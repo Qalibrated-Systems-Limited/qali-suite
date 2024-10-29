@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": true,
+    "incremental": true,
+    "module": "esnext",
+    "esModuleInterop": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "target": "ES2017"
+  },
+  "include": [
+    "next-env.d.ts",
+    ".next/types/**/*.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "components/ui/pagination.jsx",
+    "components/ui/data-table.jsx",
+    "components/ui/search.jsx",
+    "app/dashboard/components/axles/overloads-linegraph.jsx",
+    "components/ui/skeletons.jsx",
+    "app/hooks/useMediaquery.js",
+    "app/dashboard/components/mombile-nav.jsx",
+    "app/dashboard/layout.js",
+    "app/dashboard/components/menu-title.jsx",
+    "app/dashboard/components/menu-item.jsx",
+    "app/dashboard/components/main-menu.jsx",
+    "app/dashboard/components/card-skeleton.jsx",
+    "app/(logged-out)/login/page.jsx"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
