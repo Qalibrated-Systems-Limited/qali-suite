@@ -2,8 +2,12 @@
 
 import {
   validateAccount,
+  validateInvoice,
+  validateInvoiceItem,
+  validateInvoiceUpdate,
   validateNewUser,
   validateSettings,
+  ValidateStock,
   validateUpdateAccount,
   validateUpdateUser,
 } from "./validators";
@@ -16,12 +20,14 @@ import { redirect } from "next/navigation";
 import User from "../models/user";
 import BridgeConfig from "../models/bridgeConfigs";
 import { toTitle } from "../utils/validators";
-
-const sesssion = await auth();
-const user = sesssion && sesssion.user;
+import Product from "../models/product";
+import { Delius_Unicase } from "next/font/google";
+import Invoice from "../models/invoice";
+import Counter from "../models/counter";
+import StockTransaction from "../models/stockTransaction";
 
 export async function logout(params) {
-  await signOut();
+  return await signOut();
 }
 export async function authenticate(prevState, formData) {
   try {
@@ -43,6 +49,8 @@ export async function authenticate(prevState, formData) {
 
 export async function createAccount(state, formData) {
   try {
+    const sesssion = await auth();
+    const user = sesssion && sesssion.user;
     const rawFormData = Object.fromEntries(formData.entries());
 
     const validatedFields = validateAccount(rawFormData);
@@ -54,10 +62,15 @@ export async function createAccount(state, formData) {
       };
     }
 
+    const data = validatedFields.data;
+
     await Account.create({
       name: toTitle(validatedFields.data.name),
-      accountType: validatedFields.data.accountType,
+      address: data.address,
+      email: data.email,
+      phoneNumber: data.phoneNumber,
       status: "Active",
+
       creator: {
         name: user.name,
         id: user.id,
@@ -68,6 +81,38 @@ export async function createAccount(state, formData) {
   }
   revalidatePath("/dashboard/customers");
   redirect("/dashboard/customers");
+}
+
+export async function addStock(state, formData) {
+  try {
+    const sesssion = await auth();
+    const user = sesssion && sesssion.user;
+    const rawFormData = Object.fromEntries(formData.entries());
+
+    const validatedFields = ValidateStock(rawFormData);
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: "Missing Fields. Failed to add stock.",
+      };
+    }
+
+    const data = validatedFields.data;
+
+    await Product.create({
+      name: toTitle(data.name),
+      price: data.price,
+      SKU: data.SKU,
+      description: data.description,
+      category: data.category,
+      stock: data.stock,
+    });
+  } catch (e) {
+    return { message: "Database error: failed to add stock" };
+  }
+  revalidatePath("/dashboard/stocks");
+  redirect("/dashboard/stocks");
 }
 
 export async function updateAccount(id, prevState, formData) {
@@ -81,13 +126,16 @@ export async function updateAccount(id, prevState, formData) {
   }
 
   try {
+    const data = validatedFields.data;
     await Account.updateOne(
       { _id: id },
       {
         $set: {
           name: toTitle(validatedFields.data.name),
           status: validatedFields.data.status,
-          accountType: validatedFields.data.accountType,
+          address: data.address,
+          phoneNumber: data.phoneNumber,
+          email: data.email,
         },
       }
     );
@@ -96,6 +144,37 @@ export async function updateAccount(id, prevState, formData) {
   }
   revalidatePath("/dashboard/customers");
   redirect("/dashboard/customers");
+}
+
+export async function updateStock(id, prevState, formData) {
+  const rawFormData = Object.fromEntries(formData.entries());
+  const validatedFields = ValidateStock(rawFormData);
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: "Missing Fields. Failed to update stock.",
+    };
+  }
+
+  try {
+    await Product.updateOne(
+      { _id: id },
+      {
+        $set: {
+          name: toTitle(validatedFields.data.name),
+          SKU: validatedFields.data.SKU,
+          price: validatedFields.data.price,
+          stock: validatedFields.data.stock,
+          category: validatedFields.data.category,
+          description: validatedFields.data.description,
+        },
+      }
+    );
+  } catch (e) {
+    return { message: "Database Error: Failed to Update stock." };
+  }
+  revalidatePath("/dashboard/stocks");
+  redirect("/dashboard/stocks");
 }
 
 export const deleteAccount = async (id) => {
@@ -112,6 +191,8 @@ export const deleteAccount = async (id) => {
 
 export async function createUser(state, formData) {
   try {
+    const sesssion = await auth();
+    const user = sesssion && sesssion.user;
     const rawFormData = Object.fromEntries(formData.entries());
 
     const validatedFields = validateNewUser(rawFormData);
@@ -230,4 +311,203 @@ export async function updateSettings(id, prevState, formData) {
   }
   revalidatePath("/dashboard/transaction");
   redirect("/dashboard/transactions");
+}
+
+//Invoices
+
+export async function createInvoice(state, formData) {
+  try {
+    const rawFormData = Object.fromEntries(formData.entries());
+
+    const validatedFields = validateInvoice(rawFormData);
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: "Missing Fields. Failed to add invoices.",
+      };
+    }
+
+    const data = validatedFields.data;
+
+    const account = await Account.findById(data.customerId);
+    let invoiceNumber = "1";
+
+    if (!account) {
+      return { message: "No customer was found" };
+    }
+
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // e.g., 20241031
+    const counter = await Counter.findOneAndUpdate(
+      { name: `invoiceNumber-${today}` },
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true }
+    );
+
+    invoiceNumber = `INV-${today}-${counter.seq.toString().padStart(4, "0")}`; // e.g., 20241031-0001
+    const customer = {
+      name: account.name,
+      address: account.address,
+
+      id: account._id.toString(),
+      email: account.email,
+      phone: account.phone,
+    };
+    const invoice = Invoice({
+      description: data.description,
+      taxRate: data.taxRate,
+      customer,
+      items: [],
+      invoiceNumber,
+      status: data.status,
+    });
+    await invoice.save();
+  } catch (e) {
+    console.log(e);
+    return { message: "Database error: failed to add invoice" };
+  }
+  revalidatePath("/dashboard/invoices");
+  redirect("/dashboard/invoices");
+}
+
+export async function addInvoiceItem(id, state, formData) {
+  try {
+    const rawFormData = Object.fromEntries(formData.entries());
+
+    const validatedFields = validateInvoiceItem(rawFormData);
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: "Missing Fields. Failed to add item.",
+      };
+    }
+
+    const data = validatedFields.data;
+
+    const invoice = await Invoice.findById(id);
+    const items = invoice.items ?? [];
+    let item = {
+      name: toTitle(data.name),
+
+      quantity: data.quantity,
+      unitPrice: data.unitPrice,
+      unit: data.unit,
+      type: data.type,
+    };
+
+    if (data.type === "Service") {
+      if (items.length > 0) {
+        const existingItem = items.find(
+          (item) => item.name === toTitle(data.name)
+        );
+
+        if (existingItem) {
+          return { message: "This item is already added" };
+        }
+      }
+
+      await Invoice.findOneAndUpdate({ _id: id }, { $push: { items: item } });
+    } else {
+      const stock = await Product.findOne({
+        SKU: data.name,
+        stock: { $gt: 0 },
+      });
+      if (!stock) {
+        return { message: "No stock, Item found" };
+      }
+
+      const remainingStock = stock.stock;
+
+      if (Number(data.quantity) > remainingStock) {
+        return { message: "Insufficient stock" };
+      }
+
+      const existingItem = items.find((item) => item.name === stock.SKU);
+
+      if (existingItem) {
+        return { message: "This item is already added" };
+      }
+
+      item = {
+        id: stock._id.toString(),
+        quantity: data.quantity,
+        unitPrice: data.unitPrice,
+        type: "Stock",
+        unit: data.unit,
+        name: stock.SKU,
+      };
+
+      await Invoice.findOneAndUpdate({ _id: id }, { $push: { items: item } });
+      const newStock = remainingStock - Number(data.quantity);
+      stock.stock = newStock;
+      await stock.save();
+
+      const amount = Number(data.quantity) * Number(data.unitPrice);
+
+      await StockTransaction.create({
+        SKU: stock.SKU,
+        amount,
+        transactionType: "Sale",
+        quantity: data.quantity,
+      });
+    }
+  } catch (e) {
+    console.error(e);
+    return { message: "Database error: failed to add Invoice item" };
+  }
+  revalidatePath("/dashboard/invoice");
+  redirect("/dashboard/invoices");
+}
+
+export async function updateInvoice(id, prevState, formData) {
+  const rawFormData = Object.fromEntries(formData.entries());
+
+  const validatedFields = validateInvoiceUpdate(rawFormData);
+
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: "Missing Fields. Failed to add invoices.",
+    };
+  }
+
+  const data = validatedFields.data;
+  try {
+    const account = await Account.findById(data.customerId);
+
+    if (!account) {
+      return { message: "No customer was found" };
+    }
+
+    const customer = {
+      name: account.name,
+      address: account.address,
+
+      id: account._id.toString(),
+      email: account.email,
+      phone: account.phone,
+    };
+
+    const invoice = await Invoice.findOneAndUpdate(
+      { _id: id },
+      {
+        $set: {
+          customer: customer,
+          discount: data.discount,
+          description: data.description,
+          status: data.status,
+          taxRate: data.taxRate,
+        },
+      }
+    );
+    if (!invoice) {
+      return { message: "No invoice found with this id" };
+    }
+  } catch (e) {
+    console.log(e);
+    return { message: "Database Error: Failed to Update  invoice." };
+  }
+  revalidatePath("/dashboard/invoices");
+  redirect("/dashboard/invoices");
 }

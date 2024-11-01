@@ -11,18 +11,13 @@ const accountSchema = new Schema(
     name: { required: [true, "Please enter name"], type: String, unique: true },
 
     phoneNumber: String,
-    nationalId: String,
 
     email: String,
-    address: String,
+    address: { type: String, required: true },
 
     status: {
       type: String,
       default: "Active",
-    },
-    accountType: {
-      type: String,
-      default: "Customer",
     },
   },
   { timestamps: true }

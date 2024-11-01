@@ -1,17 +1,63 @@
 import { z } from "zod";
 
+export const accountForm = z.object({
+  name: z.string().max(100).min(4),
+  address: z.string().max(100).min(4),
+
+  phoneNumber: z.string().length(12),
+  email: z.string().email().optional(),
+});
+
+export const invoiceItemForm = z.object({
+  name: z.string().min(2).max(60),
+  unit: z.string(),
+  unitPrice: z.string().optional(),
+  type: z.enum(["Stock", "Service"]),
+
+  quantity: z.string(),
+});
+
 export const updateAccountForm = z.object({
   name: z.string().max(100).min(4),
+  address: z.string().min(4),
+  phoneNumber: z.string().length(12),
+  email: z.string().email().optional(),
 
   status: z.enum(["Active", "Inactive"], {
     invalid_type_error: "Status should be either Active or Inactive.",
     required_error: "Status should be either Active or Inactive.",
   }),
+});
 
-  accountType: z.enum(["Driver", "Customer"], {
-    invalid_type_error: "Type should be Customer or Driver.",
-    required_error: "Type is either Customer or Driver.",
-  }),
+export const stockForm = z.object({
+  name: z.string(),
+  SKU: z
+    .string()
+    .min(3, "SKU must be at least 3 characters long")
+    .max(50, "SKU must be no more than 50 characters long")
+    .regex(
+      /^[A-Z0-9-]+$/,
+      "SKU must contain only uppercase letters, numbers, and dashes"
+    ),
+
+  price: z.string(),
+  category: z.string(),
+  stock: z.string(),
+  description: z.string(),
+});
+export const invoiceForm = z.object({
+  description: z.string().min(8).max(50),
+  status: z.enum(["Paid", "Unpaid"]),
+  customerId: z.string(),
+  taxRate: z.string().min(2).max(2),
+});
+
+export const updateInvoiceForm = z.object({
+  description: z.string().min(8).max(50),
+  status: z.enum(["Paid", "Unpaid"]),
+  customerId: z.string(),
+  discount: z.string().min(1).max(2),
+  taxRate: z.string().min(1).max(2),
 });
 
 export const settingsForm = z.object({
@@ -23,11 +69,6 @@ export const settingsForm = z.object({
   minCapacity: z.string(),
   weigherId: z.string(),
   division: z.string(),
-});
-
-export const accountForm = z.object({
-  name: z.string().max(100).min(4),
-  accountType: z.string().max(10).min(4),
 });
 
 export const stationForm = z.object({
@@ -82,3 +123,10 @@ export const validateAccount = (rawData) => accountForm.safeParse(rawData);
 export const validateStation = (rawData) => stationForm.safeParse(rawData);
 
 export const validateSettings = (rawData) => settingsForm.safeParse(rawData);
+export const ValidateStock = (rawData) => stockForm.safeParse(rawData);
+export const validateInvoice = (rawData) => invoiceForm.safeParse(rawData);
+export const validateInvoiceItem = (rawData) =>
+  invoiceItemForm.safeParse(rawData);
+
+export const validateInvoiceUpdate = (rawData) =>
+  updateInvoiceForm.safeParse(rawData);

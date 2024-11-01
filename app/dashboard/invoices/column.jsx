@@ -1,29 +1,30 @@
 "use client";
 
-import { TrashIcon } from "lucide-react";
+import { PlusIcon, TrashIcon } from "lucide-react";
 import { deleteAccount } from "../../mongodb/actions";
 import { UpdateButton } from "../../../components/ui/buttons";
+import Link from "next/link";
 
 // This type is used to define the shape of our data.
 //
 
 export const columns = [
   {
-    accessorKey: "name",
-    header: "Name",
+    accessorKey: "invoiceNumber",
+    header: "No",
   },
   {
-    accessorKey: "address",
-    header: "Address",
+    accessorKey: "customer",
+    header: "Customer",
   },
 
   {
-    accessorKey: "email",
-    header: "Email",
+    accessorKey: "totalAmount",
+    header: "Amount",
   },
   {
-    accessorKey: "phoneNumber",
-    header: "Phone",
+    accessorKey: "status",
+    header: "Status",
   },
 
   {
@@ -35,13 +36,21 @@ export const columns = [
 
       return (
         <div className="flex justify-end gap-3">
-          <UpdateButton path={`/dashboard/customers/${id}/update`} />
-          <DeleteAccount id={id} />
+          <UpdateButton path={`/dashboard/invoices/${id}/update`} />
+          <AddItemButton path={`/dashboard/invoices/${id}/add-item`} />
         </div>
       );
     },
   },
 ];
+
+export function AddItemButton({ path }) {
+  return (
+    <Link href={path} className="rounded-md border p-2 hover:bg-gray-100">
+      <PlusIcon className="w-5" />
+    </Link>
+  );
+}
 
 export function DeleteAccount({ id }) {
   const deleteInvoiceWithId = deleteAccount.bind(null, id);

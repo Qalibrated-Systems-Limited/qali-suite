@@ -14,7 +14,7 @@ const nextConfig = {
     AUTH_SECRET: "cU4MLQChH0IoakjEcH9FBHtQUr8Mnkn2elIZdlgmnwg=",
 
     DB_LOCAL_URI:
-      "mongodb+srv://werner:werner@cluster0.cbuo3.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
+      "mongodb+srv://werner:werner@cluster0.cbuo3.mongodb.net/StockVault?retryWrites=true&w=majority&appName=Cluster0",
   },
 };
 

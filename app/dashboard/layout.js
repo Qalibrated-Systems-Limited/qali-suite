@@ -4,8 +4,8 @@ import MainMenu from "./components/main-menu";
 import MobileNav from "./components/mombile-nav";
 
 export const metadata = {
-  title: "Kilosahihi dashboard",
-  description: "Manage your weighbridge",
+  title: "StockVault dashboard",
+  description: "Manage your store",
 };
 
 async function layout({ children }) {

@@ -1,12 +1,15 @@
 import dbConnect from "../config/dbConnect";
 import Vehicles from "../models/vehicles";
 import Transactions from "../models/transaction";
+import Product from "../models/product";
 import { unstable_noStore as noStore } from "next/cache";
 
 import Accounts from "../models/account";
 import Vehicle from "../models/vehicles";
 import Commodity from "../models/commodity";
 import User from "../models/user";
+
+import Invoice from "../models/invoice";
 
 import BridgeConfig from "../models/bridgeConfigs";
 
@@ -387,37 +390,36 @@ export const searchAccounts = async (searchTerm, page = 1) => {
     ];
 
     const projectStage = {
-      $project: {
-        status: 1,
-        accountType: 1,
-        name: 1,
-      },
+      $project: { name: 1, address: 1, phoneNumber: 1, email: 1 },
     };
 
     const sortStage = { $sort: { updatedAt: -1 } };
 
-    let pipeline = [...paginationStage, projectStage];
+    let pipeline = [sortStage, ...paginationStage, projectStage];
     if (searchTerm && searchTerm.length > 0) {
       pipeline = [searchStage, ...paginationStage, projectStage];
     }
 
     let result = await Accounts.aggregate(pipeline);
-    result = result.map((res) => {
-      return { ...res, _id: res._id.toString() };
-    });
+    console.log(result);
+    if (result && result.length > 0) {
+      result = result.map((res) => {
+        return { ...res, _id: res._id.toString() };
+      });
+    }
+
     return result;
   } catch (e) {
     throw new Error("Could not get accounts");
   }
 };
 
-//Transactions queries
+//Products or stock queries
 
-export const fetchTransactionPages = async (searchTerm) => {
-  noStore();
+export const fetchStockPages = async (searchTerm) => {
   const transactionSearchStage = {
     $search: {
-      index: "transactionSearchIndex", // The name of your full-text search index
+      index: "default", // The name of your full-text search index
       text: {
         query: searchTerm,
         path: {
@@ -435,7 +437,7 @@ export const fetchTransactionPages = async (searchTerm) => {
   if (searchTerm && searchTerm.length > 0) {
     pipeline = [transactionSearchStage, countStage];
   }
-  const result = await Transactions.aggregate(pipeline);
+  const result = await Product.aggregate(pipeline);
   let count = 1;
   if (result && result.length > 0) {
     count = result[0].totalRecords;
@@ -445,12 +447,12 @@ export const fetchTransactionPages = async (searchTerm) => {
 
   return noOfPages;
 };
-export const searchTransactions = async (searchTerm, page = 1) => {
+export const searchStock = async (searchTerm, page = 1) => {
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
   const searchStage = {
     $search: {
-      index: "transactionSearchIndex", // Name of the atlas search index
+      index: "default", // Name of the atlas search index
       text: {
         query: searchTerm,
         path: {
@@ -465,35 +467,16 @@ export const searchTransactions = async (searchTerm, page = 1) => {
     { $limit: ITEMS_PER_PAGE }, // Limit results per page
   ];
 
-  const sortStage = { $sort: { "firstWeight.date": -1 } };
-  const matchStage = { $match: { isComplete: true } };
+  const sortStage = { $sort: { createdAt: -1 } };
 
-  const projectStage = {
-    $project: {
-      firstWeight: "$firstWeight.value",
-      secondWeight: "$secondWeight.value",
-      vehRegNo: 1,
-
-      date: {
-        $dateToString: { format: "%d-%m-%G %H:%M", date: "$firstWeight.date" },
-      },
-
-      customer: "$customer.name",
-      commodity: 1,
-      netWeight: {
-        $abs: { $subtract: ["$firstWeight.value", "$secondWeight.value"] },
-      },
-    },
-  };
-
-  let pipeline = [matchStage, sortStage, ...paginationStage, projectStage];
+  let pipeline = [sortStage, ...paginationStage];
   if (searchTerm && searchTerm.length > 0) {
-    pipeline = [searchStage, ...paginationStage, projectStage];
+    pipeline = [searchStage, ...paginationStage];
   }
 
-  let result = await Transactions.aggregate(pipeline);
+  let result = await Product.aggregate(pipeline);
   result = result.map((res) => {
-    return { ...res, _id: res._id.toString().slice(0, 10) };
+    return { ...res, _id: res._id.toString() };
   });
   return result;
 };
@@ -572,4 +555,99 @@ export const getWbConfigs = async (id) => {
   noStore();
   const configs = await BridgeConfig.findOne({ weigherId: id });
   return configs;
+};
+
+//Invoices queries
+
+export const searchInvoice = async (searchTerm, page = 1) => {
+  const skipRecords = (page - 1) * ITEMS_PER_PAGE;
+
+  try {
+    const searchStage = {
+      $search: {
+        index: "invoiceSearchIndex", // Name of the full-text search index
+        text: {
+          query: searchTerm,
+          path: {
+            wildcard: "*",
+          },
+        },
+      },
+    };
+
+    const paginationStage = [
+      { $skip: skipRecords }, // Skip records for pagination
+      { $limit: ITEMS_PER_PAGE }, // Limit results per page
+    ];
+
+    const projectStage = {
+      $project: {
+        invoiceNumber: 1,
+
+        totalAmount: {
+          $sum: {
+            $map: {
+              input: "$items",
+              as: "item",
+              in: { $multiply: ["$$item.unitPrice", "$$item.quantity"] },
+            },
+          },
+        },
+
+        customer: "$customer.name",
+        status: 1,
+      },
+    };
+
+    const sortStage = { $sort: { updatedAt: -1 } };
+
+    let pipeline = [sortStage, ...paginationStage, projectStage];
+    if (searchTerm && searchTerm.length > 0) {
+      pipeline = [searchStage, ...paginationStage, projectStage];
+    }
+
+    let result = await Invoice.aggregate(pipeline);
+    console.log(result);
+    if (result && result.length > 0) {
+      result = result.map((res) => {
+        return { ...res, _id: res._id.toString() };
+      });
+    }
+
+    return result;
+  } catch (e) {
+    throw new Error("Could not get accounts");
+  }
+};
+
+export const fetchInvoicePages = async (searchTerm) => {
+  const transactionSearchStage = {
+    $search: {
+      index: "invoiceSearchIndex", // The name of your full-text search index
+      text: {
+        query: searchTerm,
+        path: {
+          wildcard: "*",
+        },
+      },
+    },
+  };
+
+  const countStage = {
+    $count: "totalRecords", // This stage returns the total number of records matching the search query
+  };
+
+  let pipeline = [countStage];
+  if (searchTerm && searchTerm.length > 0) {
+    pipeline = [transactionSearchStage, countStage];
+  }
+  const result = await Invoice.aggregate(pipeline);
+  let count = 1;
+  if (result && result.length > 0) {
+    count = result[0].totalRecords;
+  }
+  const noOfPages = Math.ceil(Number(count) / ITEMS_PER_PAGE);
+  console.log(result);
+
+  return noOfPages;
 };

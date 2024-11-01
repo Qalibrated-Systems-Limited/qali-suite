@@ -1,5 +1,6 @@
-import { useActionState } from "react";
 "use client";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 
 import { Button } from "../../../../components/ui/button";
 import {
@@ -160,10 +161,7 @@ export function CreateUserForm() {
                   </FormItem>
                 )}
               />
-
-              <Button type="submit" className="max-w-[500px] self-end ">
-                Create user
-              </Button>
+              <CreateButton />
             </form>
           </Form>
         </CardContent>
@@ -172,5 +170,18 @@ export function CreateUserForm() {
         </CardFooter> */}
       </Card>
     </>
+  );
+}
+
+function CreateButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button
+      type="submit"
+      className="max-w-[500px] self-end "
+      aria-disabled={pending}
+    >
+      Create user
+    </Button>
   );
 }

@@ -2,7 +2,6 @@ import AuthProvider from "../context/auth";
 import "../globals.css";
 import { Poppins } from "next/font/google";
 
-import { cn } from "../../lib/utils";
 import { LightDarkToggle } from "../../components/ui/light-dark-toggle";
 const poppins = Poppins({
   subsets: ["latin"],
@@ -10,8 +9,8 @@ const poppins = Poppins({
 });
 
 export const metadata = {
-  title: "Welcome to kilosahihi",
-  description: "The most comprehensive and efficient weighing solution",
+  title: "Welcome to StockVault",
+  description: "The most comprehensive and efficient store management solution",
 };
 
 export default function LogoutLayout({ children }) {

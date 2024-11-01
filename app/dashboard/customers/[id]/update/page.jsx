@@ -10,7 +10,9 @@ async function page(props) {
   account = {
     name: account.name,
     status: account.status,
-    accountType: account.accountType,
+    address: account.address,
+    phoneNumber: account.phoneNumber,
+    email: account.email,
     _id: account._id.toString(),
   };
   console.log(account);

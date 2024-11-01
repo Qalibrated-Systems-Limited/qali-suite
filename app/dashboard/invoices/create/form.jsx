@@ -22,53 +22,88 @@ import { zodResolver } from "@hookform/resolvers/zod";
 
 import { useForm } from "react-hook-form";
 
-import { createAccount } from "../../../mongodb/actions";
-import { accountForm } from "../../../mongodb/validators";
+import { createInvoice } from "../../../mongodb/actions";
+import { invoiceForm } from "../../../mongodb/validators";
 import { cn } from "../../../../lib/utils";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../../../../components/ui/popover";
+import { Check, ChevronsUpDown } from "lucide-react";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "../../../../components/ui/command";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../../../components/ui/select";
 
-export function CreateAccountForm() {
+export function CreateInvoiceForm({ customers = [] }) {
   const initialState = { message: "", errors: {} };
-  const [state, dispatch] = useActionState(createAccount, initialState);
+  const [state, dispatch] = useActionState(createInvoice, initialState);
   const form = useForm({
-    resolver: zodResolver(accountForm),
-    defaultValues: {
-      name: "",
-      address: "",
-      email: "",
-      phoneNumber: "",
+    resolver: zodResolver(invoiceForm),
+    values: {
+      description: "",
+      customerId: "",
+      status: "",
+      taxRate: "",
     },
   });
 
   return (
     <Card className="items-center justify-center  md:w-1/2 mx-auto  ">
       <CardHeader>
-        <CardTitle>Add Account</CardTitle>
+        <CardTitle>Add Invoice</CardTitle>
       </CardHeader>
       <CardContent>
         <Form {...form}>
           <form action={dispatch} className="flex flex-col gap-4">
-            <div className="flex flex-col md:flex-row w-full gap-4">
+            <div className="flex flex-col md:flex-row w-full gap-4 ">
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="name"
+                  name="category"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Name</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="Imenti Tea Factory"
-                          {...field}
-                          type="text"
-                        />
-                      </FormControl>
+                      <FormLabel> Customer</FormLabel>
+                      <Select onValueChange={field.onChange} name="customerId">
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select customer" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectGroup>
+                            {customers.map((customer) => (
+                              <SelectItem
+                                key={customer._id}
+                                value={customer._id}
+                              >
+                                {customer.name}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+
                       <div
-                        id="name-error"
+                        id="category-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.name &&
-                          state.errors.name.map((error) => (
+                        {state.errors?.category &&
+                          state.errors.category.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -85,20 +120,24 @@ export function CreateAccountForm() {
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="address"
+                  name="description"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Address</FormLabel>
+                      <FormLabel>Description</FormLabel>
                       <FormControl>
-                        <Input placeholder="Meru" {...field} type="text" />
+                        <Input
+                          placeholder="Enter description"
+                          {...field}
+                          type="text"
+                        />
                       </FormControl>
                       <div
-                        id="address-error"
+                        id="description-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.address &&
-                          state.errors.address.map((error) => (
+                        {state.errors?.description &&
+                          state.errors.description.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -117,24 +156,24 @@ export function CreateAccountForm() {
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="phoneNumber"
+                  name="taxRate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Phone</FormLabel>
+                      <FormLabel>VAT</FormLabel>
                       <FormControl>
                         <Input
-                          placeholder="Enter phone number"
+                          placeholder="Enter tax rate"
                           {...field}
-                          type="tel"
+                          type="number"
                         />
                       </FormControl>
                       <div
-                        id="phone-error"
+                        id="taxRate-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.phoneNumber &&
-                          state.errors.phoneNumber.map((error) => (
+                        {state.errors?.taxRate &&
+                          state.errors.taxRate.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -151,24 +190,30 @@ export function CreateAccountForm() {
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="email"
+                  name="status"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="Enter email address"
-                          {...field}
-                          type="email"
-                        />
-                      </FormControl>
+                      <FormLabel> Status</FormLabel>
+                      <Select onValueChange={field.onChange} name="status">
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Change status" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Paid">Paid</SelectItem>
+
+                          <SelectItem value="Unpaid">Unpaid</SelectItem>
+                        </SelectContent>
+                      </Select>
+
                       <div
-                        id="email-error"
+                        id="accountType-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.email &&
-                          state.errors.email.map((error) => (
+                        {state.errors?.status &&
+                          state.errors.status.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -204,7 +249,7 @@ function CreateButton() {
         "bg-primary": !pending,
       })}
     >
-      {pending ? "Submitting.." : "Create customer"}
+      {pending ? "Submitting.." : "Create invoice"}
     </Button>
   );
 }

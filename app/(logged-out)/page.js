@@ -1,5 +1,5 @@
 import { Button } from "../../components/ui/button";
-import { ScaleIcon } from "lucide-react";
+import { ComputerIcon } from "lucide-react";
 import Link from "next/link";
 
 export default function LandingPage() {
@@ -7,10 +7,10 @@ export default function LandingPage() {
     <>
       <h1 className="flex gap-2 items-center">
         {" "}
-        <ScaleIcon size={50} className="text-pink-500" />
-        Kilo sahihi
+        <ComputerIcon size={50} className="text-pink-500" />
+        StockVault
       </h1>
-      <p>The most compherensive and efficient weighing system</p>
+      <p>The most compherensive and efficient store management system</p>
       <div className="flex  gap-2 items-center">
         <Button asChild>
           <Link href={"/login"}>Login</Link>

@@ -10,7 +10,7 @@ export default function Loading() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Transactions</CardTitle>
+        <CardTitle>Invoices</CardTitle>
       </CardHeader>
       <CardContent className="grid grid-cols-[60px_1fr_1fr_1fr_1fr] gap-4">
         <Skeleton className="size-10 rounded-full" />

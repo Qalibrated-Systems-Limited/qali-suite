@@ -1,5 +1,5 @@
-import { useActionState } from "react";
 "use client";
+import { useActionState } from "react";
 
 import { Button } from "../../../components/ui/button";
 import {
@@ -20,7 +20,13 @@ import {
 } from "../../../components/ui/form";
 import { Input } from "../../../components/ui/input";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ScaleIcon, TriangleAlert, WeightIcon } from "lucide-react";
+import {
+  ComputerIcon,
+  ScaleIcon,
+  StoreIcon,
+  TriangleAlert,
+  WeightIcon,
+} from "lucide-react";
 import { useFormStatus } from "react-dom";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
@@ -44,7 +50,7 @@ export default function Page() {
 
   return (
     <>
-      <ScaleIcon size={50} className="text-pink-500" />
+      <ComputerIcon size={50} className="text-pink-500" />
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Login</CardTitle>

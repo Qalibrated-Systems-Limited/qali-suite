@@ -17,68 +17,91 @@ import {
   FormLabel,
 } from "../../../../../components/ui/form";
 import { Input } from "../../../../../components/ui/input";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+
+import { useForm } from "react-hook-form";
+
+import { invoiceForm, updateInvoiceForm } from "../../../../mongodb/validators";
+import { cn } from "../../../../../lib/utils";
+
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "../../../../../components/ui/select";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { updateInvoice } from "../../../../mongodb/actions";
+import { useParams } from "next/navigation";
 
-import { useForm } from "react-hook-form";
-import { updateAccountForm } from "../../../../mongodb/validators";
-
-import { updateAccount } from "../../../../mongodb/actions";
-import { cn } from "../../../../../lib/utils";
-
-export default function UpdateAccountForm({ account }) {
+export function UpdateInvoiceForm({ customers = [], invoice }) {
   const initialState = { message: "", errors: {} };
+  const params = useParams();
+  console.log(params);
 
-  const updateWithId = updateAccount.bind(null, account._id.toString());
+  const updateWithId = updateInvoice.bind(null, invoice._id);
   const [state, dispatch] = useActionState(updateWithId, initialState);
-
   const form = useForm({
-    resolver: zodResolver(updateAccountForm),
+    resolver: zodResolver(updateInvoiceForm),
     defaultValues: {
-      name: account.name,
-      address: account.address,
-      email: account.email,
-      phoneNumber: account.phoneNumber,
-      status: account.status,
+      description: invoice ? invoice.description : "",
+      customerId: invoice ? invoice.customer.id : "",
+      status: invoice ? invoice.status : "",
+      taxRate: invoice ? invoice.taxRate : "",
+      discount: invoice ? invoice.discount : "",
     },
   });
 
   return (
     <Card className="items-center justify-center  md:w-1/2 mx-auto  ">
       <CardHeader>
-        <CardTitle>Add Account</CardTitle>
+        <CardTitle>Add Invoice</CardTitle>
       </CardHeader>
       <CardContent>
         <Form {...form}>
           <form action={dispatch} className="flex flex-col gap-4">
-            <div className="flex flex-col md:flex-row w-full gap-4">
+            <div className="flex flex-col md:flex-row w-full gap-4 ">
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="name"
+                  name="category"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Name</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="Imenti Tea Factory"
-                          {...field}
-                          type="text"
-                        />
-                      </FormControl>
+                      <FormLabel> Customer</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        name="customerId"
+                        defaultValue={invoice ? invoice.customer.id : ""}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select customer" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectGroup>
+                            {customers.length > 0 &&
+                              customers.map((customer) => (
+                                <SelectItem
+                                  key={customer._id}
+                                  value={customer._id}
+                                >
+                                  {customer.name}
+                                </SelectItem>
+                              ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+
                       <div
-                        id="name-error"
+                        id="category-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.name &&
-                          state.errors.name.map((error) => (
+                        {state.errors?.category &&
+                          state.errors.category.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -95,20 +118,24 @@ export default function UpdateAccountForm({ account }) {
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="address"
+                  name="description"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Address</FormLabel>
+                      <FormLabel>Description</FormLabel>
                       <FormControl>
-                        <Input placeholder="Meru" {...field} type="text" />
+                        <Input
+                          placeholder="Enter description"
+                          {...field}
+                          type="text"
+                        />
                       </FormControl>
                       <div
-                        id="address-error"
+                        id="description-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.address &&
-                          state.errors.address.map((error) => (
+                        {state.errors?.description &&
+                          state.errors.description.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -127,24 +154,24 @@ export default function UpdateAccountForm({ account }) {
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="phoneNumber"
+                  name="taxRate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Phone</FormLabel>
+                      <FormLabel>VAT</FormLabel>
                       <FormControl>
                         <Input
-                          placeholder="Enter phone number"
+                          placeholder="Enter tax rate"
                           {...field}
-                          type="tel"
+                          type="number"
                         />
                       </FormControl>
                       <div
-                        id="phone-error"
+                        id="taxRate-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.phoneNumber &&
-                          state.errors.phoneNumber.map((error) => (
+                        {state.errors?.taxRate &&
+                          state.errors.taxRate.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -158,27 +185,27 @@ export default function UpdateAccountForm({ account }) {
                 />
               </div>
 
-              <div className="flex-3">
+              <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="email"
+                  name="discount"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Email</FormLabel>
+                      <FormLabel>Discount</FormLabel>
                       <FormControl>
                         <Input
-                          placeholder="Enter email address"
+                          placeholder="Enter discount"
                           {...field}
-                          type="email"
+                          type="number"
                         />
                       </FormControl>
                       <div
-                        id="email-error"
+                        id="discount-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.email &&
-                          state.errors.email.map((error) => (
+                        {state.errors?.discount &&
+                          state.errors.discount.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -198,11 +225,11 @@ export default function UpdateAccountForm({ account }) {
                   name="status"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel> Account status</FormLabel>
+                      <FormLabel> Status</FormLabel>
                       <Select
                         onValueChange={field.onChange}
                         name="status"
-                        defaultValue={account.status}
+                        defaultValue={invoice ? invoice.status : ""}
                       >
                         <FormControl>
                           <SelectTrigger>
@@ -210,9 +237,9 @@ export default function UpdateAccountForm({ account }) {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="Active">Active</SelectItem>
+                          <SelectItem value="Paid">Paid</SelectItem>
 
-                          <SelectItem value="Inactive">Inactive</SelectItem>
+                          <SelectItem value="Unpaid">Unpaid</SelectItem>
                         </SelectContent>
                       </Select>
 
@@ -236,18 +263,22 @@ export default function UpdateAccountForm({ account }) {
                 />
               </div>
             </div>
-            <CreateButton />
+
+            {state.message && (
+              <p className="text-red-500 my-2 text-center">{state.message}</p>
+            )}
+            <UpdateButton />
           </form>
         </Form>
       </CardContent>
       {/* <CardFooter>
-        <small>Contact your admin if new</small>
-      </CardFooter> */}
+          <small>Contact your admin if new</small>
+        </CardFooter> */}
     </Card>
   );
 }
 
-function CreateButton() {
+function UpdateButton() {
   const { pending } = useFormStatus();
 
   return (
@@ -255,9 +286,10 @@ function CreateButton() {
       aria-disabled={pending}
       className={cn("self-end", {
         "bg-pink-200 ": pending,
+        "bg-primary": !pending,
       })}
     >
-      {pending ? "Submitting" : "Update Account"}
+      {pending ? "Submitting.." : "Update invoice"}
     </Button>
   );
 }

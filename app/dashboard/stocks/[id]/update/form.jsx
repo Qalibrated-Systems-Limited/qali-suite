@@ -20,6 +20,7 @@ import { Input } from "../../../../../components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -27,36 +28,38 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { useForm } from "react-hook-form";
-import { updateAccountForm } from "../../../../mongodb/validators";
+import { stockForm } from "../../../../mongodb/validators";
 
-import { updateAccount } from "../../../../mongodb/actions";
+import { updateStock } from "../../../../mongodb/actions";
 import { cn } from "../../../../../lib/utils";
 
-export default function UpdateAccountForm({ account }) {
+export default function UpdateStockForm({ stock }) {
   const initialState = { message: "", errors: {} };
 
-  const updateWithId = updateAccount.bind(null, account._id.toString());
+  const updateWithId = updateStock.bind(null, stock._id.toString());
   const [state, dispatch] = useActionState(updateWithId, initialState);
 
   const form = useForm({
-    resolver: zodResolver(updateAccountForm),
+    resolver: zodResolver(stockForm),
     defaultValues: {
-      name: account.name,
-      address: account.address,
-      email: account.email,
-      phoneNumber: account.phoneNumber,
-      status: account.status,
+      SKU: stock.SKU,
+      price: stock.price,
+      description: stock.description,
+      stock: stock.stock,
+      category: stock.category,
+
+      name: stock.name,
     },
   });
 
   return (
-    <Card className="items-center justify-center  md:w-1/2 mx-auto  ">
+    <Card className=" items-center justify-center  md:w-1/2 mx-auto ">
       <CardHeader>
-        <CardTitle>Add Account</CardTitle>
+        <CardTitle>Update Stock</CardTitle>
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form action={dispatch} className="flex flex-col gap-4">
+          <form action={dispatch} className="flex flex-col gap-4  w-full">
             <div className="flex flex-col md:flex-row w-full gap-4">
               <div className="flex-1">
                 <FormField
@@ -66,17 +69,9 @@ export default function UpdateAccountForm({ account }) {
                     <FormItem>
                       <FormLabel>Name</FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="Imenti Tea Factory"
-                          {...field}
-                          type="text"
-                        />
+                        <Input {...field} type="text" />
                       </FormControl>
-                      <div
-                        id="name-error"
-                        aria-live="polite"
-                        aria-atomic="true"
-                      >
+                      <div id="ip-error" aria-live="polite" aria-atomic="true">
                         {state.errors?.name &&
                           state.errors.name.map((error) => (
                             <p
@@ -95,20 +90,16 @@ export default function UpdateAccountForm({ account }) {
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="address"
+                  name="SKU"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Address</FormLabel>
+                      <FormLabel>SKU</FormLabel>
                       <FormControl>
-                        <Input placeholder="Meru" {...field} type="text" />
+                        <Input {...field} type="text" />
                       </FormControl>
-                      <div
-                        id="address-error"
-                        aria-live="polite"
-                        aria-atomic="true"
-                      >
-                        {state.errors?.address &&
-                          state.errors.address.map((error) => (
+                      <div id="SKU-error" aria-live="polite" aria-atomic="true">
+                        {state.errors?.SKU &&
+                          state.errors.SKU.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -123,28 +114,24 @@ export default function UpdateAccountForm({ account }) {
               </div>
             </div>
 
-            <div className="flex flex-col md:flex-row w-full gap-4">
+            <div className="flex flex-col md:flex-row gap-4 w-full">
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="phoneNumber"
+                  name="price"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Phone</FormLabel>
+                      <FormLabel>Price</FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="Enter phone number"
-                          {...field}
-                          type="tel"
-                        />
+                        <Input placeholder="" {...field} type="number" />
                       </FormControl>
                       <div
-                        id="phone-error"
+                        id="price-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.phoneNumber &&
-                          state.errors.phoneNumber.map((error) => (
+                        {state.errors?.price &&
+                          state.errors.price.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -157,28 +144,23 @@ export default function UpdateAccountForm({ account }) {
                   )}
                 />
               </div>
-
-              <div className="flex-3">
+              <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="email"
+                  name="stock"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Email</FormLabel>
+                      <FormLabel>Stock</FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="Enter email address"
-                          {...field}
-                          type="email"
-                        />
+                        <Input {...field} type="number" />
                       </FormControl>
                       <div
-                        id="email-error"
+                        id="stock-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.email &&
-                          state.errors.email.map((error) => (
+                        {state.errors?.stock &&
+                          state.errors.stock.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -191,38 +173,81 @@ export default function UpdateAccountForm({ account }) {
                   )}
                 />
               </div>
+            </div>
 
+            <div className="flex flex-col md:flex-row gap-4">
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="status"
+                  name="category"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel> Account status</FormLabel>
+                      <FormLabel> Category</FormLabel>
                       <Select
                         onValueChange={field.onChange}
-                        name="status"
-                        defaultValue={account.status}
+                        name="category"
+                        defaultValue={stock.category}
                       >
                         <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Change status" />
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select category" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="Active">Active</SelectItem>
+                          <SelectGroup>
+                            <SelectItem value="indicator">Indicator</SelectItem>
 
-                          <SelectItem value="Inactive">Inactive</SelectItem>
+                            <SelectItem value="loadcell">Load cell</SelectItem>
+                            <SelectItem value="platform">Platform</SelectItem>
+                            <SelectItem value="cable">cable</SelectItem>
+                            <SelectItem value="pos">POS</SelectItem>
+                          </SelectGroup>
+
+                          <SelectItem value="other">Other</SelectItem>
                         </SelectContent>
                       </Select>
 
                       <div
-                        id="accountType-error"
+                        id="category-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.status &&
-                          state.errors.status.map((error) => (
+                        {state.errors?.category &&
+                          state.errors.category.map((error) => (
+                            <p
+                              className="mt-2 text-sm text-red-500"
+                              key={error}
+                            >
+                              {error}
+                            </p>
+                          ))}
+                      </div>
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="flex-1">
+                <FormField
+                  control={form.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Description</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Description"
+                          {...field}
+                          type="text"
+                        />
+                      </FormControl>
+                      <div
+                        id="stock-error"
+                        aria-live="polite"
+                        aria-atomic="true"
+                      >
+                        {state.errors?.description &&
+                          state.errors.description.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -236,18 +261,19 @@ export default function UpdateAccountForm({ account }) {
                 />
               </div>
             </div>
-            <CreateButton />
+
+            <UpdateButton />
           </form>
         </Form>
       </CardContent>
       {/* <CardFooter>
-        <small>Contact your admin if new</small>
-      </CardFooter> */}
+          <small>Contact your admin if new</small>
+        </CardFooter> */}
     </Card>
   );
 }
 
-function CreateButton() {
+function UpdateButton() {
   const { pending } = useFormStatus();
 
   return (
@@ -255,9 +281,10 @@ function CreateButton() {
       aria-disabled={pending}
       className={cn("self-end", {
         "bg-pink-200 ": pending,
+        "bg-primary": !pending,
       })}
     >
-      {pending ? "Submitting" : "Update Account"}
+      {pending ? "Submitting.." : "Update Stock"}
     </Button>
   );
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { Button } from "../../../../../components/ui/button";
@@ -27,25 +27,30 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { useForm } from "react-hook-form";
-import { updateAccountForm } from "../../../../mongodb/validators";
+import {
+  invoiceItemForm,
+  updateAccountForm,
+} from "../../../../mongodb/validators";
 
-import { updateAccount } from "../../../../mongodb/actions";
+import { addInvoiceItem, updateAccount } from "../../../../mongodb/actions";
 import { cn } from "../../../../../lib/utils";
+import { SelectGroup } from "@radix-ui/react-select";
 
-export default function UpdateAccountForm({ account }) {
+export default function AddItemForm({ products, id }) {
   const initialState = { message: "", errors: {} };
+  const [itemType, setItemType] = useState("Stock");
 
-  const updateWithId = updateAccount.bind(null, account._id.toString());
-  const [state, dispatch] = useActionState(updateWithId, initialState);
+  const addItem = addInvoiceItem.bind(null, id);
+  const [state, dispatch] = useActionState(addItem, initialState);
 
   const form = useForm({
-    resolver: zodResolver(updateAccountForm),
-    defaultValues: {
-      name: account.name,
-      address: account.address,
-      email: account.email,
-      phoneNumber: account.phoneNumber,
-      status: account.status,
+    resolver: zodResolver(invoiceItemForm),
+    values: {
+      name: "",
+      unitPrice: "",
+      unit: "",
+      type: "",
+      quantity: "",
     },
   });
 
@@ -61,19 +66,99 @@ export default function UpdateAccountForm({ account }) {
               <div className="flex-1">
                 <FormField
                   control={form.control}
+                  name="type"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel> Type</FormLabel>
+                      <Select
+                        {...field}
+                        onValueChange={(value) => {
+                          field.onChange(value);
+                          setItemType(value);
+                        }}
+                        name="type"
+                        value={itemType}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="Stock">Stock</SelectItem>
+                            <SelectItem value="Service">Service</SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+
+                      <div
+                        id="category-error"
+                        aria-live="polite"
+                        aria-atomic="true"
+                      >
+                        {state.errors?.type &&
+                          state.errors.type.map((error) => (
+                            <p
+                              className="mt-2 text-sm text-red-500"
+                              key={error}
+                            >
+                              {error}
+                            </p>
+                          ))}
+                      </div>
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <div className="flex-1">
+                <FormField
+                  control={form.control}
                   name="name"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Name</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="Imenti Tea Factory"
+                      <FormLabel>
+                        {itemType === "Stock"
+                          ? "Select product"
+                          : "Enter service"}
+                      </FormLabel>
+                      {itemType === "Stock" ? (
+                        <Select
+                          key={"select"}
+                          onValueChange={field.onChange}
+                          name="name"
                           {...field}
-                          type="text"
-                        />
-                      </FormControl>
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select product" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectGroup>
+                              {products.map((product) => (
+                                <SelectItem
+                                  key={product.SKU}
+                                  value={product.SKU}
+                                >
+                                  {product.name}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <FormControl key={"Input"}>
+                          <Input
+                            placeholder="Enter price per unit"
+                            {...field}
+                            type="text"
+                          />
+                        </FormControl>
+                      )}
+
                       <div
-                        id="name-error"
+                        id="category-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
@@ -91,85 +176,21 @@ export default function UpdateAccountForm({ account }) {
                   )}
                 />
               </div>
-
-              <div className="flex-1">
-                <FormField
-                  control={form.control}
-                  name="address"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Address</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Meru" {...field} type="text" />
-                      </FormControl>
-                      <div
-                        id="address-error"
-                        aria-live="polite"
-                        aria-atomic="true"
-                      >
-                        {state.errors?.address &&
-                          state.errors.address.map((error) => (
-                            <p
-                              className="mt-2 text-sm text-red-500"
-                              key={error}
-                            >
-                              {error}
-                            </p>
-                          ))}
-                      </div>
-                    </FormItem>
-                  )}
-                />
-              </div>
             </div>
 
             <div className="flex flex-col md:flex-row w-full gap-4">
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="phoneNumber"
+                  name="unitPrice"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Phone</FormLabel>
+                      <FormLabel>Price per unit</FormLabel>
                       <FormControl>
                         <Input
-                          placeholder="Enter phone number"
+                          placeholder="Enter price per unit"
                           {...field}
-                          type="tel"
-                        />
-                      </FormControl>
-                      <div
-                        id="phone-error"
-                        aria-live="polite"
-                        aria-atomic="true"
-                      >
-                        {state.errors?.phoneNumber &&
-                          state.errors.phoneNumber.map((error) => (
-                            <p
-                              className="mt-2 text-sm text-red-500"
-                              key={error}
-                            >
-                              {error}
-                            </p>
-                          ))}
-                      </div>
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="flex-3">
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="Enter email address"
-                          {...field}
-                          type="email"
+                          type="number"
                         />
                       </FormControl>
                       <div
@@ -177,8 +198,8 @@ export default function UpdateAccountForm({ account }) {
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.email &&
-                          state.errors.email.map((error) => (
+                        {state.errors?.unitPrice &&
+                          state.errors.unitPrice.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -195,34 +216,57 @@ export default function UpdateAccountForm({ account }) {
               <div className="flex-1">
                 <FormField
                   control={form.control}
-                  name="status"
+                  name="quantity"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel> Account status</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        name="status"
-                        defaultValue={account.status}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Change status" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="Active">Active</SelectItem>
-
-                          <SelectItem value="Inactive">Inactive</SelectItem>
-                        </SelectContent>
-                      </Select>
-
+                      <FormLabel>Quantity</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Enter quantity"
+                          {...field}
+                          type="number"
+                        />
+                      </FormControl>
                       <div
-                        id="accountType-error"
+                        id="quantity-error"
                         aria-live="polite"
                         aria-atomic="true"
                       >
-                        {state.errors?.status &&
-                          state.errors.status.map((error) => (
+                        {state.errors?.quantity &&
+                          state.errors.quantity.map((error) => (
+                            <p
+                              className="mt-2 text-sm text-red-500"
+                              key={error}
+                            >
+                              {error}
+                            </p>
+                          ))}
+                      </div>
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <div className="flex-1">
+                <FormField
+                  control={form.control}
+                  name="unit"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Enter unit</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Enter units like hours ,pcs ,lot, days"
+                          {...field}
+                          type="text"
+                        />
+                      </FormControl>
+                      <div
+                        id="phone-error"
+                        aria-live="polite"
+                        aria-atomic="true"
+                      >
+                        {state.errors?.unit &&
+                          state.errors.unit.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}
@@ -236,6 +280,11 @@ export default function UpdateAccountForm({ account }) {
                 />
               </div>
             </div>
+            {state.message && (
+              <p className="my-2 text-center text-red-600 font-semibold">
+                {state.message}
+              </p>
+            )}
             <CreateButton />
           </form>
         </Form>
@@ -257,7 +306,7 @@ function CreateButton() {
         "bg-pink-200 ": pending,
       })}
     >
-      {pending ? "Submitting" : "Update Account"}
+      {pending ? "Submitting" : "Add item"}
     </Button>
   );
 }
