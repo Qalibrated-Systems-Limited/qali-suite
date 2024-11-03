@@ -1,6 +1,6 @@
 "use client";
 import { useActionState } from "react";
-import { useFormStatus } from "react-dom";
+import { useFormStatus, useFormState } from "react-dom";
 
 import { Button } from "../../../../../components/ui/button";
 import {
@@ -37,7 +37,7 @@ export default function UpdateStockForm({ stock }) {
   const initialState = { message: "", errors: {} };
 
   const updateWithId = updateStock.bind(null, stock._id.toString());
-  const [state, dispatch] = useActionState(updateWithId, initialState);
+  const [state, dispatch] = useFormState(updateWithId, initialState);
 
   const form = useForm({
     resolver: zodResolver(stockForm),

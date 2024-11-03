@@ -1,6 +1,6 @@
 "use client";
 import { useActionState } from "react";
-import { useFormStatus } from "react-dom";
+import { useFormStatus, useFormState } from "react-dom";
 
 import { Button } from "../../../../components/ui/button";
 import {
@@ -25,20 +25,7 @@ import { useForm } from "react-hook-form";
 import { createInvoice } from "../../../mongodb/actions";
 import { invoiceForm } from "../../../mongodb/validators";
 import { cn } from "../../../../lib/utils";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "../../../../components/ui/popover";
-import { Check, ChevronsUpDown } from "lucide-react";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "../../../../components/ui/command";
+
 import {
   Select,
   SelectContent,
@@ -50,7 +37,7 @@ import {
 
 export function CreateInvoiceForm({ customers = [] }) {
   const initialState = { message: "", errors: {} };
-  const [state, dispatch] = useActionState(createInvoice, initialState);
+  const [state, dispatch] = useFormState(createInvoice, initialState);
   const form = useForm({
     resolver: zodResolver(invoiceForm),
     values: {

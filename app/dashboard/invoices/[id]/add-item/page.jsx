@@ -15,7 +15,7 @@ async function page(props) {
     <main>
       <Breadcrumbs
         breadcrumbs={[
-          { label: "Invoices", href: "/dashboard/invoices" },
+          { label: "Invoice", href: `/dashboard/invoices/${id}` },
           {
             label: "Add Item",
             href: `/dashboard/invoices/${id}/add-item`,

@@ -1,6 +1,6 @@
 "use client";
 import { useActionState } from "react";
-import { useFormStatus } from "react-dom";
+import { useFormStatus, useFormState } from "react-dom";
 
 import { Button } from "../../../../components/ui/button";
 import {
@@ -37,7 +37,7 @@ import { FunctionSquare } from "lucide-react";
 
 export function CreateStockForm() {
   const initialState = { message: "", errors: {} };
-  const [state, dispatch] = useActionState(addStock, initialState);
+  const [state, dispatch] = useFormState(addStock, initialState);
   const form = useForm({
     resolver: zodResolver(stockForm),
     defaultValues: {

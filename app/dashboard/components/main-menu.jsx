@@ -17,6 +17,7 @@ import {
   WeightIcon,
   StoreIcon,
   ReceiptIcon,
+  DollarSignIcon,
 } from "lucide-react";
 import MenuItem from "./menu-item";
 import MenuTitle from "./menu-title";
@@ -26,6 +27,11 @@ const menuItems = [
   { title: "Dashboard", href: "/dashboard", Icon: LayoutDashboardIcon },
   { title: "Stock", href: "/dashboard/stocks", Icon: StoreIcon },
   { title: "Invoices", href: "/dashboard/invoices", Icon: ReceiptIcon },
+  {
+    title: "Transaction",
+    href: "/dashboard/transactions",
+    Icon: DollarSignIcon,
+  },
   { title: "Customers", href: "/dashboard/customers", Icon: GroupIcon },
 
   { title: "Users", href: "/dashboard/users", Icon: UserIcon },

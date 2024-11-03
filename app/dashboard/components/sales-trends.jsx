@@ -1,0 +1,45 @@
+"use client";
+import { Tooltip } from "flowbite-react";
+
+import React from "react";
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+  LineChart,
+} from "recharts";
+
+function salesTrendsChart({ data }) {
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <LineChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" />
+        <XAxis dataKey={"_id.month"} />
+        <YAxis />
+        <Tooltip
+          formatter={(value, name) => {
+            return [value, name];
+          }}
+          labelClassName="font-bold"
+          wrapperClassName="!text-sm dark:!bg-black rounded-md dark:!border-border"
+          separator=": "
+        />
+        <Legend
+          formatter={(value) => <span className="capitalize">{value}</span>}
+        />
+        <Line
+          type="monotone"
+          dataKey="Sales"
+          stroke="#ec4899"
+          activeDot={{ r: 8 }}
+        />
+        <Line type="monotone" dataKey="Purchases" stroke="#82ca9d" />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+export default salesTrendsChart;

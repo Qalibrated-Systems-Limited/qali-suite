@@ -1,86 +1,99 @@
+import React from "react";
+import { Card, CardContent, CardHeader } from "../../../components/ui/card";
 import {
-  WeightIcon,
-  CheckIcon,
-  TruckIcon,
-  ListChecksIcon,
-  PersonStandingIcon,
-} from "lucide-react";
-import Link from "next/link";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "../../../components/ui/card";
-import { Button } from "../../../components/ui/button";
-import { fetchCardsData } from "../../mongodb/queries";
+  getStockAggregate,
+  getTotalSaleThisMonth,
+  invoicesCount,
+} from "../../mongodb/queries";
 
-export async function Cardwrapper({}) {
-  const { numberOfAccounts, numberOfTrans, numberOfVehicles } =
-    await fetchCardsData();
+const currentDate = new Date();
+const monthNames = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+const currentMonth = monthNames[currentDate.getMonth()];
+
+async function Cardwrapper() {
+  const result = await Promise.all([
+    getTotalSaleThisMonth(),
+    invoicesCount(),
+    getStockAggregate(),
+  ]);
+
+  let totalSale = 0;
+  let invoices = 0;
+  let stocks = 0;
+  let stockValue = 0;
+  if (result && result.length > 2) {
+    totalSale = (result[0] / 1000000).toFixed(2);
+    invoices = result[1];
+    stocks = result[2].totalCount;
+    stockValue = (result[2].totalValue / 1000000).toFixed(2);
+  }
   return (
-    <div className=" grid  lg:grid-cols-3 gap-4 ">
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Transactions</CardTitle>
-        </CardHeader>
-        <CardContent className="flex justify-between items-center">
-          <div className="flex gap-2">
-            <WeightIcon />
-            <span className="text-2xl font-bold">{numberOfTrans}</span>
-          </div>
-        </CardContent>
-        <CardFooter>
-          <span className="text-xs flex gap-1 items-center">
-            <CheckIcon />
-            All weight records since installation
-          </span>
-        </CardFooter>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Accounts</CardTitle>
+    <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <Card className="bg-card text-card-foreground shadow-lg">
+        <CardHeader>
+          <h2 className="text-xl font-bold">{currentMonth} sale</h2>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-2">
-            <ListChecksIcon />
-            <span className="text-2xl font-bold">{numberOfAccounts}</span>
-          </div>
+          <p className="text-2xl text-primary">KES {totalSale}M</p>
         </CardContent>
-        <CardFooter>
-          <span className="text-xs flex gap-1 items-center">
-            <PersonStandingIcon />
-            All accounts
-          </span>
-        </CardFooter>
       </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Vehicles</CardTitle>
+      <Card className="bg-card text-card-foreground shadow-lg">
+        <CardHeader>
+          <h2 className="text-xl font-bold">Total Stock</h2>
         </CardHeader>
-        <CardContent className="flex justify-between items-center">
-          <div className="flex gap-2 items-center">
-            <TruckIcon />
-            <span className="text-2xl font-bold">{numberOfVehicles}</span>
-          </div>
-
-          <div>
-            <Button asChild size={"xs"}>
-              <Link href={"/dashboard/tags"}>View All </Link>
-            </Button>
-          </div>
+        <CardContent>
+          <p className="text-2xl text-primary">{stocks}</p>
         </CardContent>
-        <CardFooter>
-          <span className="text-xs flex gap-1 items-center">
-            <CheckIcon />
-            Vehicles registered
-          </span>
-        </CardFooter>
       </Card>
-    </div>
+      <Card className="bg-card text-card-foreground shadow-lg">
+        <CardHeader>
+          <h2 className="text-xl font-bold">Stock value</h2>
+        </CardHeader>
+        <CardContent>
+          <p className="text-2xl text-primary">KES {stockValue}M</p>
+        </CardContent>
+      </Card>
+      <Card className="bg-card text-card-foreground shadow-lg">
+        <CardHeader>
+          <h2 className="text-xl font-bold">Invoices</h2>
+        </CardHeader>
+        <CardContent>
+          <p className="text-2xl text-primary">{invoices}</p>
+        </CardContent>
+      </Card>
+    </section>
   );
 }
+
+export default Cardwrapper;
+
+export const TopFourCardsSkeleton = () => {
+  return (
+    <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {Array(4)
+        .fill()
+        .map((_, index) => (
+          <div
+            key={index}
+            className="bg-card text-card-foreground shadow-lg p-4 rounded-lg animate-pulse"
+          >
+            <div className="h-6 bg-gray-300 rounded w-3/4 mb-4"></div>
+            <div className="h-8 bg-gray-300 rounded w-1/2"></div>
+          </div>
+        ))}
+    </section>
+  );
+};

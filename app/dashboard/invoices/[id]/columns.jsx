@@ -1,30 +1,36 @@
 "use client";
 
-import { EyeIcon, PlusIcon, TrashIcon } from "lucide-react";
-import { deleteAccount } from "../../mongodb/actions";
-import { UpdateButton } from "../../../components/ui/buttons";
+import { DeleteIcon, EyeIcon, PlusIcon, TrashIcon } from "lucide-react";
+
 import Link from "next/link";
+import { deleteInvoiceItem } from "../../../mongodb/actions";
+import { useParams } from "next/navigation";
 
 // This type is used to define the shape of our data.
 //
 
 export const columns = [
   {
-    accessorKey: "invoiceNumber",
-    header: "No",
+    accessorKey: "name",
+    header: "Ref",
   },
   {
-    accessorKey: "customer",
-    header: "Customer",
+    accessorKey: "quantity",
+    header: "Quantity",
   },
 
   {
-    accessorKey: "totalAmount",
-    header: "Amount",
+    accessorKey: "unitPrice",
+    header: "Unit Cost",
+  },
+
+  {
+    accessorKey: "unit",
+    header: "Unit",
   },
   {
-    accessorKey: "status",
-    header: "Status",
+    accessorKey: "totalAmount",
+    header: "Amount",
   },
 
   {
@@ -33,18 +39,18 @@ export const columns = [
 
     cell: ({ row }) => {
       let id = row.getValue("_id");
+      const params = useParams();
+      const invoiceId = params.id;
 
       return (
         <div className="flex justify-end gap-3">
-          <UpdateButton path={`/dashboard/invoices/${id}/update`} />
-          <AddItemButton path={`/dashboard/invoices/${id}/add-item`} />
-          <ViewButton path={`/dashboard/invoices/${id}`} />
+          <AddItemButton path={`/dashboard/invoices/${invoiceId}/add-item`} />
+          <DeleteInvoiceItem id={id} />
         </div>
       );
     },
   },
 ];
-
 export function AddItemButton({ path }) {
   return (
     <Link href={path} className="rounded-md border p-2 hover:bg-gray-100">
@@ -53,6 +59,20 @@ export function AddItemButton({ path }) {
   );
 }
 
+export function DeleteInvoiceItem({ id }) {
+  const params = useParams();
+  const invoiceId = params.id;
+
+  const deleteInvoiceWithId = deleteInvoiceItem.bind(null, id, invoiceId);
+  return (
+    <form action={deleteInvoiceWithId}>
+      <button className="rounded-md border p-2 hover:bg-gray-100">
+        <span className="sr-only">Delete</span>
+        <DeleteIcon className="w-5" />
+      </button>
+    </form>
+  );
+}
 export function ViewButton({ path }) {
   return (
     <Link href={path} className="rounded-md border p-2 hover:bg-gray-100">

@@ -1,6 +1,6 @@
 "use client";
 import { useActionState, useState } from "react";
-import { useFormStatus } from "react-dom";
+import { useFormStatus, useFormState } from "react-dom";
 
 import { Button } from "../../../../../components/ui/button";
 import {
@@ -41,7 +41,7 @@ export default function AddItemForm({ products, id }) {
   const [itemType, setItemType] = useState("Stock");
 
   const addItem = addInvoiceItem.bind(null, id);
-  const [state, dispatch] = useActionState(addItem, initialState);
+  const [state, dispatch] = useFormState(addItem, initialState);
 
   const form = useForm({
     resolver: zodResolver(invoiceItemForm),
@@ -57,7 +57,7 @@ export default function AddItemForm({ products, id }) {
   return (
     <Card className="items-center justify-center  md:w-1/2 mx-auto  ">
       <CardHeader>
-        <CardTitle>Add Account</CardTitle>
+        <CardTitle>Add Item</CardTitle>
       </CardHeader>
       <CardContent>
         <Form {...form}>

@@ -1,4 +1,5 @@
 "use server";
+import { renderToFile } from "@react-pdf/renderer";
 
 import {
   validateAccount,
@@ -25,6 +26,7 @@ import { Delius_Unicase } from "next/font/google";
 import Invoice from "../models/invoice";
 import Counter from "../models/counter";
 import StockTransaction from "../models/stockTransaction";
+import { number } from "zod";
 
 export async function logout(params) {
   return await signOut();
@@ -100,7 +102,7 @@ export async function addStock(state, formData) {
 
     const data = validatedFields.data;
 
-    await Product.create({
+    const result = await Product.create({
       name: toTitle(data.name),
       price: data.price,
       SKU: data.SKU,
@@ -108,7 +110,19 @@ export async function addStock(state, formData) {
       category: data.category,
       stock: data.stock,
     });
+
+    const amount = Number(data.stock) * Number(data.price);
+
+    if (result) {
+      await StockTransaction.create({
+        SKU: data.SKU,
+        amount: amount,
+        transactionType: "Purchase",
+        quantity: data.stock,
+      });
+    }
   } catch (e) {
+    console.log(e);
     return { message: "Database error: failed to add stock" };
   }
   revalidatePath("/dashboard/stocks");
@@ -157,19 +171,29 @@ export async function updateStock(id, prevState, formData) {
   }
 
   try {
-    await Product.updateOne(
-      { _id: id },
-      {
-        $set: {
-          name: toTitle(validatedFields.data.name),
-          SKU: validatedFields.data.SKU,
-          price: validatedFields.data.price,
-          stock: validatedFields.data.stock,
-          category: validatedFields.data.category,
-          description: validatedFields.data.description,
-        },
+    const product = await Product.findById(id);
+    const oldStock = product.stock;
+    if (product) {
+      product.name = toTitle(validatedFields.data.name);
+      product.SKU = validatedFields.data.SKU;
+      product.price = validatedFields.data.price;
+      product.stock = validatedFields.data.stock;
+      product.category = validatedFields.data.category;
+      product.description = validatedFields.data.description;
+      const result = await product.save();
+      if (result) {
+        const addedProducts = Number(validatedFields.data.stock) - oldStock;
+        if (addedProducts > 0) {
+          const amount = Number(validatedFields.data.price) * addedProducts;
+          await StockTransaction.create({
+            SKU: validatedFields.data.SKU,
+            amount: amount,
+            transactionType: "Purchase",
+            quantity: addedProducts,
+          });
+        }
       }
-    );
+    }
   } catch (e) {
     return { message: "Database Error: Failed to Update stock." };
   }
@@ -384,8 +408,12 @@ export async function addInvoiceItem(id, state, formData) {
     }
 
     const data = validatedFields.data;
+    console.log(data);
 
     const invoice = await Invoice.findById(id);
+    if (!invoice) {
+      return { message: "No invoice found" };
+    }
     const items = invoice.items ?? [];
     let item = {
       name: toTitle(data.name),
@@ -407,7 +435,21 @@ export async function addInvoiceItem(id, state, formData) {
         }
       }
 
-      await Invoice.findOneAndUpdate({ _id: id }, { $push: { items: item } });
+      await Invoice.findOneAndUpdate(
+        { _id: id },
+        {
+          $push: {
+            items: {
+              name: toTitle(data.name),
+
+              quantity: data.quantity,
+              unitPrice: data.unitPrice,
+              unit: data.unit,
+              type: data.type,
+            },
+          },
+        }
+      );
     } else {
       const stock = await Product.findOne({
         SKU: data.name,
@@ -431,11 +473,11 @@ export async function addInvoiceItem(id, state, formData) {
 
       item = {
         id: stock._id.toString(),
-        quantity: data.quantity,
-        unitPrice: data.unitPrice,
+        quantity: Number(data.quantity),
+        unitPrice: Number(data.unitPrice),
         type: "Stock",
-        unit: data.unit,
-        name: stock.SKU,
+        unit: data.unit.toString(),
+        name: stock.SKU.toString(),
       };
 
       await Invoice.findOneAndUpdate({ _id: id }, { $push: { items: item } });
@@ -456,8 +498,8 @@ export async function addInvoiceItem(id, state, formData) {
     console.error(e);
     return { message: "Database error: failed to add Invoice item" };
   }
-  revalidatePath("/dashboard/invoice");
-  redirect("/dashboard/invoices");
+  revalidatePath(`/dashboard/invoices/${id}`);
+  redirect(`/dashboard/invoices/${id}`);
 }
 
 export async function updateInvoice(id, prevState, formData) {
@@ -511,3 +553,20 @@ export async function updateInvoice(id, prevState, formData) {
   revalidatePath("/dashboard/invoices");
   redirect("/dashboard/invoices");
 }
+
+export const deleteInvoiceItem = async (itemId, invoiceId) => {
+  try {
+    await Invoice.findOneAndUpdate(
+      { _id: invoiceId },
+      { $pull: { items: { _id: itemId } } }
+    );
+  } catch (e) {
+    return { message: "Could not remove item" };
+  }
+  revalidatePath(`/dashboard/invoices/${invoiceId}`);
+  redirect(`/dashboard/invoices/${invoiceId}`);
+};
+
+export const downloadFile = async (Doc) => {
+  await renderToFile(!!Doc, `${__dirname}/my-doc.pdf`);
+};

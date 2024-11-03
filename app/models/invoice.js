@@ -2,6 +2,15 @@ import mongoose from "mongoose";
 
 const Schema = mongoose.Schema;
 
+const nestedSchema = new Schema({
+  name: String,
+  id: String,
+  quantity: Number,
+  unitPrice: Number,
+  unit: String,
+  type: String,
+});
+
 const invoiceSchema =
   Schema &&
   new Schema(
@@ -29,16 +38,7 @@ const invoiceSchema =
       },
       invoiceNumber: { type: String, required: true, unique: true },
 
-      items: [
-        {
-          name: String,
-          id: String,
-          quantity: Number,
-          unitPrice: Number,
-          unit: String,
-          type: String,
-        },
-      ],
+      items: [nestedSchema],
       status: {
         type: String,
         required: true,

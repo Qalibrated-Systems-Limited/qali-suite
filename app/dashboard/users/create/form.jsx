@@ -1,6 +1,6 @@
 "use client";
 import { useActionState } from "react";
-import { useFormStatus } from "react-dom";
+import { useFormStatus, useFormState } from "react-dom";
 
 import { Button } from "../../../../components/ui/button";
 import {
@@ -36,7 +36,7 @@ const formSchema = z.object({
 });
 export function CreateUserForm() {
   const initialState = { message: "", errors: {} };
-  const [state, dispatch] = useActionState(createUser, initialState);
+  const [state, dispatch] = useFormState(createUser, initialState);
   const form = useForm({
     resolver: zodResolver(formSchema),
     defaultValues: {

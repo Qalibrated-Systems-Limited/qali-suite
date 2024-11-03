@@ -12,6 +12,7 @@ import User from "../models/user";
 import Invoice from "../models/invoice";
 
 import BridgeConfig from "../models/bridgeConfigs";
+import StockTransaction from "../models/stockTransaction";
 
 dbConnect();
 
@@ -620,6 +621,45 @@ export const searchInvoice = async (searchTerm, page = 1) => {
   }
 };
 
+export const fetchLatestInvoices = async () => {
+  const projectStage = {
+    $project: {
+      invoiceNumber: 1,
+
+      totalAmount: {
+        $sum: {
+          $map: {
+            input: "$items",
+            as: "item",
+            in: { $multiply: ["$$item.unitPrice", "$$item.quantity"] },
+          },
+        },
+      },
+
+      customer: "$customer.name",
+    },
+  };
+
+  const limitStage = { $limit: 5 };
+
+  const sortStage = { $sort: { createdAt: -1 } };
+  const pipeline = [sortStage, limitStage, sortStage, projectStage];
+
+  let result = await Invoice.aggregate(pipeline);
+  if (result && result.length > 0) {
+    result = result.map((res) => {
+      return {
+        _id: res._id.toString(),
+        invoiceNumber: res.invoiceNumber,
+        customer: res.customer,
+        amount: res.totalAmount,
+      };
+    });
+  }
+
+  return result;
+};
+
 export const fetchInvoicePages = async (searchTerm) => {
   const transactionSearchStage = {
     $search: {
@@ -651,3 +691,265 @@ export const fetchInvoicePages = async (searchTerm) => {
 
   return noOfPages;
 };
+
+export const fetchStockTxPages = async (searchTerm) => {
+  try {
+    const accountSearchStage = {
+      $search: {
+        index: "stockTxSearchIndex", // The name of your full-text search index
+        text: {
+          query: searchTerm,
+          path: {
+            wildcard: "*",
+          },
+        },
+      },
+    };
+
+    const countStage = {
+      $count: "totalRecords", // This stage returns the total number of records matching the search query
+    };
+
+    let pipeline = [countStage];
+    if (searchTerm && searchTerm.length > 0) {
+      pipeline = [accountSearchStage, countStage];
+    }
+    const result = await StockTransaction.aggregate(pipeline);
+    let count = 1;
+    if (result && result.length > 0) {
+      count = result[0].totalRecords;
+    }
+    const noOfPages = Math.ceil(Number(count) / ITEMS_PER_PAGE);
+    console.log(result);
+
+    return noOfPages;
+  } catch (e) {
+    throw new Error("Could not get accounts pages");
+  }
+};
+
+export const searchStockTx = async (searchTerm, page = 1) => {
+  const skipRecords = (page - 1) * ITEMS_PER_PAGE;
+
+  try {
+    const searchStage = {
+      $search: {
+        index: "stockTxSearchIndex", // Name of the full-text search index
+        text: {
+          query: searchTerm,
+          path: {
+            wildcard: "*",
+          },
+        },
+      },
+    };
+
+    const paginationStage = [
+      { $skip: skipRecords }, // Skip records for pagination
+      { $limit: ITEMS_PER_PAGE }, // Limit results per page
+    ];
+
+    const projectStage = {
+      $project: {
+        amount: 1,
+
+        SKU: 1,
+        transactionType: 1,
+        date: {
+          $dateToString: { format: "%d-%m-%G", date: "$date" },
+        },
+      },
+    };
+
+    const sortStage = { $sort: { date: -1 } };
+
+    let pipeline = [sortStage, ...paginationStage, projectStage];
+    if (searchTerm && searchTerm.length > 0) {
+      pipeline = [searchStage, ...paginationStage, projectStage];
+    }
+
+    let result = await StockTransaction.aggregate(pipeline);
+
+    if (result && result.length > 0) {
+      result = result.map((res) => {
+        return { ...res, _id: res._id.toString() };
+      });
+    }
+
+    return result;
+  } catch (e) {
+    throw new Error("Could not get accounts");
+  }
+};
+
+export const getStockAggregate = async () => {
+  const matchStage = { $match: { stock: { $gt: 0 } } };
+  const groupStage = {
+    $group: {
+      _id: null,
+      totalCount: { $sum: "$stock" },
+      totalValue: { $sum: { $multiply: ["$stock", "$price"] } },
+    },
+  };
+
+  const result = await Product.aggregate([matchStage, groupStage]);
+
+  const aggregates = result && result.length > 0 ? result[0] : null;
+  return aggregates;
+};
+
+export const invoicesCount = async () => {
+  const result = await Invoice.countDocuments();
+
+  return result;
+};
+
+export const getTotalSaleThisMonth = async () => {
+  // Define the start and end of the current month
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+
+  const endOfMonth = new Date();
+  endOfMonth.setMonth(endOfMonth.getMonth() + 1);
+  endOfMonth.setDate(1);
+  endOfMonth.setHours(0, 0, 0, 0);
+
+  // Aggregation pipeline
+  const result = await StockTransaction.aggregate([
+    {
+      // Match transactions from the current month
+      $match: {
+        date: {
+          $gte: startOfMonth,
+          $lt: endOfMonth,
+        },
+        transactionType: "Sale",
+      },
+    },
+    {
+      // Calculate the total sales for the current month
+      $group: {
+        _id: null,
+        totalSales: {
+          $sum: "$amount",
+        },
+      },
+    },
+  ]);
+
+  let aggregates = 0;
+  if (result && result.length > 0) {
+    aggregates = result[0].totalSales;
+  }
+
+  return aggregates;
+};
+
+export const monthlySalesDistro = async () => {
+  noStore();
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  // Determine if the current month is in the first or second half of the year
+  const isFirstHalf = now.getMonth() < 6;
+
+  // Set the start and end dates for the desired half-year range
+  const startOfHalfYear = new Date(currentYear, isFirstHalf ? 0 : 6, 1); // January 1st or July 1st
+  const endOfHalfYear = new Date(currentYear, isFirstHalf ? 6 : 12, 1); // July 1st or January 1st of the next year
+  const matchStage = {
+    $match: {
+      date: {
+        $gte: startOfHalfYear,
+        $lt: endOfHalfYear,
+      },
+    },
+  };
+
+  const groupStage = {
+    $group: {
+      _id: {
+        month: { $dateToString: { format: "%b", date: "$date" } },
+        monthNum: {
+          $dateToString: { format: "%m", date: "$date" },
+        },
+      },
+
+      Sales: {
+        $sum: {
+          $cond: {
+            if: { $eq: ["$transactionType", "Sale"] },
+            then: "$amount",
+            else: 0,
+          },
+        },
+      },
+      Purchases: {
+        $sum: {
+          $cond: {
+            if: { $eq: ["$transactionType", "Purchase"] },
+            then: "$amount",
+            else: 0,
+          },
+        },
+      },
+    },
+  };
+  const projectStage = {
+    $project: {
+      _id: 1,
+      Purchases: { $divide: ["$Purchases", 1000000] },
+      Sales: { $divide: ["$Sales", 1000000] },
+    },
+  };
+  const pipeline = [
+    matchStage,
+    groupStage,
+    { $sort: { "_id.monthNum": 1 } },
+    projectStage,
+  ];
+
+  const result = await StockTransaction.aggregate(pipeline);
+
+  return result;
+};
+
+export async function getTopSellingProducts() {
+  const groupStage = {
+    $group: {
+      _id: "$SKU",
+      Sales: {
+        $sum: {
+          $cond: {
+            if: { $eq: ["$transactionType", "Sale"] },
+            then: "$amount",
+            else: 0,
+          },
+        },
+      },
+      Purchases: {
+        $sum: {
+          $cond: {
+            if: { $eq: ["$transactionType", "Purchase"] },
+            then: "$amount",
+            else: 0,
+          },
+        },
+      },
+    },
+  };
+  const projectStage = {
+    $project: {
+      _id: 1,
+      Purchases: { $divide: ["$Purchases", 1000000] },
+      Sales: { $divide: ["$Sales", 1000000] },
+    },
+  };
+  const sortStage = { $sort: { Sales: -1 } };
+  const limitStage = { $limit: 10 };
+  const pipeline = [groupStage, sortStage, limitStage, projectStage];
+  const result = await StockTransaction.aggregate(pipeline);
+
+  return result;
+}
