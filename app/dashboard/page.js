@@ -13,42 +13,19 @@ import CardWrapper, { TopFourCardsSkeleton } from "./components/cardwrapper";
 import TopSellingProductComp, {
   TopSellingProductBarsSkeleton,
 } from "./components/topSalesComp";
-
-const data = [
-  { name: "Jan", sales: 4000, stock: 2400 },
-  { name: "Feb", sales: 3000, stock: 1398 },
-  { name: "Mar", sales: 2000, stock: 9800 },
-  { name: "Apr", sales: 2780, stock: 3908 },
-  { name: "May", sales: 1890, stock: 4800 },
-  { name: "Jun", sales: 2390, stock: 3800 },
-  { name: "Jul", sales: 3490, stock: 4300 },
-];
-
-const invoices = [
-  {
-    id: "INV-20241102-0003",
-    amount: 90000,
-    customer: "Imenti Tea Factory",
-    date: "2024-11-02",
-  },
-  {
-    id: "INV-20241102-0004",
-    amount: 45000,
-    customer: "Kisii Tea Factory",
-    date: "2024-11-03",
-  },
-  // Add more invoice data here...
-];
+import Link from "next/link";
 
 const page = () => {
   return (
     <div className="bg-background text-foreground min-h-screen p-6">
       <header className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-primary">Dashboard</h1>
-        <Button>
-          <PlusIcon size={30} className="md:hidden" />
-          <span className="hidden md:block"> Add New Item</span>
-        </Button>
+        <Link href={"/dashboard/invoices/create"}>
+          <Button>
+            <PlusIcon size={30} className="md:hidden" />
+            <span className="hidden md:block"> Add Invoice</span>
+          </Button>
+        </Link>
       </header>
       <Suspense fallback={<TopFourCardsSkeleton />}>
         <CardWrapper />
