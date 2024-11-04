@@ -3,7 +3,7 @@ import Breadcrumbs from "../../../../components/ui/breadcrumbs";
 import Account from "../../../models/account";
 
 async function page() {
-  let accounts = await Account.find();
+  let accounts = await Account.find().lean();
 
   if (accounts) {
     accounts = accounts.map((account) => {
