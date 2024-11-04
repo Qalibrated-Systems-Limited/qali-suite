@@ -1,6 +1,6 @@
 "use client";
-import { useActionState } from "react";
-import { useFormStatus } from "react-dom";
+
+import { useFormStatus, useFormState } from "react-dom";
 
 import { Button } from "../../../../../components/ui/button";
 import {
@@ -42,7 +42,7 @@ export function UpdateInvoiceForm({ customers = [], invoice }) {
   console.log(params);
 
   const updateWithId = updateInvoice.bind(null, invoice._id);
-  const [state, dispatch] = useActionState(updateWithId, initialState);
+  const [state, dispatch] = useFormState(updateWithId, initialState);
   const form = useForm({
     resolver: zodResolver(updateInvoiceForm),
     defaultValues: {

@@ -1,6 +1,6 @@
 "use client";
-import { useActionState } from "react";
-import { useFormStatus } from "react-dom";
+
+import { useFormStatus, useFormState } from "react-dom";
 
 import { Button } from "../../../../components/ui/button";
 import {
@@ -28,7 +28,7 @@ import { cn } from "../../../../lib/utils";
 
 export function CreateAccountForm() {
   const initialState = { message: "", errors: {} };
-  const [state, dispatch] = useActionState(createAccount, initialState);
+  const [state, dispatch] = useFormState(createAccount, initialState);
   const form = useForm({
     resolver: zodResolver(accountForm),
     defaultValues: {

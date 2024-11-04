@@ -1,5 +1,6 @@
 "use client";
-import { useActionState } from "react";
+
+import { useFormState } from "react-dom";
 
 import { useForm } from "react-hook-form";
 import { settingsForm } from "../../mongodb/validators";
@@ -33,7 +34,7 @@ export default function UpdateSettingsForm({ settings }) {
   const initialState = { message: "", errors: {} };
 
   const updateWithId = updateSettings.bind(null, settings.weigherId);
-  const [state, dispatch] = useActionState(updateWithId, initialState);
+  const [state, dispatch] = useFormState(updateWithId, initialState);
 
   const form = useForm({
     resolver: zodResolver(settingsForm),
