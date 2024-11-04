@@ -19,17 +19,26 @@ function salesTrendsChart({ data }) {
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis dataKey={"_id.month"} />
         <YAxis />
+
         <Tooltip
           formatter={(value, name) => {
-            return [value, name];
+            if (name === "Sales") {
+              return [value, "Net Weight"];
+            }
           }}
           labelClassName="font-bold"
           wrapperClassName="!text-sm dark:!bg-black rounded-md dark:!border-border"
           separator=": "
         />
         <Legend
-          formatter={(value) => <span className="capitalize">{value}</span>}
+          iconType="circle"
+          formatter={(value) => {
+            if (value === "totalNetWeight") {
+              return <div className="text-sm"> Net Weight</div>;
+            }
+          }}
         />
+
         <Line
           type="monotone"
           dataKey="Sales"

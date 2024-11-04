@@ -8,6 +8,7 @@ const stockTransactionSchema = new Schema({
 
     required: true,
   },
+  ref: String,
   amount: { required: true, type: Number },
   quantity: { type: Number, required: true },
   transactionType: {

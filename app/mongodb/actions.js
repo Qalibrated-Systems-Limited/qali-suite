@@ -27,6 +27,7 @@ import Invoice from "../models/invoice";
 import Counter from "../models/counter";
 import StockTransaction from "../models/stockTransaction";
 import { number } from "zod";
+import { ST } from "next/dist/shared/lib/utils";
 
 export async function logout(params) {
   return await signOut();
@@ -480,7 +481,10 @@ export async function addInvoiceItem(id, state, formData) {
         name: stock.SKU.toString(),
       };
 
-      await Invoice.findOneAndUpdate({ _id: id }, { $push: { items: item } });
+      const invoice = await Invoice.findOneAndUpdate(
+        { _id: id },
+        { $push: { items: item } }
+      );
       const newStock = remainingStock - Number(data.quantity);
       stock.stock = newStock;
       await stock.save();
@@ -490,6 +494,7 @@ export async function addInvoiceItem(id, state, formData) {
       await StockTransaction.create({
         SKU: stock.SKU,
         amount,
+        ref: invoice.invoiceNumber,
         transactionType: "Sale",
         quantity: data.quantity,
       });
@@ -556,13 +561,32 @@ export async function updateInvoice(id, prevState, formData) {
 
 export const deleteInvoiceItem = async (itemId, invoiceId) => {
   try {
-    await Invoice.findOneAndUpdate(
+    const res = await Invoice.findOneAndUpdate(
       { _id: invoiceId },
       { $pull: { items: { _id: itemId } } }
     );
+    if (res) {
+      const deletedItem = res.items.find((item) => item._id == itemId);
+      if (deletedItem) {
+        console.log(deletedItem);
+        const result = await StockTransaction.deleteOne({
+          SKU: deletedItem.name,
+          ref: res.invoiceNumber,
+        });
+
+        console.log(result);
+        const res2 = await Product.updateOne(
+          { SKU: deletedItem.name },
+          { $inc: { stock: deletedItem.quantity } }
+        );
+
+        console.log(res2);
+      }
+    }
   } catch (e) {
     return { message: "Could not remove item" };
   }
+
   revalidatePath(`/dashboard/invoices/${invoiceId}`);
   redirect(`/dashboard/invoices/${invoiceId}`);
 };

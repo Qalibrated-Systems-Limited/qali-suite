@@ -38,14 +38,14 @@ export const columns = [
     header: "",
 
     cell: ({ row }) => {
-      let id = row.getValue("_id");
-      const params = useParams();
-      const invoiceId = params.id;
+      //   let id = row.getValue("_id");
+      //   const params = useParams();
+      //   const invoiceId = params.id;
 
       return (
         <div className="flex justify-end gap-3">
-          <AddItemButton path={`/dashboard/invoices/${invoiceId}/add-item`} />
-          <DeleteInvoiceItem id={id} />
+          {/* <AddItemButton path={`/dashboard/invoices/${invoiceId}/add-item`} />
+          <DeleteInvoiceItem id={id} /> */}
         </div>
       );
     },

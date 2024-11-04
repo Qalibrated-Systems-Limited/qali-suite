@@ -1,5 +1,6 @@
 "use client";
 import { useActionState } from "react";
+import { useFormState } from "react-dom";
 
 import { Button } from "../../../components/ui/button";
 import {
@@ -39,7 +40,7 @@ const formSchema = z.object({
   name: z.string().max(200).min(8),
 });
 export default function Page() {
-  const [errorMessage, dispatch] = useActionState(authenticate, undefined);
+  const [errorMessage, dispatch] = useFormState(authenticate, undefined);
   const form = useForm({
     resolver: zodResolver(formSchema),
     defaultValues: {

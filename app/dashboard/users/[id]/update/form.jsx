@@ -1,4 +1,3 @@
-import { useActionState } from "react";
 "use client";
 import { Button } from "../../../../../components/ui/button";
 import {
@@ -23,6 +22,7 @@ import {
   SelectValue,
 } from "../../../../../components/ui/select";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useFormState } from "react-dom";
 
 import { useForm } from "react-hook-form";
 import { userUpdateForm } from "../../../../mongodb/validators";
@@ -33,7 +33,7 @@ export default function UpdateUserForm({ account }) {
   const initialState = { message: "", errors: {} };
 
   const updateWithId = updateUser.bind(null, account._id.toString());
-  const [state, dispatch] = useActionState(updateWithId, initialState);
+  const [state, dispatch] = useFormState(updateWithId, initialState);
 
   const form = useForm({
     resolver: zodResolver(userUpdateForm),

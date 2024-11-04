@@ -1,5 +1,6 @@
 "use client";
 import { useActionState } from "react";
+import { useFormState } from "react-dom";
 
 import { Button } from "../../../components/ui/button";
 import {
@@ -32,7 +33,7 @@ import { createSettings } from "../../mongodb/actions";
 
 export function SettingsForm() {
   const initialState = { message: "", errors: {} };
-  const [state, dispatch] = useActionState(createSettings, initialState);
+  const [state, dispatch] = useFormState(createSettings, initialState);
   const form = useForm({
     resolver: zodResolver(settingsForm),
     defaultValues: {
