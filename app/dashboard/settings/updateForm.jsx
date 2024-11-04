@@ -41,7 +41,6 @@ export default function UpdateSettingsForm({ settings }) {
       isLocked: settings.isLocked,
       maxCapacity: settings.maxCapacity ?? "",
       minCapacity: settings.minCapacity,
-      weigherId: settings.weigherId,
     },
   });
 
