@@ -21,7 +21,7 @@ const page = () => {
       <header className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-primary">Dashboard</h1>
         <Link href={"/dashboard/invoices/create"}>
-          <Button>
+          <Button variant="outline">
             <PlusIcon size={30} className="md:hidden" />
             <span className="hidden md:block"> Add Invoice</span>
           </Button>
