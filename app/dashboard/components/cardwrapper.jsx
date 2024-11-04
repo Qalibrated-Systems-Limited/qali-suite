@@ -35,10 +35,16 @@ async function Cardwrapper() {
   let stocks = 0;
   let stockValue = 0;
   if (result && result.length > 2) {
-    totalSale = (result[0] / 1000000).toFixed(2);
+    console.log(result);
+    if (result[0]) {
+      totalSale = (result[0] / 1000000).toFixed(2);
+    }
+
     invoices = result[1];
-    stocks = result[2].totalCount;
-    stockValue = (result[2].totalValue / 1000000).toFixed(2);
+    if (result[2]) {
+      stocks = result[2].totalCount;
+      stockValue = (result[2].totalValue / 1000000).toFixed(2);
+    }
   }
   return (
     <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
