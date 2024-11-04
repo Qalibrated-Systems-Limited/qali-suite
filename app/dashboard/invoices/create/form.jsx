@@ -214,6 +214,9 @@ export function CreateInvoiceForm({ customers = [] }) {
                 />
               </div>
             </div>
+            {state.message && (
+              <p className="text-center text-red-500">{state.message}</p>
+            )}
             <CreateButton />
           </form>
         </Form>
