@@ -22,7 +22,8 @@ import {
   SelectValue,
 } from "../../../../../components/ui/select";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useFormState } from "react-dom";
+import { useActionState } from "react";
+import NextForm from "next/form";
 
 import { useForm } from "react-hook-form";
 import { userUpdateForm } from "../../../../mongodb/validators";
@@ -33,7 +34,10 @@ export default function UpdateUserForm({ account }) {
   const initialState = { message: "", errors: {} };
 
   const updateWithId = updateUser.bind(null, account._id.toString());
-  const [state, dispatch] = useFormState(updateWithId, initialState);
+  const [state, dispatch, isPending] = useActionState(
+    updateWithId,
+    initialState
+  );
 
   const form = useForm({
     resolver: zodResolver(userUpdateForm),
@@ -53,7 +57,7 @@ export default function UpdateUserForm({ account }) {
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form action={dispatch} className="flex flex-col gap-4">
+            <NextForm action={dispatch} className="flex flex-col gap-4">
               <FormField
                 control={form.control}
                 name="name"
@@ -182,11 +186,8 @@ export default function UpdateUserForm({ account }) {
                   </FormItem>
                 )}
               />
-
-              <Button type="submit" className="max-w-[500px] self-end ">
-                Update user
-              </Button>
-            </form>
+              <CreateButton isPending={isPending} />
+            </NextForm>
           </Form>
         </CardContent>
         {/* <CardFooter>
@@ -197,18 +198,16 @@ export default function UpdateUserForm({ account }) {
   );
 }
 
-function CreateButton() {
-  const { pending } = useFormStatus();
-
+function CreateButton({ isPending }) {
   return (
     <Button
-      aria-disabled={pending}
+      aria-disabled={isPending}
       className={clsx({
-        "bg-yellow-200 ": pending,
-        "bg-primary": !pending,
+        "bg-pink-200 ": isPending,
+        "bg-primary": !isPending,
       })}
     >
-      {pending ? "Submitting" : "Update Account"}
+      {isPending ? "Submitting" : "Update user"}
     </Button>
   );
 }

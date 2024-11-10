@@ -8,7 +8,7 @@ import {
   Document,
   StyleSheet,
   PDFDownloadLink,
-} from "@react-pdf/renderer";
+} from "@alexandernanberg/react-pdf-renderer";
 import { PrinterIcon } from "lucide-react";
 import { Button } from "../../../../components/ui/button";
 

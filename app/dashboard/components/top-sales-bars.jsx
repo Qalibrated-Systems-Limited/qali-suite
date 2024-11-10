@@ -1,5 +1,5 @@
 "use client";
-import { Tooltip } from "flowbite-react";
+
 import React from "react";
 import {
   Bar,
@@ -9,6 +9,7 @@ import {
   ResponsiveContainer,
   XAxis,
   YAxis,
+  Tooltip,
 } from "recharts";
 
 function TopSellingProductsBars({ data }) {

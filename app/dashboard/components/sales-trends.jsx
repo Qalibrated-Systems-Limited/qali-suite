@@ -1,5 +1,4 @@
 "use client";
-import { Tooltip } from "flowbite-react";
 
 import React from "react";
 import {
@@ -10,6 +9,7 @@ import {
   XAxis,
   YAxis,
   LineChart,
+  Tooltip,
 } from "recharts";
 
 function salesTrendsChart({ data }) {

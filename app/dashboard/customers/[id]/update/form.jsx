@@ -1,7 +1,6 @@
 "use client";
 
-import { useFormStatus, useFormState } from "react-dom";
-
+import { useActionState } from "react";
 import { Button } from "../../../../../components/ui/button";
 import {
   Card,
@@ -31,12 +30,16 @@ import { updateAccountForm } from "../../../../mongodb/validators";
 
 import { updateAccount } from "../../../../mongodb/actions";
 import { cn } from "../../../../../lib/utils";
+import NextForm from "next/form";
 
 export default function UpdateAccountForm({ account }) {
   const initialState = { message: "", errors: {} };
 
   const updateWithId = updateAccount.bind(null, account._id.toString());
-  const [state, dispatch] = useFormState(updateWithId, initialState);
+  const [state, dispatch, isPending] = useActionState(
+    updateWithId,
+    initialState
+  );
 
   const form = useForm({
     resolver: zodResolver(updateAccountForm),
@@ -56,7 +59,7 @@ export default function UpdateAccountForm({ account }) {
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form action={dispatch} className="flex flex-col gap-4">
+          <NextForm action={dispatch} className="flex flex-col gap-4">
             <div className="flex flex-col md:flex-row w-full gap-4">
               <div className="flex-1">
                 <FormField
@@ -236,8 +239,8 @@ export default function UpdateAccountForm({ account }) {
                 />
               </div>
             </div>
-            <CreateButton />
-          </form>
+            <CreateButton isPending={isPending} />
+          </NextForm>
         </Form>
       </CardContent>
       {/* <CardFooter>
@@ -247,17 +250,15 @@ export default function UpdateAccountForm({ account }) {
   );
 }
 
-function CreateButton() {
-  const { pending } = useFormStatus();
-
+function CreateButton({ isPending }) {
   return (
     <Button
-      aria-disabled={pending}
+      aria-disabled={isPending}
       className={cn("self-end", {
-        "bg-pink-200 ": pending,
+        "bg-pink-200 ": isPending,
       })}
     >
-      {pending ? "Submitting" : "Update Account"}
+      {isPending ? "Submitting" : "Update Account"}
     </Button>
   );
 }

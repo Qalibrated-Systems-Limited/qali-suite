@@ -1,6 +1,5 @@
 "use client";
 import { useActionState, useState } from "react";
-import { useFormStatus, useFormState } from "react-dom";
 
 import { Button } from "../../../../../components/ui/button";
 import {
@@ -27,21 +26,19 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { useForm } from "react-hook-form";
-import {
-  invoiceItemForm,
-  updateAccountForm,
-} from "../../../../mongodb/validators";
+import { invoiceItemForm } from "../../../../mongodb/validators";
 
 import { addInvoiceItem, updateAccount } from "../../../../mongodb/actions";
 import { cn } from "../../../../../lib/utils";
 import { SelectGroup } from "@radix-ui/react-select";
+import NextForm from "next/form";
 
 export default function AddItemForm({ products, id }) {
   const initialState = { message: "", errors: {} };
   const [itemType, setItemType] = useState("Stock");
 
   const addItem = addInvoiceItem.bind(null, id);
-  const [state, dispatch] = useFormState(addItem, initialState);
+  const [state, dispatch, isPending] = useActionState(addItem, initialState);
 
   const form = useForm({
     resolver: zodResolver(invoiceItemForm),
@@ -61,7 +58,7 @@ export default function AddItemForm({ products, id }) {
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form action={dispatch} className="flex flex-col gap-4">
+          <NextForm action={dispatch} className="flex flex-col gap-4">
             <div className="flex flex-col md:flex-row w-full gap-4">
               <div className="flex-1">
                 <FormField
@@ -285,8 +282,8 @@ export default function AddItemForm({ products, id }) {
                 {state.message}
               </p>
             )}
-            <CreateButton />
-          </form>
+            <CreateButton isPending={isPending} />
+          </NextForm>
         </Form>
       </CardContent>
       {/* <CardFooter>
@@ -296,17 +293,15 @@ export default function AddItemForm({ products, id }) {
   );
 }
 
-function CreateButton() {
-  const { pending } = useFormStatus();
-
+function CreateButton({ isPending }) {
   return (
     <Button
-      aria-disabled={pending}
+      aria-disabled={isPending}
       className={cn("self-end", {
-        "bg-pink-200 ": pending,
+        "bg-pink-200 ": isPending,
       })}
     >
-      {pending ? "Submitting" : "Add item"}
+      {isPending ? "Submitting" : "Add item"}
     </Button>
   );
 }

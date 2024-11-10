@@ -1,7 +1,7 @@
 "use client";
 
-import { useFormStatus, useFormState } from "react-dom";
-
+import { useActionState } from "react";
+import NextForm from "next/form";
 import { Button } from "../../../../components/ui/button";
 import {
   Card,
@@ -29,6 +29,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { createUser } from "../../../mongodb/actions";
+import { cn } from "../../../../lib/utils";
 
 const formSchema = z.object({
   name: z.string(),
@@ -36,7 +37,7 @@ const formSchema = z.object({
 });
 export function CreateUserForm() {
   const initialState = { message: "", errors: {} };
-  const [state, dispatch] = useFormState(createUser, initialState);
+  const [state, dispatch, isPending] = useActionState(createUser, initialState);
   const form = useForm({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -55,7 +56,7 @@ export function CreateUserForm() {
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form action={dispatch} className="flex flex-col gap-4">
+            <NextForm action={dispatch} className="flex flex-col gap-4">
               <FormField
                 control={form.control}
                 name="name"
@@ -161,8 +162,8 @@ export function CreateUserForm() {
                   </FormItem>
                 )}
               />
-              <CreateButton />
-            </form>
+              <CreateButton isPending={isPending} />
+            </NextForm>
           </Form>
         </CardContent>
         {/* <CardFooter>
@@ -173,15 +174,14 @@ export function CreateUserForm() {
   );
 }
 
-function CreateButton() {
-  const { pending } = useFormStatus();
+function CreateButton({ isPending }) {
   return (
     <Button
       type="submit"
-      className="max-w-[500px] self-end "
-      aria-disabled={pending}
+      className={cn("max-w-[500px] self-end ", { "bg-pink-200": isPending })}
+      aria-disabled={isPending}
     >
-      Create user
+      {isPending ? "Creating.." : "Create user"}
     </Button>
   );
 }

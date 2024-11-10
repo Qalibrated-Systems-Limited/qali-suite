@@ -1,6 +1,6 @@
 "use client";
 
-import { useFormStatus, useFormState } from "react-dom";
+import { useActionState } from "react";
 
 import { Button } from "../../../../components/ui/button";
 import {
@@ -28,7 +28,10 @@ import { cn } from "../../../../lib/utils";
 
 export function CreateAccountForm() {
   const initialState = { message: "", errors: {} };
-  const [state, dispatch] = useFormState(createAccount, initialState);
+  const [state, dispatch, isPending] = useActionState(
+    createAccount,
+    initialState
+  );
   const form = useForm({
     resolver: zodResolver(accountForm),
     defaultValues: {
@@ -182,7 +185,7 @@ export function CreateAccountForm() {
                 />
               </div>
             </div>
-            <CreateButton />
+            <CreateButton isPending={isPending} />
           </form>
         </Form>
       </CardContent>
@@ -193,18 +196,16 @@ export function CreateAccountForm() {
   );
 }
 
-function CreateButton() {
-  const { pending } = useFormStatus();
-
+function CreateButton({ isPending }) {
   return (
     <Button
-      aria-disabled={pending}
+      aria-disabled={isPending}
       className={cn("self-end", {
-        "bg-pink-200 ": pending,
-        "bg-primary": !pending,
+        "bg-pink-200 ": isPending,
+        "bg-primary": !isPending,
       })}
     >
-      {pending ? "Submitting.." : "Create customer"}
+      {isPending ? "Submitting.." : "Create customer"}
     </Button>
   );
 }

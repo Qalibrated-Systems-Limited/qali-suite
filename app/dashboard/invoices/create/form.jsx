@@ -1,7 +1,6 @@
 "use client";
 
-import { useFormStatus, useFormState } from "react-dom";
-
+import { useActionState } from "react";
 import { Button } from "../../../../components/ui/button";
 import {
   Card,
@@ -25,6 +24,7 @@ import { useForm } from "react-hook-form";
 import { createInvoice } from "../../../mongodb/actions";
 import { invoiceForm } from "../../../mongodb/validators";
 import { cn } from "../../../../lib/utils";
+import NextForm from "next/form";
 
 import {
   Select,
@@ -37,7 +37,10 @@ import {
 
 export function CreateInvoiceForm({ customers = [] }) {
   const initialState = { message: "", errors: {} };
-  const [state, dispatch] = useFormState(createInvoice, initialState);
+  const [state, dispatch, isPending] = useActionState(
+    createInvoice,
+    initialState
+  );
   const form = useForm({
     resolver: zodResolver(invoiceForm),
     values: {
@@ -55,7 +58,7 @@ export function CreateInvoiceForm({ customers = [] }) {
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form action={dispatch} className="flex flex-col gap-4">
+          <NextForm action={dispatch} className="flex flex-col gap-4">
             <div className="flex flex-col md:flex-row w-full gap-4 ">
               <div className="flex-1">
                 <FormField
@@ -217,8 +220,8 @@ export function CreateInvoiceForm({ customers = [] }) {
             {state.message && (
               <p className="text-center text-red-500">{state.message}</p>
             )}
-            <CreateButton />
-          </form>
+            <CreateButton isPending={isPending} />
+          </NextForm>
         </Form>
       </CardContent>
       {/* <CardFooter>
@@ -228,18 +231,16 @@ export function CreateInvoiceForm({ customers = [] }) {
   );
 }
 
-function CreateButton() {
-  const { pending } = useFormStatus();
-
+function CreateButton({ isPending }) {
   return (
     <Button
-      aria-disabled={pending}
+      aria-disabled={isPending}
       className={cn("self-end", {
-        "bg-pink-200 ": pending,
-        "bg-primary": !pending,
+        "bg-pink-200 ": isPending,
+        "bg-primary": !isPending,
       })}
     >
-      {pending ? "Submitting.." : "Create invoice"}
+      {isPending ? "Submitting.." : "Create invoice"}
     </Button>
   );
 }

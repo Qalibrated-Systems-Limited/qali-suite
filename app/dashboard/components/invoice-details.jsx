@@ -12,6 +12,15 @@ const InvoiceDetail = async ({ id }) => {
   if (!invoice) {
     return notFound();
   }
+  invoice = {
+    ...invoice,
+    createdAt: invoice.createdAt.toISOString(), // Convert Date to string
+    updatedAt: invoice.updatedAt.toISOString(),
+    _id: invoice._id.toString(),
+    items: invoice.items.map((item) => {
+      return { ...item, _id: item._id.toString() };
+    }),
+  };
   const formattedDate = format(new Date(invoice.createdAt), "dd-MM-yy");
   invoice.date = formattedDate;
 
@@ -19,7 +28,11 @@ const InvoiceDetail = async ({ id }) => {
   if (items.length > 0) {
     items = items.map((item) => {
       const amount = item.quantity * item.unitPrice;
-      return { ...item, _id: item._id.toString(), totalAmount: amount };
+      return {
+        ...item,
+        _id: item._id.toString(),
+        totalAmount: amount,
+      };
     });
   }
 
@@ -114,7 +127,7 @@ const InvoiceDetail = async ({ id }) => {
                 <tr key={item._id} className="border-t">
                   <td className="px-4 py-2">{item.name}</td>
                   <td className="px-4 py-2">
-                    {item.quantity} {item.unit}
+                    {item.quantity.$numberInt} {item.unit}
                   </td>
                   <td className="px-4 py-2">
                     {invoice.currency} {item.unitPrice}

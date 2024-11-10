@@ -29,22 +29,19 @@ const InvoicesList = async ({}) => {
 export default InvoicesList;
 
 import React from "react";
+import { Skeleton } from "../../../components/ui/skeleton";
 
 export const InvoicesListSkeleton = () => {
-  return (
-    <ul className="space-y-4">
-      {Array.from({ length: 5 }).map((_, index) => (
-        <li
-          key={index}
-          className="flex justify-between items-center p-4 bg-secondary rounded-lg animate-pulse"
-        >
-          <div>
-            <div className="h-4 bg-gray-300 rounded w-32 mb-2"></div>
-            <div className="h-4 bg-gray-300 rounded w-24"></div>
-          </div>
-          <div className="h-4 bg-gray-300 rounded w-16"></div>
-        </li>
-      ))}
-    </ul>
-  );
+  return Array.from({ length: 5 }).map((_, index) => (
+    <div
+      key={index}
+      className="flex justify-between items-center p-4 bg-secondary rounded-lg"
+    >
+      <div>
+        <Skeleton className="h-4 w-32 mb-2" />
+        <Skeleton className="h-3 w-24" />
+      </div>
+      <Skeleton className="h-4 w-20" />
+    </div>
+  ));
 };

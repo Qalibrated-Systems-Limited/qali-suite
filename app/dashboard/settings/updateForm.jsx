@@ -1,6 +1,7 @@
 "use client";
 
-import { useFormState } from "react-dom";
+import { useActionState } from "react";
+import NextForm from "next/form";
 
 import { useForm } from "react-hook-form";
 import { settingsForm } from "../../mongodb/validators";
@@ -34,7 +35,10 @@ export default function UpdateSettingsForm({ settings }) {
   const initialState = { message: "", errors: {} };
 
   const updateWithId = updateSettings.bind(null, settings.weigherId);
-  const [state, dispatch] = useFormState(updateWithId, initialState);
+  const [state, dispatch, isPending] = useActionState(
+    updateWithId,
+    initialState
+  );
 
   const form = useForm({
     resolver: zodResolver(settingsForm),
@@ -53,7 +57,7 @@ export default function UpdateSettingsForm({ settings }) {
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form action={dispatch} className="flex flex-col gap-4">
+            <NextForm action={dispatch} className="flex flex-col gap-4">
               <FormField
                 control={form.control}
                 name="maxCapacity"
@@ -196,10 +200,8 @@ export default function UpdateSettingsForm({ settings }) {
                 )}
               />
 
-              <Button type="submit" className="max-w-[500px] self-end ">
-                Update settings
-              </Button>
-            </form>
+              <UpdateButton isPending={isPending} />
+            </NextForm>
           </Form>
         </CardContent>
         {/* <CardFooter>
@@ -210,18 +212,16 @@ export default function UpdateSettingsForm({ settings }) {
   );
 }
 
-function CreateButton() {
-  const { pending } = useFormStatus();
-
+function UpdateButton({ isPending }) {
   return (
     <Button
-      aria-disabled={pending}
+      aria-disabled={isPending}
       className={clsx({
-        "bg-yellow-200 ": pending,
-        "bg-primary": !pending,
+        "bg-pink-200 ": isPending,
+        "bg-primary": !isPending,
       })}
     >
-      {pending ? "Submitting" : "Update Account"}
+      {isPending ? "Submitting" : "Update Settings"}
     </Button>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useFormStatus, useFormState } from "react-dom";
+import { useActionState } from "react";
 
 import { Button } from "../../../../../components/ui/button";
 import {
@@ -22,7 +22,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 
 import { useForm } from "react-hook-form";
 
-import { invoiceForm, updateInvoiceForm } from "../../../../mongodb/validators";
+import { updateInvoiceForm } from "../../../../mongodb/validators";
 import { cn } from "../../../../../lib/utils";
 
 import {
@@ -35,6 +35,7 @@ import {
 } from "../../../../../components/ui/select";
 import { updateInvoice } from "../../../../mongodb/actions";
 import { useParams } from "next/navigation";
+import NextForm from "next/form";
 
 export function UpdateInvoiceForm({ customers = [], invoice }) {
   const initialState = { message: "", errors: {} };
@@ -42,7 +43,10 @@ export function UpdateInvoiceForm({ customers = [], invoice }) {
   console.log(params);
 
   const updateWithId = updateInvoice.bind(null, invoice._id);
-  const [state, dispatch] = useFormState(updateWithId, initialState);
+  const [state, dispatch, isPending] = useActionState(
+    updateWithId,
+    initialState
+  );
   const form = useForm({
     resolver: zodResolver(updateInvoiceForm),
     defaultValues: {
@@ -61,7 +65,7 @@ export function UpdateInvoiceForm({ customers = [], invoice }) {
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form action={dispatch} className="flex flex-col gap-4">
+          <NextForm action={dispatch} className="flex flex-col gap-4">
             <div className="flex flex-col md:flex-row w-full gap-4 ">
               <div className="flex-1">
                 <FormField
@@ -267,8 +271,8 @@ export function UpdateInvoiceForm({ customers = [], invoice }) {
             {state.message && (
               <p className="text-red-500 my-2 text-center">{state.message}</p>
             )}
-            <UpdateButton />
-          </form>
+            <UpdateButton isPending={isPending} />
+          </NextForm>
         </Form>
       </CardContent>
       {/* <CardFooter>
@@ -278,18 +282,16 @@ export function UpdateInvoiceForm({ customers = [], invoice }) {
   );
 }
 
-function UpdateButton() {
-  const { pending } = useFormStatus();
-
+function UpdateButton({ isPending }) {
   return (
     <Button
-      aria-disabled={pending}
+      aria-disabled={isPending}
       className={cn("self-end", {
-        "bg-pink-200 ": pending,
-        "bg-primary": !pending,
+        "bg-pink-200 ": isPending,
+        "bg-primary": !isPending,
       })}
     >
-      {pending ? "Submitting.." : "Update invoice"}
+      {isPending ? "Submitting.." : "Update invoice"}
     </Button>
   );
 }

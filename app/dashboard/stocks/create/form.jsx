@@ -1,7 +1,7 @@
 "use client";
 
-import { useFormStatus, useFormState } from "react-dom";
-
+import { useActionState } from "react";
+import NextForm from "next/form";
 import { Button } from "../../../../components/ui/button";
 import {
   Card,
@@ -33,11 +33,11 @@ import { stockForm } from "../../../mongodb/validators";
 import { useForm } from "react-hook-form";
 
 import { addStock } from "../../../mongodb/actions";
-import { FunctionSquare } from "lucide-react";
+import { cn } from "../../../../lib/utils";
 
 export function CreateStockForm() {
   const initialState = { message: "", errors: {} };
-  const [state, dispatch] = useFormState(addStock, initialState);
+  const [state, dispatch, isPending] = useActionState(addStock, initialState);
   const form = useForm({
     resolver: zodResolver(stockForm),
     defaultValues: {
@@ -57,7 +57,7 @@ export function CreateStockForm() {
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form action={dispatch} className="flex flex-col gap-4  w-full">
+          <NextForm action={dispatch} className="flex flex-col gap-4  w-full">
             <div className="flex flex-col md:flex-row w-full gap-4">
               <div className="flex-1">
                 <FormField
@@ -263,8 +263,8 @@ export function CreateStockForm() {
               <p className="mt-2 text-sm text-red-500">{state.message}</p>
             )}
 
-            <CreateButton />
-          </form>
+            <CreateButton isPending={isPending} />
+          </NextForm>
         </Form>
       </CardContent>
       {/* <CardFooter>
@@ -274,16 +274,14 @@ export function CreateStockForm() {
   );
 }
 
-function CreateButton() {
-  const { pending } = useFormStatus();
-
+function CreateButton({ isPending }) {
   return (
     <Button
       type="submit"
-      className="max-w-[500px] self-end "
-      disabled={pending}
+      className={cn("max-w-[500px] self-end ", { "bg-pink-200": isPending })}
+      disabled={isPending}
     >
-      Create stock
+      {isPending ? "Creating.." : "Create stock"}
     </Button>
   );
 }

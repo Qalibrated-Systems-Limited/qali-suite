@@ -1,6 +1,7 @@
 "use client";
 
-import { useFormStatus, useFormState } from "react-dom";
+import { useActionState } from "react";
+import NextForm from "next/form";
 
 import { Button } from "../../../../../components/ui/button";
 import {
@@ -37,7 +38,10 @@ export default function UpdateStockForm({ stock }) {
   const initialState = { message: "", errors: {} };
 
   const updateWithId = updateStock.bind(null, stock._id.toString());
-  const [state, dispatch] = useFormState(updateWithId, initialState);
+  const [state, dispatch, isPending] = useActionState(
+    updateWithId,
+    initialState
+  );
 
   const form = useForm({
     resolver: zodResolver(stockForm),
@@ -59,7 +63,7 @@ export default function UpdateStockForm({ stock }) {
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form action={dispatch} className="flex flex-col gap-4  w-full">
+          <NextForm action={dispatch} className="flex flex-col gap-4  w-full">
             <div className="flex flex-col md:flex-row w-full gap-4">
               <div className="flex-1">
                 <FormField
@@ -262,8 +266,8 @@ export default function UpdateStockForm({ stock }) {
               </div>
             </div>
 
-            <UpdateButton />
-          </form>
+            <UpdateButton isPending={isPending} />
+          </NextForm>
         </Form>
       </CardContent>
       {/* <CardFooter>
@@ -273,18 +277,16 @@ export default function UpdateStockForm({ stock }) {
   );
 }
 
-function UpdateButton() {
-  const { pending } = useFormStatus();
-
+function UpdateButton({ isPending }) {
   return (
     <Button
-      aria-disabled={pending}
+      aria-disabled={isPending}
       className={cn("self-end", {
-        "bg-pink-200 ": pending,
-        "bg-primary": !pending,
+        "bg-pink-200 ": isPending,
+        "bg-primary": !isPending,
       })}
     >
-      {pending ? "Submitting.." : "Update Stock"}
+      {isPending ? "Submitting.." : "Update Stock"}
     </Button>
   );
 }

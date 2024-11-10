@@ -1,6 +1,6 @@
 "use client";
 
-import { useFormState } from "react-dom";
+import { useActionState } from "react";
 
 import { Button } from "../../../components/ui/button";
 import {
@@ -30,10 +30,15 @@ import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { settingsForm } from "../../mongodb/validators";
 import { createSettings } from "../../mongodb/actions";
+import NextForm from "next/form";
+import { cn } from "../../../lib/utils";
 
 export function SettingsForm() {
   const initialState = { message: "", errors: {} };
-  const [state, dispatch] = useFormState(createSettings, initialState);
+  const [state, dispatch, isPending] = useActionState(
+    createSettings,
+    initialState
+  );
   const form = useForm({
     resolver: zodResolver(settingsForm),
     defaultValues: {
@@ -53,7 +58,7 @@ export function SettingsForm() {
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form action={dispatch} className="flex flex-col gap-4">
+            <NextForm action={dispatch} className="flex flex-col gap-4">
               <FormField
                 control={form.control}
                 name="maxCapacity"
@@ -179,11 +184,7 @@ export function SettingsForm() {
                   </FormItem>
                 )}
               />
-
-              <Button type="submit" className="max-w-[500px] self-end ">
-                Add settings
-              </Button>
-            </form>
+            </NextForm>
           </Form>
         </CardContent>
         {/* <CardFooter>
@@ -191,5 +192,19 @@ export function SettingsForm() {
         </CardFooter> */}
       </Card>
     </>
+  );
+}
+
+function CreateButton({ isPending }) {
+  return (
+    <Button
+      aria-disabled={isPending}
+      className={cn("self-end", {
+        "bg-pink-200 ": isPending,
+        "bg-primary": !isPending,
+      })}
+    >
+      {isPending ? "Submitting.." : "Add Settings"}
+    </Button>
   );
 }
