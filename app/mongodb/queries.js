@@ -566,7 +566,7 @@ export const searchInvoice = async (searchTerm, page = 1) => {
   try {
     const searchStage = {
       $search: {
-        index: "invoiceSearchIndex", // Name of the full-text search index
+        index: "default", // Name of the full-text search index
         text: {
           query: searchTerm,
           path: {

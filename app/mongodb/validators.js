@@ -60,6 +60,10 @@ export const updateInvoiceForm = z.object({
   taxRate: z.string().min(1).max(2),
 });
 
+export const updatedInvoiceWithIdSchema = updateInvoiceForm.extend({
+  id: z.string(),
+});
+
 export const settingsForm = z.object({
   isLocked: z.enum(["0", "1"], {
     invalid_type_error: "Please provide a valid value.",
@@ -130,3 +134,6 @@ export const validateInvoiceItem = (rawData) =>
 
 export const validateInvoiceUpdate = (rawData) =>
   updateInvoiceForm.safeParse(rawData);
+
+export const validateInvoiceWithId = (rawData) =>
+  updatedInvoiceWithIdSchema.safeParse(rawData);

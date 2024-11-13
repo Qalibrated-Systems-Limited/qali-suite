@@ -6,7 +6,7 @@ import { errorHandlers } from "../../utils/errorHandler";
 import { toTitle } from "../../utils/validators";
 
 export async function POST(req) {
-  isAuth(req);
+  await isAuth(req);
 
   if (!req.isAuth) {
     return authErrorResponse("Not allowed");

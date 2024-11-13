@@ -1,6 +1,6 @@
 import dbConnect from "../../config/dbConnect";
 import { isAuth } from "../../middlewares/auth";
-import Account from "../../models/account";
+import Invoice from "../../models/invoice";
 
 import { authErrorResponse, okResponse } from "../../utils/customres";
 import { errorHandlers } from "../../utils/errorHandler";
@@ -15,25 +15,12 @@ export async function GET(req) {
   try {
     dbConnect();
 
-    const matchStage = {
-      $match: { status: "Active" },
-    };
-
+    const limitStage = { $limit: 500 };
     const sortStage = { $sort: { createdAt: -1 } };
 
-    const projectStage = {
-      $project: {
-        name: 1,
-        email: 1,
-        nationalId: 1,
-        phoneNumber: 1,
-        address: 1,
-      },
-    };
+    const pipeline = [sortStage, limitStage];
 
-    const pipeline = [matchStage, sortStage, projectStage];
-
-    const result = await Account.aggregate(pipeline);
+    const result = await Invoice.aggregate(pipeline);
 
     if (result) {
       return okResponse(result);

@@ -16,11 +16,6 @@ export async function POST(req) {
 
   try {
     dbConnect();
-    const configs = await BridgeConfig.findOne({ weigherId: "WB/FEED/001" });
-
-    if (!configs || configs.isLocked === 1) {
-      return authErrorResponse("Weighbridge locked by admin or not configured");
-    }
 
     const user = await User.findOne({ email: email }).select("+password");
 

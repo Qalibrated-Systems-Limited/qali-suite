@@ -509,18 +509,18 @@ export async function addInvoiceItem(id, state, formData) {
 
 export async function updateInvoice(id, prevState, formData) {
   const rawFormData = Object.fromEntries(formData.entries());
-
-  const validatedFields = validateInvoiceUpdate(rawFormData);
-
-  if (!validatedFields.success) {
-    return {
-      errors: validatedFields.error.flatten().fieldErrors,
-      message: "Missing Fields. Failed to add invoices.",
-    };
-  }
-
-  const data = validatedFields.data;
   try {
+    const validatedFields = validateInvoiceUpdate(rawFormData);
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: "Missing Fields. Failed to add invoices.",
+      };
+    }
+
+    const data = validatedFields.data;
+
     const account = await Account.findById(data.customerId);
 
     if (!account) {
