@@ -6,8 +6,10 @@ import { format } from "date-fns";
 import Link from "next/link";
 import { GeneratePdf } from "../invoices/[id]/download";
 import { DeleteInvoiceItem } from "../invoices/[id]/columns";
+import dbConnect from "../../config/dbConnect";
 
 const InvoiceDetail = async ({ id }) => {
+  dbConnect();
   let invoice = await Invoice.findOne({ _id: id }).lean();
   if (!invoice) {
     return notFound();

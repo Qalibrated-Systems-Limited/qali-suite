@@ -93,8 +93,33 @@ export async function PUT(req) {
     dbConnect();
 
     const rawFormData = await req.json();
-
     const validatedFields = ValidateStock(rawFormData);
+    if (!validatedFields.success) {
+      return clientSideErrorResponse("Some required fields missing");
+    }
+    const product = await Product.findById(id);
+    const oldStock = product.stock;
+    if (product) {
+      product.name = toTitle(validatedFields.data.name);
+      product.SKU = validatedFields.data.SKU;
+      product.price = validatedFields.data.price;
+      product.stock = validatedFields.data.stock;
+      product.category = validatedFields.data.category;
+      product.description = validatedFields.data.description;
+      const result = await product.save();
+      if (result) {
+        const addedProducts = Number(validatedFields.data.stock) - oldStock;
+        if (addedProducts > 0) {
+          const amount = Number(validatedFields.data.price) * addedProducts;
+          await StockTransaction.create({
+            SKU: validatedFields.data.SKU,
+            amount: amount,
+            transactionType: "Purchase",
+            quantity: addedProducts,
+          });
+        }
+      }
+    }
 
     return okResponse(invoice);
   } catch (e) {

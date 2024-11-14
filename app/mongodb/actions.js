@@ -163,15 +163,15 @@ export async function updateAccount(id, prevState, formData) {
 
 export async function updateStock(id, prevState, formData) {
   const rawFormData = Object.fromEntries(formData.entries());
-  const validatedFields = ValidateStock(rawFormData);
-  if (!validatedFields.success) {
-    return {
-      errors: validatedFields.error.flatten().fieldErrors,
-      message: "Missing Fields. Failed to update stock.",
-    };
-  }
 
   try {
+    const validatedFields = ValidateStock(rawFormData);
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: "Missing Fields. Failed to update stock.",
+      };
+    }
     const product = await Product.findById(id);
     const oldStock = product.stock;
     if (product) {

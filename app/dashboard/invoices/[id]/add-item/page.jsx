@@ -2,10 +2,12 @@ import AddItemForm from "./form";
 import Breadcrumbs from "../../../../../components/ui/breadcrumbs";
 
 import Product from "../../../../models/product";
+import dbConnect from "../../../../config/dbConnect";
 
 async function page(props) {
   const params = await props.params;
   const id = params.id;
+  dbConnect();
   const stocks = await Product.find(
     {},
     { name: 1, SKU: 1, quantity: 1, _id: 0 }
