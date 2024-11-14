@@ -4,7 +4,7 @@ export const accountForm = z.object({
   name: z.string().max(100).min(4),
   address: z.string().max(100).min(4),
 
-  phoneNumber: z.string().length(12),
+  phoneNumber: z.string().min(10).max(12),
   email: z.string().email().optional(),
 });
 

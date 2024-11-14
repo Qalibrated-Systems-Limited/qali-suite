@@ -1,9 +1,15 @@
 import dbConnect from "../../config/dbConnect";
 import { isAuth } from "../../middlewares/auth";
 import Account from "../../models/account";
+import { validateAccount } from "../../mongodb/validators";
 
-import { authErrorResponse, okResponse } from "../../utils/customres";
+import {
+  authErrorResponse,
+  clientSideErrorResponse,
+  okResponse,
+} from "../../utils/customres";
 import { errorHandlers } from "../../utils/errorHandler";
+import { toTitle } from "../../utils/validators";
 
 export async function GET(req) {
   await isAuth(req);
@@ -39,6 +45,48 @@ export async function GET(req) {
       return okResponse(result);
     }
   } catch (e) {
+    return errorHandlers(e);
+  }
+}
+
+export async function POST(req) {
+  await isAuth(req);
+
+  if (!req.isAuth) {
+    return authErrorResponse("Not allowed");
+  }
+
+  try {
+    dbConnect();
+
+    const rawFormData = await req.json();
+    console.log(rawFormData);
+
+    const validatedFields = validateAccount(rawFormData);
+
+    if (!validatedFields.success) {
+      console.log("Validation failed");
+      return clientSideErrorResponse("Missing Fields. Failed to add stock.");
+    }
+
+    const data = validatedFields.data;
+
+    const result = await Account.create({
+      name: toTitle(data.name),
+      address: data.address,
+      email: data.email,
+      phoneNumber: data.phoneNumber,
+      status: "Active",
+
+      creator: {
+        name: req.userName,
+        id: req.userId,
+      },
+    });
+
+    return okResponse(result);
+  } catch (e) {
+    console.log(e);
     return errorHandlers(e);
   }
 }
