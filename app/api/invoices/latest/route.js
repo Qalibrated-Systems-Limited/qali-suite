@@ -1,9 +1,9 @@
-import dbConnect from "../../config/dbConnect";
-import { isAuth } from "../../middlewares/auth";
-import Invoice from "../../models/invoice";
+import dbConnect from "../../../config/dbConnect";
+import { isAuth } from "../../../middlewares/auth";
+import Invoice from "../../../models/invoice";
 
-import { authErrorResponse, okResponse } from "../../utils/customres";
-import { errorHandlers } from "../../utils/errorHandler";
+import { authErrorResponse, okResponse } from "../../../utils/customres";
+import { errorHandlers } from "../../../utils/errorHandler";
 
 export async function GET(req) {
   await isAuth(req);
@@ -15,7 +15,7 @@ export async function GET(req) {
   try {
     dbConnect();
 
-    const limitStage = { $limit: 1000 };
+    const limitStage = { $limit: 10 };
     const sortStage = { $sort: { createdAt: -1 } };
 
     const addFieldsStage = {

@@ -13,6 +13,7 @@ import { toTitle } from "../../../../utils/validators";
 import Product from "../../../../models/product";
 import StockTransaction from "../../../../models/stockTransaction";
 import { validateInvoiceItem } from "../../../../mongodb/validators";
+import { format } from "date-fns/format";
 
 export async function POST(req, { params }) {
   await isAuth(req);
@@ -135,14 +136,22 @@ export async function POST(req, { params }) {
         totalAmount += i.unitPrice * i.quantity;
       }
     }
-
+    const date = format(modInvoice.createdAt, "dd-MM-yyyy");
     return okResponse({
+      date,
       items: modInvoice.items,
       invoiceNumber: modInvoice.invoiceNumber,
 
       customerName: modInvoice.customer.name,
       _id: modInvoice._id.toString(),
       description: modInvoice.description,
+      customerEmail: modInvoice.customer.email,
+      customerAddress: modInvoice.customer.address,
+      status: modInvoice.satus,
+      discount: modInvoice.discount,
+      taxRate: modInvoice.taxRate,
+      totalAmount: totalAmount,
+      paymentMethod: modInvoice.paymentMethod,
 
       totalAmount: totalAmount.toString(),
     });
@@ -193,12 +202,21 @@ export async function DELETE(req, { params }) {
         totalAmount += item.unitPrice * item.quantity;
       }
     }
+
+    const date = format(res.createdAt, "mm-MM-yyyy");
     console.log(totalAmount);
     return okResponse({
+      date,
       invoiceNumber: res.invoiceNumber,
       items: res.items ?? [],
       customerName: res.customer.name,
+      customerEmail: res.customer.email,
+      customerAddress: res.customer.address,
+      status: res.satus,
+      discount: res.discount,
+      taxRate: res.taxRate,
       totalAmount: totalAmount,
+      paymentMethod: res.paymentMethod,
       _id: res._id.toString(),
     });
   } catch (e) {

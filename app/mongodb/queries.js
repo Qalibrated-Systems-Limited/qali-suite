@@ -915,6 +915,77 @@ export const monthlySalesDistro = async () => {
   return result;
 };
 
+export const quartelySummary = async () => {
+  noStore();
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+
+  // Determine the start month of the current quarter
+  const quarterStartMonth = Math.floor(currentMonth / 3) * 3;
+
+  // Set the start and end dates for the desired quarter range
+  const startOfQuarter = new Date(currentYear, quarterStartMonth, 1); // Start of current quarter
+  const endOfQuarter = new Date(currentYear, quarterStartMonth + 3, 1); // Start of the next quarter
+
+  const matchStage = {
+    $match: {
+      date: {
+        $gte: startOfQuarter,
+        $lt: endOfQuarter,
+      },
+    },
+  };
+
+  const groupStage = {
+    $group: {
+      _id: {
+        month: { $dateToString: { format: "%b", date: "$date" } },
+        monthNum: {
+          $dateToString: { format: "%m", date: "$date" },
+        },
+      },
+      Sales: {
+        $sum: {
+          $cond: {
+            if: { $eq: ["$transactionType", "Sale"] },
+            then: "$amount",
+            else: 0,
+          },
+        },
+      },
+      Purchases: {
+        $sum: {
+          $cond: {
+            if: { $eq: ["$transactionType", "Purchase"] },
+            then: "$amount",
+            else: 0,
+          },
+        },
+      },
+    },
+  };
+  const projectStage = {
+    $project: {
+      _id: 1,
+      Purchases: { $divide: ["$Purchases", 1000000] },
+      Sales: { $divide: ["$Sales", 1000] },
+    },
+  };
+
+  const pipeline = [
+    matchStage,
+    groupStage,
+    { $sort: { "_id.monthNum": 1 } },
+    projectStage,
+  ];
+
+  const result = await StockTransaction.aggregate(pipeline);
+
+  return result;
+};
+
 export async function getTopSellingProducts() {
   const groupStage = {
     $group: {
@@ -953,3 +1024,71 @@ export async function getTopSellingProducts() {
 
   return result;
 }
+
+export const quarterlySalesDistro = async () => {
+  noStore();
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  // Set the start and end dates for the current year
+  const startOfYear = new Date(currentYear, 0, 1); // January 1st
+  const endOfYear = new Date(currentYear + 1, 0, 1); // January 1st of the next year
+
+  const matchStage = {
+    $match: {
+      date: {
+        $gte: startOfYear,
+        $lt: endOfYear,
+      },
+    },
+  };
+
+  const groupStage = {
+    $group: {
+      _id: {
+        quarter: {
+          $add: [{ $divide: [{ $month: "$date" }, 3] }, 1],
+        },
+        year: { $year: "$date" },
+      },
+      Sales: {
+        $sum: {
+          $cond: {
+            if: { $eq: ["$transactionType", "Sale"] },
+            then: "$amount",
+            else: 0,
+          },
+        },
+      },
+      Purchases: {
+        $sum: {
+          $cond: {
+            if: { $eq: ["$transactionType", "Purchase"] },
+            then: "$amount",
+            else: 0,
+          },
+        },
+      },
+    },
+  };
+
+  const projectStage = {
+    $project: {
+      _id: 1,
+      Purchases: { $divide: ["$Purchases", 1000000] }, // Convert to millions
+      Sales: { $divide: ["$Sales", 1000000] }, // Convert to millions
+    },
+  };
+
+  const pipeline = [
+    matchStage,
+    groupStage,
+    { $sort: { "_id.year": 1, "_id.quarter": 1 } },
+    projectStage,
+  ];
+
+  const result = await StockTransaction.aggregate(pipeline);
+
+  return result;
+};
