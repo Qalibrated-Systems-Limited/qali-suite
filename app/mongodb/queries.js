@@ -13,6 +13,7 @@ import Invoice from "../models/invoice";
 
 import BridgeConfig from "../models/bridgeConfigs";
 import StockTransaction from "../models/stockTransaction";
+import { format } from "date-fns";
 
 dbConnect();
 
@@ -560,6 +561,68 @@ export const getWbConfigs = async (id) => {
 
 //Invoices queries
 
+export const filterInvoices = async (customer, startDate, endDate) => {
+  try {
+    if (isNaN(new Date(startDate)) || isNaN(new Date(endDate))) {
+      throw new Error("Invalid start or end date");
+    }
+    const dateOne =
+      format(startDate, "yyyy-MM-dd") + "T" + "00:00:00.000+00:00";
+    const dateTwo = format(endDate, "yyyy-MM-dd") + "T" + "23:59:00.000+00:00";
+    console.log(dateOne, dateTwo);
+
+    const matchStage = {
+      $match: {
+        createdAt: { $gte: new Date(dateOne), $lte: new Date(dateTwo) },
+      },
+    };
+    if (customer && customer !== "All") {
+      matchStage.$match["customer.name"] = customer;
+    }
+
+    ("2024-11-11T18:55:16.755+00:00");
+
+    const projectStage = {
+      $project: {
+        invoiceNumber: 1,
+        date: {
+          $dateToString: { format: "%d-%m-%G", date: "$createdAt" },
+        },
+        totalAmount: {
+          $sum: {
+            $map: {
+              input: "$items",
+              as: "item",
+              in: { $multiply: ["$$item.unitPrice", "$$item.quantity"] },
+            },
+          },
+        },
+        customer: "$customer.name",
+        status: 1,
+      },
+    };
+
+    const sortStage = { $sort: { updatedAt: -1 } };
+
+    const limitStage = { $limit: 2000 };
+
+    const pipeline = [matchStage, sortStage, limitStage, projectStage];
+    let result = await Invoice.aggregate(pipeline);
+
+    if (result && result.length > 0) {
+      result = result.map((res) => ({
+        ...res,
+        _id: res._id.toString(),
+      }));
+    }
+
+    return result;
+  } catch (e) {
+    console.error("Error filtering invoices:", e);
+    return { error: "Failed to fetch invoices." };
+  }
+};
+
 export const searchInvoice = async (searchTerm, page = 1) => {
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
@@ -584,6 +647,9 @@ export const searchInvoice = async (searchTerm, page = 1) => {
     const projectStage = {
       $project: {
         invoiceNumber: 1,
+        date: {
+          $dateToString: { format: "%d-%m-%G", date: "$createdAt" },
+        },
 
         totalAmount: {
           $sum: {
@@ -608,7 +674,7 @@ export const searchInvoice = async (searchTerm, page = 1) => {
     }
 
     let result = await Invoice.aggregate(pipeline);
-    console.log(result);
+
     if (result && result.length > 0) {
       result = result.map((res) => {
         return { ...res, _id: res._id.toString() };

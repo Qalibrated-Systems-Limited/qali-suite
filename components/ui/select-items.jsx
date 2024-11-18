@@ -21,7 +21,8 @@ function ItemSelect({ handleSelectType, className, items, name }) {
         </SelectTrigger>
 
         <SelectContent className="w-full">
-          <SelectItem value="All">Choose item</SelectItem>
+          <SelectItem value="_">No selection</SelectItem>
+          <SelectItem value="All">All</SelectItem>
           {...items.map((station) => (
             <SelectItem key={station._id} value={station.name}>
               {station.name}

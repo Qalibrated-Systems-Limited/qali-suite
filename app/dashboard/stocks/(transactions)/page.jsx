@@ -40,9 +40,10 @@ async function page(props) {
 
           <div className="mt-4 flex flex-col lg:flex-row items-center gap-8 md:mt-8">
             <Search placeholder="Search stock..." />
-            <Button>
-              <Link href={"/dashboard/stocks/create"}>Create</Link>
-            </Button>
+
+            <Link href={"/dashboard/stocks/create"}>
+              <Button>Create</Button>
+            </Link>
           </div>
         </div>
       </CardHeader>

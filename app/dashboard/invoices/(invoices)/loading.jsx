@@ -12,43 +12,42 @@ export default function Loading() {
       <CardHeader>
         <CardTitle>Invoices</CardTitle>
       </CardHeader>
-      <CardContent className="grid grid-cols-[60px_1fr_1fr_1fr_1fr] gap-4">
-        <Skeleton className="size-10 rounded-full" />
+      <CardContent className="grid grid-cols-4 gap-4">
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
-        <Skeleton className="size-10 rounded-full" />
+
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
-        <Skeleton className="size-10 rounded-full" />
+
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
-        <Skeleton className="size-10 rounded-full" />
+
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
-        <Skeleton className="size-10 rounded-full" />
+
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
-        <Skeleton className="size-10 rounded-full" />
+
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
-        <Skeleton className="size-10 rounded-full" />
+
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
-        <Skeleton className="size-10 rounded-full" />
+
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />
         <Skeleton className="h-8 w-full" />

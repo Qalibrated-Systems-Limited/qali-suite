@@ -14,6 +14,11 @@ export const columns = [
     header: "No",
   },
   {
+    accessorKey: "date",
+    header: "Date",
+  },
+
+  {
     accessorKey: "customer",
     header: "Customer",
   },

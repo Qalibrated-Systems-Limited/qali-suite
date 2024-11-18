@@ -19,7 +19,7 @@ import { useRef, useState } from "react";
 import { DatePickerWithRange } from "./date-picker";
 import { ItemSelect } from "./select-items";
 
-export function FilterDialog({ vehicles, commodities, customers }) {
+export function FilterDialog({ customers }) {
   let startDate = new Date();
   let vehicle = "";
   let customer = "";
@@ -31,13 +31,6 @@ export function FilterDialog({ vehicles, commodities, customers }) {
   const { replace } = useRouter();
   const pathname = usePathname();
 
-  const handleSelectCommodity = (_comm) => {
-    commodity = _comm;
-  };
-
-  const handleSelectVehicle = (_veh) => {
-    vehicle = _veh;
-  };
   const handleSelectCustomer = (_customer) => {
     customer = _customer;
   };
@@ -54,20 +47,9 @@ export function FilterDialog({ vehicles, commodities, customers }) {
     const params = new URLSearchParams(searchParams);
 
     if (startDate) {
-      params.set("startDate", format(startDate, "yyyy-MM-dd"));
+      params.set("startDate", startDate);
     } else {
       params.delete("startDate");
-    }
-    if (commodity) {
-      params.set("commodity", commodity);
-    } else {
-      params.delete("commodity");
-    }
-
-    if (vehicle) {
-      params.set("vehicle", vehicle);
-    } else {
-      params.delete("vehicle");
     }
 
     if (customer) {
@@ -77,7 +59,7 @@ export function FilterDialog({ vehicles, commodities, customers }) {
     }
 
     if (endDate) {
-      params.set("endDate", format(endDate, "yyyy-MM-dd"));
+      params.set("endDate", endDate);
     } else {
       params.delete("endDate");
     }
@@ -104,28 +86,6 @@ export function FilterDialog({ vehicles, commodities, customers }) {
           />
           <div className="flex flex-col  gap-4 items-center ">
             <div className=" flex flex-col w-full  gap-4">
-              <Label htmlFor="station" className="">
-                Select commodity
-              </Label>
-              <ItemSelect
-                name={"commodity"}
-                handleSelectType={handleSelectCommodity}
-                items={commodities ?? []}
-              />
-            </div>
-
-            <div className=" flex flex-col w-full  gap-4">
-              <Label htmlFor="vehicle" className="">
-                Select vehicle
-              </Label>
-              <ItemSelect
-                handleSelectType={handleSelectVehicle}
-                items={vehicles ?? []}
-                name={"vehicle"}
-              />
-            </div>
-
-            <div className=" flex flex-col w-full  gap-4">
               <Label htmlFor="Customer" className="">
                 Select customer
               </Label>
@@ -138,16 +98,7 @@ export function FilterDialog({ vehicles, commodities, customers }) {
           </div>
         </div>
         <DialogFooter className="flex items-center justify-between">
-          <DialogClose asChild>
-            <Button type="button" variant="secondary">
-              CANCEL
-            </Button>
-          </DialogClose>
-          <DialogClose>
-            <Button onClick={submitHandle} type="submit">
-              Submit
-            </Button>
-          </DialogClose>
+          <DialogClose onClick={submitHandle}>Submit</DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>

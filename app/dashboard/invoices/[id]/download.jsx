@@ -123,9 +123,9 @@ function InvoicePDF({
 
         {/* Total Amount */}
         <View style={styles.section}>
+          {shoudShowSub && buildFooterRowItem("Subtotal", `KES ${subTotal}`)}
           {discount > 0 && buildFooterRowItem("Discount", `${discount}%`)}
           {taxRate > 0 && buildFooterRowItem("VAT", `${taxRate}%`)}
-          {shoudShowSub && buildFooterRowItem("Subtotal", `KES ${subTotal}`)}
 
           {buildFooterRowItem("Total", `KES ${total}`)}
         </View>

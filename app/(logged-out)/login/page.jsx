@@ -1,6 +1,5 @@
 "use client";
 import { useActionState } from "react";
-import { useFormState } from "react-dom";
 
 import { Button } from "../../../components/ui/button";
 import {
@@ -21,17 +20,12 @@ import {
 } from "../../../components/ui/form";
 import { Input } from "../../../components/ui/input";
 import { zodResolver } from "@hookform/resolvers/zod";
-import {
-  ComputerIcon,
-  ScaleIcon,
-  StoreIcon,
-  TriangleAlert,
-  WeightIcon,
-} from "lucide-react";
+import { ComputerIcon, TriangleAlert } from "lucide-react";
 import { useFormStatus } from "react-dom";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { authenticate } from "../../mongodb/actions";
+import { cn } from "../../../lib/utils";
 
 const formSchema = z.object({
   email: z.string().email(),
@@ -40,7 +34,10 @@ const formSchema = z.object({
   name: z.string().max(200).min(8),
 });
 export default function Page() {
-  const [errorMessage, dispatch] = useFormState(authenticate, undefined);
+  const [errorMessage, dispatch, isPending] = useActionState(
+    authenticate,
+    undefined
+  );
   const form = useForm({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -106,7 +103,7 @@ export default function Page() {
                   </FormItem>
                 )}
               />
-              <LoginButton />
+              <LoginButton isPending={isPending} />
             </form>
           </Form>
         </CardContent>
@@ -119,12 +116,16 @@ export default function Page() {
   );
 }
 
-function LoginButton() {
-  const { pending } = useFormStatus();
-
+function LoginButton({ isPending }) {
   return (
-    <Button type="submit" disabled={pending}>
-      Login
+    <Button
+      aria-disabled={isPending}
+      className={cn({
+        "bg-pink-200 ": isPending,
+        "bg-primary": !isPending,
+      })}
+    >
+      {isPending ? "Submitting.." : "Login"}
     </Button>
   );
 }
