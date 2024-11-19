@@ -483,6 +483,19 @@ export const searchStock = async (searchTerm, page = 1) => {
   return result;
 };
 
+export const extractStock = async () => {
+  const sortStage = { $sort: { stock: 1 } };
+
+  let pipeline = [sortStage];
+
+  let result = await Product.aggregate(pipeline);
+  result = result.map((res) => {
+    return { ...res, _id: res._id.toString() };
+  });
+
+  return result;
+};
+
 export async function generateReport(
   startDate,
   endDate,
