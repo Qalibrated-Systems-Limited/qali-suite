@@ -28,6 +28,7 @@ async function page(props) {
       status: invoice.status,
       discount: invoice.discount,
       taxRate: invoice.taxRate,
+      dNoteNumber: invoice.dNoteNumber,
     };
   }
 
