@@ -16,6 +16,7 @@ async function page(props) {
       status: 1,
       discount: 1,
       status: 1,
+      dNoteNumber: 1,
     }
   );
 
