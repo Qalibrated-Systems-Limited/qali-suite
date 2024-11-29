@@ -55,6 +55,7 @@ export function UpdateInvoiceForm({ customers = [], invoice }) {
       status: invoice ? invoice.status : "",
       taxRate: invoice ? invoice.taxRate : "",
       discount: invoice ? invoice.discount : "",
+      dNoteNumber: invoice ? invoice.dNoteNumber | "" : "",
     },
   });
 
@@ -241,9 +242,13 @@ export function UpdateInvoiceForm({ customers = [], invoice }) {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="Paid">Paid</SelectItem>
+                          <SelectItem value="Paid" key={"ps"}>
+                            Paid
+                          </SelectItem>
 
-                          <SelectItem value="Unpaid">Unpaid</SelectItem>
+                          <SelectItem value="Unpaid" key={"u"}>
+                            Unpaid
+                          </SelectItem>
                         </SelectContent>
                       </Select>
 
@@ -266,6 +271,33 @@ export function UpdateInvoiceForm({ customers = [], invoice }) {
                   )}
                 />
               </div>
+            </div>
+
+            <div className="flex-1">
+              <FormField
+                control={form.control}
+                name="dNoteNumber"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>DNote Number</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="Enter DNote Number"
+                        {...field}
+                        type="text"
+                      />
+                    </FormControl>
+                    <div id="dNote-error" aria-live="polite" aria-atomic="true">
+                      {state.errors?.dNoteNumber &&
+                        state.errors.dNoteNumber.map((error) => (
+                          <p className="mt-2 text-sm text-red-500" key={error}>
+                            {error}
+                          </p>
+                        ))}
+                    </div>
+                  </FormItem>
+                )}
+              />
             </div>
 
             {state.message && (

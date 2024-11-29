@@ -34,6 +34,7 @@ import { useForm } from "react-hook-form";
 
 import { addStock } from "../../../mongodb/actions";
 import { cn } from "../../../../lib/utils";
+import { CATEGORIES } from "../../../utils/productCategories";
 
 export function CreateStockForm() {
   const initialState = { message: "", errors: {} };
@@ -197,15 +198,12 @@ export function CreateStockForm() {
                         </FormControl>
                         <SelectContent>
                           <SelectGroup>
-                            <SelectItem value="indicator">Indicator</SelectItem>
-
-                            <SelectItem value="loadcell">Load cell</SelectItem>
-                            <SelectItem value="platform">Platform</SelectItem>
-                            <SelectItem value="cable">cable</SelectItem>
-                            <SelectItem value="pos">POS</SelectItem>
+                            {CATEGORIES.map((cat) => (
+                              <SelectItem value={cat.value} key={cat.value}>
+                                {cat.name}
+                              </SelectItem>
+                            ))}
                           </SelectGroup>
-
-                          <SelectItem value="other">Other</SelectItem>
                         </SelectContent>
                       </Select>
 

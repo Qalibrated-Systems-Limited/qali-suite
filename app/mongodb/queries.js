@@ -484,7 +484,7 @@ export const searchStock = async (searchTerm, page = 1) => {
 };
 
 export const extractStock = async () => {
-  const sortStage = { $sort: { stock: 1 } };
+  const sortStage = { $sort: { category: 1 } };
 
   let pipeline = [sortStage];
 
@@ -719,7 +719,7 @@ export const fetchLatestInvoices = async () => {
     },
   };
 
-  const limitStage = { $limit: 5 };
+  const limitStage = { $limit: 3 };
 
   const sortStage = { $sort: { createdAt: -1 } };
   const pipeline = [sortStage, limitStage, sortStage, projectStage];

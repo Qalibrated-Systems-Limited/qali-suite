@@ -48,6 +48,7 @@ export function CreateInvoiceForm({ customers = [] }) {
       customerId: "",
       status: "",
       taxRate: "",
+      dNoteNumber: "",
     },
   });
 
@@ -204,6 +205,40 @@ export function CreateInvoiceForm({ customers = [] }) {
                       >
                         {state.errors?.status &&
                           state.errors.status.map((error) => (
+                            <p
+                              className="mt-2 text-sm text-red-500"
+                              key={error}
+                            >
+                              {error}
+                            </p>
+                          ))}
+                      </div>
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="flex-1">
+                <FormField
+                  control={form.control}
+                  name="dNoteNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>DNote Number</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Enter DNote Number"
+                          {...field}
+                          type="text"
+                        />
+                      </FormControl>
+                      <div
+                        id="dNote-error"
+                        aria-live="polite"
+                        aria-atomic="true"
+                      >
+                        {state.errors?.dNoteNumber &&
+                          state.errors.dNoteNumber.map((error) => (
                             <p
                               className="mt-2 text-sm text-red-500"
                               key={error}

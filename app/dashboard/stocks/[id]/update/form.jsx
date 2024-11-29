@@ -33,6 +33,7 @@ import { stockForm } from "../../../../mongodb/validators";
 
 import { updateStock } from "../../../../mongodb/actions";
 import { cn } from "../../../../../lib/utils";
+import { CATEGORIES } from "../../../../utils/productCategories";
 
 export default function UpdateStockForm({ stock }) {
   const initialState = { message: "", errors: {} };
@@ -199,15 +200,12 @@ export default function UpdateStockForm({ stock }) {
                         </FormControl>
                         <SelectContent>
                           <SelectGroup>
-                            <SelectItem value="indicator">Indicator</SelectItem>
-
-                            <SelectItem value="loadcell">Load cell</SelectItem>
-                            <SelectItem value="platform">Platform</SelectItem>
-                            <SelectItem value="cable">cable</SelectItem>
-                            <SelectItem value="pos">POS</SelectItem>
+                            {CATEGORIES.map((cat) => (
+                              <SelectItem value={cat.value} key={cat.value}>
+                                {cat.name}
+                              </SelectItem>
+                            ))}
                           </SelectGroup>
-
-                          <SelectItem value="other">Other</SelectItem>
                         </SelectContent>
                       </Select>
 

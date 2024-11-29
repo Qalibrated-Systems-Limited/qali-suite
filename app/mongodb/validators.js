@@ -15,6 +15,7 @@ export const invoiceItemForm = z.object({
   type: z.enum(["Stock", "Service"]),
 
   quantity: z.string(),
+  serialNo: z.string().optional(),
 });
 
 export const updateAccountForm = z.object({
@@ -49,6 +50,7 @@ export const invoiceForm = z.object({
   description: z.string().min(8).max(50),
   status: z.enum(["Paid", "Unpaid"]),
   customerId: z.string(),
+  dNoteNumber: z.string(),
   taxRate: z.string().min(2).max(2),
 });
 
@@ -58,6 +60,7 @@ export const updateInvoiceForm = z.object({
   customerId: z.string(),
   discount: z.string().min(1).max(2),
   taxRate: z.string().min(1).max(2),
+  dNoteNumber: z.string(),
 });
 
 export const updatedInvoiceWithIdSchema = updateInvoiceForm.extend({

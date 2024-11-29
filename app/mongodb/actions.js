@@ -381,6 +381,7 @@ export async function createInvoice(state, formData) {
     const invoice = Invoice({
       description: data.description,
       taxRate: data.taxRate,
+      dNoteNumber: data.dNoteNumber,
       customer,
       items: [],
       invoiceNumber,
@@ -479,6 +480,7 @@ export async function addInvoiceItem(id, state, formData) {
         type: "Stock",
         unit: data.unit.toString(),
         name: stock.SKU.toString(),
+        serialNo: data.serialNo,
       };
 
       const invoice = await Invoice.findOneAndUpdate(
@@ -545,6 +547,7 @@ export async function updateInvoice(id, prevState, formData) {
           description: data.description,
           status: data.status,
           taxRate: data.taxRate,
+          dNoteNumber: data.dNoteNumber,
         },
       }
     );

@@ -28,7 +28,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { invoiceItemForm } from "../../../../mongodb/validators";
 
-import { addInvoiceItem, updateAccount } from "../../../../mongodb/actions";
+import { addInvoiceItem } from "../../../../mongodb/actions";
 import { cn } from "../../../../../lib/utils";
 import { SelectGroup } from "@radix-ui/react-select";
 import NextForm from "next/form";
@@ -277,6 +277,42 @@ export default function AddItemForm({ products, id }) {
                 />
               </div>
             </div>
+
+            {itemType === "Stock" && (
+              <div className="flex-1">
+                <FormField
+                  control={form.control}
+                  name="serialNo"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Serial No.</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Enter serial no"
+                          {...field}
+                          type="text"
+                        />
+                      </FormControl>
+                      <div
+                        id="phone-error"
+                        aria-live="polite"
+                        aria-atomic="true"
+                      >
+                        {state.errors?.serialNo &&
+                          state.errors.serialNo.map((error) => (
+                            <p
+                              className="mt-2 text-sm text-red-500"
+                              key={error}
+                            >
+                              {error}
+                            </p>
+                          ))}
+                      </div>
+                    </FormItem>
+                  )}
+                />
+              </div>
+            )}
             {state.message && (
               <p className="my-2 text-center text-red-600 font-semibold">
                 {state.message}

@@ -9,6 +9,7 @@ const nestedSchema = new Schema({
   unitPrice: Number,
   unit: String,
   type: String,
+  serialNo: String,
 });
 
 const invoiceSchema =
@@ -19,6 +20,7 @@ const invoiceSchema =
         type: String,
         required: true,
       },
+      dNoteNumber: String,
       customer: {
         name: { type: String, required: true },
         address: { type: String, required: true },

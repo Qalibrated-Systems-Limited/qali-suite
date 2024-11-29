@@ -81,6 +81,7 @@ function InvoicePDF({
         <View style={styles.section}>
           <Text>Date: {new Date(invoice.createdAt).toLocaleDateString()}</Text>
           <Text>Invoice #: {invoice.invoiceNumber}</Text>
+          <Text>DNote #: {invoice.dNoteNumber}</Text>
         </View>
 
         {/* Client and Company Info */}
