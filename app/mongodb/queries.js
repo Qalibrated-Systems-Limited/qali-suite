@@ -14,6 +14,7 @@ import Invoice from "../models/invoice";
 import BridgeConfig from "../models/bridgeConfigs";
 import StockTransaction from "../models/stockTransaction";
 import { format } from "date-fns";
+import DeliveryNote from "../models/dnote";
 
 dbConnect();
 
@@ -403,7 +404,7 @@ export const searchAccounts = async (searchTerm, page = 1) => {
     }
 
     let result = await Accounts.aggregate(pipeline);
-    console.log(result);
+
     if (result && result.length > 0) {
       result = result.map((res) => {
         return { ...res, _id: res._id.toString() };
@@ -1170,4 +1171,92 @@ export const quarterlySalesDistro = async () => {
   const result = await StockTransaction.aggregate(pipeline);
 
   return result;
+};
+
+//DNOTE QUERIES
+export const fetchDnotePages = async (searchTerm) => {
+  try {
+    const accountSearchStage = {
+      $search: {
+        index: "dNoteSearchIndex", // The name of your full-text search index
+        text: {
+          query: searchTerm,
+          path: {
+            wildcard: "*",
+          },
+        },
+      },
+    };
+
+    const countStage = {
+      $count: "totalRecords", // This stage returns the total number of records matching the search query
+    };
+
+    let pipeline = [countStage];
+    if (searchTerm && searchTerm.length > 0) {
+      pipeline = [accountSearchStage, countStage];
+    }
+    const result = await DeliveryNote.aggregate(pipeline);
+    let count = 1;
+    if (result && result.length > 0) {
+      count = result[0].totalRecords;
+    }
+    const noOfPages = Math.ceil(Number(count) / ITEMS_PER_PAGE);
+    console.log(result);
+
+    return noOfPages;
+  } catch (e) {
+    throw new Error("Could not get dnote pages");
+  }
+};
+
+export const searchDnotes = async (searchTerm, page = 1) => {
+  const skipRecords = (page - 1) * ITEMS_PER_PAGE;
+
+  try {
+    const searchStage = {
+      $search: {
+        index: "dNoteSearchIndex", // Name of the full-text search index
+        text: {
+          query: searchTerm,
+          path: {
+            wildcard: "*",
+          },
+        },
+      },
+    };
+
+    const paginationStage = [
+      { $skip: skipRecords }, // Skip records for pagination
+      { $limit: ITEMS_PER_PAGE }, // Limit results per page
+    ];
+
+    const projectStage = {
+      $project: {
+        deliveryNumber: 1,
+        date: { $dateToString: { format: "%d-%m-%G", date: "$date" } },
+        customerName: "$customer.name",
+        notes: 1,
+      },
+    };
+
+    const sortStage = { $sort: { date: -1 } };
+
+    let pipeline = [sortStage, ...paginationStage, projectStage];
+    if (searchTerm && searchTerm.length > 0) {
+      pipeline = [searchStage, ...paginationStage, projectStage];
+    }
+
+    let result = await DeliveryNote.aggregate(pipeline);
+
+    if (result && result.length > 0) {
+      result = result.map((res) => {
+        return { ...res, _id: res._id.toString() };
+      });
+    }
+
+    return result;
+  } catch (e) {
+    throw new Error("Could not get dNotes");
+  }
 };

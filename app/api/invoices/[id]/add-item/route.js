@@ -104,6 +104,7 @@ export async function POST(req, { params }) {
         id: stock._id.toString(),
         quantity: Number(data.quantity),
         unitPrice: Number(data.unitPrice),
+        serialNo: data.serialNo,
         type: "Stock",
         unit: data.unit.toString(),
         name: stock.SKU.toString(),

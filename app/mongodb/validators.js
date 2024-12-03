@@ -8,6 +8,11 @@ export const accountForm = z.object({
   email: z.string().email().optional(),
 });
 
+export const deliveryNoteZodSchema = z.object({
+  notes: z.string().max(100).min(4),
+  customerId: z.string(),
+});
+
 export const invoiceItemForm = z.object({
   name: z.string().min(2).max(60),
   unit: z.string(),
@@ -140,3 +145,5 @@ export const validateInvoiceUpdate = (rawData) =>
 
 export const validateInvoiceWithId = (rawData) =>
   updatedInvoiceWithIdSchema.safeParse(rawData);
+export const validateDNote = (rawData) =>
+  deliveryNoteZodSchema.safeParse(rawData);

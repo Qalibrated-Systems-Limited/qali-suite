@@ -3,6 +3,7 @@ import { renderToFile } from "@react-pdf/renderer";
 
 import {
   validateAccount,
+  validateDNote,
   validateInvoice,
   validateInvoiceItem,
   validateInvoiceUpdate,
@@ -22,12 +23,11 @@ import User from "../models/user";
 import BridgeConfig from "../models/bridgeConfigs";
 import { toTitle } from "../utils/validators";
 import Product from "../models/product";
-import { Delius_Unicase } from "next/font/google";
+
 import Invoice from "../models/invoice";
+import DeliveryNote from "../models/dnote";
 import Counter from "../models/counter";
 import StockTransaction from "../models/stockTransaction";
-import { number } from "zod";
-import { ST } from "next/dist/shared/lib/utils";
 
 export async function logout(params) {
   return await signOut();
@@ -597,3 +597,103 @@ export const deleteInvoiceItem = async (itemId, invoiceId) => {
 export const downloadFile = async (Doc) => {
   await renderToFile(!!Doc, `${__dirname}/my-doc.pdf`);
 };
+
+export async function addDNote(state, formData) {
+  try {
+    const rawFormData = Object.fromEntries(formData.entries());
+
+    const validatedFields = validateDNote(rawFormData);
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: "Missing Fields. Failed to add Dnote.",
+      };
+    }
+
+    const data = validatedFields.data;
+
+    const account = await Account.findById(data.customerId);
+    let dNoteNumber = "1";
+
+    if (!account) {
+      return { message: "No customer was found" };
+    }
+
+    const counter = await Counter.findOneAndUpdate(
+      { name: `DN` },
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true }
+    );
+
+    dNoteNumber = `DN${counter.seq.toString().padStart(4, "0")}`; // e.g., 20241031-0001
+    const customer = {
+      name: account.name,
+      address: account.address,
+
+      phone: account.phone,
+    };
+    const deliveryNote = DeliveryNote({
+      notes: data.notes,
+
+      deliveryNumber: dNoteNumber,
+      customer,
+      items: [],
+    });
+    await deliveryNote.save();
+  } catch (e) {
+    console.log(e);
+    return { message: "Database error: failed to add dNote" };
+  }
+  revalidatePath("/dashboard/dnotes");
+  redirect("/dashboard/dnotes");
+}
+
+export async function updateDnote(id, prevState, formData) {
+  const rawFormData = Object.fromEntries(formData.entries());
+  try {
+    const validatedFields = validateDNote(rawFormData);
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: "Missing Fields. Failed to update dnote.",
+      };
+    }
+
+    const data = validatedFields.data;
+
+    const account = await Account.findById(data.customerId);
+
+    if (!account) {
+      return { message: "No customer was found" };
+    }
+
+    const customer = {
+      name: account.name,
+      address: account.address,
+
+      id: account._id.toString(),
+
+      phone: account.phone,
+    };
+
+    const dnote = await DeliveryNote.findOneAndUpdate(
+      { _id: id },
+      {
+        $set: {
+          customer: customer,
+          notes: data.notes,
+        },
+      }
+    );
+    if (!dnote) {
+      return { message: "No dnote found with this id" };
+    }
+  } catch (e) {
+    console.log(e);
+    return { message: "Database Error: Failed to Update  dnote." };
+  }
+  revalidatePath("/dashboard/dnotes");
+  redirect("/dashboard/dnotes");
+}
