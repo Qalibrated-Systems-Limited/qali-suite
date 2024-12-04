@@ -10,5 +10,5 @@ export const CATEGORIES = [
     name: "Platform",
   },
   { name: "Other stock", value: "other stock" },
-
+  { name: "Indicator Batteries", value: "indicator batteries" },
 ];
