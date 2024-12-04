@@ -3,7 +3,7 @@
 import { DeleteIcon, EyeIcon, PlusIcon, TrashIcon } from "lucide-react";
 
 import Link from "next/link";
-import { deleteInvoiceItem } from "../../../mongodb/actions";
+import { deleteDnoteItem, deleteInvoiceItem } from "../../../mongodb/actions";
 import { useParams } from "next/navigation";
 
 // This type is used to define the shape of our data.
@@ -64,6 +64,22 @@ export function DeleteInvoiceItem({ id }) {
   const invoiceId = params.id;
 
   const deleteInvoiceWithId = deleteInvoiceItem.bind(null, id, invoiceId);
+  return (
+    <form action={deleteInvoiceWithId}>
+      <button className="rounded-md border p-2 hover:bg-gray-100">
+        <span className="sr-only">Delete</span>
+        <DeleteIcon className="w-5" />
+      </button>
+    </form>
+  );
+}
+
+
+export function DeleteDNoteItem({ id }) {
+  const params = useParams();
+  const invoiceId = params.id;
+
+  const deleteInvoiceWithId = deleteDnoteItem.bind(null, id, invoiceId);
   return (
     <form action={deleteInvoiceWithId}>
       <button className="rounded-md border p-2 hover:bg-gray-100">

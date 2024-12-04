@@ -67,7 +67,11 @@ export function UpdateDNoteForm({ customers = [], dNote }) {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel> Customer</FormLabel>
-                      <Select onValueChange={field.onChange} name="customerId">
+                      <Select
+                        onValueChange={field.onChange}
+                        name="customerId"
+                        defaultValue={dNote ? dNote.customer.id : ""}
+                      >
                         <FormControl>
                           <SelectTrigger className="w-full">
                             <SelectValue placeholder="Select customer" />
@@ -79,7 +83,6 @@ export function UpdateDNoteForm({ customers = [], dNote }) {
                               <SelectItem
                                 key={customer._id}
                                 value={customer._id}
-                                defaultValues={dNote ? dNote.customer.id : ""}
                               >
                                 {customer.name}
                               </SelectItem>

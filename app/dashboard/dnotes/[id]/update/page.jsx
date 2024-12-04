@@ -21,6 +21,7 @@ async function page(props) {
       _id: deliveryNote._id.toString(),
     };
   }
+  console.log(deliveryNote);
   let accounts = await Account.find({}).lean();
 
   if (accounts) {

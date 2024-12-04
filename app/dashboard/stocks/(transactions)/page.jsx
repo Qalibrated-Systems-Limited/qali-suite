@@ -2,6 +2,7 @@ import {
   searchStock,
   fetchStockPages,
   extractStock,
+  fetchStockData,
 } from "../../../mongodb/queries";
 
 import Pagination from "../../../../components/ui/pagination";
@@ -20,6 +21,7 @@ import {
 import { Button } from "../../../../components/ui/button";
 import Link from "next/link";
 import { DownloadStock } from "../downloadStock";
+import { GenerateStockPDF } from "../export-to-pdf";
 
 async function page(props) {
   const searchParams = await props.searchParams;
@@ -36,7 +38,7 @@ async function page(props) {
   const totalPages = await fetchStockPages(query);
 
   const stock = await searchStock(query, currentPage);
-  const allStock = await extractStock();
+  const stockData = await fetchStockData();
 
   return (
     <Card>
@@ -46,11 +48,11 @@ async function page(props) {
 
           <div className="mt-4 flex flex-col lg:flex-row items-center gap-8 md:mt-8">
             <Search placeholder="Search stock..." />
-            <DownloadStock summaryResult={allStock ?? []} />
 
             <Link href={"/dashboard/stocks/create"}>
               <Button>Create</Button>
             </Link>
+            <GenerateStockPDF stockData={stockData} />
           </div>
         </div>
       </CardHeader>

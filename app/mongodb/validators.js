@@ -23,6 +23,14 @@ export const invoiceItemForm = z.object({
   serialNo: z.string().optional(),
 });
 
+export const dnoteItemForm = z.object({
+  description: z.string().min(8).max(300),
+  unit: z.string(),
+  unitPrice: z.string().optional(),
+
+  quantity: z.string(),
+});
+
 export const updateAccountForm = z.object({
   name: z.string().max(100).min(4),
   address: z.string().min(4),
@@ -147,3 +155,4 @@ export const validateInvoiceWithId = (rawData) =>
   updatedInvoiceWithIdSchema.safeParse(rawData);
 export const validateDNote = (rawData) =>
   deliveryNoteZodSchema.safeParse(rawData);
+export const validateDnoteItem = (rawData) => dnoteItemForm.safeParse(rawData);

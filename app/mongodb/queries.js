@@ -1260,3 +1260,31 @@ export const searchDnotes = async (searchTerm, page = 1) => {
     throw new Error("Could not get dNotes");
   }
 };
+
+export const fetchStockData = async () => {
+  const projectStage = {
+    $project: {
+      stock: 1,
+      SKU: 1,
+      name: 1,
+      price: 1,
+      category: { $toUpper: "$category" },
+    },
+  };
+  const sortStage = { $sort: { category: 1 } };
+  // Organize stock by department
+
+  const stockItems = await Product.aggregate([projectStage, sortStage]);
+
+  return stockItems.reduce((acc, item) => {
+    const dept = item.category || "Uncategorized";
+    if (!acc[dept]) acc[dept] = [];
+    acc[dept].push({
+      name: item.name,
+      quantity: item.stock.$numberInt || item.stock,
+      SKU: item.SKU,
+      price: item.price,
+    });
+    return acc;
+  }, {});
+};

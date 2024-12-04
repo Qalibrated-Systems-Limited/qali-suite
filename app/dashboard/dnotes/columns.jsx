@@ -38,7 +38,7 @@ export const columns = [
         <div className="flex justify-end gap-3">
           <UpdateButton path={`/dashboard/dnotes/${id}/update`} />
 
-          <ViewButton path={`/dashboard/invoices/${id}`} />
+          <ViewButton path={`/dashboard/dnotes/${id}`} />
         </div>
       );
     },

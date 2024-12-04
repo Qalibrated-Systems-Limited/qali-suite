@@ -9,6 +9,6 @@ export const CATEGORIES = [
     value: "platform",
     name: "Platform",
   },
-  { name: "Other", value: "other" },
-  { value: "Remote display unit", name: "Remote Display Unit" },
+  { name: "Other stock", value: "other stock" },
+
 ];

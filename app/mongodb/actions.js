@@ -4,6 +4,7 @@ import { renderToFile } from "@react-pdf/renderer";
 import {
   validateAccount,
   validateDNote,
+  validateDnoteItem,
   validateInvoice,
   validateInvoiceItem,
   validateInvoiceUpdate,
@@ -513,6 +514,7 @@ export async function updateInvoice(id, prevState, formData) {
   const rawFormData = Object.fromEntries(formData.entries());
   try {
     const validatedFields = validateInvoiceUpdate(rawFormData);
+    console.log(validatedFields.error);
 
     if (!validatedFields.success) {
       return {
@@ -592,6 +594,20 @@ export const deleteInvoiceItem = async (itemId, invoiceId) => {
 
   revalidatePath(`/dashboard/invoices/${invoiceId}`);
   redirect(`/dashboard/invoices/${invoiceId}`);
+};
+
+export const deleteDnoteItem = async (itemId, dnoteId) => {
+  try {
+    const res = await DeliveryNote.findOneAndUpdate(
+      { _id: dnoteId },
+      { $pull: { items: { id: itemId } } }
+    );
+  } catch (e) {
+    return { message: "Could not remove item" };
+  }
+
+  revalidatePath(`/dashboard/dnotes/${dnoteId}`);
+  redirect(`/dashboard/dnotes/${dnoteId}`);
 };
 
 export const downloadFile = async (Doc) => {
@@ -696,4 +712,58 @@ export async function updateDnote(id, prevState, formData) {
   }
   revalidatePath("/dashboard/dnotes");
   redirect("/dashboard/dnotes");
+}
+
+export async function addDnoteItem(id, state, formData) {
+  try {
+    const rawFormData = Object.fromEntries(formData.entries());
+
+    const validatedFields = validateDnoteItem(rawFormData);
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: "Missing Fields. Failed to add item.",
+      };
+    }
+
+    const data = validatedFields.data;
+
+    const dNote = await DeliveryNote.findById(id);
+    if (!dNote) {
+      return { message: "No Delivery Note Found" };
+    }
+    const items = dNote.items ?? [];
+
+    if (items.length > 0) {
+      const existingItem = items.find(
+        (item) => item.description === data.description
+      );
+
+      if (existingItem) {
+        return { message: "This item is already added" };
+      }
+    }
+
+    await DeliveryNote.findOneAndUpdate(
+      { _id: id },
+      {
+        $push: {
+          items: {
+            description: data.description,
+
+            quantity: data.quantity,
+            unitPrice: data.unitPrice,
+            unit: data.unit,
+            total: Number(data.quantity) * Number(data.unitPrice),
+          },
+        },
+      }
+    );
+  } catch (e) {
+    console.error(e);
+    return { message: "Database error: failed to add dnote item" };
+  }
+  revalidatePath(`/dashboard/dnotes/${id}`);
+  redirect(`/dashboard/dnotes/${id}`);
 }
