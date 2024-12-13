@@ -326,7 +326,6 @@ export const fetchUserPages = async (searchTerm) => {
       count = result[0].totalRecords;
     }
     const noOfPages = Math.ceil(Number(count) / ITEMS_PER_PAGE);
-    console.log(result);
 
     return noOfPages;
   } catch (e) {
