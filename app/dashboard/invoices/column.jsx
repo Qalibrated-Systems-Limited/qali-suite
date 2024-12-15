@@ -42,7 +42,7 @@ export const columns = [
       return (
         <div className="flex justify-end gap-3">
           <UpdateButton path={`/dashboard/invoices/${id}/update`} />
-          <AddItemButton path={`/dashboard/invoices/${id}/add-item`} />
+
           <ViewButton path={`/dashboard/invoices/${id}`} />
         </div>
       );
