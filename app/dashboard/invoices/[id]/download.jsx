@@ -62,7 +62,6 @@ function buildFooterRowItem(title, value) {
     </View>
   );
 }
-
 function InvoicePDF({
   items,
   invoice,
@@ -75,30 +74,33 @@ function InvoicePDF({
   return (
     <Document>
       <Page style={styles.page}>
-        <Text style={styles.header}>Invoice</Text>
+        <Text style={styles.header}>Quote</Text>
 
         {/* Invoice Info Section */}
         <View style={styles.section}>
           <Text>Date: {new Date(invoice.createdAt).toLocaleDateString()}</Text>
-          <Text>Invoice #: {invoice.invoiceNumber}</Text>
+          <Text>Quote #: {invoice.invoiceNumber}</Text>
           <Text>DNote #: {invoice.dNoteNumber}</Text>
         </View>
 
         {/* Client and Company Info */}
         <View style={styles.invoiceInfo}>
           <View>
-            <Text style={styles.bold}>Bill To:</Text>
+            <Text style={styles.bold}>Quote To:</Text>
             <Text>{invoice.customer.name}</Text>
             <Text>{invoice.customer.address}</Text>
             <Text>{invoice.customer.email}</Text>
           </View>
           <View>
             <Text style={styles.bold}>From:</Text>
-            <Text>Renson Engineering Ltd</Text>
-            <Text>Outer Ring</Text>
+            <Text>Geoffrey Oongo</Text>
+            <Text>Donholm</Text>
             <Text>Nairobi, Kenya</Text>
           </View>
         </View>
+        <Text style={{ fontSize: 16, fontWeight: "bold", marginTop: 5 }}>
+          Quatation for {invoice.description}
+        </Text>
 
         {/* Item List */}
         <View style={[styles.section, { marginTop: 20 }]}>
@@ -134,6 +136,7 @@ function InvoicePDF({
         {/* Footer */}
         <Text style={styles.footer}>Thank you for your business!</Text>
       </Page>
+      P
     </Document>
   );
 }

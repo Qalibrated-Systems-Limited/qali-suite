@@ -9,6 +9,14 @@ export const CATEGORIES = [
     value: "platform",
     name: "Platform",
   },
+  {
+    value: "Overview camera",
+    name: "overview camera",
+  },
+  {
+    value: "anpr camera",
+    name: "anpr camera",
+  },
   { name: "Other stock", value: "other stock" },
   { name: "Indicator Batteries", value: "indicator batteries" },
 ];
