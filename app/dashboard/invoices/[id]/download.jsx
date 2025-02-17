@@ -7,6 +7,7 @@ import {
   View,
   Document,
   StyleSheet,
+  Image,
   PDFDownloadLink,
 } from "@react-pdf/renderer";
 import { PrinterIcon } from "lucide-react";
@@ -74,28 +75,31 @@ function InvoicePDF({
   return (
     <Document>
       <Page style={styles.page}>
-        <Text style={styles.header}>Quote</Text>
+        {/* Company Logo */}
+        <View style={{ alignItems: "center", marginBottom: 10 }}>
+          <Image src="/images/qls.png" style={{ width: 200, height: 50 }} />
+        </View>
+        <Text style={styles.header}>INVOICE</Text>
 
         {/* Invoice Info Section */}
         <View style={styles.section}>
           <Text>Date: {new Date(invoice.createdAt).toLocaleDateString()}</Text>
-          <Text>Quote #: {invoice.invoiceNumber}</Text>
-          <Text>DNote #: {invoice.dNoteNumber}</Text>
+          <Text>Invoice #: {invoice.invoiceNumber}</Text>
         </View>
 
         {/* Client and Company Info */}
         <View style={styles.invoiceInfo}>
           <View>
-            <Text style={styles.bold}>Quote To:</Text>
+            <Text style={styles.bold}>Billing To:</Text>
             <Text>{invoice.customer.name}</Text>
             <Text>{invoice.customer.address}</Text>
             <Text>{invoice.customer.email}</Text>
           </View>
           <View>
             <Text style={styles.bold}>From:</Text>
-            <Text>Geoffrey Oongo</Text>
-            <Text>Donholm</Text>
-            <Text>Nairobi, Kenya</Text>
+            <Text>Qalibrated Systems</Text>
+            <Text>Qls Center </Text>
+            <Text>Mombasa Rd,Nairobi, Kenya</Text>
           </View>
         </View>
         <Text style={{ fontSize: 16, fontWeight: "bold", marginTop: 5 }}>

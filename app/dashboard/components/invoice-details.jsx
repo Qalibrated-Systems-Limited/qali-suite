@@ -7,6 +7,7 @@ import Link from "next/link";
 import { GeneratePdf } from "../invoices/[id]/download";
 import { DeleteInvoiceItem } from "../invoices/[id]/columns";
 import dbConnect from "../../config/dbConnect";
+import { notFound } from "next/navigation";
 
 const InvoiceDetail = async ({ id }) => {
   dbConnect();

@@ -14,7 +14,7 @@ const nextConfig = {
     AUTH_SECRET: "cU4MLQChH0IoakjEcH9FBHtQUr8Mnkn2elIZdlgmnwg=",
 
     DB_LOCAL_URI:
-      "mongodb+srv://geoffrey:geoffrey@kilos.6ilx3u2.mongodb.net/stockvault?retryWrites=true&w=majority",
+      "mongodb+srv://george_01:george_7_08_@calibrated.be4r7.mongodb.net/stockVault?retryWrites=true&w=majority&appName=Calibrated",
   },
 };
 
