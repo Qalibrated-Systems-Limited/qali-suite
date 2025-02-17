@@ -29,6 +29,7 @@ import { useForm } from "react-hook-form";
 import { userUpdateForm } from "../../../../mongodb/validators";
 
 import { updateUser } from "../../../../mongodb/actions";
+import clsx from "clsx";
 
 export default function UpdateUserForm({ account }) {
   const initialState = { message: "", errors: {} };
@@ -65,11 +66,7 @@ export default function UpdateUserForm({ account }) {
                   <FormItem>
                     <FormLabel>Name</FormLabel>
                     <FormControl>
-                      <Input
-                        defaultValue={account.name}
-                        {...field}
-                        type="text"
-                      />
+                      <Input {...field} type="text" />
                     </FormControl>
                     <div id="name-error" aria-live="polite" aria-atomic="true">
                       {state.errors?.name &&
@@ -90,11 +87,7 @@ export default function UpdateUserForm({ account }) {
                   <FormItem>
                     <FormLabel>Email</FormLabel>
                     <FormControl>
-                      <Input
-                        defaultValue={account.email}
-                        {...field}
-                        type="text"
-                      />
+                      <Input {...field} type="text" />
                     </FormControl>
                     <div id="email-error" aria-live="polite" aria-atomic="true">
                       {state.errors?.email &&
@@ -125,10 +118,16 @@ export default function UpdateUserForm({ account }) {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="Operator">Operator</SelectItem>
+                        <SelectItem key={"1"} value="Operator">
+                          Operator
+                        </SelectItem>
 
-                        <SelectItem value="Admin">Admin</SelectItem>
-                        <SelectItem value="User">User</SelectItem>
+                        <SelectItem key={"2"} value="Admin">
+                          Admin
+                        </SelectItem>
+                        <SelectItem key="3" value="User">
+                          User
+                        </SelectItem>
                       </SelectContent>
                     </Select>
 
@@ -165,9 +164,13 @@ export default function UpdateUserForm({ account }) {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="Active">Active</SelectItem>
+                        <SelectItem key={"1"} value="Active">
+                          Active
+                        </SelectItem>
 
-                        <SelectItem value="Inactive">Inactive</SelectItem>
+                        <SelectItem key={"2"} value="Inactive">
+                          Inactive
+                        </SelectItem>
                       </SelectContent>
                     </Select>
 
