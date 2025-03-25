@@ -17,6 +17,7 @@ import { format } from "date-fns";
 import DeliveryNote from "../models/dnote";
 
 dbConnect();
+const ITEMS_PER_PAGE = 20;
 
 export const fetchTodaySummary = async () => {
   noStore();
@@ -150,7 +151,6 @@ export const fetchCardsData = async () => {
 
   return { numberOfTrans, numberOfAccounts, numberOfVehicles };
 };
-const ITEMS_PER_PAGE = 10;
 
 export const monthlyAggregates = async () => {
   noStore();
@@ -454,7 +454,7 @@ export const searchStock = async (searchTerm, page = 1) => {
 
   const searchStage = {
     $search: {
-      index: "default", // Name of the atlas search index
+      index: "searchStockIndex", // Name of the atlas search index
       text: {
         query: searchTerm,
         path: {
@@ -642,7 +642,7 @@ export const searchInvoice = async (searchTerm, page = 1) => {
   try {
     const searchStage = {
       $search: {
-        index: "default", // Name of the full-text search index
+        index: "invoiceSearchIndex", // Name of the full-text search index
         text: {
           query: searchTerm,
           path: {
