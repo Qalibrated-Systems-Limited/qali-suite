@@ -11,7 +11,7 @@ export function CreateButton({ path, title }) {
       href={path}
       className="flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-medium
        text-white transition-colors hover:bg-primary focus-visible:outline 
-       focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yellow-600"
+       focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yellow-600 my-2"
     >
       <span className="hidden md:block">{title}</span>{" "}
       <PlusIcon className="h-5 md:ml-4" />
@@ -21,7 +21,7 @@ export function CreateButton({ path, title }) {
 
 export function UpdateButton({ path }) {
   return (
-    <Link href={path} className="rounded-md border p-2 hover:bg-gray-100">
+    <Link href={path} className="rounded-md border p-2 hover:bg-gray-100 my-2">
       <PencilIcon className="w-5" />
     </Link>
   );

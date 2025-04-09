@@ -1,6 +1,6 @@
 "use client";
 
-import { EyeIcon, PlusIcon, TrashIcon } from "lucide-react";
+import { CheckIcon, EyeIcon, PlusIcon, TrashIcon } from "lucide-react";
 import { deleteAccount } from "../../mongodb/actions";
 import { Badge } from "../../../components/ui/badge";
 import { ReturnDnoteItems, UpdateButton } from "../../../components/ui/buttons";
@@ -48,14 +48,14 @@ export const getColumns = (dnotes = []) => [
       }
       if (!shouldBeReturned && reason !== "Selling") {
         modAction = (
-          <Badge variant={"outline"} className={"my-2"}>
-            Returned
-          </Badge>
+          <span className="rounded-md border my-2 p-2 hover:bg-gray-100">
+            <CheckIcon />
+          </span>
         );
       }
 
       return (
-        <div className="flex justify-end gap-3">
+        <div className="flex justify-between items-center ">
           <UpdateButton path={`/dashboard/dnotes/${id}/update`} />
 
           <ViewButton path={`/dashboard/dnotes/${id}`} />
@@ -76,7 +76,7 @@ export function AddItemButton({ path }) {
 
 export function ViewButton({ path }) {
   return (
-    <Link href={path} className="rounded-md border p-2 hover:bg-gray-100">
+    <Link href={path} className="rounded-md border my-2 p-2 hover:bg-gray-100">
       <EyeIcon className="w-5" />
     </Link>
   );
