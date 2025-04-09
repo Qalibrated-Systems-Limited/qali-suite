@@ -86,12 +86,6 @@ const DeliveryNoteDetail = async ({ id }) => {
               ))}
             </tbody>
           </table>
-          <Link href={`/dashboard/dnotes/${deliveryNote._id}/add-item`}>
-            <Button className="mt-4">
-              <PlusIcon size={20} />
-              <span className="ml-2">Add Item</span>
-            </Button>
-          </Link>
         </section>
         <section className="mb-6">
           <h2 className="text-2xl font-bold mb-2">Notes</h2>

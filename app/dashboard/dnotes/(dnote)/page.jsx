@@ -39,12 +39,6 @@ async function page(props) {
 
           <div className="mt-4 flex flex-col lg:flex-row lg:items-center gap-8 md:mt-8">
             <Search placeholder="Search delivery notes..." />
-
-            <div className="flex flex-row gap-4 md:items-center">
-              <Link href={"/dashboard/dnotes/create"}>
-                <Button>Create</Button>
-              </Link>
-            </div>
           </div>
         </div>
       </CardHeader>
