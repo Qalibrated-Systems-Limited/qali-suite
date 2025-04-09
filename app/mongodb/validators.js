@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { roles } from "../utils/roles";
+import { units } from "../utils/units";
 
 export const accountForm = z.object({
   name: z.string().max(100).min(4),
@@ -64,6 +65,7 @@ export const stockForm = z.object({
   price: z.string(),
   category: z.string(),
   stock: z.string(),
+  unit: z.enum(units),
   description: z.string(),
 });
 export const invoiceForm = z.object({

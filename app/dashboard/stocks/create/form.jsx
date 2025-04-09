@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../../../../components/ui/card";
+import { units } from "../../../utils/units";
 
 import {
   Form,
@@ -180,6 +181,42 @@ export function CreateStockForm() {
                   )}
                 />
               </div>
+            </div>
+            <div className="flex-1">
+              <FormField
+                control={form.control}
+                name="units"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel> Category</FormLabel>
+                    <Select onValueChange={field.onChange} name="unit">
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select unit" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectGroup>
+                          {units.map((unit) => (
+                            <SelectItem value={unit} key={unit}>
+                              {unit}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+
+                    <div id="unit-error" aria-live="polite" aria-atomic="true">
+                      {state.errors?.unit &&
+                        state.errors.unit.map((error) => (
+                          <p className="mt-2 text-sm text-red-500" key={error}>
+                            {error}
+                          </p>
+                        ))}
+                    </div>
+                  </FormItem>
+                )}
+              />
             </div>
 
             <div className="flex flex-col md:flex-row gap-4">

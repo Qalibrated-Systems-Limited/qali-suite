@@ -6,7 +6,7 @@ async function page() {
   const sesssion = await auth();
   const user = sesssion && sesssion.user;
 
-  if (user.role !== "Admin") {
+  if (user.role !== "Store Manager") {
     return (
       <div className="flex h-full items-center justify-center gap-3">
         <h1 className="font-semibold text-red-400">Not Authorized </h1>

@@ -234,6 +234,7 @@ export async function addStock(state, formData) {
       description: data.description,
       category: data.category,
       stock: data.stock,
+      unit: data.unit,
     });
 
     const amount = Number(data.stock) * Number(data.price);
@@ -305,6 +306,7 @@ export async function updateStock(id, prevState, formData) {
       product.stock = validatedFields.data.stock;
       product.category = validatedFields.data.category;
       product.description = validatedFields.data.description;
+      product.unit = validatedFields.data.unit;
       const result = await product.save();
       if (result) {
         const addedProducts = Number(validatedFields.data.stock) - oldStock;

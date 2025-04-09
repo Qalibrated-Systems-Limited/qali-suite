@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import NextForm from "next/form";
+import { units } from "../../../../utils/units";
 
 import { Button } from "../../../../../components/ui/button";
 import {
@@ -178,6 +179,47 @@ export default function UpdateStockForm({ stock }) {
                   )}
                 />
               </div>
+            </div>
+
+            <div className="flex-1">
+              <FormField
+                control={form.control}
+                name="unit"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel> Unit</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      name="unit"
+                      defaultValue={stock.unit ?? ""}
+                    >
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select unit" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectGroup>
+                          {units.map((cat) => (
+                            <SelectItem value={cat} key={cat}>
+                              {cat}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+
+                    <div id="unit-error" aria-live="polite" aria-atomic="true">
+                      {state.errors?.unit &&
+                        state.errors.unit.map((error) => (
+                          <p className="mt-2 text-sm text-red-500" key={error}>
+                            {error}
+                          </p>
+                        ))}
+                    </div>
+                  </FormItem>
+                )}
+              />
             </div>
 
             <div className="flex flex-col md:flex-row gap-4">

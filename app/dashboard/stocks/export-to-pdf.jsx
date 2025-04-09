@@ -63,7 +63,7 @@ const StockPDF = ({ stockData }) => (
             <Text style={styles.tableCell}>SKU</Text>
 
             <Text style={[styles.tableCell, { width: "60%" }]}>Item Name</Text>
-            <Text style={[styles.tableCell]}>UnitPrice</Text>
+            <Text style={[styles.tableCell]}>Unit measure</Text>
             <Text style={styles.tableCell}>Quantity</Text>
           </View>
           {items.map((item, index) => (
@@ -72,7 +72,7 @@ const StockPDF = ({ stockData }) => (
               <Text style={[styles.tableCell, { width: "60%" }]}>
                 {item.name}
               </Text>
-              <Text style={styles.tableCell}>KES {item.price ?? "-"}</Text>
+              <Text style={styles.tableCell}> {item.unit ?? "-"}</Text>
               <Text style={styles.tableCell}>{item.quantity}</Text>
             </View>
           ))}

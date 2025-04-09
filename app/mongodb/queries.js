@@ -1275,6 +1275,7 @@ export const fetchStockData = async () => {
       SKU: 1,
       name: 1,
       price: 1,
+      unit: 1,
       category: { $toUpper: "$category" },
     },
   };
@@ -1291,6 +1292,7 @@ export const fetchStockData = async () => {
       quantity: item.stock.$numberInt || item.stock,
       SKU: item.SKU,
       price: item.price,
+      unit :item.unit
     });
     return acc;
   }, {});

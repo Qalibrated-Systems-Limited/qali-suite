@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { type } from "os";
+import { units } from "../utils/units";
 
 const Schema = mongoose.Schema;
 
@@ -21,7 +21,7 @@ const productSchema =
       },
       unit: {
         type: String,
-        enum: ["pcs", "kg", "litre", "mtr", "mm"],
+        enum: units,
         default: "pcs",
       },
       category: {
