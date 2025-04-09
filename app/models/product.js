@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { type } from "os";
 
 const Schema = mongoose.Schema;
 
@@ -17,6 +18,11 @@ const productSchema =
       description: {
         type: String,
         required: true,
+      },
+      unit: {
+        type: String,
+        enum: ["pcs", "kg", "litre", "mtr", "mm"],
+        default: "pcs",
       },
       category: {
         type: String,

@@ -1,8 +1,11 @@
-import { columns } from "./columns";
+"use client";
+import { getColumns } from "./columns";
 import { DataTable } from "../../../components/ui/data-table";
 
-async function DNoteTable({ invoices }) {
-  return <DataTable columns={columns} data={invoices ?? []}></DataTable>;
+function DNoteTable({ invoices }) {
+  return (
+    <DataTable columns={getColumns(invoices)} data={invoices ?? []}></DataTable>
+  );
 }
 
 export default DNoteTable;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { roles } from "../../../utils/roles";
 import NextForm from "next/form";
 import { Button } from "../../../../components/ui/button";
 import {
@@ -145,9 +146,11 @@ export function CreateUserForm() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="Operator">Operator</SelectItem>
-                        <SelectItem value="Admin">Admin</SelectItem>
-                        <SelectItem value="User">User</SelectItem>
+                        {roles.map((role) => (
+                          <SelectItem key={role} value={role}>
+                            {role}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
 

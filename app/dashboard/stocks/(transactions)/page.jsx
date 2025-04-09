@@ -8,7 +8,7 @@ import {
 import Pagination from "../../../../components/ui/pagination";
 
 import Search from "../../../../components/ui/search";
-import StockTable from "../table";
+import StockTable, { InventoryTable } from "../table";
 import { auth } from "../../../../auth";
 import {
   Card,
@@ -22,6 +22,8 @@ import { Button } from "../../../../components/ui/button";
 import Link from "next/link";
 import { DownloadStock } from "../downloadStock";
 import { GenerateStockPDF } from "../export-to-pdf";
+import { getColumns } from "../column";
+import User from "../../../models/user";
 
 async function page(props) {
   const searchParams = await props.searchParams;
@@ -36,6 +38,10 @@ async function page(props) {
 
   const currentPage = Number(searchParams.page) || 1;
   const totalPages = await fetchStockPages(query);
+  const { user } = sesssion;
+  const userId = user.id;
+  const userCart = await User.findById(userId).select("cart");
+  const cart = userCart.cart;
 
   const stock = await searchStock(query, currentPage);
   const stockData = await fetchStockData();
@@ -57,7 +63,7 @@ async function page(props) {
         </div>
       </CardHeader>
       <CardContent>
-        <StockTable stock={stock ?? []} />
+        <InventoryTable stock={stock} cart={cart} />
       </CardContent>
       {!startDate && (
         <CardFooter>

@@ -6,6 +6,15 @@ import { NextResponse } from "next/server";
 
 const Schema = mongoose.Schema;
 
+const nestedSchema = new Schema({
+  name: String,
+  id: String,
+  quantity: Number,
+  unitPrice: Number,
+  unit: { type: String, default: "pcs" },
+  type: { type: String, default: "stock" },
+});
+
 const userSchema =
   Schema &&
   new Schema(
@@ -33,6 +42,7 @@ const userSchema =
         trim: true,
         lowercase: true,
       },
+      cart: [nestedSchema],
 
       password: {
         type: String,

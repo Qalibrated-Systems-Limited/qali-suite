@@ -1233,6 +1233,9 @@ export const searchDnotes = async (searchTerm, page = 1) => {
     const projectStage = {
       $project: {
         deliveryNumber: 1,
+        shouldBeReturned: 1,
+        reason: 1,
+        technician: 1,
         date: { $dateToString: { format: "%d-%m-%G", date: "$date" } },
         customerName: "$customer.name",
         notes: 1,
@@ -1250,7 +1253,12 @@ export const searchDnotes = async (searchTerm, page = 1) => {
 
     if (result && result.length > 0) {
       result = result.map((res) => {
-        return { ...res, _id: res._id.toString() };
+        return {
+          ...res,
+          _id: res._id.toString(),
+          shouldBeReturned: res.shouldBeReturned ?? false,
+          reason: res.reason ?? "",
+        };
       });
     }
 

@@ -62,19 +62,23 @@ const DeliveryNoteDetail = async ({ id }) => {
             <thead>
               <tr className="w-full bg-gray-200 dark:bg-gray-700">
                 <th className="px-4 py-2 text-left">Description</th>
+
                 <th className="px-4 py-2 text-left">Quantity</th>
+
                 <th className="px-4 py-2 text-left">Unit Price</th>
-                <th className="px-4 py-2 text-left">Total</th>
+                <th className="px-4 py-2 text-left"> Unit</th>
                 <th className="px-4 py-2 text-left">Actions</th>
               </tr>
             </thead>
             <tbody>
               {deliveryNote.items.map((item) => (
                 <tr key={item._id} className="border-t">
-                  <td className="px-4 py-2">{item.description}</td>
+                  <td className="px-4 py-2">{item.name}</td>
+
                   <td className="px-4 py-2">{item.quantity}</td>
-                  <td className="px-4 py-2">{item.unitPrice}</td>
-                  <td className="px-4 py-2">{item.total}</td>
+                  <td className="px-4 py-2">{item.unitPrice.toFixed(0)}</td>
+                  <td className="px-4 py-2">{item.unit}</td>
+
                   <td className="px-4 py-2">
                     <DeleteDNoteItem id={Item.id} />
                   </td>

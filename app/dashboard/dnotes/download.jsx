@@ -1,6 +1,9 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { Button } from "../../../components/ui/button";
+// DNotePDF.jsx
+
 import {
   Page,
   Text,
@@ -8,145 +11,139 @@ import {
   Document,
   StyleSheet,
   PDFDownloadLink,
+  Image,
 } from "@react-pdf/renderer";
+import moment from "moment";
 import { PrinterIcon } from "lucide-react";
-import { Button } from "../../../components/ui/button";
 
-// Define styles for the delivery note
+// Styles
 const styles = StyleSheet.create({
-  page: {
-    padding: 30,
-    fontSize: 10,
-    lineHeight: 1.5,
-  },
+  page: { padding: 30, fontSize: 12, fontFamily: "Helvetica" },
   header: {
-    fontSize: 18,
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginBottom: 20,
-    textAlign: "center",
-    fontWeight: "bold",
   },
-  section: {
-    marginBottom: 15,
-  },
-  customerInfo: {
-    marginBottom: 15,
-  },
-  itemRow: {
+  title: { fontSize: 16, fontWeight: "bold", marginBottom: 10 },
+  section: { marginBottom: 10 },
+  logo: { height: 80, marginBottom: 5 },
+  row: { flexDirection: "row", justifyContent: "space-between" },
+  bold: { fontWeight: "bold" },
+  tableHeader: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    borderBottom: "1px solid #ccc",
-    padding: 5,
-    fontSize: 10,
-  },
-  bold: {
-    fontWeight: "bold",
-  },
-  signatureSection: {
-    marginTop: 20,
-  },
-  signatureRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-  signatureBox: {
-    border: "1px solid #000",
-    padding: 10,
-    width: "30%",
-  },
-  notes: {
+    borderBottom: "1 solid black",
+    paddingBottom: 5,
     marginTop: 10,
-    padding: 5,
-    borderTop: "1px solid #ccc",
   },
-  footer: {
-    marginTop: 30,
-    textAlign: "center",
-    fontSize: 12,
+  tableRow: { flexDirection: "row", paddingVertical: 4 },
+  cell: { flex: 1, paddingHorizontal: 4 },
+  footer: { marginTop: 30, borderTop: "1 solid #ccc", paddingTop: 10 },
+  signatureSection: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 40,
+  },
+  signBox: {
+    width: "45%",
+  },
+  signLine: {
+    marginTop: 20,
+    borderBottom: "1 solid black",
+    height: 10,
   },
 });
 
-// Delivery Note PDF Component
-function DNotePDF({ dnote }) {
+const DNotePDF = ({ data }) => {
+  const {
+    deliveryNumber,
+    customer,
+    items,
+    createdBy,
+    notes,
+    date,
+    technician,
+  } = data;
+
   return (
     <Document>
-      <Page style={styles.page}>
-        <Text style={styles.header}>Delivery Note</Text>
-
-        {/* Delivery Note Info */}
-        <View style={styles.section}>
-          <Text>Delivery Note #: {dnote.deliveryNumber}</Text>
-          <Text>Date: {new Date(dnote.date).toLocaleDateString()}</Text>
+      <Page size="A4" style={styles.page}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.leftHeader}>
+            <Image src={"/images/qls.png"} style={styles.logo} />
+            <Text style={styles.bold}>Qalibrated Systems LTD</Text>
+          </View>
+          <View style={styles.rightHeader}>
+            <Text style={styles.title}>Delivery Note</Text>
+            <Text>Delivery No: {deliveryNumber}</Text>
+            <Text>Date: {moment(date).format("YYYY-MM-DD")}</Text>
+          </View>
         </View>
 
         {/* Customer Info */}
-        <View style={styles.customerInfo}>
-          <Text style={styles.bold}>Customer Details:</Text>
-          <Text>Name: {dnote.customer.name}</Text>
-          <Text>Address: {dnote.customer.address}</Text>
-          {dnote.customer.phone && <Text>Phone: {dnote.customer.phone}</Text>}
-          {dnote.customer.id && <Text>ID: {dnote.customer.id}</Text>}
+        <View style={styles.section}>
+          <Text style={styles.bold}>Customer:</Text>
+          <Text>{customer.name}</Text>
+          <Text>{customer.address}</Text>
         </View>
 
-        {/* Item List */}
-        <View style={[styles.section, { marginTop: 10 }]}>
-          <View style={[styles.itemRow, styles.bold]}>
-            <Text style={{ width: "50%" }}>Description</Text>
-            <Text style={{ width: "15%" }}>Quantity</Text>
-            <Text style={{ width: "15%" }}>Unit Price</Text>
-            <Text style={{ width: "20%" }}>Amount</Text>
+        {/* Items Table */}
+        <View>
+          <View style={styles.tableHeader}>
+            <Text style={[styles.cell, styles.bold]}>#</Text>
+            <Text style={[styles.cell, styles.bold]}>Item</Text>
+            <Text style={[styles.cell, styles.bold]}>Qty</Text>
+            <Text style={[styles.cell, styles.bold]}>Unit</Text>
+            <Text style={[styles.cell, styles.bold]}>Unit Price</Text>
+            <Text style={[styles.cell, styles.bold]}>Total</Text>
           </View>
-          {dnote.items.map((item, index) => (
-            <View style={styles.itemRow} key={index}>
-              <Text style={{ width: "50%" }}>{item.description}</Text>
-              <Text style={{ width: "15%" }}>{item.quantity}</Text>
-              <Text style={{ width: "15%" }}>KES {item.unitPrice}</Text>
-              <Text style={{ width: "20%" }}>KES {item.total}</Text>
+
+          {items.map((item, i) => (
+            <View style={styles.tableRow} key={item.id}>
+              <Text style={styles.cell}>{i + 1}</Text>
+              <Text style={styles.cell}>{item.name}</Text>
+              <Text style={styles.cell}>{item.quantity}</Text>
+              <Text style={styles.cell}>{item.unit}</Text>
+              <Text style={styles.cell}>{item.unitPrice.toLocaleString()}</Text>
+              <Text style={styles.cell}>
+                {(item.unitPrice * item.quantity).toLocaleString()}
+              </Text>
             </View>
           ))}
         </View>
 
-        {dnote.notes && (
-          <View style={styles.notes}>
-            <Text style={styles.bold}>Notes:</Text>
-            <Text>{dnote.notes}</Text>
-          </View>
-        )}
-
-        {/* Signatures Section */}
-        <View style={styles.signatureSection}>
-          <View style={styles.signatureRow}>
-            <View style={styles.signatureBox}>
-              <Text style={styles.bold}>Security Officer:</Text>
-              <Text>Signature: ____________________</Text>
-              <Text>Date: ____________________</Text>
-            </View>
-            <View style={styles.signatureBox}>
-              <Text style={styles.bold}>Prepared By:</Text>
-              <Text>Name: ____________________</Text>
-              <Text>Signature: ____________________</Text>
-            </View>
-            <View style={styles.signatureBox}>
-              <Text style={styles.bold}>Authorized By:</Text>
-              <Text>Name: ____________________</Text>
-              <Text>Signature: ____________________</Text>
-            </View>
-          </View>
-          <View style={styles.signatureBox}>
-            <Text style={styles.bold}>Recipient:</Text>
-            <Text>Name: ____________________</Text>
-            <Text>Signature: ____________________</Text>
-          </View>
+        {/* Notes */}
+        <View style={styles.section}>
+          <Text style={styles.bold}>Notes:</Text>
+          <Text>{notes}</Text>
         </View>
 
-        {/* Footer */}
-        <Text style={styles.footer}>
-          Renson Engineering Ltd - Outer Ring, Nairobi, Kenya
-        </Text>
+        {/* Prepared By */}
+        <View style={styles.footer}>
+          <Text>Prepared By: {createdBy.name}</Text>
+        </View>
+
+        {/* Signatures */}
+        <View style={styles.signatureSection}>
+          <View style={styles.signBox}>
+            <Text style={styles.bold}>Store Manager: George Reru</Text>
+            <View style={styles.signLine}></View>
+            <Text>Signature</Text>
+          </View>
+          <View style={styles.signBox}>
+            <Text style={styles.bold}>
+              Technician: {technician?.name || "________________"}
+            </Text>
+            <View style={styles.signLine}></View>
+            <Text>Signature</Text>
+          </View>
+        </View>
       </Page>
     </Document>
   );
-}
+};
+
+export default DNotePDF;
 
 // Generate PDF Link Component
 export function GenerateDNotePDF({ dnote }) {
@@ -160,7 +157,7 @@ export function GenerateDNotePDF({ dnote }) {
     <>
       {isBrowser ? (
         <PDFDownloadLink
-          document={<DNotePDF dnote={dnote} />}
+          document={<DNotePDF data={dnote} />}
           fileName={`delivery-note-${dnote.deliveryNumber}.pdf`}
         >
           {({ loading }) =>

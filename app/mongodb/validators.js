@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { roles } from "../utils/roles";
 
 export const accountForm = z.object({
   name: z.string().max(100).min(4),
@@ -10,7 +11,13 @@ export const accountForm = z.object({
 
 export const deliveryNoteZodSchema = z.object({
   notes: z.string().max(100).min(4),
-  customerId: z.string(),
+  customerId: z.string().min(1),
+  techId: z.string().min(1),
+  reason: z.enum(["Selling", "Borrrowing", "Giving out for tests "]),
+});
+
+export const cartItemForm = z.object({
+  quantity: z.string().min(1).max(5),
 });
 
 export const invoiceItemForm = z.object({
@@ -124,7 +131,7 @@ const userForm = z.object({
       required_error: "Please provide name.",
     })
     .min(3, "Name must have atleast three characters"),
-  role: z.enum(["Admin", "Operator", "User"], {
+  role: z.enum(roles, {
     invalid_type_error: "Please provide role.",
     required_error: "Please provide role.",
   }),
@@ -147,6 +154,7 @@ export const ValidateStock = (rawData) => stockForm.safeParse(rawData);
 export const validateInvoice = (rawData) => invoiceForm.safeParse(rawData);
 export const validateInvoiceItem = (rawData) =>
   invoiceItemForm.safeParse(rawData);
+export const validateCartItem = (rawData) => cartItemForm.safeParse(rawData);
 
 export const validateInvoiceUpdate = (rawData) =>
   updateInvoiceForm.safeParse(rawData);

@@ -19,6 +19,7 @@ import {
   ReceiptIcon,
   DollarSignIcon,
   ListCheckIcon,
+  ShoppingCart,
 } from "lucide-react";
 import MenuItem from "./menu-item";
 import MenuTitle from "./menu-title";
@@ -27,6 +28,9 @@ HomeIcon;
 const menuItems = [
   { title: "Dashboard", href: "/dashboard", Icon: LayoutDashboardIcon },
   { title: "Stock", href: "/dashboard/stocks", Icon: StoreIcon },
+
+  { title: "Cart", href: "/dashboard/cart", Icon: ShoppingCart },
+
   { title: "Invoices", href: "/dashboard/invoices", Icon: ReceiptIcon },
   { title: "Dnotes", href: "/dashboard/dnotes", Icon: ListCheckIcon },
 

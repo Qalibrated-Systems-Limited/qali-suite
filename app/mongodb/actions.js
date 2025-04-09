@@ -3,6 +3,7 @@ import { renderToFile } from "@react-pdf/renderer";
 
 import {
   validateAccount,
+  validateCartItem,
   validateDNote,
   validateDnoteItem,
   validateInvoice,
@@ -29,6 +30,7 @@ import Invoice from "../models/invoice";
 import DeliveryNote from "../models/dnote";
 import Counter from "../models/counter";
 import StockTransaction from "../models/stockTransaction";
+import mongoose from "mongoose";
 
 export async function logout(params) {
   return await signOut();
@@ -47,6 +49,127 @@ export async function authenticate(prevState, formData) {
     }
     throw error;
   }
+}
+//Cart
+export async function decreaseQTY(productId) {
+  const sesssion = await auth();
+  const user = sesssion && sesssion.user;
+  try {
+    const res = await User.findOneAndUpdate(
+      { _id: user.id, "cart.id": productId },
+      {
+        $inc: { "cart.$[item].quantity": -1 },
+      },
+      {
+        arrayFilters: [{ "item.id": productId }],
+      }
+    );
+    await User.updateOne(
+      { _id: user.id },
+      {
+        $pull: { cart: { id: productId, quantity: { $lte: 0 } } },
+      }
+    );
+  } catch (e) {
+    console.log(e);
+  }
+  revalidatePath("/dashboard/stocks");
+  revalidatePath("/dashboard/cart");
+  // redirect("/dashboard/stocks");
+}
+
+export async function removeCartItem(productId) {
+  const sesssion = await auth();
+  const user = sesssion && sesssion.user;
+  try {
+    await User.updateOne(
+      { _id: user.id },
+      {
+        $pull: { cart: { id: productId } },
+      }
+    );
+  } catch (e) {
+    console.log(e);
+  }
+  revalidatePath("/dashboard/stocks");
+  revalidatePath("/dashboard/cart");
+  // redirect("/dashboard/stocks");
+}
+
+export async function increaseQTY(productId) {
+  const sesssion = await auth();
+  const user = sesssion && sesssion.user;
+  try {
+    const product = await Product.findOne({ SKU: productId });
+    const res = await User.findOneAndUpdate(
+      {
+        _id: user.id,
+      },
+      {
+        $inc: { "cart.$[item].quantity": 1 },
+      },
+      {
+        arrayFilters: [
+          { "item.id": productId, "item.quantity": { $lt: product.stock } },
+        ],
+      }
+    );
+  } catch (e) {
+    console.log(e);
+  }
+  revalidatePath("/dashboard/stocks");
+  revalidatePath("/dashboard/cart");
+  // redirect("/dashboard/stocks");
+}
+
+export async function addToCart(productId, state, formData) {
+  try {
+    const rawFormData = Object.fromEntries(formData.entries());
+
+    const validatedFields = validateCartItem(rawFormData);
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: "Missing Fields. Failed to update Cart.",
+      };
+    }
+    const data = validatedFields.data;
+    const sesssion = await auth();
+    const user = sesssion && sesssion.user;
+
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      return {
+        message: "Could not find product",
+      };
+    }
+    console.log(data.quantity, product.stock);
+    if (Number(data.quantity) > product.stock) {
+      return { message: "Insufficient stock" };
+    }
+
+    const res = await User.findOneAndUpdate(
+      { _id: user.id, "cart.id": { $ne: product.SKU } },
+      {
+        $push: {
+          cart: {
+            name: product.name,
+            id: product.SKU,
+            quantity: data.quantity,
+            unitPrice: product.price * 1.35,
+          },
+        },
+      }
+    );
+    console.log(res);
+  } catch (e) {
+    console.log(e);
+    return { message: "Database error: failed to add to cart" };
+  }
+  revalidatePath("/dashboard/stocks");
+  revalidatePath("/dashboard/cart");
 }
 
 //ccounts
@@ -615,6 +738,8 @@ export const downloadFile = async (Doc) => {
 };
 
 export async function addDNote(state, formData) {
+  const mongodbSession = await mongoose.startSession();
+  mongodbSession.startTransaction();
   try {
     const rawFormData = Object.fromEntries(formData.entries());
 
@@ -629,40 +754,142 @@ export async function addDNote(state, formData) {
 
     const data = validatedFields.data;
 
-    const account = await Account.findById(data.customerId);
+    const sesssion = await auth();
+    const user = sesssion && sesssion.user;
+
+    const userWithCart = await User.findById(user.id).session(mongodbSession);
+    const tech = await User.findById(data.techId).session(mongodbSession);
+
+    const cart = userWithCart.cart;
+
+    const account = await Account.findById(data.customerId).session(
+      mongodbSession
+    );
     let dNoteNumber = "1";
 
     if (!account) {
       return { message: "No customer was found" };
     }
+    if (!tech) {
+      return { message: "No technician was found" };
+    }
 
+    let amount = 0;
+
+    for (const item of cart) {
+      amount += item.quantity * item.unitPrice;
+      const product = await Product.findOne({ SKU: item.id }).session(
+        mongodbSession
+      );
+
+      if (!product) {
+        return { message: `No product with sku ${item.id}` };
+      }
+
+      if (item.quantity > product.stock) {
+        return { message: `Insufficient stock` };
+      }
+
+      await Product.updateOne(
+        { SKU: item.id },
+        { $inc: { stock: -item.quantity } }
+      ).session(mongodbSession);
+    }
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // e.g., 20241031
     const counter = await Counter.findOneAndUpdate(
-      { name: `DN` },
+      { name: `DN-${today}` },
       { $inc: { seq: 1 } },
       { new: true, upsert: true }
     );
 
-    dNoteNumber = `DN${counter.seq.toString().padStart(4, "0")}`; // e.g., 20241031-0001
+    dNoteNumber = `DN-${today}-${counter.seq.toString().padStart(4, "0")}`;
     const customer = {
       name: account.name,
       address: account.address,
 
       phone: account.phone,
     };
-    const deliveryNote = DeliveryNote({
-      notes: data.notes,
+    let shouldBeReturned = true;
+    if (data.reason === "Selling") {
+      shouldBeReturned = false;
+    }
 
-      deliveryNumber: dNoteNumber,
-      customer,
-      items: [],
-    });
-    await deliveryNote.save();
+    await DeliveryNote.create(
+      [
+        {
+          notes: data.notes,
+
+          deliveryNumber: dNoteNumber,
+          reason: data.reason,
+          technician: { name: tech.name, id: tech._id },
+          shouldBeReturned,
+          customer,
+          items: cart,
+
+          createdBy: { id: user.id, name: user.name },
+        },
+      ],
+      { sesssion: mongodbSession }
+    );
+
+    await User.findByIdAndUpdate(user.id, { cart: [] }).session(mongodbSession);
+
+    if (data.reason === "Selling") {
+      await new StockTransaction({
+        SKU: dNoteNumber,
+        amount: amount,
+        ref: dNoteNumber,
+        transactionType: "Sale",
+        quantity: 1,
+      }).save({ session: mongodbSession });
+    }
+    await mongodbSession.commitTransaction();
   } catch (e) {
+    await mongodbSession.abortTransaction();
     console.log(e);
     return { message: "Database error: failed to add dNote" };
   }
+  mongodbSession.endSession();
   revalidatePath("/dashboard/dnotes");
   redirect("/dashboard/dnotes");
+}
+
+export async function returnDNoteItems(id) {
+  const mongodbSession = await mongoose.startSession();
+  try {
+    const sesssion = await auth();
+    const user = sesssion && sesssion.user;
+
+    mongodbSession.startTransaction();
+    const dNote = await DeliveryNote.findById(id).session(mongodbSession);
+    console.log(dNote);
+    if (!dNote) {
+      return { message: "Could not get the D note" };
+    }
+    if (user.role !== "Store Manager") {
+      return { message: "Insufficient permisions" };
+    }
+
+    const items = dNote.items;
+
+    for (const item of items) {
+      await Product.findOneAndUpdate(
+        { SKU: item.id },
+        { $inc: { stock: item.quantity } },
+        { session: mongodbSession }
+      );
+    }
+    dNote.shouldBeReturned = false;
+    await dNote.save({ session: mongodbSession });
+    await mongodbSession.commitTransaction();
+  } catch (e) {
+    await mongodbSession.abortTransaction();
+    console.log(e);
+    return { message: "Could not return D note items" };
+  }
+  mongodbSession.endSession();
+  revalidatePath("/dashboard/dnotes");
+  revalidatePath("/dashboard/stocks");
 }
 
 export async function updateDnote(id, prevState, formData) {

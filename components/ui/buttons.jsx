@@ -1,4 +1,8 @@
+"use client";
+import { returnDNoteItems } from "../../app/mongodb/actions";
 import { PencilIcon, PlusIcon } from "lucide-react";
+import NextForm from "next/form";
+
 import Link from "next/link";
 
 export function CreateButton({ path, title }) {
@@ -22,11 +26,14 @@ export function UpdateButton({ path }) {
     </Link>
   );
 }
-
-export function SellI({ path }) {
+//style below accordingly add the necessary classes
+export function ReturnDnoteItems({ id }) {
+  const returnWithId = returnDNoteItems.bind(null, id);
   return (
-    <Link href={path} className="rounded-md border p-2 hover:bg-gray-100">
-      <PencilIcon className="w-5" />
-    </Link>
+    <NextForm action={returnWithId}>
+      <button className="p-1 py-1 my-2 text-white bg-pink-500 dark:bg-pink-600 rounded hover:bg-pink-600 dark:hover:bg-pink-700">
+        Return
+      </button>
+    </NextForm>
   );
 }
