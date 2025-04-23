@@ -55,7 +55,7 @@ export async function decreaseQTY(productId) {
   const sesssion = await auth();
   const user = sesssion && sesssion.user;
   try {
-    const res = await User.findOneAndUpdate(
+    await User.findOneAndUpdate(
       { _id: user.id, "cart.id": productId },
       {
         $inc: { "cart.$[item].quantity": -1 },
