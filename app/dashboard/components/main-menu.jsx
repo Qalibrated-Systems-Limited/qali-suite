@@ -1,7 +1,7 @@
 "use client";
 import { logout } from "../../mongodb/actions";
-import { Avatar, AvatarFallback } from "../../../components/ui/avatar";
-import { LightDarkToggle } from "../../../components/ui/light-dark-toggle";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { LightDarkToggle } from "@/components/theme-toggler";
 import { cn } from "../../../lib/utils";
 
 import {

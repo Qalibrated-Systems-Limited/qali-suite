@@ -2,7 +2,7 @@ import AuthProvider from "../context/auth";
 import "../globals.css";
 import { Poppins } from "next/font/google";
 
-import { LightDarkToggle } from "../../components/ui/light-dark-toggle";
+import { LightDarkToggle } from "@/components/theme-toggler";
 const poppins = Poppins({
   subsets: ["latin"],
   weight: ["100", "200", "300", "400", "500", "600", "700", "800", "900"],

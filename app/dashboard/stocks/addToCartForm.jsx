@@ -1,4 +1,5 @@
 "use client";
+
 import {
   addToCart,
   increaseQTY,
@@ -14,24 +15,28 @@ import {
   FormItem,
   FormLabel,
   FormControl,
+  FormMessage,
 } from "../../../components/ui/form";
-import { DialogClose } from "../../../components/ui/dialog";
+
 import { Input } from "../../../components/ui/input";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "../../../components/ui/popover";
+} from "@/components/ui/popover";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { cartItemForm } from "../../mongodb/validators";
-import { PopoverClose } from "@radix-ui/react-popover";
-import { Minus, Plus } from "lucide-react";
+import { Minus, Plus, ShoppingCart, Trash2 } from "lucide-react";
 
-export function AddToCartButton({ id }) {
+// ============================================
+// IMPROVED ADD TO CART BUTTON
+// ============================================
+export function AddToCartButton({ id, disabled = false }) {
   const initialState = { message: "", errors: {} };
+  const [open, setOpen] = useState(false);
 
   const add = addToCart.bind(null, id);
   const [state, dispatch, isPending] = useActionState(add, initialState);
@@ -39,69 +44,116 @@ export function AddToCartButton({ id }) {
   const form = useForm({
     resolver: zodResolver(cartItemForm),
     defaultValues: {
-      quantity: "",
+      quantity: "1",
     },
   });
 
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button className="bg-pink-500 text-white px-3 py-1 rounded-xl hover:bg-pink-600">
-          Add to Cart
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80">
-        <Form {...form}>
-          <NextForm action={dispatch}>
-            <FormField
-              control={form.control}
-              name="quantity"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Name</FormLabel>
-                  <FormControl>
-                    <Input {...field} type="text" />
-                  </FormControl>
-                  <div
-                    id="quantity-error"
-                    aria-live="polite"
-                    aria-atomic="true"
-                  >
-                    {state.errors?.quantity &&
-                      state.errors.quantity.map((error) => (
-                        <p className="mt-2 text-sm text-red-500" key={error}>
-                          {error}
-                        </p>
-                      ))}
-                  </div>
-                </FormItem>
-              )}
-            />
+  // Close popover on success
+  if (state.message === "success" && open) {
+    setOpen(false);
+  }
 
-            <div className="flex justify-end mt-4">
-              <Button variant="outline" className="text-sm">
-                {isPending ? "Loading" : "Submit"}
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          disabled={disabled}
+        >
+          <ShoppingCart className="h-4 w-4" />
+          <span className="sr-only">Add to cart</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-4" align="end">
+        <div className="space-y-4">
+          {/* Header */}
+          <div>
+            <h4 className="font-semibold text-sm">Add to Cart</h4>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Enter the quantity you want to add
+            </p>
+          </div>
+
+          {/* Form */}
+          <Form {...form}>
+            <NextForm action={dispatch} className="space-y-3">
+              <FormField
+                control={form.control}
+                name="quantity"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs font-medium">
+                      Quantity
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type="number"
+                        min="1"
+                        placeholder="1"
+                        className="h-9 text-sm"
+                        autoFocus
+                      />
+                    </FormControl>
+                    {state.errors?.quantity && (
+                      <p className="text-xs text-destructive mt-1">
+                        {state.errors.quantity[0]}
+                      </p>
+                    )}
+                  </FormItem>
+                )}
+              />
+
+              {/* Submit Button */}
+              <Button
+                type="submit"
+                disabled={isPending}
+                size="sm"
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90 h-9"
+              >
+                {isPending ? (
+                  <>
+                    <div className="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    Adding...
+                  </>
+                ) : (
+                  <>
+                    <ShoppingCart className="mr-2 h-3 w-3" />
+                    Add to Cart
+                  </>
+                )}
               </Button>
-            </div>
-            {state.message && (
-              <p className="mt-2 text-sm text-red-500" key={state.message}>
-                {state.message}
-              </p>
-            )}
-          </NextForm>
-        </Form>
+
+              {/* Error Message */}
+              {state.message && state.message !== "success" && (
+                <p className="text-xs text-destructive">{state.message}</p>
+              )}
+            </NextForm>
+          </Form>
+        </div>
       </PopoverContent>
     </Popover>
   );
 }
 
+// ============================================
+// COMPACT INCREMENT/DECREMENT (For Table)
+// ============================================
 export function RemoveSingleItem({ id }) {
   const removeWithId = decreaseQTY.bind(null, id);
   return (
     <form action={removeWithId}>
-      <button className="text-pink-500 hover:bg-pink-100 dark:hover:bg-zinc-700 p-1 rounded">
-        <Minus className="w-4 h-4" />
-      </button>
+      <Button
+        type="submit"
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 hover:bg-primary/10 hover:text-primary"
+      >
+        <Minus className="h-3 w-3" />
+        <span className="sr-only">Decrease quantity</span>
+      </Button>
     </form>
   );
 }
@@ -110,20 +162,34 @@ export function AddSingleItem({ id }) {
   const addWithId = increaseQTY.bind(null, id);
   return (
     <NextForm action={addWithId}>
-      <button className="text-pink-500 hover:bg-pink-100 dark:hover:bg-zinc-700 p-1 rounded">
-        <Plus className="w-4 h-4" />
-      </button>
+      <Button
+        type="submit"
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 hover:bg-primary/10 hover:text-primary"
+      >
+        <Plus className="h-3 w-3" />
+        <span className="sr-only">Increase quantity</span>
+      </Button>
     </NextForm>
   );
 }
 
+// ============================================
+// CART PAGE VERSION (Styled buttons)
+// ============================================
 export function AddSingleCartVersion({ id }) {
   const addWithId = increaseQTY.bind(null, id);
   return (
     <NextForm action={addWithId}>
-      <button className="px-2 py-1 text-white bg-pink-500 dark:bg-pink-600 rounded hover:bg-pink-600 dark:hover:bg-pink-700">
-        +
-      </button>
+      <Button
+        type="submit"
+        size="icon"
+        className="h-8 w-8 bg-primary text-primary-foreground hover:bg-primary/90"
+      >
+        <Plus className="h-4 w-4" />
+        <span className="sr-only">Increase quantity</span>
+      </Button>
     </NextForm>
   );
 }
@@ -132,9 +198,14 @@ export function RemoveSingleCartVersion({ id }) {
   const removeWithId = decreaseQTY.bind(null, id);
   return (
     <NextForm action={removeWithId}>
-      <button className="px-2 py-1 text-white bg-pink-500 dark:bg-pink-600 rounded hover:bg-pink-600 dark:hover:bg-pink-700">
-        -
-      </button>
+      <Button
+        type="submit"
+        size="icon"
+        className="h-8 w-8 bg-primary text-primary-foreground hover:bg-primary/90"
+      >
+        <Minus className="h-4 w-4" />
+        <span className="sr-only">Decrease quantity</span>
+      </Button>
     </NextForm>
   );
 }
@@ -143,7 +214,72 @@ export function RemoveCartItem({ id }) {
   const removeWithId = removeCartItem.bind(null, id);
   return (
     <NextForm action={removeWithId}>
-      <button className="text-red-500 hover:underline">Remove</button>
+      <Button
+        type="submit"
+        variant="ghost"
+        size="sm"
+        className="h-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+      >
+        <Trash2 className="mr-2 h-3 w-3" />
+        Remove
+      </Button>
+    </NextForm>
+  );
+}
+
+// ============================================
+// MOBILE-OPTIMIZED CART ITEM (For Cart Page)
+// ============================================
+export function CartItemControls({ id, quantity }) {
+  return (
+    <div className="flex items-center gap-2">
+      {/* Quantity Controls */}
+      <div className="flex items-center gap-1 border rounded-lg px-2 py-1 bg-muted/50">
+        <RemoveSingleCartVersion id={id} />
+        <span className="px-3 text-sm font-semibold text-primary min-w-[2ch] text-center">
+          {quantity}
+        </span>
+        <AddSingleCartVersion id={id} />
+      </div>
+
+      {/* Remove Button */}
+      <RemoveCartItem id={id} />
+    </div>
+  );
+}
+
+// ============================================
+// ALTERNATIVE: INLINE ADD TO CART (No Popup)
+// ============================================
+export function InlineAddToCart({ id }) {
+  const initialState = { message: "", errors: {} };
+  const add = addToCart.bind(null, id);
+  const [state, dispatch, isPending] = useActionState(add, initialState);
+
+  return (
+    <NextForm action={dispatch} className="flex items-center gap-2">
+      <Input
+        type="number"
+        name="quantity"
+        defaultValue="1"
+        min="1"
+        className="h-8 w-16 text-sm"
+      />
+      <Button
+        type="submit"
+        disabled={isPending}
+        size="sm"
+        className="h-8 bg-primary text-primary-foreground hover:bg-primary/90"
+      >
+        {isPending ? (
+          <div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        ) : (
+          <ShoppingCart className="h-4 w-4" />
+        )}
+      </Button>
+      {state.errors?.quantity && (
+        <p className="text-xs text-destructive">{state.errors.quantity[0]}</p>
+      )}
     </NextForm>
   );
 }

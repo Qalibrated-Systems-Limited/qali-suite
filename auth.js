@@ -1,4 +1,3 @@
-import { compare } from "bcrypt";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
@@ -33,10 +32,10 @@ export const { auth, signIn, signOut } = NextAuth({
 
           if (passwordsMatch)
             return {
-              ...user,
               id: user._id.toString(),
               name: user.name,
               role: user.role,
+              email: user.email,
             };
         }
         return null;

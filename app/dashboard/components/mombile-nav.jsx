@@ -10,7 +10,7 @@ import { useState } from "react";
 import MainMenu from "./main-menu";
 import MenuTitle from "./menu-title";
 
-function MobileNav({ name }) {
+function MobileNav({ name, isOpen }) {
   const [mobileMenuOpen, setOpen] = useState(false);
   const isDeskTop = useMediaQuery("(min-width: 768px)");
   return (

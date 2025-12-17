@@ -15,6 +15,8 @@ import BridgeConfig from "../models/bridgeConfigs";
 import StockTransaction from "../models/stockTransaction";
 import { format } from "date-fns";
 import DeliveryNote from "../models/dnote";
+import { StockRequest } from "../models/requests";
+import { request } from "http";
 
 dbConnect();
 const ITEMS_PER_PAGE = 20;
@@ -418,71 +420,402 @@ export const searchAccounts = async (searchTerm, page = 1) => {
 
 //Products or stock queries
 
-export const fetchStockPages = async (searchTerm) => {
+export const fetchStockPages = async (searchTerm, filters = {}) => {
+  const { category, quantity } = filters;
+
+  // Build filter conditions
+  let additionalFilters = {};
+
+  // Category filter
+  if (category) {
+    additionalFilters.category = category;
+  }
+
+  // Quantity/Stock level filter
+  if (quantity) {
+    switch (quantity) {
+      case "in-stock":
+        additionalFilters.stock = { $gte: 10 };
+        break;
+      case "low-stock":
+        additionalFilters.stock = { $gte: 1, $lte: 9 };
+        break;
+      case "out-of-stock":
+        additionalFilters.stock = 0;
+        break;
+    }
+  }
+
   const transactionSearchStage = {
-    $search: {
-      index: "default", // The name of your full-text search index
-      text: {
-        query: searchTerm,
-        path: {
-          wildcard: "*",
+    $match: {
+      $and: [
+        additionalFilters,
+        {
+          $or: [
+            { name: { $regex: searchTerm, $options: "i" } },
+            { SKU: { $regex: searchTerm, $options: "i" } },
+          ],
         },
-      },
+      ],
     },
+  };
+
+  const baseFilterStage = {
+    $match: additionalFilters,
   };
 
   const countStage = {
-    $count: "totalRecords", // This stage returns the total number of records matching the search query
+    $count: "totalRecords",
   };
 
-  let pipeline = [countStage];
+  let pipeline = [baseFilterStage, countStage];
+
   if (searchTerm && searchTerm.length > 0) {
     pipeline = [transactionSearchStage, countStage];
   }
+
   const result = await Product.aggregate(pipeline);
-  let count = 1;
+
+  let count = 0;
   if (result && result.length > 0) {
     count = result[0].totalRecords;
   }
+
   const noOfPages = Math.ceil(Number(count) / ITEMS_PER_PAGE);
-  console.log(result);
 
   return noOfPages;
 };
-export const searchStock = async (searchTerm, page = 1) => {
+
+export const searchStock = async (searchTerm, page = 1, filters = {}) => {
+  const { category, quantity } = filters;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
+  // Build filter conditions
+  let additionalFilters = {};
+
+  // Category filter
+  if (category) {
+    additionalFilters.category = category;
+  }
+
+  // Quantity/Stock level filter
+  if (quantity) {
+    switch (quantity) {
+      case "in-stock":
+        additionalFilters.stock = { $gte: 10 };
+        break;
+      case "low-stock":
+        additionalFilters.stock = { $gte: 1, $lte: 9 };
+        break;
+      case "out-of-stock":
+        additionalFilters.stock = 0;
+        break;
+    }
+  }
+
   const searchStage = {
-    $search: {
-      index: "searchStockIndex", // Name of the atlas search index
-      text: {
-        query: searchTerm,
-        path: {
-          wildcard: "*",
+    $match: {
+      $and: [
+        additionalFilters,
+        {
+          $or: [
+            { name: { $regex: searchTerm, $options: "i" } },
+            { SKU: { $regex: searchTerm, $options: "i" } },
+          ],
         },
-      },
+      ],
     },
   };
 
-  const paginationStage = [
-    { $skip: skipRecords }, // Skip records for pagination
-    { $limit: ITEMS_PER_PAGE }, // Limit results per page
-  ];
+  const baseFilterStage = {
+    $match: additionalFilters,
+  };
+
+  const paginationStage = [{ $skip: skipRecords }, { $limit: ITEMS_PER_PAGE }];
 
   const sortStage = { $sort: { createdAt: -1 } };
 
-  let pipeline = [sortStage, ...paginationStage];
+  let pipeline = [baseFilterStage, sortStage, ...paginationStage];
+
   if (searchTerm && searchTerm.length > 0) {
-    pipeline = [searchStage, ...paginationStage];
+    pipeline = [searchStage, sortStage, ...paginationStage];
   }
 
   let result = await Product.aggregate(pipeline);
   result = result.map((res) => {
     return { ...res, _id: res._id.toString() };
   });
+
   return result;
 };
 
+export const fetchRequestPages = async (
+  searchTerm,
+  userId,
+  userRole,
+  filters = {}
+) => {
+  const { status, priority, customer, startDate, endDate } = filters;
+
+  // Build role-based filter
+  let roleFilter = {};
+
+  if (userRole === "admin" || userRole === "manager") {
+    // Can see all requests
+    roleFilter = {};
+  } else if (userRole === "Store Manager" || userRole === "storekeeper") {
+    // Can see approved requests (for fulfillment) OR their own requests
+    roleFilter = {
+      $or: [
+        { status: { $in: ["approved", "fulfilled", "partially_fulfilled"] } },
+        { "requester.id": userId },
+      ],
+    };
+  } else {
+    // Regular users can only see their own requests
+    roleFilter = { "requester.id": userId };
+  }
+
+  // Build additional filters
+  let additionalFilters = {};
+
+  // Status filter
+  if (status && status !== "all") {
+    additionalFilters.status = status;
+  }
+
+  // Priority filter
+  if (priority && priority !== "all") {
+    additionalFilters.priority = priority;
+  }
+
+  // Customer filter
+  if (customer && customer !== "all") {
+    additionalFilters.customer = { $regex: customer, $options: "i" };
+  }
+
+  // Date range filter
+  if (startDate || endDate) {
+    additionalFilters.createdAt = {};
+    if (startDate) {
+      additionalFilters.createdAt.$gte = new Date(startDate);
+    }
+    if (endDate) {
+      // Add one day to include the end date
+      const endDateTime = new Date(endDate);
+      endDateTime.setDate(endDateTime.getDate() + 1);
+      additionalFilters.createdAt.$lt = endDateTime;
+    }
+  }
+
+  // Combine role filter with additional filters
+  const combinedFilter = {
+    ...additionalFilters,
+  };
+
+  const transactionSearchStage = {
+    $match: {
+      $and: [
+        roleFilter, // Apply role filter
+        combinedFilter, // Apply other filters
+        {
+          $or: [
+            { "requester.name": { $regex: searchTerm, $options: "i" } },
+            { "requester.department": { $regex: searchTerm, $options: "i" } },
+            { requestNumber: { $regex: searchTerm, $options: "i" } },
+            { customer: { $regex: searchTerm, $options: "i" } },
+          ],
+        },
+      ],
+    },
+  };
+
+  // If no search term, combine role and additional filters
+  const baseFilterStage = {
+    $match: {
+      $and: [roleFilter, combinedFilter],
+    },
+  };
+
+  const countStage = {
+    $count: "totalRecords",
+  };
+
+  let pipeline = [baseFilterStage, countStage];
+
+  if (searchTerm && searchTerm.length > 0) {
+    pipeline = [transactionSearchStage, countStage];
+  }
+
+  const result = await StockRequest.aggregate(pipeline);
+
+  let count = 0;
+  if (result && result.length > 0) {
+    count = result[0].totalRecords;
+  }
+
+  const noOfPages = Math.ceil(Number(count) / ITEMS_PER_PAGE);
+
+  return noOfPages;
+};
+
+export const searchRequests = async (
+  searchTerm,
+  page = 1,
+  userId,
+  userRole,
+  filters = {}
+) => {
+  const { status, priority, customer, startDate, endDate } = filters;
+
+  // Build role-based filter
+  let roleFilter = {};
+
+  if (userRole === "admin" || userRole === "manager") {
+    // Admins and managers can see all requests
+    roleFilter = {};
+  } else if (userRole === "Store Manager" || userRole === "storekeeper") {
+    // Store managers can see:
+    // 1. Approved requests (ready for fulfillment)
+    // 2. Their own requests (any status)
+    roleFilter = {
+      $or: [
+        { status: { $in: ["approved", "fulfilled", "partially_fulfilled"] } },
+        { "requester.id": userId },
+      ],
+    };
+  } else {
+    // Regular users (requesters) can only see their own requests
+    roleFilter = { "requester.id": userId };
+  }
+
+  // Build additional filters
+  let additionalFilters = {};
+
+  // Status filter
+  if (status && status !== "all") {
+    additionalFilters.status = status;
+  }
+
+  // Priority filter
+  if (priority && priority !== "all") {
+    additionalFilters.priority = priority;
+  }
+
+  // Customer filter
+  if (customer && customer !== "all") {
+    additionalFilters.customer = { $regex: customer, $options: "i" };
+  }
+
+  // Date range filter
+  if (startDate || endDate) {
+    additionalFilters.createdAt = {};
+    if (startDate) {
+      additionalFilters.createdAt.$gte = new Date(startDate);
+    }
+    if (endDate) {
+      // Add one day to include the end date
+      const endDateTime = new Date(endDate);
+      endDateTime.setDate(endDateTime.getDate() + 1);
+      additionalFilters.createdAt.$lt = endDateTime;
+    }
+  }
+
+  const skipRecords = (page - 1) * ITEMS_PER_PAGE;
+
+  // Combine role filter with additional filters
+  const combinedFilter = {
+    ...additionalFilters,
+  };
+
+  const searchStage = {
+    $match: {
+      $and: [
+        roleFilter, // Apply role filter first
+        combinedFilter, // Apply other filters
+        {
+          $or: [
+            { "requester.name": { $regex: searchTerm, $options: "i" } },
+            { "requester.department": { $regex: searchTerm, $options: "i" } },
+            { requestNumber: { $regex: searchTerm, $options: "i" } },
+            { customer: { $regex: searchTerm, $options: "i" } },
+          ],
+        },
+      ],
+    },
+  };
+
+  // If no search term, combine role and additional filters
+  const baseFilterStage = {
+    $match: {
+      $and: [roleFilter, combinedFilter],
+    },
+  };
+
+  const paginationStage = [{ $skip: skipRecords }, { $limit: ITEMS_PER_PAGE }];
+
+  const sortStage = { $sort: { createdAt: -1 } };
+
+  let pipeline = [baseFilterStage, sortStage, ...paginationStage];
+
+  if (searchTerm && searchTerm.length > 0) {
+    pipeline = [searchStage, sortStage, ...paginationStage];
+  }
+
+  let result = await StockRequest.aggregate(pipeline);
+
+  // Transform result for client consumption
+  result = result.map((res) => {
+    const approvalHistory = res.approvalHistory.map((entry) => {
+      return {
+        ...entry,
+        timestamp: entry.timestamp ? entry.timestamp.toISOString() : null,
+        _id: entry._id.toString(),
+      };
+    });
+    console.log(approvalHistory);
+    const items = res.items.map((item) => {
+      return {
+        ...item,
+        _id: item._id.toString(),
+        productId: item.productId.toString(),
+      };
+    });
+
+    const approver = {
+      ...res.approver,
+      approvedAt: res.approver?.approvedAt
+        ? res.approver.approvedAt.toISOString()
+        : null,
+    };
+
+    return {
+      ...res,
+      items: items,
+      approver: approver,
+      approvalHistory: approvalHistory,
+
+      _id: res._id.toString(),
+      createdAt: res.createdAt.toISOString(),
+      updatedAt: res.updatedAt.toISOString(),
+      requiredByDate: res.requiredByDate
+        ? res.requiredByDate.toISOString()
+        : null,
+      // Handle optional dates
+      "approver.approvedAt": res.approver?.approvedAt
+        ? res.approver.approvedAt.toISOString()
+        : null,
+      "storekeeper.fulfilledAt": res.storekeeper?.fulfilledAt
+        ? res.storekeeper.fulfilledAt.toISOString()
+        : null,
+      rejectedAt: res.rejectedAt ? res.rejectedAt.toISOString() : null,
+      cancelledAt: res.cancelledAt ? res.cancelledAt.toISOString() : null,
+    };
+  });
+  console.log(result);
+
+  return result;
+};
 export const extractStock = async () => {
   const sortStage = { $sort: { category: 1 } };
 
@@ -1292,7 +1625,7 @@ export const fetchStockData = async () => {
       quantity: item.stock.$numberInt || item.stock,
       SKU: item.SKU,
       price: item.price,
-      unit :item.unit
+      unit: item.unit,
     });
     return acc;
   }, {});

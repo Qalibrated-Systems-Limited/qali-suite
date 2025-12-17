@@ -1,216 +1,403 @@
 "use client";
-import { Button } from "../../../../../components/ui/button";
+
+import { useActionState } from "react";
+import NextForm from "next/form";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
-} from "../../../../../components/ui/card";
+} from "@/components/ui/card";
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
-} from "../../../../../components/ui/form";
-import { Input } from "../../../../../components/ui/input";
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../../../../../components/ui/select";
+} from "@/components/ui/select";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useActionState } from "react";
-import NextForm from "next/form";
-
 import { useForm } from "react-hook-form";
-import { userUpdateForm } from "../../../../mongodb/validators";
+import { z } from "zod";
+import { updateUser } from "@/app/mongodb/user-actions";
+import { AlertCircle, Loader2, Save, X, Mail } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { userDepartments } from "@/lib/utils";
 
-import { updateUser } from "../../../../mongodb/actions";
-import clsx from "clsx";
+const userUpdateSchema = z.object({
+  name: z.string().min(1, "Name is required").max(50),
+  email: z.string().email("Invalid email address"),
+  role: z.enum(["Admin", "Store Manager", "User", "Viewer"]),
+  department: z.string().min(1, "Department is required"),
+  status: z.enum(["Active", "Inactive"]),
+});
 
-export default function UpdateUserForm({ account }) {
+const DEPARTMENTS = userDepartments;
+
+export function EditUserForm({ user }) {
+  const router = useRouter();
   const initialState = { message: "", errors: {} };
-
-  const updateWithId = updateUser.bind(null, account._id.toString());
+  const updateWithId = updateUser.bind(null, user._id);
   const [state, dispatch, isPending] = useActionState(
     updateWithId,
     initialState
   );
 
   const form = useForm({
-    resolver: zodResolver(userUpdateForm),
+    resolver: zodResolver(userUpdateSchema),
     defaultValues: {
-      name: account.name,
-      email: account.email,
-      role: account.role ?? "",
-      status: account.status,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      department: user.department,
+      status: user.status,
     },
   });
 
+  const handleCancel = () => {
+    router.push("/dashboard/users");
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return "N/A";
+    return new Date(dateString).toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   return (
-    <>
-      <Card className="w-full ">
-        <CardHeader>
-          <CardTitle>Update user</CardTitle>
+    <div className="max-w-4xl mx-auto py-8">
+      <Card className="bg-card border-border">
+        <CardHeader className="space-y-1 border-b border-border pb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-2xl font-bold text-foreground">
+                Edit User Account
+              </CardTitle>
+              <CardDescription className="text-muted-foreground">
+                Update user information and permissions
+              </CardDescription>
+            </div>
+            <div className="px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-md">
+              <p className="text-xs font-mono text-blue-600 dark:text-blue-400">
+                {user.email}
+              </p>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent>
+
+        <CardContent className="pt-6">
           <Form {...form}>
-            <NextForm action={dispatch} className="flex flex-col gap-4">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Name</FormLabel>
-                    <FormControl>
-                      <Input {...field} type="text" />
-                    </FormControl>
-                    <div id="name-error" aria-live="polite" aria-atomic="true">
-                      {state.errors?.name &&
-                        state.errors.name.map((error) => (
-                          <p className="mt-2 text-sm text-red-500" key={error}>
-                            {error}
-                          </p>
-                        ))}
-                    </div>
-                  </FormItem>
-                )}
-              />
+            <NextForm action={dispatch} className="space-y-8">
+              {/* Error Alert */}
+              {state.message && (
+                <Alert
+                  variant="destructive"
+                  className="bg-red-500/10 border-red-500/20"
+                >
+                  <AlertCircle className="h-4 w-4 text-g-600 dark:text-red-400" />
+                  <AlertDescription className="text-red-600 dark:text-red-400">
+                    {state.message}
+                  </AlertDescription>
+                </Alert>
+              )}
 
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input {...field} type="text" />
-                    </FormControl>
-                    <div id="email-error" aria-live="polite" aria-atomic="true">
-                      {state.errors?.email &&
-                        state.errors.email.map((error) => (
-                          <p className="mt-2 text-sm text-red-500" key={error}>
-                            {error}
-                          </p>
-                        ))}
-                    </div>
-                  </FormItem>
-                )}
-              />
+              {/* Account Info */}
+              <div className="p-4 bg-muted/50 rounded-lg border border-border space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">
+                    Account created:
+                  </span>
+                  <span className="text-foreground font-medium">
+                    {formatDate(user.createdAt)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">Last updated:</span>
+                  <span className="text-foreground font-medium">
+                    {formatDate(user.updatedAt)}
+                  </span>
+                </div>
+              </div>
 
-              <FormField
-                control={form.control}
-                name="role"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel> Role</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
+              {/* Personal Information Section */}
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground mb-4">
+                    Personal Information
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Name */}
+                    <FormField
+                      control={form.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-foreground font-medium">
+                            Full Name <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              className="bg-background border-border text-foreground"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs text-muted-foreground">
+                            User's full legal name
+                          </FormDescription>
+                          {state.errors?.name && (
+                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                              {state.errors.name[0]}
+                            </p>
+                          )}
+                        </FormItem>
+                      )}
+                    />
+
+                    {/* Email */}
+                    <FormField
+                      control={form.control}
+                      name="email"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-foreground font-medium">
+                            Email Address{" "}
+                            <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <FormControl>
+                            <div className="relative">
+                              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                              <Input
+                                type="email"
+                                className="bg-background border-border text-foreground pl-10"
+                                {...field}
+                              />
+                            </div>
+                          </FormControl>
+                          <FormDescription className="text-xs text-muted-foreground">
+                            Used for login and notifications
+                          </FormDescription>
+                          {state.errors?.email && (
+                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                              {state.errors.email[0]}
+                            </p>
+                          )}
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+
+                {/* Role & Department Section */}
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground mb-4">
+                    Role & Department
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Role */}
+                    <FormField
+                      control={form.control}
                       name="role"
-                      defaultValue={account.role}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select role" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem key={"1"} value="Operator">
-                          Operator
-                        </SelectItem>
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-foreground font-medium">
+                            Role <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <Select
+                            onValueChange={field.onChange}
+                            defaultValue={user.role}
+                            name="role"
+                          >
+                            <FormControl>
+                              <SelectTrigger className="bg-background border-border text-foreground">
+                                <SelectValue placeholder="Select a role" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent className="bg-card border-border">
+                              <SelectItem
+                                value="Viewer"
+                                className="text-foreground"
+                              >
+                                Viewer - View only access
+                              </SelectItem>
+                              <SelectItem
+                                value="User"
+                                className="text-foreground"
+                              >
+                                User - Standard user access
+                              </SelectItem>
+                              <SelectItem
+                                value="Store Manager"
+                                className="text-foreground"
+                              >
+                                Store Manager - Manage inventory
+                              </SelectItem>
+                              <SelectItem
+                                value="Admin"
+                                className="text-foreground"
+                              >
+                                Admin - Full system access
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription className="text-xs text-muted-foreground">
+                            Determines user permissions
+                          </FormDescription>
+                          {state.errors?.role && (
+                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                              {state.errors.role[0]}
+                            </p>
+                          )}
+                        </FormItem>
+                      )}
+                    />
 
-                        <SelectItem key={"2"} value="Admin">
-                          Admin
-                        </SelectItem>
-                        <SelectItem key="3" value="User">
-                          User
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {/* Department */}
+                    <FormField
+                      control={form.control}
+                      name="department"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-foreground font-medium">
+                            Department <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <Select
+                            onValueChange={field.onChange}
+                            defaultValue={user.department}
+                            name="department"
+                          >
+                            <FormControl>
+                              <SelectTrigger className="bg-background border-border text-foreground">
+                                <SelectValue placeholder="Select a department" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent className="bg-card border-border">
+                              {DEPARTMENTS.map((dept) => (
+                                <SelectItem
+                                  key={dept}
+                                  value={dept}
+                                  className="text-foreground"
+                                >
+                                  {dept}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormDescription className="text-xs text-muted-foreground">
+                            User's department or team
+                          </FormDescription>
+                          {state.errors?.department && (
+                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                              {state.errors.department[0]}
+                            </p>
+                          )}
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
 
-                    <div
-                      id="accountType-error"
-                      aria-live="polite"
-                      aria-atomic="true"
-                    >
-                      {state.errors?.role &&
-                        state.errors.role.map((error) => (
-                          <p className="mt-2 text-sm text-red-500" key={error}>
-                            {error}
+                {/* Account Status Section */}
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground mb-4">
+                    Account Status
+                  </h3>
+                  <FormField
+                    control={form.control}
+                    name="status"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-foreground font-medium">
+                          Status <span className="text-red-500">*</span>
+                        </FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          defaultValue={user.status}
+                          name="status"
+                        >
+                          <FormControl>
+                            <SelectTrigger className="bg-background border-border text-foreground w-full md:w-[300px]">
+                              <SelectValue placeholder="Select status" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent className="bg-card border-border">
+                            <SelectItem
+                              value="Active"
+                              className="text-foreground"
+                            >
+                              Active - User can login
+                            </SelectItem>
+                            <SelectItem
+                              value="Inactive"
+                              className="text-foreground"
+                            >
+                              Inactive - User cannot login
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormDescription className="text-xs text-muted-foreground">
+                          Controls whether user can access the system
+                        </FormDescription>
+                        {state.errors?.status && (
+                          <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                            {state.errors.status[0]}
                           </p>
-                        ))}
-                    </div>
-                  </FormItem>
-                )}
-              />
+                        )}
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
 
-              <FormField
-                control={form.control}
-                name="status"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel> Status</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      name="status"
-                      defaultValue={account.status}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Change status" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem key={"1"} value="Active">
-                          Active
-                        </SelectItem>
-
-                        <SelectItem key={"2"} value="Inactive">
-                          Inactive
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    <div
-                      id="accountType-error"
-                      aria-live="polite"
-                      aria-atomic="true"
-                    >
-                      {state.errors?.status &&
-                        state.errors.status.map((error) => (
-                          <p className="mt-2 text-sm text-red-500" key={error}>
-                            {error}
-                          </p>
-                        ))}
-                    </div>
-                  </FormItem>
-                )}
-              />
-              <CreateButton isPending={isPending} />
+              {/* Form Actions */}
+              <div className="flex items-center justify-end gap-3 pt-6 border-t border-border">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-border text-foreground hover:bg-accent"
+                  onClick={handleCancel}
+                  disabled={isPending}
+                >
+                  <X className="mr-2 h-4 w-4" />
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  className="bg-yellow-500 hover:bg-yellow-600 text-black font-medium"
+                  disabled={isPending}
+                >
+                  {isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-2 h-4 w-4" />
+                      Update User
+                    </>
+                  )}
+                </Button>
+              </div>
             </NextForm>
           </Form>
         </CardContent>
-        {/* <CardFooter>
-          <small>Contact your admin if new</small>
-        </CardFooter> */}
       </Card>
-    </>
-  );
-}
-
-function CreateButton({ isPending }) {
-  return (
-    <Button
-      aria-disabled={isPending}
-      className={clsx({
-        "bg-pink-200 ": isPending,
-        "bg-primary": !isPending,
-      })}
-    >
-      {isPending ? "Submitting" : "Update user"}
-    </Button>
+    </div>
   );
 }

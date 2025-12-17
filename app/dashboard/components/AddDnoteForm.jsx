@@ -34,11 +34,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../../components/ui/select";
+import { useSearchParams } from "next/navigation";
 
 const reasons = ["Selling", "Borrrowing", "Giving out for tests "];
 
 export function CreateDNoteForm({ customers = [], technicians = [] }) {
   const initialState = { message: "", errors: {} };
+
+  const searchParams = useSearchParams();
+
+  const action = searchParams.get("action") || "dispatch";
   const [state, dispatch, isPending] = useActionState(addDNote, initialState);
   const form = useForm({
     resolver: zodResolver(deliveryNoteZodSchema),

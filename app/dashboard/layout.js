@@ -1,16 +1,18 @@
 import { auth } from "../../auth";
+// import { AppSidebar } from "./components/app-sidebar";
+// import { SiteHeader } from "@/components/site-header";
 
-import MainMenu from "./components/main-menu";
-import MobileNav from "./components/mombile-nav";
+import { AppSidebar } from "./components/app-sidebar";
 
 export const metadata = {
-  title: "StockVault dashboard",
+  title: "StockVault Dashboard",
   description: "Manage your store",
 };
 
-async function layout({ children }) {
+async function DashboardLayout({ children }) {
   const session = await auth();
   const user = session?.user;
+
   let name = "";
   if (user) {
     name = user.name ?? "";
@@ -18,17 +20,15 @@ async function layout({ children }) {
       name = name.split(" ")[0];
     }
   }
-  return (
-    <div className="md:grid grid-cols-[250px_1fr] h-screen  ">
-      <MainMenu className="hidden md:flex" name={user.name ?? ""} />
-      <MobileNav name={user.name ?? ""} />
 
-      <div className="overflow-auto py-2 px-4">
-        <h1 className="pb-4  ">Welcome back , {name} !</h1>
-        {children}
-      </div>
-    </div>
+  return (
+    <>
+      <AppSidebar
+        user={user}
+        children={<div className=" p-4 md:p-6 lg:p-8">{children}</div>}
+      />
+    </>
   );
 }
 
-export default layout;
+export default DashboardLayout;

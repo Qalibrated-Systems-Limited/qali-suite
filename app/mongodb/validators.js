@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { roles } from "../utils/roles";
 import { units } from "../utils/units";
+import {
+  departments,
+  priority,
+  purposeForItemsRemovalFromStock,
+} from "@/lib/utils";
 
 export const accountForm = z.object({
   name: z.string().max(100).min(4),
@@ -8,6 +13,25 @@ export const accountForm = z.object({
 
   phoneNumber: z.string().min(10).max(12),
   email: z.string().email().optional(),
+});
+
+export const createRequestFromCartSchema = z.object({
+  customer: z.string().min(1, "Customer is required"),
+  purpose: z.enum(purposeForItemsRemovalFromStock, {
+    required_error: "Please select a purpose",
+  }),
+  priority: z.enum(priority, {
+    required_error: "Please select priority",
+  }),
+  department: z.enum(departments, {
+    required_error: "Please select your department",
+  }),
+  requiredByDate: z.string().optional(),
+  notes: z
+    .string()
+    .min(10, "Please provide more details (at least 10 characters)")
+    .max(500),
+  purposeDetails: z.string().optional(),
 });
 
 export const deliveryNoteZodSchema = z.object({
@@ -166,3 +190,5 @@ export const validateInvoiceWithId = (rawData) =>
 export const validateDNote = (rawData) =>
   deliveryNoteZodSchema.safeParse(rawData);
 export const validateDnoteItem = (rawData) => dnoteItemForm.safeParse(rawData);
+export const validateCreateRequestFromCart = (rawData) =>
+  createRequestFromCartSchema.safeParse(rawData);

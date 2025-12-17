@@ -15,9 +15,9 @@ const deliveryNoteSchema = new mongoose.Schema({
   date: { type: Date, default: Date.now },
   reason: String,
 
-  customer: { 
+  customer: {
     name: { type: String, required: true },
-    address: { type: String, required: true },
+    address: { type: String, default: "Nairobi" },
     phone: String,
     id: String,
   },

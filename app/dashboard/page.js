@@ -1,70 +1,101 @@
-import React, { Suspense } from "react";
-import { Card, CardHeader, CardContent } from "../../components/ui/card";
-import { Button } from "../../components/ui/button";
+import { Suspense } from "react";
 
-import SalesTrendComp, {
-  SalesTrendsSkeleton,
-} from "./components/salesTrendsComp";
+import { auth } from "@/auth";
+import { DashboardStatsCards } from "./components/dashboardCardStats";
+import {
+  MovementTrendChart,
+  CategoryDistributionChart,
+  RequestStatusChart,
+  TopProductsChart,
+} from "./components/dashboardCharts";
+import {
+  RecentRequestsCard,
+  RecentMovementsCard,
+  LowStockAlertsCard,
+  OverdueCheckoutsCard,
+} from "./components/dashboardActivityCards";
+import {
+  StatsSkeleton,
+  ChartsSkeleton,
+  ActivitySkeleton,
+  AlertsSkeleton,
+  ChartSkeleton,
+  AlertCardSkeleton,
+} from "./components/dashboardLoadingSkeleton";
+import { MovementAndCatDistroChartsWrapper } from "./components/movementAndCatDistroChartsWrapper";
+import {
+  RequestStatusChartServerComp,
+  TopProductsChartServerComp,
+} from "./components/ChartsServerComponents";
+import { TechnicianDashboard } from "./employee/components/TechnicianDashboard";
 
-import { PlusIcon } from "lucide-react";
-import InvoicesList from "./components/invoices-list"; // Importing the InvoicesList component
-import { InvoiceSkeleton } from "../../components/ui/skeletons";
-import CardWrapper, { TopFourCardsSkeleton } from "./components/cardwrapper";
-import TopSellingProductComp, {
-  TopSellingProductBarsSkeleton,
-} from "./components/topSalesComp";
-import Link from "next/link";
+export default async function DashboardPage() {
+  const session = await auth();
+  const { user } = session;
 
-const page = () => {
+  // Fetch all data in parallel
+
+  const isAdmin = ["Admin", "Store Manager", "Manager"].includes(user?.role);
+  if (!isAdmin) {
+    return <TechnicianDashboard />;
+  }
+
   return (
-    <div className="bg-background text-foreground min-h-screen p-6">
-      <header className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-primary">Dashboard</h1>
-        <Link href={"/dashboard/invoices/create"}>
-          <Button variant="outline">
-            <PlusIcon size={30} className="md:hidden" />
-            <span className="hidden md:block"> Add Invoice</span>
-          </Button>
-        </Link>
-      </header>
-      <Suspense fallback={<TopFourCardsSkeleton />}>
-        <CardWrapper />
+    <div className="flex flex-col gap-6">
+      {/* Welcome Header */}
+      <div className="space-y-1">
+        <h1 className="text-3xl font-bold text-foreground">
+          Welcome back, {user?.name?.split(" ")[0] || "User"}! 👋
+        </h1>
+        <p className="text-muted-foreground">
+          Here's what's happening with your inventory today
+        </p>
+      </div>
+
+      {/* Stats Cards */}
+      <Suspense fallback={<StatsSkeleton />}>
+        <DashboardStatsCards />
       </Suspense>
 
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-        <Card className="bg-card text-card-foreground shadow-lg col-span-2">
-          <CardHeader>
-            <h2 className="text-xl font-bold">Sales Trends</h2>
-          </CardHeader>
-          <CardContent>
-            <Suspense fallback={<SalesTrendsSkeleton />}>
-              <SalesTrendComp />
-            </Suspense>
-          </CardContent>
-        </Card>
-        <Card className="bg-card text-card-foreground shadow-lg">
-          <CardHeader>
-            <h2 className="text-xl font-bold">Recent Invoices</h2>
-          </CardHeader>
-          <CardContent>
-            <Suspense fallback={<InvoiceSkeleton />}>
-              <InvoicesList />
-            </Suspense>
-          </CardContent>
-        </Card>
-        <Card className="bg-card text-card-foreground shadow-lg col-span-3">
-          <CardHeader>
-            <h2 className="text-xl font-bold">Top-Selling Products</h2>
-          </CardHeader>
-          <CardContent>
-            <Suspense fallback={<TopSellingProductBarsSkeleton />}>
-              <TopSellingProductComp />
-            </Suspense>
-          </CardContent>
-        </Card>
-      </section>
+      {/* Charts Row 1 - Movement Trend & Category Distribution */}
+      <Suspense fallback={<ChartsSkeleton />}>
+        <MovementAndCatDistroChartsWrapper />
+      </Suspense>
+
+      {/* Alerts Row - Low Stock & Overdue Checkouts */}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Suspense fallback={<AlertCardSkeleton />}>
+          <LowStockAlertsCard />
+        </Suspense>
+
+        <Suspense fallback={<AlertCardSkeleton />}>
+          <OverdueCheckoutsCard />
+        </Suspense>
+      </div>
+
+      {/* Activity Row - Recent Requests & Movements */}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Suspense fallback={<ChartSkeleton />}>
+          <RecentRequestsCard />
+        </Suspense>
+        <Suspense fallback={<ChartSkeleton />}>
+          <RecentMovementsCard />
+        </Suspense>
+      </div>
+
+      {/* Charts Row 2 - Request Status & Top Products */}
+      <Suspense fallback={<ChartsSkeleton />}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Suspense fallback={<ChartSkeleton />}>
+            <RequestStatusChartServerComp />
+          </Suspense>
+          <Suspense fallback={<ChartSkeleton />}>
+            <TopProductsChartServerComp />
+          </Suspense>
+        </div>
+      </Suspense>
     </div>
   );
-};
-
-export default page;
+}

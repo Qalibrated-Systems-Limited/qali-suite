@@ -1,0 +1,159 @@
+"use client";
+
+import { useState } from "react";
+import { useFormState } from "react-dom";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { escalateCheckout } from "@/app/mongodb/checkout-action";
+import { AlertTriangle, Loader2 } from "lucide-react";
+
+export function EscalateDialog({ checkout, open, onOpenChange }) {
+  const [state, formAction] = useFormState(
+    escalateCheckout.bind(null, checkout._id),
+    {
+      message: "",
+    }
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (formData) => {
+    setIsSubmitting(true);
+    await formAction(formData);
+    setIsSubmitting(false);
+
+    if (state.message === "success") {
+      onOpenChange(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-[#161b22] border-[#30363d] text-gray-100 max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-white flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-red-500" />
+            Escalate Checkout
+          </DialogTitle>
+          <DialogDescription className="text-gray-400">
+            Escalate this overdue checkout to a manager
+          </DialogDescription>
+        </DialogHeader>
+
+        <form action={handleSubmit}>
+          <div className="space-y-4 py-4">
+            {/* Checkout Info */}
+            <div className="space-y-2 p-3 bg-red-500/5 rounded-lg border border-red-500/20">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Product:</span>
+                <span className="font-medium text-white">
+                  {checkout.productSnapshot.name}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Checked Out To:</span>
+                <span className="text-gray-100">
+                  {checkout.checkedOutTo.name}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Days Overdue:</span>
+                <span className="text-red-500 font-medium">
+                  {checkout.daysOverdue} days
+                </span>
+              </div>
+            </div>
+
+            {/* Escalate To Name */}
+            <div className="space-y-2">
+              <Label htmlFor="escalatedToName" className="text-gray-300">
+                Escalate To (Name) <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="escalatedToName"
+                name="escalatedToName"
+                placeholder="Manager name..."
+                required
+                className="bg-[#0d1117] border-[#30363d] text-gray-100 placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
+              />
+            </div>
+
+            {/* Escalate To ID */}
+            <div className="space-y-2">
+              <Label htmlFor="escalatedToId" className="text-gray-300">
+                Escalate To (ID) <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="escalatedToId"
+                name="escalatedToId"
+                placeholder="Manager ID..."
+                required
+                className="bg-[#0d1117] border-[#30363d] text-gray-100 placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
+              />
+            </div>
+
+            {/* Reason */}
+            <div className="space-y-2">
+              <Label htmlFor="reason" className="text-gray-300">
+                Escalation Reason
+              </Label>
+              <Textarea
+                id="reason"
+                name="reason"
+                placeholder="Reason for escalation..."
+                defaultValue={`Item is ${checkout.daysOverdue} days overdue`}
+                className="bg-[#0d1117] border-[#30363d] text-gray-100 placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
+                rows={3}
+              />
+            </div>
+
+            {/* Error Message */}
+            {state.message && state.message !== "success" && (
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                <p className="text-sm text-red-500">{state.message}</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+              className="border-[#30363d] text-gray-300 hover:bg-[#1f2937] hover:text-white"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={isSubmitting}
+              className="bg-red-500 text-white hover:bg-red-600"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Escalating...
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="mr-2 h-4 w-4" />
+                  Escalate
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}

@@ -2,6 +2,7 @@ import "./globals.css";
 import { Poppins } from "next/font/google";
 
 import { cn } from "../lib/utils";
+import { ThemeProvider } from "@/components/Theme-Provider";
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -16,7 +17,16 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className={cn(poppins.className, "dark")}>{children}</body>
+      <body className={cn(poppins.className)}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }

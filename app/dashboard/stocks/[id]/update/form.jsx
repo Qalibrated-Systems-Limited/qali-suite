@@ -3,22 +3,24 @@
 import { useActionState } from "react";
 import NextForm from "next/form";
 import { units } from "../../../../utils/units";
-
 import { Button } from "../../../../../components/ui/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "../../../../../components/ui/card";
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
 } from "../../../../../components/ui/form";
 import { Input } from "../../../../../components/ui/input";
+import { Textarea } from "../../../../../components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -27,18 +29,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../../../../components/ui/select";
+import { Alert, AlertDescription } from "../../../../../components/ui/alert";
 import { zodResolver } from "@hookform/resolvers/zod";
-
 import { useForm } from "react-hook-form";
 import { stockForm } from "../../../../mongodb/validators";
-
 import { updateStock } from "../../../../mongodb/actions";
-import { cn } from "../../../../../lib/utils";
 import { CATEGORIES } from "../../../../utils/productCategories";
+import { AlertCircle, Loader2, Save, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 export default function UpdateStockForm({ stock }) {
+  const router = useRouter();
   const initialState = { message: "", errors: {} };
-
   const updateWithId = updateStock.bind(null, stock._id.toString());
   const [state, dispatch, isPending] = useActionState(
     updateWithId,
@@ -48,285 +50,360 @@ export default function UpdateStockForm({ stock }) {
   const form = useForm({
     resolver: zodResolver(stockForm),
     defaultValues: {
+      name: stock.name,
       SKU: stock.SKU,
       price: stock.price,
       description: stock.description,
       stock: stock.stock,
       category: stock.category,
-
-      name: stock.name,
+      unit: stock.unit,
     },
   });
 
+  const handleCancel = () => {
+    router.push("/dashboard/stocks");
+  };
+
   return (
-    <Card className=" items-center justify-center  md:w-1/2 mx-auto ">
-      <CardHeader>
-        <CardTitle>Update Stock</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Form {...form}>
-          <NextForm action={dispatch} className="flex flex-col gap-4  w-full">
-            <div className="flex flex-col md:flex-row w-full gap-4">
-              <div className="flex-1">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Name</FormLabel>
-                      <FormControl>
-                        <Input {...field} type="text" />
-                      </FormControl>
-                      <div id="ip-error" aria-live="polite" aria-atomic="true">
-                        {state.errors?.name &&
-                          state.errors.name.map((error) => (
-                            <p
-                              className="mt-2 text-sm text-red-500"
-                              key={error}
-                            >
-                              {error}
-                            </p>
-                          ))}
-                      </div>
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="flex-1">
-                <FormField
-                  control={form.control}
-                  name="SKU"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>SKU</FormLabel>
-                      <FormControl>
-                        <Input {...field} type="text" />
-                      </FormControl>
-                      <div id="SKU-error" aria-live="polite" aria-atomic="true">
-                        {state.errors?.SKU &&
-                          state.errors.SKU.map((error) => (
-                            <p
-                              className="mt-2 text-sm text-red-500"
-                              key={error}
-                            >
-                              {error}
-                            </p>
-                          ))}
-                      </div>
-                    </FormItem>
-                  )}
-                />
-              </div>
+    <div className="max-w-4xl mx-auto py-8">
+      <Card className="bg-card border-border">
+        <CardHeader className="space-y-1 border-b border-border pb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-2xl font-bold text-foreground">
+                Update Stock Item
+              </CardTitle>
+              <CardDescription className="text-muted-foreground">
+                Modify product details and inventory levels
+              </CardDescription>
             </div>
-
-            <div className="flex flex-col md:flex-row gap-4 w-full">
-              <div className="flex-1">
-                <FormField
-                  control={form.control}
-                  name="price"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Price</FormLabel>
-                      <FormControl>
-                        <Input placeholder="" {...field} type="number" />
-                      </FormControl>
-                      <div
-                        id="price-error"
-                        aria-live="polite"
-                        aria-atomic="true"
-                      >
-                        {state.errors?.price &&
-                          state.errors.price.map((error) => (
-                            <p
-                              className="mt-2 text-sm text-red-500"
-                              key={error}
-                            >
-                              {error}
-                            </p>
-                          ))}
-                      </div>
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <div className="flex-1">
-                <FormField
-                  control={form.control}
-                  name="stock"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Stock</FormLabel>
-                      <FormControl>
-                        <Input {...field} type="number" />
-                      </FormControl>
-                      <div
-                        id="stock-error"
-                        aria-live="polite"
-                        aria-atomic="true"
-                      >
-                        {state.errors?.stock &&
-                          state.errors.stock.map((error) => (
-                            <p
-                              className="mt-2 text-sm text-red-500"
-                              key={error}
-                            >
-                              {error}
-                            </p>
-                          ))}
-                      </div>
-                    </FormItem>
-                  )}
-                />
-              </div>
+            <div className="px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-md">
+              <p className="text-xs font-mono text-blue-600 dark:text-blue-400">
+                {stock.SKU}
+              </p>
             </div>
+          </div>
+        </CardHeader>
 
-            <div className="flex-1">
-              <FormField
-                control={form.control}
-                name="unit"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel> Unit</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
+        <CardContent className="pt-6">
+          <Form {...form}>
+            <NextForm action={dispatch} className="space-y-8">
+              {/* Error Alert */}
+              {state.message && (
+                <Alert
+                  variant="destructive"
+                  className="bg-red-500/10 border-red-500/20"
+                >
+                  <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+                  <AlertDescription className="text-red-600 dark:text-red-400">
+                    {state.message}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Basic Information Section */}
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground mb-4">
+                    Basic Information
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Product Name */}
+                    <FormField
+                      control={form.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-foreground font-medium">
+                            Product Name <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              className="bg-background border-border text-foreground"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs text-muted-foreground">
+                            Full product name
+                          </FormDescription>
+                          {state.errors?.name && (
+                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                              {state.errors.name[0]}
+                            </p>
+                          )}
+                        </FormItem>
+                      )}
+                    />
+
+                    {/* SKU */}
+                    <FormField
+                      control={form.control}
+                      name="SKU"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-foreground font-medium">
+                            SKU <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              className="bg-background border-border text-foreground font-mono"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs text-muted-foreground">
+                            Unique stock keeping unit
+                          </FormDescription>
+                          {state.errors?.SKU && (
+                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                              {state.errors.SKU[0]}
+                            </p>
+                          )}
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+
+                {/* Category & Unit Section */}
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground mb-4">
+                    Classification
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Category */}
+                    <FormField
+                      control={form.control}
+                      name="category"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-foreground font-medium">
+                            Category <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <Select
+                            onValueChange={field.onChange}
+                            name="category"
+                            defaultValue={stock.category}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="bg-background border-border text-foreground">
+                                <SelectValue placeholder="Select a category" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent className="bg-card border-border">
+                              <SelectGroup>
+                                {CATEGORIES.map((cat) => (
+                                  <SelectItem
+                                    value={cat.value}
+                                    key={cat.value}
+                                    className="text-foreground focus:bg-accent focus:text-foreground"
+                                  >
+                                    {cat.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription className="text-xs text-muted-foreground">
+                            Product category
+                          </FormDescription>
+                          {state.errors?.category && (
+                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                              {state.errors.category[0]}
+                            </p>
+                          )}
+                        </FormItem>
+                      )}
+                    />
+
+                    {/* Unit */}
+                    <FormField
+                      control={form.control}
                       name="unit"
-                      defaultValue={stock.unit ?? ""}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select unit" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectGroup>
-                          {units.map((cat) => (
-                            <SelectItem value={cat} key={cat}>
-                              {cat}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-foreground font-medium">
+                            Unit <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <Select
+                            onValueChange={field.onChange}
+                            name="unit"
+                            defaultValue={stock.unit ?? ""}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="bg-background border-border text-foreground">
+                                <SelectValue placeholder="Select a unit" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent className="bg-card border-border">
+                              <SelectGroup>
+                                {units.map((unit) => (
+                                  <SelectItem
+                                    value={unit}
+                                    key={unit}
+                                    className="text-foreground focus:bg-accent focus:text-foreground"
+                                  >
+                                    {unit}
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription className="text-xs text-muted-foreground">
+                            Unit of measurement
+                          </FormDescription>
+                          {state.errors?.unit && (
+                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                              {state.errors.unit[0]}
+                            </p>
+                          )}
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
 
-                    <div id="unit-error" aria-live="polite" aria-atomic="true">
-                      {state.errors?.unit &&
-                        state.errors.unit.map((error) => (
-                          <p className="mt-2 text-sm text-red-500" key={error}>
-                            {error}
-                          </p>
-                        ))}
-                    </div>
-                  </FormItem>
-                )}
-              />
-            </div>
+                {/* Pricing & Inventory Section */}
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground mb-4">
+                    Cost & Inventory
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Price */}
+                    <FormField
+                      control={form.control}
+                      name="price"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-foreground font-medium">
+                            Landing cost (KES){" "}
+                            <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <FormControl>
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                                KES
+                              </span>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="bg-background border-border text-foreground pl-14"
+                                {...field}
+                              />
+                            </div>
+                          </FormControl>
+                          <FormDescription className="text-xs text-muted-foreground">
+                            Unit Landing Cost
+                          </FormDescription>
+                          {state.errors?.price && (
+                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                              {state.errors.price[0]}
+                            </p>
+                          )}
+                        </FormItem>
+                      )}
+                    />
 
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <FormField
-                  control={form.control}
-                  name="category"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel> Category</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        name="category"
-                        defaultValue={stock.category}
-                      >
+                    {/* Stock Quantity */}
+                    <FormField
+                      control={form.control}
+                      name="stock"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-foreground font-medium">
+                            Current Stock{" "}
+                            <span className="text-red-500">*</span>
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              min="0"
+                              className="bg-background border-border text-foreground"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription className="text-xs text-muted-foreground">
+                            Quantity in stock
+                          </FormDescription>
+                          {state.errors?.stock && (
+                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                              {state.errors.stock[0]}
+                            </p>
+                          )}
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+
+                {/* Description Section */}
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground mb-4">
+                    Additional Details
+                  </h3>
+                  <FormField
+                    control={form.control}
+                    name="description"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-foreground font-medium">
+                          Description
+                        </FormLabel>
                         <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Select category" />
-                          </SelectTrigger>
+                          <Textarea
+                            placeholder="Enter product description..."
+                            className="bg-background border-border text-foreground min-h-[100px] resize-none"
+                            {...field}
+                          />
                         </FormControl>
-                        <SelectContent>
-                          <SelectGroup>
-                            {CATEGORIES.map((cat) => (
-                              <SelectItem value={cat.value} key={cat.value}>
-                                {cat.name}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-
-                      <div
-                        id="category-error"
-                        aria-live="polite"
-                        aria-atomic="true"
-                      >
-                        {state.errors?.category &&
-                          state.errors.category.map((error) => (
-                            <p
-                              className="mt-2 text-sm text-red-500"
-                              key={error}
-                            >
-                              {error}
-                            </p>
-                          ))}
-                      </div>
-                    </FormItem>
-                  )}
-                />
+                        <FormDescription className="text-xs text-muted-foreground">
+                          Optional product description
+                        </FormDescription>
+                        {state.errors?.description && (
+                          <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                            {state.errors.description[0]}
+                          </p>
+                        )}
+                      </FormItem>
+                    )}
+                  />
+                </div>
               </div>
 
-              <div className="flex-1">
-                <FormField
-                  control={form.control}
-                  name="description"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Description</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="Description"
-                          {...field}
-                          type="text"
-                        />
-                      </FormControl>
-                      <div
-                        id="stock-error"
-                        aria-live="polite"
-                        aria-atomic="true"
-                      >
-                        {state.errors?.description &&
-                          state.errors.description.map((error) => (
-                            <p
-                              className="mt-2 text-sm text-red-500"
-                              key={error}
-                            >
-                              {error}
-                            </p>
-                          ))}
-                      </div>
-                    </FormItem>
+              {/* Form Actions */}
+              <div className="flex items-center justify-end gap-3 pt-6 border-t border-border">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-border text-foreground hover:bg-accent"
+                  onClick={handleCancel}
+                  disabled={isPending}
+                >
+                  <X className="mr-2 h-4 w-4" />
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  className="bg-yellow-500 hover:bg-yellow-600 text-black font-medium"
+                  disabled={isPending}
+                >
+                  {isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-2 h-4 w-4" />
+                      Update Stock
+                    </>
                   )}
-                />
+                </Button>
               </div>
-            </div>
-
-            <UpdateButton isPending={isPending} />
-          </NextForm>
-        </Form>
-      </CardContent>
-      {/* <CardFooter>
-          <small>Contact your admin if new</small>
-        </CardFooter> */}
-    </Card>
-  );
-}
-
-function UpdateButton({ isPending }) {
-  return (
-    <Button
-      aria-disabled={isPending}
-      className={cn("self-end", {
-        "bg-pink-200 ": isPending,
-        "bg-primary": !isPending,
-      })}
-    >
-      {isPending ? "Submitting.." : "Update Stock"}
-    </Button>
+            </NextForm>
+          </Form>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

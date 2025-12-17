@@ -2,19 +2,14 @@
 
 import { useActionState } from "react";
 import { Button } from "../../../../components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "../../../../components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Form,
   FormControl,
   FormField,
   FormItem,
   FormLabel,
-} from "../../../../components/ui/form";
+} from "@/components/ui/form";
 import { Input } from "../../../../components/ui/input";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -33,7 +28,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../../../../components/ui/select";
+} from "@/components/ui/select";
 
 export function CreateInvoiceForm({ customers = [] }) {
   const initialState = { message: "", errors: {} };

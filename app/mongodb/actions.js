@@ -4,6 +4,7 @@ import { renderToFile } from "@react-pdf/renderer";
 import {
   validateAccount,
   validateCartItem,
+  validateCreateRequestFromCart,
   validateDNote,
   validateDnoteItem,
   validateInvoice,
@@ -25,12 +26,18 @@ import User from "../models/user";
 import BridgeConfig from "../models/bridgeConfigs";
 import { toTitle } from "../utils/validators";
 import Product from "../models/product";
+import { generateMovementNo } from "./requests-actions";
 
 import Invoice from "../models/invoice";
 import DeliveryNote from "../models/dnote";
 import Counter from "../models/counter";
 import StockTransaction from "../models/stockTransaction";
+import { StockRequest } from "../models/requests";
 import mongoose from "mongoose";
+import { format } from "date-fns";
+import dbConnect from "../config/dbConnect";
+import { StockMovement } from "../models/stockmovement";
+dbConnect();
 
 export async function logout(params) {
   return await signOut();
@@ -210,15 +217,23 @@ export async function createAccount(state, formData) {
   redirect("/dashboard/customers");
 }
 
-export async function addStock(state, formData) {
-  try {
-    const sesssion = await auth();
-    const user = sesssion && sesssion.user;
-    const rawFormData = Object.fromEntries(formData.entries());
+export async function addStock(prevState, formData) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
+  try {
+    const authSession = await auth();
+    const user = authSession?.user;
+
+    if (!user) {
+      return { message: "Unauthorized", errors: {} };
+    }
+
+    const rawFormData = Object.fromEntries(formData.entries());
     const validatedFields = ValidateStock(rawFormData);
 
     if (!validatedFields.success) {
+      await session.abortTransaction();
       return {
         errors: validatedFields.error.flatten().fieldErrors,
         message: "Missing Fields. Failed to add stock.",
@@ -227,29 +242,192 @@ export async function addStock(state, formData) {
 
     const data = validatedFields.data;
 
-    const result = await Product.create({
-      name: toTitle(data.name),
-      price: data.price,
-      SKU: data.SKU,
-      description: data.description,
-      category: data.category,
-      stock: data.stock,
-      unit: data.unit,
-    });
+    // 1. Create the product
+    const product = await Product.create(
+      [
+        {
+          name: toTitle(data.name),
+          price: data.price,
+          SKU: data.SKU,
+          description: data.description,
+          category: data.category,
+          stock: data.stock,
+          unit: data.unit,
+        },
+      ],
+      { session }
+    );
 
-    const amount = Number(data.stock) * Number(data.price);
+    const createdProduct = product[0];
 
-    if (result) {
-      await StockTransaction.create({
-        SKU: data.SKU,
-        amount: amount,
-        transactionType: "Purchase",
-        quantity: data.stock,
-      });
+    // 2. Create initial stock movement
+    const movementNumber = await generateMovementNo(session);
+    const unitPrice = Number(data.price);
+    const quantity = Number(data.stock);
+    const totalValue = quantity * unitPrice;
+
+    await StockMovement.create(
+      [
+        {
+          movementNumber,
+          productId: createdProduct._id,
+          productSnapshot: {
+            name: createdProduct.name,
+            SKU: createdProduct.SKU,
+            category: createdProduct.category,
+            unit: createdProduct.unit,
+          },
+          movementType: "initial", // Initial stock entry
+          direction: "in",
+          quantity: quantity,
+          previousStock: 0, // New product, previous stock is 0
+          newStock: quantity,
+          unitPrice: unitPrice,
+          totalValue: totalValue,
+          performedBy: {
+            name: user.name,
+            id: user.id,
+            role: user.role,
+          },
+          notes: "Initial stock entry - Product created",
+          reason: "New product added to inventory",
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+    revalidatePath("/dashboard/stocks");
+
+    return {
+      message: "Stock added successfully",
+      errors: {},
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("Add stock error:", error);
+    return {
+      message: "Database error: failed to add stock",
+      errors: {},
+    };
+  } finally {
+    session.endSession();
+  }
+}
+
+// ============================================
+// UPDATE STOCK WITH MOVEMENT TRACKING
+// ============================================
+export async function updateStock(productId, prevState, formData) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const authSession = await auth();
+    const user = authSession?.user;
+
+    if (!user) {
+      await session.abortTransaction();
+      return { message: "Unauthorized", errors: {} };
     }
-  } catch (e) {
-    console.log(e);
-    return { message: "Database error: failed to add stock" };
+
+    const rawFormData = Object.fromEntries(formData.entries());
+    const validatedFields = ValidateStock(rawFormData);
+
+    if (!validatedFields.success) {
+      await session.abortTransaction();
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: "Missing Fields. Failed to update stock.",
+      };
+    }
+
+    const data = validatedFields.data;
+
+    // 1. Get current product
+    const currentProduct = await Product.findById(productId).session(session);
+
+    if (!currentProduct) {
+      await session.abortTransaction();
+      return { message: "Product not found", errors: {} };
+    }
+
+    const oldStock = currentProduct.stock;
+    const newStock = Number(data.stock);
+    const stockDifference = newStock - oldStock;
+
+    // 2. Update product
+    const updatedProduct = await Product.findByIdAndUpdate(
+      productId,
+      {
+        $set: {
+          name: toTitle(data.name),
+          price: data.price,
+          SKU: data.SKU,
+          description: data.description,
+          category: data.category,
+          stock: newStock, // Use $set, not $inc!
+          unit: data.unit,
+        },
+      },
+      {
+        new: true,
+        session,
+        runValidators: true,
+      }
+    );
+
+    // 3. Create stock movement if stock changed
+    if (stockDifference !== 0) {
+      const movementNumber = await generateMovementNo(session);
+      const direction = stockDifference > 0 ? "in" : "out";
+      const quantity = Math.abs(stockDifference);
+      const unitPrice = Number(data.price);
+      const totalValue = quantity * unitPrice;
+
+      await StockMovement.create(
+        [
+          {
+            movementNumber,
+            productId: updatedProduct._id,
+            productSnapshot: {
+              name: updatedProduct.name,
+              SKU: updatedProduct.SKU,
+              category: updatedProduct.category,
+              unit: updatedProduct.unit,
+            },
+            movementType: "adjustment",
+            direction: direction,
+            quantity: quantity,
+            previousStock: oldStock,
+            newStock: newStock,
+            unitPrice: unitPrice,
+            totalValue: totalValue,
+            performedBy: {
+              name: user.name,
+              id: user.id,
+              role: user.role,
+            },
+            notes: "Stock adjustment via product update",
+            reason: `Manual stock ${
+              direction === "in" ? "increase" : "decrease"
+            } from ${oldStock} to ${newStock}`,
+          },
+        ],
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("Update stock error:", error);
+    return {
+      message: "Database error: failed to update stock",
+      errors: {},
+    };
+  } finally {
+    session.endSession();
   }
   revalidatePath("/dashboard/stocks");
   redirect("/dashboard/stocks");
@@ -286,47 +464,47 @@ export async function updateAccount(id, prevState, formData) {
   redirect("/dashboard/customers");
 }
 
-export async function updateStock(id, prevState, formData) {
-  const rawFormData = Object.fromEntries(formData.entries());
+// export async function updateStock(id, prevState, formData) {
+//   const rawFormData = Object.fromEntries(formData.entries());
 
-  try {
-    const validatedFields = ValidateStock(rawFormData);
-    if (!validatedFields.success) {
-      return {
-        errors: validatedFields.error.flatten().fieldErrors,
-        message: "Missing Fields. Failed to update stock.",
-      };
-    }
-    const product = await Product.findById(id);
-    const oldStock = product.stock;
-    if (product) {
-      product.name = toTitle(validatedFields.data.name);
-      product.SKU = validatedFields.data.SKU;
-      product.price = validatedFields.data.price;
-      product.stock = validatedFields.data.stock;
-      product.category = validatedFields.data.category;
-      product.description = validatedFields.data.description;
-      product.unit = validatedFields.data.unit;
-      const result = await product.save();
-      if (result) {
-        const addedProducts = Number(validatedFields.data.stock) - oldStock;
-        if (addedProducts > 0) {
-          const amount = Number(validatedFields.data.price) * addedProducts;
-          await StockTransaction.create({
-            SKU: validatedFields.data.SKU,
-            amount: amount,
-            transactionType: "Purchase",
-            quantity: addedProducts,
-          });
-        }
-      }
-    }
-  } catch (e) {
-    return { message: "Database Error: Failed to Update stock." };
-  }
-  revalidatePath("/dashboard/stocks");
-  redirect("/dashboard/stocks");
-}
+//   try {
+//     const validatedFields = ValidateStock(rawFormData);
+//     if (!validatedFields.success) {
+//       return {
+//         errors: validatedFields.error.flatten().fieldErrors,
+//         message: "Missing Fields. Failed to update stock.",
+//       };
+//     }
+//     const product = await Product.findById(id);
+//     const oldStock = product.stock;
+//     if (product) {
+//       product.name = toTitle(validatedFields.data.name);
+//       product.SKU = validatedFields.data.SKU;
+//       product.price = validatedFields.data.price;
+//       product.stock = validatedFields.data.stock;
+//       product.category = validatedFields.data.category;
+//       product.description = validatedFields.data.description;
+//       product.unit = validatedFields.data.unit;
+//       const result = await product.save();
+//       if (result) {
+//         const addedProducts = Number(validatedFields.data.stock) - oldStock;
+//         if (addedProducts > 0) {
+//           const amount = Number(validatedFields.data.price) * addedProducts;
+//           await StockTransaction.create({
+//             SKU: validatedFields.data.SKU,
+//             amount: amount,
+//             transactionType: "Purchase",
+//             quantity: addedProducts,
+//           });
+//         }
+//       }
+//     }
+//   } catch (e) {
+//     return { message: "Database Error: Failed to Update stock." };
+//   }
+//   revalidatePath("/dashboard/stocks");
+//   redirect("/dashboard/stocks");
+// }
 
 export const deleteAccount = async (id) => {
   try {
@@ -995,4 +1173,169 @@ export async function addDnoteItem(id, state, formData) {
   }
   revalidatePath(`/dashboard/dnotes/${id}`);
   redirect(`/dashboard/dnotes/${id}`);
+}
+
+export async function createRequestFromCart(prevState, formData) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const requestNo = await generateRequestNo();
+    // 1. Validate form data
+    const rawFormData = Object.fromEntries(formData.entries());
+    const validatedFields = validateCreateRequestFromCart(rawFormData);
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        message: "Missing or invalid fields. Please check the form.",
+      };
+    }
+
+    const data = validatedFields.data;
+
+    // 2. Get authenticated user
+    const userSession = await auth();
+    if (!userSession?.user) {
+      return { message: "Unauthorized. Please log in." };
+    }
+
+    const user = userSession.user;
+
+    // 3. Get user with cart
+    const userWithCart = await User.findById(user.id).session(session).lean();
+
+    if (!userWithCart) {
+      return { message: "User not found" };
+    }
+
+    const cart = userWithCart?.cart;
+
+    if (!cart || cart.length === 0) {
+      return { message: "Your cart is empty" };
+    }
+
+    // 4. Verify customer exists
+    const customer = await Account.findById(data.customer)
+      .session(session)
+      .lean();
+
+    if (!customer) {
+      return { message: "Customer not found" };
+    }
+
+    // 5. Build items array for request
+    const requestItems = [];
+    let totalValue = 0;
+
+    for (const cartItem of cart) {
+      // Find product by SKU
+      const product = await Product.findOne({ SKU: cartItem.id })
+        .session(session)
+        .lean();
+
+      if (!product) {
+        await session.abortTransaction();
+        return { message: `Product with SKU ${cartItem.id} not found` };
+      }
+
+      // Check if sufficient stock
+      if (cartItem.quantity > product.stock) {
+        await session.abortTransaction();
+        return {
+          message: `Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${cartItem.quantity}`,
+        };
+      }
+
+      // Calculate value
+      const itemValue = product.price * cartItem.quantity;
+      totalValue += itemValue;
+
+      // Add to request items
+      requestItems.push({
+        productId: product._id,
+        productName: product.name,
+        SKU: product.SKU,
+        currentStock: product.stock,
+        requestedQuantity: cartItem.quantity,
+        unitPrice: product.price,
+        unit: product.unit || "pcs",
+        purpose: data.purpose,
+        purposeDetails: data.purposeDetails || "",
+        notes: "",
+        requiresReturn:
+          data.purpose === "technician_test" ||
+          data.purpose === "customer_demo",
+      });
+    }
+
+    // 6. Create stock request
+    const requestData = {
+      customer: customer.name,
+      requestNumber: requestNo,
+
+      requester: {
+        name: user.name,
+        id: user.id,
+        department: data.department,
+        email: user.email || "",
+        phone: user.phone || "",
+      },
+      items: requestItems,
+      status: "pending",
+      priority: data.priority,
+      notes: data.notes,
+      totalValue: totalValue,
+      requiredByDate: data.requiredByDate
+        ? new Date(data.requiredByDate)
+        : null,
+    };
+
+    const newRequest = await StockRequest.create([requestData], { session });
+
+    // 7. Clear user's cart
+    await User.findByIdAndUpdate(user.id, { $set: { cart: [] } }, { session });
+
+    // 8. Commit transaction
+    await session.commitTransaction();
+
+    // 9. Send notification (optional - implement later)
+    // await sendNotificationToManager(newRequest[0]);
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("Error creating request from cart:", error);
+    return {
+      message: "Failed to create request. Please try again.",
+    };
+  } finally {
+    session.endSession();
+  }
+
+  revalidatePath("/dashboard/requests");
+  redirect("/dashboard/requests");
+}
+
+// ============================================
+// HELPER: Send Notification (Optional)
+// ============================================
+async function sendNotificationToManager(request) {
+  // Implement notification logic here
+  // Could use email, in-app notifications, etc.
+  console.log(`New request ${request.requestNumber} needs approval`);
+}
+
+export async function generateRequestNo() {
+  const today = format(new Date(), "ddMMyy");
+  const counterId = `REQ-${today}`;
+
+  const result = await Counter.findOneAndUpdate(
+    { name: counterId },
+    { $inc: { seq: 1 } },
+    { upsert: true, returnDocument: "after" }
+  );
+
+  const sequence = String(result.seq).padStart(3, "0");
+  const requestNo = `${counterId}-${sequence}`;
+
+  return requestNo;
 }
