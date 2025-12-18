@@ -14,7 +14,6 @@ import {
 import {
   Eye,
   MoreHorizontal,
-  Download,
   Mail,
   XCircle,
   DollarSign,
@@ -23,6 +22,7 @@ import {
   Edit,
 } from "lucide-react";
 import { InvoicePrintDialog } from "./invoicePrintDialog";
+import { DownloadInvoicePDF } from "./Download";
 
 export function InvoicesTable({ invoices }) {
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
@@ -230,16 +230,9 @@ export function InvoicesTable({ invoices }) {
                               </Link>
                             </DropdownMenuItem>
                           )}
-                        <DropdownMenuItem
-                          onClick={() => handlePrintClick(invoice)}
-                          className="cursor-pointer"
-                        >
-                          <Printer className="mr-2 h-4 w-4" />
-                          Print/Preview
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Download className="mr-2 h-4 w-4" />
-                          Download PDF
+
+                        <DropdownMenuItem asChild>
+                          <DownloadInvoicePDF invoice={invoice} />
                         </DropdownMenuItem>
                         <DropdownMenuItem>
                           <Mail className="mr-2 h-4 w-4" />
@@ -311,24 +304,15 @@ export function InvoicesTable({ invoices }) {
                   {invoice.status !== "paid" &&
                     invoice.status !== "cancelled" && (
                       <DropdownMenuItem asChild>
-                        <Link
-                          href={`/dashboard/invoices/${invoice._id}/update`}
-                        >
+                        <Link href={`/dashboard/invoices/${invoice._id}/edit`}>
                           <Edit className="mr-2 h-4 w-4" />
                           Edit Invoice
                         </Link>
                       </DropdownMenuItem>
                     )}
-                  <DropdownMenuItem
-                    onClick={() => handlePrintClick(invoice)}
-                    className="cursor-pointer"
-                  >
-                    <Printer className="mr-2 h-4 w-4" />
-                    Print/Preview
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <Download className="mr-2 h-4 w-4" />
-                    Download PDF
+
+                  <DropdownMenuItem asChild>
+                    <DownloadInvoicePDF invoice={invoice} />
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

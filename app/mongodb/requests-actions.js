@@ -17,6 +17,19 @@ import dbConnect from "../config/dbConnect";
 // 1. APPROVE REQUEST (Manager/Admin only)
 // ============================================
 dbConnect();
+
+async function generateRequestNumber(session) {
+  const today = format(new Date(), "ddMMyy");
+  const counterId = `REQ-${today}`;
+
+  const counter = await Counter.findOneAndUpdate(
+    { name: counterId },
+    { $inc: { seq: 1 } },
+    { upsert: true, new: true, session }
+  );
+
+  return `${counterId}-${String(counter.seq).padStart(3, "0")}`;
+}
 export async function approveRequest(requestId, prevState, formData) {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -55,13 +68,42 @@ export async function approveRequest(requestId, prevState, formData) {
       return { message: "This request cannot be approved" };
     }
 
-    // Approve the request
-    await request.approve({
-      name: user.name,
-      id: user.id,
-      comments,
-      conditions,
+    // ========================================
+    // ✅ NEW: Extract per-item approvals
+    // ========================================
+    const itemApprovals = {};
+    
+    request.items.forEach((item) => {
+      const approvedQty = parseInt(rawFormData[`approved_${item._id}`]);
+      const itemNotes = rawFormData[`notes_${item._id}`] || "";
+      
+      // If manager specified a quantity, use it
+      if (!isNaN(approvedQty)) {
+        itemApprovals[item._id.toString()] = {
+          quantity: Math.max(0, Math.min(approvedQty, item.requestedQuantity)),
+          notes: itemNotes
+        };
+      } else {
+        // Default: approve full requested quantity
+        itemApprovals[item._id.toString()] = {
+          quantity: item.requestedQuantity,
+          notes: itemNotes
+        };
+      }
     });
+
+    // ========================================
+    // Approve the request with item approvals
+    // ========================================
+    await request.approve(
+      {
+        name: user.name,
+        id: user.id,
+        comments,
+        conditions,
+      },
+      itemApprovals  // ✅ Pass item-specific approvals
+    );
 
     await session.commitTransaction();
 
@@ -69,7 +111,7 @@ export async function approveRequest(requestId, prevState, formData) {
   } catch (error) {
     await session.abortTransaction();
     console.error("Error approving request:", error);
-    return { message: "Failed to approve request" };
+    return { message: error.message || "Failed to approve request" };
   } finally {
     session.endSession();
   }
@@ -147,7 +189,7 @@ export async function rejectRequest(requestId, prevState, formData) {
 // 3. FULFILL REQUEST (Store Manager only)
 // ============================================
 
-export async function fulfillRequest(requestId, prevState, formData) {
+export async function fulfillRequestOldVersion(requestId, prevState, formData) {
   let session;
 
   try {
@@ -533,19 +575,6 @@ export async function generateMovementNo(session) {
 
   return `${counterId}-${String(counter.seq).padStart(4, "0")}`;
 }
-// Helper function
-function getPurposeLabel(purpose) {
-  const labels = {
-    sale: "Sale to Customer",
-    technician_test: "Testing by Technician",
-    customer_demo: "Customer Demonstration",
-    internal_use: "Internal Use",
-    installation: "Installation at Site",
-    repair: "Repair/Maintenance",
-    other: "Other Purpose",
-  };
-  return labels[purpose] || purpose;
-}
 
 // ============================================
 // 4. CANCEL REQUEST
@@ -630,4 +659,490 @@ async function generateCheckoutNumber(session) {
   const checkoutNo = `${counterId}-${sequence}`;
 
   return checkoutNo;
+}
+
+export async function createStockRequest(prevState, formData) {
+  let session;
+
+  try {
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    // Get authenticated user
+    const userSession = await auth();
+    if (!userSession?.user) {
+      throw new Error("Unauthorized. Please log in.");
+    }
+
+    const user = userSession.user;
+
+    // Extract form data
+    const customer = formData.get("customer");
+    const priority = formData.get("priority") || "normal";
+    const notes = formData.get("notes") || "";
+    const requiredByDateStr = formData.get("requiredByDate");
+    const itemsJson = formData.get("items");
+
+    // Validate required fields
+    if (!customer || !customer.trim()) {
+      throw new Error("Customer name is required");
+    }
+
+    if (!itemsJson) {
+      throw new Error("No items provided");
+    }
+
+    // Parse items
+    let items;
+    try {
+      items = JSON.parse(itemsJson);
+    } catch (error) {
+      throw new Error("Invalid items data");
+    }
+
+    if (!items || items.length === 0) {
+      throw new Error("Please add at least one item to the request");
+    }
+
+    // Validate and prepare items
+    const validatedItems = [];
+
+    for (const item of items) {
+      // Verify product exists and has sufficient stock
+      const product = await Product.findById(item.productId).session(session);
+
+      if (!product) {
+        throw new Error(`Product ${item.productName} not found`);
+      }
+
+      if (item.requestedQuantity > product.stock) {
+        throw new Error(
+          `Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${item.requestedQuantity}`
+        );
+      }
+
+      validatedItems.push({
+        productId: product._id,
+        productName: product.name,
+        SKU: product.SKU,
+        currentStock: product.stock,
+        requestedQuantity: item.requestedQuantity,
+        unitPrice: product.price || 0,
+        unit: product.unit,
+        purpose: item.purpose,
+        purposeDetails: item.purposeDetails || "",
+        requiresReturn: item.requiresReturn || false,
+        expectedReturnDate: item.expectedReturnDate || null,
+        notes: item.notes || "",
+        approvedQuantity: 0,
+        fulfillments: [],
+        totalFulfilled: 0,
+        remainingToFulfill: 0,
+        fulfillmentStatus: "pending",
+      });
+    }
+
+    // Generate request number
+    const requestNumber = await generateRequestNumber(session);
+
+    // Parse required by date
+    let requiredByDate = null;
+    if (requiredByDateStr) {
+      requiredByDate = new Date(requiredByDateStr);
+    }
+
+    // Create request
+    const newRequest = await StockRequest.create(
+      [
+        {
+          requestNumber,
+          customer: customer.trim(),
+          requester: {
+            name: user.name,
+            id: user.id,
+            department: user.department || "Other",
+            email: user.email || "",
+            phone: user.phone || "",
+          },
+          items: validatedItems,
+          status: "pending",
+          priority,
+          notes,
+          requiredByDate,
+          approvalHistory: [],
+          attachments: [],
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+
+    revalidatePath("/dashboard/requests");
+
+    // Return success with request ID
+    return {
+      message: "success",
+      requestId: newRequest[0]._id.toString(),
+      requestNumber: newRequest[0].requestNumber,
+    };
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error creating stock request:", error);
+    return {
+      message: error.message || "Failed to create stock request",
+    };
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
+  }
+}
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+async function generateMovementNumber(session) {
+  const today = format(new Date(), "ddMMyy");
+  const counterId = `MOV-${today}`;
+
+  const counter = await Counter.findOneAndUpdate(
+    { name: counterId },
+    { $inc: { seq: 1 } },
+    { upsert: true, new: true, session }
+  );
+
+  return `${counterId}-${String(counter.seq).padStart(4, "0")}`;
+}
+
+async function generateDeliveryNoteNumber(session) {
+  const today = format(new Date(), "ddMMyy");
+  const counterId = `DN-${today}`;
+
+  const counter = await Counter.findOneAndUpdate(
+    { name: counterId },
+    { $inc: { seq: 1 } },
+    { upsert: true, new: true, session }
+  );
+
+  return `${counterId}-${String(counter.seq).padStart(3, "0")}`;
+}
+
+function getPurposeLabel(purpose) {
+  const labels = {
+    sale: "Sale to Customer",
+    technician_test: "Testing by Technician",
+    customer_demo: "Customer Demonstration",
+    internal_use: "Internal Use",
+    installation: "Installation at Site",
+    repair: "Repair/Maintenance",
+    other: "Other Purpose",
+  };
+  return labels[purpose] || purpose;
+}
+
+// ============================================
+// FULFILL REQUEST (Transaction-Safe with Fulfillments Array)
+// ============================================
+export async function fulfillRequest(requestId, prevState, formData) {
+  let session;
+
+  try {
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const rawFormData = Object.fromEntries(formData.entries());
+
+    // Get authenticated user
+    const userSession = await auth();
+    if (!userSession?.user) {
+      throw new Error("Unauthorized. Please log in.");
+    }
+
+    const user = userSession.user;
+    const userRole =
+      user.role === "Store Manager"
+        ? "Store Manager"
+        : user.role?.toLowerCase();
+
+    // Check permissions
+    if (userRole !== "Store Manager" && userRole !== "admin") {
+      throw new Error("Only store managers can fulfill requests.");
+    }
+
+    // Get request
+    const request = await StockRequest.findById(requestId).session(session);
+
+    if (!request) {
+      throw new Error("Request not found");
+    }
+
+    // Check if can fulfill
+    if (!request.canFulfill()) {
+      throw new Error("This request cannot be fulfilled");
+    }
+
+    const fulfillmentNotes = rawFormData.comments || "";
+    let itemsFulfilledCount = 0;
+
+    // ========================================
+    // PROCESS EACH ITEM
+    // ========================================
+    for (const item of request.items) {
+      const fulfillQty = parseInt(rawFormData[`item_${item._id}`] || "0");
+
+      if (fulfillQty <= 0) continue; // Skip if no quantity
+
+      itemsFulfilledCount++;
+
+      // ========================================
+      // VALIDATION
+      // ========================================
+      // Calculate current remaining
+      const currentFulfilled = item.fulfillments.reduce(
+        (sum, f) => sum + (f.quantity || 0),
+        0
+      );
+      const target = item.approvedQuantity || item.requestedQuantity;
+      const remaining = target - currentFulfilled;
+
+      if (fulfillQty > remaining) {
+        throw new Error(
+          `Cannot fulfill ${fulfillQty} of ${item.productName}. ` +
+            `Only ${remaining} remaining.`
+        );
+      }
+
+      // Check stock availability
+      const product = await Product.findById(item.productId).session(session);
+
+      if (!product) {
+        throw new Error(`Product ${item.productName} not found`);
+      }
+
+      if (fulfillQty > product.stock) {
+        throw new Error(
+          `Insufficient stock for ${item.productName}. ` +
+            `Available: ${product.stock}, Requested: ${fulfillQty}`
+        );
+      }
+
+      // Get serial numbers
+      const serialNos =
+        rawFormData[`serialNo_${item._id}`]
+          ?.split(",")
+          .map((s) => s.trim())
+          .filter(Boolean) || [];
+
+      // ========================================
+      // DEDUCT STOCK
+      // ========================================
+      await Product.findByIdAndUpdate(
+        item.productId,
+        { $inc: { stock: -fulfillQty } },
+        { session }
+      );
+
+      const updatedProduct = await Product.findById(item.productId).session(
+        session
+      );
+
+      // ========================================
+      // CREATE STOCK MOVEMENT
+      // ========================================
+      const movementNumber = await generateMovementNumber(session);
+      const isSale = item.purpose === "sale";
+
+      const movement = await StockMovement.create(
+        [
+          {
+            movementNumber,
+            productId: item.productId,
+            productSnapshot: {
+              name: item.productName,
+              SKU: item.SKU,
+              unit: item.unit,
+            },
+            direction: "out",
+            movementType: isSale ? "sale" : "issue",
+            quantity: fulfillQty,
+            previousStock: updatedProduct.stock + fulfillQty,
+            newStock: updatedProduct.stock,
+            unitPrice: item.unitPrice,
+            totalValue: fulfillQty * (item.unitPrice || 0),
+            performedBy: {
+              name: user.name,
+              id: user.id,
+              role: userRole,
+            },
+            issuedTo: {
+              name: isSale ? request.customer : request.requester.name,
+              id: isSale ? "" : request.requester.id,
+              department: isSale ? "External" : request.requester.department,
+              purpose: item.purpose,
+            },
+            relatedDocuments: {
+              requestId: request._id,
+            },
+            requiresReturn: !isSale && item.requiresReturn,
+            expectedReturnDate: item.expectedReturnDate,
+            notes: `${getPurposeLabel(item.purpose)} - Request ${
+              request.requestNumber
+            }`,
+          },
+        ],
+        { session }
+      );
+
+      let checkoutId = null;
+      let deliveryNoteId = null;
+
+      // ========================================
+      // HANDLE SALES (Create Delivery Note)
+      // ========================================
+      if (isSale) {
+        const dNoteNumber = await generateDeliveryNoteNumber(session);
+
+        const deliveryNote = await DeliveryNote.create(
+          [
+            {
+              deliveryNumber: dNoteNumber,
+              customer: {
+                name: request.customer || "Unknown",
+                address: "",
+                phone: "",
+              },
+              items: [
+                {
+                  id: product.SKU,
+                  name: product.name,
+                  quantity: fulfillQty,
+                  unitPrice: item.unitPrice || product.price,
+                  unit: product.unit,
+                  type: "Stock",
+                  serialNo: serialNos,
+                },
+              ],
+              reason: "Selling",
+              shouldBeReturned: false,
+              notes: `Sale from request ${request.requestNumber}`,
+              createdBy: {
+                id: user.id,
+                name: user.name,
+              },
+            },
+          ],
+          { session }
+        );
+
+        deliveryNoteId = deliveryNote[0]._id;
+      }
+
+      // ========================================
+      // HANDLE LOANS (Create Checkout)
+      // ========================================
+      if (!isSale && item.requiresReturn) {
+        const checkoutNumber = await generateCheckoutNumber(session);
+        const expectedReturn =
+          item.expectedReturnDate ||
+          new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+        const checkout = await ItemCheckout.create(
+          [
+            {
+              checkoutNumber,
+              productId: item.productId,
+              productSnapshot: {
+                name: item.productName,
+                SKU: item.SKU,
+              },
+              quantity: fulfillQty,
+              serialNo: serialNos.join(", "),
+              checkedOutTo: {
+                name: request.requester.name,
+                id: request.requester.id,
+                department: request.requester.department,
+                email: request.requester.email || "",
+                phone: request.requester.phone || "",
+              },
+              checkedOutBy: {
+                name: user.name,
+                id: user.id,
+                role: userRole,
+              },
+              purpose: item.purpose,
+              purposeDetails:
+                item.purposeDetails || getPurposeLabel(item.purpose),
+              expectedReturnDate: expectedReturn,
+              relatedDocuments: {
+                requestId: request._id,
+                movementId: movement[0]._id,
+              },
+              checkoutNotes: `Checkout from request ${request.requestNumber}`,
+            },
+          ],
+          { session }
+        );
+
+        checkoutId = checkout[0]._id;
+      }
+
+      // ========================================
+      // ADD FULFILLMENT TO REQUEST (Using helper method)
+      // ========================================
+      request.addFulfillment(item._id, {
+        quantity: fulfillQty,
+        serialNumbers: serialNos,
+        fulfilledBy: {
+          name: user.name,
+          id: user.id,
+        },
+        fulfilledAt: new Date(),
+        movementId: movement[0]._id,
+        checkoutId,
+        deliveryNoteId,
+        notes: fulfillmentNotes,
+      });
+    }
+
+    if (itemsFulfilledCount === 0) {
+      throw new Error("Please specify quantities to fulfill");
+    }
+
+    // ========================================
+    // SAVE REQUEST (recalculation already done by addFulfillment)
+    // ========================================
+    await request.save({ session });
+
+    await session.commitTransaction();
+
+    // Revalidate paths
+    revalidatePath("/dashboard/requests");
+    revalidatePath("/dashboard/stocks");
+    revalidatePath("/dashboard/checkouts");
+    revalidatePath("/dashboard/dnotes");
+    revalidatePath("/dashboard/movement");
+
+    return {
+      message: "success",
+      details: `Fulfilled ${itemsFulfilledCount} item(s)`,
+    };
+  } catch (error) {
+    if (session?.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error fulfilling request:", error);
+    return {
+      message: error.message || "Failed to fulfill request",
+    };
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
+  }
 }

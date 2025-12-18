@@ -259,9 +259,9 @@ export const getInvoiceById = async (invoiceId) => {
   return {
     ...invoice,
     _id: invoice._id.toString(),
-    invoiceDate: invoice.invoiceDate.toISOString(),
+    invoiceDate: invoice.invoiceDate?.toISOString(),
     dueDate: invoice.dueDate?.toISOString() || null,
-    createdAt: invoice.createdAt.toISOString(),
+    createdAt: invoice.createdAt?.toISOString(),
     updatedAt: invoice.updatedAt?.toISOString() || null,
     // Serialize items array
     items: invoice.items.map((item) => ({

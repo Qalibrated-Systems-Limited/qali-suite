@@ -24,7 +24,7 @@ export function CreateButton({ title = "New", role }) {
       <Link
         href={
           shouldCreateRequest
-            ? "/dashboard/stocks?action=request"
+            ? "/dashboard/requests/create"
             : `${pathname}/create`
         }
       >

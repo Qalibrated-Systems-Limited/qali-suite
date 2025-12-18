@@ -39,10 +39,14 @@ import {
   fulfillRequest,
   cancelRequest,
 } from "@/app/mongodb/requests-actions";
+import { useEffect } from "react";
+import { IconClock } from "@tabler/icons-react";
+import { Progress } from "@/components/ui/progress";
 
 // ============================================
 // 1. APPROVE DIALOG
 // ============================================
+
 export function ApproveDialog({ request, open, onOpenChange }) {
   const initialState = { message: "" };
   const approveWithId = approveRequest.bind(null, request._id);
@@ -51,12 +55,22 @@ export function ApproveDialog({ request, open, onOpenChange }) {
     initialState
   );
 
-  const form = useForm({
-    defaultValues: {
-      comments: "",
-      conditions: "",
-    },
-  });
+  // ✅ NEW: Track approved quantities for each item
+  const [approvedQuantities, setApprovedQuantities] = useState({});
+  const [itemNotes, setItemNotes] = useState({});
+  const [comments, setComments] = useState("");
+  const [conditions, setConditions] = useState("");
+
+  // Initialize with requested quantities
+  useState(() => {
+    if (request && open) {
+      const initialQty = {};
+      request.items.forEach((item) => {
+        initialQty[item._id] = item.requestedQuantity;
+      });
+      setApprovedQuantities(initialQty);
+    }
+  }, [request, open]);
 
   // Close dialog on success
   if (state.message === "success" && open) {
@@ -64,9 +78,46 @@ export function ApproveDialog({ request, open, onOpenChange }) {
     window.location.reload();
   }
 
+  const handleQuantityChange = (itemId, value, maxQuantity) => {
+    const qty = parseInt(value) || 0;
+    setApprovedQuantities((prev) => ({
+      ...prev,
+      [itemId]: Math.min(Math.max(0, qty), maxQuantity),
+    }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    const formData = new FormData();
+    formData.append("comments", comments);
+    formData.append("conditions", conditions);
+
+    // ✅ Add approved quantities for each item
+    request.items.forEach((item) => {
+      const approvedQty =
+        approvedQuantities[item._id] || item.requestedQuantity;
+      formData.append(`approved_${item._id}`, approvedQty);
+      if (itemNotes[item._id]) {
+        formData.append(`notes_${item._id}`, itemNotes[item._id]);
+      }
+    });
+
+    dispatch(formData);
+  };
+
+  const totalRequested = request.items.reduce(
+    (sum, item) => sum + item.requestedQuantity,
+    0
+  );
+  const totalApproving = Object.values(approvedQuantities).reduce(
+    (sum, qty) => sum + (qty || 0),
+    0
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconCheck className="h-5 w-5 text-green-500" />
@@ -104,77 +155,207 @@ export function ApproveDialog({ request, open, onOpenChange }) {
             </CardContent>
           </Card>
 
+          {/* ✅ NEW: Item-by-item approval */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="font-semibold">Approve Items</h4>
+              <Alert className="w-auto">
+                <IconAlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  You can adjust quantities per item
+                </AlertDescription>
+              </Alert>
+            </div>
+
+            {request.items.map((item) => (
+              <Card key={item._id}>
+                <CardContent className="p-4">
+                  <div className="space-y-3">
+                    {/* Item Header */}
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold">{item.productName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          SKU: {item.SKU} • Stock: {item.currentStock}{" "}
+                          {item.unit}
+                        </p>
+                      </div>
+                      <Badge variant="secondary">
+                        Requested: {item.requestedQuantity}
+                      </Badge>
+                    </div>
+
+                    {/* Approval Quantity */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-medium">
+                          Approve Quantity *
+                        </label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max={item.requestedQuantity}
+                          value={
+                            approvedQuantities[item._id] ||
+                            item.requestedQuantity
+                          }
+                          onChange={(e) =>
+                            handleQuantityChange(
+                              item._id,
+                              e.target.value,
+                              item.requestedQuantity
+                            )
+                          }
+                          className="mt-1"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Requested: {item.requestedQuantity} • Stock:{" "}
+                          {item.currentStock}
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-medium">
+                          Item Notes (Optional)
+                        </label>
+                        <Input
+                          type="text"
+                          value={itemNotes[item._id] || ""}
+                          onChange={(e) =>
+                            setItemNotes({
+                              ...itemNotes,
+                              [item._id]: e.target.value,
+                            })
+                          }
+                          placeholder="e.g., 2 units out of stock"
+                          className="mt-1"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Quick Actions */}
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          handleQuantityChange(
+                            item._id,
+                            item.requestedQuantity,
+                            item.requestedQuantity
+                          )
+                        }
+                      >
+                        Approve All
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          handleQuantityChange(
+                            item._id,
+                            Math.min(item.currentStock, item.requestedQuantity),
+                            item.requestedQuantity
+                          )
+                        }
+                      >
+                        Approve Stock Available (
+                        {Math.min(item.currentStock, item.requestedQuantity)})
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          handleQuantityChange(
+                            item._id,
+                            0,
+                            item.requestedQuantity
+                          )
+                        }
+                      >
+                        Deny
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Summary */}
+          <Card className="bg-green-500/10 border-green-500/20">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold">Total Approving:</span>
+                <Badge
+                  variant="default"
+                  className="bg-green-600 text-base px-3 py-1"
+                >
+                  {totalApproving} of {totalRequested} units
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Form */}
-          <Form {...form}>
-            <NextForm action={dispatch} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="comments"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Comments (Optional)</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        {...field}
-                        placeholder="Add any comments or instructions..."
-                        className="min-h-[80px]"
-                      />
-                    </FormControl>
-                    <FormDescription className="text-xs">
-                      These comments will be visible to the requester and
-                      storekeeper
-                    </FormDescription>
-                  </FormItem>
-                )}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Comments (Optional)</label>
+              <Textarea
+                value={comments}
+                onChange={(e) => setComments(e.target.value)}
+                placeholder="Add any comments or instructions..."
+                className="min-h-20"
               />
+              <p className="text-xs text-muted-foreground">
+                These comments will be visible to the requester and storekeeper
+              </p>
+            </div>
 
-              <FormField
-                control={form.control}
-                name="conditions"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Conditions (Optional)</FormLabel>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        placeholder="e.g., Must return within 5 days"
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Conditions (Optional)
+              </label>
+              <Input
+                value={conditions}
+                onChange={(e) => setConditions(e.target.value)}
+                placeholder="e.g., Must return within 5 days"
               />
+            </div>
 
-              {state.message && state.message !== "success" && (
-                <Alert variant="destructive">
-                  <AlertDescription>{state.message}</AlertDescription>
-                </Alert>
-              )}
+            {state.message && state.message !== "success" && (
+              <Alert variant="destructive">
+                <IconAlertCircle className="h-4 w-4" />
+                <AlertDescription>{state.message}</AlertDescription>
+              </Alert>
+            )}
 
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => onOpenChange(false)}
-                  disabled={isPending}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isPending}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  {isPending ? "Approving..." : "Approve Request"}
-                </Button>
-              </DialogFooter>
-            </NextForm>
-          </Form>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isPending || totalApproving === 0}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {isPending ? "Approving..." : `Approve ${totalApproving} Items`}
+              </Button>
+            </DialogFooter>
+          </form>
         </div>
       </DialogContent>
     </Dialog>
   );
 }
-
 // ============================================
 // 2. REJECT DIALOG
 // ============================================
@@ -271,6 +452,7 @@ export function RejectDialog({ request, open, onOpenChange }) {
 // ============================================
 // 3. FULFILL DIALOG (Full Page/Large Dialog)
 // ============================================
+
 export function FulfillDialog({ request, open, onOpenChange }) {
   const initialState = { message: "" };
   const fulfillWithId = fulfillRequest.bind(null, request._id);
@@ -280,6 +462,7 @@ export function FulfillDialog({ request, open, onOpenChange }) {
   );
 
   const [itemQuantities, setItemQuantities] = useState({});
+  const [serialNumbers, setSerialNumbers] = useState({});
 
   const form = useForm({
     defaultValues: {
@@ -287,6 +470,24 @@ export function FulfillDialog({ request, open, onOpenChange }) {
     },
   });
 
+  // Initialize quantities when dialog opens
+  useEffect(() => {
+    if (open && request) {
+      const initialQty = {};
+      request.items.forEach((item) => {
+        // ✅ FIXED: Use remainingToFulfill instead of requestedQuantity
+        const remaining =
+          item.remainingToFulfill ||
+          (item.approvedQuantity || item.requestedQuantity) -
+            (item.totalFulfilled || 0);
+        initialQty[item._id] = 0; // Start with 0, user enters what they want
+      });
+      setItemQuantities(initialQty);
+      setSerialNumbers({});
+    }
+  }, [open, request]);
+
+  // Close and reload on success
   if (state.message === "success" && open) {
     onOpenChange(false);
     window.location.reload();
@@ -300,17 +501,25 @@ export function FulfillDialog({ request, open, onOpenChange }) {
     }));
   };
 
-  const totalFulfilled = Object.values(itemQuantities).reduce(
+  const totalFulfilling = Object.values(itemQuantities).reduce(
     (sum, qty) => sum + (qty || 0),
     0
   );
+
+  // ✅ Calculate fulfillment progress for each item
+  const getItemProgress = (item) => {
+    const target = item.approvedQuantity || item.requestedQuantity;
+    const fulfilled = item.totalFulfilled || 0;
+    if (target === 0) return 0;
+    return Math.round((fulfilled / target) * 100);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <IconPackage className="h-5 w-5 text-primary" />
+            <IconPackage className="h-5 w-5 text-yellow-500" />
             Fulfill Request
           </DialogTitle>
           <DialogDescription>
@@ -318,23 +527,41 @@ export function FulfillDialog({ request, open, onOpenChange }) {
           </DialogDescription>
         </DialogHeader>
 
-        <Form {...form}>
-          <NextForm action={dispatch} className="space-y-6">
-            {/* Instructions */}
-            <Alert>
-              <IconAlertCircle className="h-4 w-4" />
-              <AlertDescription className="text-xs">
-                Enter the quantity you can provide for each item. You can
-                fulfill partially if there's insufficient stock.
-              </AlertDescription>
-            </Alert>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            dispatch(new FormData(e.target));
+          }}
+          className="space-y-6"
+        >
+          {/* Instructions */}
+          <Alert>
+            <IconAlertCircle className="h-4 w-4" />
+            <AlertDescription className="text-xs">
+              ✅ You can fulfill <strong>partial quantities</strong>. Enter only
+              what's available now. Remaining items can be fulfilled later.
+            </AlertDescription>
+          </Alert>
 
-            {/* Items List */}
-            <div className="space-y-3">
-              <h4 className="font-semibold">Items to Fulfill</h4>
+          {/* Items List */}
+          <div className="space-y-3">
+            <h4 className="font-semibold">Items to Fulfill</h4>
 
-              {request.items.map((item) => (
-                <Card key={item._id} className="overflow-hidden">
+            {request.items.map((item) => {
+              // ✅ FIXED: Calculate remaining properly
+              const target = item.approvedQuantity || item.requestedQuantity;
+              const fulfilled = item.totalFulfilled || 0;
+              const remaining = item.remainingToFulfill || target - fulfilled;
+              const progress = getItemProgress(item);
+              const isComplete = remaining === 0;
+
+              return (
+                <Card
+                  key={item._id}
+                  className={`overflow-hidden ${
+                    isComplete ? "bg-muted/50 opacity-60" : ""
+                  }`}
+                >
                   <CardContent className="p-4">
                     <div className="space-y-3">
                       {/* Item Header */}
@@ -350,164 +577,225 @@ export function FulfillDialog({ request, open, onOpenChange }) {
                             </Badge>
                           )}
                         </div>
-                        <Badge variant="secondary">
-                          Requested: {item.requestedQuantity}
-                        </Badge>
+                        <div className="text-right">
+                          <Badge variant={isComplete ? "success" : "secondary"}>
+                            {isComplete ? (
+                              <>
+                                <IconCheck className="mr-1 h-3 w-3" />
+                                Complete
+                              </>
+                            ) : (
+                              <>
+                                <IconClock className="mr-1 h-3 w-3" />
+                                {remaining} remaining
+                              </>
+                            )}
+                          </Badge>
+                        </div>
                       </div>
 
-                      {/* Quantity Input */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div>
-                          <label className="text-xs text-muted-foreground">
-                            Quantity to Fulfill *
-                          </label>
-                          <Input
-                            type="number"
-                            name={`item_${item._id}`}
-                            min="0"
-                            max={item.requestedQuantity}
-                            value={itemQuantities[item._id] || ""}
-                            onChange={(e) =>
-                              handleQuantityChange(
-                                item._id,
-                                e.target.value,
-                                item.requestedQuantity
-                              )
-                            }
-                            placeholder="0"
-                            className="mt-1"
-                          />
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Max: {item.requestedQuantity} • Current Stock:{" "}
-                            {item.currentStock}
+                      {/* ✅ FIXED: Show fulfillment progress */}
+                      {!isComplete && fulfilled > 0 && (
+                        <div className="space-y-1 p-3 bg-muted/50 rounded-md">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>
+                              Previously Fulfilled: {fulfilled} of {target}
+                            </span>
+                            <span>{progress}%</span>
+                          </div>
+                          <Progress value={progress} className="h-2" />
+                          {item.fulfillments &&
+                            item.fulfillments.length > 0 && (
+                              <div className="mt-2 space-y-1">
+                                <p className="text-xs font-semibold text-muted-foreground">
+                                  Fulfillment History:
+                                </p>
+                                {item.fulfillments.map((f, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-center justify-between text-xs"
+                                  >
+                                    <span>
+                                      <IconCheck className="inline h-3 w-3 mr-1 text-green-600" />
+                                      {f.quantity} units
+                                    </span>
+                                    <span className="text-muted-foreground">
+                                      {new Date(
+                                        f.fulfilledAt
+                                      ).toLocaleDateString()}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                        </div>
+                      )}
+
+                      {/* ✅ FIXED: Only show input if not complete */}
+                      {!isComplete ? (
+                        <>
+                          {/* Quantity Input */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div>
+                              <label className="text-xs font-medium">
+                                Quantity to Fulfill Now *
+                              </label>
+                              <Input
+                                type="number"
+                                name={`item_${item._id}`}
+                                min="0"
+                                max={remaining} // ✅ FIXED: Use remaining, not requestedQuantity
+                                value={itemQuantities[item._id] || ""}
+                                onChange={(e) =>
+                                  handleQuantityChange(
+                                    item._id,
+                                    e.target.value,
+                                    remaining // ✅ FIXED
+                                  )
+                                }
+                                placeholder="0"
+                                className="mt-1"
+                              />
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Max: <strong>{remaining}</strong> remaining •
+                                Stock: {item.currentStock}
+                              </p>
+                            </div>
+
+                            {(item.requiresReturn ||
+                              item.purpose !== "sale") && (
+                              <div className="md:col-span-2">
+                                <label className="text-xs font-medium">
+                                  Serial Numbers (Optional, comma-separated)
+                                </label>
+                                <Input
+                                  type="text"
+                                  name={`serialNo_${item._id}`}
+                                  value={serialNumbers[item._id] || ""}
+                                  onChange={(e) =>
+                                    setSerialNumbers({
+                                      ...serialNumbers,
+                                      [item._id]: e.target.value,
+                                    })
+                                  }
+                                  placeholder="SN001, SN002, SN003"
+                                  className="mt-1"
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Quick Actions */}
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                handleQuantityChange(
+                                  item._id,
+                                  remaining, // ✅ FIXED: Use remaining
+                                  remaining
+                                )
+                              }
+                            >
+                              Fulfill All ({remaining})
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                handleQuantityChange(
+                                  item._id,
+                                  Math.floor(remaining / 2), // ✅ FIXED
+                                  remaining
+                                )
+                              }
+                            >
+                              Fulfill Half ({Math.floor(remaining / 2)})
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                handleQuantityChange(item._id, 0, remaining)
+                              }
+                            >
+                              Clear
+                            </Button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="bg-green-500/10 border border-green-500/20 rounded-md p-3 text-center">
+                          <IconCheck className="h-5 w-5 text-green-600 mx-auto mb-1" />
+                          <p className="text-sm text-green-600 font-medium">
+                            This item has been fully fulfilled
                           </p>
                         </div>
-
-                        {item.requiresReturn && (
-                          <div className="md:col-span-2">
-                            <label className="text-xs text-muted-foreground">
-                              Serial Number (Optional)
-                            </label>
-                            <Input
-                              type="text"
-                              name={`serialNo_${item._id}`}
-                              placeholder="Enter serial number if applicable"
-                              className="mt-1"
-                            />
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Quick Actions */}
-                      <div className="flex gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            handleQuantityChange(
-                              item._id,
-                              item.requestedQuantity,
-                              item.requestedQuantity
-                            )
-                          }
-                        >
-                          Fulfill All
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            handleQuantityChange(
-                              item._id,
-                              Math.floor(item.requestedQuantity / 2),
-                              item.requestedQuantity
-                            )
-                          }
-                        >
-                          Fulfill Half
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() =>
-                            handleQuantityChange(
-                              item._id,
-                              0,
-                              item.requestedQuantity
-                            )
-                          }
-                        >
-                          Clear
-                        </Button>
-                      </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
+              );
+            })}
+          </div>
 
-            {/* Comments */}
-            <FormField
-              control={form.control}
+          {/* Comments */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Fulfillment Notes</label>
+            <Textarea
               name="comments"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Comments (Optional)</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      {...field}
-                      placeholder="Add any notes about the fulfillment..."
-                      className="min-h-[80px]"
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
+              placeholder="Add any notes about this fulfillment..."
+              className="min-h-[80px]"
             />
+          </div>
 
-            {/* Summary */}
-            <Card className="bg-muted/50">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold">Total Items to Fulfill:</span>
-                  <Badge variant="default" className="text-base px-3 py-1">
-                    {totalFulfilled} of{" "}
-                    {request.items.reduce(
-                      (sum, item) => sum + item.requestedQuantity,
-                      0
-                    )}
-                  </Badge>
-                </div>
-              </CardContent>
-            </Card>
+          {/* Summary */}
+          <Card className="bg-yellow-500/10 border-yellow-500/20">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold">
+                  Total Items Fulfilling Now:
+                </span>
+                <Badge
+                  variant="default"
+                  className="bg-yellow-500 text-black text-base px-3 py-1"
+                >
+                  {totalFulfilling} units
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
 
-            {state.message && state.message !== "success" && (
-              <Alert variant="destructive">
-                <AlertDescription>{state.message}</AlertDescription>
-              </Alert>
-            )}
+          {state.message && state.message !== "success" && (
+            <Alert variant="destructive">
+              <IconAlertCircle className="h-4 w-4" />
+              <AlertDescription>{state.message}</AlertDescription>
+            </Alert>
+          )}
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isPending}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={isPending || totalFulfilled === 0}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                {isPending ? "Processing..." : "Fulfill Request"}
-              </Button>
-            </DialogFooter>
-          </NextForm>
-        </Form>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={isPending || totalFulfilling === 0}
+              className="bg-yellow-500 hover:bg-yellow-600 text-black"
+            >
+              {isPending
+                ? "Processing..."
+                : `Fulfill ${totalFulfilling} Item(s)`}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

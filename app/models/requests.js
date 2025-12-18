@@ -66,9 +66,7 @@ const stockRequestSchema = new Schema(
         },
         approvedQuantity: {
           type: Number,
-        },
-        fulfilledQuantity: {
-          type: Number,
+          default: 0,
         },
         unitPrice: Number,
         unit: String,
@@ -77,16 +75,58 @@ const stockRequestSchema = new Schema(
           enum: purposeForItemsRemovalFromStock,
           required: true,
         },
-        purposeDetails: {
-          type: String,
-        },
+        purposeDetails: String,
         requiresReturn: {
           type: Boolean,
           default: false,
         },
         expectedReturnDate: Date,
-        serialNo: String,
         notes: String,
+
+        // ============================================
+        // FULFILLMENT TRACKING ARRAY
+        // ============================================
+        fulfillments: [
+          {
+            quantity: {
+              type: Number,
+              required: true,
+              min: 1,
+            },
+            serialNumbers: [String],
+            fulfilledBy: {
+              name: String,
+              id: String,
+            },
+            fulfilledAt: {
+              type: Date,
+              default: Date.now,
+            },
+            movementId: {
+              type: Schema.Types.ObjectId,
+              ref: "StockMovement",
+            },
+            checkoutId: {
+              type: Schema.Types.ObjectId,
+              ref: "ItemCheckout",
+            },
+            deliveryNoteId: {
+              type: Schema.Types.ObjectId,
+              ref: "DeliveryNote",
+            },
+            notes: String,
+          },
+        ],
+
+        // ============================================
+        // CALCULATED FIELDS (NO DEFAULTS - calculated on-demand)
+        // ============================================
+        totalFulfilled: Number,
+        remainingToFulfill: Number,
+        fulfillmentStatus: {
+          type: String,
+          enum: ["pending", "partial", "complete"],
+        },
       },
     ],
     status: {
@@ -113,13 +153,6 @@ const stockRequestSchema = new Schema(
       approvedAt: Date,
       comments: String,
       conditions: String,
-    },
-    storekeeper: {
-      name: String,
-      id: String,
-      fulfilledAt: Date,
-      comments: String,
-      issues: String,
     },
     rejectionReason: String,
     rejectedAt: Date,
@@ -150,11 +183,6 @@ const stockRequestSchema = new Schema(
         },
       },
     ],
-    notifications: {
-      requesterNotified: { type: Boolean, default: false },
-      approverNotified: { type: Boolean, default: false },
-      storekeeperNotified: { type: Boolean, default: false },
-    },
     attachments: [
       {
         filename: String,
@@ -171,18 +199,7 @@ const stockRequestSchema = new Schema(
 );
 
 // ============================================
-// INDEXES
-// ============================================
-// stockRequestSchema.index({ requestNumber: 1 });
-// stockRequestSchema.index({ status: 1 });
-// stockRequestSchema.index({ "requester.id": 1 });
-// stockRequestSchema.index({ "requester.department": 1 });
-// stockRequestSchema.index({ createdAt: -1 });
-// stockRequestSchema.index({ priority: 1, status: 1 });
-// stockRequestSchema.index({ "approver.id": 1 });
-
-// ============================================
-// VIRTUALS (These are OK - they don't affect DB)
+// VIRTUALS (Read-only computed properties - SAFE)
 // ============================================
 stockRequestSchema.virtual("isOverdue").get(function () {
   if (this.requiredByDate && this.status === "pending") {
@@ -195,30 +212,121 @@ stockRequestSchema.virtual("totalItemsRequested").get(function () {
   return this.items.reduce((sum, item) => sum + item.requestedQuantity, 0);
 });
 
-stockRequestSchema.virtual("processingTime").get(function () {
-  if (this.status === "fulfilled" && this.storekeeper.fulfilledAt) {
-    const diff = this.storekeeper.fulfilledAt - this.createdAt;
-    return Math.floor(diff / (1000 * 60 * 60));
-  }
-  return null;
+stockRequestSchema.virtual("totalItemsApproved").get(function () {
+  return this.items.reduce(
+    (sum, item) => sum + (item.approvedQuantity || 0),
+    0
+  );
+});
+
+stockRequestSchema.virtual("totalItemsFulfilled").get(function () {
+  return this.items.reduce((sum, item) => sum + (item.totalFulfilled || 0), 0);
+});
+
+stockRequestSchema.virtual("fulfillmentProgress").get(function () {
+  const approved = this.totalItemsApproved;
+  const fulfilled = this.totalItemsFulfilled;
+  if (approved === 0) return 0;
+  return Math.round((fulfilled / approved) * 100);
 });
 
 // ============================================
-// MIDDLEWARE - KEEP ONLY NON-CONFLICTING ONES
+// NO PRE-SAVE MIDDLEWARE! (Transaction-safe)
 // ============================================
+// We calculate manually in actions using helper methods
 
-// Calculate total value before saving (THIS IS OK)
-stockRequestSchema.pre("save", function (next) {
+// ============================================
+// HELPER METHOD: Recalculate Fulfillment (Instance)
+// ============================================
+stockRequestSchema.methods.recalculateFulfillment = function () {
+  // Calculate for each item
+  this.items.forEach((item) => {
+    // Calculate total fulfilled from fulfillments array
+    item.totalFulfilled = item.fulfillments.reduce(
+      (sum, f) => sum + (f.quantity || 0),
+      0
+    );
+
+    // Calculate remaining
+    const target = item.approvedQuantity || item.requestedQuantity || 0;
+    item.remainingToFulfill = Math.max(0, target - item.totalFulfilled);
+
+    // Set item status
+    if (item.totalFulfilled === 0) {
+      item.fulfillmentStatus = "pending";
+    } else if (item.totalFulfilled >= target) {
+      item.fulfillmentStatus = "complete";
+    } else {
+      item.fulfillmentStatus = "partial";
+    }
+  });
+
+  // Calculate request status
+  const allComplete = this.items.every(
+    (item) => item.fulfillmentStatus === "complete"
+  );
+  const someComplete = this.items.some((item) => item.totalFulfilled > 0);
+
+  const validStatuses = ["approved", "partially_fulfilled"];
+  if (validStatuses.includes(this.status)) {
+    if (allComplete) {
+      this.status = "fulfilled";
+    } else if (someComplete) {
+      this.status = "partially_fulfilled";
+    }
+  }
+
+  // Calculate total value
   this.totalValue = this.items.reduce((sum, item) => {
     const qty = item.approvedQuantity || item.requestedQuantity;
     return sum + qty * (item.unitPrice || 0);
   }, 0);
-  next();
-});
 
-// ❌ REMOVED: Auto-generate request number
-// ❌ REMOVED: Post-save hook that updates Product stock
-// These conflict with transactions - handle manually instead!
+  return this;
+};
+
+// ============================================
+// HELPER METHOD: Add Fulfillment (Instance)
+// ============================================
+stockRequestSchema.methods.addFulfillment = function (itemId, fulfillmentData) {
+  const item = this.items.id(itemId);
+
+  if (!item) {
+    throw new Error("Item not found in request");
+  }
+
+  // Validate quantity
+  const currentTotal = item.fulfillments.reduce(
+    (sum, f) => sum + (f.quantity || 0),
+    0
+  );
+  const target = item.approvedQuantity || item.requestedQuantity || 0;
+  const newTotal = currentTotal + fulfillmentData.quantity;
+
+  if (newTotal > target) {
+    throw new Error(
+      `Cannot fulfill ${fulfillmentData.quantity}. ` +
+        `Only ${target - currentTotal} remaining.`
+    );
+  }
+
+  // Add fulfillment to array
+  item.fulfillments.push({
+    quantity: fulfillmentData.quantity,
+    serialNumbers: fulfillmentData.serialNumbers || [],
+    fulfilledBy: fulfillmentData.fulfilledBy,
+    fulfilledAt: fulfillmentData.fulfilledAt || new Date(),
+    movementId: fulfillmentData.movementId,
+    checkoutId: fulfillmentData.checkoutId,
+    deliveryNoteId: fulfillmentData.deliveryNoteId,
+    notes: fulfillmentData.notes || "",
+  });
+
+  // Recalculate totals
+  this.recalculateFulfillment();
+
+  return this;
+};
 
 // ============================================
 // STATIC METHODS
@@ -239,14 +347,14 @@ stockRequestSchema.statics.getByDepartment = function (
 stockRequestSchema.statics.getUrgentRequests = function () {
   return this.find({
     priority: { $in: ["high", "urgent"] },
-    status: { $in: ["pending", "approved"] },
+    status: { $in: ["pending", "approved", "partially_fulfilled"] },
   }).sort({ priority: -1, createdAt: 1 });
 };
 
 stockRequestSchema.statics.getOverdueRequests = function () {
   return this.find({
     requiredByDate: { $lt: new Date() },
-    status: { $in: ["pending", "approved"] },
+    status: { $in: ["pending", "approved", "partially_fulfilled"] },
   }).sort({ requiredByDate: 1 });
 };
 
@@ -255,13 +363,18 @@ stockRequestSchema.statics.getNeedsApproval = function () {
 };
 
 stockRequestSchema.statics.getNeedsFulfillment = function () {
-  return this.find({ status: "approved" }).sort({ priority: -1, createdAt: 1 });
+  return this.find({
+    status: { $in: ["approved", "partially_fulfilled"] },
+  }).sort({ priority: -1, createdAt: 1 });
 };
 
 // ============================================
 // INSTANCE METHODS
 // ============================================
-stockRequestSchema.methods.approve = function (approverData) {
+stockRequestSchema.methods.approve = function (
+  approverData,
+  itemApprovals = null
+) {
   this.status = "approved";
   this.approver = {
     name: approverData.name,
@@ -271,6 +384,23 @@ stockRequestSchema.methods.approve = function (approverData) {
     conditions: approverData.conditions,
   };
 
+  // Set approved quantities for each item
+  if (itemApprovals) {
+    this.items.forEach((item) => {
+      const approval = itemApprovals[item._id.toString()];
+      if (approval) {
+        item.approvedQuantity = approval.quantity;
+        item.notes = approval.notes || item.notes;
+      } else {
+        item.approvedQuantity = item.requestedQuantity;
+      }
+    });
+  } else {
+    this.items.forEach((item) => {
+      item.approvedQuantity = item.requestedQuantity;
+    });
+  }
+
   this.approvalHistory.push({
     approverName: approverData.name,
     approverId: approverData.id,
@@ -278,6 +408,9 @@ stockRequestSchema.methods.approve = function (approverData) {
     comments: approverData.comments,
     timestamp: new Date(),
   });
+
+  // Recalculate after approval
+  this.recalculateFulfillment();
 
   return this.save();
 };
@@ -316,7 +449,11 @@ stockRequestSchema.methods.canApprove = function (userId) {
 };
 
 stockRequestSchema.methods.canFulfill = function () {
-  return this.status === "approved";
+  return this.status === "approved" || this.status === "partially_fulfilled";
+};
+
+stockRequestSchema.methods.hasUnfulfilledItems = function () {
+  return this.items.some((item) => (item.remainingToFulfill || 0) > 0);
 };
 
 const models = mongoose.models;

@@ -1,5 +1,5 @@
 import React from "react";
-import { RequestsListWithActions } from "./components/request";
+import { RequestsListWithActions } from "../components/request";
 import { AddButton } from "@/components/buttons";
 import { fetchRequestPages, searchRequests } from "@/app/mongodb/queries";
 import Pagination from "@/components/pagination";
@@ -11,7 +11,7 @@ import {
   PriorityFilter,
   ClearFiltersButton,
   FilterBadge,
-} from "./components/filters";
+} from "../components/filters";
 import { SiteHeader } from "@/components/site-header";
 
 const RequestsPage = async (props) => {

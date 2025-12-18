@@ -206,7 +206,7 @@ export function QuickActionsCard() {
             className="h-auto flex-col items-start p-4 bg-yellow-500 hover:bg-yellow-600 text-black font-medium"
             asChild
           >
-            <Link href="/dashboard/stocks?action=request">
+            <Link href="/dashboard/requests/create">
               <FileText className="h-5 w-5 mb-2" />
               <span className="text-sm">Request Stock</span>
               <span className="text-xs font-normal opacity-80">

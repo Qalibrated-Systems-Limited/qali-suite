@@ -3,8 +3,6 @@
 import { useState } from "react";
 import {
   IconClipboardList,
-  IconEdit,
-  IconTrash,
   IconEye,
   IconChevronDown,
   IconClock,
@@ -12,6 +10,7 @@ import {
   IconX,
   IconPackage,
   IconBan,
+  IconProgress,
 } from "@tabler/icons-react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -31,6 +30,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   ApproveDialog,
   RejectDialog,
@@ -58,7 +64,7 @@ const statusConfig = {
   partially_fulfilled: {
     label: "Partial",
     color: "bg-orange-500/10 text-orange-500 border-orange-500/20",
-    icon: IconClock,
+    icon: IconProgress,
   },
   rejected: {
     label: "Rejected",
@@ -131,8 +137,34 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
     }).format(amount);
   };
 
+  // ============================================
+  // NEW: Calculate fulfillment progress
+  // ============================================
+  const getFulfillmentProgress = (request) => {
+    if (request.status === "pending") return 0;
+
+    const totalRequested = request.items.reduce(
+      (sum, item) => sum + (item.approvedQuantity || item.requestedQuantity),
+      0
+    );
+    const totalFulfilled = request.items.reduce(
+      (sum, item) => sum + (item.totalFulfilled || 0),
+      0
+    );
+
+    if (totalRequested === 0) return 0;
+    return Math.round((totalFulfilled / totalRequested) * 100);
+  };
+
+  const getTotalRemaining = (request) => {
+    return request.items.reduce(
+      (sum, item) => sum + (item.remainingToFulfill || 0),
+      0
+    );
+  };
+
   return (
-    <>
+    <TooltipProvider>
       {/* Desktop Table View */}
       <Card className="hidden md:block">
         <CardContent className="p-0">
@@ -143,6 +175,7 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
                 <TableHead>Requester</TableHead>
                 <TableHead>Department</TableHead>
                 <TableHead>Items</TableHead>
+                <TableHead>Progress</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Priority</TableHead>
                 <TableHead>Value</TableHead>
@@ -153,7 +186,7 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
             <TableBody>
               {filteredRequests.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="h-24 text-center">
+                  <TableCell colSpan={10} className="h-24 text-center">
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
                       <IconClipboardList className="h-8 w-8" />
                       <p>No requests found</p>
@@ -166,6 +199,8 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
                     statusConfig[request.status]?.icon || IconClock;
                   const statusStyle = statusConfig[request.status]?.color;
                   const statusLabel = statusConfig[request.status]?.label;
+                  const progress = getFulfillmentProgress(request);
+                  const remaining = getTotalRemaining(request);
 
                   return (
                     <TableRow key={request._id}>
@@ -179,6 +214,44 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
                           {request.items?.length || 0} item(s)
                         </span>
                       </TableCell>
+
+                      {/* NEW: Progress Column */}
+                      <TableCell>
+                        {request.status === "approved" ||
+                        request.status === "partially_fulfilled" ||
+                        request.status === "fulfilled" ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <Progress
+                                    value={progress}
+                                    className="h-2 w-20"
+                                  />
+                                  <span className="text-xs text-muted-foreground">
+                                    {progress}%
+                                  </span>
+                                </div>
+                                {remaining > 0 && (
+                                  <p className="text-xs text-orange-600">
+                                    {remaining} remaining
+                                  </p>
+                                )}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="text-xs">
+                                Fulfillment Progress: {progress}%
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            N/A
+                          </span>
+                        )}
+                      </TableCell>
+
                       <TableCell>
                         <Badge variant="outline" className={statusStyle}>
                           <StatusIcon className="mr-1 h-3 w-3" />
@@ -259,6 +332,14 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
                                 >
                                   <IconPackage className="mr-2 h-4 w-4" />
                                   Fulfill Request
+                                  {remaining > 0 && (
+                                    <Badge
+                                      variant="secondary"
+                                      className="ml-2 text-xs"
+                                    >
+                                      {remaining} left
+                                    </Badge>
+                                  )}
                                 </DropdownMenuItem>
                               </>
                             )}
@@ -304,6 +385,8 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
             const StatusIcon = statusConfig[request.status]?.icon || IconClock;
             const statusStyle = statusConfig[request.status]?.color;
             const statusLabel = statusConfig[request.status]?.label;
+            const progress = getFulfillmentProgress(request);
+            const remaining = getTotalRemaining(request);
 
             return (
               <Card key={request._id}>
@@ -322,6 +405,24 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
                         {statusLabel}
                       </Badge>
                     </div>
+
+                    {/* NEW: Progress Bar for partial/fulfilled */}
+                    {(request.status === "approved" ||
+                      request.status === "partially_fulfilled" ||
+                      request.status === "fulfilled") && (
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>Fulfillment Progress</span>
+                          <span>{progress}%</span>
+                        </div>
+                        <Progress value={progress} className="h-2" />
+                        {remaining > 0 && (
+                          <p className="text-xs text-orange-600">
+                            {remaining} items remaining
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     {/* Details */}
                     <div className="grid grid-cols-2 gap-2 text-sm">
@@ -410,6 +511,11 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
                         >
                           <IconPackage className="mr-2 h-4 w-4" />
                           Fulfill
+                          {remaining > 0 && (
+                            <Badge variant="secondary" className="ml-1 text-xs">
+                              {remaining}
+                            </Badge>
+                          )}
                         </Button>
                       )}
 
@@ -469,6 +575,6 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
           />
         </>
       )}
-    </>
+    </TooltipProvider>
   );
 }

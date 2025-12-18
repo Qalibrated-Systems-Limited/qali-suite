@@ -128,7 +128,7 @@ export function AppSidebar({ children, user, cartItemsCount = 0, ...props }) {
                       <Link
                         href={
                           shouldCreateRequest
-                            ? "/dashboard/stocks?action=request"
+                            ? "/dashboard/requests/create"
                             : `${pathname}/create`
                         }
                       >
