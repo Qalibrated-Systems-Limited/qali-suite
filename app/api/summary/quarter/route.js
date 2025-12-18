@@ -3,7 +3,7 @@ import { isAuth } from "../../../middlewares/auth";
 import {
   quartelySummary,
   quarterlySalesDistro,
-} from "../../../mongodb/queries";
+} from "../../../mongodb/queries/queries";
 import {
   authErrorResponse,
   failedResponse,

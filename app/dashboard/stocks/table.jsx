@@ -1,4 +1,4 @@
-import { Pencil } from "lucide-react";
+import { Pencil, Package, AlertTriangle, XCircle } from "lucide-react";
 import {
   AddSingleItem,
   AddToCartButton,
@@ -15,8 +15,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 
+// ============================================
+// DESKTOP TABLE VIEW
+// ============================================
 export function InventoryTable({ cart = [], stock, action }) {
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-KE", {
@@ -27,22 +30,27 @@ export function InventoryTable({ cart = [], stock, action }) {
   };
 
   return (
-    <Card className="bg-[#161b22] border-[#30363d]">
+    <Card className="bg-card border-border">
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
-            <TableRow className="border-b border-[#30363d] hover:bg-transparent">
-              <TableHead className="font-semibold text-gray-300">SKU</TableHead>
-              <TableHead className="font-semibold text-gray-300">
+            <TableRow className="border-b border-border hover:bg-transparent">
+              <TableHead className="font-semibold text-muted-foreground">
+                SKU
+              </TableHead>
+              <TableHead className="font-semibold text-muted-foreground">
                 Product Name
               </TableHead>
-              <TableHead className="font-semibold text-gray-300">
+              <TableHead className="font-semibold text-muted-foreground">
+                Category
+              </TableHead>
+              <TableHead className="font-semibold text-muted-foreground">
                 Landing Cost
               </TableHead>
-              <TableHead className="font-semibold text-gray-300">
+              <TableHead className="font-semibold text-muted-foreground">
                 Stock
               </TableHead>
-              <TableHead className="text-right font-semibold text-gray-300">
+              <TableHead className="text-right font-semibold text-muted-foreground">
                 Actions
               </TableHead>
             </TableRow>
@@ -51,10 +59,14 @@ export function InventoryTable({ cart = [], stock, action }) {
             {stock.length === 0 ? (
               <TableRow className="hover:bg-transparent">
                 <TableCell
-                  colSpan={5}
-                  className="h-24 text-center text-gray-400"
+                  colSpan={6}
+                  className="h-32 text-center text-muted-foreground"
                 >
-                  No products found
+                  <div className="flex flex-col items-center gap-2">
+                    <Package className="w-12 h-12 text-muted-foreground/50" />
+                    <p>No products found</p>
+                    <p className="text-sm">Try adjusting your filters</p>
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (
@@ -62,26 +74,40 @@ export function InventoryTable({ cart = [], stock, action }) {
                 const cartItem = cart.find(
                   (cartItem) => cartItem.id === item.SKU
                 );
-                const isLowStock = item.stock < 10;
+                const isLowStock = item.stock > 0 && item.stock < 10;
                 const isOutOfStock = item.stock === 0;
 
                 return (
                   <TableRow
                     key={item._id}
-                    className="border-b border-[#30363d] hover:bg-[#161b22] transition-colors"
+                    className="border-b border-border hover:bg-muted/50 transition-colors"
                   >
                     {/* SKU */}
-                    <TableCell className="font-mono text-sm text-gray-400">
+                    <TableCell className="font-mono text-sm text-muted-foreground">
                       {item.SKU}
                     </TableCell>
 
                     {/* Product Name */}
-                    <TableCell className="font-medium text-white">
-                      {item.name}
+                    <TableCell>
+                      <div>
+                        <p className="font-medium text-foreground">
+                          {item.name}
+                        </p>
+                        {item.description && (
+                          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+                            {item.description}
+                          </p>
+                        )}
+                      </div>
+                    </TableCell>
+
+                    {/* Category */}
+                    <TableCell className="text-muted-foreground">
+                      {item.category || "N/A"}
                     </TableCell>
 
                     {/* Price */}
-                    <TableCell className="font-medium text-gray-100">
+                    <TableCell className="font-medium text-foreground">
                       {formatCurrency(item.price)}
                     </TableCell>
 
@@ -94,7 +120,7 @@ export function InventoryTable({ cart = [], stock, action }) {
                               ? "text-red-500"
                               : isLowStock
                               ? "text-orange-500"
-                              : "text-gray-100"
+                              : "text-green-500"
                           }`}
                         >
                           {item.stock}
@@ -104,15 +130,25 @@ export function InventoryTable({ cart = [], stock, action }) {
                             variant="outline"
                             className="text-xs bg-red-500/10 text-red-500 border-red-500/20"
                           >
+                            <XCircle className="w-3 h-3 mr-1" />
                             Out
                           </Badge>
                         )}
-                        {isLowStock && !isOutOfStock && (
+                        {isLowStock && (
                           <Badge
                             variant="outline"
                             className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/20"
                           >
+                            <AlertTriangle className="w-3 h-3 mr-1" />
                             Low
+                          </Badge>
+                        )}
+                        {!isOutOfStock && !isLowStock && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs bg-green-500/10 text-green-500 border-green-500/20"
+                          >
+                            In Stock
                           </Badge>
                         )}
                       </div>
@@ -127,7 +163,7 @@ export function InventoryTable({ cart = [], stock, action }) {
                             asChild
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-gray-400 hover:text-white hover:bg-[#1f2937]"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-accent"
                           >
                             <Link href={`/dashboard/stocks/${item._id}/update`}>
                               <Pencil className="h-4 w-4" />
@@ -138,7 +174,7 @@ export function InventoryTable({ cart = [], stock, action }) {
 
                         {/* Cart Controls */}
                         {cartItem ? (
-                          <div className="flex items-center gap-1 border border-[#30363d] rounded-lg px-2 py-1 bg-[#0d1117]">
+                          <div className="flex items-center gap-1 border border-border rounded-lg px-2 py-1 bg-background">
                             <RemoveSingleItem id={item.SKU} />
                             <span className="px-2 text-sm font-semibold text-yellow-500 min-w-[2ch] text-center">
                               {cartItem.quantity}
@@ -165,7 +201,7 @@ export function InventoryTable({ cart = [], stock, action }) {
 }
 
 // ============================================
-// MOBILE-RESPONSIVE VERSION (Card Layout)
+// MOBILE CARD VIEW
 // ============================================
 export function InventoryTableMobile({ cart = [], stock, action }) {
   const formatCurrency = (amount) => {
@@ -179,95 +215,135 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
   return (
     <div className="space-y-4">
       {stock.length === 0 ? (
-        <Card className="p-8 text-center bg-[#161b22] border-[#30363d]">
-          <p className="text-gray-400">No products found</p>
+        <Card className="bg-card border-border">
+          <CardContent className="p-8 text-center">
+            <Package className="w-12 h-12 mx-auto mb-4 text-muted-foreground/50" />
+            <p className="text-muted-foreground mb-1">No products found</p>
+            <p className="text-sm text-muted-foreground">
+              Try adjusting your filters
+            </p>
+          </CardContent>
         </Card>
       ) : (
         stock.map((item) => {
           const cartItem = cart.find((cartItem) => cartItem.id === item.SKU);
-          const isLowStock = item.stock < 10;
+          const isLowStock = item.stock > 0 && item.stock < 10;
           const isOutOfStock = item.stock === 0;
 
           return (
-            <Card key={item._id} className="p-4 bg-[#161b22] border-[#30363d]">
-              <div className="space-y-3">
-                {/* Header */}
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-semibold text-white">{item.name}</h3>
-                    <p className="text-xs text-gray-400 font-mono">
-                      {item.SKU}
-                    </p>
-                  </div>
-                  {(isOutOfStock || isLowStock) && (
-                    <Badge
-                      variant="outline"
-                      className={
-                        isOutOfStock
-                          ? "bg-red-500/10 text-red-500 border-red-500/20"
-                          : "bg-orange-500/10 text-orange-500 border-orange-500/20"
-                      }
-                    >
-                      {isOutOfStock ? "Out of Stock" : "Low Stock"}
-                    </Badge>
-                  )}
-                </div>
-
-                {/* Details */}
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div>
-                    <p className="text-gray-400 text-xs">Price</p>
-                    <p className="font-semibold text-gray-100">
-                      {formatCurrency(item.price)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400 text-xs">Stock</p>
-                    <p
-                      className={`font-semibold ${
-                        isOutOfStock
-                          ? "text-red-500"
-                          : isLowStock
-                          ? "text-orange-500"
-                          : "text-gray-100"
-                      }`}
-                    >
-                      {item.stock}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center gap-2 pt-2">
-                  {action !== "request" && (
-                    <Button
-                      asChild
-                      variant="outline"
-                      size="sm"
-                      className="flex-1 border-[#30363d] text-gray-300 hover:bg-[#1f2937] hover:text-white"
-                    >
-                      <Link href={`/dashboard/stocks/${item._id}/update`}>
-                        <Pencil className="mr-2 h-3 w-3" />
-                        Edit
-                      </Link>
-                    </Button>
-                  )}
-
-                  {cartItem ? (
-                    <div className="flex items-center gap-1 border border-[#30363d] rounded-lg px-3 py-1.5 bg-[#0d1117]">
-                      <RemoveSingleItem id={item.SKU} />
-                      <span className="px-2 text-sm font-semibold text-yellow-500 min-w-[2ch] text-center">
-                        {cartItem.quantity}
-                      </span>
-                      <AddSingleItem id={item.SKU} />
+            <Card key={item._id} className="bg-card border-border">
+              <CardContent className="p-4">
+                <div className="space-y-3">
+                  {/* Header */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-foreground">
+                        {item.name}
+                      </h3>
+                      <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                        {item.SKU}
+                      </p>
                     </div>
-                  ) : (
-                    <div className="flex-1">
-                      <AddToCartButton id={item._id} disabled={isOutOfStock} />
-                    </div>
+                    {isOutOfStock ? (
+                      <Badge
+                        variant="outline"
+                        className="bg-red-500/10 text-red-500 border-red-500/20 shrink-0"
+                      >
+                        <XCircle className="w-3 h-3 mr-1" />
+                        Out
+                      </Badge>
+                    ) : isLowStock ? (
+                      <Badge
+                        variant="outline"
+                        className="bg-orange-500/10 text-orange-500 border-orange-500/20 shrink-0"
+                      >
+                        <AlertTriangle className="w-3 h-3 mr-1" />
+                        Low
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="bg-green-500/10 text-green-500 border-green-500/20 shrink-0"
+                      >
+                        In Stock
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Description */}
+                  {item.description && (
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      {item.description}
+                    </p>
                   )}
+
+                  {/* Details Grid */}
+                  <div className="grid grid-cols-3 gap-3 text-sm">
+                    <div>
+                      <p className="text-muted-foreground text-xs">Category</p>
+                      <p className="font-medium text-foreground truncate">
+                        {item.category || "N/A"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Price</p>
+                      <p className="font-medium text-foreground">
+                        {formatCurrency(item.price)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Stock</p>
+                      <p
+                        className={`font-semibold ${
+                          isOutOfStock
+                            ? "text-red-500"
+                            : isLowStock
+                            ? "text-orange-500"
+                            : "text-green-500"
+                        }`}
+                      >
+                        {item.stock}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-border">
+                    {action !== "request" && (
+                      <Button
+                        asChild
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 border-border text-foreground hover:bg-accent"
+                      >
+                        <Link href={`/dashboard/stocks/${item._id}/update`}>
+                          <Pencil className="mr-2 h-3 w-3" />
+                          Edit
+                        </Link>
+                      </Button>
+                    )}
+
+                    {cartItem ? (
+                      <div className="flex items-center gap-1 border border-border rounded-lg px-3 py-1.5 bg-background">
+                        <RemoveSingleItem id={item.SKU} />
+                        <span className="px-2 text-sm font-semibold text-yellow-500 min-w-[2ch] text-center">
+                          {cartItem.quantity}
+                        </span>
+                        <AddSingleItem id={item.SKU} />
+                      </div>
+                    ) : (
+                      <div
+                        className={action !== "request" ? "flex-1" : "w-full"}
+                      >
+                        <AddToCartButton
+                          id={item._id}
+                          disabled={isOutOfStock}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              </CardContent>
             </Card>
           );
         })

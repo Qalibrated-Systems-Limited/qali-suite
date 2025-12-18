@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import {
   fetchActiveCustomers,
   fetchAvailableProducts,
-} from "@/app/mongodb/invoice-queries";
+} from "@/app/mongodb/queries/invoice-queries";
 import CreateInvoiceFormClient from "../components/CreateInvoiceForm";
 
 export default async function CreateInvoicePage() {

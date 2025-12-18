@@ -1,6 +1,6 @@
-import dbConnect from "../config/dbConnect";
-import { StockMovement } from "../models/stockmovement";
-import Counter from "../models/counter";
+import dbConnect from "../../config/dbConnect";
+import { StockMovement } from "../../models/stockmovement";
+import Counter from "../../models/counter";
 
 const ITEMS_PER_PAGE = 20;
 dbConnect();

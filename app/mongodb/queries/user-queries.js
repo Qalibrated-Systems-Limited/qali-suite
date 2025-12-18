@@ -1,5 +1,5 @@
-import dbConnect from "../config/dbConnect";
-import User from "../models/user";
+import dbConnect from "../../config/dbConnect";
+import User from "../../models/user";
 
 const ITEMS_PER_PAGE = 20;
 

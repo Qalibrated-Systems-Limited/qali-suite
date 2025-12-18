@@ -1,5 +1,5 @@
 import React from "react";
-import { monthlyAggregates } from "../mongodb/queries";
+import { monthlyAggregates } from "../mongodb/queries/queries";
 import { Cardwrapper } from "./components/cardwrapper";
 import { MonthlyAggregatesStats } from "./components/monthlycharts";
 

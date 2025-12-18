@@ -2,7 +2,7 @@ import {
   searchCheckouts,
   fetchCheckoutPages,
   getCheckoutStats,
-} from "@/app/mongodb/checkout-queries";
+} from "@/app/mongodb/queries/checkout-queries";
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";
 import { auth } from "@/auth";

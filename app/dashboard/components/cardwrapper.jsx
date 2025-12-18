@@ -4,7 +4,7 @@ import {
   getStockAggregate,
   getTotalSaleThisMonth,
   invoicesCount,
-} from "../../mongodb/queries";
+} from "../../mongodb/queries/queries";
 
 const currentDate = new Date();
 const monthNames = [

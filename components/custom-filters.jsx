@@ -9,64 +9,77 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Filter, X } from "lucide-react";
-import { ca } from "date-fns/locale";
+import { Label } from "@/components/ui/label";
+import { Filter, X, Package, AlertTriangle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export const CATEGORIES = [
+  { value: "all", label: "All Categories" },
   { value: "loadcell", label: "Loadcell" },
-  { value: "all", label: "All Products" },
   { value: "analytical balances", label: "Analytical Balances" },
   { value: "indicator", label: "Indicator" },
   { value: "Spare part", label: "Spare Part" },
-  { value: "hanging scale", label: "Hanging scale" },
-  { value: "bench scale", label: "Bench scale" },
-  {
-    value: "platform",
-    label: "Platform",
-  },
-  {
-    value: "Overview camera",
-    label: "overview camera",
-  },
-  {
-    value: "anpr camera",
-    label: "anpr camera",
-  },
-  { label: "Other stock", value: "other stock" },
-  { label: "Indicator Batteries", value: "indicator batteries" },
+  { value: "hanging scale", label: "Hanging Scale" },
+  { value: "bench scale", label: "Bench Scale" },
+  { value: "platform", label: "Platform" },
+  { value: "Overview camera", label: "Overview Camera" },
+  { value: "anpr camera", label: "ANPR Camera" },
+  { value: "other stock", label: "Other Stock" },
+  { value: "indicator batteries", label: "Indicator Batteries" },
 ];
 
-// Category Filter Component
+const QUANTITY_OPTIONS = [
+  { value: "all", label: "All Stock Levels", icon: null },
+  { value: "in-stock", label: "In Stock (10+)", icon: "green" },
+  { value: "low-stock", label: "Low Stock (1-9)", icon: "orange" },
+  { value: "out-of-stock", label: "Out of Stock (0)", icon: "red" },
+];
+
+// ============================================
+// CATEGORY FILTER COMPONENT
+// ============================================
 export function StockCategoryFilter({ currentCategory }) {
   return (
-    <StockFilterSelect
-      value={currentCategory}
-      param="category"
-      placeholder="All Categories"
-      options={CATEGORIES}
-    />
+    <div className="flex flex-col gap-2">
+      <Label className="text-xs text-muted-foreground">Category</Label>
+      <StockFilterSelect
+        value={currentCategory}
+        param="category"
+        placeholder="All Categories"
+        options={CATEGORIES}
+      />
+    </div>
   );
 }
 
-// Quantity/Stock Level Filter Component
+// ============================================
+// QUANTITY/STOCK LEVEL FILTER COMPONENT
+// ============================================
 export function StockQuantityFilter({ currentQuantity }) {
   return (
-    <StockFilterSelect
-      value={currentQuantity}
-      param="quantity"
-      placeholder="All Stock Levels"
-      options={[
-        { value: "all", label: "All Stock Levels" },
-        { value: "in-stock", label: "In Stock (10+)" },
-        { value: "low-stock", label: "Low Stock (1-9)" },
-        { value: "out-of-stock", label: "Out of Stock (0)" },
-      ]}
-    />
+    <div className="flex flex-col gap-2">
+      <Label className="text-xs text-muted-foreground">Stock Level</Label>
+      <StockFilterSelect
+        value={currentQuantity}
+        param="quantity"
+        placeholder="All Stock Levels"
+        options={QUANTITY_OPTIONS}
+        showIcons={true}
+      />
+    </div>
   );
 }
 
-// Reusable Filter Select Component
-function StockFilterSelect({ value, param, placeholder, options }) {
+// ============================================
+// REUSABLE FILTER SELECT COMPONENT
+// ============================================
+function StockFilterSelect({
+  value,
+  param,
+  placeholder,
+  options,
+  showIcons = false,
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -86,20 +99,40 @@ function StockFilterSelect({ value, param, placeholder, options }) {
 
   return (
     <Select value={value} onValueChange={handleChange}>
-      <SelectTrigger className="w-full sm:w-[200px] bg-[#0d1117] border-[#30363d] text-gray-100 focus:border-yellow-500 focus:ring-yellow-500">
+      <SelectTrigger className="w-full md:w-[180px] bg-background border-border text-foreground focus-visible:ring-yellow-500 focus-visible:border-yellow-500">
         <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-gray-400" />
+          <Filter className="w-4 h-4 text-muted-foreground" />
           <SelectValue placeholder={placeholder} />
         </div>
       </SelectTrigger>
-      <SelectContent className="bg-[#161b22] border-[#30363d]">
+      <SelectContent className="bg-card border-border">
         {options.map((option) => (
           <SelectItem
             key={option.value}
             value={option.value}
-            className="text-gray-100 focus:bg-[#1f2937] focus:text-white"
+            className="text-foreground focus:bg-accent focus:text-accent-foreground cursor-pointer"
           >
-            {option.label}
+            <div className="flex items-center gap-2">
+              {showIcons && option.icon && (
+                <div
+                  className={`w-2 h-2 rounded-full ${
+                    option.icon === "green"
+                      ? "bg-green-500"
+                      : option.icon === "orange"
+                      ? "bg-orange-500"
+                      : "bg-red-500"
+                  }`}
+                />
+              )}
+              {showIcons && option.value === "low-stock" && (
+                <AlertTriangle className="w-3 h-3 text-orange-500" />
+              )}
+              {!showIcons || !option.icon ? (
+                <span>{option.label}</span>
+              ) : (
+                <span>{option.label}</span>
+              )}
+            </div>
           </SelectItem>
         ))}
       </SelectContent>
@@ -107,7 +140,9 @@ function StockFilterSelect({ value, param, placeholder, options }) {
   );
 }
 
-// Clear Filters Button Component
+// ============================================
+// CLEAR FILTERS BUTTON COMPONENT
+// ============================================
 export function ClearStockFiltersButton() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -123,18 +158,20 @@ export function ClearStockFiltersButton() {
 
   return (
     <Button
-      variant="ghost"
+      variant="outline"
       size="sm"
       onClick={handleClear}
-      className="text-yellow-500 hover:text-yellow-400 hover:bg-[#1f2937]"
+      className="border-border text-foreground hover:bg-accent self-end"
     >
-      <X className="w-4 h-4 mr-2" />
-      Clear Filters
+      <X className="w-4 h-4 mr-1" />
+      Clear All
     </Button>
   );
 }
 
-// Filter Badge Component
+// ============================================
+// FILTER BADGE COMPONENT
+// ============================================
 export function StockFilterBadge({ label, value, param }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -148,17 +185,52 @@ export function StockFilterBadge({ label, value, param }) {
   };
 
   // Format the display value
+  const displayValue = value
+    .replace(/-/g, " ")
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+
+  return (
+    <Badge
+      variant="secondary"
+      className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20 cursor-pointer"
+      onClick={handleRemove}
+    >
+      <span className="text-muted-foreground">{label}:</span>
+      <span className="ml-1 font-medium">{displayValue}</span>
+      <X className="w-3 h-3 ml-1" />
+    </Badge>
+  );
+}
+
+// ============================================
+// ALTERNATIVE: INLINE FILTER BADGE (Smaller)
+// ============================================
+export function StockFilterBadgeInline({ label, value, param }) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const handleRemove = () => {
+    const params = new URLSearchParams(searchParams);
+    params.delete(param);
+    params.set("page", "1");
+    router.replace(`${pathname}?${params.toString()}`);
+  };
+
   const displayValue = value.replace(/-/g, " ");
 
   return (
     <div className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-500/10 border border-yellow-500/20 rounded-md text-xs">
-      <span className="text-gray-400">{label}:</span>
-      <span className="text-yellow-500 font-medium capitalize">
+      <span className="text-muted-foreground">{label}:</span>
+      <span className="text-yellow-600 dark:text-yellow-400 font-medium capitalize">
         {displayValue}
       </span>
       <button
         onClick={handleRemove}
-        className="ml-1 text-gray-400 hover:text-yellow-500 transition-colors"
+        className="ml-1 text-muted-foreground hover:text-yellow-500 transition-colors"
+        aria-label={`Remove ${label} filter`}
       >
         <X className="w-3 h-3" />
       </button>

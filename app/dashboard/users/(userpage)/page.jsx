@@ -4,7 +4,7 @@ import {
   fetchUserPages,
   getUserStats,
   getDepartments,
-} from "@/app/mongodb/user-queries";
+} from "@/app/mongodb/queries/user-queries";
 import { auth } from "@/auth";
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";

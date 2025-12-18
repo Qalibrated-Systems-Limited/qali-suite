@@ -23,7 +23,7 @@ import {
   getOverdueCheckouts,
   getRecentMovements,
   getRecentRequests,
-} from "@/app/mongodb/dashboard-queries";
+} from "@/app/mongodb/queries/dashboard-queries";
 
 // ============================================
 // RECENT REQUESTS

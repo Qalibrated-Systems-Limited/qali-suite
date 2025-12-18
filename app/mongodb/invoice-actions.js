@@ -7,8 +7,8 @@ import { StockMovement } from "../models/stockmovement";
 import Account from "../models/account";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { generateInvoiceNumber } from "./invoice-queries";
-import { generateMovementNumber } from "./movement-queries";
+import { generateInvoiceNumber } from "./queries/invoice-queries";
+import { generateMovementNumber } from "./queries/movement-queries";
 import mongoose from "mongoose";
 
 // ============================================

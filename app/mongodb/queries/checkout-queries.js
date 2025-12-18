@@ -1,4 +1,4 @@
-import { ItemCheckout } from "../models/checkouts";
+import { ItemCheckout } from "../../models/checkouts";
 import mongoose from "mongoose";
 
 const ITEMS_PER_PAGE = 20;
@@ -295,7 +295,7 @@ export const getUserCheckouts = async (userId, activeOnly = false) => {
 // ============================================
 export const generateCheckoutNumber = async (session = null) => {
   const { format } = await import("date-fns");
-  const { Counter } = await import("../models/counter");
+  const { Counter } = await import("../../models/counter");
 
   const today = format(new Date(), "ddMMyy");
   const counterId = `CHK-${today}`;

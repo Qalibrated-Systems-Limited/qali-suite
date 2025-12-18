@@ -3,7 +3,7 @@ import Transaction from "../../models/transaction";
 import {
   getStockAggregate,
   getTotalSaleThisMonth,
-} from "../../mongodb/queries";
+} from "../../mongodb/queries/queries";
 import {
   authErrorResponse,
   failedResponse,

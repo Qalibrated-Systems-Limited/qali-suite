@@ -19,7 +19,7 @@ import {
 import {
   getMyOverdueItems,
   getMyRequests,
-} from "@/app/mongodb/tech-dashboard-queries";
+} from "@/app/mongodb/queries/tech-dashboard-queries";
 import { auth } from "@/auth";
 
 // ============================================

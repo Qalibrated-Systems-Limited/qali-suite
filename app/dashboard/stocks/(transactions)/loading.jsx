@@ -1,5 +1,5 @@
-import { StockPageSkeleton } from "./loading-skeleton";
+import StockLoading from "./loading-skeleton";
 
 export default function Loading() {
-  return <StockPageSkeleton />;
+  return <StockLoading />;
 }

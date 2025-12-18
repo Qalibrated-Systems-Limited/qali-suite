@@ -13,7 +13,10 @@ import {
 
 import { Button } from "../../../../components/ui/button";
 import Link from "next/link";
-import { fetchStockTxPages, searchStockTx } from "../../../mongodb/queries";
+import {
+  fetchStockTxPages,
+  searchStockTx,
+} from "../../../mongodb/queries/queries";
 
 async function page(props) {
   const searchParams = await props.searchParams;

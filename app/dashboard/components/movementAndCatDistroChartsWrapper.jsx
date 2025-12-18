@@ -6,7 +6,7 @@ import {
 import {
   getMovementTrend,
   getStockByCategory,
-} from "@/app/mongodb/dashboard-queries";
+} from "@/app/mongodb/queries/dashboard-queries";
 
 export async function MovementAndCatDistroChartsWrapper() {
   const [movementTrend, categoryData] = await Promise.all([

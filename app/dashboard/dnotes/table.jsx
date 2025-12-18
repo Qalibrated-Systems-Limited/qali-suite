@@ -1,6 +1,6 @@
 "use client";
 import { getColumns } from "./columns";
-import { DataTable } from "../../../components/ui/data-table";
+import { DataTable } from "@/components/ui/data-table";
 
 function DNoteTable({ invoices }) {
   return (

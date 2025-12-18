@@ -1,7 +1,10 @@
 import React from "react";
 import { RequestsListWithActions } from "../components/request";
-import { AddButton } from "@/components/buttons";
-import { fetchRequestPages, searchRequests } from "@/app/mongodb/queries";
+
+import {
+  fetchRequestPages,
+  searchRequests,
+} from "@/app/mongodb/queries/queries";
 import Pagination from "@/components/pagination";
 import { auth } from "@/auth";
 import Search from "@/components/search";
@@ -13,6 +16,7 @@ import {
   FilterBadge,
 } from "../components/filters";
 import { SiteHeader } from "@/components/site-header";
+import { redirect } from "next/navigation";
 
 const RequestsPage = async (props) => {
   const searchParams = await props.searchParams;
@@ -28,15 +32,7 @@ const RequestsPage = async (props) => {
   const user = session?.user;
 
   if (!user) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Card className="bg-[#161b22] border-[#30363d]">
-          <CardContent className="p-6">
-            <p className="text-gray-300">Please log in to view requests.</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
+    redirect("/login");
   }
 
   const userId = user.id;
@@ -75,12 +71,19 @@ const RequestsPage = async (props) => {
   const hasActiveFilters = status !== "all" || priority !== "all";
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       {/* Header */}
-      <SiteHeader title={canOnlyViewOwn ? "My Requests" : "Manage Requets"} />
+      <SiteHeader 
+        title={canOnlyViewOwn ? "My Requests" : "Manage Requests"}
+        description={
+          canOnlyViewOwn 
+            ? "View and track your submitted requests" 
+            : "Review and manage all stock requests"
+        }
+      />
 
       {/* Search and Filters */}
-      <Card className="bg-[#161b22] border-[#30363d]">
+      <Card className="bg-card border-border">
         <CardContent className="p-4">
           <div className="flex flex-col gap-4">
             {/* Search Bar */}
@@ -99,8 +102,10 @@ const RequestsPage = async (props) => {
 
             {/* Active Filters Display */}
             {hasActiveFilters && (
-              <div className="flex flex-wrap gap-2 pt-2 border-t border-[#30363d]">
-                <span className="text-xs text-gray-400">Active filters:</span>
+              <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
+                <span className="text-xs text-muted-foreground">
+                  Active filters:
+                </span>
                 {status !== "all" && (
                   <FilterBadge label="Status" value={status} param="status" />
                 )}
@@ -133,4 +138,5 @@ const RequestsPage = async (props) => {
     </div>
   );
 };
+
 export default RequestsPage;

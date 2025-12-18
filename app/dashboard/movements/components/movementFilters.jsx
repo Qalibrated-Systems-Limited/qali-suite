@@ -11,47 +11,94 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Filter, X, Calendar } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+  Filter,
+  X,
+  Calendar,
+  ArrowDownCircle,
+  ArrowUpCircle,
+} from "lucide-react";
 
-// Movement Type Filter
+// ============================================
+// MOVEMENT TYPE FILTER
+// ============================================
 export function MovementTypeFilter({ currentType }) {
   return (
-    <MovementFilterSelect
-      value={currentType}
-      param="movementType"
-      placeholder="All Types"
-      options={[
-        { value: "all", label: "All Types" },
-        { value: "issue", label: "Issue" },
-        { value: "return", label: "Return" },
-        { value: "sale", label: "Sale" },
-        { value: "purchase", label: "Purchase" },
-        { value: "adjustment", label: "Adjustment" },
-        { value: "damage", label: "Damage" },
-        { value: "transfer", label: "Transfer" },
-        { value: "initial", label: "Initial Stock" },
-      ]}
-    />
+    <div className="flex flex-col gap-2">
+      <Label className="text-xs text-muted-foreground">Movement Type</Label>
+      <MovementFilterSelect
+        value={currentType}
+        param="movementType"
+        placeholder="All Types"
+        options={[
+          { value: "all", label: "All Types" },
+          { value: "issue", label: "Issue" },
+          { value: "return", label: "Return" },
+          { value: "sale", label: "Sale" },
+          { value: "purchase", label: "Purchase" },
+          { value: "adjustment", label: "Adjustment" },
+          { value: "damage", label: "Damage" },
+          { value: "transfer", label: "Transfer" },
+          { value: "initial", label: "Initial Stock" },
+        ]}
+      />
+    </div>
   );
 }
 
-// Direction Filter
+// ============================================
+// DIRECTION FILTER
+// ============================================
 export function MovementDirectionFilter({ currentDirection }) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const handleChange = (newValue) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("page", "1");
+
+    if (newValue === "all") {
+      params.delete("direction");
+    } else {
+      params.set("direction", newValue);
+    }
+
+    router.replace(`${pathname}?${params.toString()}`);
+  };
+
   return (
-    <MovementFilterSelect
-      value={currentDirection}
-      param="direction"
-      placeholder="All Directions"
-      options={[
-        { value: "all", label: "All Directions" },
-        { value: "in", label: "Stock In" },
-        { value: "out", label: "Stock Out" },
-      ]}
-    />
+    <div className="flex flex-col gap-2">
+      <Label className="text-xs text-muted-foreground">Direction</Label>
+      <Select value={currentDirection} onValueChange={handleChange}>
+        <SelectTrigger className="w-full bg-background border-border text-foreground">
+          <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
+          <SelectValue placeholder="All Directions" />
+        </SelectTrigger>
+        <SelectContent className="bg-card border-border">
+          <SelectItem value="all">All Directions</SelectItem>
+          <SelectItem value="in">
+            <div className="flex items-center">
+              <ArrowDownCircle className="w-3 h-3 mr-2 text-green-500" />
+              Stock In
+            </div>
+          </SelectItem>
+          <SelectItem value="out">
+            <div className="flex items-center">
+              <ArrowUpCircle className="w-3 h-3 mr-2 text-red-500" />
+              Stock Out
+            </div>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
 
-// Date Range Filter
+// ============================================
+// DATE RANGE FILTER
+// ============================================
 export function MovementDateFilter({ startDate, endDate }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -71,11 +118,11 @@ export function MovementDateFilter({ startDate, endDate }) {
   };
 
   return (
-    <div className="flex flex-col sm:flex-row gap-3 w-full">
+    <div className="flex flex-col md:flex-row gap-3 w-full">
       <div className="flex-1 space-y-2">
         <Label
           htmlFor="startDate"
-          className="text-xs text-gray-400 flex items-center gap-1"
+          className="text-xs text-muted-foreground flex items-center gap-1"
         >
           <Calendar className="w-3 h-3" />
           Start Date
@@ -85,13 +132,13 @@ export function MovementDateFilter({ startDate, endDate }) {
           type="date"
           value={startDate || ""}
           onChange={(e) => handleDateChange("startDate", e.target.value)}
-          className="bg-[#0d1117] border-[#30363d] text-gray-100 focus:border-yellow-500 focus:ring-yellow-500"
+          className="bg-background border-border text-foreground focus-visible:ring-yellow-500 focus-visible:border-yellow-500"
         />
       </div>
       <div className="flex-1 space-y-2">
         <Label
           htmlFor="endDate"
-          className="text-xs text-gray-400 flex items-center gap-1"
+          className="text-xs text-muted-foreground flex items-center gap-1"
         >
           <Calendar className="w-3 h-3" />
           End Date
@@ -101,14 +148,16 @@ export function MovementDateFilter({ startDate, endDate }) {
           type="date"
           value={endDate || ""}
           onChange={(e) => handleDateChange("endDate", e.target.value)}
-          className="bg-[#0d1117] border-[#30363d] text-gray-100 focus:border-yellow-500 focus:ring-yellow-500"
+          className="bg-background border-border text-foreground focus-visible:ring-yellow-500 focus-visible:border-yellow-500"
         />
       </div>
     </div>
   );
 }
 
-// Reusable Filter Select
+// ============================================
+// REUSABLE FILTER SELECT
+// ============================================
 function MovementFilterSelect({ value, param, placeholder, options }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -129,18 +178,18 @@ function MovementFilterSelect({ value, param, placeholder, options }) {
 
   return (
     <Select value={value} onValueChange={handleChange}>
-      <SelectTrigger className="w-full  bg-[#0d1117] border-[#30363d] text-gray-100 focus:border-yellow-500 focus:ring-yellow-500">
+      <SelectTrigger className="w-full bg-background border-border text-foreground focus-visible:ring-yellow-500 focus-visible:border-yellow-500">
         <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-gray-400" />
+          <Filter className="w-4 h-4 text-muted-foreground" />
           <SelectValue placeholder={placeholder} />
         </div>
       </SelectTrigger>
-      <SelectContent className="bg-[#161b22] border-[#30363d]">
+      <SelectContent className="bg-card border-border">
         {options.map((option) => (
           <SelectItem
             key={option.value}
             value={option.value}
-            className="text-gray-100 focus:bg-[#1f2937] focus:text-white"
+            className="text-foreground focus:bg-accent focus:text-accent-foreground cursor-pointer"
           >
             {option.label}
           </SelectItem>
@@ -150,7 +199,9 @@ function MovementFilterSelect({ value, param, placeholder, options }) {
   );
 }
 
-// Clear Filters Button
+// ============================================
+// CLEAR FILTERS BUTTON
+// ============================================
 export function ClearMovementFiltersButton() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -168,18 +219,20 @@ export function ClearMovementFiltersButton() {
 
   return (
     <Button
-      variant="ghost"
+      variant="outline"
       size="sm"
       onClick={handleClear}
-      className="text-yellow-500 hover:text-yellow-400 hover:bg-[#1f2937]"
+      className="border-border text-foreground hover:bg-accent self-end"
     >
-      <X className="w-4 h-4 mr-2" />
+      <X className="w-4 h-4 mr-1" />
       Clear All
     </Button>
   );
 }
 
-// Filter Badge
+// ============================================
+// FILTER BADGE
+// ============================================
 export function MovementFilterBadge({ label, value, param }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -193,20 +246,22 @@ export function MovementFilterBadge({ label, value, param }) {
   };
 
   // Format the display value
-  const displayValue = value.replace(/-/g, " ").replace(/_/g, " ");
+  const displayValue = value
+    .replace(/-/g, " ")
+    .replace(/_/g, " ")
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 
   return (
-    <div className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-500/10 border border-yellow-500/20 rounded-md text-xs">
-      <span className="text-gray-400">{label}:</span>
-      <span className="text-yellow-500 font-medium capitalize">
-        {displayValue}
-      </span>
-      <button
-        onClick={handleRemove}
-        className="ml-1 text-gray-400 hover:text-yellow-500 transition-colors"
-      >
-        <X className="w-3 h-3" />
-      </button>
-    </div>
+    <Badge
+      variant="secondary"
+      className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20 cursor-pointer"
+      onClick={handleRemove}
+    >
+      <span className="text-muted-foreground">{label}:</span>
+      <span className="ml-1 font-medium">{displayValue}</span>
+      <X className="w-3 h-3 ml-1" />
+    </Badge>
   );
 }

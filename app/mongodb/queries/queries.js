@@ -1,21 +1,21 @@
-import dbConnect from "../config/dbConnect";
-import Vehicles from "../models/vehicles";
-import Transactions from "../models/transaction";
-import Product from "../models/product";
+import dbConnect from "../../config/dbConnect";
+import Vehicles from "../../models/vehicles";
+import Transactions from "../../models/transaction";
+import Product from "../../models/product";
 import { unstable_noStore as noStore } from "next/cache";
 
-import Accounts from "../models/account";
-import Vehicle from "../models/vehicles";
-import Commodity from "../models/commodity";
-import User from "../models/user";
+import Accounts from "../../models/account";
+import Vehicle from "../../models/vehicles";
+import Commodity from "../../models/commodity";
+import User from "../../models/user";
 
-import Invoice from "../models/invoice";
+import Invoice from "../../models/invoice";
 
-import BridgeConfig from "../models/bridgeConfigs";
-import StockTransaction from "../models/stockTransaction";
+import BridgeConfig from "../../models/bridgeConfigs";
+import StockTransaction from "../../models/stockTransaction";
 import { format } from "date-fns";
-import DeliveryNote from "../models/dnote";
-import { StockRequest } from "../models/requests";
+import DeliveryNote from "../../models/dnote";
+import { StockRequest } from "../../models/requests";
 import { request } from "http";
 
 dbConnect();

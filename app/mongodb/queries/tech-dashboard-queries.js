@@ -1,5 +1,5 @@
-import { StockRequest } from "../models/requests";
-import { ItemCheckout } from "../models/checkouts";
+import { StockRequest } from "../../models/requests";
+import { ItemCheckout } from "../../models/checkouts";
 
 // ============================================
 // TECHNICIAN DASHBOARD STATS

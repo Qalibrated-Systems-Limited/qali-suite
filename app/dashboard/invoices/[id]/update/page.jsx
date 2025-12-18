@@ -1,10 +1,10 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
-import { getInvoiceById } from "@/app/mongodb/invoice-queries";
+import { getInvoiceById } from "@/app/mongodb/queries/invoice-queries";
 import {
   fetchActiveCustomers,
   fetchAvailableProducts,
-} from "@/app/mongodb/invoice-queries";
+} from "@/app/mongodb/queries/invoice-queries";
 import EditInvoiceFormClient from "../../components/EditInvoiceForm";
 
 export default async function EditInvoicePage({ params }) {

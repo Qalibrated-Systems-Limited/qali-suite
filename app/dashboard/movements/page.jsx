@@ -2,7 +2,7 @@ import {
   searchMovements,
   fetchMovementPages,
   getMovementStats,
-} from "@/app/mongodb/movement-queries";
+} from "@/app/mongodb/queries/movement-queries";
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";
 import { auth } from "@/auth";

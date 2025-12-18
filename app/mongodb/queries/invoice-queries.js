@@ -1,8 +1,8 @@
-import dbConnect from "../config/dbConnect";
-import Account from "../models/account";
-import Product from "../models/product";
-import Invoice from "../models/invoice";
-import Counter from "../models/counter";
+import dbConnect from "../../config/dbConnect";
+import Account from "../../models/account";
+import Product from "../../models/product";
+import Invoice from "../../models/invoice";
+import Counter from "../../models/counter";
 
 dbConnect();
 

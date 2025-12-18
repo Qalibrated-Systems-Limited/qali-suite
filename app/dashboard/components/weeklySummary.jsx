@@ -1,4 +1,4 @@
-import { weeklyAggregates } from "../../mongodb/queries";
+import { weeklyAggregates } from "../../mongodb/queries/queries";
 import WeeklyDistributionLine from "./axles/summary-linegraph";
 import WeeklyDistrosCardWrapper from "./axles/weeklyDistrosCardWrapper";
 

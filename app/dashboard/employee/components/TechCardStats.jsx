@@ -1,4 +1,4 @@
-import { getTechnicianStats } from "@/app/mongodb/tech-dashboard-queries";
+import { getTechnicianStats } from "@/app/mongodb/queries/tech-dashboard-queries";
 import { auth } from "@/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import {

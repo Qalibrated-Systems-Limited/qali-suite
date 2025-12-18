@@ -6,7 +6,7 @@ function SkeletonWithShimmer({ className }) {
     <div
       className={`relative overflow-hidden bg-[#161b22] rounded ${className}`}
     >
-      <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-[#30363d]/50 to-transparent" />
+      <div className="absolute inset-0 -translate-x-full animate-shimmer bg-linear-to-r from-transparent via-[#30363d]/50 to-transparent" />
     </div>
   );
 }
@@ -27,8 +27,8 @@ export function MovementsPageSkeleton() {
 
             {/* Type & Direction Filters */}
             <div className="flex flex-col sm:flex-row gap-3">
-              <SkeletonWithShimmer className="h-10 w-full sm:w-[200px]" />
-              <SkeletonWithShimmer className="h-10 w-full sm:w-[200px]" />
+              <SkeletonWithShimmer className="h-10 w-full sm:w-50" />
+              <SkeletonWithShimmer className="h-10 w-full sm:w-50" />
             </div>
 
             {/* Date Range */}

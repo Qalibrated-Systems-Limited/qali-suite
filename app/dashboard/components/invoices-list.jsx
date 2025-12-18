@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { fetchLatestInvoices } from "../../mongodb/queries";
+import { fetchLatestInvoices } from "../../mongodb/queries/queries";
 
 const InvoicesList = async ({}) => {
   const invoices = await fetchLatestInvoices();

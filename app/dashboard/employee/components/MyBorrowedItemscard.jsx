@@ -16,7 +16,7 @@ import {
   Clock,
   ChevronRight,
 } from "lucide-react";
-import { getMyBorrowedItems } from "@/app/mongodb/tech-dashboard-queries";
+import { getMyBorrowedItems } from "@/app/mongodb/queries/tech-dashboard-queries";
 import { auth } from "@/auth";
 
 export async function MyBorrowedItemsCard({}) {
@@ -108,9 +108,7 @@ export async function MyBorrowedItemsCard({}) {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-2">
-                        <Icon
-                          className={`h-4 w-4 ${config.iconColor} `}
-                        />
+                        <Icon className={`h-4 w-4 ${config.iconColor} `} />
                         <p className="text-sm font-semibold text-foreground truncate">
                           {item.productSnapshot.name}
                         </p>

@@ -10,7 +10,7 @@ import {
 } from "../../../../components/ui/card";
 import { Button } from "../../../../components/ui/button";
 import Link from "next/link";
-import { fetchTodaySummary } from "../../../mongodb/queries";
+import { fetchTodaySummary } from "../../../mongodb/queries/queries";
 import {
   Calendar1Icon,
   CheckIcon,

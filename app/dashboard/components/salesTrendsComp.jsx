@@ -1,5 +1,5 @@
 import React from "react";
-import { monthlySalesDistro } from "../../mongodb/queries";
+import { monthlySalesDistro } from "../../mongodb/queries/queries";
 import SalesTrendCharts from "./sales-trends";
 
 async function SalesTrendsComp() {

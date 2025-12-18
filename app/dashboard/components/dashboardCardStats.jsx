@@ -1,4 +1,4 @@
-import { getDashboardStats } from "@/app/mongodb/dashboard-queries";
+import { getDashboardStats } from "@/app/mongodb/queries/dashboard-queries";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import {

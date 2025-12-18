@@ -1,8 +1,8 @@
-import Product from "../models/product";
-import { StockRequest } from "../models/requests";
-import { ItemCheckout } from "../models/checkouts";
-import { StockMovement } from "../models/stockmovement";
-import dbConnect from "../config/dbConnect";
+import Product from "../../models/product";
+import { StockRequest } from "../../models/requests";
+import { ItemCheckout } from "../../models/checkouts";
+import { StockMovement } from "../../models/stockmovement";
+import dbConnect from "../../config/dbConnect";
 
 // ============================================
 // DASHBOARD OVERVIEW STATS

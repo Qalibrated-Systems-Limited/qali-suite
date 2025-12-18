@@ -1,6 +1,6 @@
 import { EditUserForm } from "./form";
 import { auth } from "@/auth";
-import { getUserById } from "@/app/mongodb/user-queries";
+import { getUserById } from "@/app/mongodb/queries/user-queries";
 import { notFound } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";

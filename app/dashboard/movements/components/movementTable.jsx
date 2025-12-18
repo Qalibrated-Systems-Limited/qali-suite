@@ -46,7 +46,7 @@ const typeConfig = {
   },
   initial: {
     label: "Initial",
-    color: "bg-gray-500/10 text-gray-500 border-gray-500/20",
+    color: "bg-gray-500/10 text-gray-500 dark:text-gray-400 border-gray-500/20",
   },
 };
 
@@ -76,37 +76,37 @@ export function MovementsTable({ movements }) {
   return (
     <>
       {/* Desktop Table View */}
-      <Card className="hidden md:block bg-[#161b22] border-[#30363d]">
+      <Card className="hidden md:block bg-card border-border">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="border-b border-[#30363d] hover:bg-transparent">
-                  <TableHead className="font-semibold text-gray-300">
+                <TableRow className="border-b border-border hover:bg-transparent">
+                  <TableHead className="font-semibold text-muted-foreground">
                     Movement #
                   </TableHead>
-                  <TableHead className="font-semibold text-gray-300">
+                  <TableHead className="font-semibold text-muted-foreground">
                     Product
                   </TableHead>
-                  <TableHead className="font-semibold text-gray-300">
+                  <TableHead className="font-semibold text-muted-foreground">
                     Type
                   </TableHead>
-                  <TableHead className="font-semibold text-gray-300">
+                  <TableHead className="font-semibold text-muted-foreground">
                     Direction
                   </TableHead>
-                  <TableHead className="font-semibold text-gray-300">
+                  <TableHead className="font-semibold text-muted-foreground">
                     Quantity
                   </TableHead>
-                  <TableHead className="font-semibold text-gray-300">
+                  <TableHead className="font-semibold text-muted-foreground">
                     Value
                   </TableHead>
-                  <TableHead className="font-semibold text-gray-300">
+                  <TableHead className="font-semibold text-muted-foreground">
                     Performed By
                   </TableHead>
-                  <TableHead className="font-semibold text-gray-300">
+                  <TableHead className="font-semibold text-muted-foreground">
                     Date
                   </TableHead>
-                  <TableHead className="text-right font-semibold text-gray-300">
+                  <TableHead className="text-right font-semibold text-muted-foreground">
                     Actions
                   </TableHead>
                 </TableRow>
@@ -116,11 +116,14 @@ export function MovementsTable({ movements }) {
                   <TableRow className="hover:bg-transparent">
                     <TableCell
                       colSpan={9}
-                      className="h-24 text-center text-gray-400"
+                      className="h-32 text-center text-muted-foreground"
                     >
                       <div className="flex flex-col items-center gap-2">
-                        <Package className="h-8 w-8" />
+                        <Package className="h-12 w-12 text-muted-foreground/50" />
                         <p>No movements found</p>
+                        <p className="text-sm">
+                          No stock movements recorded yet
+                        </p>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -132,18 +135,18 @@ export function MovementsTable({ movements }) {
                     return (
                       <TableRow
                         key={movement._id}
-                        className="border-b border-[#30363d] hover:bg-[#161b22] transition-colors"
+                        className="border-b border-border hover:bg-muted/50 transition-colors"
                       >
-                        <TableCell className="font-mono text-sm text-gray-400">
+                        <TableCell className="font-mono text-sm text-muted-foreground">
                           {movement.movementNumber}
                         </TableCell>
 
                         <TableCell>
                           <div>
-                            <p className="font-medium text-white">
+                            <p className="font-medium text-foreground">
                               {movement.productSnapshot.name}
                             </p>
-                            <p className="text-xs text-gray-400">
+                            <p className="text-xs text-muted-foreground">
                               {movement.productSnapshot.SKU}
                             </p>
                           </div>
@@ -173,31 +176,31 @@ export function MovementsTable({ movements }) {
                           </Badge>
                         </TableCell>
 
-                        <TableCell className="text-gray-100">
+                        <TableCell className="text-foreground">
                           <span className="font-medium">
                             {movement.quantity}
                           </span>
-                          <span className="text-xs text-gray-400 ml-1">
+                          <span className="text-xs text-muted-foreground ml-1">
                             ({movement.previousStock} → {movement.newStock})
                           </span>
                         </TableCell>
 
-                        <TableCell className="font-medium text-gray-100">
+                        <TableCell className="font-medium text-foreground">
                           {formatCurrency(movement.totalValue)}
                         </TableCell>
 
                         <TableCell>
                           <div>
-                            <p className="text-sm text-gray-100">
+                            <p className="text-sm text-foreground">
                               {movement.performedBy.name}
                             </p>
-                            <p className="text-xs text-gray-400">
+                            <p className="text-xs text-muted-foreground">
                               {movement.performedBy.role}
                             </p>
                           </div>
                         </TableCell>
 
-                        <TableCell className="text-sm text-gray-400">
+                        <TableCell className="text-sm text-muted-foreground">
                           {formatDate(movement.createdAt)}
                         </TableCell>
 
@@ -209,9 +212,12 @@ export function MovementsTable({ movements }) {
                               setSelectedMovement(movement);
                               setViewDialogOpen(true);
                             }}
-                            className="text-gray-300 hover:text-white hover:bg-[#1f2937]"
+                            className="text-muted-foreground hover:text-foreground hover:bg-accent"
                           >
                             <Eye className="h-4 w-4" />
+                            <span className="sr-only">
+                              View movement details
+                            </span>
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -227,9 +233,14 @@ export function MovementsTable({ movements }) {
       {/* Mobile Card View */}
       <div className="space-y-4 md:hidden">
         {movements.length === 0 ? (
-          <Card className="p-8 text-center bg-[#161b22] border-[#30363d]">
-            <Package className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-            <p className="text-gray-400">No movements found</p>
+          <Card className="bg-card border-border">
+            <CardContent className="p-8 text-center">
+              <Package className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+              <p className="text-muted-foreground mb-1">No movements found</p>
+              <p className="text-sm text-muted-foreground">
+                No stock movements recorded yet
+              </p>
+            </CardContent>
           </Card>
         ) : (
           movements.map((movement) => {
@@ -237,92 +248,100 @@ export function MovementsTable({ movements }) {
             const typeLabel = typeConfig[movement.movementType]?.label;
 
             return (
-              <Card
-                key={movement._id}
-                className="p-4 bg-[#161b22] border-[#30363d]"
-              >
-                <div className="space-y-3">
-                  {/* Header */}
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="font-semibold text-white">
-                        {movement.productSnapshot.name}
-                      </p>
-                      <p className="text-xs text-gray-400 font-mono">
-                        {movement.movementNumber}
-                      </p>
+              <Card key={movement._id} className="bg-card border-border">
+                <CardContent className="p-4">
+                  <div className="space-y-3">
+                    {/* Header */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-foreground">
+                          {movement.productSnapshot.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                          {movement.movementNumber}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={
+                          movement.direction === "in"
+                            ? "bg-green-500/10 text-green-500 border-green-500/20 shrink-0"
+                            : "bg-red-500/10 text-red-500 border-red-500/20 shrink-0"
+                        }
+                      >
+                        {movement.direction === "in" ? (
+                          <ArrowDownCircle className="mr-1 h-3 w-3" />
+                        ) : (
+                          <ArrowUpCircle className="mr-1 h-3 w-3" />
+                        )}
+                        {movement.direction === "in" ? "In" : "Out"}
+                      </Badge>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={
-                        movement.direction === "in"
-                          ? "bg-green-500/10 text-green-500 border-green-500/20"
-                          : "bg-red-500/10 text-red-500 border-red-500/20"
-                      }
-                    >
-                      {movement.direction === "in" ? (
-                        <ArrowDownCircle className="mr-1 h-3 w-3" />
-                      ) : (
-                        <ArrowUpCircle className="mr-1 h-3 w-3" />
-                      )}
-                      {movement.direction === "in" ? "In" : "Out"}
-                    </Badge>
-                  </div>
 
-                  {/* Type Badge */}
-                  <div>
-                    <Badge variant="outline" className={typeStyle}>
-                      {typeLabel}
-                    </Badge>
-                  </div>
+                    {/* Type Badge */}
+                    <div>
+                      <Badge variant="outline" className={typeStyle}>
+                        {typeLabel}
+                      </Badge>
+                    </div>
 
-                  {/* Details */}
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <p className="text-gray-400 text-xs">Quantity</p>
-                      <p className="font-medium text-gray-100">
-                        {movement.quantity}
-                      </p>
+                    {/* Details */}
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-muted-foreground text-xs">
+                          Quantity
+                        </p>
+                        <p className="font-medium text-foreground">
+                          {movement.quantity}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground text-xs">Value</p>
+                        <p className="font-medium text-foreground">
+                          {formatCurrency(movement.totalValue)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground text-xs">
+                          Performed By
+                        </p>
+                        <p className="font-medium text-foreground truncate">
+                          {movement.performedBy.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {movement.performedBy.role}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground text-xs">
+                          Stock Change
+                        </p>
+                        <p className="font-medium text-foreground">
+                          {movement.previousStock} → {movement.newStock}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-gray-400 text-xs">Value</p>
-                      <p className="font-medium text-gray-100">
-                        {formatCurrency(movement.totalValue)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400 text-xs">Performed By</p>
-                      <p className="font-medium text-gray-100">
-                        {movement.performedBy.name}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400 text-xs">Stock Change</p>
-                      <p className="font-medium text-gray-100">
-                        {movement.previousStock} → {movement.newStock}
-                      </p>
-                    </div>
-                  </div>
 
-                  {/* Date & Action */}
-                  <div className="flex items-center justify-between pt-2 border-t border-[#30363d]">
-                    <p className="text-xs text-gray-400">
-                      {formatDate(movement.createdAt)}
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setSelectedMovement(movement);
-                        setViewDialogOpen(true);
-                      }}
-                      className="border-[#30363d] text-gray-300 hover:bg-[#1f2937] hover:text-white"
-                    >
-                      <Eye className="mr-2 h-4 w-4" />
-                      View
-                    </Button>
+                    {/* Date & Action */}
+                    <div className="flex items-center justify-between pt-2 border-t border-border">
+                      <p className="text-xs text-muted-foreground">
+                        {formatDate(movement.createdAt)}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedMovement(movement);
+                          setViewDialogOpen(true);
+                        }}
+                        className="border-border text-foreground hover:bg-accent"
+                      >
+                        <Eye className="mr-2 h-4 w-4" />
+                        View
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                </CardContent>
               </Card>
             );
           })

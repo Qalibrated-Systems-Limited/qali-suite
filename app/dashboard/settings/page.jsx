@@ -2,7 +2,7 @@ import React from "react";
 
 import UpdateForm from "./updateForm";
 import { SettingsForm } from "./form";
-import { getWbConfigs } from "../../mongodb/queries";
+import { getWbConfigs } from "../../mongodb/queries/queries";
 import { auth } from "../../../auth";
 
 async function page() {

@@ -1,5 +1,5 @@
 import React from "react";
-import { getTopSellingProducts } from "../../mongodb/queries";
+import { getTopSellingProducts } from "../../mongodb/queries/queries";
 import TopSellingProductsBars from "./top-sales-bars";
 
 async function TopSalesComp() {

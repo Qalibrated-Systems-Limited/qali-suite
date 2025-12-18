@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { getMyRecentActivity } from "@/app/mongodb/tech-dashboard-queries";
+import { getMyRecentActivity } from "@/app/mongodb/queries/tech-dashboard-queries";
 import { auth } from "@/auth";
 import { TechnicianStatsCards } from "./TechCardStats";
 import { MyBorrowedItemsCard } from "./MyBorrowedItemscard";

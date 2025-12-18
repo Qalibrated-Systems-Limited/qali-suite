@@ -5,7 +5,7 @@ import {
   searchInvoices,
   fetchInvoicePages,
   getInvoiceStats,
-} from "@/app/mongodb/invoice-queries";
+} from "@/app/mongodb/queries/invoice-queries";
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,6 +19,7 @@ import {
 } from "../components/invoice-filters";
 import { InvoicesTable } from "../components/Invoicetable";
 import { FileText, Plus, CheckCircle, XCircle, Clock } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 async function InvoicesPage(props) {
   const searchParams = await props.searchParams;
@@ -33,7 +34,7 @@ async function InvoicesPage(props) {
   // Check permissions
   if (user.role !== "Admin" && user.role !== "Accountant") {
     return (
-      <div className="flex min-h-[400px] items-center justify-center">
+      <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-foreground mb-2">
             Access Denied
@@ -72,13 +73,6 @@ async function InvoicesPage(props) {
   const hasActiveFilters =
     paymentStatus !== "all" || status !== "all" || startDate || endDate;
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat("en-KE", {
-      style: "currency",
-      currency: "KES",
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
 
   return (
     <div className="flex flex-col gap-6">

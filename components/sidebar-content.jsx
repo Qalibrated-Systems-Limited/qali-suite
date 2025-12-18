@@ -1,4 +1,5 @@
 "use client";
+
 import {
   Boxes,
   LayoutDashboard,
@@ -8,205 +9,258 @@ import {
   Users,
   Activity,
   LogOut,
-  Sun,
-  Moon,
-  Monitor,
-  ShoppingBag,
   Receipt,
+  FileText,
+  User,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useTheme } from "next-themes";
 import { clsx } from "clsx";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
-import { Button } from "./ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from "./ui/dropdown-menu";
 import { getInitials } from "@/lib/utils";
-import { signOut } from "@/auth";
 import { logout } from "@/app/mongodb/actions";
+import { NextThemeToggler } from "./NextThemeToggler";
 
 export const SidebarContent = ({ onItemClick, user }) => {
   const pathname = usePathname();
-  const { theme, setTheme } = useTheme();
 
   const sidebarItems = [
-    { icon: LayoutDashboard, label: "Dashboard", id: "." },
+    {
+      icon: LayoutDashboard,
+      label: "Dashboard",
+      id: ".",
+      href: "/dashboard",
+    },
     {
       icon: Boxes,
       label: "Stocks",
       id: "stocks",
+      href: "/dashboard/stocks",
       hidden: user?.role !== "Admin" && user?.role !== "Store Manager",
     },
-
-    { icon: List, label: "Requests", id: "requests" },
-    { icon: Package, label: "Checkouts", id: "checkout" },
-    { icon: Activity, label: "Movements", id: "movements" },
+    {
+      icon: List,
+      label: "Requests",
+      id: "requests",
+      href: "/dashboard/requests",
+    },
+    {
+      icon: Package,
+      label: "Checkouts",
+      id: "checkout",
+      href: "/dashboard/checkout",
+    },
+    {
+      icon: Activity,
+      label: "Movements",
+      id: "movements",
+      href: "/dashboard/movements",
+    },
     {
       icon: Receipt,
       label: "Invoices",
       id: "invoices",
+      href: "/dashboard/invoices",
       hidden: !["Admin", "admin", "Accountant"].includes(user?.role),
     },
-
+    {
+      icon: FileText,
+      label: "Delivery Notes",
+      id: "dnotes",
+      href: "/dashboard/dnotes",
+      hidden: !["Admin", "Store Manager"].includes(user?.role),
+    },
     {
       icon: Users,
       label: "Users",
       id: "users",
-      hidden: user?.role !== "Admin",
-    },
-    {
-      icon: Settings,
-      label: "Settings",
-      id: "settings",
+      href: "/dashboard/users",
       hidden: user?.role !== "Admin",
     },
   ];
 
+  const isActive = (itemId, itemHref) => {
+    if (itemId === ".") {
+      return pathname === "/dashboard";
+    }
+    return pathname.startsWith(itemHref);
+  };
+
   return (
-    <>
+    <div className="flex flex-col h-full bg-card">
       {/* Logo */}
       <div className="p-4 md:p-6 border-b border-border">
-        <Link href="/dashboard" className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-yellow-500 rounded-md flex items-center justify-center font-bold text-black text-lg">
-            S
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-3 group"
+          onClick={() => onItemClick?.()}
+        >
+          <div className="w-10 h-10 bg-yellow-500 rounded-lg flex items-center justify-center font-bold text-black text-xl shadow-sm group-hover:shadow-md transition-shadow">
+            Q
           </div>
-          <span className="text-lg font-semibold">StockVault</span>
+          <div className="flex flex-col">
+            <span className="text-lg font-bold text-foreground">
+              StockVault
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Inventory System
+            </span>
+          </div>
         </Link>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 p-3 md:p-4 space-y-1 overflow-y-auto">
         {sidebarItems.map((item) => {
-          if (item.hidden) return;
+          if (item.hidden) return null;
+
+          const active = isActive(item.id, item.href);
+
           return (
             <Link
               key={item.id}
-              href={`/dashboard/${item.id}`}
-              onClick={() => {
-                onItemClick?.();
-              }}
+              href={item.href}
+              onClick={() => onItemClick?.()}
               className={clsx(
-                "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                "group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
                 {
-                  "bg-yellow-500 text-black":
-                    pathname === `/dashboard/${item.id}` ||
-                    (item.id === "." && pathname === "/dashboard"),
-                  "text-foreground/70 hover:bg-accent hover:text-foreground":
-                    pathname !== `/dashboard/${item.id}` &&
-                    !(item.id === "." && pathname === "/dashboard"),
+                  "bg-yellow-500 text-black shadow-sm hover:shadow-md": active,
+                  "text-muted-foreground hover:bg-accent hover:text-foreground":
+                    !active,
                 }
               )}
             >
-              <item.icon className="w-5 h-5" />
-              {item.label}
+              <item.icon
+                className={clsx(
+                  "w-5 h-5 transition-transform group-hover:scale-110",
+                  {
+                    "text-black": active,
+                  }
+                )}
+              />
+              <span
+                className={clsx("font-medium", {
+                  "text-black": active,
+                })}
+              >
+                {item.label}
+              </span>
             </Link>
           );
         })}
       </nav>
 
       {/* Theme Toggle */}
-      <div className="px-4 py-2 border-t border-border">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start gap-3 text-foreground/70 hover:bg-accent hover:text-foreground"
-            >
-              {theme === "light" ? (
-                <Sun className="w-5 h-5" />
-              ) : theme === "dark" ? (
-                <Moon className="w-5 h-5" />
-              ) : (
-                <Monitor className="w-5 h-5" />
-              )}
-              <span className="text-sm font-medium">
-                {theme === "light"
-                  ? "Light"
-                  : theme === "dark"
-                  ? "Dark"
-                  : "System"}
-              </span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-48">
-            <DropdownMenuItem onClick={() => setTheme("light")}>
-              <Sun className="mr-2 h-4 w-4" />
-              Light
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setTheme("dark")}>
-              <Moon className="mr-2 h-4 w-4" />
-              Dark
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setTheme("system")}>
-              <Monitor className="mr-2 h-4 w-4" />
-              System
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+      <NextThemeToggler />
 
       {/* User Profile with Logout */}
-      <div className="p-4 border-t border-border">
+      <div className="p-4 border-t border-border bg-muted/30">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="w-full flex items-center gap-3 hover:bg-accent p-2 rounded-md transition-colors">
-              <Avatar className="w-10 h-10">
+            <button className="w-full flex items-center gap-3 hover:bg-accent p-2.5 rounded-lg transition-all duration-200">
+              <Avatar className="w-10 h-10 ring-2 ring-border">
                 <AvatarImage
                   src={user?.image || "https://github.com/shadcn.png"}
+                  alt={user?.name}
                 />
-                <AvatarFallback className="bg-yellow-500 text-black">
+                <AvatarFallback className="bg-yellow-500 text-black font-bold">
                   {getInitials(user?.name)}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0 text-left">
-                <p className="text-sm font-medium truncate">{user?.name}</p>
+                <p className="text-sm font-semibold text-foreground truncate">
+                  {user?.name}
+                </p>
                 <p className="text-xs text-muted-foreground truncate">
-                  {user?.email}
+                  {user?.role || "User"}
                 </p>
               </div>
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-56">
-            <div className="px-2 py-1.5">
-              <p className="text-sm font-medium">{user?.name}</p>
-              <p className="text-xs text-muted-foreground">{user?.email}</p>
-            </div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link href="/dashboard/profile">
-                <Users className="mr-2 h-4 w-4" />
-                Profile
+          <DropdownMenuContent
+            align="start"
+            className="w-64 bg-card border-border"
+            sideOffset={5}
+          >
+            <DropdownMenuLabel>
+              <div className="flex items-center gap-3 pb-2">
+                <Avatar className="w-12 h-12 ring-2 ring-border">
+                  <AvatarImage
+                    src={user?.image || "https://github.com/shadcn.png"}
+                    alt={user?.name}
+                  />
+                  <AvatarFallback className="bg-yellow-500 text-black font-bold">
+                    {getInitials(user?.name)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground truncate">
+                    {user?.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {user?.email}
+                  </p>
+                  <p className="text-xs font-medium text-yellow-600 dark:text-yellow-500 truncate mt-1">
+                    {user?.role || "User"}
+                  </p>
+                </div>
+              </div>
+            </DropdownMenuLabel>
+
+            <DropdownMenuSeparator className="bg-border" />
+
+            <DropdownMenuItem
+              asChild
+              className="cursor-pointer focus:bg-accent focus:text-accent-foreground"
+            >
+              <Link href="/dashboard/profile" className="flex items-center">
+                <User className="mr-2 h-4 w-4" />
+                <span>Profile</span>
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href="/dashboard/settings">
+
+            <DropdownMenuItem
+              asChild
+              className="cursor-pointer focus:bg-accent focus:text-accent-foreground"
+            >
+              <Link href="/dashboard/settings" className="flex items-center">
                 <Settings className="mr-2 h-4 w-4" />
-                Settings
+                <span>Settings</span>
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-950">
+
+            <DropdownMenuSeparator className="bg-border" />
+
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
+              asChild
+            >
               <form
                 action={async () => {
                   await logout();
                 }}
+                className="w-full"
               >
-                <button className="flex items-center gap-2" type="submit">
+                <button
+                  className="w-full flex items-center text-left"
+                  type="submit"
+                >
                   <LogOut className="mr-2 h-4 w-4" />
-                  Log out
+                  <span>Log out</span>
                 </button>
               </form>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-    </>
+    </div>
   );
 };
