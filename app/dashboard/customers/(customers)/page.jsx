@@ -1,6 +1,6 @@
-import Pagination from "../../../../components/ui/pagination";
+import Pagination from "../../../../components/pagination";
 
-import Search from "../../../../components/ui/search";
+import Search from "../../../../components/search";
 import AccounTable from "../table";
 
 import {

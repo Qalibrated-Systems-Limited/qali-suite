@@ -1,6 +1,7 @@
 import dbConnect from "../../config/dbConnect";
 import { StockMovement } from "../../models/stockmovement";
 import Counter from "../../models/counter";
+import { sanitizeSearchTerm } from "../../../lib/utils/sanitize";
 
 const ITEMS_PER_PAGE = 20;
 dbConnect();
@@ -15,6 +16,9 @@ export const fetchMovementPages = async (
   userRole = null
 ) => {
   const { movementType, direction, startDate, endDate } = filters;
+
+  // Sanitize search term to prevent NoSQL injection
+  const safeSearchTerm = sanitizeSearchTerm(searchTerm);
 
   // Build filter conditions
   let additionalFilters = {};
@@ -63,12 +67,12 @@ export const fetchMovementPages = async (
         additionalFilters,
         {
           $or: [
-            { movementNumber: { $regex: searchTerm, $options: "i" } },
-            { "productSnapshot.name": { $regex: searchTerm, $options: "i" } },
-            { "productSnapshot.SKU": { $regex: searchTerm, $options: "i" } },
-            { "performedBy.name": { $regex: searchTerm, $options: "i" } },
-            { "issuedTo.name": { $regex: searchTerm, $options: "i" } },
-            { "issuedTo.department": { $regex: searchTerm, $options: "i" } },
+            { movementNumber: { $regex: safeSearchTerm, $options: "i" } },
+            { "productSnapshot.name": { $regex: safeSearchTerm, $options: "i" } },
+            { "productSnapshot.SKU": { $regex: safeSearchTerm, $options: "i" } },
+            { "performedBy.name": { $regex: safeSearchTerm, $options: "i" } },
+            { "issuedTo.name": { $regex: safeSearchTerm, $options: "i" } },
+            { "issuedTo.department": { $regex: safeSearchTerm, $options: "i" } },
           ],
         },
       ],
@@ -85,7 +89,7 @@ export const fetchMovementPages = async (
 
   let pipeline = [baseFilterStage, countStage];
 
-  if (searchTerm && searchTerm.length > 0) {
+  if (safeSearchTerm && safeSearchTerm.length > 0) {
     pipeline = [transactionSearchStage, countStage];
   }
 
@@ -113,6 +117,9 @@ export const searchMovements = async (
 ) => {
   const { movementType, direction, startDate, endDate } = filters;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
+
+  // Sanitize search term to prevent NoSQL injection
+  const safeSearchTerm = sanitizeSearchTerm(searchTerm);
 
   // Build filter conditions
   let additionalFilters = {};
@@ -156,12 +163,12 @@ export const searchMovements = async (
         additionalFilters,
         {
           $or: [
-            { movementNumber: { $regex: searchTerm, $options: "i" } },
-            { "productSnapshot.name": { $regex: searchTerm, $options: "i" } },
-            { "productSnapshot.SKU": { $regex: searchTerm, $options: "i" } },
-            { "performedBy.name": { $regex: searchTerm, $options: "i" } },
-            { "issuedTo.name": { $regex: searchTerm, $options: "i" } },
-            { "issuedTo.department": { $regex: searchTerm, $options: "i" } },
+            { movementNumber: { $regex: safeSearchTerm, $options: "i" } },
+            { "productSnapshot.name": { $regex: safeSearchTerm, $options: "i" } },
+            { "productSnapshot.SKU": { $regex: safeSearchTerm, $options: "i" } },
+            { "performedBy.name": { $regex: safeSearchTerm, $options: "i" } },
+            { "issuedTo.name": { $regex: safeSearchTerm, $options: "i" } },
+            { "issuedTo.department": { $regex: safeSearchTerm, $options: "i" } },
           ],
         },
       ],
@@ -178,7 +185,7 @@ export const searchMovements = async (
 
   let pipeline = [baseFilterStage, sortStage, ...paginationStage];
 
-  if (searchTerm && searchTerm.length > 0) {
+  if (safeSearchTerm && safeSearchTerm.length > 0) {
     pipeline = [searchStage, sortStage, ...paginationStage];
   }
 

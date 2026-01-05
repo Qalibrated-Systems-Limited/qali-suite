@@ -1,5 +1,5 @@
 import UpdateAccountForm from "./form";
-import Breadcrumbs from "../../../../../components/ui/breadcrumbs";
+import Breadcrumbs from "../../../../../components/breadcrumbs";
 import { notFound } from "next/navigation";
 import Account from "../../../../models/account";
 

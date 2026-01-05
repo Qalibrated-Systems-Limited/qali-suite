@@ -1,5 +1,5 @@
 import { CreateAccountForm } from "./form";
-import Breadcrumbs from "../../../../components/ui/breadcrumbs";
+import Breadcrumbs from "../../../../components/breadcrumbs";
 
 function page() {
   return (

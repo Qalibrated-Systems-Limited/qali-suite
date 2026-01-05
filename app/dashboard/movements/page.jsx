@@ -23,6 +23,7 @@ import {
   DollarSign,
   Info,
 } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 async function MovementsPage(props) {
   const searchParams = await props.searchParams;
@@ -62,14 +63,6 @@ async function MovementsPage(props) {
   // Check if any filters are active
   const hasActiveFilters =
     movementType !== "all" || direction !== "all" || startDate || endDate;
-
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat("en-KE", {
-      style: "currency",
-      currency: "KES",
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
 
   return (
     <div className="flex flex-col gap-6">

@@ -1,5 +1,5 @@
 import { UpdateDNoteForm } from "./form";
-import Breadcrumbs from "../../../../../components/ui/breadcrumbs";
+import Breadcrumbs from "../../../../../components/breadcrumbs";
 import Account from "../../../../models/account";
 import DeliveryNote from "../../../../models/dnote";
 

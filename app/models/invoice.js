@@ -188,7 +188,7 @@ const invoiceSchema = new Schema(
 // ============================================
 // INDEXES
 // ============================================
-invoiceSchema.index({ invoiceNumber: 1 });
+// Note: invoiceNumber index is auto-created by unique: true
 invoiceSchema.index({ "customer.id": 1 });
 invoiceSchema.index({ invoiceDate: -1 });
 invoiceSchema.index({ paymentStatus: 1 });

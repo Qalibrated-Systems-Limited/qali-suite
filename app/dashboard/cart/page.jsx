@@ -8,7 +8,12 @@ export default async function page({}) {
 
   const userWithCart = await User.findById(user.id);
 
-  const cart = userWithCart?.cart ?? [];
+  // Serialize cart data for client component
+  const cart = userWithCart?.cart?.map((item) => ({
+    ...item.toObject(),
+    _id: item._id?.toString(),
+    productId: item.productId?.toString(),
+  })) ?? [];
 
   return <CartComp cart={cart} />;
 }

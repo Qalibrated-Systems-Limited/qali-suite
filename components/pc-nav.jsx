@@ -1,6 +1,4 @@
-import React from "react";
 import { SidebarContent } from "./sidebar-content";
-import { auth } from "@/auth";
 
 export function PcNav({ user }) {
   return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useFormState } from "react-dom";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,7 @@ import {
   IconAlertCircle,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { useActionState } from "react";
 
 // ============================================
 // PRODUCT SEARCH COMBOBOX
@@ -125,7 +126,8 @@ export function CreateStockRequestForm({
   createRequestAction,
 }) {
   const router = useRouter();
-  const [state, formAction] = useFormState(createRequestAction, {
+  const [isPending, startTransition] = useTransition();
+  const [state, formAction] = useActionState(createRequestAction, {
     message: "",
   });
 
@@ -241,7 +243,7 @@ export function CreateStockRequestForm({
   // ============================================
   // SUBMIT FORM
   // ============================================
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
 
     if (items.length === 0) {
@@ -265,7 +267,9 @@ export function CreateStockRequestForm({
     // Add items as JSON
     formData.append("items", JSON.stringify(items));
 
-    await formAction(formData);
+    startTransition(() => {
+      formAction(formData);
+    });
   };
 
   return (
@@ -689,10 +693,10 @@ export function CreateStockRequestForm({
         </Button>
         <Button
           type="submit"
-          disabled={items.length === 0}
+          disabled={items.length === 0 || isPending}
           className="bg-yellow-500 hover:bg-yellow-600 text-black"
         >
-          Submit Request
+          {isPending ? "Submitting..." : "Submit Request"}
         </Button>
       </div>
     </form>

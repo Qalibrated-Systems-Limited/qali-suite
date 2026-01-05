@@ -34,7 +34,14 @@ async function StockPage(props) {
   const { user } = session;
   const userId = user.id;
   const userCart = await User.findById(userId).select("cart");
-  const cart = userCart?.cart ?? [];
+
+  // Serialize cart data for client component
+  const cart = userCart?.cart?.map((item) => ({
+    ...item.toObject(),
+    _id: item._id?.toString(),
+    productId: item.productId?.toString(),
+  })) ?? [];
+
   const canCreateStock = user.role === "Store Manager" || user.role === "Admin";
 
   // Build filters object

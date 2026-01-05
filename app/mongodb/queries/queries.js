@@ -17,6 +17,7 @@ import { format } from "date-fns";
 import DeliveryNote from "../../models/dnote";
 import { StockRequest } from "../../models/requests";
 import { request } from "http";
+import { sanitizeSearchTerm } from "../../../lib/utils/sanitize";
 
 dbConnect();
 const ITEMS_PER_PAGE = 20;
@@ -423,6 +424,9 @@ export const searchAccounts = async (searchTerm, page = 1) => {
 export const fetchStockPages = async (searchTerm, filters = {}) => {
   const { category, quantity } = filters;
 
+  // Sanitize search term to prevent NoSQL injection
+  const safeSearchTerm = sanitizeSearchTerm(searchTerm);
+
   // Build filter conditions
   let additionalFilters = {};
 
@@ -452,8 +456,8 @@ export const fetchStockPages = async (searchTerm, filters = {}) => {
         additionalFilters,
         {
           $or: [
-            { name: { $regex: searchTerm, $options: "i" } },
-            { SKU: { $regex: searchTerm, $options: "i" } },
+            { name: { $regex: safeSearchTerm, $options: "i" } },
+            { SKU: { $regex: safeSearchTerm, $options: "i" } },
           ],
         },
       ],
@@ -470,7 +474,7 @@ export const fetchStockPages = async (searchTerm, filters = {}) => {
 
   let pipeline = [baseFilterStage, countStage];
 
-  if (searchTerm && searchTerm.length > 0) {
+  if (safeSearchTerm && safeSearchTerm.length > 0) {
     pipeline = [transactionSearchStage, countStage];
   }
 
@@ -489,6 +493,9 @@ export const fetchStockPages = async (searchTerm, filters = {}) => {
 export const searchStock = async (searchTerm, page = 1, filters = {}) => {
   const { category, quantity } = filters;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
+
+  // Sanitize search term to prevent NoSQL injection
+  const safeSearchTerm = sanitizeSearchTerm(searchTerm);
 
   // Build filter conditions
   let additionalFilters = {};
@@ -519,8 +526,8 @@ export const searchStock = async (searchTerm, page = 1, filters = {}) => {
         additionalFilters,
         {
           $or: [
-            { name: { $regex: searchTerm, $options: "i" } },
-            { SKU: { $regex: searchTerm, $options: "i" } },
+            { name: { $regex: safeSearchTerm, $options: "i" } },
+            { SKU: { $regex: safeSearchTerm, $options: "i" } },
           ],
         },
       ],
@@ -537,7 +544,7 @@ export const searchStock = async (searchTerm, page = 1, filters = {}) => {
 
   let pipeline = [baseFilterStage, sortStage, ...paginationStage];
 
-  if (searchTerm && searchTerm.length > 0) {
+  if (safeSearchTerm && safeSearchTerm.length > 0) {
     pipeline = [searchStage, sortStage, ...paginationStage];
   }
 
@@ -556,6 +563,9 @@ export const fetchRequestPages = async (
   filters = {}
 ) => {
   const { status, priority, customer, startDate, endDate } = filters;
+
+  // Sanitize search term to prevent NoSQL injection
+  const safeSearchTerm = sanitizeSearchTerm(searchTerm);
 
   // Build role-based filter
   let roleFilter = {};
@@ -620,10 +630,10 @@ export const fetchRequestPages = async (
         combinedFilter, // Apply other filters
         {
           $or: [
-            { "requester.name": { $regex: searchTerm, $options: "i" } },
-            { "requester.department": { $regex: searchTerm, $options: "i" } },
-            { requestNumber: { $regex: searchTerm, $options: "i" } },
-            { customer: { $regex: searchTerm, $options: "i" } },
+            { "requester.name": { $regex: safeSearchTerm, $options: "i" } },
+            { "requester.department": { $regex: safeSearchTerm, $options: "i" } },
+            { requestNumber: { $regex: safeSearchTerm, $options: "i" } },
+            { customer: { $regex: safeSearchTerm, $options: "i" } },
           ],
         },
       ],
@@ -643,7 +653,7 @@ export const fetchRequestPages = async (
 
   let pipeline = [baseFilterStage, countStage];
 
-  if (searchTerm && searchTerm.length > 0) {
+  if (safeSearchTerm && safeSearchTerm.length > 0) {
     pipeline = [transactionSearchStage, countStage];
   }
 
@@ -667,6 +677,9 @@ export const searchRequests = async (
   filters = {}
 ) => {
   const { status, priority, customer, startDate, endDate } = filters;
+
+  // Sanitize search term to prevent NoSQL injection
+  const safeSearchTerm = sanitizeSearchTerm(searchTerm);
 
   // Build role-based filter
   let roleFilter = {};
@@ -735,10 +748,10 @@ export const searchRequests = async (
         combinedFilter, // Apply other filters
         {
           $or: [
-            { "requester.name": { $regex: searchTerm, $options: "i" } },
-            { "requester.department": { $regex: searchTerm, $options: "i" } },
-            { requestNumber: { $regex: searchTerm, $options: "i" } },
-            { customer: { $regex: searchTerm, $options: "i" } },
+            { "requester.name": { $regex: safeSearchTerm, $options: "i" } },
+            { "requester.department": { $regex: safeSearchTerm, $options: "i" } },
+            { requestNumber: { $regex: safeSearchTerm, $options: "i" } },
+            { customer: { $regex: safeSearchTerm, $options: "i" } },
           ],
         },
       ],
@@ -758,7 +771,7 @@ export const searchRequests = async (
 
   let pipeline = [baseFilterStage, sortStage, ...paginationStage];
 
-  if (searchTerm && searchTerm.length > 0) {
+  if (safeSearchTerm && safeSearchTerm.length > 0) {
     pipeline = [searchStage, sortStage, ...paginationStage];
   }
 
@@ -775,10 +788,36 @@ export const searchRequests = async (
     });
     console.log(approvalHistory);
     const items = res.items.map((item) => {
+      let fulfillments = [];
+      if (item.fulfillments && item.fulfillments.length > 0) {
+        fulfillments = item.fulfillments.map((f) => {
+          return {
+            ...f,
+            fulfilledAt: f.fulfilledAt ? f.fulfilledAt.toISOString() : null,
+
+            movementId: f.movementId ? f.movementId.toString() : null,
+            checkoutId: f.checkoutId?.toString(),
+            deliveryNoteId: f.deliveryNoteId?.toString(),
+            _id: f._id.toString(),
+          };
+        });
+      }
+
       return {
         ...item,
+        fulfillments,
         _id: item._id.toString(),
+        expectedReturnDate: item.expectedReturnDate
+          ? item.expectedReturnDate.toISOString()
+          : null,
+
         productId: item.productId.toString(),
+        movementId: item.movementId ? item.movementId.toString() : null,
+        checkoutId: item.checkoutId ? item.checkoutId.toString() : null,
+        deliveryNoteId: item.deliveryNoteId
+          ? item.deliveryNoteId.toString()
+          : null,
+        fulfilledAt: item.fulfilledAt ? item.fulfilledAt.toISOString() : null,
       };
     });
 
@@ -789,10 +828,18 @@ export const searchRequests = async (
         : null,
     };
 
+    const storekeeper = {
+      ...res.storekeeper,
+      fulfilledAt: res.storekeeper?.fulfilledAt
+        ? res.storekeeper.fulfilledAt.toISOString()
+        : null,
+    };
+
     return {
       ...res,
       items: items,
       approver: approver,
+      storekeeper: storekeeper,
       approvalHistory: approvalHistory,
 
       _id: res._id.toString(),
@@ -812,7 +859,6 @@ export const searchRequests = async (
       cancelledAt: res.cancelledAt ? res.cancelledAt.toISOString() : null,
     };
   });
-  console.log(result);
 
   return result;
 };

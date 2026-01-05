@@ -2,7 +2,7 @@
 
 import { TrashIcon } from "lucide-react";
 import { deleteAccount } from "../../mongodb/actions";
-import { UpdateButton } from "../../../components/ui/buttons";
+import { UpdateButton } from "../../../components/buttons";
 
 // This type is used to define the shape of our data.
 //

@@ -1,7 +1,6 @@
 import AddItemForm from "./form";
-import Breadcrumbs from "../../../../../components/ui/breadcrumbs";
+import Breadcrumbs from "../../../../../components/breadcrumbs";
 
-import Product from "../../../../models/product";
 import dbConnect from "../../../../config/dbConnect";
 
 async function page(props) {

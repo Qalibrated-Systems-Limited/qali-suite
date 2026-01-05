@@ -1,26 +1,26 @@
-// lib/stores/useInventoryCart.ts
-import { create } from "zustand";
+// // lib/stores/useInventoryCart.ts
+// import { create } from "zustand";
 
-type Item = {
-  id: string;
-  name: string;
+// type Item = {
+//   id: string;
+//   name: string;
 
-  quantity: number;
-};
+//   quantity: number;
+// };
 
-type InventoryCartState = {
-  items: Item[];
-  addItem: (item: Item) => void;
-  removeItem: (id: string) => void;
+// type InventoryCartState = {
+//   items: Item[];
+//   addItem: (item: Item) => void;
+//   removeItem: (id: string) => void;
 
-  clearCart: () => void;
-};
+//   clearCart: () => void;
+// };
 
-export const useInventoryCart = create<InventoryCartState>((set) => ({
-  items: [],
-  addItem: (item) => set((state) => ({ items: [...state.items, item] })),
-  removeItem: (id) =>
-    set((state) => ({ items: state.items.filter((i) => i.id !== id) })),
+// export const useInventoryCart = create<InventoryCartState>((set) => ({
+//   items: [],
+//   addItem: (item) => set((state) => ({ items: [...state.items, item] })),
+//   removeItem: (id) =>
+//     set((state) => ({ items: state.items.filter((i) => i.id !== id) })),
 
-  clearCart: () => set({ items: [] }),
-}));
+//   clearCart: () => set({ items: [] }),
+// }));

@@ -54,10 +54,18 @@ async function EditUserPage(props) {
   }
 
   // Fetch user data
-  const user = await getUserById(userId);
+  let user = await getUserById(userId);
 
   if (!user) {
     return notFound();
+  } else {
+    user = {
+      ...user,
+      cart: [],
+      _id: user._id.toString(),
+      createdAt: user.createdAt?.toString(),
+      updatetAt: user.updatetAt?.toString(),
+    };
   }
 
   return (

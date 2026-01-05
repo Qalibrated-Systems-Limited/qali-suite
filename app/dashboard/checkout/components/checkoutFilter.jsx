@@ -9,45 +9,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Filter, X } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import {
+  Filter,
+  X,
+  Package,
+  CheckCircle,
+  AlertTriangle,
+  XCircle,
+  Clock,
+} from "lucide-react";
 
-// Status Filter Component
+// ============================================
+// STATUS FILTER COMPONENT
+// ============================================
 export function CheckoutStatusFilter({ currentStatus }) {
-  return (
-    <CheckoutFilterSelect
-      value={currentStatus}
-      param="status"
-      placeholder="All Statuses"
-      options={[
-        { value: "all", label: "All Statuses" },
-        { value: "checked_out", label: "Checked Out" },
-        { value: "returned", label: "Returned" },
-        { value: "overdue", label: "Overdue" },
-        { value: "lost", label: "Lost" },
-        { value: "damaged", label: "Damaged" },
-      ]}
-    />
-  );
-}
-
-// Due Status Filter Component
-export function CheckoutDueFilter({ currentDueStatus }) {
-  return (
-    <CheckoutFilterSelect
-      value={currentDueStatus}
-      param="dueStatus"
-      placeholder="All Items"
-      options={[
-        { value: "all", label: "All Items" },
-        { value: "due-soon", label: "Due Soon (3 days)" },
-        { value: "overdue", label: "Overdue" },
-      ]}
-    />
-  );
-}
-
-// Reusable Filter Select Component
-function CheckoutFilterSelect({ value, param, placeholder, options }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -57,38 +34,112 @@ function CheckoutFilterSelect({ value, param, placeholder, options }) {
     params.set("page", "1");
 
     if (newValue === "all") {
-      params.delete(param);
+      params.delete("status");
     } else {
-      params.set(param, newValue);
+      params.set("status", newValue);
     }
 
     router.replace(`${pathname}?${params.toString()}`);
   };
 
   return (
-    <Select value={value} onValueChange={handleChange}>
-      <SelectTrigger className="w-full sm:w-[200px] bg-[#0d1117] border-[#30363d] text-gray-100 focus:border-yellow-500 focus:ring-yellow-500">
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-gray-400" />
-          <SelectValue placeholder={placeholder} />
-        </div>
-      </SelectTrigger>
-      <SelectContent className="bg-[#161b22] border-[#30363d]">
-        {options.map((option) => (
-          <SelectItem
-            key={option.value}
-            value={option.value}
-            className="text-gray-100 focus:bg-[#1f2937] focus:text-white"
-          >
-            {option.label}
+    <div className="flex flex-col gap-2">
+      <Label className="text-xs text-muted-foreground">Status</Label>
+      <Select value={currentStatus} onValueChange={handleChange}>
+        <SelectTrigger className="w-full md:w-[200px] bg-background border-border text-foreground">
+          <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
+          <SelectValue placeholder="All Statuses" />
+        </SelectTrigger>
+        <SelectContent className="bg-card border-border">
+          <SelectItem value="all">All Statuses</SelectItem>
+          <SelectItem value="checked_out">
+            <div className="flex items-center">
+              <Package className="w-3 h-3 mr-2 text-blue-500" />
+              Checked Out
+            </div>
           </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+          <SelectItem value="returned">
+            <div className="flex items-center">
+              <CheckCircle className="w-3 h-3 mr-2 text-green-500" />
+              Returned
+            </div>
+          </SelectItem>
+          <SelectItem value="overdue">
+            <div className="flex items-center">
+              <AlertTriangle className="w-3 h-3 mr-2 text-red-500" />
+              Overdue
+            </div>
+          </SelectItem>
+          <SelectItem value="lost">
+            <div className="flex items-center">
+              <XCircle className="w-3 h-3 mr-2 text-gray-500" />
+              Lost
+            </div>
+          </SelectItem>
+          <SelectItem value="damaged">
+            <div className="flex items-center">
+              <AlertTriangle className="w-3 h-3 mr-2 text-orange-500" />
+              Damaged
+            </div>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
 
-// Clear Filters Button Component
+// ============================================
+// DUE STATUS FILTER COMPONENT
+// ============================================
+export function CheckoutDueFilter({ currentDueStatus }) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const handleChange = (newValue) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("page", "1");
+
+    if (newValue === "all") {
+      params.delete("dueStatus");
+    } else {
+      params.set("dueStatus", newValue);
+    }
+
+    router.replace(`${pathname}?${params.toString()}`);
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label className="text-xs text-muted-foreground">Due Status</Label>
+      <Select value={currentDueStatus} onValueChange={handleChange}>
+        <SelectTrigger className="w-full md:w-[200px] bg-background border-border text-foreground">
+          <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
+          <SelectValue placeholder="All Items" />
+        </SelectTrigger>
+        <SelectContent className="bg-card border-border">
+          <SelectItem value="all">All Items</SelectItem>
+          <SelectItem value="due-soon">
+            <div className="flex items-center">
+              <Clock className="w-3 h-3 mr-2 text-orange-500" />
+              Due Soon (3 days)
+            </div>
+          </SelectItem>
+          <SelectItem value="overdue">
+            <div className="flex items-center">
+              <AlertTriangle className="w-3 h-3 mr-2 text-red-500" />
+              Overdue
+            </div>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// ============================================
+// CLEAR FILTERS BUTTON
+// ============================================
 export function ClearCheckoutFiltersButton() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -104,18 +155,20 @@ export function ClearCheckoutFiltersButton() {
 
   return (
     <Button
-      variant="ghost"
+      variant="outline"
       size="sm"
       onClick={handleClear}
-      className="text-yellow-500 hover:text-yellow-400 hover:bg-[#1f2937]"
+      className="border-border text-foreground hover:bg-accent self-end"
     >
-      <X className="w-4 h-4 mr-2" />
-      Clear Filters
+      <X className="w-4 h-4 mr-1" />
+      Clear All
     </Button>
   );
 }
 
-// Filter Badge Component
+// ============================================
+// FILTER BADGE
+// ============================================
 export function CheckoutFilterBadge({ label, value, param }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -129,20 +182,22 @@ export function CheckoutFilterBadge({ label, value, param }) {
   };
 
   // Format the display value
-  const displayValue = value.replace(/-/g, " ").replace(/_/g, " ");
+  const displayValue = value
+    .replace(/-/g, " ")
+    .replace(/_/g, " ")
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 
   return (
-    <div className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-500/10 border border-yellow-500/20 rounded-md text-xs">
-      <span className="text-gray-400">{label}:</span>
-      <span className="text-yellow-500 font-medium capitalize">
-        {displayValue}
-      </span>
-      <button
-        onClick={handleRemove}
-        className="ml-1 text-gray-400 hover:text-yellow-500 transition-colors"
-      >
-        <X className="w-3 h-3" />
-      </button>
-    </div>
+    <Badge
+      variant="secondary"
+      className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20 cursor-pointer"
+      onClick={handleRemove}
+    >
+      <span className="text-muted-foreground">{label}:</span>
+      <span className="ml-1 font-medium">{displayValue}</span>
+      <X className="w-3 h-3 ml-1" />
+    </Badge>
   );
 }

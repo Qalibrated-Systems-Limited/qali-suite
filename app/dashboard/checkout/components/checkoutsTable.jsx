@@ -49,7 +49,7 @@ const statusConfig = {
   },
   lost: {
     label: "Lost",
-    color: "bg-gray-500/10 text-gray-500 border-gray-500/20",
+    color: "bg-gray-500/10 text-gray-500 dark:text-gray-400 border-gray-500/20",
     icon: AlertTriangle,
   },
   damaged: {
@@ -75,10 +75,7 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
   };
 
   const canReturn = (checkout) => {
-    return (
-      canManageCheckouts &&
-      checkout.status === "checked_out"
-    );
+    return canManageCheckouts && checkout.status === "checked_out";
   };
 
   const canEscalate = (checkout) => {
@@ -93,62 +90,95 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
   return (
     <>
       {/* Desktop Table View */}
-      <Card className="hidden md:block bg-[#161b22] border-[#30363d]">
+      <Card className="hidden md:block bg-card border-border">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="border-b border-[#30363d] hover:bg-transparent">
-                  <TableHead className="font-semibold text-gray-300">Checkout #</TableHead>
-                  <TableHead className="font-semibold text-gray-300">Product</TableHead>
-                  <TableHead className="font-semibold text-gray-300">Checked Out To</TableHead>
-                  <TableHead className="font-semibold text-gray-300">Quantity</TableHead>
-                  <TableHead className="font-semibold text-gray-300">Status</TableHead>
-                  <TableHead className="font-semibold text-gray-300">Due Date</TableHead>
-                  <TableHead className="font-semibold text-gray-300">Days</TableHead>
-                  <TableHead className="text-right font-semibold text-gray-300">Actions</TableHead>
+                <TableRow className="border-b border-border hover:bg-transparent">
+                  <TableHead className="font-semibold text-muted-foreground">
+                    Checkout #
+                  </TableHead>
+                  <TableHead className="font-semibold text-muted-foreground">
+                    Product
+                  </TableHead>
+                  <TableHead className="font-semibold text-muted-foreground">
+                    Checked Out To
+                  </TableHead>
+                  <TableHead className="font-semibold text-muted-foreground">
+                    Quantity
+                  </TableHead>
+                  <TableHead className="font-semibold text-muted-foreground">
+                    Status
+                  </TableHead>
+                  <TableHead className="font-semibold text-muted-foreground">
+                    Due Date
+                  </TableHead>
+                  <TableHead className="font-semibold text-muted-foreground">
+                    Days
+                  </TableHead>
+                  <TableHead className="text-right font-semibold text-muted-foreground">
+                    Actions
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {checkouts.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={8} className="h-24 text-center text-gray-400">
+                    <TableCell
+                      colSpan={8}
+                      className="h-32 text-center text-muted-foreground"
+                    >
                       <div className="flex flex-col items-center gap-2">
-                        <Package className="h-8 w-8" />
+                        <Package className="h-12 w-12 text-muted-foreground/50" />
                         <p>No checkouts found</p>
+                        <p className="text-sm">
+                          No items are currently checked out
+                        </p>
                       </div>
                     </TableCell>
                   </TableRow>
                 ) : (
                   checkouts.map((checkout) => {
-                    const StatusIcon = statusConfig[checkout.status]?.icon || Package;
+                    const StatusIcon =
+                      statusConfig[checkout.status]?.icon || Package;
                     const statusStyle = statusConfig[checkout.status]?.color;
                     const statusLabel = statusConfig[checkout.status]?.label;
 
                     return (
                       <TableRow
                         key={checkout._id}
-                        className="border-b border-[#30363d] hover:bg-[#161b22] transition-colors"
+                        className="border-b border-border hover:bg-muted/50 transition-colors"
                       >
-                        <TableCell className="font-mono text-sm text-gray-400">
+                        <TableCell className="font-mono text-sm text-muted-foreground">
                           {checkout.checkoutNumber}
                         </TableCell>
 
                         <TableCell>
                           <div>
-                            <p className="font-medium text-white">{checkout.productSnapshot.name}</p>
-                            <p className="text-xs text-gray-400">{checkout.productSnapshot.SKU}</p>
+                            <p className="font-medium text-foreground">
+                              {checkout.productSnapshot.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {checkout.productSnapshot.SKU}
+                            </p>
                           </div>
                         </TableCell>
 
                         <TableCell>
                           <div>
-                            <p className="font-medium text-gray-100">{checkout.checkedOutTo.name}</p>
-                            <p className="text-xs text-gray-400">{checkout.checkedOutTo.department}</p>
+                            <p className="font-medium text-foreground">
+                              {checkout.checkedOutTo.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {checkout.checkedOutTo.department}
+                            </p>
                           </div>
                         </TableCell>
 
-                        <TableCell className="text-gray-100">{checkout.quantity}</TableCell>
+                        <TableCell className="text-foreground">
+                          {checkout.quantity}
+                        </TableCell>
 
                         <TableCell>
                           <Badge variant="outline" className={statusStyle}>
@@ -157,7 +187,7 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
                           </Badge>
                         </TableCell>
 
-                        <TableCell className="text-sm text-gray-100">
+                        <TableCell className="text-sm text-foreground">
                           {formatDate(checkout.expectedReturnDate)}
                         </TableCell>
 
@@ -165,15 +195,23 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
                           {checkout.status === "checked_out" && (
                             <div className="flex items-center gap-1">
                               {checkout.isOverdue ? (
-                                <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20 text-xs">
+                                <Badge
+                                  variant="outline"
+                                  className="bg-red-500/10 text-red-500 border-red-500/20 text-xs"
+                                >
                                   {checkout.daysOverdue}d overdue
                                 </Badge>
                               ) : checkout.daysUntilDue <= 3 ? (
-                                <Badge variant="outline" className="bg-orange-500/10 text-orange-500 border-orange-500/20 text-xs">
+                                <Badge
+                                  variant="outline"
+                                  className="bg-orange-500/10 text-orange-500 border-orange-500/20 text-xs"
+                                >
                                   {checkout.daysUntilDue}d left
                                 </Badge>
                               ) : (
-                                <span className="text-sm text-gray-400">{checkout.daysUntilDue}d left</span>
+                                <span className="text-sm text-muted-foreground">
+                                  {checkout.daysUntilDue}d left
+                                </span>
                               )}
                             </div>
                           )}
@@ -182,17 +220,27 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
                         <TableCell className="text-right">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="text-gray-300 hover:text-white hover:bg-[#1f2937]">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-muted-foreground hover:text-foreground hover:bg-accent"
+                              >
                                 <ChevronDown className="h-4 w-4" />
+                                <span className="sr-only">
+                                  Open actions menu
+                                </span>
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="bg-[#161b22] border-[#30363d]">
+                            <DropdownMenuContent
+                              align="end"
+                              className="bg-card border-border"
+                            >
                               <DropdownMenuItem
                                 onClick={() => {
                                   setSelectedCheckout(checkout);
                                   setViewDialogOpen(true);
                                 }}
-                                className="text-gray-100 focus:bg-[#1f2937] focus:text-white"
+                                className="text-foreground focus:bg-accent focus:text-accent-foreground cursor-pointer"
                               >
                                 <Eye className="mr-2 h-4 w-4" />
                                 View Details
@@ -200,13 +248,13 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
 
                               {canReturn(checkout) && (
                                 <>
-                                  <DropdownMenuSeparator className="bg-[#30363d]" />
+                                  <DropdownMenuSeparator className="bg-border" />
                                   <DropdownMenuItem
                                     onClick={() => {
                                       setSelectedCheckout(checkout);
                                       setReturnDialogOpen(true);
                                     }}
-                                    className="text-green-500 focus:bg-[#1f2937] focus:text-green-400"
+                                    className="text-green-500 focus:bg-green-500/10 focus:text-green-500 cursor-pointer"
                                   >
                                     <RotateCcw className="mr-2 h-4 w-4" />
                                     Process Return
@@ -216,13 +264,13 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
 
                               {canEscalate(checkout) && (
                                 <>
-                                  <DropdownMenuSeparator className="bg-[#30363d]" />
+                                  <DropdownMenuSeparator className="bg-border" />
                                   <DropdownMenuItem
                                     onClick={() => {
                                       setSelectedCheckout(checkout);
                                       setEscalateDialogOpen(true);
                                     }}
-                                    className="text-red-500 focus:bg-[#1f2937] focus:text-red-400"
+                                    className="text-red-500 focus:bg-red-500/10 focus:text-red-500 cursor-pointer"
                                   >
                                     <AlertTriangle className="mr-2 h-4 w-4" />
                                     Escalate
@@ -245,9 +293,14 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
       {/* Mobile Card View */}
       <div className="space-y-4 md:hidden">
         {checkouts.length === 0 ? (
-          <Card className="p-8 text-center bg-[#161b22] border-[#30363d]">
-            <Package className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-            <p className="text-gray-400">No checkouts found</p>
+          <Card className="bg-card border-border">
+            <CardContent className="p-8 text-center">
+              <Package className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+              <p className="text-muted-foreground mb-1">No checkouts found</p>
+              <p className="text-sm text-muted-foreground">
+                No items are currently checked out
+              </p>
+            </CardContent>
           </Card>
         ) : (
           checkouts.map((checkout) => {
@@ -256,92 +309,124 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
             const statusLabel = statusConfig[checkout.status]?.label;
 
             return (
-              <Card key={checkout._id} className="p-4 bg-[#161b22] border-[#30363d]">
-                <div className="space-y-3">
-                  {/* Header */}
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="font-semibold text-white">{checkout.productSnapshot.name}</p>
-                      <p className="text-xs text-gray-400 font-mono">{checkout.checkoutNumber}</p>
+              <Card key={checkout._id} className="bg-card border-border">
+                <CardContent className="p-4">
+                  <div className="space-y-3">
+                    {/* Header */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-foreground">
+                          {checkout.productSnapshot.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                          {checkout.checkoutNumber}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={`${statusStyle} shrink-0`}
+                      >
+                        <StatusIcon className="mr-1 h-3 w-3" />
+                        {statusLabel}
+                      </Badge>
                     </div>
-                    <Badge variant="outline" className={statusStyle}>
-                      <StatusIcon className="mr-1 h-3 w-3" />
-                      {statusLabel}
-                    </Badge>
-                  </div>
 
-                  {/* Details */}
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <p className="text-gray-400 text-xs">Checked Out To</p>
-                      <p className="font-medium text-gray-100">{checkout.checkedOutTo.name}</p>
+                    {/* Details */}
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-muted-foreground text-xs">
+                          Checked Out To
+                        </p>
+                        <p className="font-medium text-foreground truncate">
+                          {checkout.checkedOutTo.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {checkout.checkedOutTo.department}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground text-xs">
+                          Quantity
+                        </p>
+                        <p className="font-medium text-foreground">
+                          {checkout.quantity}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground text-xs">
+                          Due Date
+                        </p>
+                        <p className="font-medium text-foreground">
+                          {formatDate(checkout.expectedReturnDate)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground text-xs">Status</p>
+                        {checkout.status === "checked_out" &&
+                          checkout.isOverdue && (
+                            <Badge
+                              variant="outline"
+                              className="bg-red-500/10 text-red-500 border-red-500/20 text-xs"
+                            >
+                              {checkout.daysOverdue}d overdue
+                            </Badge>
+                          )}
+                        {checkout.status === "checked_out" &&
+                          !checkout.isOverdue && (
+                            <span className="text-sm text-foreground">
+                              {checkout.daysUntilDue}d left
+                            </span>
+                          )}
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-gray-400 text-xs">Quantity</p>
-                      <p className="font-medium text-gray-100">{checkout.quantity}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400 text-xs">Due Date</p>
-                      <p className="font-medium text-gray-100">{formatDate(checkout.expectedReturnDate)}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400 text-xs">Status</p>
-                      {checkout.status === "checked_out" && checkout.isOverdue && (
-                        <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20 text-xs">
-                          {checkout.daysOverdue}d overdue
-                        </Badge>
-                      )}
-                      {checkout.status === "checked_out" && !checkout.isOverdue && (
-                        <span className="text-sm text-gray-100">{checkout.daysUntilDue}d left</span>
-                      )}
-                    </div>
-                  </div>
 
-                  {/* Actions */}
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setSelectedCheckout(checkout);
-                        setViewDialogOpen(true);
-                      }}
-                      className="flex-1 border-[#30363d] text-gray-300 hover:bg-[#1f2937] hover:text-white"
-                    >
-                      <Eye className="mr-2 h-4 w-4" />
-                      View
-                    </Button>
-
-                    {canReturn(checkout) && (
+                    {/* Actions */}
+                    <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => {
                           setSelectedCheckout(checkout);
-                          setReturnDialogOpen(true);
+                          setViewDialogOpen(true);
                         }}
-                        className="flex-1 border-green-500/20 text-green-500 hover:bg-green-500/10"
+                        className="flex-1 border-border text-foreground hover:bg-accent"
                       >
-                        <RotateCcw className="mr-2 h-4 w-4" />
-                        Return
+                        <Eye className="mr-2 h-4 w-4" />
+                        View
                       </Button>
-                    )}
 
-                    {canEscalate(checkout) && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedCheckout(checkout);
-                          setEscalateDialogOpen(true);
-                        }}
-                        className="border-red-500/20 text-red-500 hover:bg-red-500/10"
-                      >
-                        <AlertTriangle className="h-4 w-4" />
-                      </Button>
-                    )}
+                      {canReturn(checkout) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedCheckout(checkout);
+                            setReturnDialogOpen(true);
+                          }}
+                          className="flex-1 border-green-500/20 text-green-500 hover:bg-green-500/10"
+                        >
+                          <RotateCcw className="mr-2 h-4 w-4" />
+                          Return
+                        </Button>
+                      )}
+
+                      {canEscalate(checkout) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedCheckout(checkout);
+                            setEscalateDialogOpen(true);
+                          }}
+                          className="border-red-500/20 text-red-500 hover:bg-red-500/10"
+                        >
+                          <AlertTriangle className="h-4 w-4" />
+                          <span className="sr-only">Escalate</span>
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
+                </CardContent>
               </Card>
             );
           })

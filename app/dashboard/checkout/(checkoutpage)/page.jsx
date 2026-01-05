@@ -55,10 +55,84 @@ async function CheckoutsPage(props) {
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <SiteHeader title="Item Checkouts" />
+      <SiteHeader
+        title="Item Checkouts"
+        description="Track and manage checked out inventory items"
+      />
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="bg-card border-border hover:shadow-md transition-shadow">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">Active</p>
+                <p className="text-2xl font-bold text-foreground">
+                  {stats.active}
+                </p>
+              </div>
+              <Package className="w-8 h-8 text-blue-500" />
+            </div>
+            <div className="mt-2 pt-2 border-t border-border">
+              <p className="text-xs text-muted-foreground">Currently out</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border hover:shadow-md transition-shadow">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">Due Soon</p>
+                <p className="text-2xl font-bold text-orange-500">
+                  {stats.dueSoon}
+                </p>
+              </div>
+              <Clock className="w-8 h-8 text-orange-500" />
+            </div>
+            <div className="mt-2 pt-2 border-t border-border">
+              <p className="text-xs text-muted-foreground">Within 3 days</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border hover:shadow-md transition-shadow">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">Overdue</p>
+                <p className="text-2xl font-bold text-red-500">
+                  {stats.overdue}
+                </p>
+              </div>
+              <AlertTriangle className="w-8 h-8 text-red-500" />
+            </div>
+            <div className="mt-2 pt-2 border-t border-border">
+              <p className="text-xs text-muted-foreground">Requires action</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border hover:shadow-md transition-shadow">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">Returned</p>
+                <p className="text-2xl font-bold text-green-500">
+                  {stats.returned}
+                </p>
+              </div>
+              <CheckCircle className="w-8 h-8 text-green-500" />
+            </div>
+            <div className="mt-2 pt-2 border-t border-border">
+              <p className="text-xs text-muted-foreground">Completed</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Search and Filters */}
-      <Card className="bg-[#161b22] border-[#30363d]">
+      <Card className="bg-card border-border">
         <CardContent className="p-4">
           <div className="flex flex-col gap-4">
             {/* Search Bar */}
@@ -77,8 +151,10 @@ async function CheckoutsPage(props) {
 
             {/* Active Filters Display */}
             {hasActiveFilters && (
-              <div className="flex flex-wrap gap-2 pt-2 border-t border-[#30363d]">
-                <span className="text-xs text-gray-400">Active filters:</span>
+              <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
+                <span className="text-xs text-muted-foreground">
+                  Active filters:
+                </span>
                 {status !== "all" && (
                   <CheckoutFilterBadge
                     label="Status"
@@ -98,63 +174,6 @@ async function CheckoutsPage(props) {
           </div>
         </CardContent>
       </Card>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="bg-[#161b22] border-[#30363d]">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-400">Active</p>
-                <p className="text-2xl font-bold text-white">{stats.active}</p>
-              </div>
-              <Package className="w-8 h-8 text-blue-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-[#161b22] border-[#30363d]">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-400">Due Soon</p>
-                <p className="text-2xl font-bold text-orange-500">
-                  {stats.dueSoon}
-                </p>
-              </div>
-              <Clock className="w-8 h-8 text-orange-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-[#161b22] border-[#30363d]">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-400">Overdue</p>
-                <p className="text-2xl font-bold text-red-500">
-                  {stats.overdue}
-                </p>
-              </div>
-              <AlertTriangle className="w-8 h-8 text-red-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-[#161b22] border-[#30363d]">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-gray-400">Returned</p>
-                <p className="text-2xl font-bold text-green-500">
-                  {stats.returned}
-                </p>
-              </div>
-              <CheckCircle className="w-8 h-8 text-green-500" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
 
       {/* Checkouts Table */}
       <CheckoutsTable

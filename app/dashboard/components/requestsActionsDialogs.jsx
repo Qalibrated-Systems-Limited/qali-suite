@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useActionState } from "react";
+import { useState, useActionState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,6 +46,15 @@ import { Progress } from "@/components/ui/progress";
 // ============================================
 // 1. APPROVE DIALOG
 // ============================================
+function initialiseQty(request, open) {
+  const initialQty = {};
+  if (request && open) {
+    request.items.forEach((item) => {
+      initialQty[item._id] = item.requestedQuantity;
+    });
+  }
+  return initialQty;
+}
 
 export function ApproveDialog({ request, open, onOpenChange }) {
   const initialState = { message: "" };
@@ -56,21 +65,15 @@ export function ApproveDialog({ request, open, onOpenChange }) {
   );
 
   // ✅ NEW: Track approved quantities for each item
-  const [approvedQuantities, setApprovedQuantities] = useState({});
+  const [approvedQuantities, setApprovedQuantities] = useState(() =>
+    initialiseQty(request, open)
+  );
   const [itemNotes, setItemNotes] = useState({});
   const [comments, setComments] = useState("");
   const [conditions, setConditions] = useState("");
 
   // Initialize with requested quantities
-  useState(() => {
-    if (request && open) {
-      const initialQty = {};
-      request.items.forEach((item) => {
-        initialQty[item._id] = item.requestedQuantity;
-      });
-      setApprovedQuantities(initialQty);
-    }
-  }, [request, open]);
+  useState(() => {});
 
   // Close dialog on success
   if (state.message === "success" && open) {
@@ -460,6 +463,7 @@ export function FulfillDialog({ request, open, onOpenChange }) {
     fulfillWithId,
     initialState
   );
+  const [, startTransition] = useTransition();
 
   const [itemQuantities, setItemQuantities] = useState({});
   const [serialNumbers, setSerialNumbers] = useState({});
@@ -530,7 +534,9 @@ export function FulfillDialog({ request, open, onOpenChange }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            dispatch(new FormData(e.target));
+            startTransition(() => {
+              dispatch(new FormData(e.target));
+            });
           }}
           className="space-y-6"
         >

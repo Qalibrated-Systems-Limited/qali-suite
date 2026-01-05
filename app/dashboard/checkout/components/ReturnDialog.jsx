@@ -22,10 +22,11 @@ import {
 } from "@/components/ui/select";
 import { returnCheckout } from "@/app/mongodb/checkout-action";
 import { RotateCcw, Loader2 } from "lucide-react";
+import { useActionState } from "react";
 
 export function ReturnDialog({ checkout, open, onOpenChange }) {
   const [returnCondition, setReturnCondition] = useState("");
-  const [state, formAction] = useFormState(
+  const [state, formAction] = useActionState(
     returnCheckout.bind(null, checkout._id),
     {
       message: "",
