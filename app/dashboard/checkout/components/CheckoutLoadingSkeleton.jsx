@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 
-// Enhanced Skeleton with Shimmer Effect
+// Enhanced Skeleton with Shimmer
 function SkeletonWithShimmer({ className }) {
   return (
     <div
