@@ -1,4 +1,3 @@
-"use server";
 import mongoose from "mongoose";
 import validator from "validator";
 import bcrypt from "bcryptjs";
@@ -57,10 +56,9 @@ const userSchema = new Schema(
 // Encrypting password before saving user
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) {
-    return next();
+    return;
   }
   this.password = await bcrypt.hash(this.password, 10);
-  next();
 });
 
 // Compare user password
