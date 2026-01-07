@@ -138,13 +138,11 @@ const stockMovementSchema = new Schema(
 // ============================================
 // INDEXES
 // ============================================
-// INDEXES - Critical for performance with large datasets
-// ============================================
-stockMovementSchema.index({ movementNumber: 1 });
-stockMovementSchema.index({ productId: 1, createdAt: -1 });
-stockMovementSchema.index({ movementType: 1 });
-stockMovementSchema.index({ "performedBy.id": 1 });
-stockMovementSchema.index({ createdAt: -1 });
+// stockMovementSchema.index({ movementNumber: 1 });
+// stockMovementSchema.index({ productId: 1, createdAt: -1 });
+// stockMovementSchema.index({ movementType: 1 });
+// stockMovementSchema.index({ "performedBy.id": 1 });
+// stockMovementSchema.index({ createdAt: -1 });
 
 // ============================================
 // MIDDLEWARE - ONLY IMMUTABILITY CHECK
@@ -154,9 +152,8 @@ stockMovementSchema.index({ createdAt: -1 });
 // This is SAFE for transactions because it only blocks updates, not creates
 stockMovementSchema.pre("save", function (next) {
   if (!this.isNew) {
-    return next(new Error("Stock movements cannot be modified after creation"));
+    return;
   }
- 
 });
 
 // ============================================
