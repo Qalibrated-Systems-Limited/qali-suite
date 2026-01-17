@@ -25,6 +25,9 @@ import {
   ArrowLeftRight,
   Briefcase,
   ShoppingBag,
+  ShoppingCart,
+  Calendar,
+  FolderTree,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -46,6 +49,9 @@ import { useState, useEffect } from "react";
 // ============================================
 // NAV GROUP CONFIGURATION - GENERAL NAMING
 // ============================================
+// ============================================
+// NAV GROUP CONFIGURATION - ERP FOCUSED
+// ============================================
 const getNavigationGroups = (user) => [
   // Dashboard (ungrouped)
   {
@@ -56,26 +62,43 @@ const getNavigationGroups = (user) => [
     href: "/dashboard",
   },
 
-  // Operations - Stock/Inventory
+  // ============================================
+  // INVENTORY & PRODUCTS
+  // ============================================
   {
     type: "group",
     label: "Inventory",
     icon: Package,
-    id: "Inventory",
+    id: "inventory",
     defaultOpen: true,
     items: [
       {
         icon: Boxes,
         label: "Products",
-        id: "stocks",
+        id: "products",
         href: "/dashboard/stocks",
-        hidden: !["Admin", "Store Manager"].includes(user?.role),
+        hidden: !["Admin", "Store Manager", "Accountant"].includes(user?.role),
+      },
+      {
+        icon: FolderTree,
+        label: "Categories",
+        id: "categories",
+        href: "/dashboard/categories",
+        hidden: !["Admin", "Manager"].includes(user?.role),
       },
       {
         icon: Activity,
         label: "Stock Movements",
         id: "movements",
         href: "/dashboard/movements",
+        // View only - auto-generated
+      },
+      {
+        icon: FileText,
+        label: "Stock Adjustments",
+        id: "adjustments",
+        href: "/dashboard/adjustments",
+        hidden: !["Admin", "Store Manager", "Accountant"].includes(user?.role),
       },
       {
         icon: Package,
@@ -92,7 +115,9 @@ const getNavigationGroups = (user) => [
     ],
   },
 
-  // Sales - Invoices, Delivery Notes, Customers
+  // ============================================
+  // SALES
+  // ============================================
   {
     type: "group",
     label: "Sales",
@@ -105,35 +130,134 @@ const getNavigationGroups = (user) => [
         label: "Invoices",
         id: "invoices",
         href: "/dashboard/invoices",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant", "Sales"].includes(user?.role),
       },
       {
         icon: FileText,
         label: "Delivery Notes",
         id: "dnotes",
         href: "/dashboard/dnotes",
-        hidden: !["Admin", "Store Manager"].includes(user?.role),
+        hidden: !["Admin", "Store Manager", "Sales"].includes(user?.role),
       },
       {
         icon: Users,
         label: "Customers",
         id: "customers",
         href: "/dashboard/customers",
+        hidden: !["Admin", "Accountant", "Sales"].includes(user?.role),
+      },
+      {
+        icon: CreditCard,
+        label: "Payments Received",
+        id: "payments-received",
+        href: "/dashboard/payments/received",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+    ],
+  },
+
+  // ============================================
+  // PURCHASES
+  // ============================================
+  {
+    type: "group",
+    label: "Purchases",
+    icon: ShoppingCart,
+    id: "purchases",
+    defaultOpen: false,
+    items: [
+      {
+        icon: FileText,
+        label: "Bills",
+        id: "bills",
+        href: "/dashboard/bills",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+      {
+        icon: Users,
+        label: "Suppliers",
+        id: "suppliers",
+        href: "/dashboard/suppliers",
+        hidden: !["Admin", "Accountant", "Store Manager"].includes(user?.role),
+      },
+      {
+        icon: Wallet,
+        label: "Payments Made",
+        id: "payments-made",
+        href: "/dashboard/payments/made",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+    ],
+  },
+
+  // ============================================
+  // EXPENSES
+  // ============================================
+  {
+    type: "group",
+    label: "Expenses",
+    icon: Wallet,
+    id: "expenses",
+    defaultOpen: false,
+    items: [
+      {
+        icon: Receipt,
+        label: "My Claims", // ← Employee view
+        id: "my-claims",
+        href: "/dashboard/my-claims",
+        // Everyone can see their own
+      },
+
+      {
+        icon: Wallet,
+        label: "All Claims", // ← Admin/Accountant view
+        id: "all-claims",
+        href: "/dashboard/claims",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+      {
+        icon: Receipt,
+        label: "All Expenses",
+        id: "expenses",
+        href: "/dashboard/expenses",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+      {
+        icon: FileText,
+        label: "Pending Approval",
+        id: "expenses-pending",
+        href: "/dashboard/expenses/pending",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+      {
+        icon: CreditCard,
+        label: "Reimbursements",
+        id: "reimbursements",
+        href: "/dashboard/expenses/reimbursements",
         hidden: !["Admin", "Accountant"].includes(user?.role),
         badge: "Soon",
       },
     ],
   },
 
-  // Finance - Accounting, Payments, Expenses
+  // ============================================
+  // FINANCE & ACCOUNTING
+  // ============================================
   {
     type: "group",
-    label: "Finance",
+    label: "Finance ",
     icon: DollarSign,
     id: "finance",
     defaultOpen: false,
     badge: "New",
     items: [
+      {
+        icon: Briefcase, // or Building2 or Users
+        label: "Parties",
+        id: "parties",
+        href: "/dashboard/parties",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
       {
         icon: BookOpen,
         label: "Chart of Accounts",
@@ -147,39 +271,79 @@ const getNavigationGroups = (user) => [
         id: "journal-entries",
         href: "/dashboard/journal-entries",
         hidden: !["Admin", "Accountant"].includes(user?.role),
-      },
-      {
-        icon: CreditCard,
-        label: "Payments",
-        id: "payments",
-        href: "/dashboard/payments",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
-      },
-      {
-        icon: Wallet,
-        label: "Expenses",
-        id: "expenses",
-        href: "/dashboard/expenses",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        // Mostly view-only, auto-generated
       },
       {
         icon: ArrowLeftRight,
-        label: "Bills",
-        id: "bills",
-        href: "/dashboard/bills",
+        label: "Bank Reconciliation",
+        id: "bank-reconciliation",
+        href: "/dashboard/reconciliation",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+        badge: "Soon",
+      },
+      {
+        icon: Calendar,
+        label: "Fiscal Periods",
+        id: "fiscal-periods",
+        href: "/dashboard/fiscal-periods",
         hidden: !["Admin", "Accountant"].includes(user?.role),
       },
     ],
   },
 
-  // Analytics - Reports & Insights
+  // ============================================
+  // TAX MANAGEMENT
+  // ============================================
   {
     type: "group",
-    label: "Analytics",
-    icon: BarChart3,
-    id: "analytics",
+    label: "Tax Management",
+    icon: FileText,
+    id: "tax",
     defaultOpen: false,
     items: [
+      {
+        icon: Receipt,
+        label: "VAT Returns",
+        id: "vat-returns",
+        href: "/dashboard/tax/vat",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+      {
+        icon: FileText,
+        label: "WHT Reports",
+        id: "wht-reports",
+        href: "/dashboard/tax/wht",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+      {
+        icon: FileSpreadsheet,
+        label: "Tax Transactions",
+        id: "tax-transactions",
+        href: "/dashboard/tax/transactions",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+      {
+        icon: Building2,
+        label: "KRA Filings",
+        id: "kra-filings",
+        href: "/dashboard/tax/kra",
+        hidden: user?.role !== "Admin",
+        badge: "Soon",
+      },
+    ],
+  },
+
+  // ============================================
+  // REPORTS & ANALYTICS
+  // ============================================
+  {
+    type: "group",
+    label: "Reports",
+    icon: BarChart3,
+    id: "reports",
+    defaultOpen: false,
+    items: [
+      // Financial Reports
       {
         icon: TrendingUp,
         label: "Profit & Loss",
@@ -203,14 +367,54 @@ const getNavigationGroups = (user) => [
       },
       {
         icon: FileSpreadsheet,
+        label: "Trial Balance",
+        id: "trial-balance",
+        href: "/dashboard/reports/trial-balance",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+      {
+        icon: BookOpen,
+        label: "General Ledger",
+        id: "general-ledger",
+        href: "/dashboard/reports/general-ledger",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+
+      // Divider comment
+      // Operational Reports
+      {
+        icon: Package,
         label: "Inventory Reports",
         id: "inventory-reports",
         href: "/dashboard/reports/inventory",
       },
+      {
+        icon: ShoppingBag,
+        label: "Sales Reports",
+        id: "sales-reports",
+        href: "/dashboard/reports/sales",
+        hidden: !["Admin", "Accountant", "Sales"].includes(user?.role),
+      },
+      {
+        icon: ShoppingCart,
+        label: "Purchase Reports",
+        id: "purchase-reports",
+        href: "/dashboard/reports/purchases",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
+      },
+      {
+        icon: Users,
+        label: "Customer Reports",
+        id: "customer-reports",
+        href: "/dashboard/reports/customers",
+        hidden: !["Admin", "Accountant", "Sales"].includes(user?.role),
+      },
     ],
   },
 
-  // People (for future HR) - Currently just Users
+  // ============================================
+  // PEOPLE & HR
+  // ============================================
   {
     type: "group",
     label: "People",
@@ -233,24 +437,12 @@ const getNavigationGroups = (user) => [
       //   href: "/dashboard/employees",
       //   badge: "Soon",
       // },
-      // {
-      //   icon: Calendar,
-      //   label: "Attendance",
-      //   id: "attendance",
-      //   href: "/dashboard/attendance",
-      //   badge: "Soon",
-      // },
-      // {
-      //   icon: DollarSign,
-      //   label: "Payroll",
-      //   id: "payroll",
-      //   href: "/dashboard/payroll",
-      //   badge: "Soon",
-      // },
     ],
   },
 
-  // Settings (ungrouped)
+  // ============================================
+  // SETTINGS (ungrouped)
+  // ============================================
   {
     type: "single",
     icon: Settings,

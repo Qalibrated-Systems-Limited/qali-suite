@@ -33,7 +33,7 @@ import { z } from "zod";
 import { updateUser } from "@/app/mongodb/user-actions";
 import { AlertCircle, Loader2, Save, X, Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { userDepartments } from "@/lib/utils";
+import { userDepartments, userRolesMapping } from "@/lib/utils";
 
 const userUpdateSchema = z.object({
   name: z.string().min(1, "Name is required").max(50),
@@ -229,30 +229,15 @@ export function EditUserForm({ user }) {
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent className="bg-card border-border">
-                              <SelectItem
-                                value="Viewer"
-                                className="text-foreground"
-                              >
-                                Viewer - View only access
-                              </SelectItem>
-                              <SelectItem
-                                value="User"
-                                className="text-foreground"
-                              >
-                                User - Standard user access
-                              </SelectItem>
-                              <SelectItem
-                                value="Store Manager"
-                                className="text-foreground"
-                              >
-                                Store Manager - Manage inventory
-                              </SelectItem>
-                              <SelectItem
-                                value="Admin"
-                                className="text-foreground"
-                              >
-                                Admin - Full system access
-                              </SelectItem>
+                              {userRolesMapping.map(({ label, value }) => (
+                                <SelectItem
+                                  key={value}
+                                  value={value}
+                                  className="text-foreground"
+                                >
+                                  {label}
+                                </SelectItem>
+                              ))}
                             </SelectContent>
                           </Select>
                           <FormDescription className="text-xs text-muted-foreground">

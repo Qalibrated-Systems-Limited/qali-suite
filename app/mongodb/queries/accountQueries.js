@@ -1,0 +1,465 @@
+import Account from "../../models/account";
+import JournalEntry from "../../models/JournalEntry";
+import AccountService from "../services/accountService";
+import dbConnect from "../../config/dbConnect";
+
+const ITEMS_PER_PAGE = 20;
+
+// ============================================
+// ACCOUNT QUERIES - READ OPERATIONS
+// Following industry best practices
+// ============================================
+
+/**
+ * Get paginated accounts with filters and search
+ * Best Practice: Pagination (20/page), Smart Filters, Search
+ */
+export async function getAccounts(page = 1, filters = {}) {
+  await dbConnect();
+
+  const skip = (page - 1) * ITEMS_PER_PAGE;
+  const query = { isActive: true };
+
+  // Apply filters
+  if (filters.accountType) query.accountType = filters.accountType;
+  if (filters.canPost !== undefined) {
+    query.canPost = filters.canPost === "true" || filters.canPost === true;
+  }
+  if (filters.subType) query.subType = filters.subType;
+  if (filters.search) {
+    query.$or = [
+      { accountCode: { $regex: filters.search, $options: "i" } },
+      { accountName: { $regex: filters.search, $options: "i" } },
+    ];
+  }
+
+  // Parallel queries for performance
+  const [accounts, total] = await Promise.all([
+    Account.find(query)
+      .sort({ accountCode: 1 })
+      .skip(skip)
+      .limit(ITEMS_PER_PAGE)
+      .select(
+        "accountCode accountName accountType subType canPost cachedBalance balanceUpdatedAt systemAccount"
+      )
+      .lean(), // Performance optimization
+    Account.countDocuments(query),
+  ]);
+
+  return {
+    accounts,
+    pagination: {
+      page,
+      totalPages: Math.ceil(total / ITEMS_PER_PAGE),
+      total,
+      hasMore: skip + accounts.length < total,
+    },
+  };
+}
+
+/**
+ * Get Chart of Accounts (hierarchical tree)
+ * Best Practice: Hierarchical data structure for expand/collapse UI
+ */
+export async function getChartOfAccounts() {
+  await dbConnect();
+  return await AccountService.getChartOfAccounts();
+}
+
+/**
+ * Get account details with recent transactions
+ * Best Practice: Drill-down support
+ */
+export async function getAccountById(accountId, includeTransactions = false) {
+  await dbConnect();
+
+  const account = await Account.findById(accountId).lean();
+  if (!account) return null;
+
+  if (includeTransactions) {
+    const recentTransactions = await JournalEntry.find({
+      status: "posted",
+      "lines.accountId": accountId,
+    })
+      .sort({ entryDate: -1 })
+      .limit(10)
+      .select("entryNumber entryDate description lines")
+      .lean();
+
+    account.recentTransactions = recentTransactions.map((entry) => {
+      const line = entry.lines.find(
+        (l) => l.accountId.toString() === accountId.toString()
+      );
+      return {
+        entryNumber: entry.entryNumber,
+        date: entry.entryDate,
+        description: entry.description,
+        debit: line?.debit || 0,
+        credit: line?.credit || 0,
+      };
+    });
+  }
+
+  // Serialize ObjectIds for Next.js
+  return {
+    ...account,
+    _id: account._id.toString(),
+    parentAccount: account.parentAccount
+      ? account.parentAccount.toString()
+      : null,
+    ancestors: account.ancestors?.map((id) => id.toString()) || [],
+    createdAt: account.createdAt?.toISOString(),
+    updatedAt: account.updatedAt?.toISOString(),
+    balanceUpdatedAt: account.balanceUpdatedAt?.toISOString(),
+  };
+}
+
+/**
+ * Get account summary with statistics
+ * Best Practice: Dashboard summaries
+ */
+export async function getAccountDetails(accountId, startDate, endDate) {
+  await dbConnect();
+  return await AccountService.getAccountSummary(accountId, startDate, endDate);
+}
+
+/**
+ * Search accounts (autocomplete)
+ * Best Practice: Fast search for dropdowns, limit 50
+ */
+export async function searchAccounts(searchTerm, limit = 50) {
+  await dbConnect();
+
+  if (!searchTerm || searchTerm.trim().length === 0) return [];
+
+  return await Account.find({
+    isActive: true,
+    $or: [
+      { accountCode: { $regex: searchTerm, $options: "i" } },
+      { accountName: { $regex: searchTerm, $options: "i" } },
+    ],
+  })
+    .sort({ accountCode: 1 })
+    .limit(limit)
+    .select("accountCode accountName accountType subType canPost")
+    .lean();
+}
+
+/**
+ * Get postable accounts
+ * Best Practice: Use schema methods where available
+ */
+export async function getPostableAccounts(accountType = null) {
+  await dbConnect();
+
+  if (typeof Account.getPostableAccounts === "function") {
+    return await Account.getPostableAccounts(accountType);
+  }
+
+  const query = { canPost: true, isActive: true };
+  if (accountType) query.accountType = accountType;
+
+  return await Account.find(query)
+    .sort({ accountCode: 1 })
+    .select("accountCode accountName accountType subType")
+    .lean();
+}
+
+/**
+ * Get account ledger with pagination
+ * Best Practice: Paginated ledger with running balance
+ */
+export async function getAccountLedger(
+  accountId,
+  page = 1,
+  startDate = null,
+  endDate = null
+) {
+  await dbConnect();
+
+  const account = await Account.findById(accountId);
+  if (!account) return null;
+
+  const skip = (page - 1) * ITEMS_PER_PAGE;
+  const query = {
+    status: "posted",
+    "lines.accountId": accountId,
+  };
+
+  if (startDate || endDate) {
+    query.entryDate = {};
+    if (startDate) query.entryDate.$gte = new Date(startDate);
+    if (endDate) query.entryDate.$lte = new Date(endDate);
+  }
+
+  const [entries, total] = await Promise.all([
+    JournalEntry.find(query)
+      .sort({ entryDate: 1, entryNumber: 1 })
+      .skip(skip)
+      .limit(ITEMS_PER_PAGE)
+      .lean(),
+    JournalEntry.countDocuments(query),
+  ]);
+
+  // Calculate running balance
+  let runningBalance = 0;
+  const normalSide = ["asset", "expense"].includes(account.accountType)
+    ? "debit"
+    : "credit";
+
+  const transactions = entries
+    .map((entry) => {
+      const line = entry.lines.find(
+        (l) => l.accountId.toString() === accountId.toString()
+      );
+      if (!line) return null;
+
+      const debit = line.debit || 0;
+      const credit = line.credit || 0;
+
+      if (normalSide === "debit") {
+        runningBalance += debit - credit;
+      } else {
+        runningBalance += credit - debit;
+      }
+
+      return {
+        date: entry.entryDate,
+        entryNumber: entry.entryNumber,
+        entryId: entry._id,
+        description: entry.description,
+        reference: entry.reference,
+        debit,
+        credit,
+        balance: runningBalance,
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    account: {
+      accountCode: account.accountCode,
+      accountName: account.accountName,
+      accountType: account.accountType,
+      normalBalanceSide: normalSide,
+    },
+    transactions,
+    pagination: {
+      page,
+      totalPages: Math.ceil(total / ITEMS_PER_PAGE),
+      total,
+      hasMore: skip + transactions.length < total,
+    },
+  };
+}
+
+/**
+ * Get account statistics
+ * Best Practice: Dashboard KPIs
+ */
+export async function getAccountStats() {
+  await dbConnect();
+
+  const [stats, total, postableTotal] = await Promise.all([
+    Account.aggregate([
+      { $match: { isActive: true } },
+      {
+        $group: {
+          _id: "$accountType",
+          count: { $sum: 1 },
+          postableCount: { $sum: { $cond: ["$canPost", 1, 0] } },
+        },
+      },
+    ]),
+    Account.countDocuments({ isActive: true }),
+    Account.countDocuments({ isActive: true, canPost: true }),
+  ]);
+
+  return {
+    total,
+    postableTotal,
+    byType: stats.reduce((acc, stat) => {
+      acc[stat._id] = {
+        count: stat.count,
+        postable: stat.postableCount,
+      };
+      return acc;
+    }, {}),
+  };
+}
+
+/**
+ * Get accounts by type
+ */
+export async function getAccountsByType(accountType) {
+  await dbConnect();
+
+  if (typeof Account.getByType === "function") {
+    return await Account.getByType(accountType);
+  }
+
+  return await Account.find({ accountType, isActive: true })
+    .sort({ accountCode: 1 })
+    .lean();
+}
+
+/**
+ * Get root accounts
+ */
+export async function getRootAccounts() {
+  await dbConnect();
+
+  if (typeof Account.getRootAccounts === "function") {
+    return await Account.getRootAccounts();
+  }
+
+  return await Account.find({ parentAccount: null, isActive: true })
+    .sort({ accountCode: 1 })
+    .lean();
+}
+
+/**
+ * Get system account
+ */
+export async function getSystemAccount(systemAccountName) {
+  await dbConnect();
+  return await AccountService.getSystemAccount(systemAccountName);
+}
+
+/**
+ * Get accounts with balances
+ * Best Practice: Aggregation for performance
+ */
+export async function getAccountsWithBalances(
+  accountType = null,
+  startDate = null,
+  endDate = null
+) {
+  await dbConnect();
+
+  const query = { canPost: true, isActive: true };
+  if (accountType) query.accountType = accountType;
+
+  const accounts = await Account.find(query).lean();
+
+  const accountsWithBalances = await Promise.all(
+    accounts.map(async (account) => {
+      const jeQuery = {
+        status: "posted",
+        "lines.accountId": account._id,
+      };
+
+      if (startDate || endDate) {
+        jeQuery.entryDate = {};
+        if (startDate) jeQuery.entryDate.$gte = new Date(startDate);
+        if (endDate) jeQuery.entryDate.$lte = new Date(endDate);
+      }
+
+      const result = await JournalEntry.aggregate([
+        { $match: jeQuery },
+        { $unwind: "$lines" },
+        { $match: { "lines.accountId": account._id } },
+        {
+          $group: {
+            _id: null,
+            totalDebit: { $sum: "$lines.debit" },
+            totalCredit: { $sum: "$lines.credit" },
+          },
+        },
+      ]);
+
+      if (result.length === 0) {
+        return { ...account, balance: 0 };
+      }
+
+      const { totalDebit, totalCredit } = result[0];
+      const normalSide = ["asset", "expense"].includes(account.accountType)
+        ? "debit"
+        : "credit";
+
+      const balance =
+        normalSide === "debit"
+          ? totalDebit - totalCredit
+          : totalCredit - totalDebit;
+
+      return { ...account, balance };
+    })
+  );
+
+  return accountsWithBalances.filter((acc) => Math.abs(acc.balance) > 0.01);
+}
+
+/**
+ * Get accounts grouped by type with hierarchical structure
+ * Returns tree structure for expand/collapse UI
+ */
+export async function getAccountsGrouped() {
+  dbConnect();
+
+  // Fetch all active accounts
+  const accounts = await Account.find({ isActive: true })
+    .sort({ accountCode: 1 })
+    .select(
+      "_id accountCode accountName accountType subType parentId canPost cachedBalance isActive systemAccount"
+    )
+    .lean();
+
+  // Serialize for client
+  const serialized = accounts.map((acc) => ({
+    ...acc,
+    _id: acc._id.toString(),
+    parentId: acc.parentId ? acc.parentId.toString() : null,
+  }));
+
+  // Build hierarchy
+  const accountMap = new Map();
+  const rootsByType = {
+    asset: [],
+    liability: [],
+    equity: [],
+    revenue: [],
+    expense: [],
+  };
+
+  // First pass: create map
+  serialized.forEach((account) => {
+    accountMap.set(account._id, {
+      ...account,
+      children: [],
+    });
+  });
+
+  // Second pass: build hierarchy
+  serialized.forEach((account) => {
+    const node = accountMap.get(account._id);
+    if (account.parentId) {
+      const parent = accountMap.get(account.parentId);
+      if (parent) {
+        parent.children.push(node);
+      } else {
+        // Orphaned account - add to root
+        rootsByType[account.accountType]?.push(node);
+      }
+    } else {
+      // Root account
+      rootsByType[account.accountType]?.push(node);
+    }
+  });
+
+  return rootsByType;
+}
+
+export default {
+  getAccounts,
+  getChartOfAccounts,
+  getAccountById,
+  getAccountDetails,
+  searchAccounts,
+  getPostableAccounts,
+  getAccountsByType,
+  getRootAccounts,
+  getSystemAccount,
+  getAccountLedger,
+  getAccountStats,
+  getAccountsWithBalances,
+};

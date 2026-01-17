@@ -1,0 +1,766 @@
+import mongoose from "mongoose";
+
+const Schema = mongoose.Schema;
+
+// ============================================
+// UTILITY: Format user for audit trail
+// ============================================
+function formatUserForAudit(user) {
+  if (!user) {
+    return { name: "System", id: "system" };
+  }
+  return {
+    name: user.name || user.username || "Unknown User",
+    id: user.id || user._id?.toString() || "unknown",
+  };
+}
+
+// ============================================
+// INVENTORY ADJUSTMENT SCHEMA
+// ============================================
+const inventoryAdjustmentSchema = new Schema(
+  {
+    // Adjustment Identification
+    adjustmentNumber: {
+      type: String,
+      required: [true, "Adjustment number is required"],
+      unique: true,
+      index: true,
+    },
+
+    adjustmentDate: {
+      type: Date,
+      required: [true, "Adjustment date is required"],
+      default: Date.now,
+      index: true,
+    },
+
+    adjustmentType: {
+      type: String,
+      required: [true, "Adjustment type is required"],
+      enum: {
+        values: [
+          "physical_count", // Stock take revealed difference
+          "damage", // Damaged goods
+          "expiry", // Expired goods
+          "theft", // Stolen/lost goods
+          "correction", // Data entry error correction
+          "write_off", // Obsolete inventory write-off
+          "found", // Unexpected inventory found
+          "other",
+        ],
+        message: "{VALUE} is not a valid adjustment type",
+      },
+      index: true,
+    },
+
+    // Adjustment Lines
+    lines: {
+      type: [
+        {
+          productId: {
+            type: Schema.Types.ObjectId,
+            ref: "Product",
+            required: [true, "Product is required"],
+          },
+          productSKU: String,
+          productName: String,
+          productUnit: String,
+
+          // Quantities
+          systemQuantity: {
+            type: Number,
+            required: [true, "System quantity is required"],
+            min: [0, "System quantity cannot be negative"],
+            // What the system says we have
+          },
+
+          physicalQuantity: {
+            type: Number,
+            required: [true, "Physical quantity is required"],
+            min: [0, "Physical quantity cannot be negative"],
+            // What was actually counted/adjusted to
+          },
+
+          adjustmentQuantity: {
+            type: Number,
+            required: [true, "Adjustment quantity is required"],
+            // Difference (physical - system)
+            // Positive = increase, Negative = decrease
+          },
+
+          // Costing
+          unitCost: {
+            type: Number,
+            required: [true, "Unit cost is required"],
+            min: [0, "Unit cost cannot be negative"],
+          },
+
+          adjustmentValue: {
+            type: Number,
+            required: [true, "Adjustment value is required"],
+            // |adjustmentQuantity| × unitCost
+          },
+
+          // Explanation
+          reason: {
+            type: String,
+            required: [true, "Reason is required"],
+            trim: true,
+          },
+
+          // Linked stock movement
+          stockMovementId: {
+            type: Schema.Types.ObjectId,
+            ref: "StockMovement",
+          },
+        },
+      ],
+      validate: {
+        validator: function (lines) {
+          return lines && lines.length > 0;
+        },
+        message: "Adjustment must have at least one line item",
+      },
+    },
+
+    // Totals
+    totalAdjustmentValue: {
+      type: Number,
+      default: 0,
+      // Sum of absolute adjustment values
+    },
+
+    totalIncreaseValue: {
+      type: Number,
+      default: 0,
+      // Sum of positive adjustments
+    },
+
+    totalDecreaseValue: {
+      type: Number,
+      default: 0,
+      // Sum of negative adjustments
+    },
+
+    // Accounting Link
+    journalEntryId: {
+      type: Schema.Types.ObjectId,
+      ref: "JournalEntry",
+      index: true,
+    },
+
+    // Status
+    status: {
+      type: String,
+      enum: {
+        values: ["draft", "approved", "cancelled"],
+        message: "{VALUE} is not a valid status",
+      },
+      default: "draft",
+      index: true,
+    },
+
+    approvedAt: Date,
+    approvedBy: {
+      name: String,
+      id: String,
+    },
+
+    cancelledAt: Date,
+    cancelledBy: {
+      name: String,
+      id: String,
+    },
+    cancellationReason: String,
+
+    // Details
+    description: String,
+    notes: String,
+
+    // Reference documents
+    referenceNumber: String,
+    attachments: [
+      {
+        filename: String,
+        url: String,
+        size: Number,
+        mimeType: String,
+        uploadedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        uploadedBy: {
+          name: String,
+          id: String,
+        },
+      },
+    ],
+
+    // Audit Trail
+    createdBy: {
+      name: {
+        type: String,
+        required: [true, "Creator name is required"],
+      },
+      id: {
+        type: String,
+        required: [true, "Creator ID is required"],
+      },
+    },
+
+    lastModifiedBy: {
+      name: String,
+      id: String,
+    },
+  },
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  }
+);
+
+// ============================================
+// INDEXES
+// ============================================
+inventoryAdjustmentSchema.index({ adjustmentDate: -1, status: 1 });
+inventoryAdjustmentSchema.index({ adjustmentType: 1, status: 1 });
+inventoryAdjustmentSchema.index({ status: 1, createdAt: -1 });
+
+// ============================================
+// VIRTUALS
+// ============================================
+inventoryAdjustmentSchema.virtual("hasIncreases").get(function () {
+  return this.lines.some((line) => line.adjustmentQuantity > 0);
+});
+
+inventoryAdjustmentSchema.virtual("hasDecreases").get(function () {
+  return this.lines.some((line) => line.adjustmentQuantity < 0);
+});
+
+inventoryAdjustmentSchema.virtual("netAdjustmentValue").get(function () {
+  return this.totalIncreaseValue - this.totalDecreaseValue;
+});
+
+// ============================================
+// VALIDATION METHODS
+// ============================================
+
+/**
+ * Validate adjustment lines
+ */
+inventoryAdjustmentSchema.methods.validateLines = function () {
+  for (const line of this.lines) {
+    // Validate adjustment quantity calculation
+    const expectedAdjustment = line.physicalQuantity - line.systemQuantity;
+
+    if (Math.abs(expectedAdjustment - line.adjustmentQuantity) > 0.001) {
+      throw new Error(
+        `Adjustment quantity for ${line.productName} incorrect. ` +
+          `Expected: ${expectedAdjustment}, Got: ${line.adjustmentQuantity}`
+      );
+    }
+
+    // Validate adjustment value calculation
+    const expectedValue = Math.abs(line.adjustmentQuantity) * line.unitCost;
+
+    if (Math.abs(expectedValue - line.adjustmentValue) > 0.01) {
+      throw new Error(
+        `Adjustment value for ${line.productName} incorrect. ` +
+          `Expected: ${expectedValue.toFixed(2)}, Got: ${line.adjustmentValue}`
+      );
+    }
+
+    // Validate reason provided
+    if (!line.reason || line.reason.trim().length === 0) {
+      throw new Error(`Reason required for ${line.productName} adjustment`);
+    }
+  }
+
+  return true;
+};
+
+/**
+ * Calculate totals
+ */
+inventoryAdjustmentSchema.methods.calculateTotals = function () {
+  let totalIncrease = 0;
+  let totalDecrease = 0;
+  let totalValue = 0;
+
+  console.log("calculateTotals - Number of lines:", this.lines.length);
+
+  for (const line of this.lines) {
+    console.log("Line:", {
+      adjustmentQuantity: line.adjustmentQuantity,
+      adjustmentValue: line.adjustmentValue,
+    });
+
+    if (line.adjustmentQuantity > 0) {
+      totalIncrease += line.adjustmentValue;
+    } else if (line.adjustmentQuantity < 0) {
+      totalDecrease += line.adjustmentValue;
+    }
+    totalValue += line.adjustmentValue;
+  }
+
+  console.log("Calculated totals:", {
+    totalIncrease,
+    totalDecrease,
+    totalValue,
+  });
+
+  this.totalIncreaseValue = totalIncrease;
+  this.totalDecreaseValue = totalDecrease;
+  this.totalAdjustmentValue = totalValue;
+
+  return {
+    totalIncreaseValue: totalIncrease,
+    totalDecreaseValue: totalDecrease,
+    totalAdjustmentValue: totalValue,
+  };
+};
+
+/**
+ * Validate before approval
+ */
+inventoryAdjustmentSchema.methods.validateBeforeApproval = async function () {
+  this.validateLines();
+  this.calculateTotals();
+
+  // Validate products exist
+  const Product = mongoose.model("Product");
+
+  for (const line of this.lines) {
+    const product = await Product.findById(line.productId);
+
+    if (!product) {
+      throw new Error(`Product not found: ${line.productId}`);
+    }
+
+    // Cache product details
+    line.productSKU = product.SKU;
+    line.productName = product.name;
+    line.productUnit = product.unit;
+  }
+
+  return true;
+};
+
+// ============================================
+// APPROVE ADJUSTMENT
+// ============================================
+inventoryAdjustmentSchema.methods.approve = async function (approvedBy) {
+  if (this.status !== "draft") {
+    throw new Error(
+      `Can only approve draft adjustments. Current status: ${this.status}`
+    );
+  }
+
+  const userInfo = formatUserForAudit(approvedBy);
+
+  // Validate
+  await this.validateBeforeApproval();
+
+  // Calculate totals from lines
+  this.calculateTotals();
+
+  const Product = mongoose.model("Product");
+  const StockMovement = mongoose.model("StockMovement");
+  const stockMovements = [];
+
+  try {
+    // Process each line
+    for (const line of this.lines) {
+      if (line.adjustmentQuantity === 0) continue; // Skip no-change lines
+
+      const product = await Product.findById(line.productId);
+
+      if (!product) {
+        throw new Error(`Product not found: ${line.productId}`);
+      }
+
+      // Adjust inventory
+      if (line.adjustmentQuantity > 0) {
+        // Increase
+        await product.increaseInventory(
+          line.adjustmentQuantity,
+          line.unitCost,
+          `Adjustment ${this.adjustmentNumber} - ${this.adjustmentType}: ${line.reason}`
+        );
+      } else {
+        // Decrease
+        await product.decreaseInventory(
+          Math.abs(line.adjustmentQuantity),
+          `Adjustment ${this.adjustmentNumber} - ${this.adjustmentType}: ${line.reason}`
+        );
+      }
+
+      // Create stock movement
+      const movementNumber = await StockMovement.generateMovementNumber();
+
+      const movement = await StockMovement.create({
+        movementNumber,
+        productId: product._id,
+        productSnapshot: {
+          name: product.name,
+          SKU: product.SKU,
+          category: product.category,
+          unit: product.unit,
+        },
+        movementType: "adjustment",
+        direction: line.adjustmentQuantity > 0 ? "in" : "out",
+        quantity: Math.abs(line.adjustmentQuantity),
+        previousStock: line.systemQuantity,
+        newStock: line.physicalQuantity,
+        costing: {
+          unitCost: line.unitCost,
+          totalCost: line.adjustmentValue,
+          averageCostAtMovement: product.costing?.costPrice || 0,
+        },
+        performedBy: {
+          name: userInfo.name,
+          id: userInfo.id,
+          role: "system",
+        },
+        relatedDocuments: {
+          adjustmentId: this._id,
+          adjustmentNumber: this.adjustmentNumber,
+        },
+        notes: `Adjustment - ${this.adjustmentType}`,
+        reason: line.reason,
+        status: "posted",
+        postedAt: new Date(),
+        postedBy: userInfo,
+        accounting: {
+          affectsAccounting: true,
+          accountingPosted: false,
+        },
+      });
+
+      stockMovements.push(movement);
+      line.stockMovementId = movement._id;
+    }
+
+    // Create journal entry (may be null if no net change)
+    const journalEntry = await this.createJournalEntry(userInfo);
+
+    if (journalEntry) {
+      this.journalEntryId = journalEntry._id;
+
+      // Update stock movements with journal entry ID
+      for (const movement of stockMovements) {
+        movement.accounting.journalEntryId = journalEntry._id;
+        movement.accounting.accountingPosted = true;
+        movement.accounting.accountingPostedAt = new Date();
+        await movement.save();
+      }
+    }
+
+    // Update adjustment status
+    this.status = "approved";
+    this.approvedAt = new Date();
+    this.approvedBy = userInfo;
+    this.lastModifiedBy = userInfo;
+
+    await this.save();
+
+    return this;
+  } catch (error) {
+    // Rollback stock movements
+    for (const movement of stockMovements) {
+      const product = await Product.findById(movement.productId);
+      if (product) {
+        if (movement.direction === "in") {
+          await product.decreaseInventory(
+            movement.quantity,
+            "Rollback: Adjustment approval failed"
+          );
+        } else {
+          await product.increaseInventory(
+            movement.quantity,
+            movement.costing.unitCost,
+            "Rollback: Adjustment approval failed"
+          );
+        }
+      }
+      await StockMovement.findByIdAndDelete(movement._id);
+    }
+
+    throw new Error(`Adjustment approval failed: ${error.message}`);
+  }
+};
+
+// ============================================
+// CREATE JOURNAL ENTRY
+// ============================================
+inventoryAdjustmentSchema.methods.createJournalEntry = async function (user) {
+  if (this.journalEntryId) {
+    throw new Error("Journal entry already exists for this adjustment");
+  }
+  console.log("calledd===");
+  const Account = mongoose.model("Account");
+  const JournalEntry = mongoose.model("JournalEntry");
+
+  // Get accounts
+  const inventoryAccount = await Account.findOne({
+    systemAccount: "inventory",
+  });
+  console.log(inventoryAccount, "inventory");
+  const adjustmentAccount = await Account.findOne({
+    subType: "inventory_adjustment",
+  });
+
+  console.log(adjustmentAccount);
+
+  if (!inventoryAccount) {
+    throw new Error("Inventory account not configured");
+  }
+
+  if (!adjustmentAccount) {
+    throw new Error(
+      "Inventory Adjustment account not configured. Please create an expense account with subType 'inventory_adjustment'"
+    );
+  }
+
+  const lines = [];
+
+  // Calculate net adjustment (increases - decreases)
+  console.log(this.totalIncreaseValue, "totalIncreaseValue");
+  const netValue = this.totalIncreaseValue - this.totalDecreaseValue;
+  console.log(netValue);
+
+  if (netValue > 0) {
+    // Net increase: Debit Inventory, Credit Adjustment Income/Contra
+    lines.push(
+      {
+        accountId: inventoryAccount._id,
+        accountCode: inventoryAccount.accountCode,
+        accountName: inventoryAccount.accountName,
+        accountType: inventoryAccount.accountType,
+        debit: netValue,
+        credit: 0,
+        description: `Inventory increase - ${this.adjustmentType}`,
+      },
+      {
+        accountId: adjustmentAccount._id,
+        accountCode: adjustmentAccount.accountCode,
+        accountName: adjustmentAccount.accountName,
+        accountType: adjustmentAccount.accountType,
+        debit: 0,
+        credit: netValue,
+        description: `Adjustment - ${this.adjustmentType}`,
+      }
+    );
+  } else if (netValue < 0) {
+    // Net decrease: Debit Adjustment Expense, Credit Inventory
+    const absValue = Math.abs(netValue);
+    lines.push(
+      {
+        accountId: adjustmentAccount._id,
+        accountCode: adjustmentAccount.accountCode,
+        accountName: adjustmentAccount.accountName,
+        accountType: adjustmentAccount.accountType,
+        debit: absValue,
+        credit: 0,
+        description: `Adjustment expense - ${this.adjustmentType}`,
+      },
+      {
+        accountId: inventoryAccount._id,
+        accountCode: inventoryAccount.accountCode,
+        accountName: inventoryAccount.accountName,
+        accountType: inventoryAccount.accountType,
+        debit: 0,
+        credit: absValue,
+        description: `Inventory decrease - ${this.adjustmentType}`,
+      }
+    );
+  } else {
+    // No net change (equal increases and decreases)
+    // Skip journal entry - no financial impact
+    console.log("No net change, skipping journal entry");
+    return null;
+  }
+
+  // Validate balance
+  const totalDebits = lines.reduce((sum, line) => sum + (line.debit || 0), 0);
+  const totalCredits = lines.reduce((sum, line) => sum + (line.credit || 0), 0);
+
+  if (Math.abs(totalDebits - totalCredits) > 0.01) {
+    throw new Error(
+      `Journal entry not balanced! Debits: ${totalDebits}, Credits: ${totalCredits}`
+    );
+  }
+
+  // Generate entry number
+  const entryNumber = await this.generateUniqueEntryNumber();
+
+  // Create journal entry
+  const journalEntry = await JournalEntry.create({
+    entryNumber,
+    entryDate: this.adjustmentDate,
+    entryType: "adjustment",
+    description: `Inventory Adjustment - ${this.adjustmentType} - ${this.adjustmentNumber}`,
+    lines,
+    relatedDocuments: {
+      adjustmentId: this._id,
+      adjustmentNumber: this.adjustmentNumber,
+    },
+    status: "draft",
+    createdBy: user,
+  });
+
+  // Post journal entry
+  await journalEntry.post(user);
+
+  return journalEntry;
+};
+
+/**
+ * Generate unique entry number - delegates to centralized utility
+ */
+inventoryAdjustmentSchema.methods.generateUniqueEntryNumber = async function (session = null) {
+  const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
+  return generateUniqueEntryNumber("ADJ", session);
+};
+
+/**
+ * Cancel adjustment
+ */
+inventoryAdjustmentSchema.methods.cancel = async function (
+  cancelledBy,
+  reason
+) {
+  if (this.status !== "draft") {
+    throw new Error("Can only cancel draft adjustments");
+  }
+
+  const userInfo = formatUserForAudit(cancelledBy);
+
+  this.status = "cancelled";
+  this.cancelledAt = new Date();
+  this.cancelledBy = userInfo;
+  this.cancellationReason = reason || "No reason provided";
+  this.lastModifiedBy = userInfo;
+
+  await this.save();
+
+  return this;
+};
+
+// ============================================
+// STATIC METHODS
+// ============================================
+
+/**
+ * Get adjustments by type
+ */
+inventoryAdjustmentSchema.statics.getByType = function (
+  adjustmentType,
+  status = null
+) {
+  const query = { adjustmentType };
+
+  if (status) {
+    query.status = status;
+  }
+
+  return this.find(query).sort({ adjustmentDate: -1 }).lean();
+};
+
+/**
+ * Get adjustments for a period
+ */
+inventoryAdjustmentSchema.statics.getForPeriod = function (startDate, endDate) {
+  return this.find({
+    adjustmentDate: { $gte: startDate, $lte: endDate },
+    status: "approved",
+  })
+    .sort({ adjustmentDate: -1 })
+    .lean();
+};
+
+/**
+ * Get adjustment summary by type
+ */
+inventoryAdjustmentSchema.statics.getSummaryByType = async function (
+  startDate,
+  endDate
+) {
+  return this.aggregate([
+    {
+      $match: {
+        adjustmentDate: { $gte: startDate, $lte: endDate },
+        status: "approved",
+      },
+    },
+    {
+      $group: {
+        _id: "$adjustmentType",
+        count: { $sum: 1 },
+        totalValue: { $sum: "$totalAdjustmentValue" },
+        totalIncrease: { $sum: "$totalIncreaseValue" },
+        totalDecrease: { $sum: "$totalDecreaseValue" },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        adjustmentType: "$_id",
+        count: 1,
+        totalValue: 1,
+        totalIncrease: 1,
+        totalDecrease: 1,
+        netValue: { $subtract: ["$totalIncrease", "$totalDecrease"] },
+      },
+    },
+    {
+      $sort: { totalValue: -1 },
+    },
+  ]);
+};
+
+/**
+ * Generate adjustment number
+ */
+inventoryAdjustmentSchema.statics.generateAdjustmentNumber = async function () {
+  const lastAdjustment = await this.findOne({
+    adjustmentNumber: /^ADJ-/,
+  })
+    .sort({ adjustmentNumber: -1 })
+    .limit(1)
+    .lean();
+
+  const year = new Date().getFullYear();
+  let nextNum = 1;
+
+  if (lastAdjustment?.adjustmentNumber) {
+    const match = lastAdjustment.adjustmentNumber.match(/\d+$/);
+    if (match) {
+      const lastYear = parseInt(
+        lastAdjustment.adjustmentNumber.match(/\d{4}/)[0]
+      );
+      if (lastYear === year) {
+        nextNum = parseInt(match[0], 10) + 1;
+      }
+    }
+  }
+
+  return `ADJ-${year}-${String(nextNum).padStart(4, "0")}`;
+};
+
+// ============================================
+// MODEL EXPORT
+// ============================================
+const models = mongoose.models;
+let InventoryAdjustment = models?.InventoryAdjustment;
+
+if (!InventoryAdjustment) {
+  InventoryAdjustment = mongoose.model(
+    "InventoryAdjustment",
+    inventoryAdjustmentSchema
+  );
+}
+
+export default InventoryAdjustment;

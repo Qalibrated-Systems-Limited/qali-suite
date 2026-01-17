@@ -2,6 +2,7 @@ import dbConnect from "../../config/dbConnect";
 import { StockMovement } from "../../models/stockmovement";
 import Counter from "../../models/counter";
 import { sanitizeSearchTerm } from "../../../lib/utils/sanitize";
+import { serializeBsonType } from "@/lib/utils";
 
 const ITEMS_PER_PAGE = 20;
 dbConnect();
@@ -68,11 +69,17 @@ export const fetchMovementPages = async (
         {
           $or: [
             { movementNumber: { $regex: safeSearchTerm, $options: "i" } },
-            { "productSnapshot.name": { $regex: safeSearchTerm, $options: "i" } },
-            { "productSnapshot.SKU": { $regex: safeSearchTerm, $options: "i" } },
+            {
+              "productSnapshot.name": { $regex: safeSearchTerm, $options: "i" },
+            },
+            {
+              "productSnapshot.SKU": { $regex: safeSearchTerm, $options: "i" },
+            },
             { "performedBy.name": { $regex: safeSearchTerm, $options: "i" } },
             { "issuedTo.name": { $regex: safeSearchTerm, $options: "i" } },
-            { "issuedTo.department": { $regex: safeSearchTerm, $options: "i" } },
+            {
+              "issuedTo.department": { $regex: safeSearchTerm, $options: "i" },
+            },
           ],
         },
       ],
@@ -115,7 +122,7 @@ export const searchMovements = async (
   userId = null,
   userRole = null
 ) => {
-  const { movementType, direction, startDate, endDate } = filters;
+  const { movementType, direction, startDate, endDate, productId } = filters;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
   // Sanitize search term to prevent NoSQL injection
@@ -137,6 +144,9 @@ export const searchMovements = async (
   // Movement type filter
   if (movementType && movementType !== "all") {
     additionalFilters.movementType = movementType;
+  }
+  if (productId && productId !== "") {
+    additionalFilters.productId = productId;
   }
 
   // Direction filter
@@ -164,11 +174,17 @@ export const searchMovements = async (
         {
           $or: [
             { movementNumber: { $regex: safeSearchTerm, $options: "i" } },
-            { "productSnapshot.name": { $regex: safeSearchTerm, $options: "i" } },
-            { "productSnapshot.SKU": { $regex: safeSearchTerm, $options: "i" } },
+            {
+              "productSnapshot.name": { $regex: safeSearchTerm, $options: "i" },
+            },
+            {
+              "productSnapshot.SKU": { $regex: safeSearchTerm, $options: "i" },
+            },
             { "performedBy.name": { $regex: safeSearchTerm, $options: "i" } },
             { "issuedTo.name": { $regex: safeSearchTerm, $options: "i" } },
-            { "issuedTo.department": { $regex: safeSearchTerm, $options: "i" } },
+            {
+              "issuedTo.department": { $regex: safeSearchTerm, $options: "i" },
+            },
           ],
         },
       ],
@@ -192,26 +208,8 @@ export const searchMovements = async (
   let result = await StockMovement.aggregate(pipeline);
 
   // Transform result for client consumption
-  result = result.map((movement) => ({
-    ...movement,
-    _id: movement._id.toString(),
-    productId: movement.productId.toString(),
-    createdAt: movement.createdAt.toISOString(),
-    updatedAt: movement.updatedAt?.toISOString() || null,
-    expectedReturnDate: movement.expectedReturnDate?.toISOString() || null,
-    actualReturnDate: movement.actualReturnDate?.toISOString() || null,
-    totalValue:
-      movement.totalValue || movement.quantity * (movement.unitPrice || 0),
-    relatedDocuments: {
-      requestId: movement.relatedDocuments?.requestId?.toString() || null,
-      invoiceId: movement.relatedDocuments?.invoiceId?.toString() || null,
-      checkoutId: movement.relatedDocuments?.checkoutId?.toString() || null,
-      purchaseOrderId:
-        movement.relatedDocuments?.purchaseOrderId?.toString() || null,
-    },
-  }));
 
-  return result;
+  return serializeBsonType(result);
 };
 
 // ============================================

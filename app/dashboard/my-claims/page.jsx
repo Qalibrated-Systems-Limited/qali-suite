@@ -1,0 +1,86 @@
+import { auth } from "@/auth";
+import { redirect } from "next/navigation";
+import {
+  searchUserClaims,
+  fetchUserClaimPages,
+  getClaimStats,
+} from "@/app/mongodb/queries/claimQueries";
+import Pagination from "@/components/pagination";
+import {
+  ClaimsListSkeleton,
+  ClaimsListWithFilters,
+} from "../claims/components/ClaimListWithFilter";
+import { Card } from "@/components/ui/card";
+import { DollarSign, Clock, CheckCircle2, XCircle } from "lucide-react";
+import { Suspense } from "react";
+import ClaimStats from "../claims/components/ClaimStats";
+import {
+  StatsCardSkeleton,
+  StatsCardsSkeleton,
+} from "../claims/components/ClaimsSkeleton";
+import ClaimListWithFiltersServerComp from "../claims/components/ClaimListWithFiltersServerComp";
+
+export const metadata = {
+  title: "My Claims | ERP System",
+  description: "View and manage your expense claims",
+};
+
+export default async function MyClaimsPage({ searchParams }) {
+  const params = await searchParams;
+  const session = await auth();
+
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const { user } = session;
+  const query = params?.query || "";
+  const status = params?.status || "all";
+  const claimType = params?.type || "all";
+
+  // Get user role (normalize)
+  let userRole = user.role || "user";
+  if (userRole !== "Store Manager" && userRole !== "Admin") {
+    userRole = userRole.toLowerCase();
+  }
+
+  // Fetch data
+  const filters = { status, claimType };
+  const totalPages = await fetchUserClaimPages(
+    user.id,
+    userRole,
+    query,
+    filters
+  );
+
+  return (
+    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
+      {/* Header */}
+      <div className="space-y-1 sm:space-y-2">
+        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+          My Claims
+        </h1>
+        <p className="text-sm sm:text-base text-muted-foreground">
+          View and manage your expense claims
+        </p>
+      </div>
+
+      {/* Claim Stats */}
+      <Suspense fallback={<StatsCardsSkeleton />}>
+        <ClaimStats userId={user.id} userRole={userRole} />
+      </Suspense>
+
+      {/* Claims List with Filters */}
+      <Suspense fallback={<ClaimsListSkeleton />}>
+        <ClaimListWithFiltersServerComp AreMyclaims={true} params={params} />
+      </Suspense>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex justify-center mt-4">
+          <Pagination totalPages={totalPages} />
+        </div>
+      )}
+    </div>
+  );
+}

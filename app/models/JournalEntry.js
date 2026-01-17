@@ -25,15 +25,34 @@ const journalEntrySchema = new Schema(
       type: String,
       required: [true, "Entry type is required"],
       enum: [
+        // Existing
         "sale",
         "payment_received",
         "payment_made",
         "expense",
+        "advance",
         "purchase",
         "adjustment",
         "opening_balance",
+        "advance_settlement",
+        "invoice_cancellation",
+        "bill_cancellation",
         "closing",
         "transfer",
+        // Added - ERP standard types
+        "credit_note",
+        "debit_note",
+        "depreciation",
+        "write_off",
+        "payroll",
+        "contra",
+        "bank_entry",
+        "cash_entry",
+        "accrual",
+        "revaluation",
+        "tax",
+        "inventory_adjustment",
+        "other",
       ],
       index: true,
     },
@@ -304,15 +323,11 @@ journalEntrySchema.methods.validateFiscalPeriod = async function () {
   }
 
   if (period.status === "closed") {
-    throw new Error(
-      `Cannot post to closed fiscal period: ${period.name}`
-    );
+    throw new Error(`Cannot post to closed fiscal period: ${period.name}`);
   }
 
   if (period.status === "locked") {
-    throw new Error(
-      `Cannot post to locked fiscal period: ${period.name}`
-    );
+    throw new Error(`Cannot post to locked fiscal period: ${period.name}`);
   }
 
   return true;
@@ -402,7 +417,9 @@ journalEntrySchema.methods.reverse = async function (reversedBy, reason) {
     entryNumber: reversalEntryNumber,
     entryDate: new Date(),
     entryType: "adjustment",
-    description: `Reversal of ${this.entryNumber}: ${reason || "No reason provided"}`,
+    description: `Reversal of ${this.entryNumber}: ${
+      reason || "No reason provided"
+    }`,
     lines: reversalLines,
     status: "draft",
     originalEntryId: this._id,
@@ -430,7 +447,9 @@ journalEntrySchema.methods.reverse = async function (reversedBy, reason) {
 // ============================================
 journalEntrySchema.methods.updateAccountBalances = async function () {
   const Account = mongoose.model("Account");
-  const accountIds = [...new Set(this.lines.map((l) => l.accountId.toString()))];
+  const accountIds = [
+    ...new Set(this.lines.map((l) => l.accountId.toString())),
+  ];
 
   for (const accountId of accountIds) {
     const account = await Account.findById(accountId);
@@ -444,9 +463,13 @@ journalEntrySchema.methods.updateAccountBalances = async function () {
 // AGING REPORT METHODS
 // ============================================
 
-journalEntrySchema.statics.getARAgingReport = async function (asOfDate = new Date()) {
+journalEntrySchema.statics.getARAgingReport = async function (
+  asOfDate = new Date()
+) {
   const Account = mongoose.model("Account");
-  const arAccount = await Account.findOne({ systemAccount: "accounts_receivable" });
+  const arAccount = await Account.findOne({
+    systemAccount: "accounts_receivable",
+  });
 
   if (!arAccount) throw new Error("AR account not found");
 
@@ -542,9 +565,13 @@ journalEntrySchema.statics.getARAgingReport = async function (asOfDate = new Dat
   ]);
 };
 
-journalEntrySchema.statics.getAPAgingReport = async function (asOfDate = new Date()) {
+journalEntrySchema.statics.getAPAgingReport = async function (
+  asOfDate = new Date()
+) {
   const Account = mongoose.model("Account");
-  const apAccount = await Account.findOne({ systemAccount: "accounts_payable" });
+  const apAccount = await Account.findOne({
+    systemAccount: "accounts_payable",
+  });
 
   if (!apAccount) throw new Error("AP account not found");
 

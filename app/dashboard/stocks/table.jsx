@@ -1,4 +1,4 @@
-import { Pencil, Package, AlertTriangle, XCircle } from "lucide-react";
+import { Pencil, Package, AlertTriangle, XCircle, Eye } from "lucide-react";
 import {
   AddSingleItem,
   AddToCartButton,
@@ -87,9 +87,12 @@ export function InventoryTable({ cart = [], stock, action }) {
                       {item.SKU}
                     </TableCell>
 
-                    {/* Product Name */}
+                    {/* Product Name - Clickable to view details */}
                     <TableCell>
-                      <div>
+                      <Link
+                        href={`/dashboard/stocks/${item._id}`}
+                        className="block hover:underline underline-offset-2"
+                      >
                         <p className="font-medium text-foreground">
                           {item.name}
                         </p>
@@ -98,7 +101,7 @@ export function InventoryTable({ cart = [], stock, action }) {
                             {item.description}
                           </p>
                         )}
-                      </div>
+                      </Link>
                     </TableCell>
 
                     {/* Category */}
@@ -156,7 +159,20 @@ export function InventoryTable({ cart = [], stock, action }) {
 
                     {/* Actions */}
                     <TableCell>
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1">
+                        {/* View Details Button */}
+                        <Button
+                          asChild
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-accent"
+                        >
+                          <Link href={`/dashboard/stocks/${item._id}`}>
+                            <Eye className="h-4 w-4" />
+                            <span className="sr-only">View {item.name}</span>
+                          </Link>
+                        </Button>
+
                         {/* Edit Button */}
                         {action !== "request" && (
                           <Button
@@ -174,7 +190,7 @@ export function InventoryTable({ cart = [], stock, action }) {
 
                         {/* Cart Controls */}
                         {cartItem ? (
-                          <div className="flex items-center gap-1 border border-border rounded-lg px-2 py-1 bg-background">
+                          <div className="flex items-center gap-1 border border-border rounded-lg px-2 py-1 bg-background ml-1">
                             <RemoveSingleItem id={item.SKU} />
                             <span className="px-2 text-sm font-semibold text-yellow-500 min-w-[2ch] text-center">
                               {cartItem.quantity}
@@ -234,16 +250,19 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
             <Card key={item._id} className="bg-card border-border">
               <CardContent className="p-4">
                 <div className="space-y-3">
-                  {/* Header */}
+                  {/* Header - Clickable to view details */}
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-foreground">
+                    <Link
+                      href={`/products/${item._id}`}
+                      className="flex-1 min-w-0"
+                    >
+                      <h3 className="font-semibold text-foreground hover:underline underline-offset-2">
                         {item.name}
                       </h3>
                       <p className="text-xs text-muted-foreground font-mono mt-0.5">
                         {item.SKU}
                       </p>
-                    </div>
+                    </Link>
                     {isOutOfStock ? (
                       <Badge
                         variant="outline"
@@ -309,22 +328,35 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
 
                   {/* Actions */}
                   <div className="flex items-center gap-2 pt-2 border-t border-border">
+                    {/* View Details Button */}
+                    <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="border-border text-foreground hover:bg-accent"
+                    >
+                      <Link href={`/dashboard/stocks/${item._id}`}>
+                        <Eye className="mr-1.5 h-3 w-3" />
+                        View
+                      </Link>
+                    </Button>
+
                     {action !== "request" && (
                       <Button
                         asChild
                         variant="outline"
                         size="sm"
-                        className="flex-1 border-border text-foreground hover:bg-accent"
+                        className="border-border text-foreground hover:bg-accent"
                       >
                         <Link href={`/dashboard/stocks/${item._id}/update`}>
-                          <Pencil className="mr-2 h-3 w-3" />
+                          <Pencil className="mr-1.5 h-3 w-3" />
                           Edit
                         </Link>
                       </Button>
                     )}
 
                     {cartItem ? (
-                      <div className="flex items-center gap-1 border border-border rounded-lg px-3 py-1.5 bg-background">
+                      <div className="flex items-center gap-1 border border-border rounded-lg px-3 py-1.5 bg-background ml-auto">
                         <RemoveSingleItem id={item.SKU} />
                         <span className="px-2 text-sm font-semibold text-yellow-500 min-w-[2ch] text-center">
                           {cartItem.quantity}
@@ -332,9 +364,7 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
                         <AddSingleItem id={item.SKU} />
                       </div>
                     ) : (
-                      <div
-                        className={action !== "request" ? "flex-1" : "w-full"}
-                      >
+                      <div className="ml-auto">
                         <AddToCartButton
                           id={item._id}
                           disabled={isOutOfStock}

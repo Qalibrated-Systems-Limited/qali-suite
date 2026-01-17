@@ -1,396 +1,672 @@
 "use client";
 
-import { useActionState } from "react";
-import NextForm from "next/form";
-import { Button } from "../../../../components/ui/button";
+import { useActionState, useState } from "react";
+import { useRouter } from "next/navigation";
+import { addProduct } from "../../../mongodb/actions/stock-actions";
+
+import { cn } from "@/lib/utils";
+
+// Icons
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "../../../../components/ui/card";
-import { units } from "../../../utils/units";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "../../../../components/ui/form";
-import { Input } from "../../../../components/ui/input";
-import { Textarea } from "../../../../components/ui/textarea";
+
+  Package,
+  DollarSign,
+  Warehouse,
+  Settings,
+  FileText,
+  Tag,
+  Hash,
+  Layers,
+  Scale,
+  TrendingUp,
+  Percent,
+  MapPin,
+  Building,
+  Receipt,
+  Truck,
+  AlertCircle,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  Plus,
+} from "lucide-react";
+
+// UI Components
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../../../../components/ui/select";
-import { Alert, AlertDescription } from "../../../../components/ui/alert";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { stockForm } from "../../../mongodb/validators";
-import { useForm } from "react-hook-form";
-import { addStock } from "../../../mongodb/actions";
-import { CATEGORIES } from "../../../utils/productCategories";
-import { AlertCircle, Loader2, Package } from "lucide-react";
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { units } from "@/app/utils/units";
 
-export function CreateStockForm() {
-  const initialState = { message: "", errors: {} };
-  const [state, dispatch, isPending] = useActionState(addStock, initialState);
+// Product categories - adjust based on your business
+const categories = [
+  "Loadcells",
+  "Indicators",
+  "Platforms",
+  "Spare Parts",
+  "Cables",
+  "Accessories",
+  "Scales",
 
-  const form = useForm({
-    resolver: zodResolver(stockForm),
-    defaultValues: {
-      name: "",
-      SKU: "",
-      category: "",
-      stock: "",
-      price: "",
-      description: "",
-      unit: "",
-    },
-  });
+  "Other",
+];
+
+// ============================================
+// FORM SECTION COMPONENT
+// ============================================
+function FormSection({
+  title,
+  icon: Icon,
+  children,
+  collapsible = false,
+  defaultOpen = true,
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
-    <div className="max-w-4xl mx-auto py-8">
-      <Card className="bg-card border-border">
-        <CardHeader className="space-y-1 border-b border-border pb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-yellow-500/10 rounded-lg flex items-center justify-center">
-              <Package className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
-            </div>
+    <Card className="border-border/50">
+      <CardHeader
+        className={cn("pb-4", collapsible && "cursor-pointer select-none")}
+        onClick={() => collapsible && setIsOpen(!isOpen)}
+      >
+        <CardTitle className="flex items-center justify-between text-base font-medium">
+          <span className="flex items-center gap-2">
+            {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
+            {title}
+          </span>
+          {collapsible && (
+            <span className="text-muted-foreground">
+              {isOpen ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      {(!collapsible || isOpen) && (
+        <CardContent className="pt-0">{children}</CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ============================================
+// FIELD ERROR COMPONENT
+// ============================================
+function FieldError({ errors }) {
+  if (!errors || errors.length === 0) return null;
+
+  return (
+    <div className="flex items-start gap-1.5 mt-1.5">
+      <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+      <span className="text-xs text-destructive">{errors[0]}</span>
+    </div>
+  );
+}
+
+// ============================================
+// ADD PRODUCT FORM
+// ============================================
+export  function AddProductForm({ onSuccess, onCancel }) {
+  const router = useRouter();
+  const [state, formAction, isPending] = useActionState(addProduct, {});
+  const [taxable, setTaxable] = useState(true);
+
+  // Handle successful submission
+  if (state?.success) {
+    if (onSuccess) {
+      onSuccess(state);
+    } else {
+      router.push("/dashboard/stock");
+    }
+  }
+
+  return (
+    <form action={formAction} className="space-y-6">
+      {/* Form Error */}
+      {state?.errors?._form && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
             <div>
-              <CardTitle className="text-2xl font-bold text-foreground">
-                Add New Stock Item
-              </CardTitle>
-              <CardDescription className="text-muted-foreground">
-                Create a new product in your inventory
-              </CardDescription>
+              <p className="font-medium text-destructive">Error</p>
+              <p className="text-sm text-destructive/90">
+                {state.errors._form[0]}
+              </p>
             </div>
           </div>
-        </CardHeader>
+        </div>
+      )}
 
-        <CardContent className="pt-6">
-          <Form {...form}>
-            <NextForm action={dispatch} className="space-y-8">
-              {/* Error Alert */}
-              {state.message && (
-                <Alert
-                  variant="destructive"
-                  className="bg-red-500/10 border-red-500/20"
-                >
-                  <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
-                  <AlertDescription className="text-red-600 dark:text-red-400">
-                    {state.message}
-                  </AlertDescription>
-                </Alert>
-              )}
+      {/* ============================================ */}
+      {/* BASIC INFORMATION */}
+      {/* ============================================ */}
+      <FormSection title="Basic Information" icon={Package}>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {/* Product Name */}
+          <div className="sm:col-span-2">
+            <Label htmlFor="name" className="text-sm font-medium">
+              Product Name <span className="text-destructive">*</span>
+            </Label>
+            <div className="relative mt-1.5">
+              <Tag className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="name"
+                name="name"
+                placeholder="e.g., Loadcell 10kg Single Point"
+                className={cn(
+                  "pl-10",
+                  state?.errors?.name &&
+                    "border-destructive focus-visible:ring-destructive"
+                )}
+                required
+              />
+            </div>
+            <FieldError errors={state?.errors?.name} />
+          </div>
 
-              {/* Basic Information Section */}
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-lg font-semibold text-foreground mb-4">
-                    Basic Information
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Product Name */}
-                    <FormField
-                      control={form.control}
-                      name="name"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-foreground font-medium">
-                            Product Name <span className="text-red-500">*</span>
-                          </FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder="e.g., Wireless Mouse"
-                              className="bg-background border-border text-foreground"
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormDescription className="text-xs text-muted-foreground">
-                            Enter the full product name
-                          </FormDescription>
-                          {state.errors?.name && (
-                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                              {state.errors.name[0]}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
+          {/* SKU */}
+          <div>
+            <Label htmlFor="SKU" className="text-sm font-medium">
+              SKU <span className="text-destructive">*</span>
+            </Label>
+            <div className="relative mt-1.5">
+              <Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="SKU"
+                name="SKU"
+                placeholder="e.g., LC-10KG-SP"
+                className={cn(
+                  "pl-10 uppercase",
+                  state?.errors?.SKU &&
+                    "border-destructive focus-visible:ring-destructive"
+                )}
+                style={{ textTransform: "uppercase" }}
+                required
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Uppercase letters, numbers, and dashes only
+            </p>
+            <FieldError errors={state?.errors?.SKU} />
+          </div>
 
-                    {/* SKU */}
-                    <FormField
-                      control={form.control}
-                      name="SKU"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-foreground font-medium">
-                            SKU <span className="text-red-500">*</span>
-                          </FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder="e.g., WMOUSE-001"
-                              className="bg-background border-border text-foreground font-mono"
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormDescription className="text-xs text-muted-foreground">
-                            Unique stock keeping unit
-                          </FormDescription>
-                          {state.errors?.SKU && (
-                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                              {state.errors.SKU[0]}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </div>
+          {/* Category */}
+          <div>
+            <Label htmlFor="category" className="text-sm font-medium">
+              Category <span className="text-destructive">*</span>
+            </Label>
+            <Select name="category" required>
+              <SelectTrigger
+                className={cn(
+                  "mt-1.5",
+                  state?.errors?.category && "border-destructive"
+                )}
+              >
+                <SelectValue placeholder="Select category" />
+              </SelectTrigger>
+              <SelectContent>
+                {categories.map((cat) => (
+                  <SelectItem key={cat} value={cat}>
+                    {cat}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FieldError errors={state?.errors?.category} />
+          </div>
 
-                {/* Category & Unit Section */}
-                <div>
-                  <h3 className="text-lg font-semibold text-foreground mb-4">
-                    Classification
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Category */}
-                    <FormField
-                      control={form.control}
-                      name="category"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-foreground font-medium">
-                            Category <span className="text-red-500">*</span>
-                          </FormLabel>
-                          <Select
-                            onValueChange={field.onChange}
-                            name="category"
-                          >
-                            <FormControl>
-                              <SelectTrigger className="bg-background border-border text-foreground">
-                                <SelectValue placeholder="Select a category" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent className="bg-card border-border">
-                              <SelectGroup>
-                                {CATEGORIES.map((cat) => (
-                                  <SelectItem
-                                    value={cat.value}
-                                    key={cat.value}
-                                    className="text-foreground focus:bg-accent focus:text-foreground"
-                                  >
-                                    {cat.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
-                          <FormDescription className="text-xs text-muted-foreground">
-                            Product category
-                          </FormDescription>
-                          {state.errors?.category && (
-                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                              {state.errors.category[0]}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
+          {/* Unit */}
+          <div>
+            <Label htmlFor="unit" className="text-sm font-medium">
+              Unit <span className="text-destructive">*</span>
+            </Label>
+            <Select name="unit" defaultValue="pcs" required>
+              <SelectTrigger
+                className={cn(
+                  "mt-1.5",
+                  state?.errors?.unit && "border-destructive"
+                )}
+              >
+                <SelectValue placeholder="Select unit" />
+              </SelectTrigger>
+              <SelectContent>
+                {units.map((unit) => (
+                  <SelectItem key={unit} value={unit}>
+                    {unit}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FieldError errors={state?.errors?.unit} />
+          </div>
 
-                    {/* Unit */}
-                    <FormField
-                      control={form.control}
-                      name="unit"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-foreground font-medium">
-                            Unit <span className="text-red-500">*</span>
-                          </FormLabel>
-                          <Select onValueChange={field.onChange} name="unit">
-                            <FormControl>
-                              <SelectTrigger className="bg-background border-border text-foreground">
-                                <SelectValue placeholder="Select a unit" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent className="bg-card border-border">
-                              <SelectGroup>
-                                {units.map((unit) => (
-                                  <SelectItem
-                                    value={unit}
-                                    key={unit}
-                                    className="text-foreground focus:bg-accent focus:text-foreground"
-                                  >
-                                    {unit}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
-                          <FormDescription className="text-xs text-muted-foreground">
-                            Unit of measurement
-                          </FormDescription>
-                          {state.errors?.unit && (
-                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                              {state.errors.unit[0]}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </div>
+          {/* Description */}
+          <div className="sm:col-span-2">
+            <Label htmlFor="description" className="text-sm font-medium">
+              Description
+            </Label>
+            <Textarea
+              id="description"
+              name="description"
+              placeholder="Product description, specifications, or notes..."
+              className="mt-1.5 min-h-20 resize-none"
+              rows={3}
+            />
+            <FieldError errors={state?.errors?.description} />
+          </div>
+        </div>
+      </FormSection>
 
-                {/* Pricing & Inventory Section */}
-                <div>
-                  <h3 className="text-lg font-semibold text-foreground mb-4">
-                    Pricing & Inventory
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Price */}
-                    <FormField
-                      control={form.control}
-                      name="price"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-foreground font-medium">
-                            Unit Landing Cost (KES){" "}
-                            <span className="text-red-500">*</span>
-                          </FormLabel>
-                          <FormControl>
-                            <div className="relative">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                                KES
-                              </span>
-                              <Input
-                                placeholder="0.00"
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                className="bg-background border-border text-foreground pl-14"
-                                {...field}
-                              />
-                            </div>
-                          </FormControl>
-                          <FormDescription className="text-xs text-muted-foreground">
-                            Landing Cost per unit
-                          </FormDescription>
-                          {state.errors?.price && (
-                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                              {state.errors.price[0]}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
+      {/* ============================================ */}
+      {/* PRICING */}
+      {/* ============================================ */}
+      <FormSection title="Pricing" icon={DollarSign}>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {/* Selling Price */}
+          <div>
+            <Label htmlFor="sellingPrice" className="text-sm font-medium">
+              Selling Price <span className="text-destructive">*</span>
+            </Label>
+            <div className="relative mt-1.5">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                KES
+              </span>
+              <Input
+                id="sellingPrice"
+                name="sellingPrice"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                className={cn(
+                  "pl-12",
+                  state?.errors?.sellingPrice && "border-destructive"
+                )}
+                required
+              />
+            </div>
+            <FieldError errors={state?.errors?.sellingPrice} />
+          </div>
 
-                    {/* Stock Quantity */}
-                    <FormField
-                      control={form.control}
-                      name="stock"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-foreground font-medium">
-                            Initial Stock{" "}
-                            <span className="text-red-500">*</span>
-                          </FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder="0"
-                              type="number"
-                              min="0"
-                              className="bg-background border-border text-foreground"
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormDescription className="text-xs text-muted-foreground">
-                            Current quantity in stock
-                          </FormDescription>
-                          {state.errors?.stock && (
-                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                              {state.errors.stock[0]}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </div>
+          {/* Wholesale Price */}
+          <div>
+            <Label htmlFor="wholesalePrice" className="text-sm font-medium">
+              Wholesale Price
+            </Label>
+            <div className="relative mt-1.5">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                KES
+              </span>
+              <Input
+                id="wholesalePrice"
+                name="wholesalePrice"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                className="pl-12"
+              />
+            </div>
+            <FieldError errors={state?.errors?.wholesalePrice} />
+          </div>
 
-                {/* Description Section */}
-                <div>
-                  <h3 className="text-lg font-semibold text-foreground mb-4">
-                    Additional Details
-                  </h3>
-                  <FormField
-                    control={form.control}
-                    name="description"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-foreground font-medium">
-                          Description
-                        </FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="Enter product description, specifications, or notes..."
-                            className="bg-background border-border text-foreground min-h-[100px] resize-none"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormDescription className="text-xs text-muted-foreground">
-                          Optional product description (max 500 characters)
-                        </FormDescription>
-                        {state.errors?.description && (
-                          <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                            {state.errors.description[0]}
-                          </p>
-                        )}
-                      </FormItem>
-                    )}
-                  />
-                </div>
-              </div>
+          {/* Minimum Price */}
+          <div>
+            <Label htmlFor="minimumPrice" className="text-sm font-medium">
+              Minimum Price
+            </Label>
+            <div className="relative mt-1.5">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                KES
+              </span>
+              <Input
+                id="minimumPrice"
+                name="minimumPrice"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                className="pl-12"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Sales below this need approval
+            </p>
+            <FieldError errors={state?.errors?.minimumPrice} />
+          </div>
+        </div>
+      </FormSection>
 
-              {/* Form Actions */}
-              <div className="flex items-center justify-end gap-3 pt-6 border-t border-border">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="border-border text-foreground hover:bg-accent"
-                  onClick={() => form.reset()}
-                  disabled={isPending}
-                >
-                  Reset
-                </Button>
-                <Button
-                  type="submit"
-                  className="bg-yellow-500 hover:bg-yellow-600 text-black font-medium"
-                  disabled={isPending}
-                >
-                  {isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    <>
-                      <Package className="mr-2 h-4 w-4" />
-                      Create Stock Item
-                    </>
-                  )}
-                </Button>
-              </div>
-            </NextForm>
-          </Form>
-        </CardContent>
-      </Card>
-    </div>
+      {/* ============================================ */}
+      {/* COSTING & INITIAL STOCK */}
+      {/* ============================================ */}
+      <FormSection title="Costing & Initial Stock" icon={TrendingUp}>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {/* Cost Price */}
+          <div>
+            <Label htmlFor="costPrice" className="text-sm font-medium">
+              Cost Price <span className="text-destructive">*</span>
+            </Label>
+            <div className="relative mt-1.5">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                KES
+              </span>
+              <Input
+                id="costPrice"
+                name="costPrice"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                className={cn(
+                  "pl-12",
+                  state?.errors?.costPrice && "border-destructive"
+                )}
+                required
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Average cost per unit (for COGS calculation)
+            </p>
+            <FieldError errors={state?.errors?.costPrice} />
+          </div>
+
+          {/* Initial Quantity */}
+          <div>
+            <Label htmlFor="initialQuantity" className="text-sm font-medium">
+              Initial Stock Quantity
+            </Label>
+            <div className="relative mt-1.5">
+              <Layers className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="initialQuantity"
+                name="initialQuantity"
+                type="number"
+                min="0"
+                step="1"
+                defaultValue="0"
+                placeholder="0"
+                className="pl-10"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Opening stock (no journal entry created)
+            </p>
+            <FieldError errors={state?.errors?.initialQuantity} />
+          </div>
+        </div>
+      </FormSection>
+
+      {/* ============================================ */}
+      {/* INVENTORY SETTINGS */}
+      {/* ============================================ */}
+      <FormSection
+        title="Inventory Settings"
+        icon={Settings}
+        collapsible
+        defaultOpen={false}
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          {/* Reorder Point */}
+          <div>
+            <Label htmlFor="reorderPoint" className="text-sm font-medium">
+              Reorder Point
+            </Label>
+            <div className="relative mt-1.5">
+              <AlertCircle className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="reorderPoint"
+                name="reorderPoint"
+                type="number"
+                min="0"
+                step="1"
+                defaultValue="0"
+                placeholder="0"
+                className="pl-10"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Alert when stock falls to this level
+            </p>
+            <FieldError errors={state?.errors?.reorderPoint} />
+          </div>
+
+          {/* Reorder Quantity */}
+          <div>
+            <Label htmlFor="reorderQuantity" className="text-sm font-medium">
+              Reorder Quantity
+            </Label>
+            <div className="relative mt-1.5">
+              <Plus className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="reorderQuantity"
+                name="reorderQuantity"
+                type="number"
+                min="0"
+                step="1"
+                defaultValue="0"
+                placeholder="0"
+                className="pl-10"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Suggested quantity to order
+            </p>
+            <FieldError errors={state?.errors?.reorderQuantity} />
+          </div>
+        </div>
+      </FormSection>
+
+      {/* ============================================ */}
+      {/* LOCATION */}
+      {/* ============================================ */}
+      <FormSection
+        title="Storage Location"
+        icon={MapPin}
+        collapsible
+        defaultOpen={false}
+      >
+        <div className="grid gap-4 sm:grid-cols-3">
+          {/* Warehouse */}
+          <div>
+            <Label htmlFor="warehouse" className="text-sm font-medium">
+              Warehouse
+            </Label>
+            <div className="relative mt-1.5">
+              <Building className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="warehouse"
+                name="warehouse"
+                placeholder="Main"
+                defaultValue="Main"
+                className="pl-10"
+              />
+            </div>
+            <FieldError errors={state?.errors?.warehouse} />
+          </div>
+
+          {/* Bin */}
+          <div>
+            <Label htmlFor="bin" className="text-sm font-medium">
+              Bin / Rack
+            </Label>
+            <Input
+              id="bin"
+              name="bin"
+              placeholder="e.g., A1"
+              className="mt-1.5"
+            />
+            <FieldError errors={state?.errors?.bin} />
+          </div>
+
+          {/* Shelf */}
+          <div>
+            <Label htmlFor="shelf" className="text-sm font-medium">
+              Shelf
+            </Label>
+            <Input
+              id="shelf"
+              name="shelf"
+              placeholder="e.g., Top"
+              className="mt-1.5"
+            />
+            <FieldError errors={state?.errors?.shelf} />
+          </div>
+        </div>
+      </FormSection>
+
+      {/* ============================================ */}
+      {/* TAX SETTINGS */}
+      {/* ============================================ */}
+      <FormSection
+        title="Tax Settings"
+        icon={Receipt}
+        collapsible
+        defaultOpen={false}
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          {/* Taxable */}
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="taxable" className="text-sm font-medium">
+                Taxable Product
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Apply VAT to this product
+              </p>
+            </div>
+            <Switch
+              id="taxable"
+              name="taxable"
+              checked={taxable}
+              onCheckedChange={setTaxable}
+              value={taxable ? "true" : "false"}
+            />
+          </div>
+
+          {/* Tax Rate */}
+          <div>
+            <Label htmlFor="taxRate" className="text-sm font-medium">
+              Tax Rate (%)
+            </Label>
+            <div className="relative mt-1.5">
+              <Percent className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="taxRate"
+                name="taxRate"
+                type="number"
+                min="0"
+                max="100"
+                step="0.5"
+                defaultValue="16"
+                placeholder="16"
+                className="pl-10"
+                disabled={!taxable}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Kenya VAT: 16%</p>
+            <FieldError errors={state?.errors?.taxRate} />
+          </div>
+        </div>
+      </FormSection>
+
+      {/* ============================================ */}
+      {/* SUPPLIER INFO */}
+      {/* ============================================ */}
+      <FormSection
+        title="Supplier Information"
+        icon={Truck}
+        collapsible
+        defaultOpen={false}
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          {/* Default Supplier ID */}
+          <div>
+            <Label htmlFor="defaultSupplierId" className="text-sm font-medium">
+              Default Supplier
+            </Label>
+            <Input
+              id="defaultSupplierId"
+              name="defaultSupplierId"
+              placeholder="Supplier ID (optional)"
+              className="mt-1.5"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Link to Party record
+            </p>
+            <FieldError errors={state?.errors?.defaultSupplierId} />
+          </div>
+
+          {/* Supplier SKU */}
+          <div>
+            <Label htmlFor="supplierSKU" className="text-sm font-medium">
+              Supplier SKU
+            </Label>
+            <Input
+              id="supplierSKU"
+              name="supplierSKU"
+              placeholder="Supplier's product code"
+              className="mt-1.5"
+            />
+            <FieldError errors={state?.errors?.supplierSKU} />
+          </div>
+        </div>
+      </FormSection>
+
+      {/* ============================================ */}
+      {/* FORM ACTIONS */}
+      {/* ============================================ */}
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        {onCancel && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel}
+            disabled={isPending}
+            className="w-full sm:w-auto"
+          >
+            Cancel
+          </Button>
+        )}
+        <Button
+          type="submit"
+          disabled={isPending}
+          className="w-full sm:w-auto bg-yellow-500 hover:bg-yellow-600 text-black"
+        >
+          {isPending ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Creating...
+            </>
+          ) : (
+            <>
+              <Plus className="mr-2 h-4 w-4" />
+              Create Product
+            </>
+          )}
+        </Button>
+      </div>
+
+      {/* Success Message (if staying on page) */}
+      {state?.success && (
+        <div className="rounded-lg border border-green-500/50 bg-green-500/10 p-4">
+          <p className="text-sm text-green-600 dark:text-green-400">
+            ✓ {state.message}
+          </p>
+        </div>
+      )}
+    </form>
   );
 }

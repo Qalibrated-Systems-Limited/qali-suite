@@ -7,6 +7,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Shield, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import Category from "@/app/models/category";
+import { serializeBsonType } from "@/lib/utils";
 
 async function UpdateStockPage(props) {
   const params = await props.params;
@@ -16,6 +18,12 @@ async function UpdateStockPage(props) {
   const user = session && session.user;
   const canUpdateStock =
     user?.role === "Store Manager" || user?.role === "Admin";
+  const result = (await Category.find({}).lean()) ?? [];
+
+  const categories = result.map((cat) => {
+    const id = cat._id.toString();
+    return { _id: id, name: cat.name };
+  });
 
   if (!canUpdateStock) {
     return (
@@ -55,22 +63,17 @@ async function UpdateStockPage(props) {
 
   let stock = await Product.findOne({ _id: id });
 
-  if (stock) {
-    stock = {
-      name: stock.name,
-      SKU: stock.SKU,
-      description: stock.description,
-      category: stock.category,
-      price: stock.price,
-      stock: stock.stock,
-      unit: stock.unit,
-      _id: stock._id.toString(),
-    };
-  }
-
   if (!stock) {
     return notFound();
   }
+
+  // Find the category ID from the category name stored in product
+  const productCategoryName = stock.category;
+  const matchingCategory = categories.find(cat => cat.name === productCategoryName);
+
+  // Serialize and add the category ID for the form
+  stock = serializeBsonType(stock);
+  stock.categoryId = matchingCategory?._id || "";
 
   return (
     <main className="flex flex-col gap-6">
@@ -91,7 +94,11 @@ async function UpdateStockPage(props) {
       </div>
 
       {/* Form */}
-      <UpdateStockForm stock={stock} />
+      <UpdateStockForm
+        product={stock}
+        categories={categories}
+        userRole={user?.role || "employee"}
+      />
     </main>
   );
 }

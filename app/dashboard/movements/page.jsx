@@ -34,6 +34,7 @@ async function MovementsPage(props) {
   const direction = searchParams.direction || "all";
   const startDate = searchParams.startDate || "";
   const endDate = searchParams.endDate || "";
+  const productId = searchParams.productId || "";
 
   const currentPage = Number(searchParams.page) || 1;
 
@@ -43,6 +44,7 @@ async function MovementsPage(props) {
   const filters = {
     movementType: movementType !== "all" ? movementType : "",
     direction: direction !== "all" ? direction : "",
+    productId: productId || "",
     startDate,
     endDate,
   };

@@ -495,20 +495,9 @@ expenseSchema.methods.createJournalEntry = async function (user) {
     }
   }
 
-  // Generate entry number
-  const lastEntry = await JournalEntry.findOne({
-    entryType: "expense",
-  })
-    .sort({ entryNumber: -1 })
-    .limit(1);
-
-  let nextNum = 1;
-  if (lastEntry && lastEntry.entryNumber) {
-    const match = lastEntry.entryNumber.match(/\d+$/);
-    if (match) nextNum = parseInt(match[0]) + 1;
-  }
-
-  const entryNumber = `JE-EXP-${String(nextNum).padStart(4, "0")}`;
+  // Generate entry number using centralized utility
+  const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
+  const entryNumber = await generateUniqueEntryNumber("EXP");
 
   // Create journal entry
   const journalEntry = await JournalEntry.create({

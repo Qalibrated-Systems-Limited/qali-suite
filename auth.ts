@@ -4,7 +4,14 @@ import { z } from "zod";
 import User from "./app/models/user";
 import { authOptions } from "./auth.config";
 import dbConnect from "./app/config/dbConnect";
-async function getUser(email) {
+
+type UserType = {
+  id: string;
+  name: string;
+  role: string;
+  email: string;
+};
+async function getUser(email: string) {
   try {
     dbConnect();
     const user = await User.findOne({ email }).select("+password");
@@ -36,7 +43,7 @@ export const { auth, signIn, signOut } = NextAuth({
               name: user.name,
               role: user.role,
               email: user.email,
-            };
+            } as UserType;
         }
         return null;
       },

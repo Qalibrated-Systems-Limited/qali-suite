@@ -127,6 +127,25 @@ const stockRequestSchema = new Schema(
           type: String,
           enum: ["pending", "partial", "complete"],
         },
+
+        // ============================================
+        // INVOICING TRACKING (for sales/installations)
+        // ============================================
+        invoicedQuantity: {
+          type: Number,
+          default: 0,
+        },
+        invoices: [
+          {
+            invoiceId: {
+              type: Schema.Types.ObjectId,
+              ref: "Invoice",
+            },
+            invoiceNumber: String,
+            quantity: Number,
+            invoicedAt: Date,
+          },
+        ],
       },
     ],
     status: {
@@ -136,6 +155,7 @@ const stockRequestSchema = new Schema(
         "approved",
         "partially_fulfilled",
         "fulfilled",
+        "invoiced",      // NEW: Items have been invoiced (for sales)
         "rejected",
         "cancelled",
       ],

@@ -1,0 +1,53 @@
+import { auth } from "@/auth";
+import { redirect, notFound } from "next/navigation";
+import { getClaimById } from "@/app/mongodb/queries/claimQueries";
+import { AdvanceRequestForm } from "../../components/AdvanceRequestFrom";
+import { ReimbursementForm } from "../../components/ReimbursementForm";
+
+export const metadata = {
+  title: "Edit Claim | ERP System",
+  description: "Edit your expense claim",
+};
+
+export default async function EditClaimPage({ params }) {
+  const { id } = await params;
+  const session = await auth();
+
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const { user } = session;
+  const userRole = user.role?.toLowerCase();
+
+  // Fetch claim
+  const claim = await getClaimById(id);
+
+  if (!claim) {
+    notFound();
+  }
+
+  // Check permissions
+  const isOwner = claim.employee.userId === user.id;
+  const isManager = userRole === "manager" || userRole === "admin";
+
+  // Only owner and managers can edit
+  if (!isOwner && !isManager) {
+    redirect("/dashboard/claims/my-claims");
+  }
+
+  // Can only edit draft or submitted claims
+  if (claim.status !== "draft" && claim.status !== "submitted") {
+    redirect(`/dashboard/claims/${id}`);
+  }
+
+  // Render appropriate form based on claim type
+  if (claim.claimType === "advance_request") {
+    return <AdvanceRequestForm claim={claim} />;
+  } else if (claim.claimType === "reimbursement") {
+    return <ReimbursementForm claim={claim} />;
+  } else {
+    // Settlement claims cannot be edited
+    redirect(`/dashboard/claims/${id}`);
+  }
+}

@@ -5,7 +5,9 @@ import {
   departments,
   priority,
   purposeForItemsRemovalFromStock,
+  reimbursementCategories,
 } from "@/lib/utils";
+import { de } from "date-fns/locale";
 
 export const accountForm = z.object({
   name: z.string().max(100).min(4),
@@ -33,6 +35,94 @@ export const createRequestFromCartSchema = z.object({
     .max(500),
   purposeDetails: z.string().optional(),
 });
+
+const ruimbursementPaymentSchema = z.object({
+  paymentMethod: z.enum(["bank_transfer", "cash", "check"], {
+    required_error: "Please select a payment method",
+  }),
+  transactionReference: z.string().min(3).max(100).optional(),
+});
+
+export const expenseItemSchema = z.object({
+  date: z.coerce.date(),
+
+  category: z.enum(reimbursementCategories),
+
+  description: z.string().min(3),
+
+  amount: z.coerce.number().positive(),
+
+  receipt: z
+    .object({
+      filename: z.string(),
+      url: z.string().url(),
+      uploadedAt: z.coerce.date().optional(),
+    })
+    .optional(),
+
+  notes: z.string().optional(),
+});
+
+const itemsSchema = z.preprocess((value) => {
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}, z.array(expenseItemSchema).min(1, "At least one item is required"));
+
+export const reimbursementSchema = z.object({
+  description: z
+    .string()
+    .min(10, "Description must be at least 10 characters long")
+    .max(200, "Description must be at most 200 characters long"),
+  notes: z
+    .string()
+    .max(500, "Notes must be at most 500 characters long")
+    .optional()
+    .or(z.literal("")),
+  items: itemsSchema,
+});
+
+export const advanceRequestSchema = z
+  .object({
+    requestedAmount: z.coerce
+      .number()
+      .positive("Requested amount must be greater than zero"),
+
+    purpose: z
+      .string()
+      .min(5, "Purpose is required")
+      .max(200, "Purpose is too long"),
+
+    destination: z
+      .string()
+      .min(2, "Destination is required")
+      .max(100, "Destination is too long"),
+
+    travelFromDate: z.coerce.date({
+      invalid_type_error: "Invalid travel start date",
+    }),
+
+    travelToDate: z.coerce.date({
+      invalid_type_error: "Invalid travel end date",
+    }),
+    //estimated exp LIKE meals -2k ,accommodation -5k, transport -3k etc  required
+
+    estimatedExpenses: z
+      .string()
+      .max(200, "Estimated expenses too long")
+      .optional()
+      .or(z.literal("")),
+    notes: z.string().max(500, "Notes too long").optional().or(z.literal("")),
+  })
+  .refine((data) => data.travelToDate >= data.travelFromDate, {
+    message: "Travel end date cannot be before start date",
+    path: ["travelToDate"],
+  });
 
 export const deliveryNoteZodSchema = z.object({
   notes: z.string().max(100).min(4),
@@ -162,6 +252,34 @@ const userForm = z.object({
     required_error: "Please provide role.",
   }),
 });
+
+const expenseItemSchemaa = z.object({
+  date: z.coerce.date({
+    required_error: "Date is required",
+    invalid_type_error: "Invalid date",
+  }),
+  category: z.enum(reimbursementCategories, {
+    required_error: "Category is required",
+  }),
+  description: z
+    .string()
+    .min(3, "Description must be at least 3 characters")
+    .max(200, "Description is too long"),
+  amount: z.coerce
+    .number({
+      required_error: "Amount is required",
+      invalid_type_error: "Amount must be a number",
+    })
+    .positive("Amount must be greater than zero"),
+  notes: z.string().max(200).optional().or(z.literal("")),
+  receipt: z
+    .object({
+      filename: z.string(),
+      url: z.string().url(),
+    })
+    .optional(),
+});
+
 export const userUpdateForm = userForm.omit({ password: true });
 
 export const validateNewUser = (userRawData) => userForm.safeParse(userRawData);
@@ -192,3 +310,9 @@ export const validateDNote = (rawData) =>
 export const validateDnoteItem = (rawData) => dnoteItemForm.safeParse(rawData);
 export const validateCreateRequestFromCart = (rawData) =>
   createRequestFromCartSchema.safeParse(rawData);
+
+export const validateAdvanceRequest = (rawData) =>
+  advanceRequestSchema.safeParse(rawData);
+
+export const validateReimbursement = (rawData) =>
+  reimbursementSchema.safeParse(rawData);

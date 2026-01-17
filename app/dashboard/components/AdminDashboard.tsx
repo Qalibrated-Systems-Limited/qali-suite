@@ -1,0 +1,149 @@
+import { Suspense } from "react";
+import { auth } from "@/auth";
+import { redirect } from "next/navigation";
+
+// Client Component (uses useSearchParams)
+import { DashboardTabs } from "./tabs/DashboardTabs";
+
+// Server Components (Tabs)
+import { FinanceTab, FinanceTabSkeleton } from "./tabs/FinanceTab";
+import { InventoryTab, InventoryTabSkeleton } from "./tabs/InventoryTab";
+import { OperationsTab, OperationsTabSkeleton } from "./tabs/OperationlTabs";
+
+// ============================================
+// DASHBOARD PAGE - Server Component
+// ============================================
+export const metadata = {
+  title: "Dashboard | ERP System",
+  description: "Your personalized dashboard",
+};
+
+export async function AdminDashboardPage() {
+  const session = await auth();
+
+  if (!session?.user) {
+    redirect("/login");
+  }
+
+  const user = {
+    id: session.user.id || "",
+    name: session.user.name || "User",
+    email: session.user.email || "",
+    role: session.user.role || "Employee",
+  };
+
+  const firstName = user.name?.split(" ")[0] || "Admin";
+  const greeting = getGreeting();
+
+  // Role check
+  const isAdmin = ["Admin", "Manager", "Store Manager", "Accountant"].includes(
+    user.role
+  );
+
+  if (!isAdmin) {
+    redirect("/dashboard/employee");
+  }
+
+  return (
+    <div className="space-y-4 sm:space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-foreground tracking-tight">
+            {greeting}, {firstName}
+          </h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            {formatDate(new Date())}
+          </p>
+        </div>
+      </div>
+
+      {/* 
+        IMPORTANT: Wrap in Suspense for useSearchParams
+        Next.js 16 requires this for client components using useSearchParams
+      */}
+      <Suspense fallback={<TabsLoadingSkeleton />}>
+        <DashboardTabs
+          financeTab={
+            <Suspense fallback={<FinanceTabSkeleton />}>
+              <FinanceTab />
+            </Suspense>
+          }
+          inventoryTab={
+            <Suspense fallback={<InventoryTabSkeleton />}>
+              <InventoryTab />
+            </Suspense>
+          }
+          operationsTab={
+            <Suspense fallback={<OperationsTabSkeleton />}>
+              <OperationsTab />
+            </Suspense>
+          }
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+// ============================================
+// TABS LOADING SKELETON
+// ============================================
+function TabsLoadingSkeleton() {
+  return (
+    <div className="space-y-4 sm:space-y-6">
+      {/* Tab triggers skeleton */}
+      <div className="flex gap-1 p-1 bg-muted/50 rounded-lg w-full sm:w-auto">
+        {[1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="flex-1 sm:flex-none h-9 px-4 bg-muted animate-pulse rounded-md"
+          />
+        ))}
+      </div>
+
+      {/* Tab content skeleton */}
+      <div className="space-y-4">
+        {/* KPIs */}
+        <div className="grid grid-cols-3 gap-2 sm:gap-4">
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-24 bg-muted/50 animate-pulse rounded-lg border border-border/40"
+            />
+          ))}
+        </div>
+
+        {/* Alerts */}
+        <div className="h-12 bg-muted/50 animate-pulse rounded-lg border border-border/40" />
+
+        {/* Charts */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {[1, 2].map((i) => (
+            <div
+              key={i}
+              className="h-80 bg-muted/50 animate-pulse rounded-lg border border-border/40"
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// HELPERS
+// ============================================
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function formatDate(date: Date) {
+  return date.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+}

@@ -1,0 +1,865 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import dbConnect from "@/app/lib/db";
+import Payment from "@/app/models/payment";
+import Bill from "@/app/models/bill";
+import Invoice from "@/app/models/invoice";
+import Party from "@/app/models/party";
+import Account from "@/app/models/account";
+import { auth } from "@/auth";
+
+// ============================================
+// VALIDATION SCHEMAS
+// ============================================
+
+const AllocationSchema = z.object({
+  documentType: z.enum(["invoice", "bill"]),
+  documentId: z.string().min(1, "Document ID required"),
+  documentNumber: z.string().min(1, "Document number required"),
+  documentDate: z.string().optional(),
+  originalAmount: z.coerce.number().min(0),
+  balanceBefore: z.coerce.number().min(0),
+  amountAllocated: z.coerce.number().min(0.01, "Amount must be positive"),
+});
+
+const CreatePaymentSchema = z
+  .object({
+    paymentType: z.enum(["received", "made"], {
+      required_error: "Payment type is required",
+    }),
+    paymentDate: z.string().min(1, "Payment date is required"),
+    amount: z.coerce.number().min(0.01, "Amount must be positive"),
+    paymentMethod: z.enum(
+      ["cash", "mpesa", "bank_transfer", "cheque", "card"],
+      { required_error: "Payment method is required" }
+    ),
+    accountId: z.string().min(1, "Payment account is required"),
+    partyId: z.string().min(1, "Party is required"),
+    description: z.string().min(1, "Description is required").max(500),
+    reference: z.string().max(100).optional(),
+    notes: z.string().max(1000).optional(),
+
+    // M-Pesa details
+    mpesaTransactionCode: z.string().optional(),
+    mpesaPhoneNumber: z.string().optional(),
+    mpesaReceiptNumber: z.string().optional(),
+
+    // Bank details
+    bankName: z.string().optional(),
+    bankAccountNumber: z.string().optional(),
+    chequeNumber: z.string().optional(),
+    bankTransactionReference: z.string().optional(),
+
+    // Card details
+    cardLast4Digits: z.string().optional(),
+    cardType: z.string().optional(),
+    cardApprovalCode: z.string().optional(),
+
+    // Allocations (JSON string from form)
+    allocations: z.string().optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.paymentMethod === "mpesa" && !data.mpesaTransactionCode) {
+        return false;
+      }
+      return true;
+    },
+    { message: "M-Pesa transaction code required", path: ["mpesaTransactionCode"] }
+  )
+  .refine(
+    (data) => {
+      if (data.paymentMethod === "cheque" && !data.chequeNumber) {
+        return false;
+      }
+      return true;
+    },
+    { message: "Cheque number required", path: ["chequeNumber"] }
+  );
+
+// ============================================
+// HELPER: Get current user
+// ============================================
+async function getCurrentUser() {
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error("Unauthorized");
+  }
+  return {
+    name: session.user.name || session.user.email,
+    id: session.user.id,
+    role: session.user.role,
+  };
+}
+
+// ============================================
+// HELPER: Check role
+// ============================================
+function checkRole(user, allowedRoles) {
+  if (!allowedRoles.includes(user.role)) {
+    throw new Error(`Access denied. Required roles: ${allowedRoles.join(", ")}`);
+  }
+}
+
+// ============================================
+// HELPER: Serialize for client
+// ============================================
+function serializePayment(payment) {
+  if (!payment) return null;
+
+  const obj = payment.toObject ? payment.toObject() : { ...payment };
+
+  return {
+    ...obj,
+    _id: obj._id?.toString(),
+    id: obj._id?.toString(),
+    account: obj.account
+      ? {
+          ...obj.account,
+          id: obj.account.id?.toString(),
+        }
+      : null,
+    party: obj.party
+      ? {
+          ...obj.party,
+          partyId: obj.party.partyId?.toString(),
+        }
+      : null,
+    allocations: obj.allocations?.map((a) => ({
+      ...a,
+      _id: a._id?.toString(),
+      documentId: a.documentId?.toString(),
+    })),
+    journalEntryId: obj.journalEntryId?.toString(),
+    createdAt: obj.createdAt?.toISOString(),
+    updatedAt: obj.updatedAt?.toISOString(),
+    paymentDate: obj.paymentDate?.toISOString(),
+    confirmedAt: obj.confirmedAt?.toISOString(),
+    cancelledAt: obj.cancelledAt?.toISOString(),
+  };
+}
+
+// ============================================
+// CREATE PAYMENT
+// ============================================
+export async function createPayment(prevState, formData) {
+  try {
+    await dbConnect();
+    const user = await getCurrentUser();
+    checkRole(user, ["admin", "manager", "accountant"]);
+
+    // Parse form data
+    const rawData = {
+      paymentType: formData.get("paymentType"),
+      paymentDate: formData.get("paymentDate"),
+      amount: formData.get("amount"),
+      paymentMethod: formData.get("paymentMethod"),
+      accountId: formData.get("accountId"),
+      partyId: formData.get("partyId"),
+      description: formData.get("description"),
+      reference: formData.get("reference"),
+      notes: formData.get("notes"),
+      mpesaTransactionCode: formData.get("mpesaTransactionCode"),
+      mpesaPhoneNumber: formData.get("mpesaPhoneNumber"),
+      mpesaReceiptNumber: formData.get("mpesaReceiptNumber"),
+      bankName: formData.get("bankName"),
+      bankAccountNumber: formData.get("bankAccountNumber"),
+      chequeNumber: formData.get("chequeNumber"),
+      bankTransactionReference: formData.get("bankTransactionReference"),
+      cardLast4Digits: formData.get("cardLast4Digits"),
+      cardType: formData.get("cardType"),
+      cardApprovalCode: formData.get("cardApprovalCode"),
+      allocations: formData.get("allocations"),
+    };
+
+    // Validate
+    const validated = CreatePaymentSchema.safeParse(rawData);
+    if (!validated.success) {
+      return {
+        success: false,
+        error: "Validation failed",
+        fieldErrors: validated.error.flatten().fieldErrors,
+      };
+    }
+
+    const data = validated.data;
+
+    // Parse allocations JSON
+    let allocations = [];
+    if (data.allocations) {
+      try {
+        const parsed = JSON.parse(data.allocations);
+        const validatedAllocs = z.array(AllocationSchema).safeParse(parsed);
+        if (validatedAllocs.success) {
+          allocations = validatedAllocs.data;
+        }
+      } catch (e) {
+        return { success: false, error: "Invalid allocations format" };
+      }
+    }
+
+    // Validate total allocations don't exceed amount
+    const totalAllocated = allocations.reduce((sum, a) => sum + a.amountAllocated, 0);
+    if (totalAllocated > data.amount + 0.01) {
+      return {
+        success: false,
+        error: `Total allocated (${totalAllocated}) exceeds payment amount (${data.amount})`,
+      };
+    }
+
+    // Get party
+    const party = await Party.findById(data.partyId);
+    if (!party) {
+      return { success: false, error: "Party not found" };
+    }
+
+    // Validate party type matches payment type
+    if (data.paymentType === "received" && party.partyType !== "customer") {
+      return { success: false, error: "Received payments must be from customers" };
+    }
+    if (data.paymentType === "made" && party.partyType !== "supplier") {
+      return { success: false, error: "Made payments must be to suppliers" };
+    }
+
+    // Get account
+    const account = await Account.findById(data.accountId);
+    if (!account) {
+      return { success: false, error: "Payment account not found" };
+    }
+    if (!["cash", "bank", "mpesa"].includes(account.subType)) {
+      return { success: false, error: "Invalid account type. Must be cash, bank, or mpesa" };
+    }
+
+    // Generate payment number
+    const paymentNumber = await Payment.generatePaymentNumber(data.paymentType);
+
+    // Build payment document
+    const paymentData = {
+      paymentNumber,
+      paymentType: data.paymentType,
+      paymentDate: new Date(data.paymentDate),
+      amount: data.amount,
+      currency: "KES",
+      paymentMethod: data.paymentMethod,
+
+      account: {
+        id: account._id,
+        code: account.accountCode,
+        name: account.accountName,
+        subType: account.subType,
+      },
+
+      party: {
+        type: party.partyType,
+        partyId: party._id,
+        name: party.name,
+        email: party.email,
+        phone: party.phone,
+      },
+
+      allocations: allocations.map((a) => ({
+        documentType: a.documentType,
+        documentId: a.documentId,
+        documentNumber: a.documentNumber,
+        documentDate: a.documentDate ? new Date(a.documentDate) : undefined,
+        originalAmount: a.originalAmount,
+        balanceBefore: a.balanceBefore,
+        amountAllocated: a.amountAllocated,
+      })),
+
+      reference: data.reference || undefined,
+      description: data.description,
+      notes: data.notes || undefined,
+
+      status: "draft",
+      createdBy: { name: user.name, id: user.id },
+    };
+
+    // Add method-specific details
+    if (data.paymentMethod === "mpesa") {
+      paymentData.mpesaDetails = {
+        transactionCode: data.mpesaTransactionCode,
+        phoneNumber: data.mpesaPhoneNumber,
+        receiptNumber: data.mpesaReceiptNumber,
+      };
+    }
+
+    if (["bank_transfer", "cheque"].includes(data.paymentMethod)) {
+      paymentData.bankDetails = {
+        bankName: data.bankName,
+        accountNumber: data.bankAccountNumber,
+        chequeNumber: data.chequeNumber,
+        transactionReference: data.bankTransactionReference,
+      };
+    }
+
+    if (data.paymentMethod === "card") {
+      paymentData.cardDetails = {
+        last4Digits: data.cardLast4Digits,
+        cardType: data.cardType,
+        approvalCode: data.cardApprovalCode,
+      };
+    }
+
+    // Create payment
+    const payment = new Payment(paymentData);
+    await payment.save();
+
+    revalidatePath("/payments");
+    revalidatePath("/bills");
+    revalidatePath("/invoices");
+
+    return {
+      success: true,
+      data: {
+        id: payment._id.toString(),
+        paymentNumber: payment.paymentNumber,
+      },
+    };
+  } catch (error) {
+    console.error("Create payment error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================
+// UPDATE PAYMENT (Draft only)
+// ============================================
+export async function updatePayment(id, prevState, formData) {
+  try {
+    await dbConnect();
+    const user = await getCurrentUser();
+    checkRole(user, ["admin", "manager", "accountant"]);
+
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    if (!payment.canEdit) {
+      return { success: false, error: "Cannot edit confirmed/cancelled payment" };
+    }
+
+    // Parse and validate (same as create)
+    const rawData = {
+      paymentType: formData.get("paymentType"),
+      paymentDate: formData.get("paymentDate"),
+      amount: formData.get("amount"),
+      paymentMethod: formData.get("paymentMethod"),
+      accountId: formData.get("accountId"),
+      partyId: formData.get("partyId"),
+      description: formData.get("description"),
+      reference: formData.get("reference"),
+      notes: formData.get("notes"),
+      mpesaTransactionCode: formData.get("mpesaTransactionCode"),
+      mpesaPhoneNumber: formData.get("mpesaPhoneNumber"),
+      mpesaReceiptNumber: formData.get("mpesaReceiptNumber"),
+      bankName: formData.get("bankName"),
+      bankAccountNumber: formData.get("bankAccountNumber"),
+      chequeNumber: formData.get("chequeNumber"),
+      bankTransactionReference: formData.get("bankTransactionReference"),
+      cardLast4Digits: formData.get("cardLast4Digits"),
+      cardType: formData.get("cardType"),
+      cardApprovalCode: formData.get("cardApprovalCode"),
+      allocations: formData.get("allocations"),
+    };
+
+    const validated = CreatePaymentSchema.safeParse(rawData);
+    if (!validated.success) {
+      return {
+        success: false,
+        error: "Validation failed",
+        fieldErrors: validated.error.flatten().fieldErrors,
+      };
+    }
+
+    const data = validated.data;
+
+    // Parse allocations
+    let allocations = [];
+    if (data.allocations) {
+      try {
+        allocations = JSON.parse(data.allocations);
+      } catch (e) {
+        return { success: false, error: "Invalid allocations format" };
+      }
+    }
+
+    // Get party and account
+    const party = await Party.findById(data.partyId);
+    const account = await Account.findById(data.accountId);
+
+    if (!party || !account) {
+      return { success: false, error: "Party or account not found" };
+    }
+
+    // Update fields
+    payment.paymentDate = new Date(data.paymentDate);
+    payment.amount = data.amount;
+    payment.paymentMethod = data.paymentMethod;
+    payment.description = data.description;
+    payment.reference = data.reference;
+    payment.notes = data.notes;
+
+    payment.account = {
+      id: account._id,
+      code: account.accountCode,
+      name: account.accountName,
+      subType: account.subType,
+    };
+
+    payment.party = {
+      type: party.partyType,
+      partyId: party._id,
+      name: party.name,
+      email: party.email,
+      phone: party.phone,
+    };
+
+    payment.allocations = allocations.map((a) => ({
+      documentType: a.documentType,
+      documentId: a.documentId,
+      documentNumber: a.documentNumber,
+      originalAmount: a.originalAmount,
+      balanceBefore: a.balanceBefore,
+      amountAllocated: a.amountAllocated,
+    }));
+
+    // Update method details
+    if (data.paymentMethod === "mpesa") {
+      payment.mpesaDetails = {
+        transactionCode: data.mpesaTransactionCode,
+        phoneNumber: data.mpesaPhoneNumber,
+        receiptNumber: data.mpesaReceiptNumber,
+      };
+    }
+
+    if (["bank_transfer", "cheque"].includes(data.paymentMethod)) {
+      payment.bankDetails = {
+        bankName: data.bankName,
+        accountNumber: data.bankAccountNumber,
+        chequeNumber: data.chequeNumber,
+        transactionReference: data.bankTransactionReference,
+      };
+    }
+
+    payment.lastModifiedBy = { name: user.name, id: user.id };
+
+    await payment.save();
+
+    revalidatePath("/payments");
+    revalidatePath(`/payments/${id}`);
+
+    return { success: true, data: { id: payment._id.toString() } };
+  } catch (error) {
+    console.error("Update payment error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================
+// DELETE PAYMENT (Draft only)
+// ============================================
+export async function deletePayment(id) {
+  try {
+    await dbConnect();
+    const user = await getCurrentUser();
+    checkRole(user, ["admin", "manager"]);
+
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    if (payment.status !== "draft") {
+      return { success: false, error: "Can only delete draft payments" };
+    }
+
+    await Payment.findByIdAndDelete(id);
+
+    revalidatePath("/payments");
+
+    return { success: true };
+  } catch (error) {
+    console.error("Delete payment error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================
+// CONFIRM PAYMENT
+// ============================================
+export async function confirmPayment(id) {
+  try {
+    await dbConnect();
+    const user = await getCurrentUser();
+    checkRole(user, ["admin", "manager", "accountant"]);
+
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    await payment.confirm(user);
+
+    revalidatePath("/payments");
+    revalidatePath(`/payments/${id}`);
+    revalidatePath("/bills");
+    revalidatePath("/invoices");
+
+    return {
+      success: true,
+      data: {
+        id: payment._id.toString(),
+        paymentNumber: payment.paymentNumber,
+        journalEntryId: payment.journalEntryId?.toString(),
+      },
+    };
+  } catch (error) {
+    console.error("Confirm payment error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================
+// CANCEL PAYMENT
+// ============================================
+export async function cancelPayment(id, prevState, formData) {
+  try {
+    await dbConnect();
+    const user = await getCurrentUser();
+    checkRole(user, ["admin", "manager"]);
+
+    const reason = formData.get("reason");
+    if (!reason) {
+      return { success: false, error: "Cancellation reason is required" };
+    }
+
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    await payment.cancel(user, reason);
+
+    revalidatePath("/payments");
+    revalidatePath(`/payments/${id}`);
+    revalidatePath("/bills");
+    revalidatePath("/invoices");
+
+    return { success: true };
+  } catch (error) {
+    console.error("Cancel payment error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================
+// RECONCILE PAYMENT
+// ============================================
+export async function reconcilePayment(id, prevState, formData) {
+  try {
+    await dbConnect();
+    const user = await getCurrentUser();
+    checkRole(user, ["admin", "accountant"]);
+
+    const statementRef = formData.get("statementReference");
+
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    await payment.reconcile(user, statementRef);
+
+    revalidatePath("/payments");
+    revalidatePath(`/payments/${id}`);
+
+    return { success: true };
+  } catch (error) {
+    console.error("Reconcile payment error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================
+// GET PAYMENTS (List with filters)
+// ============================================
+export async function getPayments(filters = {}) {
+  try {
+    await dbConnect();
+
+    const {
+      paymentType,
+      status,
+      paymentMethod,
+      partyId,
+      fiscalPeriod,
+      isReconciled,
+      startDate,
+      endDate,
+      search,
+      page = 1,
+      limit = 20,
+    } = filters;
+
+    const query = {};
+
+    if (paymentType) query.paymentType = paymentType;
+    if (status) query.status = status;
+    if (paymentMethod) query.paymentMethod = paymentMethod;
+    if (partyId) query["party.partyId"] = partyId;
+    if (fiscalPeriod) query.fiscalPeriod = fiscalPeriod;
+    if (typeof isReconciled === "boolean") {
+      query["reconciliation.isReconciled"] = isReconciled;
+    }
+
+    if (startDate || endDate) {
+      query.paymentDate = {};
+      if (startDate) query.paymentDate.$gte = new Date(startDate);
+      if (endDate) query.paymentDate.$lte = new Date(endDate);
+    }
+
+    if (search) {
+      query.$or = [
+        { paymentNumber: { $regex: search, $options: "i" } },
+        { "party.name": { $regex: search, $options: "i" } },
+        { reference: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+        { "mpesaDetails.transactionCode": { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [payments, total] = await Promise.all([
+      Payment.find(query)
+        .sort({ paymentDate: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Payment.countDocuments(query),
+    ]);
+
+    return {
+      success: true,
+      data: payments.map((p) => ({
+        ...p,
+        _id: p._id.toString(),
+        id: p._id.toString(),
+        account: p.account ? { ...p.account, id: p.account.id?.toString() } : null,
+        party: p.party ? { ...p.party, partyId: p.party.partyId?.toString() } : null,
+        journalEntryId: p.journalEntryId?.toString(),
+        paymentDate: p.paymentDate?.toISOString(),
+        createdAt: p.createdAt?.toISOString(),
+        updatedAt: p.updatedAt?.toISOString(),
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  } catch (error) {
+    console.error("Get payments error:", error);
+    return { success: false, error: error.message, data: [] };
+  }
+}
+
+// ============================================
+// GET SINGLE PAYMENT
+// ============================================
+export async function getPayment(id) {
+  try {
+    await dbConnect();
+
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    return { success: true, data: serializePayment(payment) };
+  } catch (error) {
+    console.error("Get payment error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================
+// GET PAYMENT STATS (Dashboard)
+// ============================================
+export async function getPaymentStats() {
+  try {
+    await dbConnect();
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    const [
+      statusCounts,
+      monthlyReceived,
+      monthlyMade,
+      unreconciledCount,
+      byMethod,
+    ] = await Promise.all([
+      // Count by status
+      Payment.aggregate([
+        { $group: { _id: "$status", count: { $sum: 1 } } },
+      ]),
+
+      // This month received
+      Payment.aggregate([
+        {
+          $match: {
+            paymentType: "received",
+            status: "confirmed",
+            paymentDate: { $gte: startOfMonth, $lte: endOfMonth },
+          },
+        },
+        { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } },
+      ]),
+
+      // This month made
+      Payment.aggregate([
+        {
+          $match: {
+            paymentType: "made",
+            status: "confirmed",
+            paymentDate: { $gte: startOfMonth, $lte: endOfMonth },
+          },
+        },
+        { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } },
+      ]),
+
+      // Unreconciled count
+      Payment.countDocuments({
+        status: "confirmed",
+        "reconciliation.isReconciled": false,
+      }),
+
+      // By payment method
+      Payment.aggregate([
+        { $match: { status: "confirmed" } },
+        {
+          $group: {
+            _id: "$paymentMethod",
+            total: { $sum: "$amount" },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+
+    return {
+      success: true,
+      data: {
+        byStatus: statusCounts.reduce((acc, s) => {
+          acc[s._id] = s.count;
+          return acc;
+        }, {}),
+        thisMonth: {
+          received: monthlyReceived[0] || { total: 0, count: 0 },
+          made: monthlyMade[0] || { total: 0, count: 0 },
+        },
+        unreconciledCount,
+        byMethod: byMethod.reduce((acc, m) => {
+          acc[m._id] = { total: m.total, count: m.count };
+          return acc;
+        }, {}),
+      },
+    };
+  } catch (error) {
+    console.error("Get payment stats error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================
+// GET UNPAID DOCUMENTS FOR ALLOCATION
+// ============================================
+export async function getUnpaidDocuments(partyId, documentType) {
+  try {
+    await dbConnect();
+
+    let documents = [];
+
+    if (documentType === "bill") {
+      documents = await Bill.find({
+        "supplier.partyId": partyId,
+        status: "approved",
+        paymentStatus: { $in: ["unpaid", "partial"] },
+      })
+        .select("billNumber billDate amounts.total amounts.balance dueDate")
+        .sort({ dueDate: 1 })
+        .lean();
+
+      documents = documents.map((d) => ({
+        id: d._id.toString(),
+        documentNumber: d.billNumber,
+        documentDate: d.billDate?.toISOString(),
+        originalAmount: d.amounts?.total || 0,
+        balance: d.amounts?.balance || 0,
+        dueDate: d.dueDate?.toISOString(),
+      }));
+    } else if (documentType === "invoice") {
+      documents = await Invoice.find({
+        "customer.partyId": partyId,
+        status: "completed",
+        paymentStatus: { $in: ["unpaid", "partial"] },
+      })
+        .select("invoiceNumber invoiceDate total balance dueDate")
+        .sort({ dueDate: 1 })
+        .lean();
+
+      documents = documents.map((d) => ({
+        id: d._id.toString(),
+        documentNumber: d.invoiceNumber,
+        documentDate: d.invoiceDate?.toISOString(),
+        originalAmount: d.total || 0,
+        balance: d.balance || 0,
+        dueDate: d.dueDate?.toISOString(),
+      }));
+    }
+
+    return { success: true, data: documents };
+  } catch (error) {
+    console.error("Get unpaid documents error:", error);
+    return { success: false, error: error.message, data: [] };
+  }
+}
+
+// ============================================
+// GET PAYMENT ACCOUNTS
+// ============================================
+export async function getPaymentAccounts() {
+  try {
+    await dbConnect();
+
+    const accounts = await Account.find({
+      subType: { $in: ["cash", "bank", "mpesa"] },
+      isActive: true,
+      canPost: true,
+    })
+      .select("accountCode accountName subType balance")
+      .sort({ subType: 1, accountName: 1 })
+      .lean();
+
+    return {
+      success: true,
+      data: accounts.map((a) => ({
+        id: a._id.toString(),
+        code: a.accountCode,
+        name: a.accountName,
+        subType: a.subType,
+        balance: a.balance || 0,
+      })),
+    };
+  } catch (error) {
+    console.error("Get payment accounts error:", error);
+    return { success: false, error: error.message, data: [] };
+  }
+}

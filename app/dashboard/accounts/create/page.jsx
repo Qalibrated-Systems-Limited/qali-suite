@@ -1,0 +1,54 @@
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import AccountForm from "../components/accountForm";
+
+import connectDB from "@/app/config/dbConnect";
+import Account from "@/app/models/account";
+
+export const metadata = {
+  title: "Create Account | ERP System",
+};
+
+export default async function CreateAccountPage() {
+  await connectDB();
+
+  // Fetch ONLY header accounts (can't post, used as parents)
+  const headerAccounts = await Account.find({
+    subType: "header",
+    isActive: true,
+  })
+    .sort({ accountCode: 1 })
+    .select("_id accountCode accountName accountType")
+    .lean();
+
+  // Serialize for client
+  const serializedHeaders = headerAccounts.map((acc) => ({
+    _id: acc._id.toString(),
+    accountCode: acc.accountCode,
+    accountName: acc.accountName,
+    accountType: acc.accountType,
+  }));
+
+  return (
+    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" asChild>
+          <Link href="/dashboard/accounts">
+            <ArrowLeft className="w-5 h-5" />
+          </Link>
+        </Button>
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold">Create Account</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Add a new account to your chart of accounts
+          </p>
+        </div>
+      </div>
+
+      {/* Form */}
+      <AccountForm headerAccounts={serializedHeaders} />
+    </div>
+  );
+}

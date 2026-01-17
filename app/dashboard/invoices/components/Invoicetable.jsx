@@ -23,14 +23,22 @@ import {
 } from "lucide-react";
 import { InvoicePrintDialog } from "./invoicePrintDialog";
 import { DownloadInvoicePDF } from "./Download";
+import { InvoicePaymentDialog } from "./InvoicePaymentDialog";
 
-export function InvoicesTable({ invoices }) {
+export function InvoicesTable({ invoices, paymentAccounts = [] }) {
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [paymentInvoice, setPaymentInvoice] = useState(null);
 
   const handlePrintClick = (invoice) => {
     setSelectedInvoice(invoice);
     setPrintDialogOpen(true);
+  };
+
+  const handlePaymentClick = (invoice) => {
+    setPaymentInvoice(invoice);
+    setPaymentDialogOpen(true);
   };
 
   const formatCurrency = (amount) => {
@@ -238,15 +246,18 @@ export function InvoicesTable({ invoices }) {
                           <Mail className="mr-2 h-4 w-4" />
                           Send Email
                         </DropdownMenuItem>
-                        {invoice.paymentStatus !== "paid" && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem>
-                              <DollarSign className="mr-2 h-4 w-4" />
-                              Record Payment
-                            </DropdownMenuItem>
-                          </>
-                        )}
+                        {invoice.paymentStatus !== "paid" &&
+                          invoice.status !== "cancelled" && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => handlePaymentClick(invoice)}
+                              >
+                                <DollarSign className="mr-2 h-4 w-4" />
+                                Receive Payment
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         {invoice.status !== "cancelled" && (
                           <>
                             <DropdownMenuSeparator />
@@ -363,6 +374,16 @@ export function InvoicesTable({ invoices }) {
           invoice={selectedInvoice}
           open={printDialogOpen}
           onOpenChange={setPrintDialogOpen}
+        />
+      )}
+
+      {/* Payment Dialog */}
+      {paymentInvoice && (
+        <InvoicePaymentDialog
+          open={paymentDialogOpen}
+          onOpenChange={setPaymentDialogOpen}
+          invoice={paymentInvoice}
+          paymentAccounts={paymentAccounts}
         />
       )}
     </>

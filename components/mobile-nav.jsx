@@ -1,4 +1,3 @@
-import React from "react";
 import { Sheet, SheetContent, SheetTitle } from "./ui/sheet";
 import { SidebarContentGrouped } from "./sidebar-content-grouped";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";

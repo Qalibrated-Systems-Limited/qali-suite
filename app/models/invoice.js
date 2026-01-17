@@ -2,257 +2,1351 @@ import mongoose from "mongoose";
 
 const Schema = mongoose.Schema;
 
-// Line Item Schema (Stock Items and Services)
-const lineItemSchema = new Schema({
-  type: {
-    type: String,
-    enum: ["stock", "service"],
-    required: true,
-  },
-  // For stock items
-  productId: {
-    type: Schema.Types.ObjectId,
-    ref: "Product",
-  },
-  SKU: String,
+// ============================================
+// UTILITY: Format user for audit trail
+// ============================================
+function formatUserForAudit(user) {
+  if (!user) {
+    return { name: "System", id: "system" };
+  }
+  return {
+    name: user.name || user.username || "Unknown User",
+    id: user.id || user._id?.toString() || "unknown",
+  };
+}
 
-  // Common fields
-  name: {
-    type: String,
-    required: true,
-  },
-  description: String,
-  unit: {
-    type: String,
-    default: "pcs",
-    required: true, // e.g., "pcs", "hour", "km", "service", "day"
-  },
-  quantity: {
-    type: Number,
-    required: true,
-    min: 0,
-  },
-  unitPrice: {
-    type: Number,
-    required: true,
-    min: 0,
-  },
-  total: {
-    type: Number,
-    required: true,
-  },
-
-  // For tracking stock deduction
-  stockDeducted: {
-    type: Boolean,
-    default: false,
-  },
-});
-
-// Invoice Schema
+// ============================================
+// INVOICE SCHEMA - ACCOUNTS RECEIVABLE (WITH COGS)
+// ============================================
 const invoiceSchema = new Schema(
   {
+    // Invoice Identification
     invoiceNumber: {
       type: String,
-      required: true,
+      required: [true, "Invoice number is required"],
       unique: true,
+      index: true,
+    },
+
+    invoiceDate: {
+      type: Date,
+      required: [true, "Invoice date is required"],
+      index: true,
+    },
+
+    dueDate: {
+      type: Date,
+      required: [true, "Due date is required"],
+      index: true,
+      validate: {
+        validator: function (value) {
+          return value >= this.invoiceDate;
+        },
+        message: "Due date cannot be before invoice date",
+      },
     },
 
     // Customer Information
     customer: {
       id: {
-        type: String, // Account ID
-        required: true,
+        type: String,
+        required: [true, "Customer ID is required"],
+        index: true,
       },
       name: {
         type: String,
-        required: true,
+        required: [true, "Customer name is required"],
+        trim: true,
       },
-      email: String,
-      phone: String,
-      address: {
+      email: {
         type: String,
-        required: true,
+        trim: true,
+        lowercase: true,
+      },
+      phone: {
+        type: String,
+        trim: true,
+      },
+      address: String,
+      taxPin: {
+        type: String,
+        trim: true,
+        uppercase: true,
       },
     },
 
-    // Invoice Details
-    invoiceDate: {
-      type: Date,
-      required: true,
-      default: Date.now,
-    },
-    dueDate: Date,
+    // ============================================
+    // INVOICE ITEMS (PRODUCTS + SERVICES)
+    // ============================================
+    items: {
+      type: [
+        {
+          // Item type
+          itemType: {
+            type: String,
+            enum: ["product", "service"],
+            required: [true, "Item type is required"],
+          },
 
-    // Line Items
-    items: [lineItemSchema],
+          // Product reference (for products only)
+          productId: {
+            type: Schema.Types.ObjectId,
+            ref: "Product",
+            // Required if itemType is "product"
+          },
+          productSKU: String,
+          productName: String,
 
-    // Financial Details
-    currency: {
-      type: String,
-      required: true,
-      default: "KES",
+          // Common fields
+          description: {
+            type: String,
+            required: [true, "Description is required"],
+            trim: true,
+          },
+
+          unit: {
+            type: String,
+            default: "pcs",
+          },
+
+          quantity: {
+            type: Number,
+            required: [true, "Quantity is required"],
+            min: [0.001, "Quantity must be greater than zero"],
+          },
+
+          unitPrice: {
+            type: Number,
+            required: [true, "Unit price is required"],
+            min: [0, "Unit price cannot be negative"],
+          },
+
+          amount: {
+            type: Number,
+            required: [true, "Amount is required"],
+            min: [0, "Amount cannot be negative"],
+          },
+
+          // ============================================
+          // COSTING (FOR PRODUCTS)
+          // ============================================
+          costing: {
+            unitCost: {
+              type: Number,
+              default: 0,
+              // Cost per unit at time of sale (for COGS)
+            },
+            totalCost: {
+              type: Number,
+              default: 0,
+              // Total COGS for this line
+            },
+            grossProfit: {
+              type: Number,
+              default: 0,
+              // amount - totalCost
+            },
+            marginPercentage: {
+              type: Number,
+              default: 0,
+              // (grossProfit / amount) × 100
+            },
+          },
+
+          // VAT
+          taxRate: {
+            type: Number,
+            default: 16, // Kenya VAT 16%
+            min: [0, "Tax rate cannot be negative"],
+            max: [100, "Tax rate cannot exceed 100%"],
+          },
+
+          taxAmount: {
+            type: Number,
+            default: 0,
+            min: [0, "Tax amount cannot be negative"],
+          },
+
+          // Discount (optional)
+          discountPercentage: {
+            type: Number,
+            default: 0,
+            min: [0, "Discount cannot be negative"],
+            max: [100, "Discount cannot exceed 100%"],
+          },
+
+          discountAmount: {
+            type: Number,
+            default: 0,
+            min: [0, "Discount amount cannot be negative"],
+          },
+
+          // ============================================
+          // RELATED REQUEST (FOR TECHNICIAN STOCK)
+          // ============================================
+          relatedRequest: {
+            requestId: {
+              type: Schema.Types.ObjectId,
+              ref: "StockRequest",
+            },
+            requestNumber: String,
+            technicianId: String,
+            technicianName: String,
+            // If this exists, COGS will credit Technician Stock instead of Inventory
+          },
+        },
+      ],
+      validate: {
+        validator: function (items) {
+          return items && items.length > 0;
+        },
+        message: "Invoice must have at least one item",
+      },
     },
+
+    // ============================================
+    // AMOUNTS
+    // ============================================
     subtotal: {
       type: Number,
-      required: true,
-      min: 0,
-    },
-    discountPercentage: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 100,
-    },
-    discountAmount: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    taxRate: {
-      type: Number,
-      default: 16, // VAT percentage
-      min: 0,
-      max: 100,
-    },
-    taxAmount: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
-    total: {
-      type: Number,
-      required: true,
-      min: 0,
+      required: [true, "Subtotal is required"],
+      min: [0, "Subtotal cannot be negative"],
     },
 
-    // Payment Information
+    totalDiscount: {
+      type: Number,
+      default: 0,
+      min: [0, "Discount cannot be negative"],
+    },
+
+    taxAmount: {
+      type: Number,
+      default: 0,
+      min: [0, "Tax amount cannot be negative"],
+    },
+
+    total: {
+      type: Number,
+      required: [true, "Total is required"],
+      min: [0.01, "Total must be greater than zero"],
+    },
+
+    currency: {
+      type: String,
+      default: "KES",
+      uppercase: true,
+      trim: true,
+    },
+
+    // ============================================
+    // COSTING & PROFITABILITY (CALCULATED)
+    // ============================================
+    totalCOGS: {
+      type: Number,
+      default: 0,
+      // Sum of all item.costing.totalCost
+    },
+
+    grossProfit: {
+      type: Number,
+      default: 0,
+      // subtotal - totalCOGS
+    },
+
+    grossMarginPercentage: {
+      type: Number,
+      default: 0,
+      // (grossProfit / subtotal) × 100
+    },
+
+    // ============================================
+    // PAYMENT TRACKING
+    // ============================================
     paymentStatus: {
       type: String,
-      enum: ["paid", "unpaid", "partial", "overdue"],
+      enum: {
+        values: ["unpaid", "partial", "paid", "overdue"],
+        message: "{VALUE} is not a valid payment status",
+      },
       default: "unpaid",
+      index: true,
     },
-    paymentMethod: {
-      type: String,
-      enum: ["cash", "mpesa", "bank_transfer", "cheque", "credit_card"],
-    },
-    paymentReference: String,
+
     amountPaid: {
       type: Number,
       default: 0,
-      min: 0,
+      min: [0, "Amount paid cannot be negative"],
     },
 
-    // Additional Info
+    amountDue: {
+      type: Number,
+      default: 0,
+    },
+
+    // Payment History
+    paymentHistory: [
+      {
+        paymentId: {
+          type: Schema.Types.ObjectId,
+          ref: "Payment",
+          required: true,
+        },
+        amount: {
+          type: Number,
+          required: true,
+          min: 0,
+        },
+        paymentDate: {
+          type: Date,
+          required: true,
+        },
+        paymentNumber: String,
+        paymentMethod: String,
+      },
+    ],
+
+    // ============================================
+    // ACCOUNTING LINKS
+    // ============================================
+    accounting: {
+      // Revenue journal entry
+      revenueJournalEntryId: {
+        type: Schema.Types.ObjectId,
+        ref: "JournalEntry",
+        index: true,
+      },
+
+      // COGS journal entry
+      cogsJournalEntryId: {
+        type: Schema.Types.ObjectId,
+        ref: "JournalEntry",
+        index: true,
+      },
+
+      // Both posted?
+      accountingComplete: {
+        type: Boolean,
+        default: false,
+      },
+
+      accountingCompletedAt: Date,
+    },
+
+    // ============================================
+    // STATUS & WORKFLOW
+    // ============================================
+    status: {
+      type: String,
+      enum: {
+        values: ["draft", "sent", "completed", "cancelled", "void"],
+        message: "{VALUE} is not a valid status",
+      },
+      default: "draft",
+      index: true,
+    },
+
+    sentAt: Date,
+    sentBy: {
+      name: String,
+      id: String,
+    },
+
+    completedAt: Date,
+    completedBy: {
+      name: String,
+      id: String,
+    },
+
+    cancelledAt: Date,
+    cancelledBy: {
+      name: String,
+      id: String,
+    },
+    cancellationReason: String,
+
+    // ============================================
+    // ADDITIONAL INFO
+    // ============================================
+    paymentTerms: {
+      type: String,
+      default: "Net 30",
+    },
+
+    referenceNumber: String,
+    purchaseOrderNumber: String,
+
     notes: String,
-    terms: String,
+    termsAndConditions: String,
 
-    // Delivery Note
-    dNoteNumber: String,
+    // Attachments
+    attachments: [
+      {
+        filename: String,
+        url: String,
+        size: Number,
+        mimeType: String,
+        uploadedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        uploadedBy: {
+          name: String,
+          id: String,
+        },
+      },
+    ],
 
-    // Tracking
+    // ============================================
+    // DELIVERY TRACKING
+    // ============================================
+    deliveryInfo: {
+      deliveryNoteId: {
+        type: Schema.Types.ObjectId,
+        ref: "DeliveryNote",
+      },
+      deliveryNumber: String,
+      deliveryDate: Date,
+      deliveryAddress: String,
+      deliveryStatus: {
+        type: String,
+        enum: ["pending", "delivered", "partial"],
+      },
+    },
+
+    // ============================================
+    // AUDIT TRAIL
+    // ============================================
     createdBy: {
       name: {
         type: String,
-        required: true,
+        required: [true, "Creator name is required"],
       },
       id: {
         type: String,
-        required: true,
+        required: [true, "Creator ID is required"],
       },
-      role: String,
     },
 
-    // Related Documents
-    relatedDocuments: {
-      movementIds: [
-        {
-          type: Schema.Types.ObjectId,
-          ref: "StockMovement",
-        },
-      ],
-    },
-
-    // Status
-    status: {
-      type: String,
-      enum: ["draft", "sent", "paid", "cancelled"],
-      default: "draft",
+    lastModifiedBy: {
+      name: String,
+      id: String,
     },
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
 
 // ============================================
 // INDEXES
 // ============================================
-// Note: invoiceNumber index is auto-created by unique: true
-invoiceSchema.index({ "customer.id": 1 });
-invoiceSchema.index({ invoiceDate: -1 });
-invoiceSchema.index({ paymentStatus: 1 });
-invoiceSchema.index({ status: 1 });
+invoiceSchema.index({ invoiceDate: -1, status: 1 });
+invoiceSchema.index({ dueDate: 1, paymentStatus: 1 });
+invoiceSchema.index({ "customer.id": 1, status: 1 });
+invoiceSchema.index({ paymentStatus: 1, dueDate: 1 });
+invoiceSchema.index({ status: 1, invoiceDate: -1 });
+invoiceSchema.index({ "accounting.accountingComplete": 1 });
 
 // ============================================
 // VIRTUALS
 // ============================================
-invoiceSchema.virtual("balanceDue").get(function () {
-  return this.total - this.amountPaid;
+invoiceSchema.virtual("isOverdue").get(function () {
+  if (this.paymentStatus === "paid") return false;
+  return new Date() > this.dueDate;
+});
+
+invoiceSchema.virtual("daysOverdue").get(function () {
+  if (!this.isOverdue) return 0;
+  const diff = new Date() - this.dueDate;
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
+});
+
+invoiceSchema.virtual("isFullyPaid").get(function () {
+  return this.paymentStatus === "paid";
+});
+
+invoiceSchema.virtual("hasProducts").get(function () {
+  return this.items.some((item) => item.itemType === "product");
+});
+
+invoiceSchema.virtual("hasServices").get(function () {
+  return this.items.some((item) => item.itemType === "service");
+});
+
+invoiceSchema.virtual("needsCOGSEntry").get(function () {
+  return this.hasProducts && !this.accounting?.cogsJournalEntryId;
 });
 
 // ============================================
-// METHODS
+// VALIDATION METHODS
 // ============================================
-invoiceSchema.methods.markAsPaid = function (paymentMethod, reference) {
-  this.paymentStatus = "paid";
-  this.amountPaid = this.total;
-  this.paymentMethod = paymentMethod;
-  this.paymentReference = reference;
-  this.status = "paid";
-  return this.save();
+
+/**
+ * Validate line items
+ */
+invoiceSchema.methods.validateItems = function () {
+  for (const item of this.items) {
+    // Validate amount = quantity × unitPrice - discount
+    const expectedAmount =
+      item.quantity * item.unitPrice - (item.discountAmount || 0);
+
+    if (Math.abs(expectedAmount - item.amount) > 0.01) {
+      throw new Error(
+        `Amount mismatch for "${item.description}". ` +
+          `Expected: ${expectedAmount.toFixed(2)}, Got: ${item.amount}`
+      );
+    }
+
+    // Validate tax calculation
+    if (item.taxRate > 0) {
+      const expectedTax = (item.amount * item.taxRate) / 100;
+      if (Math.abs(expectedTax - item.taxAmount) > 0.01) {
+        throw new Error(
+          `Tax calculation incorrect for "${item.description}". ` +
+            `Expected: ${expectedTax.toFixed(2)}, Got: ${item.taxAmount}`
+        );
+      }
+    }
+
+    // Validate product items have productId
+    if (item.itemType === "product" && !item.productId) {
+      throw new Error(
+        `Product item "${item.description}" must have a productId`
+      );
+    }
+  }
+
+  return true;
 };
 
-invoiceSchema.methods.recordPayment = function (
-  amount,
-  paymentMethod,
-  reference
-) {
-  this.amountPaid += amount;
-  this.paymentMethod = paymentMethod;
-  this.paymentReference = reference;
+/**
+ * Validate amounts
+ */
+invoiceSchema.methods.validateAmounts = function () {
+  // Calculate subtotal from items
+  const calculatedSubtotal = this.items.reduce(
+    (sum, item) => sum + (item.amount || 0),
+    0
+  );
 
-  if (this.amountPaid >= this.total) {
+  if (Math.abs(calculatedSubtotal - this.subtotal) > 0.01) {
+    throw new Error(
+      `Subtotal mismatch. Expected: ${calculatedSubtotal.toFixed(2)}, Got: ${
+        this.subtotal
+      }`
+    );
+  }
+
+  // Calculate total discount
+  const calculatedDiscount = this.items.reduce(
+    (sum, item) => sum + (item.discountAmount || 0),
+    0
+  );
+
+  if (Math.abs(calculatedDiscount - this.totalDiscount) > 0.01) {
+    throw new Error(
+      `Discount mismatch. Expected: ${calculatedDiscount.toFixed(2)}, Got: ${
+        this.totalDiscount
+      }`
+    );
+  }
+
+  // Calculate total tax
+  const calculatedTax = this.items.reduce(
+    (sum, item) => sum + (item.taxAmount || 0),
+    0
+  );
+
+  if (Math.abs(calculatedTax - this.taxAmount) > 0.01) {
+    throw new Error(
+      `Tax mismatch. Expected: ${calculatedTax.toFixed(2)}, Got: ${
+        this.taxAmount
+      }`
+    );
+  }
+
+  // Validate total
+  const calculatedTotal = this.subtotal + this.taxAmount;
+
+  if (Math.abs(calculatedTotal - this.total) > 0.01) {
+    throw new Error(
+      `Total mismatch. Subtotal (${this.subtotal}) + Tax (${this.taxAmount}) = ` +
+        `${calculatedTotal.toFixed(2)}, but total is ${this.total}`
+    );
+  }
+
+  // Calculate amount due
+  this.amountDue = this.total - (this.amountPaid || 0);
+  if (this.amountDue < 0) {
+    this.amountDue = 0;
+  }
+
+  return true;
+};
+
+/**
+ * Calculate COGS for product items
+ */
+invoiceSchema.methods.calculateCOGS = async function () {
+  const Product = mongoose.model("Product");
+  let totalCOGS = 0;
+
+  for (const item of this.items) {
+    if (item.itemType === "product" && item.productId) {
+      const product = await Product.findById(item.productId);
+
+      if (!product) {
+        throw new Error(`Product not found: ${item.productId}`);
+      }
+
+      // Calculate COGS for this line
+      const unitCost = product.costing?.costPrice || 0;
+      const lineCOGS = item.quantity * unitCost;
+      const lineGrossProfit = item.amount - lineCOGS;
+      const lineMargin =
+        item.amount > 0 ? (lineGrossProfit / item.amount) * 100 : 0;
+
+      // Update item costing
+      item.costing = {
+        unitCost,
+        totalCost: lineCOGS,
+        grossProfit: lineGrossProfit,
+        marginPercentage: lineMargin,
+      };
+
+      totalCOGS += lineCOGS;
+    } else if (item.itemType === "service") {
+      // Services have no COGS
+      item.costing = {
+        unitCost: 0,
+        totalCost: 0,
+        grossProfit: item.amount,
+        marginPercentage: 100,
+      };
+    }
+  }
+
+  // Update invoice totals
+  this.totalCOGS = totalCOGS;
+  this.grossProfit = this.subtotal - totalCOGS;
+  this.grossMarginPercentage =
+    this.subtotal > 0 ? (this.grossProfit / this.subtotal) * 100 : 0;
+
+  return {
+    totalCOGS,
+    grossProfit: this.grossProfit,
+    grossMarginPercentage: this.grossMarginPercentage,
+  };
+};
+
+/**
+ * Complete validation
+ */
+invoiceSchema.methods.validateBeforeCompletion = async function () {
+  this.validateItems();
+  this.validateAmounts();
+  await this.calculateCOGS();
+  return true;
+};
+
+// ============================================
+// COMPLETE INVOICE (CREATE JOURNAL ENTRIES + STOCK MOVEMENTS)
+// ============================================
+invoiceSchema.methods.complete = async function (completedBy) {
+  if (this.status !== "draft" && this.status !== "sent") {
+    throw new Error(
+      `Can only complete draft or sent invoices. Current status: ${this.status}`
+    );
+  }
+
+  const userInfo = formatUserForAudit(completedBy);
+
+  // Validate
+  await this.validateBeforeCompletion();
+
+  let revenueJE = null;
+  let cogsJE = null;
+  const stockMovements = [];
+
+  try {
+    // 1. Create revenue journal entry
+    revenueJE = await this.createRevenueJournalEntry(userInfo);
+    this.accounting = this.accounting || {};
+    this.accounting.revenueJournalEntryId = revenueJE._id;
+
+    // 2. Create COGS journal entry + stock movements (if products)
+    if (this.hasProducts) {
+      const result = await this.createCOGSJournalEntry(userInfo);
+      cogsJE = result.journalEntry;
+      stockMovements.push(...result.stockMovements);
+      this.accounting.cogsJournalEntryId = cogsJE._id;
+    }
+
+    // 3. Update status
+    this.status = "completed";
+    this.completedAt = new Date();
+    this.completedBy = userInfo;
+    this.lastModifiedBy = userInfo;
+    this.accounting.accountingComplete = true;
+    this.accounting.accountingCompletedAt = new Date();
+
+    await this.save();
+
+    return this;
+  } catch (error) {
+    // Rollback on error
+    await this.rollbackCompletion(userInfo, {
+      revenueJE,
+      cogsJE,
+      stockMovements,
+    });
+    throw new Error(`Invoice completion failed: ${error.message}`);
+  }
+};
+
+/**
+ * Create revenue journal entry (AR + Revenue + VAT Output)
+ */
+invoiceSchema.methods.createRevenueJournalEntry = async function (user) {
+  if (this.accounting?.revenueJournalEntryId) {
+    throw new Error("Revenue journal entry already exists");
+  }
+
+  const Account = mongoose.model("Account");
+  const JournalEntry = mongoose.model("JournalEntry");
+
+  // Get accounts
+  const arAccount = await Account.findOne({
+    systemAccount: "accounts_receivable",
+  });
+  const revenueAccount = await Account.findOne({
+    systemAccount: "sales_revenue",
+  });
+  const vatOutputAccount = await Account.findOne({
+    systemAccount: "vat_output",
+  });
+
+  if (!arAccount || !revenueAccount) {
+    throw new Error("AR or Sales Revenue accounts not configured");
+  }
+
+  const lines = [];
+
+  // Debit: AR (total including VAT)
+  lines.push({
+    accountId: arAccount._id,
+    accountCode: arAccount.accountCode,
+    accountName: arAccount.accountName,
+    accountType: arAccount.accountType,
+    debit: this.total,
+    credit: 0,
+    description: `Sale to ${this.customer.name}`,
+  });
+
+  // Credit: Revenue (subtotal)
+  lines.push({
+    accountId: revenueAccount._id,
+    accountCode: revenueAccount.accountCode,
+    accountName: revenueAccount.accountName,
+    accountType: revenueAccount.accountType,
+    debit: 0,
+    credit: this.subtotal,
+    description: `Sales revenue - ${this.customer.name}`,
+  });
+
+  // Credit: VAT Output (if applicable)
+  if (this.taxAmount > 0) {
+    if (!vatOutputAccount) {
+      throw new Error("VAT Output account not configured");
+    }
+
+    lines.push({
+      accountId: vatOutputAccount._id,
+      accountCode: vatOutputAccount.accountCode,
+      accountName: vatOutputAccount.accountName,
+      accountType: vatOutputAccount.accountType,
+      debit: 0,
+      credit: this.taxAmount,
+      description: `VAT Output on sales`,
+    });
+  }
+
+  // Validate balance
+  const totalDebits = lines.reduce((sum, line) => sum + (line.debit || 0), 0);
+  const totalCredits = lines.reduce((sum, line) => sum + (line.credit || 0), 0);
+
+  if (Math.abs(totalDebits - totalCredits) > 0.01) {
+    throw new Error(
+      `Revenue journal entry not balanced! Debits: ${totalDebits}, Credits: ${totalCredits}`
+    );
+  }
+
+  // Generate entry number
+  const entryNumber = await this.generateUniqueEntryNumber("SALE");
+
+  // Create journal entry
+  const journalEntry = await JournalEntry.create({
+    entryNumber,
+    entryDate: this.invoiceDate,
+    entryType: "sale",
+    description: `Sale - Invoice ${this.invoiceNumber}`,
+    lines,
+    party: {
+      type: "customer",
+      id: this.customer.id,
+      name: this.customer.name,
+      email: this.customer.email,
+      phone: this.customer.phone,
+    },
+    dueDate: this.dueDate,
+    amountOutstanding: this.total,
+    relatedDocuments: {
+      invoiceId: this._id,
+      invoiceNumber: this.invoiceNumber,
+    },
+    status: "draft",
+    createdBy: user,
+  });
+
+  // Post journal entry
+  await journalEntry.post(user);
+
+  return journalEntry;
+};
+
+/**
+ * Create COGS journal entry + stock movements (COGS + Inventory reduction)
+ */
+invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
+  if (this.accounting?.cogsJournalEntryId) {
+    throw new Error("COGS journal entry already exists");
+  }
+
+  const Account = mongoose.model("Account");
+  const JournalEntry = mongoose.model("JournalEntry");
+  const Product = mongoose.model("Product");
+  const StockMovement = mongoose.model("StockMovement");
+
+  // Get accounts - need both Inventory and Technician Stock
+  const cogsAccount = await Account.findOne({ systemAccount: "cogs" });
+  const inventoryAccount = await Account.findOne({
+    systemAccount: "inventory",
+  });
+  const technicianStockAccount = await Account.findOne({
+    systemAccount: "technician_stock",
+  });
+
+  if (!cogsAccount) {
+    throw new Error("COGS account not configured");
+  }
+
+  // Separate items by source
+  let totalCOGSFromInventory = 0;      // Direct sales
+  let totalCOGSFromTechStock = 0;      // Sales from technician requests
+  const stockMovements = [];
+  const itemsFromInventory = [];
+  const itemsFromTechStock = [];
+
+  for (const item of this.items) {
+    if (item.itemType !== "product" || !item.productId) continue;
+
+    const product = await Product.findById(item.productId);
+
+    if (!product) {
+      throw new Error(`Product not found: ${item.productId}`);
+    }
+
+    // Check sufficient stock (only for direct sales from inventory)
+    if (!item.relatedRequest?.requestId) {
+      if (item.quantity > product.inventory?.quantityAvailable) {
+        throw new Error(
+          `Insufficient stock for ${product.name}. ` +
+            `Available: ${product.inventory?.quantityAvailable}, Requested: ${item.quantity}`
+        );
+      }
+    }
+
+    const lineCOGS = item.quantity * product.costing.costPrice;
+
+    // Categorize by source
+    if (item.relatedRequest?.requestId) {
+      // Item came from technician stock
+      totalCOGSFromTechStock += lineCOGS;
+      itemsFromTechStock.push({ item, product, lineCOGS });
+    } else {
+      // Direct sale from inventory
+      totalCOGSFromInventory += lineCOGS;
+      itemsFromInventory.push({ item, product, lineCOGS });
+    }
+
+    // Only decrease inventory for direct sales (not from technician stock)
+    if (!item.relatedRequest?.requestId) {
+      await product.decreaseInventory(
+        item.quantity,
+        `Sold on invoice ${this.invoiceNumber}`
+      );
+    }
+    // Note: For technician stock items, inventory was already decreased during fulfillment
+
+    // Update product lifetime totals
+    product.lifetimeTotals = product.lifetimeTotals || {};
+    product.lifetimeTotals.totalQuantitySold =
+      (product.lifetimeTotals.totalQuantitySold || 0) + item.quantity;
+    product.lifetimeTotals.totalRevenue =
+      (product.lifetimeTotals.totalRevenue || 0) + item.amount;
+    product.lifetimeTotals.totalCOGS =
+      (product.lifetimeTotals.totalCOGS || 0) + lineCOGS;
+    product.lifetimeTotals.totalGrossProfit =
+      (product.lifetimeTotals.totalGrossProfit || 0) + (item.amount - lineCOGS);
+    await product.save();
+  }
+
+  // ============================================
+  // CREATE STOCK MOVEMENTS (only for direct sales from inventory)
+  // ============================================
+  for (const { item, product, lineCOGS } of itemsFromInventory) {
+    const movementNumber = await StockMovement.generateMovementNumber();
+
+    const movement = await StockMovement.create({
+      movementNumber,
+      productId: product._id,
+      productSnapshot: {
+        name: product.name,
+        SKU: product.SKU,
+        category: product.category,
+        unit: product.unit,
+      },
+      movementType: "sale",
+      direction: "out",
+      quantity: item.quantity,
+      previousStock: product.inventory.quantityOnHand + item.quantity,
+      newStock: product.inventory.quantityOnHand,
+      costing: {
+        unitCost: product.costing.costPrice,
+        totalCost: lineCOGS,
+        unitPrice: item.unitPrice,
+        totalValue: item.amount,
+        averageCostAtMovement: product.costing.costPrice,
+      },
+      performedBy: {
+        name: user.name,
+        id: user.id,
+        role: "system",
+      },
+      relatedDocuments: {
+        invoiceId: this._id,
+      },
+      notes: `Direct sale to ${this.customer.name} - Invoice ${this.invoiceNumber}`,
+      reason: item.description,
+      status: "posted",
+      postedAt: new Date(),
+      postedBy: user,
+      accounting: {
+        affectsAccounting: true,
+        accountingPosted: false,
+      },
+    });
+
+    stockMovements.push(movement);
+  }
+
+  // ============================================
+  // CREATE COGS JOURNAL ENTRY (Smart Routing)
+  // ============================================
+  const totalCOGS = totalCOGSFromInventory + totalCOGSFromTechStock;
+
+  if (totalCOGS === 0) {
+    // No products sold (services only)
+    return { journalEntry: null, stockMovements };
+  }
+
+  const entryNumber = await this.generateUniqueEntryNumber("COGS");
+  const journalLines = [];
+
+  // DEBIT: Cost of Goods Sold (always)
+  journalLines.push({
+    accountId: cogsAccount._id,
+    accountCode: cogsAccount.accountCode,
+    accountName: cogsAccount.accountName,
+    accountType: cogsAccount.accountType,
+    debit: totalCOGS,
+    credit: 0,
+    description: `Cost of goods sold`,
+  });
+
+  // CREDIT: Inventory (for direct sales)
+  if (totalCOGSFromInventory > 0) {
+    if (!inventoryAccount) {
+      throw new Error("Inventory account not configured");
+    }
+    journalLines.push({
+      accountId: inventoryAccount._id,
+      accountCode: inventoryAccount.accountCode,
+      accountName: inventoryAccount.accountName,
+      accountType: inventoryAccount.accountType,
+      debit: 0,
+      credit: totalCOGSFromInventory,
+      description: `From inventory (direct sales)`,
+    });
+  }
+
+  // CREDIT: Technician Stock (for sales from requests)
+  if (totalCOGSFromTechStock > 0) {
+    if (!technicianStockAccount) {
+      throw new Error("Technician Stock account not configured");
+    }
+    journalLines.push({
+      accountId: technicianStockAccount._id,
+      accountCode: technicianStockAccount.accountCode,
+      accountName: technicianStockAccount.accountName,
+      accountType: technicianStockAccount.accountType,
+      debit: 0,
+      credit: totalCOGSFromTechStock,
+      description: `From technician stock (request sales)`,
+    });
+  }
+
+  // Create journal entry
+  const journalEntry = await JournalEntry.create({
+    entryNumber,
+    entryDate: this.invoiceDate,
+    entryType: "sale",
+    description: `COGS - Invoice ${this.invoiceNumber}`,
+    lines: journalLines,
+    relatedDocuments: {
+      invoiceId: this._id,
+      invoiceNumber: this.invoiceNumber,
+    },
+    status: "draft",
+    createdBy: user,
+  });
+
+  // Post journal entry
+  await journalEntry.post(user);
+
+  // Update stock movements with journal entry ID
+  for (const movement of stockMovements) {
+    movement.accounting.journalEntryId = journalEntry._id;
+    movement.accounting.accountingPosted = true;
+    movement.accounting.accountingPostedAt = new Date();
+    await movement.save();
+  }
+
+  // ============================================
+  // UPDATE STOCK REQUESTS (mark items as invoiced)
+  // ============================================
+  const StockRequest = mongoose.model("StockRequest");
+
+  for (const { item } of itemsFromTechStock) {
+    if (item.relatedRequest?.requestId) {
+      const request = await StockRequest.findById(item.relatedRequest.requestId);
+
+      if (request) {
+        // Find the matching item in the request
+        const requestItem = request.items.find(
+          (ri) => ri.productId.toString() === item.productId.toString()
+        );
+
+        if (requestItem) {
+          // Update invoicing tracking
+          requestItem.invoicedQuantity = (requestItem.invoicedQuantity || 0) + item.quantity;
+          requestItem.invoices.push({
+            invoiceId: this._id,
+            invoiceNumber: this.invoiceNumber,
+            quantity: item.quantity,
+            invoicedAt: new Date(),
+          });
+        }
+
+        // Check if all items are fully invoiced
+        const allInvoiced = request.items.every(
+          (ri) => (ri.invoicedQuantity || 0) >= (ri.totalFulfilled || 0)
+        );
+
+        if (allInvoiced) {
+          request.status = "invoiced";
+        }
+
+        await request.save();
+      }
+    }
+  }
+
+  return { journalEntry, stockMovements };
+};
+
+/**
+ * Rollback completion (reverse journal entries, restore inventory)
+ */
+invoiceSchema.methods.rollbackCompletion = async function (
+  user,
+  { revenueJE, cogsJE, stockMovements }
+) {
+  const JournalEntry = mongoose.model("JournalEntry");
+  const Product = mongoose.model("Product");
+  const StockMovement = mongoose.model("StockMovement");
+
+  try {
+    // Reverse COGS journal entry
+    if (cogsJE?._id) {
+      const je = await JournalEntry.findById(cogsJE._id);
+      if (je) {
+        if (je.status === "posted") {
+          await je.reverse(user, "Rollback: Invoice completion failed");
+        } else {
+          await JournalEntry.findByIdAndDelete(je._id);
+        }
+      }
+    }
+
+    // Reverse revenue journal entry
+    if (revenueJE?._id) {
+      const je = await JournalEntry.findById(revenueJE._id);
+      if (je) {
+        if (je.status === "posted") {
+          await je.reverse(user, "Rollback: Invoice completion failed");
+        } else {
+          await JournalEntry.findByIdAndDelete(je._id);
+        }
+      }
+    }
+
+    // Restore inventory
+    for (const movement of stockMovements) {
+      const product = await Product.findById(movement.productId);
+      if (product) {
+        await product.increaseInventory(
+          movement.quantity,
+          movement.costing.unitCost,
+          "Rollback: Invoice completion failed"
+        );
+      }
+      await StockMovement.findByIdAndDelete(movement._id);
+    }
+  } catch (error) {
+    console.error("[CRITICAL] Rollback failed:", error);
+  }
+};
+
+/**
+ * Generate unique entry number - delegates to centralized utility
+ */
+invoiceSchema.methods.generateUniqueEntryNumber = async function (prefix, session = null) {
+  const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
+  return generateUniqueEntryNumber(prefix, session);
+};
+
+/**
+ * Record payment
+ */
+invoiceSchema.methods.recordPayment = async function (paymentId, amount) {
+  if (amount <= 0) {
+    throw new Error("Payment amount must be greater than zero");
+  }
+
+  if (amount > this.amountDue + 0.01) {
+    throw new Error(
+      `Payment amount (${amount}) exceeds amount due (${this.amountDue})`
+    );
+  }
+
+  const Payment = mongoose.model("Payment");
+  const payment = await Payment.findById(paymentId);
+
+  if (!payment) {
+    throw new Error(`Payment not found (ID: ${paymentId})`);
+  }
+
+  // Add to payment history
+  this.paymentHistory.push({
+    paymentId: payment._id,
+    amount: amount,
+    paymentDate: payment.paymentDate,
+    paymentNumber: payment.paymentNumber,
+    paymentMethod: payment.paymentMethod,
+  });
+
+  // Update amounts
+  this.amountPaid += amount;
+  this.amountDue = this.total - this.amountPaid;
+
+  if (Math.abs(this.amountDue) < 0.01) {
+    this.amountDue = 0;
+  }
+
+  // Update payment status
+  if (this.amountDue <= 0.01) {
     this.paymentStatus = "paid";
     this.status = "paid";
   } else if (this.amountPaid > 0) {
     this.paymentStatus = "partial";
   }
 
-  return this.save();
+  // Update related journal entry
+  if (this.accounting?.revenueJournalEntryId) {
+    const JournalEntry = mongoose.model("JournalEntry");
+    const je = await JournalEntry.findById(
+      this.accounting.revenueJournalEntryId
+    );
+
+    if (je) {
+      je.amountPaid = this.amountPaid;
+      je.amountOutstanding = this.amountDue;
+      je.isFullyPaid = this.amountDue <= 0.01;
+      await je.save();
+    }
+  }
+
+  await this.save();
+  return this;
+};
+
+/**
+ * Cancel invoice
+ */
+invoiceSchema.methods.cancel = async function (cancelledBy, reason) {
+  if (this.status === "paid") {
+    throw new Error("Cannot cancel a paid invoice");
+  }
+
+  if (this.status === "cancelled") {
+    throw new Error("Invoice is already cancelled");
+  }
+
+  if (this.paymentHistory.length > 0) {
+    throw new Error(
+      "Cannot cancel an invoice with payment history. Please reverse payments first."
+    );
+  }
+
+  const userInfo = formatUserForAudit(cancelledBy);
+  const JournalEntry = mongoose.model("JournalEntry");
+
+  // Reverse revenue journal entry
+  if (this.accounting?.revenueJournalEntryId) {
+    const je = await JournalEntry.findById(
+      this.accounting.revenueJournalEntryId
+    );
+    if (je && je.status === "posted") {
+      await je.reverse(userInfo, reason || "Invoice cancelled");
+    }
+  }
+
+  // Reverse COGS journal entry
+  if (this.accounting?.cogsJournalEntryId) {
+    const je = await JournalEntry.findById(this.accounting.cogsJournalEntryId);
+    if (je && je.status === "posted") {
+      await je.reverse(userInfo, reason || "Invoice cancelled");
+    }
+  }
+
+  // TODO: Restore inventory (reverse stock movements)
+
+  // Update invoice status
+  this.status = "cancelled";
+  this.cancelledAt = new Date();
+  this.cancelledBy = userInfo;
+  this.cancellationReason = reason || "No reason provided";
+  this.lastModifiedBy = userInfo;
+
+  await this.save();
+
+  return this;
 };
 
 // ============================================
 // STATIC METHODS
 // ============================================
-invoiceSchema.statics.getOverdueInvoices = function () {
-  const today = new Date();
-  return this.find({
-    dueDate: { $lt: today },
+
+invoiceSchema.statics.getUnpaidInvoices = function (customerId = null) {
+  const query = {
     paymentStatus: { $in: ["unpaid", "partial"] },
-  });
+    status: "completed",
+  };
+
+  if (customerId) {
+    query["customer.id"] = customerId;
+  }
+
+  return this.find(query).sort({ dueDate: 1 }).lean();
+};
+
+invoiceSchema.statics.getOverdueInvoices = function (customerId = null) {
+  const query = {
+    paymentStatus: { $in: ["unpaid", "partial"] },
+    status: "completed",
+    dueDate: { $lt: new Date() },
+  };
+
+  if (customerId) {
+    query["customer.id"] = customerId;
+  }
+
+  return this.find(query).sort({ dueDate: 1 }).lean();
 };
 
 invoiceSchema.statics.getByCustomer = function (customerId) {
-  return this.find({ "customer.id": customerId }).sort({ createdAt: -1 });
+  return this.find({
+    "customer.id": customerId,
+    status: { $ne: "cancelled" },
+  })
+    .sort({ invoiceDate: -1 })
+    .lean();
+};
+
+invoiceSchema.statics.getSalesReport = async function (startDate, endDate) {
+  const result = await this.aggregate([
+    {
+      $match: {
+        invoiceDate: { $gte: startDate, $lte: endDate },
+        status: { $in: ["completed", "paid"] },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalRevenue: { $sum: "$subtotal" },
+        totalCOGS: { $sum: "$totalCOGS" },
+        totalGrossProfit: { $sum: "$grossProfit" },
+        totalTax: { $sum: "$taxAmount" },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  if (result.length === 0) {
+    return {
+      totalRevenue: 0,
+      totalCOGS: 0,
+      totalGrossProfit: 0,
+      totalTax: 0,
+      grossMargin: 0,
+      count: 0,
+    };
+  }
+
+  const data = result[0];
+  return {
+    totalRevenue: data.totalRevenue || 0,
+    totalCOGS: data.totalCOGS || 0,
+    totalGrossProfit: data.totalGrossProfit || 0,
+    totalTax: data.totalTax || 0,
+    grossMargin:
+      data.totalRevenue > 0
+        ? ((data.totalGrossProfit / data.totalRevenue) * 100).toFixed(2)
+        : 0,
+    count: data.count || 0,
+  };
 };
 
 // ============================================
 // MODEL EXPORT
 // ============================================
 const models = mongoose.models;
-
 let Invoice = models?.Invoice;
+
 if (!Invoice) {
   Invoice = mongoose.model("Invoice", invoiceSchema);
 }

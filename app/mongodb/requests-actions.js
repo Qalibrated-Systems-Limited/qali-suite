@@ -12,6 +12,8 @@ import { StockMovement } from "../models/stockmovement";
 import { format } from "date-fns";
 import DeliveryNote from "../models/dnote";
 import dbConnect from "../config/dbConnect";
+import Account from "../models/account";
+import JournalEntry from "../models/JournalEntry";
 
 // ============================================
 // 1. APPROVE REQUEST (Manager/Admin only)
@@ -72,22 +74,22 @@ export async function approveRequest(requestId, prevState, formData) {
     // ✅ NEW: Extract per-item approvals
     // ========================================
     const itemApprovals = {};
-    
+
     request.items.forEach((item) => {
       const approvedQty = parseInt(rawFormData[`approved_${item._id}`]);
       const itemNotes = rawFormData[`notes_${item._id}`] || "";
-      
+
       // If manager specified a quantity, use it
       if (!isNaN(approvedQty)) {
         itemApprovals[item._id.toString()] = {
           quantity: Math.max(0, Math.min(approvedQty, item.requestedQuantity)),
-          notes: itemNotes
+          notes: itemNotes,
         };
       } else {
         // Default: approve full requested quantity
         itemApprovals[item._id.toString()] = {
           quantity: item.requestedQuantity,
-          notes: itemNotes
+          notes: itemNotes,
         };
       }
     });
@@ -102,7 +104,7 @@ export async function approveRequest(requestId, prevState, formData) {
         comments,
         conditions,
       },
-      itemApprovals  // ✅ Pass item-specific approvals
+      itemApprovals // ✅ Pass item-specific approvals
     );
 
     await session.commitTransaction();
@@ -803,8 +805,351 @@ export async function createStockRequest(prevState, formData) {
 }
 
 // ============================================
+// RETURN ITEM CHECKOUT
+// ============================================
+export async function returnItemCheckout(checkoutId, prevState, formData) {
+  let session;
+
+  try {
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const rawFormData = Object.fromEntries(formData.entries());
+
+    // Get authenticated user
+    const userSession = await auth();
+    if (!userSession?.user) {
+      throw new Error("Unauthorized. Please log in.");
+    }
+
+    const user = userSession.user;
+    const userRole =
+      user.role === "Store Manager"
+        ? "Store Manager"
+        : user.role?.toLowerCase();
+
+    // Only Store Manager can process returns
+    if (userRole !== "Store Manager" && userRole !== "admin") {
+      throw new Error("Only store managers can process returns.");
+    }
+
+    // Get checkout
+    const checkout = await ItemCheckout.findById(checkoutId).session(session);
+
+    if (!checkout) {
+      throw new Error("Checkout not found");
+    }
+
+    if (checkout.status !== "checked_out") {
+      throw new Error("Item is not currently checked out");
+    }
+
+    const returnCondition = rawFormData.returnCondition || "good";
+    const returnNotes = rawFormData.returnNotes || "";
+
+    // Get product
+    const product = await Product.findById(checkout.productId).session(
+      session
+    );
+
+    if (!product) {
+      throw new Error("Product not found");
+    }
+
+    // Return stock to inventory
+    await Product.findByIdAndUpdate(
+      checkout.productId,
+      { $inc: { stock: checkout.quantity } },
+      { session }
+    );
+
+    const updatedProduct = await Product.findById(checkout.productId).session(
+      session
+    );
+
+    // Create return stock movement
+    const movementNumber = await generateMovementNumber(session);
+    const movement = await StockMovement.create(
+      [
+        {
+          movementNumber,
+          productId: checkout.productId,
+          productSnapshot: {
+            name: checkout.productSnapshot.name,
+            SKU: checkout.productSnapshot.SKU,
+            unit: updatedProduct.unit,
+          },
+          direction: "in",
+          movementType: "return",
+          quantity: checkout.quantity,
+          previousStock: updatedProduct.stock - checkout.quantity,
+          newStock: updatedProduct.stock,
+          unitPrice: 0,
+          totalValue: 0,
+          costing: {
+            unitCost: updatedProduct.costing?.costPrice || 0,
+            totalCost: checkout.quantity * (updatedProduct.costing?.costPrice || 0),
+            averageCostAtMovement: updatedProduct.costing?.costPrice,
+          },
+          accounting: {
+            affectsAccounting: true,
+            accountingPosted: false,
+          },
+          performedBy: {
+            name: user.name,
+            id: user.id,
+            role: userRole,
+          },
+          returnedFrom: {
+            name: checkout.checkedOutTo.name,
+            id: checkout.checkedOutTo.id,
+            department: checkout.checkedOutTo.department,
+          },
+          relatedDocuments: {
+            checkoutId: checkout._id,
+            checkoutNumber: checkout.checkoutNumber,
+          },
+          notes: `Returned by ${checkout.checkedOutTo.name} - ${returnCondition} condition`,
+        },
+      ],
+      { session }
+    );
+
+    // Create reversal journal entry
+    // DR: Inventory, CR: Technician Stock
+    const totalCost = movement[0].costing.totalCost;
+    const journalEntry = await createReturnJournalEntry(
+      movement[0],
+      totalCost,
+      user,
+      session
+    );
+
+    // Update movement with journal entry ID
+    movement[0].accounting.journalEntryId = journalEntry._id;
+    movement[0].accounting.accountingPosted = true;
+    movement[0].accounting.accountingPostedAt = new Date();
+    await movement[0].save({ session });
+
+    // Update checkout
+    checkout.status = "returned";
+    checkout.actualReturnDate = new Date();
+    checkout.returnedBy = {
+      name: user.name,
+      id: user.id,
+    };
+    checkout.returnCondition = returnCondition;
+    checkout.returnNotes = returnNotes;
+    checkout.relatedDocuments.returnMovementId = movement[0]._id;
+    await checkout.save({ session });
+
+    await session.commitTransaction();
+
+    revalidatePath("/dashboard/checkouts");
+    revalidatePath("/dashboard/stocks");
+    revalidatePath("/dashboard/movements");
+
+    return {
+      message: "success",
+      details: `Item returned successfully`,
+    };
+  } catch (error) {
+    if (session?.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error returning checkout:", error);
+    return {
+      message: error.message || "Failed to process return",
+    };
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
+  }
+}
+
+// ============================================
 // HELPER FUNCTIONS
 // ============================================
+
+/**
+ * Create journal entry for stock fulfillment
+ * DR: Technician Stock, CR: Inventory
+ */
+async function createFulfillmentJournalEntry(
+  stockMovement,
+  totalCost,
+  user,
+  session
+) {
+  // Get system accounts
+  const techStockAccount = await Account.findOne({
+    systemAccount: "technician_stock",
+  }).session(session);
+
+  const inventoryAccount = await Account.findOne({
+    systemAccount: "inventory",
+  }).session(session);
+
+  if (!techStockAccount) {
+    throw new Error(
+      "Technician Stock account not found. Please create system account 'technician_stock'"
+    );
+  }
+
+  if (!inventoryAccount) {
+    throw new Error(
+      "Inventory account not found. Please create system account 'inventory'"
+    );
+  }
+
+  // Generate entry number
+  const entryNumber = await generateJournalEntryNumber(session);
+
+  // Create journal entry
+  const journalEntry = await JournalEntry.create(
+    [
+      {
+        entryNumber,
+        entryDate: new Date(),
+        entryType: "inventory_transfer",
+        description: `Stock issued to technician - ${stockMovement.movementNumber}`,
+        lines: [
+          {
+            accountId: techStockAccount._id,
+            accountCode: techStockAccount.accountCode,
+            accountName: techStockAccount.accountName,
+            accountType: techStockAccount.accountType,
+            debit: totalCost,
+            credit: 0,
+            description: `Stock issued - ${stockMovement.productSnapshot.name}`,
+          },
+          {
+            accountId: inventoryAccount._id,
+            accountCode: inventoryAccount.accountCode,
+            accountName: inventoryAccount.accountName,
+            accountType: inventoryAccount.accountType,
+            debit: 0,
+            credit: totalCost,
+            description: `From inventory - ${stockMovement.productSnapshot.name}`,
+          },
+        ],
+        relatedDocuments: {
+          movementId: stockMovement._id,
+          movementNumber: stockMovement.movementNumber,
+        },
+        status: "draft",
+        createdBy: {
+          name: user.name,
+          id: user.id,
+        },
+      },
+    ],
+    { session }
+  );
+
+  // Post journal entry
+  await journalEntry[0].post({
+    name: user.name,
+    id: user.id,
+  });
+
+  return journalEntry[0];
+}
+
+/**
+ * Create journal entry for item return
+ * DR: Inventory, CR: Technician Stock (reversal)
+ */
+async function createReturnJournalEntry(
+  stockMovement,
+  totalCost,
+  user,
+  session
+) {
+  // Get system accounts
+  const techStockAccount = await Account.findOne({
+    systemAccount: "technician_stock",
+  }).session(session);
+
+  const inventoryAccount = await Account.findOne({
+    systemAccount: "inventory",
+  }).session(session);
+
+  if (!techStockAccount || !inventoryAccount) {
+    throw new Error("System accounts not found");
+  }
+
+  // Generate entry number
+  const entryNumber = await generateJournalEntryNumber(session);
+
+  // Create reversal journal entry
+  const journalEntry = await JournalEntry.create(
+    [
+      {
+        entryNumber,
+        entryDate: new Date(),
+        entryType: "inventory_transfer",
+        description: `Stock returned from technician - ${stockMovement.movementNumber}`,
+        lines: [
+          {
+            accountId: inventoryAccount._id,
+            accountCode: inventoryAccount.accountCode,
+            accountName: inventoryAccount.accountName,
+            accountType: inventoryAccount.accountType,
+            debit: totalCost,
+            credit: 0,
+            description: `Stock returned - ${stockMovement.productSnapshot.name}`,
+          },
+          {
+            accountId: techStockAccount._id,
+            accountCode: techStockAccount.accountCode,
+            accountName: techStockAccount.accountName,
+            accountType: techStockAccount.accountType,
+            debit: 0,
+            credit: totalCost,
+            description: `From technician - ${stockMovement.productSnapshot.name}`,
+          },
+        ],
+        relatedDocuments: {
+          movementId: stockMovement._id,
+          movementNumber: stockMovement.movementNumber,
+        },
+        status: "draft",
+        createdBy: {
+          name: user.name,
+          id: user.id,
+        },
+      },
+    ],
+    { session }
+  );
+
+  // Post journal entry
+  await journalEntry[0].post({
+    name: user.name,
+    id: user.id,
+  });
+
+  return journalEntry[0];
+}
+
+/**
+ * Generate journal entry number
+ */
+async function generateJournalEntryNumber(session) {
+  const today = format(new Date(), "yyyyMM");
+  const counterId = `JE-${today}`;
+
+  const counter = await Counter.findOneAndUpdate(
+    { name: counterId },
+    { $inc: { seq: 1 } },
+    { upsert: true, new: true, session }
+  );
+
+  return `${counterId}-${String(counter.seq).padStart(4, "0")}`;
+}
 
 async function generateMovementNumber(session) {
   const today = format(new Date(), "ddMMyy");
@@ -974,6 +1319,21 @@ export async function fulfillRequest(requestId, prevState, formData) {
             newStock: updatedProduct.stock,
             unitPrice: item.unitPrice,
             totalValue: fulfillQty * (item.unitPrice || 0),
+            costing: {
+              unitCost: updatedProduct.costing?.costPrice || 0,
+              totalCost: fulfillQty * (updatedProduct.costing?.costPrice || 0),
+              unitPrice: item.unitPrice || updatedProduct.pricing?.sellingPrice,
+              totalValue: fulfillQty * (item.unitPrice || 0),
+              averageCostAtMovement: updatedProduct.costing?.costPrice,
+            },
+
+            // ============================================
+            // Accounting flags - ALL fulfillments affect accounting
+            // ============================================
+            accounting: {
+              affectsAccounting: true, // ALL fulfillments create journal entries
+              accountingPosted: false, // Will be posted after JE creation
+            },
             performedBy: {
               name: user.name,
               id: user.id,
@@ -997,6 +1357,24 @@ export async function fulfillRequest(requestId, prevState, formData) {
         ],
         { session }
       );
+
+      // ========================================
+      // CREATE JOURNAL ENTRY
+      // DR: Technician Stock, CR: Inventory
+      // ========================================
+      const totalCost = movement[0].costing.totalCost;
+      const journalEntry = await createFulfillmentJournalEntry(
+        movement[0],
+        totalCost,
+        user,
+        session
+      );
+
+      // Update movement with journal entry ID
+      movement[0].accounting.journalEntryId = journalEntry._id;
+      movement[0].accounting.accountingPosted = true;
+      movement[0].accounting.accountingPostedAt = new Date();
+      await movement[0].save({ session });
 
       let checkoutId = null;
       let deliveryNoteId = null;

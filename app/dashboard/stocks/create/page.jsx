@@ -1,16 +1,27 @@
-import { CreateStockForm } from "./form";
+import { AddProductForm } from "./form";
 import { auth } from "../../../../auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Shield, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import AddProductWizard from "../components/AddProductWizard";
+import { getCategories } from "@/app/mongodb/actions/category-actions";
+import Category from "@/app/models/category";
 
 async function CreateStockPage() {
   const session = await auth();
   const user = session && session.user;
   const canCreateStock =
     user?.role === "Store Manager" || user?.role === "Admin";
+  const result = (await Category.find({}).lean()) ?? [];
+
+  const categories = result.map((cat) => {
+    const id = cat._id.toString();
+    return { _id: id, name: cat.name };
+  });
+
+  // Fetch categories if needed
 
   if (!canCreateStock) {
     return (
@@ -63,7 +74,7 @@ async function CreateStockPage() {
       </div>
 
       {/* Form */}
-      <CreateStockForm />
+      <AddProductWizard userRole={user?.role} categories={categories} />
     </main>
   );
 }

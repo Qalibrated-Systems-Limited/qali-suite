@@ -1,3 +1,4 @@
+import { accountSubType, accountSystemTypes, accountTypes } from "@/lib/utils";
 import mongoose from "mongoose";
 
 const Schema = mongoose.Schema;
@@ -29,7 +30,7 @@ const accountSchema = new Schema(
       type: String,
       required: [true, "Account type is required"],
       enum: {
-        values: ["asset", "liability", "equity", "revenue", "expense"],
+        values: accountTypes,
         message: "{VALUE} is not a valid account type",
       },
       index: true,
@@ -37,38 +38,7 @@ const accountSchema = new Schema(
 
     subType: {
       type: String,
-      enum: [
-        // Assets
-        "cash",
-        "bank",
-        "accounts_receivable",
-        "inventory",
-        "fixed_asset",
-        "other_current_asset",
-        "other_asset",
-
-        // Liabilities
-        "accounts_payable",
-        "loan",
-        "tax_payable",
-        "other_current_liability",
-        "other_liability",
-
-        // Equity
-        "owner_equity",
-        "retained_earnings",
-        "drawings",
-
-        // Revenue
-        "sales",
-        "service_revenue",
-        "other_income",
-
-        // Expenses
-        "cogs",
-        "operating_expense",
-        "other_expense",
-      ],
+      enum: accountSubType,
       index: true,
     },
 
@@ -110,20 +80,7 @@ const accountSchema = new Schema(
     // System Integration
     systemAccount: {
       type: String,
-      enum: [
-        null,
-        "cash",
-        "bank_main",
-        "mpesa",
-        "accounts_receivable",
-        "accounts_payable",
-        "inventory",
-        "sales_revenue",
-        "service_revenue",
-        "cogs",
-        "vat_payable",
-        "retained_earnings",
-      ],
+      enum: accountSystemTypes,
       default: null,
       unique: true,
       sparse: true,
@@ -199,6 +156,38 @@ const accountSchema = new Schema(
 accountSchema.index({ accountType: 1, isActive: 1 });
 accountSchema.index({ canPost: 1, isActive: 1 });
 accountSchema.index({ ancestors: 1 }); // Critical for hierarchy queries
+
+// In Account schema, add a pre-remove hook
+accountSchema.pre("remove", function (next) {
+  if (this.systemAccount) {
+    throw new Error(
+      `Cannot delete system account: ${this.accountName}. This account is required for system operation.`
+    );
+  }
+});
+
+// Also add a method to check if account can be deleted
+accountSchema.methods.canDelete = function () {
+  // Cannot delete if:
+  // 1. It's a system account
+  if (this.systemAccount) {
+    return {
+      canDelete: false,
+      reason: "System account - required for system operation",
+    };
+  }
+
+  // 2. It has child accounts
+  // (Check would require async, so return true for now)
+
+  // 3. It has transactions
+  // (Check would require async, so return true for now)
+
+  return {
+    canDelete: true,
+    reason: null,
+  };
+};
 
 // ============================================
 // VIRTUALS
@@ -328,3 +317,4 @@ if (!Account) {
 }
 
 export default Account;
+export { Account };

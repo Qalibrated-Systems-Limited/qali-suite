@@ -1,0 +1,410 @@
+import TaxTransaction from "../../models/taxTransactions";
+import TaxService from "../services/taxService";
+import dbConnect from "../../config/dbConnect";
+
+const ITEMS_PER_PAGE = 20;
+
+// ============================================
+// TAX QUERIES - READ OPERATIONS (KENYA COMPLIANCE)
+// Following industry best practices
+// ============================================
+
+/**
+ * Get paginated tax transactions with filters
+ * Best Practice: Pagination, Smart Filters (type, period, filed/unfiled)
+ */
+export async function getTaxTransactions(page = 1, filters = {}) {
+  await dbConnect();
+
+  const skip = (page - 1) * ITEMS_PER_PAGE;
+  const query = {};
+
+  // Tax type filter (vat_input, vat_output, wht)
+  if (filters.taxType) {
+    query.taxType = filters.taxType;
+  }
+
+  // Filing period filter
+  if (filters.filingPeriod) {
+    query["kraTracking.filingPeriod"] = filters.filingPeriod;
+  }
+
+  // Filed status filter
+  if (filters.filed !== undefined) {
+    query["kraTracking.filed"] =
+      filters.filed === "true" || filters.filed === true;
+  }
+
+  // Remitted status filter (for WHT)
+  if (filters.remitted !== undefined) {
+    query["kraTracking.remitted"] =
+      filters.remitted === "true" || filters.remitted === true;
+  }
+
+  // Date range filter
+  if (filters.startDate || filters.endDate) {
+    query.transactionDate = {};
+    if (filters.startDate) {
+      query.transactionDate.$gte = new Date(filters.startDate);
+    }
+    if (filters.endDate) {
+      query.transactionDate.$lte = new Date(filters.endDate);
+    }
+  }
+
+  // Search filter
+  if (filters.search) {
+    query.$or = [
+      { transactionNumber: { $regex: filters.search, $options: "i" } },
+      { "party.name": { $regex: filters.search, $options: "i" } },
+      { description: { $regex: filters.search, $options: "i" } },
+    ];
+  }
+
+  // Parallel queries for performance
+  const [transactions, total] = await Promise.all([
+    TaxTransaction.find(query)
+      .sort({ transactionDate: -1 })
+      .skip(skip)
+      .limit(ITEMS_PER_PAGE)
+      .lean(),
+    TaxTransaction.countDocuments(query),
+  ]);
+
+  return {
+    transactions,
+    pagination: {
+      page,
+      totalPages: Math.ceil(total / ITEMS_PER_PAGE),
+      total,
+      hasMore: skip + transactions.length < total,
+    },
+  };
+}
+
+/**
+ * Get tax transaction by ID
+ */
+export async function getTaxTransactionById(transactionId) {
+  await dbConnect();
+  return await TaxTransaction.findById(transactionId).lean();
+}
+
+/**
+ * Get VAT dashboard data
+ * Best Practice: Kenya VAT compliance dashboard
+ */
+export async function getVATDashboard(filingPeriod = null) {
+  await dbConnect();
+
+  // Use current month if no period specified
+  if (!filingPeriod) {
+    const now = new Date();
+    filingPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}`;
+  }
+
+  // Use service method if available
+  if (typeof TaxTransaction.getVATReturn === "function") {
+    const vatReturn = await TaxTransaction.getVATReturn(filingPeriod);
+    return { filingPeriod, ...vatReturn };
+  }
+
+  // Fallback aggregation
+  const [input, output, unfiledInput, unfiledOutput] = await Promise.all([
+    TaxTransaction.aggregate([
+      {
+        $match: {
+          taxType: "vat_input",
+          "kraTracking.filingPeriod": filingPeriod,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalBase: { $sum: "$baseAmount" },
+          totalTax: { $sum: "$taxAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+
+    TaxTransaction.aggregate([
+      {
+        $match: {
+          taxType: "vat_output",
+          "kraTracking.filingPeriod": filingPeriod,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalBase: { $sum: "$baseAmount" },
+          totalTax: { $sum: "$taxAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+
+    TaxTransaction.countDocuments({
+      taxType: "vat_input",
+      "kraTracking.filingPeriod": filingPeriod,
+      "kraTracking.filed": false,
+    }),
+
+    TaxTransaction.countDocuments({
+      taxType: "vat_output",
+      "kraTracking.filingPeriod": filingPeriod,
+      "kraTracking.filed": false,
+    }),
+  ]);
+
+  const vatInput = input[0] || { totalBase: 0, totalTax: 0, count: 0 };
+  const vatOutput = output[0] || { totalBase: 0, totalTax: 0, count: 0 };
+  const vatPayable = vatOutput.totalTax - vatInput.totalTax;
+
+  return {
+    filingPeriod,
+    input: {
+      totalPurchases: vatInput.totalBase,
+      totalVAT: vatInput.totalTax,
+      transactionCount: vatInput.count,
+      unfiledCount: unfiledInput,
+    },
+    output: {
+      totalSales: vatOutput.totalBase,
+      totalVAT: vatOutput.totalTax,
+      transactionCount: vatOutput.count,
+      unfiledCount: unfiledOutput,
+    },
+    summary: {
+      vatPayable: vatPayable > 0 ? vatPayable : 0,
+      vatRefundable: vatPayable < 0 ? Math.abs(vatPayable) : 0,
+      netPosition: vatPayable,
+    },
+  };
+}
+
+/**
+ * Get WHT dashboard data
+ * Best Practice: Kenya WHT compliance dashboard
+ */
+export async function getWHTDashboard(startDate = null, endDate = null) {
+  await dbConnect();
+
+  // Default to current month if no dates
+  if (!startDate || !endDate) {
+    const now = new Date();
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  }
+
+  const dateQuery = {
+    transactionDate: {
+      $gte: new Date(startDate),
+      $lte: new Date(endDate),
+    },
+  };
+
+  // Get WHT by rate and supplier
+  const [byRate, bySupplier, unremitted, total] = await Promise.all([
+    // WHT by rate
+    TaxTransaction.aggregate([
+      { $match: { taxType: "wht", ...dateQuery } },
+      {
+        $group: {
+          _id: { taxCode: "$taxCode", taxRate: "$taxRate" },
+          totalBase: { $sum: "$baseAmount" },
+          totalWHT: { $sum: "$taxAmount" },
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          taxCode: "$_id.taxCode",
+          taxRate: "$_id.taxRate",
+          totalBase: 1,
+          totalWHT: 1,
+          count: 1,
+        },
+      },
+      { $sort: { taxRate: 1 } },
+    ]),
+
+    // WHT by supplier
+    TaxTransaction.aggregate([
+      { $match: { taxType: "wht", ...dateQuery } },
+      {
+        $group: {
+          _id: {
+            supplierId: "$party.id",
+            supplierName: "$party.name",
+            taxPin: "$party.taxPin",
+          },
+          totalBase: { $sum: "$baseAmount" },
+          totalWHT: { $sum: "$taxAmount" },
+          transactions: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          supplierId: "$_id.supplierId",
+          supplierName: "$_id.supplierName",
+          taxPin: "$_id.taxPin",
+          totalBase: 1,
+          totalWHT: 1,
+          transactions: 1,
+        },
+      },
+      { $sort: { totalWHT: -1 } },
+      { $limit: 10 }, // Top 10 suppliers
+    ]),
+
+    // Unremitted WHT
+    TaxTransaction.aggregate([
+      {
+        $match: {
+          taxType: "wht",
+          "kraTracking.remitted": false,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalWHT: { $sum: "$taxAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+
+    // Total WHT for period
+    TaxTransaction.aggregate([
+      { $match: { taxType: "wht", ...dateQuery } },
+      {
+        $group: {
+          _id: null,
+          totalWHT: { $sum: "$taxAmount" },
+          remitted: {
+            $sum: {
+              $cond: ["$kraTracking.remitted", "$taxAmount", 0],
+            },
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+  ]);
+
+  const unremittedData = unremitted[0] || { totalWHT: 0, count: 0 };
+  const totalData = total[0] || { totalWHT: 0, remitted: 0, count: 0 };
+
+  return {
+    period: { startDate, endDate },
+    byRate,
+    bySupplier,
+    summary: {
+      totalWHT: totalData.totalWHT,
+      remitted: totalData.remitted,
+      unremitted: unremittedData.totalWHT,
+      transactionCount: totalData.count,
+      unremittedCount: unremittedData.count,
+    },
+  };
+}
+
+/**
+ * Get unfiled tax transactions
+ * Best Practice: Pending KRA filing actions
+ */
+export async function getUnfiledTransactions(taxType = null) {
+  await dbConnect();
+
+  const query = { "kraTracking.filed": false };
+  if (taxType) query.taxType = taxType;
+
+  return await TaxTransaction.find(query).sort({ transactionDate: 1 }).lean();
+}
+
+/**
+ * Get unremitted WHT
+ * Best Practice: Pending WHT remittance actions
+ */
+export async function getUnremittedWHT() {
+  await dbConnect();
+
+  return await TaxTransaction.find({
+    taxType: "wht",
+    "kraTracking.remitted": false,
+  })
+    .sort({ transactionDate: 1 })
+    .lean();
+}
+
+/**
+ * Get tax summary for dashboard
+ * Best Practice: Dashboard KPIs
+ */
+export async function getTaxSummary(startDate = null, endDate = null) {
+  await dbConnect();
+
+  // Default to current month
+  if (!startDate || !endDate) {
+    const now = new Date();
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  }
+
+  return await TaxService.getTaxSummary(startDate, endDate);
+}
+
+/**
+ * Get filing periods (for dropdown)
+ */
+export async function getFilingPeriods(limit = 12) {
+  await dbConnect();
+
+  const periods = await TaxTransaction.distinct("kraTracking.filingPeriod");
+
+  // Sort descending (most recent first)
+  return periods.sort().reverse().slice(0, limit);
+}
+
+/**
+ * Search tax transactions
+ */
+export async function searchTaxTransactions(searchTerm, limit = 50) {
+  await dbConnect();
+
+  if (!searchTerm || searchTerm.trim().length === 0) {
+    return [];
+  }
+
+  return await TaxTransaction.find({
+    $or: [
+      { transactionNumber: { $regex: searchTerm, $options: "i" } },
+      { "party.name": { $regex: searchTerm, $options: "i" } },
+      { "party.taxPin": { $regex: searchTerm, $options: "i" } },
+      { description: { $regex: searchTerm, $options: "i" } },
+    ],
+  })
+    .sort({ transactionDate: -1 })
+    .limit(limit)
+    .select("transactionNumber transactionDate taxType taxAmount party.name")
+    .lean();
+}
+
+export default {
+  getTaxTransactions,
+  getTaxTransactionById,
+  getVATDashboard,
+  getWHTDashboard,
+  getUnfiledTransactions,
+  getUnremittedWHT,
+  getTaxSummary,
+  getFilingPeriods,
+  searchTaxTransactions,
+};

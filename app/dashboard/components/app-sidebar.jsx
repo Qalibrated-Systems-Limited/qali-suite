@@ -7,8 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Bell,
   Menu,
-  Plus,
-  Search,
   ShoppingCart,
   User,
   Settings,
@@ -26,35 +24,19 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MobileNav } from "@/components/mobile-nav";
 import { PcNav } from "@/components/pc-nav";
-import { Input } from "@/components/ui/input";
-import { CreateButton } from "@/components/createButton";
-import { usePathname } from "next/navigation";
+import { CreateButton } from "@/app/dashboard/components/smartCreateButton";
+import { SmartSearch } from "@/components/search";
 import { useTheme } from "next-themes";
 
 export function AppSidebar({ children, user, cartItemsCount = 0, ...props }) {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [mounted, setMounted] = React.useState(false);
-  const pathname = usePathname();
   const { theme, setTheme } = useTheme();
 
   // Avoid hydration mismatch
   React.useEffect(() => {
     setMounted(true);
   }, []);
-
-  const createButtonIsNotVisible =
-    (pathname.startsWith("/dashboard/user") && user?.role !== "Admin") ||
-    (pathname.startsWith("/dashboard/stocks") &&
-      !["Admin", "Store Manager"].includes(user?.role));
-
-  // Determine what the Create button should show/link to
-  const shouldCreateRequest = [
-    "/dashboard/requests",
-    "/dashboard/checkout",
-    "/dashboard/movement",
-    "/dashboard",
-    "/dashboard/cart",
-  ].includes(pathname);
 
   return (
     <div className="flex h-screen bg-background text-foreground">
@@ -86,25 +68,17 @@ export function AppSidebar({ children, user, cartItemsCount = 0, ...props }) {
                 </div>
               </div>
 
-              {/* Center: Search Bar */}
-              <div className="flex-1 max-w-2xl">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search products, invoices, customers..."
-                    className="pl-10 pr-4 bg-background border-input text-foreground placeholder:text-muted-foreground focus-visible:ring-yellow-500 focus-visible:border-yellow-500 text-sm h-9 sm:h-10"
-                  />
-                </div>
-              </div>
+              {/* Center: Smart Search - Always visible */}
+              <SmartSearch />
 
               {/* Right: Action Buttons */}
               <div className="flex items-center gap-1 sm:gap-2">
-                {/* Theme Toggle - Always visible */}
+                {/* Theme Toggle - HIDDEN on mobile (in sidebar) */}
                 {mounted && (
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="text-foreground hover:text-foreground hover:bg-accent h-9 w-9"
+                    className="hidden sm:flex text-foreground hover:text-foreground hover:bg-accent h-9 w-9"
                     onClick={() =>
                       setTheme(theme === "dark" ? "light" : "dark")
                     }
@@ -118,7 +92,7 @@ export function AppSidebar({ children, user, cartItemsCount = 0, ...props }) {
                   </Button>
                 )}
 
-                {/* Cart Button */}
+                {/* Cart Button - Always visible */}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -146,40 +120,16 @@ export function AppSidebar({ children, user, cartItemsCount = 0, ...props }) {
                   <span className="sr-only">Notifications</span>
                 </Button>
 
-                {/* Create Button */}
-                {!createButtonIsNotVisible && (
-                  <>
-                    {/* Mobile: Icon only */}
-                    <Button
-                      size="icon"
-                      className="bg-yellow-500 text-black hover:bg-yellow-600 font-medium sm:hidden h-9 w-9"
-                      asChild
-                    >
-                      <Link
-                        href={
-                          shouldCreateRequest
-                            ? "/dashboard/requests/create"
-                            : `${pathname}/create`
-                        }
-                      >
-                        <Plus className="w-5 h-5" />
-                      </Link>
-                    </Button>
+                {/* Smart Create Button */}
+                <CreateButton user={user} />
 
-                    {/* Desktop: Full button */}
-                    <div className="hidden sm:block">
-                      <CreateButton />
-                    </div>
-                  </>
-                )}
-
-                {/* User Menu */}
+                {/* User Menu - HIDDEN on mobile (in sidebar) */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="text-foreground hover:text-foreground hover:bg-accent h-9 w-9"
+                      className="hidden sm:flex text-foreground hover:text-foreground hover:bg-accent h-9 w-9"
                     >
                       <User className="w-5 h-5" />
                     </Button>
@@ -211,44 +161,6 @@ export function AppSidebar({ children, user, cartItemsCount = 0, ...props }) {
                     <DropdownMenuItem className="focus:bg-accent focus:text-accent-foreground cursor-pointer">
                       <Settings className="mr-2 h-4 w-4" />
                       <span>Settings</span>
-                    </DropdownMenuItem>
-
-                    {/* Theme Toggle in Menu (Mobile alternative) */}
-                    {mounted && (
-                      <DropdownMenuItem
-                        className="focus:bg-accent focus:text-accent-foreground cursor-pointer sm:hidden"
-                        onClick={() =>
-                          setTheme(theme === "dark" ? "light" : "dark")
-                        }
-                      >
-                        {theme === "dark" ? (
-                          <>
-                            <Sun className="mr-2 h-4 w-4" />
-                            <span>Light Mode</span>
-                          </>
-                        ) : (
-                          <>
-                            <Moon className="mr-2 h-4 w-4" />
-                            <span>Dark Mode</span>
-                          </>
-                        )}
-                      </DropdownMenuItem>
-                    )}
-
-                    {/* Mobile-only menu items */}
-                    <DropdownMenuItem
-                      className="focus:bg-accent focus:text-accent-foreground cursor-pointer sm:hidden"
-                      asChild
-                    >
-                      <Link href="/dashboard/cart">
-                        <ShoppingCart className="mr-2 h-4 w-4" />
-                        <span>Cart ({cartItemsCount})</span>
-                      </Link>
-                    </DropdownMenuItem>
-
-                    <DropdownMenuItem className="focus:bg-accent focus:text-accent-foreground cursor-pointer sm:hidden">
-                      <Bell className="mr-2 h-4 w-4" />
-                      <span>Notifications</span>
                     </DropdownMenuItem>
 
                     <DropdownMenuSeparator className="bg-border" />

@@ -5,13 +5,63 @@ const Schema = mongoose.Schema;
 // ============================================
 // PAYMENT SCHEMA - MONEY IN/OUT TRACKING
 // ============================================
+// Design Principles:
+// 1. Embed allocations - bounded (1-10), always read together
+// 2. Cache account/party info - read-heavy, rarely changes
+// 3. Separate collection - payments queried independently for reports
+// 4. Fiscal period - accounting compliance
+// ============================================
+
+// Allocation sub-schema
+const allocationSchema = new Schema(
+  {
+    documentType: {
+      type: String,
+      enum: ["invoice", "bill"],
+      required: true,
+    },
+    documentId: {
+      type: Schema.Types.ObjectId,
+      required: true,
+    },
+    documentNumber: {
+      type: String,
+      required: true,
+    },
+    documentDate: Date,
+    originalAmount: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    balanceBefore: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    amountAllocated: {
+      type: Number,
+      required: true,
+      min: [0.01, "Allocation must be positive"],
+    },
+  },
+  { _id: true }
+);
+
+// ============================================
+// MAIN PAYMENT SCHEMA
+// ============================================
 const paymentSchema = new Schema(
   {
-    // Payment Identification
+    // ==========================================
+    // IDENTIFICATION
+    // ==========================================
     paymentNumber: {
       type: String,
       required: [true, "Payment number is required"],
       unique: true,
+      uppercase: true,
+      trim: true,
       index: true,
     },
 
@@ -31,7 +81,17 @@ const paymentSchema = new Schema(
       index: true,
     },
 
-    // Amount
+    // Fiscal period for accounting (YYYY-MM)
+    fiscalPeriod: {
+      type: String,
+      required: true,
+      match: [/^\d{4}-\d{2}$/, "Fiscal period must be YYYY-MM format"],
+      index: true,
+    },
+
+    // ==========================================
+    // AMOUNT
+    // ==========================================
     amount: {
       type: Number,
       required: [true, "Amount is required"],
@@ -42,98 +102,106 @@ const paymentSchema = new Schema(
       type: String,
       default: "KES",
       uppercase: true,
+      enum: ["KES", "USD", "EUR", "GBP"],
     },
 
-    // Payment Method
+    // ==========================================
+    // PAYMENT METHOD
+    // ==========================================
     paymentMethod: {
       type: String,
       required: [true, "Payment method is required"],
       enum: {
-        values: ["cash", "mpesa", "bank_transfer", "cheque", "card", "other"],
+        values: ["cash", "mpesa", "bank_transfer", "cheque", "card"],
         message: "{VALUE} is not a valid payment method",
       },
       index: true,
     },
 
-    // Method-specific Details
+    // M-Pesa specific (embedded - 1:1, always read together)
     mpesaDetails: {
-      transactionCode: {
-        type: String,
-        uppercase: true,
-      },
-      phoneNumber: String,
-      mpesaReceiptNumber: String,
+      transactionCode: { type: String, uppercase: true, trim: true },
+      phoneNumber: { type: String, trim: true },
+      receiptNumber: { type: String, trim: true },
     },
 
+    // Bank specific (embedded - 1:1, always read together)
     bankDetails: {
-      bankName: String,
-      accountNumber: String,
-      chequeNumber: String,
-      transactionReference: String,
-      clearingDate: Date, // When cheque cleared
+      bankName: { type: String, trim: true },
+      accountNumber: { type: String, trim: true },
+      chequeNumber: { type: String, trim: true },
+      transactionReference: { type: String, trim: true },
+      clearingDate: Date,
     },
 
+    // Card specific (embedded - 1:1)
     cardDetails: {
       last4Digits: String,
-      cardType: String,
+      cardType: { type: String, enum: ["visa", "mastercard", "amex", "other"] },
       approvalCode: String,
     },
 
-    // Account Used (Cash/Bank/M-Pesa account from COA)
-    accountId: {
-      type: Schema.Types.ObjectId,
-      ref: "Account",
-      required: [true, "Payment account is required"],
-      index: true,
+    // ==========================================
+    // PAYMENT ACCOUNT (Cash/Bank/M-Pesa from COA)
+    // ==========================================
+    account: {
+      id: {
+        type: Schema.Types.ObjectId,
+        ref: "Account",
+        required: [true, "Payment account is required"],
+        index: true,
+      },
+      // Cached for display (rarely changes)
+      code: { type: String, required: true },
+      name: { type: String, required: true },
+      subType: {
+        type: String,
+        enum: ["cash", "bank", "mpesa"],
+        required: true,
+      },
     },
 
-    accountCode: String, // Cached
-    accountName: String, // Cached
-
-    // Party (Customer or Supplier)
+    // ==========================================
+    // PARTY (Customer or Supplier)
+    // Snapshot at payment time - won't change
+    // ==========================================
     party: {
       type: {
         type: String,
-        enum: ["customer", "supplier"],
+        enum: ["customer", "supplier", "both"],
         required: [true, "Party type is required"],
       },
-      id: {
+      partyId: {
         type: Schema.Types.ObjectId,
         ref: "Party",
         required: true,
+        index: true,
       },
+      // Cached snapshot
       name: {
         type: String,
         required: [true, "Party name is required"],
+        trim: true,
       },
-      email: String,
-      phone: String,
+      email: { type: String, lowercase: true, trim: true },
+      phone: { type: String, trim: true },
     },
 
-    // Payment Allocation (to invoices/bills)
-    allocations: [
-      {
-        documentType: {
-          type: String,
-          enum: ["invoice", "bill"],
-          required: true,
+    // ==========================================
+    // ALLOCATIONS (Bounded: max 20 documents)
+    // Embedded - always read together, lifecycle tied
+    // ==========================================
+    allocations: {
+      type: [allocationSchema],
+      validate: {
+        validator: function (v) {
+          return v.length <= 20;
         },
-        documentId: {
-          type: Schema.Types.ObjectId,
-          required: true,
-          refPath: "allocations.documentType",
-        },
-        documentNumber: String,
-        originalAmount: Number,
-        amountAllocated: {
-          type: Number,
-          required: true,
-          min: 0,
-        },
+        message: "Cannot allocate to more than 20 documents",
       },
-    ],
+    },
 
-    // Unapplied Amount
+    // Calculated amounts
     totalAllocated: {
       type: Number,
       default: 0,
@@ -146,64 +214,73 @@ const paymentSchema = new Schema(
       min: 0,
     },
 
-    // Reference & Description
-    reference: String,
+    // ==========================================
+    // REFERENCE & DESCRIPTION
+    // ==========================================
+    reference: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+    },
 
     description: {
       type: String,
       required: [true, "Description is required"],
+      trim: true,
+      maxlength: 500,
     },
 
-    notes: String,
+    notes: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+    },
 
-    // Accounting Link
+    // ==========================================
+    // STATUS & WORKFLOW
+    // ==========================================
+    status: {
+      type: String,
+      enum: ["draft", "pending_clearance", "confirmed", "cancelled"],
+      default: "draft",
+      index: true,
+    },
+
+    // ==========================================
+    // ACCOUNTING LINK
+    // ==========================================
     journalEntryId: {
       type: Schema.Types.ObjectId,
       ref: "JournalEntry",
       index: true,
     },
 
-    // Bank Reconciliation
-    isReconciled: {
-      type: Boolean,
-      default: false,
-      index: true,
+    // ==========================================
+    // BANK RECONCILIATION
+    // ==========================================
+    reconciliation: {
+      isReconciled: { type: Boolean, default: false },
+      reconciledAt: Date,
+      reconciledBy: { name: String, id: String },
+      statementReference: String,
     },
 
-    reconciledAt: Date,
-
-    reconciledBy: {
-      name: String,
-      id: String,
-    },
-
-    // Status
-    status: {
-      type: String,
-      enum: ["confirmed", "cancelled", "pending_clearance", "draft"],
-      default: "pending_clearance",
-      index: true,
-    },
+    // ==========================================
+    // WORKFLOW TIMESTAMPS
+    // ==========================================
+    confirmedAt: Date,
+    confirmedBy: { name: String, id: String },
 
     cancelledAt: Date,
-
-    cancelledBy: {
-      name: String,
-      id: String,
-    },
-
+    cancelledBy: { name: String, id: String },
     cancellationReason: String,
 
-    // Audit Trail
+    // ==========================================
+    // AUDIT
+    // ==========================================
     createdBy: {
-      name: {
-        type: String,
-        required: true,
-      },
-      id: {
-        type: String,
-        required: true,
-      },
+      name: { type: String, required: true },
+      id: { type: String, required: true },
     },
 
     lastModifiedBy: {
@@ -219,12 +296,12 @@ const paymentSchema = new Schema(
 );
 
 // ============================================
-// COMPOUND INDEXES FOR QUERY EFFICIENCY
+// INDEXES
 // ============================================
 paymentSchema.index({ paymentDate: -1, status: 1 });
-paymentSchema.index({ paymentType: 1, "party.id": 1 });
-paymentSchema.index({ paymentMethod: 1, status: 1 });
-paymentSchema.index({ isReconciled: 1, paymentMethod: 1 });
+paymentSchema.index({ paymentType: 1, "party.partyId": 1 });
+paymentSchema.index({ fiscalPeriod: 1, paymentType: 1 });
+paymentSchema.index({ "reconciliation.isReconciled": 1, paymentMethod: 1 });
 paymentSchema.index({ "allocations.documentId": 1 });
 
 // ============================================
@@ -238,202 +315,216 @@ paymentSchema.virtual("hasAllocations").get(function () {
   return this.allocations && this.allocations.length > 0;
 });
 
-// ============================================
-// VALIDATION METHODS
-// ============================================
+paymentSchema.virtual("canEdit").get(function () {
+  return this.status === "draft";
+});
 
-// Validate allocations don't exceed payment amount
-paymentSchema.methods.validateAllocations = function () {
-  const totalAllocated = this.allocations.reduce(
-    (sum, alloc) => sum + (alloc.amountAllocated || 0),
+paymentSchema.virtual("canConfirm").get(function () {
+  return ["draft", "pending_clearance"].includes(this.status);
+});
+
+paymentSchema.virtual("canCancel").get(function () {
+  return !this.reconciliation.isReconciled && this.status !== "cancelled";
+});
+
+paymentSchema.virtual("isCleared").get(function () {
+  // For cheques - check if cleared
+  if (this.paymentMethod === "cheque") {
+    return !!this.bankDetails?.clearingDate;
+  }
+  return this.status === "confirmed";
+});
+
+// ============================================
+// PRE-SAVE: Calculate allocations & fiscal period
+// ============================================
+paymentSchema.pre("save", function (next) {
+  // Calculate totals
+  this.totalAllocated = this.allocations.reduce(
+    (sum, a) => sum + (a.amountAllocated || 0),
     0
   );
+  this.unappliedAmount = Math.max(0, this.amount - this.totalAllocated);
 
-  if (totalAllocated > this.amount) {
-    throw new Error(
-      `Total allocated (${totalAllocated}) exceeds payment amount (${this.amount})`
-    );
+  // Handle rounding
+  if (Math.abs(this.unappliedAmount) < 0.01) {
+    this.unappliedAmount = 0;
   }
 
-  this.totalAllocated = totalAllocated;
-  this.unappliedAmount = this.amount - totalAllocated;
-
-  return true;
-};
-
-// Validate party type matches allocations
-paymentSchema.methods.validatePartyType = function () {
-  for (const allocation of this.allocations) {
-    if (
-      this.paymentType === "received" &&
-      allocation.documentType !== "invoice"
-    ) {
-      throw new Error("Payment received can only be allocated to invoices");
-    }
-    if (this.paymentType === "made" && allocation.documentType !== "bill") {
-      throw new Error("Payment made can only be allocated to bills");
-    }
-  }
-  return true;
-};
-
-// Validate payment account exists and is correct type
-paymentSchema.methods.validateAccount = async function () {
-  const Account = mongoose.model("Account");
-  const account = await Account.findById(this.accountId);
-
-  if (!account) {
-    throw new Error("Payment account not found");
-  }
-
-  if (!account.isActive) {
-    throw new Error(`Account ${account.accountName} is inactive`);
-  }
-
-  if (!account.canPost) {
-    throw new Error(`Cannot post to header account: ${account.accountName}`);
-  }
-
-  // Validate account type
-  const validSubTypes = ["cash", "bank", "mpesa"];
-  if (!validSubTypes.includes(account.subType)) {
-    throw new Error(
-      `Invalid account type. Must be cash, bank, or mpesa account. Got: ${account.subType}`
-    );
-  }
-
-  return true;
-};
-
-// Complete validation before confirming
-paymentSchema.methods.validateBeforeConfirming = async function () {
-  this.validateAllocations();
-  this.validatePartyType();
-  await this.validateAccount();
-  return true;
-};
-
-// ============================================
-// CONFIRM PAYMENT (CREATE JOURNAL ENTRY)
-// ============================================
-paymentSchema.methods.confirm = async function (confirmedBy) {
-  if (this.status === "confirmed") {
-    throw new Error("Payment is already confirmed");
-  }
-
-  if (this.status === "cancelled") {
-    throw new Error("Cannot confirm a cancelled payment");
-  }
-
-  // Validate
-  await this.validateBeforeConfirming();
-
-  // Create journal entry
-  const journalEntry = await this.createJournalEntry(confirmedBy);
-
-  // Update status
-  this.status = "confirmed";
-  this.journalEntryId = journalEntry._id;
-  await this.save();
-
-  // Update invoice/bill payment status
-  await this.updateDocumentPaymentStatus();
-
-  return this;
-};
-paymentSchema.pre("findOneAndUpdate", function () {
-  if (this.get("status") === "confirmed") {
-    throw new Error("Cannot edit confirmed payment");
+  // Set fiscal period from payment date
+  if (!this.fiscalPeriod && this.paymentDate) {
+    const d = new Date(this.paymentDate);
+    this.fiscalPeriod = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}`;
   }
 });
 
 // ============================================
-// CREATE JOURNAL ENTRY FOR PAYMENT
+// HELPER: Format user
+// ============================================
+function formatUser(user) {
+  if (!user) return { name: "System", id: "system" };
+  return {
+    name: user.name || user.username || "Unknown",
+    id: user.id || user._id?.toString() || "unknown",
+  };
+}
+
+// ============================================
+// METHOD: Validate before confirming
+// ============================================
+paymentSchema.methods.validate = async function () {
+  const errors = [];
+
+  // Check allocations don't exceed amount
+  if (this.totalAllocated > this.amount + 0.01) {
+    errors.push(
+      `Total allocated (${this.totalAllocated}) exceeds payment amount (${this.amount})`
+    );
+  }
+
+  // Validate party type matches allocation documents
+  for (const alloc of this.allocations) {
+    if (this.paymentType === "received" && alloc.documentType !== "invoice") {
+      errors.push("Received payments can only be allocated to invoices");
+    }
+    if (this.paymentType === "made" && alloc.documentType !== "bill") {
+      errors.push("Made payments can only be allocated to bills");
+    }
+  }
+
+  // Validate account
+  const Account = mongoose.model("Account");
+  const account = await Account.findById(this.account.id);
+
+  if (!account) {
+    errors.push("Payment account not found");
+  } else {
+    if (!account.isActive) {
+      errors.push(`Account ${account.accountName} is inactive`);
+    }
+    if (!["cash", "bank", "mpesa"].includes(account.subType)) {
+      errors.push("Payment account must be cash, bank, or mpesa type");
+    }
+  }
+
+  // Validate fiscal period is open
+  const FiscalPeriod = mongoose.model("FiscalPeriod");
+  const period = await FiscalPeriod.findOne({ period: this.fiscalPeriod });
+
+  if (period && period.status === "closed") {
+    errors.push(`Fiscal period ${this.fiscalPeriod} is closed`);
+  }
+
+  if (errors.length > 0) {
+    throw new Error(errors.join("; "));
+  }
+
+  return true;
+};
+
+// ============================================
+// METHOD: Confirm payment
+// ============================================
+paymentSchema.methods.confirm = async function (user) {
+  if (!this.canConfirm) {
+    throw new Error(`Cannot confirm payment in status: ${this.status}`);
+  }
+
+  // Validate
+  await this.validate();
+
+  const userInfo = formatUser(user);
+
+  // Create journal entry
+  const journalEntry = await this.createJournalEntry(userInfo);
+
+  // Update status
+  this.status = "confirmed";
+  this.confirmedAt = new Date();
+  this.confirmedBy = userInfo;
+  this.journalEntryId = journalEntry._id;
+  this.lastModifiedBy = userInfo;
+
+  await this.save();
+
+  // Update allocated documents
+  await this.updateAllocatedDocuments();
+
+  return this;
+};
+
+// ============================================
+// METHOD: Create Journal Entry
 // ============================================
 paymentSchema.methods.createJournalEntry = async function (user) {
   const Account = mongoose.model("Account");
   const JournalEntry = mongoose.model("JournalEntry");
 
-  // Get accounts
-  const paymentAccount = await Account.findById(this.accountId);
-  const arAccount = await Account.findOne({
-    systemAccount: "accounts_receivable",
-  });
-  const apAccount = await Account.findOne({
-    systemAccount: "accounts_payable",
-  });
+  // Get system accounts
+  const [arAccount, apAccount] = await Promise.all([
+    Account.findOne({ systemAccount: "accounts_receivable" }),
+    Account.findOne({ systemAccount: "accounts_payable" }),
+  ]);
 
   if (!arAccount || !apAccount) {
-    throw new Error("AR/AP accounts not configured");
+    throw new Error("AR/AP system accounts not configured");
   }
 
-  let lines = [];
+  const lines = [];
 
   if (this.paymentType === "received") {
-    // Money IN: Debit Cash/Bank, Credit AR
-    lines = [
-      {
-        accountId: paymentAccount._id,
-        accountCode: paymentAccount.accountCode,
-        accountName: paymentAccount.accountName,
-        accountType: paymentAccount.accountType,
-        debit: this.amount,
-        credit: 0,
-        description: `Payment received from ${this.party.name}`,
-      },
-      {
-        accountId: arAccount._id,
-        accountCode: arAccount.accountCode,
-        accountName: arAccount.accountName,
-        accountType: arAccount.accountType,
-        debit: 0,
-        credit: this.amount,
-        description: `Payment from ${this.party.name}`,
-      },
-    ];
+    // Customer payment: DR Cash/Bank, CR Accounts Receivable
+    lines.push({
+      accountId: this.account.id,
+      accountCode: this.account.code,
+      accountName: this.account.name,
+      accountType: "asset",
+      debit: this.amount,
+      credit: 0,
+      description: `Payment from ${this.party.name}`,
+    });
+
+    lines.push({
+      accountId: arAccount._id,
+      accountCode: arAccount.accountCode,
+      accountName: arAccount.accountName,
+      accountType: "asset",
+      debit: 0,
+      credit: this.amount,
+      description: `Reduce receivable - ${this.party.name}`,
+    });
   } else {
-    // Money OUT: Debit AP, Credit Cash/Bank
-    lines = [
-      {
-        accountId: apAccount._id,
-        accountCode: apAccount.accountCode,
-        accountName: apAccount.accountName,
-        accountType: apAccount.accountType,
-        debit: this.amount,
-        credit: 0,
-        description: `Payment to ${this.party.name}`,
-      },
-      {
-        accountId: paymentAccount._id,
-        accountCode: paymentAccount.accountCode,
-        accountName: paymentAccount.accountName,
-        accountType: paymentAccount.accountType,
-        debit: 0,
-        credit: this.amount,
-        description: `Payment made to ${this.party.name}`,
-      },
-    ];
+    // Supplier payment: DR Accounts Payable, CR Cash/Bank
+    lines.push({
+      accountId: apAccount._id,
+      accountCode: apAccount.accountCode,
+      accountName: apAccount.accountName,
+      accountType: "liability",
+      debit: this.amount,
+      credit: 0,
+      description: `Reduce payable - ${this.party.name}`,
+    });
+
+    lines.push({
+      accountId: this.account.id,
+      accountCode: this.account.code,
+      accountName: this.account.name,
+      accountType: "asset",
+      debit: 0,
+      credit: this.amount,
+      description: `Payment to ${this.party.name}`,
+    });
   }
 
   // Generate entry number
-  const lastEntry = await JournalEntry.findOne({
-    entryType:
-      this.paymentType === "received" ? "payment_received" : "payment_made",
-  })
-    .sort({ entryNumber: -1 })
-    .limit(1);
+  const prefix = this.paymentType === "received" ? "JE-REC" : "JE-PAY";
+  const entryNumber = await this.constructor.generateJENumber(prefix);
 
-  let nextNum = 1;
-  if (lastEntry && lastEntry.entryNumber) {
-    const match = lastEntry.entryNumber.match(/\d+$/);
-    if (match) nextNum = parseInt(match[0]) + 1;
-  }
-
-  const prefix = this.paymentType === "received" ? "JE-PAY-REC" : "JE-PAY-MADE";
-  const entryNumber = `${prefix}-${String(nextNum).padStart(4, "0")}`;
-
-  // Create journal entry
-  const journalEntry = await JournalEntry.create({
+  // Create and post
+  const journalEntry = new JournalEntry({
     entryNumber,
     entryDate: this.paymentDate,
     entryType:
@@ -441,7 +532,12 @@ paymentSchema.methods.createJournalEntry = async function (user) {
     description: this.description,
     reference: this.reference,
     lines,
-    party: this.party,
+    party: {
+      type: this.party.type,
+      id: this.party.partyId.toString(),
+      name: this.party.name,
+    },
+    fiscalPeriod: this.fiscalPeriod,
     relatedDocuments: {
       paymentId: this._id,
       paymentNumber: this.paymentNumber,
@@ -450,92 +546,303 @@ paymentSchema.methods.createJournalEntry = async function (user) {
     createdBy: user,
   });
 
-  // Post journal entry
+  await journalEntry.save();
   await journalEntry.post(user);
 
   return journalEntry;
 };
 
 // ============================================
-// UPDATE INVOICE/BILL PAYMENT STATUS
+// METHOD: Update allocated documents
 // ============================================
-paymentSchema.methods.updateDocumentPaymentStatus = async function () {
+paymentSchema.methods.updateAllocatedDocuments = async function () {
   const Invoice = mongoose.model("Invoice");
   const Bill = mongoose.model("Bill");
 
-  for (const allocation of this.allocations) {
-    if (allocation.documentType === "invoice") {
-      const invoice = await Invoice.findById(allocation.documentId);
-      if (invoice) {
-        await invoice.recordPayment(this._id, allocation.amountAllocated);
+  for (const alloc of this.allocations) {
+    try {
+      if (alloc.documentType === "invoice") {
+        const invoice = await Invoice.findById(alloc.documentId);
+        if (invoice && typeof invoice.recordPayment === "function") {
+          await invoice.recordPayment(
+            this._id,
+            this.paymentNumber,
+            alloc.amountAllocated,
+            this.paymentMethod,
+            this.reference ||
+              this.mpesaDetails?.transactionCode ||
+              this.bankDetails?.chequeNumber,
+            this.paymentDate,
+            this.confirmedBy
+          );
+        }
+      } else if (alloc.documentType === "bill") {
+        const bill = await Bill.findById(alloc.documentId);
+        if (bill && typeof bill.recordPayment === "function") {
+          await bill.recordPayment(
+            this._id,
+            this.paymentNumber,
+            alloc.amountAllocated,
+            this.paymentMethod,
+            this.reference ||
+              this.mpesaDetails?.transactionCode ||
+              this.bankDetails?.chequeNumber,
+            this.paymentDate,
+            this.confirmedBy
+          );
+        }
       }
-    } else if (allocation.documentType === "bill") {
-      const bill = await Bill.findById(allocation.documentId);
-      if (bill) {
-        await bill.recordPayment(this._id, allocation.amountAllocated);
-      }
+    } catch (err) {
+      console.error(
+        `Failed to update ${alloc.documentType} ${alloc.documentNumber}:`,
+        err
+      );
+      // Continue with other allocations
     }
   }
 };
 
 // ============================================
-// CANCEL PAYMENT
+// METHOD: Cancel payment
 // ============================================
-paymentSchema.methods.cancel = async function (cancelledBy, reason) {
-  if (this.status === "cancelled") {
-    throw new Error("Payment is already cancelled");
+paymentSchema.methods.cancel = async function (user, reason) {
+  if (!this.canCancel) {
+    throw new Error("Cannot cancel this payment");
   }
 
-  if (this.isReconciled) {
+  if (this.reconciliation.isReconciled) {
     throw new Error("Cannot cancel a reconciled payment");
   }
+
+  const userInfo = formatUser(user);
 
   // Reverse journal entry if exists
   if (this.journalEntryId) {
     const JournalEntry = mongoose.model("JournalEntry");
-    const journalEntry = await JournalEntry.findById(this.journalEntryId);
-    if (journalEntry && journalEntry.status === "posted") {
-      await journalEntry.reverse(cancelledBy, reason);
+    const je = await JournalEntry.findById(this.journalEntryId);
+    if (je && je.status === "posted") {
+      await je.reverse(
+        userInfo,
+        `Payment ${this.paymentNumber} cancelled: ${reason}`
+      );
     }
   }
 
-  // Update status
+  // Reverse allocations on documents
+  await this.reverseAllocatedDocuments();
+
   this.status = "cancelled";
   this.cancelledAt = new Date();
-  this.cancelledBy = cancelledBy;
-  this.cancellationReason = reason;
+  this.cancelledBy = userInfo;
+  this.cancellationReason = reason || "No reason provided";
+  this.lastModifiedBy = userInfo;
+
   await this.save();
 
   return this;
 };
 
 // ============================================
-// STATIC METHODS
+// METHOD: Reverse allocated documents
 // ============================================
+paymentSchema.methods.reverseAllocatedDocuments = async function () {
+  const Invoice = mongoose.model("Invoice");
+  const Bill = mongoose.model("Bill");
 
-paymentSchema.statics.getUnreconciledPayments = function (
-  paymentMethod = null
+  for (const alloc of this.allocations) {
+    try {
+      if (alloc.documentType === "invoice") {
+        const invoice = await Invoice.findById(alloc.documentId);
+        if (invoice && typeof invoice.reversePayment === "function") {
+          await invoice.reversePayment(this._id, alloc.amountAllocated);
+        }
+      } else if (alloc.documentType === "bill") {
+        const bill = await Bill.findById(alloc.documentId);
+        if (bill && typeof bill.reversePayment === "function") {
+          await bill.reversePayment(this._id, alloc.amountAllocated);
+        }
+      }
+    } catch (err) {
+      console.error(
+        `Failed to reverse ${alloc.documentType} ${alloc.documentNumber}:`,
+        err
+      );
+    }
+  }
+};
+
+// ============================================
+// METHOD: Reconcile
+// ============================================
+paymentSchema.methods.reconcile = async function (user, statementRef) {
+  if (this.status !== "confirmed") {
+    throw new Error("Only confirmed payments can be reconciled");
+  }
+
+  const userInfo = formatUser(user);
+
+  this.reconciliation.isReconciled = true;
+  this.reconciliation.reconciledAt = new Date();
+  this.reconciliation.reconciledBy = userInfo;
+  this.reconciliation.statementReference = statementRef;
+  this.lastModifiedBy = userInfo;
+
+  await this.save();
+
+  return this;
+};
+
+// ============================================
+// STATIC: Generate Payment Number (Atomic with Verification)
+// ============================================
+paymentSchema.statics.generatePaymentNumber = async function (
+  type,
+  session = null
 ) {
+  const ErpCounter = mongoose.model("ErpCounter");
+
+  const date = new Date();
+  const prefix =
+    type === "received" || type === "RECEIVED" ? "PAY-REC" : "PAY-MADE";
+  const yearMonth = `${date.getFullYear()}${String(
+    date.getMonth() + 1
+  ).padStart(2, "0")}`;
+
+  const pattern = `${prefix}-${yearMonth}`;
+  const counterKey = `payment-${pattern.toLowerCase()}`;
+  const queryOptions = session ? { session } : {};
+
+  const maxAttempts = 5;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      // Use atomic counter for sequence generation
+      const seq = await ErpCounter.getNextSequence(counterKey, session);
+      const paymentNumber = `${pattern}-${String(seq).padStart(4, "0")}`;
+
+      // Verify this number doesn't already exist (handles stale counters)
+      const exists = await this.exists({ paymentNumber, ...queryOptions });
+      if (!exists) {
+        return paymentNumber;
+      }
+
+      // Number exists - counter was stale, try again
+      console.warn(`Payment number ${paymentNumber} already exists, retrying...`);
+      continue;
+    } catch (counterError) {
+      // Counter failed - use query-based fallback
+      console.warn(
+        `Counter failed for ${counterKey}, attempt ${attempt + 1}:`,
+        counterError.message
+      );
+
+      const lastPayment = await this.findOne(
+        { paymentNumber: { $regex: `^${pattern}` } },
+        null,
+        queryOptions
+      )
+        .sort({ paymentNumber: -1 })
+        .lean();
+
+      let nextNum = 1;
+      if (lastPayment?.paymentNumber) {
+        const match = lastPayment.paymentNumber.match(/(\d+)$/);
+        if (match) nextNum = parseInt(match[1], 10) + 1;
+      }
+
+      const paymentNumber = `${pattern}-${String(nextNum).padStart(4, "0")}`;
+
+      const exists = await this.exists({ paymentNumber, ...queryOptions });
+      if (!exists) {
+        return paymentNumber;
+      }
+    }
+
+    // Exponential backoff before retry
+    await new Promise((resolve) =>
+      setTimeout(resolve, 50 * Math.pow(2, attempt))
+    );
+  }
+
+  // Ultimate fallback with timestamp - guaranteed unique
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).substring(2, 4).toUpperCase();
+  return `${pattern}-${timestamp}${random}`;
+};
+
+// ============================================
+// STATIC: Generate JE Number - delegates to centralized utility
+// ============================================
+paymentSchema.statics.generateJENumber = async function (
+  prefix,
+  session = null
+) {
+  const { generateUniqueEntryNumber } = await import(
+    "@/lib/utils/server-utils"
+  );
+  // Extract the type from prefix (e.g., "JE-REC" -> "REC", "JE-PAY" -> "PAY")
+  const normalizedPrefix = prefix.replace(/^JE-/, "");
+  return generateUniqueEntryNumber(normalizedPrefix, session);
+};
+
+// ============================================
+// STATIC: Get by party
+// ============================================
+paymentSchema.statics.getByParty = function (partyId, type = null) {
   const query = {
-    isReconciled: false,
+    "party.partyId": partyId,
     status: "confirmed",
   };
-  if (paymentMethod) query.paymentMethod = paymentMethod;
+  if (type) query.paymentType = type;
 
   return this.find(query).sort({ paymentDate: -1 });
 };
 
-paymentSchema.statics.getPaymentsByParty = function (
-  partyId,
-  paymentType = null
-) {
+// ============================================
+// STATIC: Get unreconciled
+// ============================================
+paymentSchema.statics.getUnreconciled = function (method = null) {
   const query = {
-    "party.id": partyId,
     status: "confirmed",
+    "reconciliation.isReconciled": false,
   };
-  if (paymentType) query.paymentType = paymentType;
+  if (method) query.paymentMethod = method;
+
+  return this.find(query).sort({ paymentDate: 1 });
+};
+
+// ============================================
+// STATIC: Get by fiscal period
+// ============================================
+paymentSchema.statics.getByFiscalPeriod = function (period, type = null) {
+  const query = {
+    fiscalPeriod: period,
+    status: { $ne: "cancelled" },
+  };
+  if (type) query.paymentType = type;
 
   return this.find(query).sort({ paymentDate: -1 });
+};
+
+// ============================================
+// STATIC: Summary stats
+// ============================================
+paymentSchema.statics.getSummaryStats = async function (startDate, endDate) {
+  return this.aggregate([
+    {
+      $match: {
+        paymentDate: { $gte: startDate, $lte: endDate },
+        status: "confirmed",
+      },
+    },
+    {
+      $group: {
+        _id: "$paymentType",
+        total: { $sum: "$amount" },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
 };
 
 // ============================================

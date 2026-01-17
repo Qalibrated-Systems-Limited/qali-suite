@@ -6,6 +6,8 @@ import {
   fetchInvoicePages,
   getInvoiceStats,
 } from "@/app/mongodb/queries/invoice-queries";
+import Account from "@/app/models/account";
+import dbConnect from "@/app/config/dbConnect";
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
@@ -62,12 +64,31 @@ async function InvoicesPage(props) {
     endDate,
   };
 
+  // Connect to DB for Account query
+  await dbConnect();
+
   // Fetch data in parallel
-  const [totalPages, invoices, stats] = await Promise.all([
+  const [totalPages, invoices, stats, paymentAccounts] = await Promise.all([
     fetchInvoicePages(query, filters),
     searchInvoices(query, currentPage, filters),
     getInvoiceStats(filters),
+    Account.find({
+      type: "Asset",
+      subType: { $in: ["Cash", "Bank", "Mobile Money"] },
+      isActive: true,
+    })
+      .select("_id name code subType")
+      .sort({ name: 1 })
+      .lean(),
   ]);
+
+  // Serialize payment accounts for client component
+  const serializedPaymentAccounts = paymentAccounts.map((acc) => ({
+    _id: acc._id.toString(),
+    name: acc.name,
+    code: acc.code,
+    subType: acc.subType,
+  }));
 
   // Check if any filters are active
   const hasActiveFilters =
@@ -236,7 +257,7 @@ async function InvoicesPage(props) {
       </Card>
 
       {/* Invoices Table */}
-      <InvoicesTable invoices={invoices} />
+      <InvoicesTable invoices={invoices} paymentAccounts={serializedPaymentAccounts} />
 
       {/* Pagination */}
       {totalPages > 1 && (

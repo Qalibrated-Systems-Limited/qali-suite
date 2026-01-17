@@ -7,9 +7,9 @@ const dbConnect = async () => {
   }
 
   // Validate environment variable
-  if (!process.env.DB_LOCAL_URI) {
-    throw new Error('DB_LOCAL_URI environment variable is not defined');
-  }
+  // if (!process.env.DB_LOCAL_URI) {
+  //   throw new Error("DB_LOCAL_URI environment variable is not defined");
+  // }
 
   try {
     await mongoose.connect(process.env.DB_LOCAL_URI, {
@@ -21,11 +21,12 @@ const dbConnect = async () => {
       family: 4, // Use IPv4
     });
 
-    console.log('MongoDB connected successfully');
+    console.log("MongoDB connected successfully");
   } catch (error) {
-    console.error('MongoDB connection error:', error.message);
+    console.error("MongoDB connection error:", error.message);
     throw error;
   }
 };
 
 export default dbConnect;
+export { dbConnect };

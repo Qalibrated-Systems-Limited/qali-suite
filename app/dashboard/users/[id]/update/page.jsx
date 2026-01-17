@@ -15,7 +15,7 @@ async function EditUserPage(props) {
   const session = await auth();
   const currentUser = session?.user;
   const canEditUser =
-    currentUser?.role === "Admin" || currentUser?.role === "Store Manager";
+    currentUser?.role === "Admin" || currentUser?.role === "Manager";
 
   if (!canEditUser) {
     return (

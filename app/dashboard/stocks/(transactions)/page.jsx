@@ -19,6 +19,7 @@ import {
   StockFilterBadge,
 } from "@/components/custom-filters";
 import { Package, AlertTriangle, XCircle, CheckCircle } from "lucide-react";
+import { FormBanner } from "@/components/ui/form-banner";
 
 async function StockPage(props) {
   const searchParams = await props.searchParams;
@@ -88,6 +89,9 @@ async function StockPage(props) {
         }
         Action={canCreateStock && Action}
       />
+
+      {/* Success/Error Banner */}
+      <FormBanner searchParams={searchParams} />
 
       {/* Stock Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

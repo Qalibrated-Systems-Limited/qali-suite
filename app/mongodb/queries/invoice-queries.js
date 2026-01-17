@@ -1,5 +1,6 @@
 import dbConnect from "../../config/dbConnect";
 import Account from "../../models/account";
+import Party from "../../models/parties";
 import Product from "../../models/product";
 import Invoice from "../../models/invoice";
 import Counter from "../../models/counter";
@@ -10,16 +11,33 @@ dbConnect();
 // FETCH ACTIVE CUSTOMERS
 // ============================================
 export const fetchActiveCustomers = async () => {
-  const customers = await Account.find({ status: "Active" })
+  const customers = await Party.find({
+    type: { $in: ["customer", "both"] },
+    isActive: true,
+  })
     .sort({ name: 1 })
     .lean();
 
+  // Format address helper
+  const formatAddress = (address) => {
+    if (!address) return "";
+    const parts = [
+      address.line1,
+      address.line2,
+      address.city,
+      address.postalCode,
+      address.country,
+    ].filter(Boolean);
+    return parts.join(", ");
+  };
+
   return customers.map((customer) => ({
     _id: customer._id.toString(),
-    name: customer.name,
+    name: customer.displayName || customer.name,
     email: customer.email || "",
-    phoneNumber: customer.phoneNumber || "",
-    address: customer.address || "",
+    phoneNumber: customer.phone || "",
+    address: formatAddress(customer.address),
+    taxPin: customer.taxPin || "",
   }));
 };
 
@@ -68,18 +86,37 @@ export const generateInvoiceNumber = async (session = null) => {
 // GET CUSTOMER BY ID
 // ============================================
 export const getCustomerById = async (customerId) => {
-  const customer = await Account.findById(customerId).lean();
+  const customer = await Party.findById(customerId).lean();
 
   if (!customer) {
     return null;
   }
 
+  // Verify it's a customer
+  if (customer.type !== "customer" && customer.type !== "both") {
+    return null;
+  }
+
+  // Format address from Party model
+  const formatAddress = (address) => {
+    if (!address) return "";
+    const parts = [
+      address.line1,
+      address.line2,
+      address.city,
+      address.postalCode,
+      address.country,
+    ].filter(Boolean);
+    return parts.join(", ");
+  };
+
   return {
     _id: customer._id.toString(),
-    name: customer.name,
+    name: customer.displayName || customer.name,
     email: customer.email || "",
-    phoneNumber: customer.phoneNumber || "",
-    address: customer.address || "",
+    phoneNumber: customer.phone || "",
+    address: formatAddress(customer.address),
+    taxPin: customer.taxPin || "",
   };
 };
 
@@ -352,4 +389,52 @@ export const getInvoiceStats = async (filters = {}) => {
     totalAmountPaid: stats.totalAmountPaid,
     balanceDue: stats.totalRevenue - stats.totalAmountPaid,
   };
+};
+
+// ============================================
+// GET FULFILLED REQUESTS FOR CUSTOMER (for linking to invoices)
+// ============================================
+export const getFulfilledRequestsForCustomer = async (customerId) => {
+  const StockRequest = (await import("../../models/requests")).default;
+
+  const requests = await StockRequest.find({
+    customer: customerId,
+    status: { $in: ["fulfilled", "partially_fulfilled"] },
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  // Filter requests that have items not fully invoiced
+  const availableRequests = requests
+    .map((request) => {
+      const availableItems = request.items.filter((item) => {
+        const totalFulfilled = item.totalFulfilled || 0;
+        const invoiced = item.invoicedQuantity || 0;
+        return totalFulfilled > invoiced; // Has un-invoiced items
+      });
+
+      if (availableItems.length === 0) return null;
+
+      return {
+        _id: request._id.toString(),
+        requestNumber: request.requestNumber,
+        requesterName: request.requester.name,
+        technicianId: request.requester.id,
+        technicianName: request.requester.name,
+        items: availableItems.map((item) => ({
+          productId: item.productId.toString(),
+          productName: item.productName,
+          SKU: item.SKU,
+          totalFulfilled: item.totalFulfilled || 0,
+          invoicedQuantity: item.invoicedQuantity || 0,
+          availableToInvoice:
+            (item.totalFulfilled || 0) - (item.invoicedQuantity || 0),
+          unit: item.unit,
+          unitPrice: item.unitPrice,
+        })),
+      };
+    })
+    .filter(Boolean); // Remove null entries
+
+  return availableRequests;
 };

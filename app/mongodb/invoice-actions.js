@@ -5,6 +5,7 @@ import Invoice from "../models/invoice";
 import Product from "../models/product";
 import { StockMovement } from "../models/stockmovement";
 import Account from "../models/account";
+import Party from "../models/parties";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { generateInvoiceNumber } from "./queries/invoice-queries";
@@ -483,18 +484,14 @@ export async function updateInvoice(invoiceId, prevState, formData) {
 }
 
 // ============================================
-// CREATE INVOICE
+// CREATE INVOICE (WITH ACCOUNTING INTEGRATION)
 // ============================================
 export async function createInvoice(prevState, formData) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const authSession = await auth();
     const user = authSession?.user;
 
     if (!user) {
-      await session.abortTransaction();
       return {
         message: "Unauthorized",
         success: false,
@@ -503,7 +500,6 @@ export async function createInvoice(prevState, formData) {
 
     // Check if user has permission
     if (user.role !== "Admin" && user.role !== "Accountant") {
-      await session.abortTransaction();
       return {
         message: "Access denied. Only Admin or Accountant can create invoices.",
         success: false,
@@ -518,34 +514,40 @@ export async function createInvoice(prevState, formData) {
       !data.customerId ||
       (!data.stockItems.length && !data.serviceItems.length)
     ) {
-      await session.abortTransaction();
       return {
         message: "Customer and at least one item are required",
         success: false,
       };
     }
 
-    // Get customer
-    const customer = await Account.findById(data.customerId).session(session);
+    // Get customer (Party)
+    const customer = await Party.findById(data.customerId);
     if (!customer) {
-      await session.abortTransaction();
       return {
         message: "Customer not found",
         success: false,
       };
     }
 
-    // Prepare line items
-    const lineItems = [];
-    const movementIds = [];
+    // Verify it's a customer
+    if (customer.type !== "customer" && customer.type !== "both") {
+      return {
+        message: "Selected party is not a customer",
+        success: false,
+      };
+    }
 
-    // Process stock items
+    // Generate invoice number
+    const invoiceNumber = await generateInvoiceNumber();
+
+    // Prepare invoice items in new Invoice model format
+    const items = [];
+
+    // Process stock items (products)
     for (const item of data.stockItems) {
-      // Check stock availability
-      const product = await Product.findById(item.productId).session(session);
+      const product = await Product.findById(item.productId);
 
       if (!product) {
-        await session.abortTransaction();
         return {
           message: `Product ${item.name} not found`,
           success: false,
@@ -553,151 +555,116 @@ export async function createInvoice(prevState, formData) {
       }
 
       if (product.stock < item.quantity) {
-        await session.abortTransaction();
         return {
           message: `Insufficient stock for ${product.name}. Available: ${product.stock}, Required: ${item.quantity}`,
           success: false,
         };
       }
 
-      // Deduct stock
-      await Product.findByIdAndUpdate(
-        item.productId,
-        {
-          $inc: { stock: -item.quantity },
-        },
-        { session }
-      );
-
-      // Create stock movement
-      const movementNumber = await generateMovementNumber(session);
-      const movement = await StockMovement.create(
-        [
-          {
-            movementNumber,
-            productId: item.productId,
-            productSnapshot: {
-              name: product.name,
-              SKU: product.SKU,
-              category: product.category,
-              unit: product.unit,
-            },
-            movementType: "sale",
-            direction: "out",
-            quantity: item.quantity,
-            previousStock: product.stock,
-            newStock: product.stock - item.quantity,
-            unitPrice: item.sellingPrice,
-            totalValue: item.total,
-            performedBy: {
-              name: user.name,
-              id: user.id,
-              role: user.role,
-            },
-            notes: `Sale via invoice - Customer: ${customer.name}`,
-            reason: "Direct sale",
-          },
-        ],
-        { session }
-      );
-
-      movementIds.push(movement[0]._id);
-
-      // Add to line items
-      lineItems.push({
-        type: "stock",
-        productId: item.productId,
-        SKU: product.SKU,
-        name: item.name,
-        unit: item.unit,
+      items.push({
+        itemType: "product",
+        productId: product._id,
+        productSKU: product.SKU,
+        productName: product.name,
+        description: product.description || product.name,
+        unit: product.unit,
         quantity: item.quantity,
         unitPrice: item.sellingPrice,
-        total: item.total,
-        stockDeducted: true,
+        amount: item.total,
+        taxRate: data.vatPercentage || 16,
+        taxAmount: (item.total * (data.vatPercentage || 16)) / 100,
+        discountPercentage: 0,
+        discountAmount: 0,
       });
     }
 
     // Process service items
     for (const item of data.serviceItems) {
-      lineItems.push({
-        type: "service",
-        name: item.name,
-        description: item.description || "",
+      items.push({
+        itemType: "service",
+        description: item.name,
         unit: item.unit,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        total: item.total,
-        stockDeducted: false,
+        amount: item.total,
+        taxRate: data.vatPercentage || 16,
+        taxAmount: (item.total * (data.vatPercentage || 16)) / 100,
+        discountPercentage: 0,
+        discountAmount: 0,
       });
     }
 
-    // Generate invoice number
-    const invoiceNumber = await generateInvoiceNumber(session);
-
     // Calculate totals
-    const subtotal = lineItems.reduce((sum, item) => sum + item.total, 0);
-    const discountAmount = (subtotal * data.discountPercentage) / 100;
-    const subtotalAfterDiscount = subtotal - discountAmount;
-    const taxAmount = (subtotalAfterDiscount * data.vatPercentage) / 100;
-    const total = subtotalAfterDiscount + taxAmount;
+    const subtotal = items.reduce((sum, item) => sum + item.amount, 0);
+    const totalDiscount = (subtotal * (data.discountPercentage || 0)) / 100;
+    const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
+    const total = subtotal - totalDiscount + taxAmount;
 
-    // Create invoice
-    const invoice = await Invoice.create(
-      [
-        {
-          invoiceNumber,
-          customer: {
-            id: customer._id.toString(),
-            name: customer.name,
-            email: customer.email || "",
-            phone: customer.phoneNumber || "",
-            address: customer.address,
-          },
-          invoiceDate: new Date(data.invoiceDate),
-          dueDate: data.dueDate ? new Date(data.dueDate) : null,
-          items: lineItems,
-          currency: "KES",
-          subtotal,
-          discountPercentage: data.discountPercentage,
-          discountAmount,
-          taxRate: data.vatPercentage,
-          taxAmount,
-          total,
-          paymentStatus: "unpaid",
-          notes: data.notes || "",
-          createdBy: {
-            name: user.name,
-            id: user.id,
-            role: user.role,
-          },
-          relatedDocuments: {
-            movementIds,
-          },
-          status: "draft",
-        },
-      ],
-      { session }
-    );
+    // Format customer address from Party model
+    const formatAddress = (address) => {
+      if (!address) return "";
+      const parts = [
+        address.line1,
+        address.line2,
+        address.city,
+        address.postalCode,
+        address.country,
+      ].filter(Boolean);
+      return parts.join(", ");
+    };
 
-    await session.commitTransaction();
+    // Create invoice using new Invoice model
+    const invoice = await Invoice.create({
+      invoiceNumber,
+      invoiceDate: new Date(data.invoiceDate),
+      dueDate: data.dueDate ? new Date(data.dueDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Default 30 days
+      customer: {
+        id: customer._id.toString(),
+        name: customer.displayName || customer.name,
+        email: customer.email || "",
+        phone: customer.phone || "",
+        address: formatAddress(customer.address),
+        taxPin: customer.taxPin || "",
+      },
+      items,
+      subtotal,
+      totalDiscount,
+      taxAmount,
+      total,
+      currency: "KES",
+      paymentStatus: "unpaid",
+      notes: data.notes || "",
+      createdBy: {
+        name: user.name,
+        id: user.id,
+      },
+      status: "draft",
+    });
+
+    // ============================================
+    // COMPLETE INVOICE (CREATES JOURNAL ENTRIES + STOCK MOVEMENTS)
+    // ============================================
+    await invoice.complete({
+      name: user.name,
+      id: user.id,
+    });
 
     revalidatePath("/dashboard/invoices");
+    revalidatePath("/dashboard/stocks");
+    revalidatePath("/dashboard/movements");
 
     return {
-      message: "Invoice created successfully",
+      message: `Invoice ${invoiceNumber} created successfully with journal entries`,
       success: true,
-      invoiceId: invoice[0]._id.toString(),
-      invoiceNumber: invoice[0].invoiceNumber,
+      invoiceId: invoice._id.toString(),
+      invoiceNumber: invoice.invoiceNumber,
     };
   } catch (error) {
-    await session.abortTransaction();
     console.error("Create invoice error:", error);
     return {
-      message: "Database error: failed to create invoice",
+      message: error.message || "Database error: failed to create invoice",
       success: false,
     };
-  } finally {
-    session.endSession();
   }
 }
 
@@ -751,6 +718,203 @@ export async function updateInvoicePayment(invoiceId, prevState, formData) {
       message: "Database error: failed to record payment",
       success: false,
     };
+  }
+}
+
+// ============================================
+// QUICK PAYMENT - Creates Payment + Records on Invoice
+// ============================================
+// Creates a full Payment document and allocates it to the invoice
+// Use this for direct payments from the invoice detail page
+// ============================================
+export async function createInvoicePayment(invoiceId, prevState, formData) {
+  const mongoSession = await mongoose.startSession();
+
+  try {
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Please sign in to continue" };
+    }
+
+    const user = session.user;
+
+    // Role check
+    if (!["Admin", "Accountant", "Manager"].includes(user.role)) {
+      return {
+        success: false,
+        error: "You don't have permission to record payments",
+      };
+    }
+
+    const dbConnect = (await import("@/app/config/dbConnect")).default;
+    await dbConnect();
+
+    // Parse form data
+    const amount = parseFloat(formData.get("amount"));
+    const paymentMethod = formData.get("paymentMethod");
+    const accountId = formData.get("accountId");
+    const paymentDate = formData.get("paymentDate") || new Date().toISOString();
+    const reference = formData.get("reference") || "";
+    const notes = formData.get("notes") || "";
+
+    // Validation
+    if (!amount || amount <= 0) {
+      return {
+        success: false,
+        error: "Payment amount must be positive",
+        fieldErrors: { amount: "Amount must be greater than zero" },
+      };
+    }
+
+    if (!paymentMethod) {
+      return {
+        success: false,
+        error: "Payment method is required",
+        fieldErrors: { paymentMethod: "Please select a payment method" },
+      };
+    }
+
+    if (!accountId) {
+      return {
+        success: false,
+        error: "Payment account is required",
+        fieldErrors: { accountId: "Please select a payment account" },
+      };
+    }
+
+    mongoSession.startTransaction();
+
+    // Get invoice
+    const invoice = await Invoice.findById(invoiceId).session(mongoSession);
+    if (!invoice) {
+      await mongoSession.abortTransaction();
+      return { success: false, error: "Invoice not found" };
+    }
+
+    if (invoice.paymentStatus === "paid") {
+      await mongoSession.abortTransaction();
+      return { success: false, error: "Invoice is already fully paid" };
+    }
+
+    if (amount > invoice.amountDue + 0.01) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: `Payment amount (${amount.toFixed(
+          2
+        )}) exceeds balance (${invoice.amountDue?.toFixed(2)})`,
+        fieldErrors: { amount: "Amount exceeds outstanding balance" },
+      };
+    }
+
+    // Get payment account
+    const paymentAccount = await Account.findById(accountId).session(
+      mongoSession
+    );
+    if (!paymentAccount) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: "Payment account not found",
+        fieldErrors: { accountId: "Invalid account selected" },
+      };
+    }
+
+    if (!["cash", "bank", "mpesa"].includes(paymentAccount.subType)) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: "Payment account must be cash, bank, or M-Pesa type",
+        fieldErrors: { accountId: "Select a cash, bank, or M-Pesa account" },
+      };
+    }
+
+    // Import Payment model
+    const Payment = (await import("@/app/models/payment")).default;
+
+    // Generate payment number
+    const paymentNumber = await Payment.generatePaymentNumber("RECEIVED");
+
+    // Calculate fiscal period from payment date
+    const payDate = new Date(paymentDate);
+    const fiscalPeriod = `${payDate.getFullYear()}-${String(
+      payDate.getMonth() + 1
+    ).padStart(2, "0")}`;
+
+    // Get customer info
+    const customerId = invoice.customer?.id || invoice.customerId;
+    const customerName =
+      invoice.customer?.name || invoice.customerName || "Customer";
+
+    // Create payment document
+    const payment = new Payment({
+      paymentNumber,
+      paymentType: "received",
+      paymentDate: payDate,
+      fiscalPeriod,
+      amount,
+      paymentMethod,
+      account: {
+        id: paymentAccount._id,
+        code: paymentAccount.accountCode,
+        name: paymentAccount.accountName,
+        subType: paymentAccount.subType,
+      },
+      party: {
+        partyId: customerId,
+        type: "customer",
+        name: customerName,
+      },
+      allocations: [
+        {
+          documentType: "invoice",
+          documentId: invoice._id,
+          documentNumber: invoice.invoiceNumber,
+          documentDate: invoice.invoiceDate || invoice.createdAt,
+          originalAmount: invoice.total,
+          balanceBefore: invoice.amountDue,
+          amountAllocated: amount,
+        },
+      ],
+      description: `Payment for ${invoice.invoiceNumber}`,
+      reference,
+      notes,
+      status: "draft",
+      createdBy: {
+        id: user.id,
+        name: user.name || user.email,
+        email: user.email,
+      },
+    });
+
+    await payment.save({ session: mongoSession });
+
+    // Confirm payment (creates JE and updates invoice via updateAllocatedDocuments)
+    await payment.confirm(user);
+
+    await mongoSession.commitTransaction();
+
+    revalidatePath("/dashboard/invoices");
+    revalidatePath(`/dashboard/invoices/${invoiceId}`);
+    revalidatePath("/dashboard/payments");
+
+    return {
+      success: true,
+      message: `Payment of ${amount.toFixed(2)} recorded successfully`,
+      data: {
+        paymentId: payment._id.toString(),
+        paymentNumber: payment.paymentNumber,
+      },
+    };
+  } catch (error) {
+    await mongoSession.abortTransaction();
+    console.error("Create invoice payment error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to create payment",
+    };
+  } finally {
+    mongoSession.endSession();
   }
 }
 

@@ -318,7 +318,7 @@ export default function CreateInvoiceFormClient({
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-[500px] p-0 bg-card border-border">
+              <PopoverContent className="w-125 p-0 bg-card border-border">
                 <Command>
                   <CommandInput
                     placeholder="Search customer..."
@@ -454,7 +454,7 @@ export default function CreateInvoiceFormClient({
                 <ChevronsUpDown className="ml-2 h-4 w-4" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-[500px] p-0">
+            <PopoverContent className="w-125 p-0">
               <Command>
                 <CommandInput placeholder="Search products..." />
                 <CommandList>

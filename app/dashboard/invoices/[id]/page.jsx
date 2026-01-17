@@ -2,6 +2,8 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getInvoiceById } from "@/app/mongodb/queries/invoice-queries";
+import Account from "@/app/models/account";
+import dbConnect from "@/app/config/dbConnect";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +26,7 @@ import {
   Wrench,
   AlertCircle,
 } from "lucide-react";
+import { InvoiceDetailActions } from "../components/InvoiceDetailActions";
 
 export default async function InvoiceDetailsPage({ params }) {
   const resolvedParams = await params;
@@ -38,7 +41,7 @@ export default async function InvoiceDetailsPage({ params }) {
   // Check permissions
   if (user.role !== "Admin" && user.role !== "Accountant") {
     return (
-      <div className="flex min-h-[400px] items-center justify-center">
+      <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-foreground mb-2">
             Access Denied
@@ -56,6 +59,27 @@ export default async function InvoiceDetailsPage({ params }) {
   if (!invoice) {
     notFound();
   }
+
+  // Fetch payment accounts for the payment dialog
+  await dbConnect();
+  const paymentAccounts = await Account.find({
+    accountType: "asset",
+    subType: { $in: ["cash", "bank", "m-pesa"] },
+    isActive: true,
+  })
+    .select("_id  accountName code subType")
+    .sort({ name: 1 })
+    .lean();
+
+  console.log(paymentAccounts);
+
+  // Serialize for client component
+  const serializedPaymentAccounts = paymentAccounts.map((acc) => ({
+    _id: acc._id.toString(),
+    name: acc.name,
+    code: acc.code,
+    subType: acc.subType,
+  }));
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-KE", {
@@ -172,15 +196,6 @@ export default async function InvoiceDetailsPage({ params }) {
               <Printer className="mr-2 h-4 w-4" />
               Print
             </Button>
-            {invoice.paymentStatus !== "paid" && (
-              <Button
-                size="sm"
-                className="bg-yellow-500 hover:bg-yellow-600 text-black font-medium"
-              >
-                <DollarSign className="mr-2 h-4 w-4" />
-                Record Payment
-              </Button>
-            )}
           </div>
         </div>
       </div>
@@ -188,7 +203,7 @@ export default async function InvoiceDetailsPage({ params }) {
       {/* Alert for Overdue or Balance */}
       {balanceDue > 0 && invoice.paymentStatus !== "paid" && (
         <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-4 flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 text-orange-600 dark:text-orange-400 flex-shrink-0 mt-0.5" />
+          <AlertCircle className="h-5 w-5 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="font-medium text-orange-600 dark:text-orange-400">
               Payment Pending
@@ -203,7 +218,7 @@ export default async function InvoiceDetailsPage({ params }) {
 
       {invoice.status === "cancelled" && (
         <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 flex items-start gap-3">
-          <XCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+          <XCircle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="font-medium text-red-600 dark:text-red-400">
               Invoice Cancelled
@@ -326,9 +341,9 @@ export default async function InvoiceDetailsPage({ params }) {
                         <td className="px-6 py-4">
                           <div className="flex items-start gap-2">
                             {item.type === "stock" ? (
-                              <Package className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                              <Package className="w-4 h-4 text-blue-500 mt-0.5 hrink-0" />
                             ) : (
-                              <Wrench className="w-4 h-4 text-purple-500 mt-0.5 flex-shrink-0" />
+                              <Wrench className="w-4 h-4 text-purple-500 mt-0.5 shrink-0" />
                             )}
                             <div>
                               <p className="font-medium text-foreground">
@@ -509,30 +524,12 @@ export default async function InvoiceDetailsPage({ params }) {
               <CardHeader className="border-b border-border">
                 <CardTitle className="text-foreground">Quick Actions</CardTitle>
               </CardHeader>
-              <CardContent className="p-6 space-y-2">
-                {invoice.paymentStatus !== "paid" && (
-                  <Button className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-medium">
-                    <DollarSign className="mr-2 h-4 w-4" />
-                    Record Payment
-                  </Button>
-                )}
-                <Button variant="outline" className="w-full border-border">
-                  <Mail className="mr-2 h-4 w-4" />
-                  Send to Customer
-                </Button>
-                <Button variant="outline" className="w-full border-border">
-                  <Download className="mr-2 h-4 w-4" />
-                  Download PDF
-                </Button>
-                {user.role === "Admin" && (
-                  <Button
-                    variant="outline"
-                    className="w-full border-red-500/20 text-red-600 hover:bg-red-500/10"
-                  >
-                    <XCircle className="mr-2 h-4 w-4" />
-                    Cancel Invoice
-                  </Button>
-                )}
+              <CardContent className="p-6">
+                <InvoiceDetailActions
+                  invoice={invoice}
+                  userRole={user.role}
+                  paymentAccounts={serializedPaymentAccounts}
+                />
               </CardContent>
             </Card>
           )}

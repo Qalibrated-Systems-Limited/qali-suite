@@ -1,38 +1,144 @@
 import mongoose from "mongoose";
+import { ErpCounter } from "./erp-counter";
+
+// Import models needed for the approve method
+// These imports ensure models are registered before mongoose.model() is called
+import "@/app/models/fiscalPeriod";
+import "@/app/models/JournalEntry";
+import "@/app/models/taxTransactions";
+import "@/app/models/account";
+import "@/app/models/product";
+import "@/app/models/stockmovement";
 
 const Schema = mongoose.Schema;
 
 // ============================================
-// UTILITY: Format user for audit trail
+// BILL SCHEMA - ACCOUNTS PAYABLE
 // ============================================
-function formatUserForAudit(user) {
-  if (!user) {
-    return { name: "System", id: "system" };
-  }
-  return {
-    name: user.name || user.username || "Unknown User",
-    id: user.id || user._id?.toString() || "unknown",
-  };
-}
+// Design Principles:
+// 1. Single Responsibility - Bill tracks what we owe, not tax compliance
+// 2. Strategic Denormalization - Cache read-heavy data, reference write-heavy
+// 3. Bounded Arrays - Max 50 lines per bill (reasonable business limit)
+// 4. Immutable Snapshots - Supplier info frozen at bill creation
+// 5. Lean Core - Tax tracking in TaxTransaction, Payments in Payment
+// ============================================
+
+const billLineSchema = new Schema(
+  {
+    // Line Identification
+    lineNumber: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    // Product Reference (optional - for inventory items)
+    product: {
+      id: { type: Schema.Types.ObjectId, ref: "Product" },
+      sku: { type: String, uppercase: true, trim: true },
+      name: String,
+    },
+
+    // Line Details
+    description: {
+      type: String,
+      required: [true, "Description is required"],
+      trim: true,
+      maxlength: 500,
+    },
+
+    // Account (required - where to post expense/asset)
+    account: {
+      id: {
+        type: Schema.Types.ObjectId,
+        ref: "Account",
+        required: [true, "Account is required"],
+      },
+      code: String, // Cached for display
+      name: String, // Cached for display
+      type: {
+        type: String,
+        enum: ["expense", "asset"],
+        required: true,
+      },
+    },
+
+    // Quantities & Pricing
+    quantity: {
+      type: Number,
+      required: true,
+      min: [0.001, "Quantity must be positive"],
+    },
+
+    unit: {
+      type: String,
+      default: "pcs",
+      trim: true,
+    },
+
+    unitPrice: {
+      type: Number,
+      required: true,
+      min: [0, "Unit price cannot be negative"],
+    },
+
+    // Calculated: quantity × unitPrice
+    amount: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    // VAT on this line
+    vat: {
+      rate: { type: Number, default: 0, min: 0, max: 100 },
+      amount: { type: Number, default: 0, min: 0 },
+    },
+
+    // Line total: amount + vat.amount
+    lineTotal: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    // PO Reference (if from Purchase Order)
+    poReference: {
+      poId: { type: Schema.Types.ObjectId, ref: "PurchaseOrder" },
+      poNumber: String,
+      poLineIndex: Number,
+    },
+  },
+  { _id: true }
+);
 
 // ============================================
-// BILL SCHEMA - ACCOUNTS PAYABLE (WITH WHT & VAT)
+// MAIN BILL SCHEMA
 // ============================================
 const billSchema = new Schema(
   {
-    // Bill Identification
+    // ==========================================
+    // IDENTIFICATION
+    // ==========================================
     billNumber: {
       type: String,
       required: [true, "Bill number is required"],
       unique: true,
+      uppercase: true,
+      trim: true,
       index: true,
     },
 
+    // Supplier's invoice number (for reconciliation)
     supplierInvoiceNumber: {
       type: String,
       trim: true,
+      index: true,
     },
 
+    // ==========================================
+    // DATES
+    // ==========================================
     billDate: {
       type: Date,
       required: [true, "Bill date is required"],
@@ -43,286 +149,249 @@ const billSchema = new Schema(
       type: Date,
       required: [true, "Due date is required"],
       index: true,
-      validate: {
-        validator: function (value) {
-          return value >= this.billDate;
-        },
-        message: "Due date cannot be before bill date",
-      },
     },
 
-    // Supplier Information
+    // Fiscal period for accounting (YYYY-MM format)
+    fiscalPeriod: {
+      type: String,
+      required: true,
+      match: [/^\d{4}-\d{2}$/, "Fiscal period must be YYYY-MM format"],
+      index: true,
+    },
+
+    // ==========================================
+    // SUPPLIER (Snapshot - immutable after creation)
+    // ==========================================
     supplier: {
-      id: {
-        type: String,
-        required: [true, "Supplier ID is required"],
+      partyId: {
+        type: Schema.Types.ObjectId,
+        ref: "Party",
+        required: [true, "Supplier is required"],
         index: true,
       },
-      name: {
-        type: String,
-        required: [true, "Supplier name is required"],
-        trim: true,
-      },
-      email: {
-        type: String,
-        trim: true,
-        lowercase: true,
-      },
-      phone: {
-        type: String,
-        trim: true,
-      },
+      // Cached at bill creation time (won't change if supplier updates)
+      name: { type: String, required: true, trim: true },
+      taxPin: { type: String, uppercase: true, trim: true },
+      email: { type: String, lowercase: true, trim: true },
+      phone: { type: String, trim: true },
       address: String,
-      taxPin: {
-        type: String,
-        trim: true,
-        uppercase: true,
-      },
     },
 
-    // Bill Lines
+    // WHT Settings (from supplier at time of bill)
+    whtApplicable: {
+      type: Boolean,
+      default: false,
+    },
+
+    whtRate: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 30,
+    },
+
+    // ==========================================
+    // PURCHASE ORDER REFERENCE (optional)
+    // ==========================================
+    purchaseOrder: {
+      poId: { type: Schema.Types.ObjectId, ref: "PurchaseOrder" },
+      poNumber: String,
+    },
+
+    // ==========================================
+    // LINE ITEMS (Bounded: max 50 lines)
+    // ==========================================
     lines: {
-      type: [
+      type: [billLineSchema],
+      validate: [
         {
-          description: {
-            type: String,
-            required: [true, "Line description is required"],
-            trim: true,
+          validator: function (lines) {
+            return lines && lines.length > 0;
           },
-          quantity: {
-            type: Number,
-            required: [true, "Quantity is required"],
-            min: [0.001, "Quantity must be greater than zero"],
+          message: "Bill must have at least one line",
+        },
+        {
+          validator: function (lines) {
+            return lines.length <= 50;
           },
-          unitPrice: {
-            type: Number,
-            required: [true, "Unit price is required"],
-            min: [0, "Unit price cannot be negative"],
-          },
-          amount: {
-            type: Number,
-            required: [true, "Amount is required"],
-            min: [0, "Amount cannot be negative"],
-          },
-          accountId: {
-            type: Schema.Types.ObjectId,
-            ref: "Account",
-            required: [true, "Account is required"],
-          },
-          accountCode: String,
-          accountName: String,
-
-          // VAT on this line
-          taxRate: {
-            type: Number,
-            default: 0,
-            min: [0, "Tax rate cannot be negative"],
-            max: [100, "Tax rate cannot exceed 100%"],
-          },
-          taxAmount: {
-            type: Number,
-            default: 0,
-            min: [0, "Tax amount cannot be negative"],
-          },
-
-          // WHT on this line
-          whtApplicable: {
-            type: Boolean,
-            default: false,
-          },
-          whtRate: {
-            type: Number,
-            default: 0,
-            min: [0, "WHT rate cannot be negative"],
-            max: [100, "WHT rate cannot exceed 100%"],
-          },
-          whtAmount: {
-            type: Number,
-            default: 0,
-            min: [0, "WHT amount cannot be negative"],
-          },
+          message: "Bill cannot have more than 50 lines",
         },
       ],
-      validate: {
-        validator: function (lines) {
-          return lines && lines.length > 0;
-        },
-        message: "Bill must have at least one line item",
+    },
+
+    // ==========================================
+    // AMOUNTS (All calculated, stored for query efficiency)
+    // ==========================================
+    amounts: {
+      // Sum of line amounts (before VAT)
+      subtotal: {
+        type: Number,
+        required: true,
+        min: 0,
       },
-    },
 
-    // Amounts
-    subtotal: {
-      type: Number,
-      required: [true, "Subtotal is required"],
-      min: [0, "Subtotal cannot be negative"],
-    },
+      // Sum of line VAT amounts
+      vat: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
 
-    taxAmount: {
-      type: Number,
-      default: 0,
-      min: [0, "Tax amount cannot be negative"],
-    },
+      // Gross total: subtotal + vat
+      total: {
+        type: Number,
+        required: true,
+        min: 0,
+      },
 
-    withholdingTaxAmount: {
-      type: Number,
-      default: 0,
-      min: [0, "WHT amount cannot be negative"],
-    },
+      // WHT: subtotal × whtRate (if applicable)
+      wht: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
 
-    total: {
-      type: Number,
-      required: [true, "Total is required"],
-      min: [0.01, "Total must be greater than zero"],
-    },
+      // Net payable: total - wht
+      netPayable: {
+        type: Number,
+        required: true,
+        min: 0,
+      },
 
-    netPayable: {
-      type: Number,
-      min: [0, "Net payable cannot be negative"],
+      // Payment tracking
+      paid: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      // Balance: netPayable - paid
+      balance: {
+        type: Number,
+        default: function () {
+          return this.amounts?.netPayable || 0;
+        },
+      },
     },
 
     currency: {
       type: String,
       default: "KES",
       uppercase: true,
-      trim: true,
+      enum: ["KES", "USD", "EUR", "GBP"],
     },
 
-    // WHT Certificate Tracking
-    whtCertificate: {
-      issued: {
-        type: Boolean,
-        default: false,
-      },
-      certificateNumber: String,
-      issuedDate: Date,
-      issuedBy: {
-        name: String,
-        id: String,
-      },
-    },
-
-    // Payment Status
-    paymentStatus: {
-      type: String,
-      enum: {
-        values: ["unpaid", "partial", "paid", "overdue"],
-        message: "{VALUE} is not a valid payment status",
-      },
-      default: "unpaid",
-      index: true,
-    },
-
-    amountPaid: {
-      type: Number,
-      default: 0,
-      min: [0, "Amount paid cannot be negative"],
-    },
-
-    amountDue: {
-      type: Number,
-      default: 0,
-    },
-
-    // Payment History
-    paymentHistory: [
-      {
-        paymentId: {
-          type: Schema.Types.ObjectId,
-          ref: "Payment",
-          required: true,
-        },
-        amount: {
-          type: Number,
-          required: true,
-          min: 0,
-        },
-        paymentDate: {
-          type: Date,
-          required: true,
-        },
-        paymentNumber: String,
-        whtPaid: {
-          type: Number,
-          default: 0,
-          min: 0,
-        },
-        whtRemittedToKRA: {
-          type: Boolean,
-          default: false,
-        },
-        whtRemittanceDate: Date,
-      },
-    ],
-
-    // Accounting Link
-    journalEntryId: {
-      type: Schema.Types.ObjectId,
-      ref: "JournalEntry",
-      index: true,
-    },
-
-    // Status
+    // ==========================================
+    // STATUS & WORKFLOW
+    // ==========================================
     status: {
       type: String,
-      enum: {
-        values: ["draft", "approved", "paid", "cancelled", "disputed"],
-        message: "{VALUE} is not a valid status",
-      },
+      enum: ["draft", "submitted", "approved", "rejected", "cancelled"],
       default: "draft",
       index: true,
     },
 
-    approvedAt: Date,
-    approvedBy: {
-      name: String,
-      id: String,
+    paymentStatus: {
+      type: String,
+      enum: ["unpaid", "partial", "paid"],
+      default: "unpaid",
+      index: true,
     },
 
-    // Notes & Attachments
-    description: String,
-    notes: String,
+    // ==========================================
+    // WORKFLOW TIMESTAMPS
+    // ==========================================
+    submittedAt: Date,
+    submittedBy: { name: String, id: String },
 
-    attachments: [
+    approvedAt: Date,
+    approvedBy: { name: String, id: String },
+
+    rejectedAt: Date,
+    rejectedBy: { name: String, id: String },
+    rejectionReason: String,
+
+    cancelledAt: Date,
+    cancelledBy: { name: String, id: String },
+    cancellationReason: String,
+
+    // ==========================================
+    // ACCOUNTING LINKS (References, not embedded)
+    // ==========================================
+    accounting: {
+      journalEntryId: {
+        type: Schema.Types.ObjectId,
+        ref: "JournalEntry",
+        index: true,
+      },
+      postedAt: Date,
+      postedBy: { name: String, id: String },
+    },
+
+    // Tax transactions created (reference only - details in TaxTransaction)
+    taxTransactions: [
       {
-        filename: String,
-        url: String,
-        size: Number,
-        mimeType: String,
-        uploadedAt: {
-          type: Date,
-          default: Date.now,
-        },
-        uploadedBy: {
-          name: String,
-          id: String,
-        },
+        type: Schema.Types.ObjectId,
+        ref: "TaxTransaction",
       },
     ],
 
-    // Audit Trail
+    // ==========================================
+    // PAYMENT HISTORY (Embedded - bounded, always read together)
+    // Typically 1-2 payments, max ~20
+    // ==========================================
+    payments: {
+      type: [
+        {
+          paymentId: {
+            type: Schema.Types.ObjectId,
+            ref: "Payment",
+            required: true,
+          },
+          paymentNumber: { type: String, required: true },
+          amount: { type: Number, required: true, min: 0 },
+          method: {
+            type: String,
+            enum: ["cash", "mpesa", "bank_transfer", "cheque", "card"],
+          },
+          reference: String, // M-Pesa code, cheque number, etc.
+          paidAt: { type: Date, required: true },
+          recordedBy: { name: String, id: String },
+        },
+      ],
+      validate: {
+        validator: function (v) {
+          return v.length <= 20;
+        },
+        message: "Cannot have more than 20 payments per bill",
+      },
+    },
+
+    // ==========================================
+    // NOTES
+    // ==========================================
+    description: {
+      type: String,
+      maxlength: 1000,
+    },
+
+    internalNotes: {
+      type: String,
+      maxlength: 2000,
+    },
+
+    // ==========================================
+    // AUDIT
+    // ==========================================
     createdBy: {
-      name: {
-        type: String,
-        required: [true, "Creator name is required"],
-      },
-      id: {
-        type: String,
-        required: [true, "Creator ID is required"],
-      },
+      name: { type: String, required: true },
+      id: { type: String, required: true },
     },
 
     lastModifiedBy: {
       name: String,
       id: String,
     },
-
-    cancelledAt: Date,
-    cancelledBy: {
-      name: String,
-      id: String,
-    },
-    cancellationReason: String,
   },
   {
     timestamps: true,
@@ -332,460 +401,335 @@ const billSchema = new Schema(
 );
 
 // ============================================
-// COMPOUND INDEXES FOR QUERY EFFICIENCY
+// INDEXES
 // ============================================
 billSchema.index({ billDate: -1, status: 1 });
 billSchema.index({ dueDate: 1, paymentStatus: 1 });
-billSchema.index({ "supplier.id": 1, status: 1 });
-billSchema.index({ paymentStatus: 1, dueDate: 1 });
-billSchema.index({ status: 1, billDate: -1 });
-
-// WHT-specific indexes
-billSchema.index({ withholdingTaxAmount: 1, status: 1, billDate: -1 });
-billSchema.index({ "paymentHistory.whtRemittedToKRA": 1 });
+billSchema.index({ "supplier.partyId": 1, status: 1 });
+billSchema.index({ fiscalPeriod: 1, status: 1 });
+billSchema.index({ status: 1, paymentStatus: 1 });
 
 // ============================================
 // VIRTUALS
 // ============================================
 billSchema.virtual("isOverdue").get(function () {
   if (this.paymentStatus === "paid") return false;
+  if (this.status !== "approved") return false;
   return new Date() > this.dueDate;
 });
 
 billSchema.virtual("daysOverdue").get(function () {
   if (!this.isOverdue) return 0;
-  const diff = new Date() - this.dueDate;
-  return Math.floor(diff / (1000 * 60 * 60 * 24));
+  return Math.floor((new Date() - this.dueDate) / (1000 * 60 * 60 * 24));
 });
 
-billSchema.virtual("isFullyPaid").get(function () {
-  return this.paymentStatus === "paid";
+billSchema.virtual("daysUntilDue").get(function () {
+  if (this.paymentStatus === "paid") return null;
+  const diff = this.dueDate - new Date();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
 });
 
-billSchema.virtual("hasAttachments").get(function () {
-  return this.attachments && this.attachments.length > 0;
+billSchema.virtual("canEdit").get(function () {
+  return ["draft", "rejected"].includes(this.status);
 });
 
-billSchema.virtual("hasWHT").get(function () {
-  return this.withholdingTaxAmount > 0;
+billSchema.virtual("canSubmit").get(function () {
+  return this.status === "draft";
 });
 
-billSchema.virtual("hasVAT").get(function () {
-  return this.taxAmount > 0;
+billSchema.virtual("canApprove").get(function () {
+  return this.status === "submitted";
 });
 
-billSchema.virtual("whtNeedsRemittance").get(function () {
-  if (!this.hasWHT) return false;
-  return this.paymentHistory.some(
-    (payment) => payment.whtPaid > 0 && !payment.whtRemittedToKRA
-  );
+billSchema.virtual("canPay").get(function () {
+  return this.status === "approved" && this.paymentStatus !== "paid";
+});
+
+billSchema.virtual("canCancel").get(function () {
+  // Can't cancel if any payments made
+  if (this.amounts.paid > 0) return false;
+  return ["draft", "submitted", "approved"].includes(this.status);
+});
+
+billSchema.virtual("lineCount").get(function () {
+  return this.lines?.length || 0;
 });
 
 // ============================================
-// VALIDATION METHODS
+// PRE-SAVE: Calculate amounts
 // ============================================
+billSchema.pre("save", function (next) {
+  // Calculate line totals
+  let subtotal = 0;
+  let totalVat = 0;
 
-/**
- * Validate line item calculations
- */
-billSchema.methods.validateLines = function () {
-  for (const line of this.lines) {
-    // 1. Validate amount = quantity × unit price
-    const calculatedAmount = line.quantity * line.unitPrice;
-    if (Math.abs(calculatedAmount - line.amount) > 0.01) {
-      throw new Error(
-        `Line amount for "${line.description}" incorrect. ` +
-          `Expected: ${calculatedAmount.toFixed(2)}, Got: ${line.amount}`
-      );
-    }
+  this.lines.forEach((line, index) => {
+    line.lineNumber = index + 1;
+    line.amount = Math.round(line.quantity * line.unitPrice * 100) / 100;
+    line.vat.amount =
+      Math.round(line.amount * (line.vat.rate / 100) * 100) / 100;
+    line.lineTotal = line.amount + line.vat.amount;
 
-    // 2. Validate VAT calculation
-    if (line.taxRate > 0) {
-      const calculatedTax = (line.amount * line.taxRate) / 100;
-      if (Math.abs(calculatedTax - line.taxAmount) > 0.01) {
-        throw new Error(
-          `VAT calculation incorrect for "${line.description}". ` +
-            `Expected: ${calculatedTax.toFixed(2)}, Got: ${line.taxAmount}`
-        );
-      }
-    } else if (line.taxAmount > 0) {
-      throw new Error(
-        `Line "${line.description}" has tax amount but no tax rate`
-      );
-    }
-
-    // 3. Validate WHT calculation
-    if (line.whtApplicable && line.whtRate > 0) {
-      const calculatedWHT = (line.amount * line.whtRate) / 100;
-      if (Math.abs(calculatedWHT - line.whtAmount) > 0.01) {
-        throw new Error(
-          `WHT calculation incorrect for "${line.description}". ` +
-            `Expected: ${calculatedWHT.toFixed(2)}, Got: ${line.whtAmount}`
-        );
-      }
-
-      // Validate WHT doesn't exceed line amount
-      if (line.whtAmount > line.amount) {
-        throw new Error(
-          `WHT amount (${line.whtAmount}) cannot exceed line amount (${line.amount}) ` +
-            `for "${line.description}"`
-        );
-      }
-
-      // Warn about unusual WHT rates
-      const validWHTRates = [5, 10, 12, 15, 20];
-      if (!validWHTRates.includes(line.whtRate)) {
-        console.warn(
-          `[Bill ${this.billNumber}] Unusual WHT rate ${line.whtRate}% for "${line.description}". ` +
-            `Common Kenya WHT rates: 5%, 10%, 12%, 15%, 20%`
-        );
-      }
-    } else if (line.whtAmount > 0) {
-      throw new Error(
-        `Line "${line.description}" has WHT amount but WHT not applicable or no rate`
-      );
-    }
-  }
-
-  return true;
-};
-
-/**
- * Validate bill amounts
- */
-billSchema.methods.validateAmounts = function () {
-  // 1. Validate subtotal = sum of line amounts
-  const calculatedSubtotal = this.lines.reduce(
-    (sum, line) => sum + (line.amount || 0),
-    0
-  );
-  if (Math.abs(calculatedSubtotal - this.subtotal) > 0.01) {
-    throw new Error(
-      `Subtotal mismatch. Expected: ${calculatedSubtotal.toFixed(2)}, Got: ${
-        this.subtotal
-      }`
-    );
-  }
-
-  // 2. Validate tax amount = sum of line tax amounts
-  const calculatedTax = this.lines.reduce(
-    (sum, line) => sum + (line.taxAmount || 0),
-    0
-  );
-  if (Math.abs(calculatedTax - this.taxAmount) > 0.01) {
-    throw new Error(
-      `VAT mismatch. Expected: ${calculatedTax.toFixed(2)}, Got: ${
-        this.taxAmount
-      }`
-    );
-  }
-
-  // 3. Validate WHT amount = sum of line WHT amounts
-  const calculatedWHT = this.lines.reduce(
-    (sum, line) => sum + (line.whtAmount || 0),
-    0
-  );
-  if (Math.abs(calculatedWHT - this.withholdingTaxAmount) > 0.01) {
-    throw new Error(
-      `WHT mismatch. Expected: ${calculatedWHT.toFixed(2)}, Got: ${
-        this.withholdingTaxAmount
-      }`
-    );
-  }
-
-  // 4. Validate total = subtotal + VAT
-  const calculatedTotal = this.subtotal + this.taxAmount;
-  if (Math.abs(calculatedTotal - this.total) > 0.01) {
-    throw new Error(
-      `Total mismatch. Subtotal (${this.subtotal}) + VAT (${this.taxAmount}) = ` +
-        `${calculatedTotal.toFixed(2)}, but total is ${this.total}`
-    );
-  }
-
-  // 5. Calculate and validate net payable = total - WHT
-  this.netPayable = this.total - this.withholdingTaxAmount;
-  if (this.netPayable < 0) {
-    throw new Error(
-      `Net payable cannot be negative. Total: ${this.total}, WHT: ${this.withholdingTaxAmount}`
-    );
-  }
-
-  // 6. Calculate amount due
-  this.amountDue = this.netPayable - (this.amountPaid || 0);
-  if (this.amountDue < 0) {
-    this.amountDue = 0; // Overpayment case
-  }
-
-  return true;
-};
-
-/**
- * Validate accounts exist and are valid
- */
-billSchema.methods.validateAccounts = async function () {
-  const Account = mongoose.model("Account");
-
-  for (const line of this.lines) {
-    const account = await Account.findById(line.accountId);
-
-    if (!account) {
-      throw new Error(
-        `Account not found for line "${line.description}" (ID: ${line.accountId})`
-      );
-    }
-
-    if (!account.isActive) {
-      throw new Error(
-        `Account "${account.accountName}" is inactive and cannot be used`
-      );
-    }
-
-    if (!account.canPost) {
-      throw new Error(
-        `Cannot post to header account "${account.accountName}". ` +
-          `Please select a detail account.`
-      );
-    }
-
-    // Validate account type (must be expense or asset for bills)
-    if (!["expense", "asset"].includes(account.accountType)) {
-      throw new Error(
-        `Invalid account type for bill line "${line.description}". ` +
-          `Expected 'expense' or 'asset', got '${account.accountType}'. ` +
-          `Account: ${account.accountName}`
-      );
-    }
-
-    // Cache account details
-    line.accountCode = account.accountCode;
-    line.accountName = account.accountName;
-  }
-
-  return true;
-};
-
-/**
- * Complete validation before approval
- */
-billSchema.methods.validateBeforeApproval = async function () {
-  this.validateLines();
-  this.validateAmounts();
-  await this.validateAccounts();
-  return true;
-};
-
-// ============================================
-// APPROVE BILL (WITH TRANSACTION SAFETY)
-// ============================================
-billSchema.methods.approve = async function (approvedBy) {
-  // Validate status
-  if (this.status !== "draft") {
-    throw new Error(
-      `Can only approve draft bills. Current status: ${this.status}`
-    );
-  }
-
-  // Format user
-  const userInfo = formatUserForAudit(approvedBy);
-
-  // Validate all business rules
-  await this.validateBeforeApproval();
-
-  let journalEntry = null;
-
-  try {
-    // Create and post journal entry
-    journalEntry = await this.createJournalEntry(userInfo);
-
-    // Update bill status
-    this.status = "approved";
-    this.approvedAt = new Date();
-    this.approvedBy = userInfo;
-    this.lastModifiedBy = userInfo;
-
-    await this.save();
-
-    return this;
-  } catch (error) {
-    // Rollback: Clean up journal entry if it was created
-    if (journalEntry?._id) {
-      try {
-        const JournalEntry = mongoose.model("JournalEntry");
-        const je = await JournalEntry.findById(journalEntry._id);
-
-        if (je) {
-          if (je.status === "posted") {
-            await je.reverse(
-              userInfo,
-              `Rollback: Bill approval failed - ${error.message}`
-            );
-          } else {
-            await JournalEntry.findByIdAndDelete(je._id);
-          }
-        }
-      } catch (rollbackError) {
-        console.error(
-          `[CRITICAL] Failed to rollback journal entry ${journalEntry._id}:`,
-          rollbackError
-        );
-      }
-    }
-
-    throw new Error(`Bill approval failed: ${error.message}`);
-  }
-};
-
-// ============================================
-// CREATE JOURNAL ENTRY (BUG-FREE)
-// ============================================
-billSchema.methods.createJournalEntry = async function (user) {
-  // Check if journal entry already exists
-  if (this.journalEntryId) {
-    throw new Error(
-      `Journal entry already exists for this bill (ID: ${this.journalEntryId})`
-    );
-  }
-
-  const Account = mongoose.model("Account");
-  const JournalEntry = mongoose.model("JournalEntry");
-
-  // Format user
-  const userInfo = formatUserForAudit(user);
-
-  // ============================================
-  // STEP 1: Validate all required accounts exist
-  // ============================================
-  const apAccount = await Account.findOne({
-    systemAccount: "accounts_payable",
+    subtotal += line.amount;
+    totalVat += line.vat.amount;
   });
+
+  // Set amounts
+  this.amounts.subtotal = Math.round(subtotal * 100) / 100;
+  this.amounts.vat = Math.round(totalVat * 100) / 100;
+  this.amounts.total = this.amounts.subtotal + this.amounts.vat;
+
+  // Calculate WHT if applicable
+  if (this.whtApplicable && this.whtRate > 0) {
+    this.amounts.wht =
+      Math.round(this.amounts.subtotal * (this.whtRate / 100) * 100) / 100;
+  } else {
+    this.amounts.wht = 0;
+  }
+
+  // Net payable
+  this.amounts.netPayable = this.amounts.total - this.amounts.wht;
+  this.amounts.balance = this.amounts.netPayable - this.amounts.paid;
+
+  // Set fiscal period from bill date if not set
+  if (!this.fiscalPeriod && this.billDate) {
+    const d = new Date(this.billDate);
+    this.fiscalPeriod = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}`;
+  }
+});
+
+// ============================================
+// HELPER: Format user
+// ============================================
+function formatUser(user) {
+  if (!user) return { name: "System", id: "system" };
+  return {
+    name: user.name || user.username || "Unknown",
+    id: user.id || user._id?.toString() || "unknown",
+  };
+}
+
+// ============================================
+// METHOD: Submit for approval
+// ============================================
+billSchema.methods.submit = async function (user) {
+  if (!this.canSubmit) {
+    throw new Error(`Cannot submit bill in status: ${this.status}`);
+  }
+
+  // Validate lines
+  if (!this.lines || this.lines.length === 0) {
+    throw new Error("Bill must have at least one line item");
+  }
+
+  const userInfo = formatUser(user);
+
+  this.status = "submitted";
+  this.submittedAt = new Date();
+  this.submittedBy = userInfo;
+  this.lastModifiedBy = userInfo;
+
+  await this.save();
+  return this;
+};
+
+// ============================================
+// METHOD: Approve (creates JE & Tax Transactions)
+// ============================================
+billSchema.methods.approve = async function (user) {
+  if (!this.canApprove) {
+    throw new Error(`Cannot approve bill in status: ${this.status}`);
+  }
+
+  const FiscalPeriod = mongoose.model("FiscalPeriod");
+  const JournalEntry = mongoose.model("JournalEntry");
+  // const TaxTransaction = mongoose.model("TaxTransaction");
+  const Account = mongoose.model("Account");
+  const Product = mongoose.model("Product");
+  const StockMovement = mongoose.model("StockMovement");
+
+  const userInfo = formatUser(user);
+
+  // ==========================================
+  // 1. Find or Create Fiscal Period (auto-create on-the-fly like QuickBooks/Xero)
+  // ==========================================
+  let fiscalPeriod = await FiscalPeriod.findOne({
+    periodCode: this.fiscalPeriod, // periodCode is "YYYY-MM" format
+  });
+
+  if (!fiscalPeriod) {
+    // Auto-create the fiscal period from bill's fiscalPeriod (YYYY-MM)
+    const [year, month] = this.fiscalPeriod.split("-").map(Number);
+
+    try {
+      fiscalPeriod = await FiscalPeriod.createMonthPeriod(
+        year,
+        month,
+        userInfo
+      );
+    } catch (createError) {
+      // Handle race condition - period may have been created by another request
+      fiscalPeriod = await FiscalPeriod.findOne({
+        periodCode: this.fiscalPeriod,
+      });
+      if (!fiscalPeriod) {
+        throw new Error(
+          `Failed to create fiscal period: ${createError.message}`
+        );
+      }
+    }
+  }
+
+  if (fiscalPeriod.status === "closed") {
+    throw new Error(`Fiscal period ${this.fiscalPeriod} is closed`);
+  }
+
+  if (fiscalPeriod.status === "locked") {
+    throw new Error(`Fiscal period ${this.fiscalPeriod} is locked`);
+  }
+
+  // ==========================================
+  // 2. Get Required System Accounts
+  // ==========================================
+  const [apAccount, vatInputAccount, whtPayableAccount, inventoryAccount] =
+    await Promise.all([
+      Account.findOne({ systemAccount: "accounts_payable" }),
+      Account.findOne({ systemAccount: "vat_input" }),
+      Account.findOne({ systemAccount: "wht_payable" }),
+      Account.findOne({ systemAccount: "inventory" }),
+    ]);
+
   if (!apAccount) {
-    throw new Error(
-      "Accounts Payable account not configured. Please set up system account 'accounts_payable'"
-    );
+    throw new Error("Accounts Payable system account not configured");
   }
 
-  let whtAccount = null;
-  if (this.hasWHT) {
-    whtAccount = await Account.findOne({ systemAccount: "wht_payable" });
-    if (!whtAccount) {
-      throw new Error(
-        "Withholding Tax Payable account not configured. Please set up system account 'wht_payable'"
-      );
-    }
+  if (this.amounts.vat > 0 && !vatInputAccount) {
+    throw new Error("VAT Input system account not configured");
   }
 
-  let vatInputAccount = null;
-  if (this.hasVAT) {
-    vatInputAccount = await Account.findOne({ systemAccount: "vat_input" });
-    if (!vatInputAccount) {
-      throw new Error(
-        "VAT Input account not configured. Please set up system account 'vat_input'"
-      );
-    }
+  if (this.amounts.wht > 0 && !whtPayableAccount) {
+    throw new Error("WHT Payable system account not configured");
   }
 
-  // ============================================
-  // STEP 2: Build journal entry lines
-  // ============================================
-  const lines = [];
+  // ==========================================
+  // 3. Build Journal Entry Lines
+  // ==========================================
+  const jeLines = [];
+  const stockMovements = [];
 
-  // DEBIT: Expense/Asset accounts (without VAT)
+  // Process each bill line
   for (const line of this.lines) {
-    const account = await Account.findById(line.accountId);
+    const isInventoryPurchase =
+      line.product?.id && line.account.type === "asset";
 
-    if (!account) {
-      throw new Error(
-        `Account ${line.accountId} not found for line "${line.description}"`
-      );
+    if (isInventoryPurchase && inventoryAccount) {
+      // Inventory purchase - debit Inventory account
+      jeLines.push({
+        accountId: inventoryAccount._id,
+        accountCode: inventoryAccount.accountCode,
+        accountName: inventoryAccount.accountName,
+        accountType: "asset",
+        debit: line.amount,
+        credit: 0,
+        description: `Purchase: ${line.product.name || line.description} (${
+          line.quantity
+        } ${line.unit})`,
+      });
+
+      // Queue stock movement
+      stockMovements.push({
+        productId: line.product.id,
+        quantity: line.quantity,
+        unitCost: line.unitPrice,
+        totalCost: line.amount,
+        description: line.description,
+      });
+    } else {
+      // Expense/Asset purchase - debit the specified account
+      jeLines.push({
+        accountId: line.account.id,
+        accountCode: line.account.code,
+        accountName: line.account.name,
+        accountType: line.account.type,
+        debit: line.amount,
+        credit: 0,
+        description: line.description,
+      });
     }
-
-    lines.push({
-      accountId: account._id,
-      accountCode: account.accountCode,
-      accountName: account.accountName,
-      accountType: account.accountType,
-      debit: line.amount,
-      credit: 0,
-      description: line.description,
-    });
   }
 
-  // DEBIT: VAT Input (if applicable)
-  if (this.hasVAT) {
-    lines.push({
+  // VAT Input (if applicable)
+  if (this.amounts.vat > 0) {
+    jeLines.push({
       accountId: vatInputAccount._id,
       accountCode: vatInputAccount.accountCode,
       accountName: vatInputAccount.accountName,
-      accountType: vatInputAccount.accountType,
-      debit: this.taxAmount,
+      accountType: "asset",
+      debit: this.amounts.vat,
       credit: 0,
-      description: `VAT Input on purchases from ${this.supplier.name}`,
+      description: `VAT Input - ${this.supplier.name}`,
     });
   }
 
-  // CREDIT: WHT Payable (if applicable)
-  if (this.hasWHT) {
-    lines.push({
-      accountId: whtAccount._id,
-      accountCode: whtAccount.accountCode,
-      accountName: whtAccount.accountName,
-      accountType: whtAccount.accountType,
+  // WHT Payable (if applicable)
+  if (this.amounts.wht > 0) {
+    jeLines.push({
+      accountId: whtPayableAccount._id,
+      accountCode: whtPayableAccount.accountCode,
+      accountName: whtPayableAccount.accountName,
+      accountType: "liability",
       debit: 0,
-      credit: this.withholdingTaxAmount,
-      description: `WHT Payable to KRA - ${this.supplier.name}`,
+      credit: this.amounts.wht,
+      description: `WHT ${this.whtRate}% - ${this.supplier.name}`,
     });
   }
 
-  // CREDIT: Accounts Payable (net payable)
-  lines.push({
+  // Accounts Payable (credit net payable)
+  jeLines.push({
     accountId: apAccount._id,
     accountCode: apAccount.accountCode,
     accountName: apAccount.accountName,
-    accountType: apAccount.accountType,
+    accountType: "liability",
     debit: 0,
-    credit: this.netPayable,
-    description: `Amount owed to ${this.supplier.name}`,
+    credit: this.amounts.netPayable,
+    description: `Payable to ${this.supplier.name}`,
   });
 
-  // ============================================
-  // STEP 3: Validate journal entry is balanced
-  // ============================================
-  const totalDebits = lines.reduce((sum, line) => sum + (line.debit || 0), 0);
-  const totalCredits = lines.reduce((sum, line) => sum + (line.credit || 0), 0);
+  // ==========================================
+  // 4. Validate JE is Balanced
+  // ==========================================
+  const totalDebits = jeLines.reduce((sum, l) => sum + l.debit, 0);
+  const totalCredits = jeLines.reduce((sum, l) => sum + l.credit, 0);
 
   if (Math.abs(totalDebits - totalCredits) > 0.01) {
     throw new Error(
-      `Journal entry not balanced! ` +
-        `Debits: ${totalDebits.toFixed(2)}, Credits: ${totalCredits.toFixed(
-          2
-        )}, ` +
-        `Difference: ${(totalDebits - totalCredits).toFixed(2)}`
+      `Journal entry not balanced: Debits ${totalDebits.toFixed(
+        2
+      )} ≠ Credits ${totalCredits.toFixed(2)}`
     );
   }
 
-  // ============================================
-  // STEP 4: Generate unique entry number
-  // ============================================
-  const entryNumber = await this.generateUniqueEntryNumber();
+  // ==========================================
+  // 5. Create Journal Entry
+  // ==========================================
+  const entryNumber = await this.generateJENumber();
 
-  // ============================================
-  // STEP 5: Create journal entry
-  // ============================================
-  const journalEntry = await JournalEntry.create({
+  const journalEntry = new JournalEntry({
     entryNumber,
     entryDate: this.billDate,
     entryType: "purchase",
-    description: this.buildJournalDescription(),
-    lines,
+    description: `Bill ${this.billNumber} - ${this.supplier.name}`,
+    lines: jeLines,
     party: {
       type: "supplier",
-      id: this.supplier.id,
+      id: this.supplier.partyId.toString(),
       name: this.supplier.name,
-      email: this.supplier.email,
-      phone: this.supplier.phone,
     },
     dueDate: this.dueDate,
-    amountOutstanding: this.netPayable,
+    fiscalPeriod: this.fiscalPeriod,
     relatedDocuments: {
       billId: this._id,
       billNumber: this.billNumber,
@@ -794,306 +738,144 @@ billSchema.methods.createJournalEntry = async function (user) {
     createdBy: userInfo,
   });
 
-  // ============================================
-  // STEP 6: Post journal entry
-  // ============================================
+  await journalEntry.save();
+
+  // Post the journal entry
   try {
     await journalEntry.post(userInfo);
-  } catch (error) {
-    // Clean up draft journal entry
+  } catch (postError) {
     await JournalEntry.findByIdAndDelete(journalEntry._id);
-    throw new Error(`Failed to post journal entry: ${error.message}`);
+    throw new Error(`Failed to post journal entry: ${postError.message}`);
   }
 
-  // ============================================
-  // STEP 7: Link journal entry to bill
-  // ============================================
-  this.journalEntryId = journalEntry._id;
-  // Don't save here - let the caller decide when to save
+  // ==========================================
+  // 6. Create Stock Movements (if any)
+  // ==========================================
+  for (const sm of stockMovements) {
+    try {
+      const product = await Product.findById(sm.productId);
+      if (product) {
+        // Update product inventory
+        if (typeof product.increaseInventory === "function") {
+          await product.increaseInventory(
+            sm.quantity,
+            sm.unitCost,
+            `Purchased via Bill ${this.billNumber}`
+          );
+        }
 
-  return journalEntry;
+        // Create stock movement record
+        const movementNumber = await StockMovement.generateMovementNumber();
+        await StockMovement.create({
+          movementNumber,
+          productId: product._id,
+          productSnapshot: {
+            name: product.name,
+            SKU: product.SKU,
+            category: product.category,
+            unit: product.unit,
+          },
+          movementType: "purchase",
+          direction: "in",
+          quantity: sm.quantity,
+          costing: {
+            unitCost: sm.unitCost,
+            totalCost: sm.totalCost,
+          },
+          relatedDocuments: {
+            billId: this._id,
+            journalEntryId: journalEntry._id,
+          },
+          notes: sm.description,
+          status: "posted",
+          postedAt: new Date(),
+          postedBy: userInfo,
+          performedBy: userInfo,
+        });
+      }
+    } catch (smError) {
+      console.error(
+        `Stock movement error for product ${sm.productId}:`,
+        smError
+      );
+      // Continue - don't fail the whole bill for stock movement issues
+    }
+  }
+
+  // ==========================================
+  // 7. Create Tax Transactions
+  // ==========================================
+  const taxTransactionIds = [];
+
+  try {
+    const taxTransactions = await TaxTransaction.createFromBill(this, userInfo);
+    if (taxTransactions && taxTransactions.length > 0) {
+      taxTransactionIds.push(...taxTransactions.map((t) => t._id));
+    }
+  } catch (taxError) {
+    console.error("Tax transaction creation error:", taxError);
+    // Continue - tax transactions can be created manually
+  }
+
+  // ==========================================
+  // 8. Update Bill Status
+  // ==========================================
+  this.status = "approved";
+  this.approvedAt = new Date();
+  this.approvedBy = userInfo;
+  this.accounting.journalEntryId = journalEntry._id;
+  this.accounting.postedAt = new Date();
+  this.accounting.postedBy = userInfo;
+  this.taxTransactions = taxTransactionIds;
+  this.lastModifiedBy = userInfo;
+
+  await this.save();
+
+  return this;
 };
 
-/**
- * Generate unique journal entry number (with retry logic)
- */
-billSchema.methods.generateUniqueEntryNumber = async function () {
+// ============================================
+// METHOD: Reject
+// ============================================
+billSchema.methods.reject = async function (user, reason) {
+  if (this.status !== "submitted") {
+    throw new Error(`Cannot reject bill in status: ${this.status}`);
+  }
+
+  const userInfo = formatUser(user);
+
+  this.status = "rejected";
+  this.rejectedAt = new Date();
+  this.rejectedBy = userInfo;
+  this.rejectionReason = reason || "No reason provided";
+  this.lastModifiedBy = userInfo;
+
+  await this.save();
+  return this;
+};
+
+// ============================================
+// METHOD: Cancel
+// ============================================
+billSchema.methods.cancel = async function (user, reason) {
+  if (!this.canCancel) {
+    throw new Error(`Cannot cancel bill in status: ${this.status}`);
+  }
+
   const JournalEntry = mongoose.model("JournalEntry");
-  const maxAttempts = 5;
+  const userInfo = formatUser(user);
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    // Get last entry for this type
-    const lastEntry = await JournalEntry.findOne({
-      entryType: "purchase",
-    })
-      .sort({ entryNumber: -1 })
-      .limit(1)
-      .lean();
-
-    // Generate next number
-    let nextNum = 1;
-    if (lastEntry?.entryNumber) {
-      const match = lastEntry.entryNumber.match(/\d+$/);
-      if (match) {
-        nextNum = parseInt(match[0], 10) + 1;
-      }
-    }
-
-    const entryNumber = `JE-BILL-${String(nextNum).padStart(4, "0")}`;
-
-    // Check if this number already exists
-    const exists = await JournalEntry.exists({ entryNumber });
-
-    if (!exists) {
-      return entryNumber;
-    }
-
-    // Wait before retry (exponential backoff)
-    await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-  }
-
-  // Fallback: Use timestamp-based unique number
-  const timestamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `JE-BILL-${timestamp}-${random}`;
-};
-
-/**
- * Build descriptive journal entry description
- */
-billSchema.methods.buildJournalDescription = function () {
-  let desc = `Bill from ${this.supplier.name}`;
-
-  if (this.supplierInvoiceNumber) {
-    desc += ` - Inv #${this.supplierInvoiceNumber}`;
-  }
-
-  const details = [];
-  if (this.hasVAT) {
-    details.push(`VAT: ${this.currency} ${this.taxAmount.toFixed(2)}`);
-  }
-  if (this.hasWHT) {
-    details.push(
-      `WHT: ${this.currency} ${this.withholdingTaxAmount.toFixed(2)}`
-    );
-  }
-
-  if (details.length > 0) {
-    desc += ` (${details.join(", ")})`;
-  }
-
-  return desc;
-};
-
-// ============================================
-// RECORD PAYMENT (WITH PROPORTIONAL WHT)
-// ============================================
-billSchema.methods.recordPayment = async function (
-  paymentId,
-  amount,
-  whtPaid = null
-) {
-  // Validate payment amount
-  if (amount <= 0) {
-    throw new Error("Payment amount must be greater than zero");
-  }
-
-  if (amount > this.amountDue + 0.01) {
-    // Allow 1 cent tolerance for rounding
-    throw new Error(
-      `Payment amount (${amount}) exceeds amount due (${this.amountDue})`
-    );
-  }
-
-  // Get payment record
-  const Payment = mongoose.model("Payment");
-  const payment = await Payment.findById(paymentId);
-
-  if (!payment) {
-    throw new Error(`Payment not found (ID: ${paymentId})`);
-  }
-
-  // Calculate proportional WHT if not provided
-  if (whtPaid === null && this.hasWHT) {
-    const paymentRatio = amount / this.netPayable;
-    whtPaid = this.withholdingTaxAmount * paymentRatio;
-    whtPaid = Math.round(whtPaid * 100) / 100; // Round to 2 decimals
-  } else if (whtPaid === null) {
-    whtPaid = 0;
-  }
-
-  // Validate WHT is proportional (with tolerance for rounding)
-  if (this.hasWHT && whtPaid > 0) {
-    const expectedWHT = (this.withholdingTaxAmount * amount) / this.netPayable;
-    const tolerance = 1; // KES 1 tolerance
-
-    if (Math.abs(whtPaid - expectedWHT) > tolerance) {
-      console.warn(
-        `[Bill ${this.billNumber}] WHT amount (${whtPaid}) differs from ` +
-          `proportional amount (${expectedWHT.toFixed(2)}). Difference: ` +
-          `${Math.abs(whtPaid - expectedWHT).toFixed(2)}`
-      );
-    }
-
-    // Ensure WHT doesn't exceed total WHT
-    if (whtPaid > this.withholdingTaxAmount) {
-      throw new Error(
-        `WHT paid (${whtPaid}) cannot exceed total WHT (${this.withholdingTaxAmount})`
+  // Reverse journal entry if posted
+  if (this.accounting.journalEntryId) {
+    const je = await JournalEntry.findById(this.accounting.journalEntryId);
+    if (je && je.status === "posted") {
+      await je.reverse(
+        userInfo,
+        `Bill ${this.billNumber} cancelled: ${reason}`
       );
     }
   }
 
-  // Add to payment history
-  this.paymentHistory.push({
-    paymentId: payment._id,
-    amount: amount,
-    paymentDate: payment.paymentDate,
-    paymentNumber: payment.paymentNumber,
-    whtPaid: whtPaid,
-    whtRemittedToKRA: false,
-  });
-
-  // Update amounts
-  this.amountPaid += amount;
-  this.amountDue = this.netPayable - this.amountPaid;
-
-  // Handle rounding
-  if (Math.abs(this.amountDue) < 0.01) {
-    this.amountDue = 0;
-  }
-
-  // Update payment status
-  if (this.amountDue <= 0.01) {
-    this.paymentStatus = "paid";
-    this.status = "paid";
-  } else if (this.amountPaid > 0) {
-    this.paymentStatus = "partial";
-  }
-
-  // Update related journal entry
-  if (this.journalEntryId) {
-    const JournalEntry = mongoose.model("JournalEntry");
-    const je = await JournalEntry.findById(this.journalEntryId);
-
-    if (je) {
-      je.amountPaid = this.amountPaid;
-      je.amountOutstanding = this.amountDue;
-      je.isFullyPaid = this.amountDue <= 0.01;
-      await je.save();
-    }
-  }
-
-  await this.save();
-  return this;
-};
-
-// ============================================
-// ISSUE WHT CERTIFICATE
-// ============================================
-billSchema.methods.issueWHTCertificate = async function (
-  issuedBy,
-  certificateNumber
-) {
-  if (!this.hasWHT) {
-    throw new Error("No withholding tax on this bill");
-  }
-
-  if (this.whtCertificate.issued) {
-    throw new Error(
-      `WHT certificate already issued (${this.whtCertificate.certificateNumber})`
-    );
-  }
-
-  if (this.paymentStatus !== "paid") {
-    throw new Error("Bill must be fully paid before issuing WHT certificate");
-  }
-
-  const userInfo = formatUserForAudit(issuedBy);
-
-  this.whtCertificate = {
-    issued: true,
-    certificateNumber: certificateNumber,
-    issuedDate: new Date(),
-    issuedBy: userInfo,
-  };
-
-  this.lastModifiedBy = userInfo;
-  await this.save();
-
-  return this;
-};
-
-// ============================================
-// MARK WHT AS REMITTED TO KRA
-// ============================================
-billSchema.methods.markWHTRemitted = async function (
-  paymentHistoryId,
-  remittedBy
-) {
-  const payment = this.paymentHistory.id(paymentHistoryId);
-
-  if (!payment) {
-    throw new Error(`Payment not found in history (ID: ${paymentHistoryId})`);
-  }
-
-  if (payment.whtPaid <= 0) {
-    throw new Error("No WHT was paid in this payment");
-  }
-
-  if (payment.whtRemittedToKRA) {
-    throw new Error(
-      `WHT already marked as remitted on ${payment.whtRemittanceDate?.toISOString()}`
-    );
-  }
-
-  const userInfo = formatUserForAudit(remittedBy);
-
-  payment.whtRemittedToKRA = true;
-  payment.whtRemittanceDate = new Date();
-
-  this.lastModifiedBy = userInfo;
-  await this.save();
-
-  return this;
-};
-
-// ============================================
-// CANCEL BILL (WITH SAFETY CHECKS)
-// ============================================
-billSchema.methods.cancel = async function (cancelledBy, reason) {
-  // Validate can cancel
-  if (this.status === "paid") {
-    throw new Error("Cannot cancel a fully paid bill");
-  }
-
-  if (this.status === "cancelled") {
-    throw new Error("Bill is already cancelled");
-  }
-
-  if (this.paymentHistory.length > 0) {
-    throw new Error(
-      "Cannot cancel a bill with payment history. Please reverse payments first."
-    );
-  }
-
-  const userInfo = formatUserForAudit(cancelledBy);
-
-  // Reverse journal entry if exists
-  if (this.journalEntryId) {
-    const JournalEntry = mongoose.model("JournalEntry");
-    const journalEntry = await JournalEntry.findById(this.journalEntryId);
-
-    if (journalEntry) {
-      if (journalEntry.status === "posted") {
-        await journalEntry.reverse(userInfo, reason || "Bill cancelled");
-      } else {
-        // Delete draft journal entry
-        await JournalEntry.findByIdAndDelete(journalEntry._id);
-      }
-    }
-  }
-
-  // Update bill status
   this.status = "cancelled";
   this.cancelledAt = new Date();
   this.cancelledBy = userInfo;
@@ -1101,164 +883,261 @@ billSchema.methods.cancel = async function (cancelledBy, reason) {
   this.lastModifiedBy = userInfo;
 
   await this.save();
-
   return this;
 };
 
 // ============================================
-// STATIC METHODS - QUERIES
+// METHOD: Record Payment
 // ============================================
-
-/**
- * Get unpaid bills
- */
-billSchema.statics.getUnpaidBills = function (supplierId = null) {
-  const query = {
-    paymentStatus: { $in: ["unpaid", "partial"] },
-    status: "approved",
-  };
-
-  if (supplierId) {
-    query["supplier.id"] = supplierId;
-  }
-
-  return this.find(query).sort({ dueDate: 1 }).lean();
-};
-
-/**
- * Get overdue bills
- */
-billSchema.statics.getOverdueBills = function (supplierId = null) {
-  const query = {
-    paymentStatus: { $in: ["unpaid", "partial"] },
-    status: "approved",
-    dueDate: { $lt: new Date() },
-  };
-
-  if (supplierId) {
-    query["supplier.id"] = supplierId;
-  }
-
-  return this.find(query).sort({ dueDate: 1 }).lean();
-};
-
-/**
- * Get bills by supplier
- */
-billSchema.statics.getBillsBySupplier = function (supplierId) {
-  return this.find({
-    "supplier.id": supplierId,
-    status: { $ne: "cancelled" },
-  })
-    .sort({ billDate: -1 })
-    .lean();
-};
-
-/**
- * Get bills with unremitted WHT
- */
-billSchema.statics.getBillsWithUnremittedWHT = function () {
-  return this.find({
-    withholdingTaxAmount: { $gt: 0 },
-    "paymentHistory.whtPaid": { $gt: 0 },
-    "paymentHistory.whtRemittedToKRA": false,
-  })
-    .sort({ billDate: -1 })
-    .lean();
-};
-
-/**
- * Get total WHT for a period (for KRA remittance)
- */
-billSchema.statics.getTotalWHTForPeriod = async function (startDate, endDate) {
-  const result = await this.aggregate([
-    {
-      $match: {
-        billDate: { $gte: startDate, $lte: endDate },
-        status: { $in: ["approved", "paid"] },
-        withholdingTaxAmount: { $gt: 0 },
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        totalWHT: { $sum: "$withholdingTaxAmount" },
-        totalBillAmount: { $sum: "$total" },
-        count: { $sum: 1 },
-      },
-    },
-  ]);
-
-  return result[0] || { totalWHT: 0, totalBillAmount: 0, count: 0 };
-};
-
-/**
- * Get WHT report by supplier
- */
-billSchema.statics.getWHTReportBySupplier = async function (
-  startDate,
-  endDate
+billSchema.methods.recordPayment = async function (
+  paymentId,
+  paymentNumber,
+  amount,
+  method,
+  reference,
+  paidAt,
+  recordedBy
 ) {
+  if (!this.canPay) {
+    throw new Error(`Cannot record payment for bill in status: ${this.status}`);
+  }
+
+  if (amount <= 0) {
+    throw new Error("Payment amount must be positive");
+  }
+
+  if (amount > this.amounts.balance + 0.01) {
+    throw new Error(
+      `Payment ${amount} exceeds balance ${this.amounts.balance}`
+    );
+  }
+
+  // Add payment to embedded array
+  this.payments.push({
+    paymentId,
+    paymentNumber,
+    amount,
+    method,
+    reference,
+    paidAt: paidAt || new Date(),
+    recordedBy: recordedBy || { name: "System", id: "system" },
+  });
+
+  // Update amounts
+  this.amounts.paid += amount;
+  this.amounts.balance = this.amounts.netPayable - this.amounts.paid;
+
+  // Handle rounding
+  if (Math.abs(this.amounts.balance) < 0.01) {
+    this.amounts.balance = 0;
+  }
+
+  // Update payment status
+  if (this.amounts.balance <= 0) {
+    this.paymentStatus = "paid";
+  } else {
+    this.paymentStatus = "partial";
+  }
+
+  await this.save();
+  return this;
+};
+
+// ============================================
+// METHOD: Reverse Payment (for payment cancellation)
+// ============================================
+billSchema.methods.reversePayment = async function (paymentId, amount) {
+  // Find and remove the payment from array
+  const paymentIndex = this.payments.findIndex(
+    (p) => p.paymentId.toString() === paymentId.toString()
+  );
+
+  if (paymentIndex === -1) {
+    throw new Error("Payment not found on this bill");
+  }
+
+  // Remove from array
+  this.payments.splice(paymentIndex, 1);
+
+  // Update amounts
+  this.amounts.paid = Math.max(0, this.amounts.paid - amount);
+  this.amounts.balance = this.amounts.netPayable - this.amounts.paid;
+
+  // Update payment status
+  if (this.amounts.paid <= 0) {
+    this.paymentStatus = "unpaid";
+  } else if (this.amounts.balance > 0) {
+    this.paymentStatus = "partial";
+  }
+
+  await this.save();
+  return this;
+};
+
+// ============================================
+// METHOD: Generate JE Number
+// ============================================
+billSchema.methods.generateJENumber = async function () {
+  const { generateUniqueEntryNumber } = await import(
+    "@/lib/utils/server-utils"
+  );
+  return generateUniqueEntryNumber("BILL");
+};
+
+// ============================================
+// STATIC: Generate Bill Number
+// ============================================
+// ============================================
+// ATOMIC BILL NUMBER GENERATION
+// ============================================
+// Add this to your Counter model or create one:
+
+// ============================================
+// STATIC: Generate Bill Number (Atomic with Verification)
+// ============================================
+billSchema.statics.generateBillNumber = async function (session = null) {
+  const ErpCounter = mongoose.model("ErpCounter");
+  const date = new Date();
+  const prefix = `QSL-BILL-${date.getFullYear()}${String(
+    date.getMonth() + 1
+  ).padStart(2, "0")}`;
+  const counterId = `bill-${date.getFullYear()}${String(
+    date.getMonth() + 1
+  ).padStart(2, "0")}`;
+  const queryOptions = session ? { session } : {};
+
+  const maxAttempts = 5;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const seq = await ErpCounter.getNextSequence(counterId, session);
+      const billNumber = `${prefix}-${String(seq).padStart(4, "0")}`;
+
+      // Verify this number doesn't already exist (handles stale counters)
+      const exists = await this.exists({ billNumber, ...queryOptions });
+      if (!exists) {
+        return billNumber;
+      }
+
+      // Number exists - counter was stale, try again
+      console.warn(`Bill number ${billNumber} already exists, retrying...`);
+      continue;
+    } catch (counterError) {
+      // Counter failed - use query-based fallback
+      console.warn(
+        `Counter failed for ${counterId}, attempt ${attempt + 1}:`,
+        counterError.message
+      );
+
+      const lastBill = await this.findOne(
+        { billNumber: { $regex: `^${prefix}` } },
+        null,
+        queryOptions
+      )
+        .sort({ billNumber: -1 })
+        .lean();
+
+      let nextNum = 1;
+      if (lastBill?.billNumber) {
+        const match = lastBill.billNumber.match(/(\d+)$/);
+        if (match) nextNum = parseInt(match[1], 10) + 1;
+      }
+
+      const billNumber = `${prefix}-${String(nextNum).padStart(4, "0")}`;
+
+      const exists = await this.exists({ billNumber, ...queryOptions });
+      if (!exists) {
+        return billNumber;
+      }
+    }
+
+    // Exponential backoff before retry
+    await new Promise((resolve) =>
+      setTimeout(resolve, 50 * Math.pow(2, attempt))
+    );
+  }
+
+  // Ultimate fallback with timestamp - guaranteed unique
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).substring(2, 4).toUpperCase();
+  return `${prefix}-${timestamp}${random}`;
+};
+
+// ============================================
+// STATIC: Get by Supplier
+// ============================================
+billSchema.statics.getBySupplier = function (supplierId, status = null) {
+  const query = { "supplier.partyId": supplierId };
+  if (status) {
+    query.status = Array.isArray(status) ? { $in: status } : status;
+  }
+  return this.find(query).sort({ billDate: -1 });
+};
+
+// ============================================
+// STATIC: Get Unpaid
+// ============================================
+billSchema.statics.getUnpaid = function () {
+  return this.find({
+    status: "approved",
+    paymentStatus: { $in: ["unpaid", "partial"] },
+  }).sort({ dueDate: 1 });
+};
+
+// ============================================
+// STATIC: Get Overdue
+// ============================================
+billSchema.statics.getOverdue = function () {
+  return this.find({
+    status: "approved",
+    paymentStatus: { $in: ["unpaid", "partial"] },
+    dueDate: { $lt: new Date() },
+  }).sort({ dueDate: 1 });
+};
+
+// ============================================
+// STATIC: Get AP Aging
+// ============================================
+billSchema.statics.getAPAging = async function () {
+  const now = new Date();
+  const d30 = new Date(now - 30 * 24 * 60 * 60 * 1000);
+  const d60 = new Date(now - 60 * 24 * 60 * 60 * 1000);
+  const d90 = new Date(now - 90 * 24 * 60 * 60 * 1000);
+
   return this.aggregate([
     {
       $match: {
-        billDate: { $gte: startDate, $lte: endDate },
-        status: { $in: ["approved", "paid"] },
-        withholdingTaxAmount: { $gt: 0 },
-      },
-    },
-    {
-      $group: {
-        _id: {
-          supplierId: "$supplier.id",
-          supplierName: "$supplier.name",
-          taxPin: "$supplier.taxPin",
-        },
-        totalWHT: { $sum: "$withholdingTaxAmount" },
-        totalBillAmount: { $sum: "$total" },
-        billCount: { $sum: 1 },
+        status: "approved",
+        paymentStatus: { $in: ["unpaid", "partial"] },
       },
     },
     {
       $project: {
-        _id: 0,
-        supplierId: "$_id.supplierId",
-        supplierName: "$_id.supplierName",
-        taxPin: "$_id.taxPin",
-        totalWHT: 1,
-        totalBillAmount: 1,
-        billCount: 1,
-      },
-    },
-    {
-      $sort: { totalWHT: -1 },
-    },
-  ]);
-};
-
-/**
- * Get bills summary for a supplier
- */
-billSchema.statics.getSupplierSummary = async function (supplierId) {
-  const result = await this.aggregate([
-    {
-      $match: {
-        "supplier.id": supplierId,
-        status: { $ne: "cancelled" },
+        balance: "$amounts.balance",
+        dueDate: 1,
+        supplier: 1,
+        bucket: {
+          $switch: {
+            branches: [
+              { case: { $gte: ["$dueDate", now] }, then: "current" },
+              { case: { $gte: ["$dueDate", d30] }, then: "1-30" },
+              { case: { $gte: ["$dueDate", d60] }, then: "31-60" },
+              { case: { $gte: ["$dueDate", d90] }, then: "61-90" },
+            ],
+            default: "90+",
+          },
+        },
       },
     },
     {
       $group: {
-        _id: "$paymentStatus",
+        _id: "$bucket",
+        total: { $sum: "$balance" },
         count: { $sum: 1 },
-        totalAmount: { $sum: "$netPayable" },
-        totalPaid: { $sum: "$amountPaid" },
-        totalDue: { $sum: "$amountDue" },
       },
     },
+    { $sort: { _id: 1 } },
   ]);
-
-  return result;
 };
 
 // ============================================
@@ -1266,7 +1145,7 @@ billSchema.statics.getSupplierSummary = async function (supplierId) {
 // ============================================
 const models = mongoose.models;
 let Bill = models?.Bill;
-
+//
 if (!Bill) {
   Bill = mongoose.model("Bill", billSchema);
 }

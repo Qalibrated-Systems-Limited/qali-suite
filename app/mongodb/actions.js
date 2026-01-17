@@ -19,6 +19,7 @@ import {
 import { AuthError } from "next-auth";
 import { signIn, signOut } from "../../auth";
 import Account from "../models/account";
+import Party from "../models/parties";
 import { auth } from "../../auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -659,12 +660,30 @@ export async function createInvoice(state, formData) {
 
     const data = validatedFields.data;
 
-    const account = await Account.findById(data.customerId);
+    const party = await Party.findById(data.customerId);
     let invoiceNumber = "1";
 
-    if (!account) {
+    if (!party) {
       return { message: "No customer was found" };
     }
+
+    // Verify it's a customer
+    if (party.type !== "customer" && party.type !== "both") {
+      return { message: "Selected party is not a customer" };
+    }
+
+    // Format address from Party model
+    const formatAddress = (address) => {
+      if (!address) return "";
+      const parts = [
+        address.line1,
+        address.line2,
+        address.city,
+        address.postalCode,
+        address.country,
+      ].filter(Boolean);
+      return parts.join(", ");
+    };
 
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // e.g., 20241031
     const counter = await Counter.findOneAndUpdate(
@@ -675,12 +694,12 @@ export async function createInvoice(state, formData) {
 
     invoiceNumber = `INV-${today}-${counter.seq.toString().padStart(4, "0")}`; // e.g., 20241031-0001
     const customer = {
-      name: account.name,
-      address: account.address,
-
-      id: account._id.toString(),
-      email: account.email,
-      phone: account.phone,
+      name: party.displayName || party.name,
+      address: formatAddress(party.address),
+      id: party._id.toString(),
+      email: party.email,
+      phone: party.phone,
+      taxPin: party.taxPin || "",
     };
     const invoice = Invoice({
       description: data.description,
@@ -828,19 +847,37 @@ export async function updateInvoice(id, prevState, formData) {
 
     const data = validatedFields.data;
 
-    const account = await Account.findById(data.customerId);
+    const party = await Party.findById(data.customerId);
 
-    if (!account) {
+    if (!party) {
       return { message: "No customer was found" };
     }
 
-    const customer = {
-      name: account.name,
-      address: account.address,
+    // Verify it's a customer
+    if (party.type !== "customer" && party.type !== "both") {
+      return { message: "Selected party is not a customer" };
+    }
 
-      id: account._id.toString(),
-      email: account.email,
-      phone: account.phone,
+    // Format address from Party model
+    const formatAddress = (address) => {
+      if (!address) return "";
+      const parts = [
+        address.line1,
+        address.line2,
+        address.city,
+        address.postalCode,
+        address.country,
+      ].filter(Boolean);
+      return parts.join(", ");
+    };
+
+    const customer = {
+      name: party.displayName || party.name,
+      address: formatAddress(party.address),
+      id: party._id.toString(),
+      email: party.email,
+      phone: party.phone,
+      taxPin: party.taxPin || "",
     };
 
     const invoice = await Invoice.findOneAndUpdate(
@@ -942,13 +979,19 @@ export async function addDNote(state, formData) {
 
     const cart = userWithCart.cart;
 
-    const account = await Account.findById(data.customerId).session(
+    const party = await Party.findById(data.customerId).session(
       mongodbSession
     );
     let dNoteNumber = "1";
 
-    if (!account) {
+    if (!party) {
       return { message: "No customer was found" };
+    }
+
+    // Verify it's a customer
+    if (party.type !== "customer" && party.type !== "both") {
+      await mongodbSession.abortTransaction();
+      return { message: "Selected party is not a customer" };
     }
     if (!tech) {
       return { message: "No technician was found" };
@@ -983,11 +1026,26 @@ export async function addDNote(state, formData) {
     );
 
     dNoteNumber = `DN-${today}-${counter.seq.toString().padStart(4, "0")}`;
-    const customer = {
-      name: account.name,
-      address: account.address,
 
-      phone: account.phone,
+    // Format address from Party model
+    const formatAddress = (address) => {
+      if (!address) return "";
+      const parts = [
+        address.line1,
+        address.line2,
+        address.city,
+        address.postalCode,
+        address.country,
+      ].filter(Boolean);
+      return parts.join(", ");
+    };
+
+    const customer = {
+      name: party.displayName || party.name,
+      address: formatAddress(party.address),
+      phone: party.phone,
+      email: party.email || "",
+      taxPin: party.taxPin || "",
     };
     let shouldBeReturned = true;
     if (data.reason === "Selling") {
