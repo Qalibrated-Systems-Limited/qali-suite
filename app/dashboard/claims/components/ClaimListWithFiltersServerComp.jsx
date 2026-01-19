@@ -5,6 +5,7 @@ import {
 import { auth } from "@/auth";
 import React from "react";
 import { ClaimsListWithFilters } from "./ClaimListWithFilter";
+import { serializeBsonType } from "@/lib/utils";
 
 async function ClaimListWithFiltersServerComp({ AreMyclaims = true, params }) {
   console.log("searchParams in ClaimListWithFiltersServerComp:", params);
@@ -48,6 +49,9 @@ async function ClaimListWithFiltersServerComp({ AreMyclaims = true, params }) {
   }
 
   claims = await searchClaims(query, currentPage, filters);
+  if (claims && claims.length > 0) {
+    claims = serializeBsonType(claims);
+  }
 
   return (
     <ClaimsListWithFilters

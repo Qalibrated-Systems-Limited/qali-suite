@@ -126,6 +126,13 @@ const getNavigationGroups = (user) => [
     defaultOpen: false,
     items: [
       {
+        icon: FileText,
+        label: "Quotes",
+        id: "quotes",
+        href: "/dashboard/quotes",
+        hidden: !["Admin", "Accountant", "Sales"].includes(user?.role),
+      },
+      {
         icon: Receipt,
         label: "Invoices",
         id: "invoices",
@@ -168,6 +175,13 @@ const getNavigationGroups = (user) => [
     items: [
       {
         icon: FileText,
+        label: "Purchase Orders",
+        id: "purchase-orders",
+        href: "/dashboard/purchase-orders",
+        hidden: !["Admin", "Accountant", "Store Manager"].includes(user?.role),
+      },
+      {
+        icon: Receipt,
         label: "Bills",
         id: "bills",
         href: "/dashboard/bills",

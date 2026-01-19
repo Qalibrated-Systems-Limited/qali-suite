@@ -1,0 +1,379 @@
+import dbConnect from "../../config/dbConnect";
+import PurchaseOrder from "../../models/purchaseOrder";
+import Party from "../../models/parties";
+import Product from "../../models/product";
+import Account from "../../models/account";
+import { serializeBsonType } from "@/lib/utils";
+
+// ============================================
+// FETCH ACTIVE SUPPLIERS
+// ============================================
+export const fetchActiveSuppliers = async () => {
+  await dbConnect();
+
+  const suppliers = await Party.find({
+    type: { $in: ["supplier", "both"] },
+    isActive: true,
+  })
+    .sort({ name: 1 })
+    .lean();
+
+  // Format address helper
+  const formatAddress = (address) => {
+    if (!address) return "";
+    const parts = [
+      address.line1,
+      address.line2,
+      address.city,
+      address.postalCode,
+      address.country,
+    ].filter(Boolean);
+    return parts.join(", ");
+  };
+
+  return suppliers.map((supplier) => ({
+    _id: supplier._id.toString(),
+    name: supplier.displayName || supplier.name,
+    email: supplier.email || "",
+    phone: supplier.phone || "",
+    address: formatAddress(supplier.address),
+    taxPin: supplier.taxPin || "",
+    // WHT settings
+    whtApplicable: supplier.whtApplicable || false,
+    whtRate: supplier.whtRate || 0,
+    // Payment terms
+    paymentTerms: supplier.paymentTerms || 30,
+  }));
+};
+
+// ============================================
+// FETCH ALL PRODUCTS (For PO - all products, not just in stock)
+// ============================================
+export const fetchAllProducts = async () => {
+  await dbConnect();
+
+  const products = await Product.find({
+    status: "active",
+  })
+    .sort({ name: 1 })
+    .lean();
+
+  return products.map((product) => ({
+    _id: product._id.toString(),
+    name: product.name,
+    SKU: product.SKU,
+    unit: product.unit,
+    category: product.category,
+    // ERP costing & pricing
+    costPrice: product.costing?.costPrice || product.price || 0,
+    lastPurchaseCost: product.costing?.lastPurchaseCost || 0,
+    sellingPrice: product.pricing?.sellingPrice || product.price || 0,
+    // Current stock (for reference)
+    stock: product.inventory?.quantityOnHand ?? product.stock ?? 0,
+    reorderLevel: product.inventory?.reorderLevel || 0,
+  }));
+};
+
+// ============================================
+// FETCH EXPENSE/ASSET ACCOUNTS (For PO lines)
+// ============================================
+export const fetchPurchaseAccounts = async () => {
+  await dbConnect();
+
+  const accounts = await Account.find({
+    accountType: { $in: ["expense", "asset"] },
+    isActive: true,
+    canPost: { $ne: false }, // Exclude header accounts
+  })
+    .sort({ accountCode: 1 })
+    .lean();
+
+  return accounts.map((account) => ({
+    _id: account._id.toString(),
+    code: account.accountCode,
+    name: account.accountName,
+    type: account.accountType,
+    subType: account.subType,
+    fullName: `${account.accountCode} - ${account.accountName}`,
+  }));
+};
+
+// ============================================
+// SEARCH PURCHASE ORDERS
+// ============================================
+export const searchPurchaseOrders = async (
+  query = "",
+  page = 1,
+  filters = {}
+) => {
+  await dbConnect();
+
+  const ITEMS_PER_PAGE = 10;
+  const skip = (page - 1) * ITEMS_PER_PAGE;
+
+  // Build query conditions
+  const conditions = [];
+
+  // Text search
+  if (query) {
+    conditions.push({
+      $or: [
+        { poNumber: { $regex: query, $options: "i" } },
+        { "supplier.name": { $regex: query, $options: "i" } },
+        { "supplier.taxPin": { $regex: query, $options: "i" } },
+        { notes: { $regex: query, $options: "i" } },
+      ],
+    });
+  }
+
+  // Status filter
+  if (filters.status && filters.status !== "all") {
+    conditions.push({ status: filters.status });
+  }
+
+  // Supplier filter
+  if (filters.supplierId) {
+    conditions.push({ "supplier.partyId": filters.supplierId });
+  }
+
+  // Date range filter
+  if (filters.startDate) {
+    conditions.push({ poDate: { $gte: new Date(filters.startDate) } });
+  }
+  if (filters.endDate) {
+    conditions.push({ poDate: { $lte: new Date(filters.endDate) } });
+  }
+
+  const matchQuery = conditions.length > 0 ? { $and: conditions } : {};
+
+  const purchaseOrders = await PurchaseOrder.find(matchQuery)
+    .sort({ poDate: -1, createdAt: -1 })
+    .skip(skip)
+    .limit(ITEMS_PER_PAGE)
+    .lean();
+
+  return purchaseOrders.map((po) => serializeBsonType(po));
+};
+
+// ============================================
+// FETCH PURCHASE ORDER PAGES (For pagination)
+// ============================================
+export const fetchPurchaseOrderPages = async (query = "", filters = {}) => {
+  await dbConnect();
+
+  const ITEMS_PER_PAGE = 10;
+
+  // Build query conditions (same as searchPurchaseOrders)
+  const conditions = [];
+
+  if (query) {
+    conditions.push({
+      $or: [
+        { poNumber: { $regex: query, $options: "i" } },
+        { "supplier.name": { $regex: query, $options: "i" } },
+        { "supplier.taxPin": { $regex: query, $options: "i" } },
+        { notes: { $regex: query, $options: "i" } },
+      ],
+    });
+  }
+
+  if (filters.status && filters.status !== "all") {
+    conditions.push({ status: filters.status });
+  }
+
+  if (filters.supplierId) {
+    conditions.push({ "supplier.partyId": filters.supplierId });
+  }
+
+  if (filters.startDate) {
+    conditions.push({ poDate: { $gte: new Date(filters.startDate) } });
+  }
+  if (filters.endDate) {
+    conditions.push({ poDate: { $lte: new Date(filters.endDate) } });
+  }
+
+  const matchQuery = conditions.length > 0 ? { $and: conditions } : {};
+
+  const count = await PurchaseOrder.countDocuments(matchQuery);
+  return Math.ceil(count / ITEMS_PER_PAGE);
+};
+
+// ============================================
+// GET PURCHASE ORDER BY ID
+// ============================================
+export const getPurchaseOrderById = async (id) => {
+  await dbConnect();
+
+  const po = await PurchaseOrder.findById(id).lean();
+
+  if (!po) return null;
+
+  return serializeBsonType(po);
+};
+
+// ============================================
+// GET PURCHASE ORDER STATS
+// ============================================
+export const getPurchaseOrderStats = async (filters = {}) => {
+  await dbConnect();
+
+  // Build base query
+  const conditions = [];
+
+  if (filters.startDate) {
+    conditions.push({ poDate: { $gte: new Date(filters.startDate) } });
+  }
+  if (filters.endDate) {
+    conditions.push({ poDate: { $lte: new Date(filters.endDate) } });
+  }
+
+  const baseMatch = conditions.length > 0 ? { $and: conditions } : {};
+
+  const stats = await PurchaseOrder.aggregate([
+    { $match: baseMatch },
+    {
+      $group: {
+        _id: "$status",
+        count: { $sum: 1 },
+        totalValue: { $sum: "$amounts.total" },
+      },
+    },
+  ]);
+
+  // Transform to object
+  const result = {
+    total: 0,
+    totalValue: 0,
+    draft: 0,
+    draftValue: 0,
+    sent: 0,
+    sentValue: 0,
+    confirmed: 0,
+    confirmedValue: 0,
+    partial: 0,
+    partialValue: 0,
+    received: 0,
+    receivedValue: 0,
+    cancelled: 0,
+    cancelledValue: 0,
+    expired: 0,
+    expiredValue: 0,
+  };
+
+  for (const stat of stats) {
+    result.total += stat.count;
+    result.totalValue += stat.totalValue || 0;
+    result[stat._id] = stat.count;
+    result[`${stat._id}Value`] = stat.totalValue || 0;
+  }
+
+  // Calculate open (draft + sent + confirmed + partial)
+  result.open = result.draft + result.sent + result.confirmed + result.partial;
+  result.openValue =
+    result.draftValue +
+    result.sentValue +
+    result.confirmedValue +
+    result.partialValue;
+
+  return result;
+};
+
+// ============================================
+// GET OPEN PURCHASE ORDERS (For receiving)
+// ============================================
+export const getOpenPurchaseOrders = async (supplierId = null) => {
+  await dbConnect();
+
+  const query = {
+    status: { $in: ["sent", "confirmed", "partial"] },
+  };
+
+  if (supplierId) {
+    query["supplier.partyId"] = supplierId;
+  }
+
+  const pos = await PurchaseOrder.find(query)
+    .sort({ expectedDeliveryDate: 1, poDate: -1 })
+    .lean();
+
+  // Filter to only POs with available items
+  return pos
+    .map((po) => ({
+      ...serializeBsonType(po),
+      availableLines: po.lines
+        .filter((line) => line.receivedQuantity < line.quantity)
+        .map((line) => ({
+          lineId: line._id.toString(),
+          product: line.product
+            ? {
+                id: line.product.id?.toString(),
+                sku: line.product.sku,
+                name: line.product.name,
+              }
+            : null,
+          description: line.description,
+          unit: line.unit,
+          unitPrice: line.unitPrice,
+          orderedQuantity: line.quantity,
+          receivedQuantity: line.receivedQuantity,
+          availableQuantity: line.quantity - line.receivedQuantity,
+        })),
+    }))
+    .filter((po) => po.availableLines.length > 0);
+};
+
+// ============================================
+// GET PURCHASE ORDERS BY SUPPLIER
+// ============================================
+export const getPurchaseOrdersBySupplier = async (
+  supplierId,
+  status = null
+) => {
+  await dbConnect();
+
+  const query = { "supplier.partyId": supplierId };
+  if (status) {
+    query.status = Array.isArray(status) ? { $in: status } : status;
+  }
+
+  const pos = await PurchaseOrder.find(query).sort({ poDate: -1 }).lean();
+
+  return pos.map((po) => serializeBsonType(po));
+};
+
+// ============================================
+// GET OVERDUE PURCHASE ORDERS
+// ============================================
+export const getOverduePurchaseOrders = async () => {
+  await dbConnect();
+
+  const now = new Date();
+
+  const pos = await PurchaseOrder.find({
+    status: { $in: ["sent", "confirmed", "partial"] },
+    expectedDeliveryDate: { $lt: now },
+  })
+    .sort({ expectedDeliveryDate: 1 })
+    .lean();
+
+  return pos.map((po) => serializeBsonType(po));
+};
+
+// ============================================
+// GET EXPIRING PURCHASE ORDERS
+// ============================================
+export const getExpiringPurchaseOrders = async (daysAhead = 7) => {
+  await dbConnect();
+
+  const now = new Date();
+  const futureDate = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+
+  const pos = await PurchaseOrder.find({
+    status: { $in: ["draft", "sent"] },
+    validUntil: { $gte: now, $lte: futureDate },
+  })
+    .sort({ validUntil: 1 })
+    .lean();
+
+  return pos.map((po) => serializeBsonType(po));
+};

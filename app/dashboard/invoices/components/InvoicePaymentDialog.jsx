@@ -107,8 +107,6 @@ export function InvoicePaymentDialog({
     onOpenChange(open);
   };
 
-  console.log(paymentAccounts);
-
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">

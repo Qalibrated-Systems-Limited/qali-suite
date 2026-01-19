@@ -6,6 +6,7 @@ import Product from "../models/product";
 import { StockMovement } from "../models/stockmovement";
 import Account from "../models/account";
 import Party from "../models/parties";
+import TaxTransaction from "../models/taxTransactions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { generateInvoiceNumber } from "./queries/invoice-queries";
@@ -84,11 +85,11 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       }
 
       // Check if invoice can be edited
-      if (existingInvoice.status === "paid") {
+      if (existingInvoice.paymentStatus === "paid") {
         await mongoSession.abortTransaction();
         return {
           success: false,
-          error: "Cannot edit paid invoices.",
+          error: "Cannot edit fully paid invoices.",
         };
       }
 
@@ -441,11 +442,14 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       existingInvoice.relatedDocuments.movementIds = newMovementIds;
 
       // Update payment status if amount changed
+      // Recalculate amountDue based on new total
+      existingInvoice.amountDue = total - existingInvoice.amountPaid;
+
       if (existingInvoice.amountPaid > 0) {
-        if (existingInvoice.amountPaid >= total) {
+        if (existingInvoice.amountDue <= 0.01) {
           existingInvoice.paymentStatus = "paid";
-          existingInvoice.status = "paid";
-        } else if (existingInvoice.amountPaid > 0) {
+          // Note: status stays "completed" - we use paymentStatus to track payment state
+        } else {
           existingInvoice.paymentStatus = "partial";
         }
       }
@@ -641,23 +645,17 @@ export async function createInvoice(prevState, formData) {
       status: "draft",
     });
 
-    // ============================================
-    // COMPLETE INVOICE (CREATES JOURNAL ENTRIES + STOCK MOVEMENTS)
-    // ============================================
-    await invoice.complete({
-      name: user.name,
-      id: user.id,
-    });
+    // Note: Invoice stays as draft - user must explicitly post/complete it
+    // This follows standard ERP practice where drafts can be reviewed before posting
 
     revalidatePath("/dashboard/invoices");
-    revalidatePath("/dashboard/stocks");
-    revalidatePath("/dashboard/movements");
 
     return {
-      message: `Invoice ${invoiceNumber} created successfully with journal entries`,
+      message: `Invoice ${invoiceNumber} created as draft. Post it to finalize.`,
       success: true,
       invoiceId: invoice._id.toString(),
       invoiceNumber: invoice.invoiceNumber,
+      status: "draft",
     };
   } catch (error) {
     console.error("Create invoice error:", error);
@@ -796,6 +794,15 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
       return { success: false, error: "Invoice is already fully paid" };
     }
 
+    // Only completed invoices can receive payments
+    if (invoice.status !== "completed") {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: `Can only receive payments on completed invoices. Current status: ${invoice.status}`,
+      };
+    }
+
     if (amount > invoice.amountDue + 0.01) {
       await mongoSession.abortTransaction();
       return {
@@ -921,108 +928,111 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
 // ============================================
 // CANCEL INVOICE
 // ============================================
-export async function cancelInvoice(invoiceId) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+export async function cancelInvoice(invoiceId, reason = "") {
+  const authSession = await auth();
+  const user = authSession?.user;
+
+  if (!user || user.role !== "Admin") {
+    return {
+      message: "Unauthorized - Admin only",
+    };
+  }
+
+  const dbConnect = (await import("@/app/config/dbConnect")).default;
+  await dbConnect();
+
+  const invoice = await Invoice.findById(invoiceId);
+
+  if (!invoice) {
+    return {
+      message: "Invoice not found",
+    };
+  }
 
   try {
-    const authSession = await auth();
-    const user = authSession?.user;
-
-    if (!user || user.role !== "Admin") {
-      await session.abortTransaction();
-      return {
-        message: "Unauthorized - Admin only",
-        success: false,
-      };
-    }
-
-    const invoice = await Invoice.findById(invoiceId).session(session);
-
-    if (!invoice) {
-      await session.abortTransaction();
-      return {
-        message: "Invoice not found",
-        success: false,
-      };
-    }
-
-    if (invoice.status === "paid") {
-      await session.abortTransaction();
-      return {
-        message: "Cannot cancel paid invoice",
-        success: false,
-      };
-    }
-
-    // Restore stock for cancelled invoice
-    for (const item of invoice.items) {
-      if (item.type === "stock" && item.stockDeducted) {
-        await Product.findByIdAndUpdate(
-          item.productId,
-          {
-            $inc: { stock: item.quantity },
-          },
-          { session }
-        );
-
-        // Create reversal movement
-        const product = await Product.findById(item.productId).session(session);
-        const movementNumber = await generateMovementNumber(session);
-
-        await StockMovement.create(
-          [
-            {
-              movementNumber,
-              productId: item.productId,
-              productSnapshot: {
-                name: product.name,
-                SKU: product.SKU,
-                category: product.category,
-                unit: product.unit,
-              },
-              movementType: "adjustment",
-              direction: "in",
-              quantity: item.quantity,
-              previousStock: product.stock - item.quantity,
-              newStock: product.stock,
-              unitPrice: item.unitPrice,
-              totalValue: item.total,
-              performedBy: {
-                name: user.name,
-                id: user.id,
-                role: user.role,
-              },
-              notes: `Invoice cancelled - ${invoice.invoiceNumber}`,
-              reason: "Invoice cancellation - stock restored",
-            },
-          ],
-          { session }
-        );
-      }
-    }
-
-    // Mark invoice as cancelled
-    invoice.status = "cancelled";
-    await invoice.save({ session });
-
-    await session.commitTransaction();
-
-    revalidatePath("/dashboard/invoices");
-    revalidatePath(`/dashboard/invoices/${invoiceId}`);
-
-    return {
-      message: "Invoice cancelled and stock restored",
-      success: true,
-    };
+    // Use the model's cancel method which handles:
+    // - Journal entry reversals
+    // - Stock restoration
+    // - Movement status updates
+    // - Lifetime totals adjustments
+    await invoice.cancel(
+      { name: user.name, id: user.id },
+      reason || `Cancelled by ${user.name}`
+    );
   } catch (error) {
-    await session.abortTransaction();
     console.error("Cancel invoice error:", error);
     return {
-      message: "Database error: failed to cancel invoice",
-      success: false,
+      message: error.message || "Failed to cancel invoice",
     };
-  } finally {
-    session.endSession();
   }
+
+  // Revalidate and redirect on success
+  revalidatePath("/dashboard/invoices");
+  revalidatePath(`/dashboard/invoices/${invoiceId}`);
+  revalidatePath("/dashboard/stocks");
+  revalidatePath("/dashboard/movements");
+  revalidatePath("/dashboard/accounts");
+  redirect("/dashboard/invoices");
+}
+
+// ============================================
+// COMPLETE/POST INVOICE
+// ============================================
+export async function completeInvoice(invoiceId) {
+  const authSession = await auth();
+  const user = authSession?.user;
+
+  if (!user) {
+    return {
+      message: "Unauthorized",
+    };
+  }
+
+  if (user.role !== "Admin" && user.role !== "Accountant") {
+    return {
+      message: "Access denied - Admin or Accountant only",
+    };
+  }
+
+  const dbConnect = (await import("@/app/config/dbConnect")).default;
+  await dbConnect();
+
+  const invoice = await Invoice.findById(invoiceId);
+
+  if (!invoice) {
+    return {
+      message: "Invoice not found",
+    };
+  }
+
+  if (invoice.status !== "draft" && invoice.status !== "sent") {
+    return {
+      message: `Can only complete draft or sent invoices. Current status: ${invoice.status}`,
+    };
+  }
+
+  try {
+    // Use the model's complete method which handles:
+    // - Journal entries (AR, Revenue, VAT Output)
+    // - COGS journal entry (if products)
+    // - Stock movements (deducts inventory)
+    // - Tax transactions (VAT Output)
+    await invoice.complete({
+      name: user.name,
+      id: user.id,
+    });
+  } catch (error) {
+    console.error("Complete invoice error:", error);
+    return {
+      message: error.message || "Failed to post invoice",
+    };
+  }
+
+  // Revalidate and redirect on success
+  revalidatePath("/dashboard/invoices");
+  revalidatePath(`/dashboard/invoices/${invoiceId}`);
+  revalidatePath("/dashboard/stocks");
+  revalidatePath("/dashboard/movements");
+  revalidatePath("/dashboard/accounts");
+  redirect(`/dashboard/invoices/${invoiceId}`);
 }

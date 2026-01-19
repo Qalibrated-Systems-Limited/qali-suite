@@ -73,20 +73,20 @@ async function InvoicesPage(props) {
     searchInvoices(query, currentPage, filters),
     getInvoiceStats(filters),
     Account.find({
-      type: "Asset",
-      subType: { $in: ["Cash", "Bank", "Mobile Money"] },
+      accountType: "asset",
+      subType: { $in: ["cash", "bank", "mpesa"] },
       isActive: true,
     })
-      .select("_id name code subType")
-      .sort({ name: 1 })
+      .select("_id accountName accountCode subType")
+      .sort({ accountName: 1 })
       .lean(),
   ]);
 
   // Serialize payment accounts for client component
   const serializedPaymentAccounts = paymentAccounts.map((acc) => ({
     _id: acc._id.toString(),
-    name: acc.name,
-    code: acc.code,
+    name: acc.accountName,
+    code: acc.accountCode,
     subType: acc.subType,
   }));
 

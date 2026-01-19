@@ -375,6 +375,18 @@ const invoiceSchema = new Schema(
     referenceNumber: String,
     purchaseOrderNumber: String,
 
+    // ============================================
+    // QUOTE REFERENCE (optional - if created from quote)
+    // ============================================
+    quoteRef: {
+      quoteId: {
+        type: Schema.Types.ObjectId,
+        ref: "Quote",
+        index: true,
+      },
+      quoteNumber: String,
+    },
+
     notes: String,
     termsAndConditions: String,
 
@@ -453,7 +465,9 @@ invoiceSchema.index({ "accounting.accountingComplete": 1 });
 // VIRTUALS
 // ============================================
 invoiceSchema.virtual("isOverdue").get(function () {
+  // Only completed, unpaid/partial invoices can be overdue
   if (this.paymentStatus === "paid") return false;
+  if (this.status !== "completed") return false;
   return new Date() > this.dueDate;
 });
 
@@ -567,12 +581,12 @@ invoiceSchema.methods.validateAmounts = function () {
     );
   }
 
-  // Validate total
-  const calculatedTotal = this.subtotal + this.taxAmount;
+  // Validate total: subtotal - discount + tax = total
+  const calculatedTotal = this.subtotal - this.totalDiscount + this.taxAmount;
 
   if (Math.abs(calculatedTotal - this.total) > 0.01) {
     throw new Error(
-      `Total mismatch. Subtotal (${this.subtotal}) + Tax (${this.taxAmount}) = ` +
+      `Total mismatch. Subtotal (${this.subtotal}) - Discount (${this.totalDiscount}) + Tax (${this.taxAmount}) = ` +
         `${calculatedTotal.toFixed(2)}, but total is ${this.total}`
     );
   }
@@ -681,7 +695,10 @@ invoiceSchema.methods.complete = async function (completedBy) {
       const result = await this.createCOGSJournalEntry(userInfo);
       cogsJE = result.journalEntry;
       stockMovements.push(...result.stockMovements);
-      this.accounting.cogsJournalEntryId = cogsJE._id;
+      // Only set cogsJournalEntryId if journal entry was created (may be null for zero-cost items)
+      if (cogsJE?._id) {
+        this.accounting.cogsJournalEntryId = cogsJE._id;
+      }
     }
 
     // 3. Update status
@@ -691,6 +708,12 @@ invoiceSchema.methods.complete = async function (completedBy) {
     this.lastModifiedBy = userInfo;
     this.accounting.accountingComplete = true;
     this.accounting.accountingCompletedAt = new Date();
+
+    // 4. Create VAT Output tax transaction (if tax amount > 0)
+    if (this.taxAmount > 0) {
+      const TaxTransaction = mongoose.model("TaxTransaction");
+      await TaxTransaction.createFromInvoice(this, userInfo);
+    }
 
     await this.save();
 
@@ -843,8 +866,8 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
   }
 
   // Separate items by source
-  let totalCOGSFromInventory = 0;      // Direct sales
-  let totalCOGSFromTechStock = 0;      // Sales from technician requests
+  let totalCOGSFromInventory = 0; // Direct sales
+  let totalCOGSFromTechStock = 0; // Sales from technician requests
   const stockMovements = [];
   const itemsFromInventory = [];
   const itemsFromTechStock = [];
@@ -1041,7 +1064,9 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
 
   for (const { item } of itemsFromTechStock) {
     if (item.relatedRequest?.requestId) {
-      const request = await StockRequest.findById(item.relatedRequest.requestId);
+      const request = await StockRequest.findById(
+        item.relatedRequest.requestId
+      );
 
       if (request) {
         // Find the matching item in the request
@@ -1051,7 +1076,8 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
 
         if (requestItem) {
           // Update invoicing tracking
-          requestItem.invoicedQuantity = (requestItem.invoicedQuantity || 0) + item.quantity;
+          requestItem.invoicedQuantity =
+            (requestItem.invoicedQuantity || 0) + item.quantity;
           requestItem.invoices.push({
             invoiceId: this._id,
             invoiceNumber: this.invoiceNumber,
@@ -1133,15 +1159,37 @@ invoiceSchema.methods.rollbackCompletion = async function (
 /**
  * Generate unique entry number - delegates to centralized utility
  */
-invoiceSchema.methods.generateUniqueEntryNumber = async function (prefix, session = null) {
-  const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
+invoiceSchema.methods.generateUniqueEntryNumber = async function (
+  prefix,
+  session = null
+) {
+  const { generateUniqueEntryNumber } = await import(
+    "@/lib/utils/server-utils"
+  );
   return generateUniqueEntryNumber(prefix, session);
 };
 
 /**
  * Record payment
+ * @param {ObjectId|string} paymentId - The payment ID
+ * @param {number} amount - Amount allocated to this invoice
+ * @param {Object} paymentDetails - Optional payment details to avoid re-querying
+ * @param {Date} paymentDetails.paymentDate
+ * @param {string} paymentDetails.paymentNumber
+ * @param {string} paymentDetails.paymentMethod
  */
-invoiceSchema.methods.recordPayment = async function (paymentId, amount) {
+invoiceSchema.methods.recordPayment = async function (
+  paymentId,
+  amount,
+  paymentDetails = null
+) {
+  // Only completed invoices can accept payments
+  if (this.status !== "completed") {
+    throw new Error(
+      `Can only record payments on completed invoices. Current status: ${this.status}`
+    );
+  }
+
   if (amount <= 0) {
     throw new Error("Payment amount must be greater than zero");
   }
@@ -1152,20 +1200,38 @@ invoiceSchema.methods.recordPayment = async function (paymentId, amount) {
     );
   }
 
-  const Payment = mongoose.model("Payment");
-  const payment = await Payment.findById(paymentId);
+  // Use provided payment details or query for them
+  let paymentDate, paymentNumber, paymentMethod;
 
-  if (!payment) {
-    throw new Error(`Payment not found (ID: ${paymentId})`);
+  if (paymentDetails) {
+    // Use provided details (avoids re-querying within transaction)
+    paymentDate = paymentDetails.paymentDate;
+    paymentNumber = paymentDetails.paymentNumber;
+    paymentMethod = paymentDetails.paymentMethod;
+  } else {
+    // Fallback: query for payment (for backward compatibility)
+    const Payment = mongoose.model("Payment");
+    const payment = await Payment.findById(paymentId);
+
+    if (!payment) {
+      throw new Error(`Payment not found (ID: ${paymentId})`);
+    }
+
+    paymentDate = payment.paymentDate;
+    paymentNumber = payment.paymentNumber;
+    paymentMethod = payment.paymentMethod;
   }
 
   // Add to payment history
   this.paymentHistory.push({
-    paymentId: payment._id,
+    paymentId:
+      typeof paymentId === "string"
+        ? new mongoose.Types.ObjectId(paymentId)
+        : paymentId,
     amount: amount,
-    paymentDate: payment.paymentDate,
-    paymentNumber: payment.paymentNumber,
-    paymentMethod: payment.paymentMethod,
+    paymentDate: paymentDate,
+    paymentNumber: paymentNumber,
+    paymentMethod: paymentMethod,
   });
 
   // Update amounts
@@ -1179,7 +1245,7 @@ invoiceSchema.methods.recordPayment = async function (paymentId, amount) {
   // Update payment status
   if (this.amountDue <= 0.01) {
     this.paymentStatus = "paid";
-    this.status = "paid";
+    // Note: status stays "completed" - we use paymentStatus to track payment state
   } else if (this.amountPaid > 0) {
     this.paymentStatus = "partial";
   }
@@ -1207,8 +1273,10 @@ invoiceSchema.methods.recordPayment = async function (paymentId, amount) {
  * Cancel invoice
  */
 invoiceSchema.methods.cancel = async function (cancelledBy, reason) {
-  if (this.status === "paid") {
-    throw new Error("Cannot cancel a paid invoice");
+  if (this.paymentStatus === "paid") {
+    throw new Error(
+      "Cannot cancel a fully paid invoice. Refund payments first."
+    );
   }
 
   if (this.status === "cancelled") {
@@ -1242,7 +1310,51 @@ invoiceSchema.methods.cancel = async function (cancelledBy, reason) {
     }
   }
 
-  // TODO: Restore inventory (reverse stock movements)
+  // Restore inventory (reverse stock movements for direct sales)
+  const StockMovement = mongoose.model("StockMovement");
+  const Product = mongoose.model("Product");
+
+  const stockMovements = await StockMovement.find({
+    "relatedDocuments.invoiceId": this._id,
+    movementType: "sale",
+    direction: "out",
+  });
+
+  for (const movement of stockMovements) {
+    const product = await Product.findById(movement.productId);
+    if (product) {
+      // Restore the inventory
+      await product.increaseInventory(
+        movement.quantity,
+        movement.costing?.unitCost || 0,
+        `Restored from cancelled invoice ${this.invoiceNumber}`
+      );
+
+      // Reverse lifetime totals
+      if (product.lifetimeTotals) {
+        product.lifetimeTotals.totalQuantitySold =
+          (product.lifetimeTotals.totalQuantitySold || 0) - movement.quantity;
+        product.lifetimeTotals.totalRevenue =
+          (product.lifetimeTotals.totalRevenue || 0) -
+          (movement.costing?.totalValue || 0);
+        product.lifetimeTotals.totalCOGS =
+          (product.lifetimeTotals.totalCOGS || 0) -
+          (movement.costing?.totalCost || 0);
+        product.lifetimeTotals.totalGrossProfit =
+          (product.lifetimeTotals.totalGrossProfit || 0) -
+          ((movement.costing?.totalValue || 0) -
+            (movement.costing?.totalCost || 0));
+        await product.save();
+      }
+    }
+
+    // Mark movement as reversed
+    movement.status = "reversed";
+    movement.reversedAt = new Date();
+    movement.reversedBy = userInfo;
+    movement.reversalReason = reason || "Invoice cancelled";
+    await movement.save();
+  }
 
   // Update invoice status
   this.status = "cancelled";
@@ -1301,7 +1413,7 @@ invoiceSchema.statics.getSalesReport = async function (startDate, endDate) {
     {
       $match: {
         invoiceDate: { $gte: startDate, $lte: endDate },
-        status: { $in: ["completed", "paid"] },
+        status: "completed", // Only completed invoices count for sales
       },
     },
     {

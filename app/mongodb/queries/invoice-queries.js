@@ -4,6 +4,7 @@ import Party from "../../models/parties";
 import Product from "../../models/product";
 import Invoice from "../../models/invoice";
 import Counter from "../../models/counter";
+import { serializeBsonType } from "@/lib/utils";
 
 dbConnect();
 
@@ -45,7 +46,13 @@ export const fetchActiveCustomers = async () => {
 // FETCH AVAILABLE PRODUCTS
 // ============================================
 export const fetchAvailableProducts = async () => {
-  const products = await Product.find({ stock: { $gt: 0 } })
+  // ERP: Use inventory.quantityAvailable (on hand - committed)
+  const products = await Product.find({
+    $or: [
+      { "inventory.quantityAvailable": { $gt: 0 } },
+      { stock: { $gt: 0 } }, // Fallback for legacy products
+    ],
+  })
     .sort({ name: 1 })
     .lean();
 
@@ -53,10 +60,13 @@ export const fetchAvailableProducts = async () => {
     _id: product._id.toString(),
     name: product.name,
     SKU: product.SKU,
-    price: product.price,
-    stock: product.stock,
+    price: product.price, // Legacy field
+    stock: product.inventory?.quantityAvailable ?? product.stock, // Available stock
     unit: product.unit,
     category: product.category,
+    // ERP costing & pricing
+    costing: product.costing,
+    pricing: product.pricing,
   }));
 };
 
@@ -210,7 +220,7 @@ export const searchInvoices = async (
       : { movementIds: [] },
   }));
 
-  return result;
+  return serializeBsonType(result);
 };
 
 // ============================================

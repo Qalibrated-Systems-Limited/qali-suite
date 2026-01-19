@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { useRouter } from "next/navigation";
 import { addProduct } from "../../../mongodb/actions/stock-actions";
 
 import { cn } from "@/lib/utils";
@@ -119,18 +118,10 @@ function FieldError({ errors }) {
 // ADD PRODUCT FORM
 // ============================================
 export  function AddProductForm({ onSuccess, onCancel }) {
-  const router = useRouter();
   const [state, formAction, isPending] = useActionState(addProduct, {});
   const [taxable, setTaxable] = useState(true);
 
-  // Handle successful submission
-  if (state?.success) {
-    if (onSuccess) {
-      onSuccess(state);
-    } else {
-      router.push("/dashboard/stock");
-    }
-  }
+  // Server action handles redirect on success
 
   return (
     <form action={formAction} className="space-y-6">

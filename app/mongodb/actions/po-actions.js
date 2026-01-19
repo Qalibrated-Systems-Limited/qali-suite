@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 
-import PurchaseOrder from "@/app/models/purchas-order";
+import PurchaseOrder from "@/app/models/purchaseOrder";
 import Party from "@/app/models/parties";
 import Product from "@/app/models/product";
 import { z } from "zod";

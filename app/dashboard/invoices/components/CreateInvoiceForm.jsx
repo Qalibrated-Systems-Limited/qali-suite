@@ -88,8 +88,10 @@ export default function CreateInvoiceFormClient({
 
   // Add Stock Item
   const addStockItem = (product) => {
-    const costPrice = Number(product.price);
-    const sellingPrice = costPrice + (costPrice * markupPercentage) / 100;
+    // ERP: Use costing.costPrice for COGS, pricing.sellingPrice for default selling price
+    const costPrice = Number(product.costing?.costPrice) || 0;
+    const defaultSellingPrice = Number(product.pricing?.sellingPrice) || Number(product.price) || 0;
+    const minimumPrice = Number(product.pricing?.minimumPrice) || 0;
 
     const newItem = {
       id: Date.now(),
@@ -100,8 +102,9 @@ export default function CreateInvoiceFormClient({
       availableStock: product.stock,
       quantity: 1,
       costPrice: costPrice,
-      sellingPrice: sellingPrice,
-      total: sellingPrice * 1,
+      sellingPrice: defaultSellingPrice, // Admin can edit this
+      minimumPrice: minimumPrice,
+      total: defaultSellingPrice * 1,
     };
 
     setStockItems([...stockItems, newItem]);
@@ -470,7 +473,7 @@ export default function CreateInvoiceFormClient({
                           <p className="font-medium">{product.name}</p>
                           <p className="text-xs text-muted-foreground">
                             {product.SKU} • Stock: {product.stock} • KES{" "}
-                            {product.price}
+                            {product.pricing?.sellingPrice || product.price}
                           </p>
                         </div>
                         <Plus className="h-4 w-4 text-green-500" />

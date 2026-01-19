@@ -1,0 +1,1076 @@
+"use server";
+
+// ============================================
+// PURCHASE ORDER ACTIONS - MUTATIONS ONLY
+// ============================================
+// Next.js 16 Standards:
+// ✅ useActionState compatible (prevState, formData)
+// ✅ Returns { success, error, fieldErrors } for user feedback
+// ✅ redirect() after successful mutations
+// ✅ revalidatePath() before redirect
+// ✅ No queries - mutations only
+// ✅ Never throws - always returns error objects
+// ✅ MongoDB transactions for data integrity
+//
+// Authorization Matrix:
+// ┌─────────────────────┬────────────┬─────────┬───────┐
+// │ Action              │ Accountant │ Manager │ Admin │
+// ├─────────────────────┼────────────┼─────────┼───────┤
+// │ Create              │ ✅         │ ✅      │ ✅    │
+// │ Update Draft        │ ✅ (own)   │ ✅      │ ✅    │
+// │ Delete Draft        │ ✅ (own)   │ ✅      │ ✅    │
+// │ Send                │ ✅ (own)   │ ✅      │ ✅    │
+// │ Confirm             │ ❌         │ ✅      │ ✅    │
+// │ Cancel              │ ❌         │ ✅      │ ✅    │
+// │ Convert to Bill     │ ✅         │ ✅      │ ✅    │
+// └─────────────────────┴────────────┴─────────┴───────┘
+// ============================================
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { auth } from "@/auth";
+import { z } from "zod";
+import mongoose from "mongoose";
+
+import PurchaseOrder from "@/app/models/purchaseOrder";
+import Party from "@/app/models/parties";
+import Product from "@/app/models/product";
+import Account from "@/app/models/account";
+import dbConnect from "@/app/config/dbConnect";
+
+// ============================================
+// CONSTANTS
+// ============================================
+const PO_ROLES = {
+  CREATE: ["Admin", "Manager", "Accountant", "Store Manager"],
+  SEND: ["Admin", "Manager", "Accountant", "Store Manager"],
+  CONFIRM: ["Admin", "Manager"],
+  CANCEL: ["Admin", "Manager"],
+  CONVERT_TO_BILL: ["Admin", "Manager", "Accountant"],
+};
+
+// ============================================
+// VALIDATION SCHEMAS
+// ============================================
+const POLineSchema = z.object({
+  productId: z.string().optional().nullable(),
+  customProductName: z.string().optional().nullable(),
+  description: z.string().min(1, "Description is required"),
+  accountId: z.string().optional().nullable(), // Optional - for expense categorization
+  quantity: z.coerce.number().positive("Quantity must be positive"),
+  unit: z.string().default("pcs"),
+  unitPrice: z.coerce.number().min(0, "Unit price cannot be negative"),
+  vatRate: z.coerce.number().min(0).max(100).default(16),
+});
+
+const CreatePOSchema = z.object({
+  supplierId: z.string().min(1, "Supplier is required"),
+  poDate: z.coerce.date({ required_error: "PO date is required" }),
+  expectedDeliveryDate: z.coerce.date().optional().nullable(),
+  validUntil: z.coerce.date().optional().nullable(),
+  lines: z.array(POLineSchema).min(1, "At least one line item is required"),
+  whtApplicable: z
+    .string()
+    .transform((val) => val === "true")
+    .default("false"),
+  whtRate: z.coerce.number().min(0).max(30).default(0),
+  deliveryAddress: z.string().optional(),
+  deliveryInstructions: z.string().optional(),
+  notes: z.string().optional(),
+  termsAndConditions: z.string().optional(),
+  internalNotes: z.string().optional(),
+});
+
+const CancelPOSchema = z.object({
+  reason: z.string().min(1, "Cancellation reason is required"),
+});
+
+const ConvertToBillSchema = z.object({
+  supplierInvoiceNumber: z.string().optional(),
+  billDate: z.coerce.date({ required_error: "Bill date is required" }),
+  dueDate: z.coerce.date({ required_error: "Due date is required" }),
+  description: z.string().optional(),
+  internalNotes: z.string().optional(),
+  // lines will be parsed separately as JSON
+});
+
+// ============================================
+// HELPERS
+// ============================================
+
+/**
+ * Format user object for audit trails
+ */
+function formatUser(session) {
+  if (!session?.user) return { name: "System", id: "system" };
+  return {
+    name: session.user.name || "Unknown",
+    id: session.user.id || "unknown",
+  };
+}
+
+/**
+ * Parse FormData with array support (lines[0].description)
+ */
+function parseFormData(formData) {
+  const data = {};
+
+  for (const [key, value] of formData.entries()) {
+    const arrayMatch = key.match(/^(\w+)\[(\d+)\]\.(.+)$/);
+    if (arrayMatch) {
+      const [, arrayName, index, prop] = arrayMatch;
+      if (!data[arrayName]) data[arrayName] = [];
+      if (!data[arrayName][index]) data[arrayName][index] = {};
+      data[arrayName][index][prop] = value;
+    } else {
+      data[key] = value;
+    }
+  }
+
+  // Clean sparse arrays
+  if (data.lines) {
+    data.lines = data.lines.filter(Boolean);
+  }
+
+  return data;
+}
+
+/**
+ * Check if user has required role
+ */
+function hasRole(user, allowedRoles) {
+  return allowedRoles.includes(user?.role);
+}
+
+/**
+ * Check if user owns the resource
+ */
+function isOwner(user, createdBy) {
+  return user?.id === createdBy?.id;
+}
+
+// ============================================
+// CREATE PURCHASE ORDER
+// ============================================
+export async function createPurchaseOrder(prevState, formData) {
+  let mongoSession = null;
+
+  try {
+    // 1. Auth check
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Please sign in to continue" };
+    }
+
+    const user = session.user;
+
+    // 2. Role check
+    if (!hasRole(user, PO_ROLES.CREATE)) {
+      return {
+        success: false,
+        error: "You don't have permission to create purchase orders",
+      };
+    }
+
+    await dbConnect();
+
+    // 3. Parse and validate form data
+    const rawData = parseFormData(formData);
+    const validation = CreatePOSchema.safeParse(rawData);
+
+    if (!validation.success) {
+      const fieldErrors = {};
+      for (const [key, messages] of Object.entries(
+        validation.error.flatten().fieldErrors
+      )) {
+        fieldErrors[key] = messages[0];
+      }
+      return {
+        success: false,
+        error: "Please fix the validation errors",
+        fieldErrors,
+      };
+    }
+
+    const data = validation.data;
+
+    // 4. Start transaction
+    mongoSession = await mongoose.startSession();
+    mongoSession.startTransaction();
+
+    // 5. Validate supplier exists and is correct type
+    const supplier = await Party.findById(data.supplierId)
+      .session(mongoSession)
+      .lean();
+    if (!supplier) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: "Supplier not found",
+        fieldErrors: { supplierId: "Supplier not found" },
+      };
+    }
+
+    if (!["supplier", "both"].includes(supplier.type)) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: "Selected party is not a supplier",
+        fieldErrors: { supplierId: "Selected party is not a supplier" },
+      };
+    }
+
+    // 6. Process line items
+    const processedLines = [];
+
+    for (let i = 0; i < data.lines.length; i++) {
+      const line = data.lines[i];
+
+      // Get account if specified (for expense categorization)
+      let accountData = null;
+      if (line.accountId && line.accountId !== "" && line.accountId !== "none") {
+        const account = await Account.findById(line.accountId)
+          .session(mongoSession)
+          .lean();
+        if (account) {
+          accountData = {
+            id: account._id,
+            code: account.accountCode,
+            name: account.accountName,
+            type: account.accountType,
+          };
+        }
+      }
+
+      // Get product if specified
+      let productData = null;
+      if (
+        line.productId &&
+        line.productId !== "No Product" &&
+        line.productId !== "none" &&
+        line.productId !== ""
+      ) {
+        const product = await Product.findById(line.productId)
+          .session(mongoSession)
+          .lean();
+        if (product) {
+          productData = {
+            id: product._id,
+            sku: product.SKU,
+            name: product.name,
+          };
+        }
+      }
+
+      // Calculate amounts
+      const amount = line.quantity * line.unitPrice;
+      const vatAmount = (amount * line.vatRate) / 100;
+
+      processedLines.push({
+        lineNumber: i + 1,
+        product: productData,
+        description: line.description || productData?.name || line.customProductName || "Item",
+        account: accountData,
+        quantity: line.quantity,
+        unit: line.unit || "pcs",
+        unitPrice: line.unitPrice,
+        amount,
+        vat: {
+          rate: line.vatRate,
+          amount: vatAmount,
+        },
+        lineTotal: amount + vatAmount,
+        receivedQuantity: 0,
+        receivings: [],
+      });
+    }
+
+    // 7. Generate PO number atomically
+    const poNumber = await PurchaseOrder.generatePONumber(mongoSession);
+
+    // 8. Create supplier snapshot (frozen at creation time)
+    const supplierSnapshot = {
+      partyId: supplier._id,
+      name: supplier.name,
+      taxPin: supplier.taxPin || "",
+      email: supplier.email || "",
+      phone: supplier.phone || "",
+      address: supplier.address
+        ? `${supplier.address.line1 || ""}, ${supplier.address.city || ""}`.trim()
+        : "",
+    };
+
+    // 9. Calculate PO amounts
+    const subtotal = processedLines.reduce((sum, line) => sum + line.amount, 0);
+    const vatTotal = processedLines.reduce(
+      (sum, line) => sum + (line.vat?.amount || 0),
+      0
+    );
+    const total = subtotal + vatTotal;
+    const whtAmount = data.whtApplicable ? (subtotal * data.whtRate) / 100 : 0;
+    const netPayable = total - whtAmount;
+
+    // 10. Create purchase order
+    const [po] = await PurchaseOrder.create(
+      [
+        {
+          poNumber,
+          poDate: data.poDate,
+          expectedDeliveryDate: data.expectedDeliveryDate || null,
+          validUntil: data.validUntil || null,
+          supplier: supplierSnapshot,
+          whtApplicable: data.whtApplicable,
+          whtRate: data.whtApplicable ? data.whtRate : 0,
+          lines: processedLines,
+          amounts: {
+            subtotal,
+            vat: vatTotal,
+            total,
+            wht: whtAmount,
+            netPayable,
+          },
+          deliveryAddress: data.deliveryAddress || "",
+          deliveryInstructions: data.deliveryInstructions || "",
+          notes: data.notes || "",
+          termsAndConditions: data.termsAndConditions || "",
+          internalNotes: data.internalNotes || "",
+          status: "draft",
+          bills: [],
+          createdBy: formatUser(session),
+        },
+      ],
+      { session: mongoSession }
+    );
+
+    // 11. Commit transaction
+    await mongoSession.commitTransaction();
+    mongoSession.endSession();
+    mongoSession = null;
+
+    // 12. Revalidate and redirect
+    revalidatePath("/dashboard/purchase-orders");
+    redirect(`/dashboard/purchase-orders/${po._id}?success=PO ${poNumber} created`);
+  } catch (error) {
+    // Handle redirect (it throws NEXT_REDIRECT)
+    if (error?.digest?.startsWith("NEXT_REDIRECT")) {
+      throw error;
+    }
+
+    // Abort transaction on error
+    if (mongoSession) {
+      await mongoSession.abortTransaction();
+    }
+
+    console.error("Create purchase order error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to create purchase order. Please try again.",
+    };
+  } finally {
+    if (mongoSession) {
+      mongoSession.endSession();
+    }
+  }
+}
+
+// ============================================
+// UPDATE PURCHASE ORDER (Draft only)
+// ============================================
+export async function updatePurchaseOrder(poId, prevState, formData) {
+  let mongoSession = null;
+
+  try {
+    // 1. Auth check
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Please sign in to continue" };
+    }
+
+    const user = session.user;
+
+    await dbConnect();
+
+    // 2. Get PO
+    const po = await PurchaseOrder.findById(poId);
+    if (!po) {
+      return { success: false, error: "Purchase order not found" };
+    }
+
+    // 3. Check if editable
+    if (!po.canEdit) {
+      return {
+        success: false,
+        error: `Cannot edit purchase order in ${po.status} status`,
+      };
+    }
+
+    // 4. Authorization: Owner, Manager, or Admin
+    const canEdit =
+      isOwner(user, po.createdBy) || hasRole(user, ["Admin", "Manager"]);
+
+    if (!canEdit) {
+      return {
+        success: false,
+        error: "You can only edit purchase orders you created",
+      };
+    }
+
+    // 5. Parse and validate
+    const rawData = parseFormData(formData);
+    const validation = CreatePOSchema.safeParse(rawData);
+
+    if (!validation.success) {
+      const fieldErrors = {};
+      for (const [key, messages] of Object.entries(
+        validation.error.flatten().fieldErrors
+      )) {
+        fieldErrors[key] = messages[0];
+      }
+      return {
+        success: false,
+        error: "Please fix the validation errors",
+        fieldErrors,
+      };
+    }
+
+    const data = validation.data;
+
+    // 6. Start transaction
+    mongoSession = await mongoose.startSession();
+    mongoSession.startTransaction();
+
+    // 7. Update supplier if changed
+    if (data.supplierId !== po.supplier?.partyId?.toString()) {
+      const supplier = await Party.findById(data.supplierId)
+        .session(mongoSession)
+        .lean();
+      if (!supplier) {
+        await mongoSession.abortTransaction();
+        return {
+          success: false,
+          error: "Supplier not found",
+          fieldErrors: { supplierId: "Supplier not found" },
+        };
+      }
+
+      if (!["supplier", "both"].includes(supplier.type)) {
+        await mongoSession.abortTransaction();
+        return {
+          success: false,
+          error: "Selected party is not a supplier",
+          fieldErrors: { supplierId: "Selected party is not a supplier" },
+        };
+      }
+
+      po.supplier = {
+        partyId: supplier._id,
+        name: supplier.name,
+        taxPin: supplier.taxPin || "",
+        email: supplier.email || "",
+        phone: supplier.phone || "",
+        address: supplier.address
+          ? `${supplier.address.line1 || ""}, ${supplier.address.city || ""}`.trim()
+          : "",
+      };
+    }
+
+    // 8. Process lines
+    const processedLines = [];
+
+    for (let i = 0; i < data.lines.length; i++) {
+      const line = data.lines[i];
+
+      let accountData = null;
+      if (line.accountId && line.accountId !== "" && line.accountId !== "none") {
+        const account = await Account.findById(line.accountId)
+          .session(mongoSession)
+          .lean();
+        if (account) {
+          accountData = {
+            id: account._id,
+            code: account.accountCode,
+            name: account.accountName,
+            type: account.accountType,
+          };
+        }
+      }
+
+      let productData = null;
+      if (
+        line.productId &&
+        line.productId !== "No Product" &&
+        line.productId !== "none" &&
+        line.productId !== ""
+      ) {
+        const product = await Product.findById(line.productId)
+          .session(mongoSession)
+          .lean();
+        if (product) {
+          productData = {
+            id: product._id,
+            sku: product.SKU,
+            name: product.name,
+          };
+        }
+      }
+
+      const amount = line.quantity * line.unitPrice;
+      const vatAmount = (amount * line.vatRate) / 100;
+
+      processedLines.push({
+        lineNumber: i + 1,
+        product: productData,
+        description: line.description || productData?.name || "Item",
+        account: accountData,
+        quantity: line.quantity,
+        unit: line.unit || "pcs",
+        unitPrice: line.unitPrice,
+        amount,
+        vat: {
+          rate: line.vatRate,
+          amount: vatAmount,
+        },
+        lineTotal: amount + vatAmount,
+        receivedQuantity: 0,
+        receivings: [],
+      });
+    }
+
+    // 9. Update PO fields
+    po.poDate = data.poDate;
+    po.expectedDeliveryDate = data.expectedDeliveryDate || null;
+    po.validUntil = data.validUntil || null;
+    po.whtApplicable = data.whtApplicable;
+    po.whtRate = data.whtApplicable ? data.whtRate : 0;
+    po.lines = processedLines;
+    po.deliveryAddress = data.deliveryAddress || "";
+    po.deliveryInstructions = data.deliveryInstructions || "";
+    po.notes = data.notes || "";
+    po.termsAndConditions = data.termsAndConditions || "";
+    po.internalNotes = data.internalNotes || "";
+    po.lastModifiedBy = formatUser(session);
+
+    // Amounts will be recalculated in pre-save hook
+    await po.save({ session: mongoSession });
+
+    // 10. Commit transaction
+    await mongoSession.commitTransaction();
+    mongoSession.endSession();
+    mongoSession = null;
+
+    // 11. Revalidate and redirect
+    revalidatePath("/dashboard/purchase-orders");
+    revalidatePath(`/dashboard/purchase-orders/${poId}`);
+    redirect(`/dashboard/purchase-orders/${poId}?success=PO updated successfully`);
+  } catch (error) {
+    if (error?.digest?.startsWith("NEXT_REDIRECT")) {
+      throw error;
+    }
+
+    if (mongoSession) {
+      await mongoSession.abortTransaction();
+    }
+
+    console.error("Update purchase order error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to update purchase order. Please try again.",
+    };
+  } finally {
+    if (mongoSession) {
+      mongoSession.endSession();
+    }
+  }
+}
+
+// ============================================
+// SEND PURCHASE ORDER
+// ============================================
+export async function sendPurchaseOrder(poId) {
+  try {
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Please sign in to continue" };
+    }
+
+    const user = session.user;
+
+    // Role check
+    if (!hasRole(user, PO_ROLES.SEND)) {
+      return {
+        success: false,
+        error: "You don't have permission to send purchase orders",
+      };
+    }
+
+    await dbConnect();
+
+    const po = await PurchaseOrder.findById(poId);
+    if (!po) {
+      return { success: false, error: "Purchase order not found" };
+    }
+
+    // Authorization: Owner, Manager, or Admin
+    const canSend =
+      isOwner(user, po.createdBy) || hasRole(user, ["Admin", "Manager"]);
+
+    if (!canSend) {
+      return {
+        success: false,
+        error: "You can only send purchase orders you created",
+      };
+    }
+
+    if (!po.canSend) {
+      return {
+        success: false,
+        error: `Cannot send purchase order in ${po.status} status`,
+      };
+    }
+
+    // Use schema method
+    await po.send(formatUser(session));
+
+    revalidatePath("/dashboard/purchase-orders");
+    revalidatePath(`/dashboard/purchase-orders/${poId}`);
+
+    return {
+      success: true,
+      message: `PO ${po.poNumber} sent to supplier`,
+    };
+  } catch (error) {
+    console.error("Send purchase order error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to send purchase order",
+    };
+  }
+}
+
+// ============================================
+// CONFIRM PURCHASE ORDER (Supplier confirmed)
+// ============================================
+export async function confirmPurchaseOrder(poId) {
+  try {
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Please sign in to continue" };
+    }
+
+    const user = session.user;
+
+    // Role check: Only Manager and Admin
+    if (!hasRole(user, PO_ROLES.CONFIRM)) {
+      return {
+        success: false,
+        error: "Only Managers and Admins can confirm purchase orders",
+      };
+    }
+
+    await dbConnect();
+
+    const po = await PurchaseOrder.findById(poId);
+    if (!po) {
+      return { success: false, error: "Purchase order not found" };
+    }
+
+    if (!po.canConfirm) {
+      return {
+        success: false,
+        error: `Cannot confirm purchase order in ${po.status} status. PO must be sent first.`,
+      };
+    }
+
+    // Use schema method
+    await po.confirm(formatUser(session));
+
+    revalidatePath("/dashboard/purchase-orders");
+    revalidatePath(`/dashboard/purchase-orders/${poId}`);
+
+    return {
+      success: true,
+      message: `PO ${po.poNumber} confirmed`,
+    };
+  } catch (error) {
+    console.error("Confirm purchase order error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to confirm purchase order",
+    };
+  }
+}
+
+// ============================================
+// CANCEL PURCHASE ORDER
+// ============================================
+export async function cancelPurchaseOrder(poId, prevState, formData) {
+  try {
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Please sign in to continue" };
+    }
+
+    const user = session.user;
+
+    // Role check
+    if (!hasRole(user, PO_ROLES.CANCEL)) {
+      return {
+        success: false,
+        error: "Only Managers and Admins can cancel purchase orders",
+      };
+    }
+
+    // Validate reason
+    const rawData = Object.fromEntries(formData.entries());
+    const validation = CancelPOSchema.safeParse(rawData);
+
+    if (!validation.success) {
+      return {
+        success: false,
+        error: "Please provide a cancellation reason",
+        fieldErrors: { reason: "Cancellation reason is required" },
+      };
+    }
+
+    await dbConnect();
+
+    const po = await PurchaseOrder.findById(poId);
+    if (!po) {
+      return { success: false, error: "Purchase order not found" };
+    }
+
+    if (!po.canCancel) {
+      return {
+        success: false,
+        error:
+          po.bills && po.bills.length > 0
+            ? "Cannot cancel PO with bills. Cancel/void the bills first."
+            : `Cannot cancel purchase order in ${po.status} status`,
+      };
+    }
+
+    await po.cancel(formatUser(session), validation.data.reason);
+
+    revalidatePath("/dashboard/purchase-orders");
+    revalidatePath(`/dashboard/purchase-orders/${poId}`);
+
+    return {
+      success: true,
+      message: `PO ${po.poNumber} cancelled`,
+    };
+  } catch (error) {
+    console.error("Cancel purchase order error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to cancel purchase order",
+    };
+  }
+}
+
+// ============================================
+// DELETE PURCHASE ORDER (Draft only)
+// ============================================
+export async function deletePurchaseOrder(poId) {
+  try {
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Please sign in to continue" };
+    }
+
+    const user = session.user;
+
+    await dbConnect();
+
+    const po = await PurchaseOrder.findById(poId);
+    if (!po) {
+      return { success: false, error: "Purchase order not found" };
+    }
+
+    // Only drafts can be deleted
+    if (po.status !== "draft") {
+      return {
+        success: false,
+        error:
+          "Only draft purchase orders can be deleted. Use cancel for sent POs.",
+      };
+    }
+
+    // Authorization: Owner, Manager, or Admin
+    const canDelete =
+      isOwner(user, po.createdBy) || hasRole(user, ["Admin", "Manager"]);
+
+    if (!canDelete) {
+      return {
+        success: false,
+        error: "You can only delete purchase orders you created",
+      };
+    }
+
+    const poNumber = po.poNumber;
+    await PurchaseOrder.findByIdAndDelete(poId);
+
+    revalidatePath("/dashboard/purchase-orders");
+
+    return {
+      success: true,
+      message: `PO ${poNumber} deleted`,
+    };
+  } catch (error) {
+    console.error("Delete purchase order error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to delete purchase order",
+    };
+  }
+}
+
+// ============================================
+// CONVERT PO TO BILL
+// ============================================
+export async function convertPOToBill(poId, prevState, formData) {
+  let mongoSession = null;
+
+  try {
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Please sign in to continue" };
+    }
+
+    const user = session.user;
+
+    // Role check
+    if (!hasRole(user, PO_ROLES.CONVERT_TO_BILL)) {
+      return {
+        success: false,
+        error: "You don't have permission to create bills from purchase orders",
+      };
+    }
+
+    await dbConnect();
+
+    // Parse form data
+    const rawData = Object.fromEntries(formData.entries());
+
+    // Parse selected lines from form data
+    // Format: lines[0][lineId], lines[0][quantity], lines[1][lineId], etc.
+    const selectedLines = [];
+    const linePattern = /^lines\[(\d+)\]\[(\w+)\]$/;
+
+    for (const [key, value] of formData.entries()) {
+      const match = key.match(linePattern);
+      if (match) {
+        const index = parseInt(match[1], 10);
+        const field = match[2];
+
+        if (!selectedLines[index]) {
+          selectedLines[index] = {};
+        }
+
+        if (field === "quantity") {
+          selectedLines[index][field] = parseFloat(value);
+        } else {
+          selectedLines[index][field] = value;
+        }
+      }
+    }
+
+    // Filter out empty entries and validate
+    const validLines = selectedLines.filter(
+      (line) => line && line.lineId && line.quantity > 0
+    );
+
+    if (validLines.length === 0) {
+      return {
+        success: false,
+        error: "Please select at least one line to bill",
+      };
+    }
+
+    // Validate form data (excluding selectedLines which is already parsed)
+    const validation = ConvertToBillSchema.safeParse({
+      ...rawData,
+    });
+
+    if (!validation.success) {
+      const fieldErrors = {};
+      for (const [key, messages] of Object.entries(
+        validation.error.flatten().fieldErrors
+      )) {
+        fieldErrors[key] = messages[0];
+      }
+      return {
+        success: false,
+        error: "Please fix the validation errors",
+        fieldErrors,
+      };
+    }
+
+    const data = validation.data;
+
+    // Start transaction
+    mongoSession = await mongoose.startSession();
+    mongoSession.startTransaction();
+
+    // Get PO
+    const po = await PurchaseOrder.findById(poId).session(mongoSession);
+    if (!po) {
+      await mongoSession.abortTransaction();
+      return { success: false, error: "Purchase order not found" };
+    }
+
+    if (!po.canConvertToBill) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: `Cannot create bill from PO in ${po.status} status`,
+      };
+    }
+
+    // Validate selected lines
+    for (const selection of validLines) {
+      const poLine = po.lines.find(
+        (l) => l._id.toString() === selection.lineId.toString()
+      );
+
+      if (!poLine) {
+        await mongoSession.abortTransaction();
+        return {
+          success: false,
+          error: `Line not found on PO: ${selection.lineId}`,
+        };
+      }
+
+      // Available to bill = ordered but not yet received
+      // (In this model, receiving happens when creating a bill)
+      const availableQty = poLine.quantity - (poLine.receivedQuantity || 0);
+
+      if (selection.quantity > availableQty) {
+        await mongoSession.abortTransaction();
+        return {
+          success: false,
+          error: `Quantity ${selection.quantity} exceeds available ${availableQty} for "${poLine.description}"`,
+        };
+      }
+    }
+
+    // Get default inventory account for product lines
+    const inventoryAccount = await Account.findOne({
+      systemAccount: "inventory",
+    }).session(mongoSession);
+
+    // Use schema method to convert
+    const bill = await po.convertToBill(
+      validLines,
+      {
+        supplierInvoiceNumber: data.supplierInvoiceNumber,
+        billDate: data.billDate,
+        dueDate: data.dueDate,
+        description: data.description,
+        internalNotes: data.internalNotes,
+        defaultAccountId: inventoryAccount?._id,
+        defaultAccountCode: inventoryAccount?.accountCode,
+        defaultAccountName: inventoryAccount?.accountName,
+        defaultAccountType: "asset",
+      },
+      formatUser(session)
+    );
+
+    await mongoSession.commitTransaction();
+    mongoSession.endSession();
+    mongoSession = null;
+
+    revalidatePath("/dashboard/purchase-orders");
+    revalidatePath(`/dashboard/purchase-orders/${poId}`);
+    revalidatePath("/dashboard/bills");
+
+    redirect(`/dashboard/bills/${bill._id}?success=Bill ${bill.billNumber} created from PO`);
+  } catch (error) {
+    if (error?.digest?.startsWith("NEXT_REDIRECT")) {
+      throw error;
+    }
+
+    if (mongoSession) {
+      await mongoSession.abortTransaction();
+    }
+
+    console.error("Convert PO to bill error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to create bill from purchase order",
+    };
+  } finally {
+    if (mongoSession) {
+      mongoSession.endSession();
+    }
+  }
+}
+
+// ============================================
+// GET AVAILABLE PO LINES (For bill creation from PO)
+// ============================================
+export async function getAvailablePOLines(poId) {
+  try {
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Please sign in to continue" };
+    }
+
+    await dbConnect();
+
+    const po = await PurchaseOrder.findById(poId).lean();
+    if (!po) {
+      return { success: false, error: "Purchase order not found" };
+    }
+
+    if (!["sent", "confirmed", "partial"].includes(po.status)) {
+      return {
+        success: false,
+        error: `Cannot receive items for PO in ${po.status} status`,
+      };
+    }
+
+    // Get available lines
+    const availableLines = po.lines
+      .filter((line) => line.receivedQuantity < line.quantity)
+      .map((line) => ({
+        lineId: line._id.toString(),
+        product: line.product
+          ? {
+              id: line.product.id?.toString(),
+              sku: line.product.sku,
+              name: line.product.name,
+            }
+          : null,
+        description: line.description,
+        account: line.account
+          ? {
+              id: line.account.id?.toString(),
+              code: line.account.code,
+              name: line.account.name,
+              type: line.account.type,
+            }
+          : null,
+        unit: line.unit,
+        unitPrice: line.unitPrice,
+        vat: line.vat,
+        orderedQuantity: line.quantity,
+        receivedQuantity: line.receivedQuantity,
+        availableQuantity: line.quantity - line.receivedQuantity,
+      }));
+
+    return {
+      success: true,
+      data: {
+        poNumber: po.poNumber,
+        supplier: po.supplier,
+        availableLines,
+      },
+    };
+  } catch (error) {
+    console.error("Get available PO lines error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to get available lines",
+    };
+  }
+}

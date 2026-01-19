@@ -559,6 +559,13 @@ paymentSchema.methods.updateAllocatedDocuments = async function () {
   const Invoice = mongoose.model("Invoice");
   const Bill = mongoose.model("Bill");
 
+  // Prepare payment details to pass to recordPayment (avoids re-querying within transaction)
+  const paymentDetails = {
+    paymentDate: this.paymentDate,
+    paymentNumber: this.paymentNumber,
+    paymentMethod: this.paymentMethod,
+  };
+
   for (const alloc of this.allocations) {
     try {
       if (alloc.documentType === "invoice") {
@@ -566,14 +573,8 @@ paymentSchema.methods.updateAllocatedDocuments = async function () {
         if (invoice && typeof invoice.recordPayment === "function") {
           await invoice.recordPayment(
             this._id,
-            this.paymentNumber,
             alloc.amountAllocated,
-            this.paymentMethod,
-            this.reference ||
-              this.mpesaDetails?.transactionCode ||
-              this.bankDetails?.chequeNumber,
-            this.paymentDate,
-            this.confirmedBy
+            paymentDetails
           );
         }
       } else if (alloc.documentType === "bill") {
@@ -727,7 +728,9 @@ paymentSchema.statics.generatePaymentNumber = async function (
       }
 
       // Number exists - counter was stale, try again
-      console.warn(`Payment number ${paymentNumber} already exists, retrying...`);
+      console.warn(
+        `Payment number ${paymentNumber} already exists, retrying...`
+      );
       continue;
     } catch (counterError) {
       // Counter failed - use query-based fallback
@@ -856,3 +859,4 @@ if (!Payment) {
 }
 
 export default Payment;
+export { Payment };

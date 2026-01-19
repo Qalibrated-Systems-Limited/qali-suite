@@ -595,6 +595,15 @@ taxTransactionSchema.statics.createFromInvoice = async function (
   invoice,
   createdBy
 ) {
+  // Validate invoice object
+  if (!invoice || !invoice._id) {
+    throw new Error("Invalid invoice: missing invoice or invoice._id");
+  }
+
+  if (!invoice.customer || !invoice.customer.id) {
+    throw new Error("Invalid invoice: missing customer information");
+  }
+
   if (invoice.taxAmount <= 0) {
     return null; // No tax to record
   }

@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getInvoiceById } from "@/app/mongodb/queries/invoice-queries";
+import { serializeBsonType } from "@/lib/utils";
 import Account from "@/app/models/account";
 import dbConnect from "@/app/config/dbConnect";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,10 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft,
-  Download,
   Mail,
   Printer,
-  Edit,
   DollarSign,
   XCircle,
   CheckCircle,
@@ -27,6 +26,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { InvoiceDetailActions } from "../components/InvoiceDetailActions";
+import { InvoicePDFDownloadButton } from "../components/InvoicePDFButton";
 
 export default async function InvoiceDetailsPage({ params }) {
   const resolvedParams = await params;
@@ -54,30 +54,31 @@ export default async function InvoiceDetailsPage({ params }) {
     );
   }
 
-  const invoice = await getInvoiceById(resolvedParams.id);
+  let invoice = await getInvoiceById(resolvedParams.id);
 
   if (!invoice) {
     notFound();
   }
 
+  // Serialize BSON types (ObjectId, Date) for client components
+  invoice = serializeBsonType(invoice);
+
   // Fetch payment accounts for the payment dialog
   await dbConnect();
   const paymentAccounts = await Account.find({
     accountType: "asset",
-    subType: { $in: ["cash", "bank", "m-pesa"] },
+    subType: { $in: ["cash", "bank", "mpesa"] },
     isActive: true,
   })
-    .select("_id  accountName code subType")
-    .sort({ name: 1 })
+    .select("_id accountName accountCode subType")
+    .sort({ accountName: 1 })
     .lean();
-
-  console.log(paymentAccounts);
 
   // Serialize for client component
   const serializedPaymentAccounts = paymentAccounts.map((acc) => ({
     _id: acc._id.toString(),
-    name: acc.name,
-    code: acc.code,
+    name: acc.accountName,
+    code: acc.accountCode,
     subType: acc.subType,
   }));
 
@@ -172,14 +173,7 @@ export default async function InvoiceDetailsPage({ params }) {
 
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-border hover:bg-accent"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Download PDF
-            </Button>
+            <InvoicePDFDownloadButton invoice={invoice} />
             <Button
               variant="outline"
               size="sm"
@@ -372,7 +366,7 @@ export default async function InvoiceDetailsPage({ params }) {
                           {formatCurrency(item.unitPrice)}
                         </td>
                         <td className="px-6 py-4 text-sm text-right font-semibold text-foreground">
-                          {formatCurrency(item.total)}
+                          {formatCurrency(item.amount)}
                         </td>
                       </tr>
                     ))}

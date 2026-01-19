@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,10 +21,36 @@ import {
   FileText,
   Printer,
   Edit,
+  CheckCircle,
+  Loader2,
 } from "lucide-react";
 import { InvoicePrintDialog } from "./invoicePrintDialog";
 import { DownloadInvoicePDF } from "./Download";
 import { InvoicePaymentDialog } from "./InvoicePaymentDialog";
+import { completeInvoice } from "@/app/mongodb/invoice-actions";
+
+// Post Invoice Button with form wrapper
+function PostInvoiceButton({ invoiceId }) {
+  const { pending } = useFormStatus();
+  const postInvoiceWithId = completeInvoice.bind(null, invoiceId);
+
+  return (
+    <form action={postInvoiceWithId}>
+      <button
+        type="submit"
+        disabled={pending}
+        className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none text-blue-600 dark:text-blue-400 hover:bg-accent focus:bg-accent disabled:pointer-events-none disabled:opacity-50"
+      >
+        {pending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <CheckCircle className="mr-2 h-4 w-4" />
+        )}
+        Post Invoice
+      </button>
+    </form>
+  );
+}
 
 export function InvoicesTable({ invoices, paymentAccounts = [] }) {
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
@@ -226,8 +253,9 @@ export function InvoicesTable({ invoices, paymentAccounts = [] }) {
                             View Details
                           </Link>
                         </DropdownMenuItem>
-                        {invoice.status !== "paid" &&
-                          invoice.status !== "cancelled" && (
+                        {invoice.paymentStatus !== "paid" &&
+                          invoice.status !== "cancelled" &&
+                          invoice.status !== "completed" && (
                             <DropdownMenuItem asChild>
                               <Link
                                 href={`/dashboard/invoices/${invoice._id}/update`}
@@ -238,6 +266,12 @@ export function InvoicesTable({ invoices, paymentAccounts = [] }) {
                               </Link>
                             </DropdownMenuItem>
                           )}
+                        {(invoice.status === "draft" || invoice.status === "sent") && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <PostInvoiceButton invoiceId={invoice._id} />
+                          </>
+                        )}
 
                         <DropdownMenuItem asChild>
                           <DownloadInvoicePDF invoice={invoice} />
@@ -247,7 +281,7 @@ export function InvoicesTable({ invoices, paymentAccounts = [] }) {
                           Send Email
                         </DropdownMenuItem>
                         {invoice.paymentStatus !== "paid" &&
-                          invoice.status !== "cancelled" && (
+                          invoice.status === "completed" && (
                             <>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
@@ -312,15 +346,22 @@ export function InvoicesTable({ invoices, paymentAccounts = [] }) {
                       View Details
                     </Link>
                   </DropdownMenuItem>
-                  {invoice.status !== "paid" &&
-                    invoice.status !== "cancelled" && (
+                  {invoice.paymentStatus !== "paid" &&
+                    invoice.status !== "cancelled" &&
+                    invoice.status !== "completed" && (
                       <DropdownMenuItem asChild>
-                        <Link href={`/dashboard/invoices/${invoice._id}/edit`}>
+                        <Link href={`/dashboard/invoices/${invoice._id}/update`}>
                           <Edit className="mr-2 h-4 w-4" />
                           Edit Invoice
                         </Link>
                       </DropdownMenuItem>
                     )}
+                  {(invoice.status === "draft" || invoice.status === "sent") && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <PostInvoiceButton invoiceId={invoice._id} />
+                    </>
+                  )}
 
                   <DropdownMenuItem asChild>
                     <DownloadInvoicePDF invoice={invoice} />
