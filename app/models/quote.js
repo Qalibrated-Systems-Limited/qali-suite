@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import { ErpCounter } from "./erp-counter";
 
 const Schema = mongoose.Schema;
 
@@ -132,7 +131,7 @@ const quoteLineSchema = new Schema(
       technicianName: String,
     },
   },
-  { _id: true }
+  { _id: true },
 );
 
 // Virtual: remaining quantity to invoice
@@ -349,7 +348,7 @@ const quoteSchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  }
+  },
 );
 
 // ============================================
@@ -468,7 +467,7 @@ quoteSchema.pre("save", function (next) {
   if (this.salesPerson?.commission?.rate > 0) {
     this.salesPerson.commission.amount =
       Math.round(
-        this.subtotal * (this.salesPerson.commission.rate / 100) * 100
+        this.subtotal * (this.salesPerson.commission.rate / 100) * 100,
       ) / 100;
   }
 
@@ -578,7 +577,7 @@ quoteSchema.methods.recordInvoicing = async function (
   invoiceId,
   invoiceNumber,
   invoicedItems,
-  user
+  user,
 ) {
   const userInfo = formatUser(user);
 
@@ -587,7 +586,7 @@ quoteSchema.methods.recordInvoicing = async function (
       (i) =>
         i._id.toString() === invoiced.lineId ||
         (i.product?.id &&
-          i.product.id.toString() === invoiced.productId?.toString())
+          i.product.id.toString() === invoiced.productId?.toString()),
     );
 
     if (item) {
@@ -649,11 +648,11 @@ quoteSchema.methods.getAvailableItems = function () {
 quoteSchema.methods.convertToInvoice = async function (
   selectedItems,
   invoiceData,
-  user
+  user,
 ) {
   if (!this.canConvertToInvoice) {
     throw new Error(
-      `Cannot convert quote to invoice in status: ${this.status}`
+      `Cannot convert quote to invoice in status: ${this.status}`,
     );
   }
 
@@ -666,7 +665,7 @@ quoteSchema.methods.convertToInvoice = async function (
 
   for (const selection of selectedItems) {
     const quoteItem = this.items.find(
-      (i) => i._id.toString() === selection.lineId.toString()
+      (i) => i._id.toString() === selection.lineId.toString(),
     );
 
     if (!quoteItem) {
@@ -676,7 +675,7 @@ quoteSchema.methods.convertToInvoice = async function (
     const availableQty = quoteItem.quantity - quoteItem.invoicedQuantity;
     if (selection.quantity > availableQty) {
       throw new Error(
-        `Quantity ${selection.quantity} exceeds available ${availableQty} for item ${quoteItem.description}`
+        `Quantity ${selection.quantity} exceeds available ${availableQty} for item ${quoteItem.description}`,
       );
     }
 
@@ -716,9 +715,8 @@ quoteSchema.methods.convertToInvoice = async function (
   }
 
   // Generate invoice number
-  const { generateInvoiceNumber } = await import(
-    "@/app/mongodb/queries/invoice-queries"
-  );
+  const { generateInvoiceNumber } =
+    await import("@/app/mongodb/queries/invoice-queries");
   const invoiceNumber = await generateInvoiceNumber();
 
   // Create invoice
@@ -731,7 +729,7 @@ quoteSchema.methods.convertToInvoice = async function (
   const subtotal = invoiceItems.reduce((sum, item) => sum + item.amount, 0);
   const totalDiscount = invoiceItems.reduce(
     (sum, item) => sum + item.discountAmount,
-    0
+    0,
   );
   const taxAmount = invoiceItems.reduce((sum, item) => sum + item.taxAmount, 0);
   const total = subtotal + taxAmount;
@@ -781,10 +779,10 @@ quoteSchema.statics.generateQuoteNumber = async function (session = null) {
   const ErpCounter = mongoose.model("ErpCounter");
   const date = new Date();
   const prefix = `QSL-QT-${date.getFullYear()}${String(
-    date.getMonth() + 1
+    date.getMonth() + 1,
   ).padStart(2, "0")}`;
   const counterId = `quote-${date.getFullYear()}${String(
-    date.getMonth() + 1
+    date.getMonth() + 1,
   ).padStart(2, "0")}`;
   const queryOptions = session ? { session } : {};
 
@@ -805,13 +803,13 @@ quoteSchema.statics.generateQuoteNumber = async function (session = null) {
     } catch (counterError) {
       console.warn(
         `Counter failed for ${counterId}, attempt ${attempt + 1}:`,
-        counterError.message
+        counterError.message,
       );
 
       const lastQuote = await this.findOne(
         { quoteNumber: { $regex: `^${prefix}` } },
         null,
-        queryOptions
+        queryOptions,
       )
         .sort({ quoteNumber: -1 })
         .lean();
@@ -831,7 +829,7 @@ quoteSchema.statics.generateQuoteNumber = async function (session = null) {
     }
 
     await new Promise((resolve) =>
-      setTimeout(resolve, 50 * Math.pow(2, attempt))
+      setTimeout(resolve, 50 * Math.pow(2, attempt)),
     );
   }
 
@@ -867,7 +865,7 @@ quoteSchema.statics.getActiveQuotes = function () {
 // STATIC: Get Quotes with available items
 // ============================================
 quoteSchema.statics.getQuotesWithAvailableItems = async function (
-  customerId = null
+  customerId = null,
 ) {
   const query = {
     status: { $in: ["sent", "accepted"] },
@@ -888,7 +886,7 @@ quoteSchema.statics.getQuotesWithAvailableItems = async function (
     .map((quote) => ({
       ...quote,
       availableItems: quote.items.filter(
-        (item) => item.invoicedQuantity < item.quantity
+        (item) => item.invoicedQuantity < item.quantity,
       ),
     }))
     .filter((quote) => quote.availableItems.length > 0);

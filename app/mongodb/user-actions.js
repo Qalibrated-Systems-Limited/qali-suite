@@ -2,12 +2,36 @@
 
 import { auth } from "@/auth";
 import User from "../models/user";
+import Company from "../models/Company";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import dbConnect from "../config/dbConnect";
 import { userRoles } from "@/lib/utils";
-dbConnect();
+import mongoose from "mongoose";
+
+// ============================================
+// AUTHORIZATION HELPERS
+// ============================================
+const SUPER_ADMIN_ROLES = ["SuperAdmin"];
+const ADMIN_ROLES = ["SuperAdmin", "Admin"];
+
+// Helper to transform empty string/null to undefined
+const optionalString = z
+  .string()
+  .optional()
+  .nullable()
+  .transform((val) => (val === "" || val === null ? undefined : val));
+
+// Helper for ObjectId validation
+const optionalObjectId = z
+  .string()
+  .optional()
+  .nullable()
+  .transform((val) => (val === "" || val === null ? undefined : val))
+  .refine((val) => !val || mongoose.Types.ObjectId.isValid(val), {
+    message: "Invalid company ID",
+  });
 
 // ============================================
 // VALIDATION SCHEMAS
@@ -17,15 +41,17 @@ const userCreateSchema = z.object({
   email: z.string().email("Invalid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
   role: z.enum(userRoles),
-  department: z.string().min(1, "Department is required"),
+  department: optionalString,
+  companyId: optionalObjectId,
 });
 
 const userUpdateSchema = z.object({
   name: z.string().min(1, "Name is required").max(50),
   email: z.string().email("Invalid email address"),
   role: z.enum(userRoles),
-  department: z.string().min(1, "Department is required"),
+  department: optionalString,
   status: z.enum(["Active", "Inactive"]),
+  companyId: optionalObjectId,
 });
 
 const passwordResetSchema = z
@@ -44,39 +70,78 @@ const passwordResetSchema = z
 // CREATE USER
 // ============================================
 export async function createUser(prevState, formData) {
-  try {
-    const session = await auth();
-    const user = session?.user;
+  await dbConnect();
 
-    if (!user || (user.role !== "Admin" && user.role !== "Store Manager")) {
-      return { message: "Unauthorized", errors: {} };
-    }
+  const session = await auth();
+  const currentUser = session?.user;
 
-    const rawFormData = {
-      name: formData.get("name"),
-      email: formData.get("email"),
-      password: formData.get("password"),
-      role: formData.get("role"),
-      department: formData.get("department"),
+  // Extract form values to preserve on error
+  const formValues = {
+    name: formData.get("name"),
+    email: formData.get("email"),
+    password: formData.get("password"),
+    role: formData.get("role"),
+    department: formData.get("department"),
+    companyId: formData.get("companyId"),
+  };
+
+  if (!currentUser) {
+    return { message: "You must be logged in", errors: { _form: ["You must be logged in"] }, values: formValues };
+  }
+
+  if (!ADMIN_ROLES.includes(currentUser.role)) {
+    return { message: "Unauthorized", errors: { _form: ["Admin role required"] }, values: formValues };
+  }
+
+  const validatedFields = userCreateSchema.safeParse(formValues);
+
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: "Missing or invalid fields",
+      values: formValues,
     };
+  }
 
-    const validatedFields = userCreateSchema.safeParse(rawFormData);
+  const { name, email, password, role, department, companyId } = validatedFields.data;
 
-    if (!validatedFields.success) {
+  // Determine which company to assign
+  let assignedCompanyId = companyId;
+
+  // Non-SuperAdmin can only create users for their own company
+  if (currentUser.role !== "SuperAdmin") {
+    assignedCompanyId = currentUser.companyId;
+
+    // Admin cannot create SuperAdmin or Admin users
+    if (role === "SuperAdmin" || role === "Admin") {
       return {
-        errors: validatedFields.error.flatten().fieldErrors,
-        message: "Missing or invalid fields",
+        message: "Only SuperAdmin can create Admin or SuperAdmin users",
+        errors: { role: ["You cannot assign this role"] },
+        values: formValues,
       };
     }
+  }
 
-    const { name, email, password, role, department } = validatedFields.data;
+  // Validate company exists if companyId is provided
+  if (assignedCompanyId) {
+    const company = await Company.findById(assignedCompanyId);
+    if (!company) {
+      return {
+        message: "Company not found",
+        errors: { companyId: ["Selected company does not exist"] },
+        values: formValues,
+      };
+    }
+  }
 
+  try {
     // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return {
         message: "User with this email already exists",
         errors: { email: ["Email already in use"] },
+        values: formValues,
       };
     }
 
@@ -87,19 +152,22 @@ export async function createUser(prevState, formData) {
       password,
       role,
       department,
+      companyId: assignedCompanyId,
       creator: {
-        name: user.name,
-        id: user.id,
+        name: currentUser.name,
+        id: currentUser.id,
       },
     });
 
     revalidatePath("/dashboard/users");
-    return { message: "User created successfully", errors: {} };
+    revalidatePath("/dashboard/admin/users");
+    return { message: "User created successfully", errors: {}, success: true };
   } catch (error) {
     console.error("Create user error:", error);
     return {
-      message: "Database Error: Failed to create user",
-      errors: {},
+      message: error.message || "Failed to create user",
+      errors: { _form: [error.message || "Failed to create user"] },
+      values: formValues,
     };
   }
 }
@@ -108,32 +176,75 @@ export async function createUser(prevState, formData) {
 // UPDATE USER
 // ============================================
 export async function updateUser(userId, prevState, formData) {
-  try {
-    const session = await auth();
-    const user = session?.user;
+  await dbConnect();
 
-    if (!user || (user.role !== "Admin" && user.role !== "Store Manager")) {
-      return { message: "Unauthorized", errors: {} };
-    }
+  const session = await auth();
+  const currentUser = session?.user;
 
-    const rawFormData = {
-      name: formData.get("name"),
-      email: formData.get("email"),
-      role: formData.get("role"),
-      department: formData.get("department"),
-      status: formData.get("status"),
+  // Extract form values to preserve on error
+  const formValues = {
+    name: formData.get("name"),
+    email: formData.get("email"),
+    role: formData.get("role"),
+    department: formData.get("department"),
+    status: formData.get("status"),
+    companyId: formData.get("companyId"),
+  };
+
+  if (!currentUser) {
+    return { message: "You must be logged in", errors: { _form: ["You must be logged in"] }, values: formValues };
+  }
+
+  if (!ADMIN_ROLES.includes(currentUser.role)) {
+    return { message: "Unauthorized", errors: { _form: ["Admin role required"] }, values: formValues };
+  }
+
+  const validatedFields = userUpdateSchema.safeParse(formValues);
+
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: "Missing or invalid fields",
+      values: formValues,
     };
+  }
 
-    const validatedFields = userUpdateSchema.safeParse(rawFormData);
+  const { name, email, role, department, status, companyId } = validatedFields.data;
 
-    if (!validatedFields.success) {
-      return {
-        errors: validatedFields.error.flatten().fieldErrors,
-        message: "Missing or invalid fields",
-      };
+  try {
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
+      return { message: "User not found", errors: { _form: ["User not found"] }, values: formValues };
     }
 
-    const { name, email, role, department, status } = validatedFields.data;
+    // Non-SuperAdmin can only update users in their own company
+    if (currentUser.role !== "SuperAdmin") {
+      if (targetUser.companyId?.toString() !== currentUser.companyId) {
+        return {
+          message: "You can only update users in your own company",
+          errors: { _form: ["Unauthorized"] },
+          values: formValues,
+        };
+      }
+
+      // Admin cannot promote to Admin or SuperAdmin
+      if (role === "SuperAdmin" || role === "Admin") {
+        return {
+          message: "Only SuperAdmin can assign Admin or SuperAdmin roles",
+          errors: { role: ["You cannot assign this role"] },
+          values: formValues,
+        };
+      }
+
+      // Admin cannot update Admin or SuperAdmin users
+      if (targetUser.role === "Admin" || targetUser.role === "SuperAdmin") {
+        return {
+          message: "You cannot update Admin or SuperAdmin users",
+          errors: { _form: ["Unauthorized"] },
+          values: formValues,
+        };
+      }
+    }
 
     // Check if email is taken by another user
     const existingUser = await User.findOne({
@@ -145,7 +256,28 @@ export async function updateUser(userId, prevState, formData) {
       return {
         message: "Email already in use by another user",
         errors: { email: ["Email already in use"] },
+        values: formValues,
       };
+    }
+
+    // Determine company assignment
+    let assignedCompanyId = companyId;
+
+    // Only SuperAdmin can change company assignment
+    if (currentUser.role !== "SuperAdmin") {
+      assignedCompanyId = targetUser.companyId; // Keep existing company
+    }
+
+    // Validate company exists if provided
+    if (assignedCompanyId) {
+      const company = await Company.findById(assignedCompanyId);
+      if (!company) {
+        return {
+          message: "Company not found",
+          errors: { companyId: ["Selected company does not exist"] },
+          values: formValues,
+        };
+      }
     }
 
     await User.findByIdAndUpdate(userId, {
@@ -155,54 +287,67 @@ export async function updateUser(userId, prevState, formData) {
         role,
         department,
         status,
+        companyId: assignedCompanyId,
       },
     });
 
-   
+    revalidatePath("/dashboard/users");
+    revalidatePath("/dashboard/admin/users");
   } catch (error) {
     console.error("Update user error:", error);
     return {
-      message: "Database Error: Failed to update user",
-      errors: {},
+      message: error.message || "Failed to update user",
+      errors: { _form: [error.message || "Failed to update user"] },
+      values: formValues,
     };
   }
-   revalidatePath("/dashboard/users");
-    redirect("/dashboard/users");
+
+  redirect("/dashboard/users");
 }
 
 // ============================================
 // RESET USER PASSWORD (Admin)
 // ============================================
 export async function resetUserPassword(userId, prevState, formData) {
-  try {
-    const session = await auth();
-    const user = session?.user;
+  await dbConnect();
 
-    if (!user || (user.role !== "Admin" && user.role !== "Store Manager")) {
-      return { message: "Unauthorized", errors: {} };
-    }
+  const session = await auth();
+  const currentUser = session?.user;
 
-    const rawFormData = {
-      newPassword: formData.get("newPassword"),
-      confirmPassword: formData.get("confirmPassword"),
+  if (!currentUser || !ADMIN_ROLES.includes(currentUser.role)) {
+    return { message: "Unauthorized", errors: { _form: ["Admin role required"] } };
+  }
+
+  const rawFormData = {
+    newPassword: formData.get("newPassword"),
+    confirmPassword: formData.get("confirmPassword"),
+  };
+
+  const validatedFields = passwordResetSchema.safeParse(rawFormData);
+
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: "Invalid password fields",
     };
+  }
 
-    const validatedFields = passwordResetSchema.safeParse(rawFormData);
-
-    if (!validatedFields.success) {
-      return {
-        errors: validatedFields.error.flatten().fieldErrors,
-        message: "Invalid password fields",
-      };
-    }
-
+  try {
     const targetUser = await User.findById(userId).select("+password");
 
     if (!targetUser) {
-      return {
-        message: "User not found",
-        errors: {},
-      };
+      return { message: "User not found", errors: { _form: ["User not found"] } };
+    }
+
+    // Admin can only reset passwords for users in their company (not Admin/SuperAdmin)
+    if (currentUser.role === "Admin") {
+      if (targetUser.companyId?.toString() !== currentUser.companyId) {
+        return { message: "You can only reset passwords for users in your company", errors: { _form: ["Unauthorized"] } };
+      }
+
+      if (targetUser.role === "SuperAdmin" || targetUser.role === "Admin") {
+        return { message: "Cannot reset password of Admin or SuperAdmin users", errors: { _form: ["Unauthorized"] } };
+      }
     }
 
     // Update password (will be hashed by pre-save hook)
@@ -210,17 +355,11 @@ export async function resetUserPassword(userId, prevState, formData) {
     await targetUser.save();
 
     revalidatePath("/dashboard/users");
-    return {
-      message: "Password reset successfully",
-      errors: {},
-      success: true,
-    };
+    revalidatePath("/dashboard/admin/users");
+    return { message: "Password reset successfully", errors: {}, success: true };
   } catch (error) {
     console.error("Reset password error:", error);
-    return {
-      message: "Database Error: Failed to reset password",
-      errors: {},
-    };
+    return { message: error.message || "Failed to reset password", errors: { _form: [error.message] } };
   }
 }
 
@@ -228,29 +367,51 @@ export async function resetUserPassword(userId, prevState, formData) {
 // DELETE USER
 // ============================================
 export async function deleteUser(userId) {
-  try {
-    const session = await auth();
-    const user = session?.user;
+  await dbConnect();
 
-    if (!user || user.role !== "Admin") {
-      return { message: "Unauthorized - Admin only", success: false };
+  const session = await auth();
+  const currentUser = session?.user;
+
+  if (!currentUser) {
+    return { message: "You must be logged in", success: false };
+  }
+
+  // Only SuperAdmin and Admin can delete users
+  if (!ADMIN_ROLES.includes(currentUser.role)) {
+    return { message: "Unauthorized - Admin only", success: false };
+  }
+
+  // Don't allow deleting yourself
+  if (currentUser.id === userId) {
+    return { message: "Cannot delete your own account", success: false };
+  }
+
+  try {
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
+      return { message: "User not found", success: false };
     }
 
-    // Don't allow deleting yourself
-    if (user.id === userId) {
-      return { message: "Cannot delete your own account", success: false };
+    // Admin can only delete users in their own company
+    if (currentUser.role === "Admin") {
+      if (targetUser.companyId?.toString() !== currentUser.companyId) {
+        return { message: "You can only delete users in your company", success: false };
+      }
+
+      // Admin cannot delete SuperAdmin or other Admin users
+      if (targetUser.role === "SuperAdmin" || targetUser.role === "Admin") {
+        return { message: "Cannot delete Admin or SuperAdmin users", success: false };
+      }
     }
 
     await User.findByIdAndDelete(userId);
 
     revalidatePath("/dashboard/users");
+    revalidatePath("/dashboard/admin/users");
     return { message: "User deleted successfully", success: true };
   } catch (error) {
     console.error("Delete user error:", error);
-    return {
-      message: "Database Error: Failed to delete user",
-      success: false,
-    };
+    return { message: error.message || "Failed to delete user", success: false };
   }
 }
 
@@ -258,18 +419,32 @@ export async function deleteUser(userId) {
 // TOGGLE USER STATUS
 // ============================================
 export async function toggleUserStatus(userId) {
+  await dbConnect();
+
+  const session = await auth();
+  const currentUser = session?.user;
+
+  if (!currentUser || !ADMIN_ROLES.includes(currentUser.role)) {
+    return { message: "Unauthorized", success: false };
+  }
+
   try {
-    const session = await auth();
-    const user = session?.user;
-
-    if (!user || (user.role !== "Admin" && user.role !== "Store Manager")) {
-      return { message: "Unauthorized", success: false };
-    }
-
     const targetUser = await User.findById(userId);
 
     if (!targetUser) {
       return { message: "User not found", success: false };
+    }
+
+    // Admin can only toggle status for users in their own company
+    if (currentUser.role === "Admin") {
+      if (targetUser.companyId?.toString() !== currentUser.companyId) {
+        return { message: "You can only manage users in your company", success: false };
+      }
+
+      // Admin cannot toggle SuperAdmin or Admin status
+      if (targetUser.role === "SuperAdmin" || targetUser.role === "Admin") {
+        return { message: "Cannot change status of Admin or SuperAdmin users", success: false };
+      }
     }
 
     const newStatus = targetUser.status === "Active" ? "Inactive" : "Active";
@@ -279,17 +454,187 @@ export async function toggleUserStatus(userId) {
     });
 
     revalidatePath("/dashboard/users");
+    revalidatePath("/dashboard/admin/users");
     return {
-      message: `User ${
-        newStatus === "Active" ? "activated" : "deactivated"
-      } successfully`,
+      message: `User ${newStatus === "Active" ? "activated" : "deactivated"} successfully`,
       success: true,
     };
   } catch (error) {
     console.error("Toggle status error:", error);
+    return { message: error.message || "Failed to update status", success: false };
+  }
+}
+
+// ============================================
+// SUPERADMIN: ASSIGN USER TO COMPANY
+// ============================================
+export async function assignUserToCompany(userId, companyId) {
+  await dbConnect();
+
+  const session = await auth();
+  const currentUser = session?.user;
+
+  if (!currentUser) {
+    return { message: "You must be logged in", success: false };
+  }
+
+  if (!SUPER_ADMIN_ROLES.includes(currentUser.role)) {
+    return { message: "Unauthorized - SuperAdmin only", success: false };
+  }
+
+  try {
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
+      return { message: "User not found", success: false };
+    }
+
+    // Validate company if provided
+    if (companyId) {
+      const company = await Company.findById(companyId);
+      if (!company) {
+        return { message: "Company not found", success: false };
+      }
+    }
+
+    await User.findByIdAndUpdate(userId, {
+      $set: { companyId: companyId || null },
+    });
+
+    revalidatePath("/dashboard/admin/users");
+    revalidatePath("/dashboard/users");
     return {
-      message: "Database Error: Failed to update status",
-      success: false,
+      message: companyId ? "User assigned to company successfully" : "User removed from company",
+      success: true,
     };
+  } catch (error) {
+    console.error("Assign user to company error:", error);
+    return { message: error.message || "Failed to assign user", success: false };
+  }
+}
+
+// ============================================
+// SUPERADMIN: BULK ASSIGN USERS TO COMPANY
+// ============================================
+export async function bulkAssignUsersToCompany(userIds, companyId) {
+  await dbConnect();
+
+  const session = await auth();
+  const currentUser = session?.user;
+
+  if (!currentUser) {
+    return { message: "You must be logged in", success: false };
+  }
+
+  if (!SUPER_ADMIN_ROLES.includes(currentUser.role)) {
+    return { message: "Unauthorized - SuperAdmin only", success: false };
+  }
+
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return { message: "No users selected", success: false };
+  }
+
+  try {
+    // Validate company if provided
+    if (companyId) {
+      const company = await Company.findById(companyId);
+      if (!company) {
+        return { message: "Company not found", success: false };
+      }
+    }
+
+    await User.updateMany(
+      { _id: { $in: userIds } },
+      { $set: { companyId: companyId || null } }
+    );
+
+    revalidatePath("/dashboard/admin/users");
+    revalidatePath("/dashboard/users");
+    return {
+      message: `${userIds.length} users updated successfully`,
+      success: true,
+    };
+  } catch (error) {
+    console.error("Bulk assign users error:", error);
+    return { message: error.message || "Failed to assign users", success: false };
+  }
+}
+
+// ============================================
+// SUPERADMIN: GET USERS BY COMPANY
+// ============================================
+export async function getUsersByCompany(companyId) {
+  await dbConnect();
+
+  const session = await auth();
+  const currentUser = session?.user;
+
+  if (!currentUser) {
+    return { users: [], error: "You must be logged in" };
+  }
+
+  try {
+    let query = {};
+
+    if (currentUser.role === "SuperAdmin") {
+      // SuperAdmin can filter by company or get all
+      if (companyId) {
+        query.companyId = companyId;
+      }
+    } else if (currentUser.role === "Admin") {
+      // Admin can only see users in their company
+      query.companyId = currentUser.companyId;
+    } else {
+      return { users: [], error: "Unauthorized" };
+    }
+
+    const users = await User.find(query)
+      .select("-password")
+      .populate("companyId", "name")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Convert ObjectIds to strings for serialization
+    const serializedUsers = users.map((user) => ({
+      ...user,
+      _id: user._id.toString(),
+      companyId: user.companyId?._id?.toString() || null,
+      companyName: user.companyId?.name || null,
+    }));
+
+    return { users: serializedUsers, error: null };
+  } catch (error) {
+    console.error("Get users by company error:", error);
+    return { users: [], error: error.message };
+  }
+}
+
+// ============================================
+// SUPERADMIN: GET UNASSIGNED USERS
+// ============================================
+export async function getUnassignedUsers() {
+  await dbConnect();
+
+  const session = await auth();
+  const currentUser = session?.user;
+
+  if (!currentUser || !SUPER_ADMIN_ROLES.includes(currentUser.role)) {
+    return { users: [], error: "Unauthorized - SuperAdmin only" };
+  }
+
+  try {
+    const users = await User.find({ companyId: null })
+      .select("-password")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const serializedUsers = users.map((user) => ({
+      ...user,
+      _id: user._id.toString(),
+    }));
+
+    return { users: serializedUsers, error: null };
+  } catch (error) {
+    console.error("Get unassigned users error:", error);
+    return { users: [], error: error.message };
   }
 }

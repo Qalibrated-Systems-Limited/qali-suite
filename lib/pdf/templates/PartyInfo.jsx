@@ -1,6 +1,6 @@
 import { View, Text } from "@react-pdf/renderer";
 import { styles } from "../styles";
-import { getPartyLabel } from "../utils";
+import { getPartyLabel, formatAddress } from "../utils";
 
 export function PartyInfo({ type, party, shippingAddress }) {
   const primaryLabel = getPartyLabel(type, false);
@@ -11,7 +11,7 @@ export function PartyInfo({ type, party, shippingAddress }) {
   const contactPerson = party?.contactPerson || party?.contact?.name || "";
   const email = party?.email || party?.contact?.email || "";
   const phone = party?.phone || party?.contact?.phone || "";
-  const address = party?.address || "";
+  const address = formatAddress(party?.address);
   const pin = party?.pin || party?.taxId || "";
 
   return (
@@ -37,7 +37,7 @@ export function PartyInfo({ type, party, shippingAddress }) {
             {shippingAddress.name || shippingAddress.attention || name}
           </Text>
           {shippingAddress.address && (
-            <Text style={styles.partyDetail}>{shippingAddress.address}</Text>
+            <Text style={styles.partyDetail}>{formatAddress(shippingAddress.address)}</Text>
           )}
           {shippingAddress.city && (
             <Text style={styles.partyDetail}>

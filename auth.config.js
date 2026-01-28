@@ -19,6 +19,7 @@ export const authOptions = {
       if (user) {
         token.role = customUser.role;
         token.id = customUser.id;
+        token.companyId = customUser.companyId;
         token.user = customUser;
       }
       return token;
@@ -30,6 +31,7 @@ export const authOptions = {
           role: token.role,
           emailVerified: new Date(),
           id: token.id,
+          companyId: token.companyId,
         };
         session.user = customUser;
       }

@@ -6,33 +6,23 @@ import {
   Page,
   Text,
   View,
-  Image,
   StyleSheet,
+  Image,
 } from "@react-pdf/renderer";
 
 // ============================================
-// COLOR PALETTE
+// COLORS
 // ============================================
 const colors = {
   primary: "#eab308",
-  primaryLight: "#fef9c3",
-  primaryBorder: "#fde047",
-  black: "#18181b",
-  darkGray: "#3f3f46",
+  primaryLight: "#fef3c7",
+  dark: "#18181b",
   gray: "#71717a",
-  lightGray: "#a1a1aa",
-  border: "#e4e4e7",
-  bgLight: "#fafafa",
-  bgMuted: "#f4f4f5",
+  grayLight: "#d4d4d8",
+  grayLightest: "#f4f4f5",
   white: "#ffffff",
   success: "#16a34a",
-  successLight: "#dcfce7",
-  warning: "#ca8a04",
-  warningLight: "#fef9c3",
   danger: "#dc2626",
-  dangerLight: "#fee2e2",
-  info: "#2563eb",
-  infoLight: "#dbeafe",
 };
 
 // ============================================
@@ -42,11 +32,9 @@ const styles = StyleSheet.create({
   page: {
     fontFamily: "Helvetica",
     fontSize: 9,
-    paddingTop: 25,
-    paddingBottom: 25,
-    paddingHorizontal: 30,
-    color: colors.darkGray,
+    padding: 40,
     backgroundColor: colors.white,
+    color: colors.dark,
   },
 
   // Header
@@ -54,461 +42,302 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 18,
-    paddingBottom: 14,
-    borderBottomWidth: 2,
-    borderBottomColor: colors.primary,
+    marginBottom: 25,
   },
   logoSection: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
+    flex: 1,
   },
   logo: {
-    width: 60,
-    height: 60,
+    width: 140,
+    height: 45,
     objectFit: "contain",
-  },
-  companyInfo: {
-    maxWidth: 170,
-  },
-  companyName: {
-    fontSize: 13,
-    fontFamily: "Helvetica-Bold",
-    color: colors.black,
-    marginBottom: 1,
-  },
-  companyTagline: {
-    fontSize: 7,
-    color: colors.gray,
-    marginBottom: 2,
+    marginBottom: 6,
   },
   companyDetails: {
-    fontSize: 7,
+    fontSize: 8,
     color: colors.gray,
     lineHeight: 1.4,
   },
-  documentTitle: {
-    textAlign: "right",
+  companyTagline: {
+    fontSize: 8,
+    fontFamily: "Helvetica-Oblique",
+    color: colors.primary,
+    marginTop: 4,
   },
-  documentType: {
-    fontSize: 22,
+  invoiceHeader: {
+    alignItems: "flex-end",
+  },
+  invoiceTitle: {
+    fontSize: 24,
     fontFamily: "Helvetica-Bold",
     color: colors.primary,
-    letterSpacing: 1.5,
   },
-  documentNumber: {
+  invoiceNumber: {
     fontSize: 10,
     fontFamily: "Helvetica-Bold",
-    color: colors.black,
-    marginTop: 2,
-  },
-  documentDate: {
-    fontSize: 7,
-    color: colors.gray,
-    marginTop: 1,
-  },
-
-  // Status badges
-  statusRow: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 6,
-    marginTop: 6,
+    color: colors.dark,
+    marginTop: 4,
   },
   statusBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 3,
+    marginTop: 6,
   },
   statusText: {
-    fontSize: 6,
+    fontSize: 7,
     fontFamily: "Helvetica-Bold",
     textTransform: "uppercase",
-    letterSpacing: 0.5,
   },
 
-  // Info Grid
-  infoGrid: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 16,
+  // Divider
+  divider: {
+    height: 2,
+    backgroundColor: colors.primary,
+    marginBottom: 20,
   },
-  infoBox: {
-    flex: 1,
-    backgroundColor: colors.bgMuted,
-    padding: 10,
-    borderRadius: 3,
-  },
-  infoBoxHighlight: {
-    flex: 1,
-    backgroundColor: colors.primaryLight,
-    padding: 10,
-    borderRadius: 3,
-    borderWidth: 1,
-    borderColor: colors.primaryBorder,
-  },
-  infoBoxLabel: {
-    fontSize: 6,
-    color: colors.gray,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 4,
-    fontFamily: "Helvetica-Bold",
-  },
-  infoBoxTitle: {
-    fontSize: 9,
-    fontFamily: "Helvetica-Bold",
-    color: colors.black,
-    marginBottom: 2,
-  },
-  infoBoxText: {
-    fontSize: 7,
-    color: colors.darkGray,
-    lineHeight: 1.4,
-  },
+
+  // Info Row
   infoRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 3,
+    marginBottom: 20,
   },
-  infoRowLabel: {
-    fontSize: 7,
-    color: colors.gray,
+  billTo: {
+    flex: 1,
+    backgroundColor: colors.grayLightest,
+    padding: 12,
+    borderRadius: 4,
+    marginRight: 10,
   },
-  infoRowValue: {
+  invoiceDetails: {
+    flex: 1,
+    backgroundColor: colors.primaryLight,
+    padding: 12,
+    borderRadius: 4,
+  },
+  label: {
     fontSize: 7,
     fontFamily: "Helvetica-Bold",
-    color: colors.black,
+    color: colors.gray,
+    textTransform: "uppercase",
+    marginBottom: 3,
+  },
+  value: {
+    fontSize: 9,
+    color: colors.dark,
+    lineHeight: 1.4,
+  },
+  valueBold: {
+    fontSize: 10,
+    fontFamily: "Helvetica-Bold",
+    color: colors.dark,
+  },
+  detailRow: {
+    marginBottom: 6,
   },
 
   // Table
   table: {
-    marginBottom: 14,
+    marginBottom: 15,
   },
   tableHeader: {
     flexDirection: "row",
-    backgroundColor: colors.black,
-    paddingVertical: 7,
-    paddingHorizontal: 8,
-    borderRadius: 2,
+    backgroundColor: colors.dark,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
   },
   tableHeaderCell: {
-    color: colors.white,
-    fontSize: 6,
+    fontSize: 8,
     fontFamily: "Helvetica-Bold",
+    color: colors.white,
     textTransform: "uppercase",
-    letterSpacing: 0.3,
   },
   tableRow: {
     flexDirection: "row",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingVertical: 7,
-    paddingHorizontal: 8,
-    alignItems: "center",
-    minHeight: 26,
+    borderBottomColor: colors.grayLight,
   },
   tableRowAlt: {
-    backgroundColor: colors.bgLight,
+    backgroundColor: colors.grayLightest,
   },
   tableCell: {
-    fontSize: 7,
-    color: colors.darkGray,
+    fontSize: 9,
+    color: colors.dark,
   },
   tableCellBold: {
-    fontSize: 7,
+    fontSize: 9,
     fontFamily: "Helvetica-Bold",
-    color: colors.black,
   },
-  tableCellMono: {
-    fontSize: 6,
-    fontFamily: "Courier",
+  tableCellSub: {
+    fontSize: 7,
     color: colors.gray,
-  },
-  tableCellSmall: {
-    fontSize: 6,
-    color: colors.lightGray,
-  },
-  itemTypeBadge: {
-    fontSize: 5,
-    paddingHorizontal: 3,
-    paddingVertical: 1,
-    borderRadius: 2,
     marginTop: 2,
   },
 
-  // Column widths for invoice
-  colNo: { width: "4%" },
-  colDesc: { width: "36%" },
+  // Columns
+  colNo: { width: "6%" },
+  colDesc: { width: "42%" },
   colQty: { width: "10%", textAlign: "center" },
-  colRate: { width: "15%", textAlign: "right" },
-  colDisc: { width: "10%", textAlign: "right" },
-  colVat: { width: "10%", textAlign: "right" },
-  colAmount: { width: "15%", textAlign: "right" },
+  colPrice: { width: "21%", textAlign: "right" },
+  colAmount: { width: "21%", textAlign: "right" },
 
-  // Summary Section
-  summarySection: {
+  // Totals
+  totalsRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 14,
-  },
-  notesBox: {
-    width: "52%",
-    paddingRight: 12,
-  },
-  notesLabel: {
-    fontSize: 7,
-    fontFamily: "Helvetica-Bold",
-    color: colors.darkGray,
-    marginBottom: 3,
-  },
-  notesText: {
-    fontSize: 7,
-    color: colors.gray,
-    lineHeight: 1.5,
+    justifyContent: "flex-end",
   },
   totalsBox: {
-    width: "46%",
-    backgroundColor: colors.bgMuted,
-    borderRadius: 3,
-    overflow: "hidden",
+    width: 220,
   },
-  totalsRow: {
+  totalLine: {
     flexDirection: "row",
     justifyContent: "space-between",
     paddingVertical: 5,
     paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.grayLight,
   },
-  totalsRowBorder: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  totalsLabel: {
-    fontSize: 7,
-    color: colors.gray,
-  },
-  totalsValue: {
-    fontSize: 7,
-    color: colors.black,
-    textAlign: "right",
-  },
-  totalsValueMuted: {
-    fontSize: 7,
-    color: colors.gray,
-    textAlign: "right",
-  },
-  totalsFinal: {
+  totalFinal: {
     flexDirection: "row",
     justifyContent: "space-between",
-    backgroundColor: colors.primary,
-    paddingVertical: 9,
+    paddingVertical: 8,
     paddingHorizontal: 10,
+    backgroundColor: colors.primary,
+    marginTop: 2,
   },
-  totalsFinalLabel: {
+  totalLabel: {
+    fontSize: 9,
+    color: colors.gray,
+  },
+  totalValue: {
+    fontSize: 9,
+    fontFamily: "Helvetica-Bold",
+  },
+  totalLabelFinal: {
     fontSize: 10,
     fontFamily: "Helvetica-Bold",
-    color: colors.black,
+    color: colors.dark,
   },
-  totalsFinalValue: {
+  totalValueFinal: {
     fontSize: 12,
     fontFamily: "Helvetica-Bold",
-    color: colors.black,
+    color: colors.dark,
   },
 
-  // Payment Info Section
+  // Amount Due
+  amountDue: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: colors.grayLightest,
+    padding: 12,
+    marginTop: 15,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderRadius: 4,
+  },
+  amountDueLabel: {
+    fontSize: 9,
+    color: colors.gray,
+  },
+  amountDueValue: {
+    fontSize: 16,
+    fontFamily: "Helvetica-Bold",
+    color: colors.primary,
+  },
+
+  // Payment Section
   paymentSection: {
     flexDirection: "row",
-    gap: 10,
-    marginBottom: 14,
+    marginTop: 20,
   },
   paymentBox: {
     flex: 1,
-    padding: 10,
-    backgroundColor: colors.bgLight,
-    borderRadius: 3,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.primary,
+    backgroundColor: colors.grayLightest,
+    padding: 12,
+    borderRadius: 4,
+    marginRight: 10,
   },
-  paymentBoxDanger: {
-    flex: 1,
-    padding: 10,
-    backgroundColor: colors.dangerLight,
-    borderRadius: 3,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.danger,
+  paymentBoxLast: {
+    marginRight: 0,
   },
-  paymentBoxSuccess: {
-    flex: 1,
-    padding: 10,
-    backgroundColor: colors.successLight,
-    borderRadius: 3,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.success,
-  },
-  paymentLabel: {
-    fontSize: 6,
-    color: colors.gray,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 3,
-    fontFamily: "Helvetica-Bold",
-  },
-  paymentValue: {
-    fontSize: 11,
-    fontFamily: "Helvetica-Bold",
-    color: colors.black,
-  },
-  paymentValueDanger: {
-    fontSize: 11,
-    fontFamily: "Helvetica-Bold",
-    color: colors.danger,
-  },
-  paymentValueSuccess: {
-    fontSize: 11,
-    fontFamily: "Helvetica-Bold",
-    color: colors.success,
-  },
-  paymentSubtext: {
-    fontSize: 6,
-    color: colors.gray,
-    marginTop: 2,
-  },
-
-  // Bank Details
-  bankSection: {
-    marginBottom: 14,
-    padding: 10,
-    backgroundColor: colors.bgMuted,
-    borderRadius: 3,
-  },
-  bankTitle: {
+  paymentTitle: {
     fontSize: 8,
     fontFamily: "Helvetica-Bold",
-    color: colors.darkGray,
+    color: colors.dark,
+    textTransform: "uppercase",
     marginBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.grayLight,
+    paddingBottom: 4,
   },
-  bankGrid: {
-    flexDirection: "row",
-    gap: 20,
-  },
-  bankColumn: {
-    flex: 1,
-  },
-  bankRow: {
+  paymentRow: {
     flexDirection: "row",
     marginBottom: 3,
   },
-  bankLabel: {
-    fontSize: 7,
+  paymentLabel: {
+    fontSize: 8,
     color: colors.gray,
     width: 70,
   },
-  bankValue: {
-    fontSize: 7,
+  paymentValue: {
+    fontSize: 8,
     fontFamily: "Helvetica-Bold",
-    color: colors.black,
+    color: colors.dark,
     flex: 1,
   },
 
-  // Terms
-  termsSection: {
-    marginBottom: 12,
-    padding: 8,
-    backgroundColor: colors.bgLight,
-    borderRadius: 3,
-    borderLeftWidth: 2,
-    borderLeftColor: colors.gray,
+  // Notes
+  notes: {
+    marginTop: 20,
+    padding: 12,
+    backgroundColor: colors.grayLightest,
+    borderRadius: 4,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
   },
-  termsLabel: {
-    fontSize: 7,
+  notesTitle: {
+    fontSize: 8,
     fontFamily: "Helvetica-Bold",
-    color: colors.darkGray,
-    marginBottom: 3,
+    marginBottom: 4,
   },
-  termsText: {
-    fontSize: 6,
+  notesText: {
+    fontSize: 8,
     color: colors.gray,
-    lineHeight: 1.5,
+    lineHeight: 1.4,
   },
 
   // Footer
   footer: {
+    position: "absolute",
+    bottom: 25,
+    left: 40,
+    right: 40,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: colors.grayLight,
     paddingTop: 10,
-    marginTop: 8,
-  },
-  footerContent: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
   },
-  footerLeft: {
-    flex: 1,
-  },
-  footerCompany: {
+  footerText: {
     fontSize: 7,
-    fontFamily: "Helvetica-Bold",
-    color: colors.darkGray,
-    marginBottom: 1,
-  },
-  footerAddress: {
-    fontSize: 6,
     color: colors.gray,
-    lineHeight: 1.3,
   },
-  footerCenter: {
-    flex: 1,
-    textAlign: "center",
-  },
-  footerContact: {
-    fontSize: 6,
-    color: colors.gray,
-    lineHeight: 1.3,
-  },
-  footerRight: {
-    flex: 1,
-    textAlign: "right",
-  },
-  footerPin: {
-    fontSize: 6,
-    color: colors.gray,
-    marginBottom: 2,
-  },
-  pageNumber: {
-    fontSize: 7,
-    fontFamily: "Helvetica-Bold",
-    color: colors.darkGray,
-  },
-
-  // Thank you message
-  thankYou: {
-    textAlign: "center",
-    marginBottom: 10,
-    paddingVertical: 8,
-  },
-  thankYouText: {
+  footerThank: {
     fontSize: 9,
     fontFamily: "Helvetica-Bold",
     color: colors.primary,
   },
-  thankYouSubtext: {
-    fontSize: 7,
-    color: colors.gray,
-    marginTop: 2,
-  },
 });
 
 // ============================================
-// UTILITY FUNCTIONS
+// HELPERS
 // ============================================
-const formatCurrency = (amount, currency = "KES") => {
-  if (amount === null || amount === undefined || isNaN(amount)) {
-    return `${currency} 0.00`;
-  }
-  return `${currency} ${Number(amount).toLocaleString("en-KE", {
+const formatCurrency = (amount) => {
+  if (!amount && amount !== 0) return "KES 0.00";
+  return `KES ${Number(amount).toLocaleString("en-KE", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -516,602 +345,336 @@ const formatCurrency = (amount, currency = "KES") => {
 
 const formatDate = (date) => {
   if (!date) return "-";
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return "-";
-  return d.toLocaleDateString("en-GB", {
+  return new Date(date).toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
 };
 
-const getStatusColor = (status) => {
-  const statusColors = {
-    draft: { bg: colors.bgMuted, text: colors.gray },
-    sent: { bg: colors.infoLight, text: colors.info },
-    completed: { bg: colors.successLight, text: colors.success },
-    cancelled: { bg: colors.dangerLight, text: colors.danger },
-    void: { bg: colors.dangerLight, text: colors.danger },
-  };
-  return statusColors[status] || statusColors.draft;
-};
+// Handle address that might be stored as JSON string, JS object literal, or object
+const formatAddress = (address) => {
+  if (!address) return "";
 
-const getPaymentStatusColor = (status) => {
-  const statusColors = {
-    unpaid: { bg: colors.warningLight, text: colors.warning },
-    partial: { bg: colors.infoLight, text: colors.info },
-    paid: { bg: colors.successLight, text: colors.success },
-    overdue: { bg: colors.dangerLight, text: colors.danger },
-  };
-  return statusColors[status] || statusColors.unpaid;
-};
+  // If it's a string, try to parse it
+  if (typeof address === "string") {
+    // Try to parse as JSON first (handles {"country":"Kenya"} case)
+    try {
+      const parsed = JSON.parse(address);
+      if (typeof parsed === "object" && parsed !== null) {
+        const parts = [
+          parsed.street || parsed.line1,
+          parsed.line2,
+          parsed.city,
+          parsed.state,
+          parsed.postalCode,
+          parsed.country,
+        ].filter(Boolean);
+        return parts.join(", ");
+      }
+    } catch {
+      // Not valid JSON - check if it's a JS object literal like "{ country: 'Kenya' }"
+      if (address.startsWith("{") && address.endsWith("}")) {
+        try {
+          const jsonStr = address
+            .replace(/(\w+):/g, '"$1":')
+            .replace(/'/g, '"');
+          const parsed = JSON.parse(jsonStr);
+          if (typeof parsed === "object" && parsed !== null) {
+            const parts = [
+              parsed.street || parsed.line1,
+              parsed.line2,
+              parsed.city,
+              parsed.state,
+              parsed.postalCode,
+              parsed.country,
+            ].filter(Boolean);
+            return parts.join(", ");
+          }
+        } catch {
+          return address;
+        }
+      }
+      return address;
+    }
+  }
 
-const formatStatus = (status) => {
-  if (!status) return "Draft";
-  return status.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+  // If it's an object, extract parts
+  if (typeof address === "object") {
+    const parts = [
+      address.street || address.line1,
+      address.line2,
+      address.city,
+      address.state,
+      address.postalCode,
+      address.country,
+    ].filter(Boolean);
+    return parts.join(", ");
+  }
+
+  return "";
 };
 
 // ============================================
 // INVOICE PDF COMPONENT
 // ============================================
-export const InvoicePDF = ({ data, company, bankDetails }) => {
-  const companyInfo = company || {
-    name: "QSL Technologies Ltd",
-    tagline: "Quality Systems & Logistics",
-    address: "Industrial Area, Enterprise Road",
-    city: "Nairobi, Kenya",
-    postalCode: "P.O. Box 12345-00100",
-    phone: "+254 700 123 456",
-    email: "accounts@qsl.co.ke",
-    website: "www.qsl.co.ke",
-    pin: "P051234567X",
-  };
-
-  const bankInfo = bankDetails || {
-    bankName: "Kenya Commercial Bank",
-    accountName: "QSL Technologies Ltd",
-    accountNumber: "1234567890",
-    branchName: "Westlands Branch",
-    branchCode: "001",
-    swiftCode: "KCABORBY",
-    mpesaPaybill: "123456",
-    mpesaAccountNumber: "Invoice Number",
-  };
-
-  // Destructure data matching SCHEMA STRUCTURE
-  const {
-    invoiceNumber = "INV-DRAFT",
-    invoiceDate,
-    dueDate,
-    customer = {},
-    items = [],
-    subtotal = 0,
-    totalDiscount = 0,
-    taxAmount = 0,
-    total = 0,
-    currency = "KES",
-    totalCOGS = 0,
-    grossProfit = 0,
-    grossMarginPercentage = 0,
-    paymentStatus = "unpaid",
-    amountPaid = 0,
-    amountDue = 0,
-    status = "draft",
-    paymentTerms = "Net 30",
-    referenceNumber,
-    purchaseOrderNumber,
-    quoteRef,
-    notes,
-    termsAndConditions,
-    createdBy,
-  } = data || {};
-
-  const statusColor = getStatusColor(status);
-  const paymentColor = getPaymentStatusColor(paymentStatus);
-  const hasItems = items && items.length > 0;
-  const itemCount = items?.length || 0;
-  const isMultiPage = itemCount > 15;
+export const InvoicePDF = ({ invoice, company }) => {
+  console.log(company.tagline);
   const isOverdue =
-    paymentStatus !== "paid" &&
-    status === "completed" &&
-    dueDate &&
-    new Date() > new Date(dueDate);
-  const hasDiscount = totalDiscount > 0;
+    invoice.paymentStatus !== "paid" &&
+    invoice.status === "completed" &&
+    new Date(invoice.dueDate) < new Date();
+
+  const getStatusColor = () => {
+    if (isOverdue) return { bg: "#fee2e2", text: "#dc2626" };
+    if (invoice.paymentStatus === "paid")
+      return { bg: "#dcfce7", text: "#16a34a" };
+    if (invoice.paymentStatus === "partial")
+      return { bg: "#dbeafe", text: "#2563eb" };
+    return { bg: "#fef3c7", text: "#ca8a04" };
+  };
+
+  const getStatusText = () => {
+    if (isOverdue) return "OVERDUE";
+    if (invoice.paymentStatus === "paid") return "PAID";
+    if (invoice.paymentStatus === "partial") return "PARTIAL";
+    return "UNPAID";
+  };
+
+  const statusColor = getStatusColor();
 
   return (
-    <Document>
+    <Document title={`Invoice ${invoice.invoiceNumber}`}>
       <Page size="A4" style={styles.page}>
-        {/* HEADER */}
+        {/* Header */}
         <View style={styles.header}>
           <View style={styles.logoSection}>
-            <Image src="/qsl.png" style={styles.logo} />
-            <View style={styles.companyInfo}>
-              <Text style={styles.companyName}>{companyInfo.name}</Text>
-              {companyInfo.tagline && (
-                <Text style={styles.companyTagline}>{companyInfo.tagline}</Text>
-              )}
-              <Text style={styles.companyDetails}>
-                {companyInfo.address}
-                {"\n"}
-                {companyInfo.city}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.documentTitle}>
-            <Text style={styles.documentType}>INVOICE</Text>
-            <Text style={styles.documentNumber}>{invoiceNumber}</Text>
-            <Text style={styles.documentDate}>
-              Date: {formatDate(invoiceDate || new Date())}
+            <Image style={styles.logo} src="/qsl.png" />
+            <Text style={styles.companyDetails}>
+              {company.address}
+              {company.city && `, ${company.city}`}
+              {"\n"}
+              {company.phone} | {company.email}
+              {company.taxPin && `\n${company.taxPin}`}
             </Text>
-            <View style={styles.statusRow}>
-              <View
-                style={[
-                  styles.statusBadge,
-                  { backgroundColor: statusColor.bg },
-                ]}
-              >
-                <Text style={[styles.statusText, { color: statusColor.text }]}>
-                  {formatStatus(status)}
-                </Text>
-              </View>
-              {status === "completed" && (
-                <View
-                  style={[
-                    styles.statusBadge,
-                    { backgroundColor: paymentColor.bg },
-                  ]}
-                >
-                  <Text
-                    style={[styles.statusText, { color: paymentColor.text }]}
-                  >
-                    {isOverdue ? "OVERDUE" : formatStatus(paymentStatus)}
-                  </Text>
-                </View>
-              )}
+            {company.tagline && (
+              <Text style={styles.companyTagline}>{company.tagline}</Text>
+            )}
+          </View>
+          <View style={styles.invoiceHeader}>
+            <Text style={styles.invoiceTitle}>INVOICE</Text>
+            <Text style={styles.invoiceNumber}>{invoice.invoiceNumber}</Text>
+            <View
+              style={[styles.statusBadge, { backgroundColor: statusColor.bg }]}
+            >
+              <Text style={[styles.statusText, { color: statusColor.text }]}>
+                {getStatusText()}
+              </Text>
             </View>
           </View>
         </View>
 
-        {/* INFO GRID */}
-        <View style={styles.infoGrid}>
-          {/* Bill To - Customer */}
-          <View style={styles.infoBox}>
-            <Text style={styles.infoBoxLabel}>Bill To</Text>
-            <Text style={styles.infoBoxTitle}>{customer.name || "-"}</Text>
-            {customer.address && (
-              <Text style={styles.infoBoxText}>{customer.address}</Text>
-            )}
-            {customer.taxPin && (
-              <Text style={styles.infoBoxText}>PIN: {customer.taxPin}</Text>
-            )}
-            {customer.phone && (
-              <Text style={styles.infoBoxText}>Tel: {customer.phone}</Text>
-            )}
-            {customer.email && (
-              <Text style={styles.infoBoxText}>{customer.email}</Text>
-            )}
-          </View>
+        {/* Divider */}
+        <View style={styles.divider} />
 
-          {/* Ship To / Delivery (same as customer for now) */}
-          <View style={styles.infoBox}>
-            <Text style={styles.infoBoxLabel}>Ship To</Text>
-            <Text style={styles.infoBoxTitle}>{customer.name || "-"}</Text>
-            {customer.address && (
-              <Text style={styles.infoBoxText}>{customer.address.country}</Text>
-            )}
-            {customer.phone && (
-              <Text style={styles.infoBoxText}>Tel: {customer.phone}</Text>
-            )}
+        {/* Bill To & Invoice Details */}
+        <View style={styles.infoRow}>
+          <View style={styles.billTo}>
+            <Text style={styles.label}>Bill To</Text>
+            <Text style={styles.valueBold}>{invoice.customer?.name}</Text>
+            <Text style={styles.value}>
+              {formatAddress(invoice.customer?.address)}
+              {invoice.customer?.phone && `\n${invoice.customer.phone}`}
+              {invoice.customer?.email && `\n${invoice.customer.email}`}
+              {invoice.customer?.taxPin && `\nPIN: ${invoice.customer.taxPin}`}
+            </Text>
           </View>
-
-          {/* Invoice Details */}
-          <View style={styles.infoBoxHighlight}>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoRowLabel}>Invoice Date:</Text>
-              <Text style={styles.infoRowValue}>
-                {formatDate(invoiceDate || new Date())}
+          <View style={styles.invoiceDetails}>
+            <View style={styles.detailRow}>
+              <Text style={styles.label}>Invoice Date</Text>
+              <Text style={styles.valueBold}>
+                {formatDate(invoice.invoiceDate)}
               </Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoRowLabel}>Due Date:</Text>
+            <View style={styles.detailRow}>
+              <Text style={styles.label}>Due Date</Text>
               <Text
                 style={[
-                  styles.infoRowValue,
+                  styles.valueBold,
                   isOverdue && { color: colors.danger },
                 ]}
               >
-                {formatDate(dueDate)}
+                {formatDate(invoice.dueDate)}
               </Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoRowLabel}>Payment Terms:</Text>
-              <Text style={styles.infoRowValue}>{paymentTerms}</Text>
+            <View style={styles.detailRow}>
+              <Text style={styles.label}>Payment Terms</Text>
+              <Text style={styles.value}>
+                {invoice.paymentTerms || "Due on Receipt"}
+              </Text>
             </View>
-            {purchaseOrderNumber && (
-              <View style={styles.infoRow}>
-                <Text style={styles.infoRowLabel}>PO Number:</Text>
-                <Text style={styles.infoRowValue}>{purchaseOrderNumber}</Text>
+            {invoice.purchaseOrderNumber && (
+              <View style={styles.detailRow}>
+                <Text style={styles.label}>PO Number</Text>
+                <Text style={styles.value}>{invoice.purchaseOrderNumber}</Text>
               </View>
             )}
-            {quoteRef?.quoteNumber && (
-              <View style={styles.infoRow}>
-                <Text style={styles.infoRowLabel}>Quote Ref:</Text>
-                <Text style={styles.infoRowValue}>{quoteRef.quoteNumber}</Text>
-              </View>
-            )}
-            <View style={styles.infoRow}>
-              <Text style={styles.infoRowLabel}>Currency:</Text>
-              <Text style={styles.infoRowValue}>{currency}</Text>
-            </View>
           </View>
         </View>
 
-        {/* TABLE */}
+        {/* Items Table */}
         <View style={styles.table}>
-          {/* Table Header */}
-          <View style={styles.tableHeader} fixed={isMultiPage}>
+          <View style={styles.tableHeader}>
             <Text style={[styles.tableHeaderCell, styles.colNo]}>#</Text>
             <Text style={[styles.tableHeaderCell, styles.colDesc]}>
               Description
             </Text>
             <Text style={[styles.tableHeaderCell, styles.colQty]}>Qty</Text>
-            <Text style={[styles.tableHeaderCell, styles.colRate]}>
-              Unit Price
-            </Text>
-            {hasDiscount && (
-              <Text style={[styles.tableHeaderCell, styles.colDisc]}>Disc</Text>
-            )}
-            <Text style={[styles.tableHeaderCell, styles.colVat]}>VAT</Text>
+            <Text style={[styles.tableHeaderCell, styles.colPrice]}>Price</Text>
             <Text style={[styles.tableHeaderCell, styles.colAmount]}>
               Amount
             </Text>
           </View>
-
-          {/* Table Rows */}
-          {hasItems ? (
-            items.map((item, index) => {
-              const isProduct = item.itemType === "product";
-              const description =
-                item.description || item.productName || "Item";
-              const qty = item.quantity || 0;
-              const unit = item.unit || "pcs";
-              const unitPrice = item.unitPrice || 0;
-              const discountAmt = item.discountAmount || 0;
-              const taxRate = item.taxRate ?? 16;
-              const amount = item.amount || qty * unitPrice - discountAmt;
-
-              return (
-                <View
-                  key={item._id || index}
-                  style={[
-                    styles.tableRow,
-                    index % 2 === 1 ? styles.tableRowAlt : {},
-                  ]}
-                  wrap={false}
-                >
-                  <Text style={[styles.tableCellSmall, styles.colNo]}>
-                    {index + 1}
+          {invoice.items?.map((item, i) => (
+            <View
+              key={i}
+              style={[styles.tableRow, i % 2 === 1 && styles.tableRowAlt]}
+            >
+              <Text style={[styles.tableCell, styles.colNo]}>{i + 1}</Text>
+              <View style={styles.colDesc}>
+                <Text style={styles.tableCellBold}>
+                  {item.productName || item.description}
+                </Text>
+                {item.productSKU && (
+                  <Text style={styles.tableCellSub}>
+                    SKU: {item.productSKU}
                   </Text>
-                  <View style={styles.colDesc}>
-                    <Text style={styles.tableCell}>{description}</Text>
-                    {isProduct && item.productSKU && (
-                      <Text style={styles.tableCellMono}>
-                        SKU: {item.productSKU}
-                      </Text>
-                    )}
-                    <View
-                      style={[
-                        styles.itemTypeBadge,
-                        {
-                          backgroundColor: isProduct
-                            ? colors.infoLight
-                            : colors.successLight,
-                          alignSelf: "flex-start",
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 5,
-                          color: isProduct ? colors.info : colors.success,
-                        }}
-                      >
-                        {isProduct ? "PRODUCT" : "SERVICE"}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={[styles.tableCell, styles.colQty]}>
-                    {qty} {unit}
-                  </Text>
-                  <Text style={[styles.tableCell, styles.colRate]}>
-                    {formatCurrency(unitPrice, currency)}
-                  </Text>
-                  {hasDiscount && (
-                    <Text
-                      style={[
-                        styles.tableCell,
-                        styles.colDisc,
-                        {
-                          color: discountAmt > 0 ? colors.danger : colors.gray,
-                        },
-                      ]}
-                    >
-                      {discountAmt > 0
-                        ? `(${formatCurrency(discountAmt, currency)})`
-                        : "-"}
-                    </Text>
-                  )}
-                  <Text
-                    style={[
-                      styles.tableCell,
-                      styles.colVat,
-                      { color: colors.gray },
-                    ]}
-                  >
-                    {taxRate}%
-                  </Text>
-                  <Text style={[styles.tableCellBold, styles.colAmount]}>
-                    {formatCurrency(amount, currency)}
-                  </Text>
-                </View>
-              );
-            })
-          ) : (
-            <View style={styles.tableRow}>
-              <Text
-                style={{
-                  width: "100%",
-                  textAlign: "center",
-                  color: colors.lightGray,
-                  fontStyle: "italic",
-                  fontSize: 8,
-                  paddingVertical: 10,
-                }}
-              >
-                No items on this invoice
+                )}
+              </View>
+              <Text style={[styles.tableCell, styles.colQty]}>
+                {item.quantity}
+              </Text>
+              <Text style={[styles.tableCell, styles.colPrice]}>
+                {formatCurrency(item.unitPrice)}
+              </Text>
+              <Text style={[styles.tableCellBold, styles.colAmount]}>
+                {formatCurrency(item.amount)}
               </Text>
             </View>
-          )}
+          ))}
         </View>
 
-        {/* SUMMARY SECTION */}
-        <View style={styles.summarySection} wrap={false}>
-          <View style={styles.notesBox}>
-            {notes && (
-              <>
-                <Text style={styles.notesLabel}>Notes</Text>
-                <Text style={styles.notesText}>{notes}</Text>
-              </>
-            )}
-            {!notes && (
-              <>
-                <Text style={styles.notesLabel}>Payment Instructions</Text>
-                <Text style={styles.notesText}>
-                  Please reference invoice number {invoiceNumber} on all
-                  payments. Payment is due by {formatDate(dueDate)}.
-                </Text>
-              </>
-            )}
-          </View>
-
+        {/* Totals */}
+        <View style={styles.totalsRow}>
           <View style={styles.totalsBox}>
-            <View style={styles.totalsRow}>
-              <Text style={styles.totalsLabel}>Subtotal:</Text>
-              <Text style={styles.totalsValue}>
-                {formatCurrency(subtotal, currency)}
+            <View style={styles.totalLine}>
+              <Text style={styles.totalLabel}>Subtotal</Text>
+              <Text style={styles.totalValue}>
+                {formatCurrency(invoice.subtotal)}
               </Text>
             </View>
-            {hasDiscount && (
-              <View style={[styles.totalsRow, styles.totalsRowBorder]}>
-                <Text style={styles.totalsLabel}>Discount:</Text>
-                <Text style={[styles.totalsValue, { color: colors.danger }]}>
-                  ({formatCurrency(totalDiscount, currency)})
+            {invoice.totalDiscount > 0 && (
+              <View style={styles.totalLine}>
+                <Text style={styles.totalLabel}>Discount</Text>
+                <Text style={[styles.totalValue, { color: colors.success }]}>
+                  -{formatCurrency(invoice.totalDiscount)}
                 </Text>
               </View>
             )}
-            <View style={[styles.totalsRow, styles.totalsRowBorder]}>
-              <Text style={styles.totalsLabel}>VAT (16%):</Text>
-              <Text style={styles.totalsValue}>
-                {formatCurrency(taxAmount, currency)}
+            <View style={styles.totalLine}>
+              <Text style={styles.totalLabel}>VAT (16%)</Text>
+              <Text style={styles.totalValue}>
+                {formatCurrency(invoice.taxAmount)}
               </Text>
             </View>
-            <View style={styles.totalsFinal}>
-              <Text style={styles.totalsFinalLabel}>Total:</Text>
-              <Text style={styles.totalsFinalValue}>
-                {formatCurrency(total, currency)}
+            <View style={styles.totalFinal}>
+              <Text style={styles.totalLabelFinal}>TOTAL</Text>
+              <Text style={styles.totalValueFinal}>
+                {formatCurrency(invoice.total)}
               </Text>
             </View>
-            {amountPaid > 0 && (
-              <>
-                <View
-                  style={[styles.totalsRow, { backgroundColor: colors.white }]}
-                >
-                  <Text style={styles.totalsLabel}>Amount Paid:</Text>
-                  <Text style={[styles.totalsValue, { color: colors.success }]}>
-                    ({formatCurrency(amountPaid, currency)})
-                  </Text>
-                </View>
-                <View
-                  style={[
-                    styles.totalsRow,
-                    {
-                      backgroundColor: isOverdue
-                        ? colors.dangerLight
-                        : colors.warningLight,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.totalsLabel,
-                      { fontFamily: "Helvetica-Bold" },
-                    ]}
-                  >
-                    Amount Due:
-                  </Text>
-                  <Text
-                    style={[
-                      styles.totalsValue,
-                      {
-                        fontFamily: "Helvetica-Bold",
-                        color: isOverdue ? colors.danger : colors.warning,
-                      },
-                    ]}
-                  >
-                    {formatCurrency(amountDue, currency)}
-                  </Text>
-                </View>
-              </>
-            )}
           </View>
         </View>
 
-        {/* PAYMENT STATUS BOXES */}
-        {status === "completed" && (
-          <View style={styles.paymentSection} wrap={false}>
-            <View
-              style={
-                paymentStatus === "paid"
-                  ? styles.paymentBoxSuccess
-                  : isOverdue
-                  ? styles.paymentBoxDanger
-                  : styles.paymentBox
-              }
-            >
-              <Text style={styles.paymentLabel}>Amount Due</Text>
-              <Text
-                style={
-                  paymentStatus === "paid"
-                    ? styles.paymentValueSuccess
-                    : isOverdue
-                    ? styles.paymentValueDanger
-                    : styles.paymentValue
-                }
-              >
-                {paymentStatus === "paid"
-                  ? "PAID IN FULL"
-                  : formatCurrency(amountDue, currency)}
-              </Text>
-              {paymentStatus !== "paid" && (
-                <Text style={styles.paymentSubtext}>
-                  Due: {formatDate(dueDate)}
-                  {isOverdue && " (OVERDUE)"}
+        {/* Amount Due */}
+        {invoice.paymentStatus !== "paid" && (
+          <View style={styles.amountDue}>
+            <View>
+              <Text style={styles.amountDueLabel}>Amount Due</Text>
+              {invoice.amountPaid > 0 && (
+                <Text style={{ fontSize: 7, color: colors.gray }}>
+                  Paid: {formatCurrency(invoice.amountPaid)}
                 </Text>
               )}
             </View>
-
-            <View style={styles.paymentBox}>
-              <Text style={styles.paymentLabel}>Payment Method</Text>
-              <Text style={styles.paymentValue}>Bank / M-Pesa</Text>
-              <Text style={styles.paymentSubtext}>See details below</Text>
-            </View>
+            <Text style={styles.amountDueValue}>
+              {formatCurrency(invoice.amountDue)}
+            </Text>
           </View>
         )}
 
-        {/* BANK DETAILS */}
-        {status === "completed" && paymentStatus !== "paid" && (
-          <View style={styles.bankSection} wrap={false}>
-            <Text style={styles.bankTitle}>Payment Details</Text>
-            <View style={styles.bankGrid}>
-              <View style={styles.bankColumn}>
-                <Text
-                  style={[
-                    styles.notesLabel,
-                    { marginBottom: 4, color: colors.gray },
-                  ]}
-                >
-                  Bank Transfer
-                </Text>
-                <View style={styles.bankRow}>
-                  <Text style={styles.bankLabel}>Bank:</Text>
-                  <Text style={styles.bankValue}>{bankInfo.bankName}</Text>
-                </View>
-                <View style={styles.bankRow}>
-                  <Text style={styles.bankLabel}>Account Name:</Text>
-                  <Text style={styles.bankValue}>{bankInfo.accountName}</Text>
-                </View>
-                <View style={styles.bankRow}>
-                  <Text style={styles.bankLabel}>Account No:</Text>
-                  <Text style={styles.bankValue}>{bankInfo.accountNumber}</Text>
-                </View>
-                <View style={styles.bankRow}>
-                  <Text style={styles.bankLabel}>Branch:</Text>
-                  <Text style={styles.bankValue}>{bankInfo.branchName}</Text>
-                </View>
-                <View style={styles.bankRow}>
-                  <Text style={styles.bankLabel}>Swift Code:</Text>
-                  <Text style={styles.bankValue}>{bankInfo.swiftCode}</Text>
-                </View>
-              </View>
-              <View style={styles.bankColumn}>
-                <Text
-                  style={[
-                    styles.notesLabel,
-                    { marginBottom: 4, color: colors.gray },
-                  ]}
-                >
-                  M-Pesa
-                </Text>
-                <View style={styles.bankRow}>
-                  <Text style={styles.bankLabel}>Paybill:</Text>
-                  <Text style={styles.bankValue}>{bankInfo.mpesaPaybill}</Text>
-                </View>
-                <View style={styles.bankRow}>
-                  <Text style={styles.bankLabel}>Account No:</Text>
-                  <Text style={styles.bankValue}>{invoiceNumber}</Text>
-                </View>
-                <View style={{ marginTop: 8 }}>
-                  <Text style={[styles.bankLabel, { fontStyle: "italic" }]}>
-                    Reference: {invoiceNumber}
+        {/* Payment Methods */}
+        <View style={styles.paymentSection}>
+          <View style={styles.paymentBox}>
+            <Text style={styles.paymentTitle}>Bank Transfer</Text>
+            <View style={styles.paymentRow}>
+              <Text style={styles.paymentLabel}>Bank:</Text>
+              <Text style={styles.paymentValue}>{company.bankName}</Text>
+            </View>
+            <View style={styles.paymentRow}>
+              <Text style={styles.paymentLabel}>Branch:</Text>
+              <Text style={styles.paymentValue}>{company.bankBranch}</Text>
+            </View>
+            <View style={styles.paymentRow}>
+              <Text style={styles.paymentLabel}>Account:</Text>
+              <Text style={styles.paymentValue}>{company.accountName}</Text>
+            </View>
+            <View style={styles.paymentRow}>
+              <Text style={styles.paymentLabel}>Acc No:</Text>
+              <Text style={styles.paymentValue}>{company.accountNumber}</Text>
+            </View>
+          </View>
+          <View style={[styles.paymentBox, styles.paymentBoxLast]}>
+            <Text style={styles.paymentTitle}>M-Pesa</Text>
+            {company.mpesaPaybill && (
+              <>
+                <View style={styles.paymentRow}>
+                  <Text style={styles.paymentLabel}>Paybill:</Text>
+                  <Text style={styles.paymentValue}>
+                    {company.mpesaPaybill}
                   </Text>
                 </View>
+                <View style={styles.paymentRow}>
+                  <Text style={styles.paymentLabel}>Account:</Text>
+                  <Text style={styles.paymentValue}>
+                    {invoice.invoiceNumber}
+                  </Text>
+                </View>
+              </>
+            )}
+            {company.mpesaTill && (
+              <View style={styles.paymentRow}>
+                <Text style={styles.paymentLabel}>Till No:</Text>
+                <Text style={styles.paymentValue}>{company.mpesaTill}</Text>
               </View>
-            </View>
+            )}
           </View>
-        )}
-
-        {/* TERMS & CONDITIONS */}
-        {termsAndConditions && (
-          <View style={styles.termsSection} wrap={false}>
-            <Text style={styles.termsLabel}>Terms & Conditions</Text>
-            <Text style={styles.termsText}>{termsAndConditions}</Text>
-          </View>
-        )}
-
-        {/* THANK YOU MESSAGE */}
-        <View style={styles.thankYou} wrap={false}>
-          <Text style={styles.thankYouText}>Thank you for your business!</Text>
-          <Text style={styles.thankYouSubtext}>
-            Questions? Contact us at {companyInfo.email} or {companyInfo.phone}
-          </Text>
         </View>
 
-        {/* FOOTER */}
-        <View style={styles.footer} wrap={false}>
-          <View style={styles.footerContent}>
-            <View style={styles.footerLeft}>
-              <Text style={styles.footerCompany}>{companyInfo.name}</Text>
-              <Text style={styles.footerAddress}>
-                {companyInfo.address}, {companyInfo.city}
-                {companyInfo.postalCode && ` • ${companyInfo.postalCode}`}
-              </Text>
-            </View>
-            <View style={styles.footerCenter}>
-              <Text style={styles.footerContact}>
-                Tel: {companyInfo.phone} • {companyInfo.email}
-                {companyInfo.website && ` • ${companyInfo.website}`}
-              </Text>
-            </View>
-            <View style={styles.footerRight}>
-              <Text style={styles.footerPin}>PIN: {companyInfo.pin}</Text>
-              <Text
-                style={styles.pageNumber}
-                render={({ pageNumber, totalPages }) =>
-                  totalPages > 1 ? `Page ${pageNumber} of ${totalPages}` : ""
-                }
-              />
-            </View>
+        {/* Notes */}
+        {invoice.notes && (
+          <View style={styles.notes}>
+            <Text style={styles.notesTitle}>Notes</Text>
+            <Text style={styles.notesText}>{invoice.notes}</Text>
           </View>
+        )}
+
+        {/* Footer */}
+        <View style={styles.footer} fixed>
+          <Text style={styles.footerText}>
+            {company.name} | {company.phone} | {company.email}
+          </Text>
+          <Text style={styles.footerThank}>Thank you for your business!</Text>
         </View>
       </Page>
     </Document>

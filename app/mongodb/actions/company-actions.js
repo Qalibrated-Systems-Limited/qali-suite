@@ -1,0 +1,552 @@
+"use server";
+
+import { z } from "zod";
+import { auth } from "@/auth";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import Company from "../../models/Company";
+import connectDB from "../../config/dbConnect";
+
+// ============================================
+// ZOD SCHEMAS
+// ============================================
+
+// Helper to transform empty string/null to undefined for optional strings
+const optionalString = z
+  .string()
+  .optional()
+  .nullable()
+  .transform((val) => (val === "" || val === null ? undefined : val));
+
+// Helper for optional URL - allows empty string or valid URL
+const optionalUrl = z
+  .string()
+  .optional()
+  .nullable()
+  .transform((val) => (val === "" || val === null ? undefined : val))
+  .refine((val) => !val || z.string().url().safeParse(val).success, {
+    message: "Invalid URL format",
+  });
+
+// Helper for optional numbers - handles empty strings
+const optionalNumber = (min, max) =>
+  z
+    .union([z.string(), z.number()])
+    .optional()
+    .nullable()
+    .transform((val) => {
+      if (val === "" || val === null || val === undefined) return undefined;
+      const num = Number(val);
+      return isNaN(num) ? undefined : num;
+    })
+    .refine((val) => val === undefined || (val >= min && val <= max), {
+      message: `Number must be between ${min} and ${max}`,
+    });
+
+const CreateCompanySchema = z.object({
+  // Basic Info
+  name: z.string().min(1, "Company name is required").max(100),
+  tagline: optionalString.pipe(z.string().max(200).optional()),
+  logo: optionalString,
+
+  // Contact
+  email: z.string().email("Invalid email address"),
+  phone: optionalString,
+  website: optionalUrl,
+
+  // Address
+  street: optionalString,
+  city: optionalString,
+  state: optionalString,
+  postalCode: optionalString,
+  country: optionalString,
+
+  // Tax & Legal
+  taxPin: optionalString,
+  vatNumber: optionalString,
+  registrationNumber: optionalString,
+
+  // Banking
+  bankName: optionalString,
+  bankBranch: optionalString,
+  accountName: optionalString,
+  accountNumber: optionalString,
+  swiftCode: optionalString,
+
+  // M-Pesa
+  mpesaPaybill: optionalString,
+  mpesaTill: optionalString,
+
+  // Subscription
+  plan: z.enum(["free", "starter", "professional", "enterprise"]).optional().nullable(),
+
+  // Settings
+  currency: optionalString,
+  defaultVatRate: optionalNumber(0, 100),
+  fiscalYearStart: optionalNumber(1, 12),
+  defaultPaymentTermsDays: optionalNumber(0, 365),
+});
+
+const UpdateCompanySchema = CreateCompanySchema.partial();
+
+// ============================================
+// AUTHORIZATION HELPERS
+// ============================================
+
+const SUPER_ADMIN_ROLES = ["SuperAdmin"];
+const COMPANY_ADMIN_ROLES = ["SuperAdmin", "Admin"];
+
+// ============================================
+// COMPANY ACTIONS
+// ============================================
+
+/**
+ * Create a new company (SuperAdmin only)
+ */
+export async function createCompany(prevState, formData) {
+  const session = await auth();
+
+  // Extract form values to preserve on error
+  const formValues = {
+    name: formData.get("name"),
+    tagline: formData.get("tagline"),
+    logo: formData.get("logo"),
+    email: formData.get("email"),
+    phone: formData.get("phone"),
+    website: formData.get("website"),
+    street: formData.get("street"),
+    city: formData.get("city"),
+    state: formData.get("state"),
+    postalCode: formData.get("postalCode"),
+    country: formData.get("country"),
+    taxPin: formData.get("taxPin"),
+    vatNumber: formData.get("vatNumber"),
+    registrationNumber: formData.get("registrationNumber"),
+    bankName: formData.get("bankName"),
+    bankBranch: formData.get("bankBranch"),
+    accountName: formData.get("accountName"),
+    accountNumber: formData.get("accountNumber"),
+    swiftCode: formData.get("swiftCode"),
+    mpesaPaybill: formData.get("mpesaPaybill"),
+    mpesaTill: formData.get("mpesaTill"),
+    plan: formData.get("plan"),
+    currency: formData.get("currency"),
+    defaultVatRate: formData.get("defaultVatRate"),
+    fiscalYearStart: formData.get("fiscalYearStart"),
+    defaultPaymentTermsDays: formData.get("defaultPaymentTermsDays"),
+  };
+
+  if (!session?.user) {
+    return { errors: { _form: ["You must be logged in"] }, values: formValues };
+  }
+
+  if (!SUPER_ADMIN_ROLES.includes(session.user.role)) {
+    return { errors: { _form: ["Unauthorized: SuperAdmin role required"] }, values: formValues };
+  }
+
+  const validatedFields = CreateCompanySchema.safeParse(formValues);
+
+  if (!validatedFields.success) {
+    console.log(validatedFields.error.flatten().fieldErrors);
+    return { errors: validatedFields.error.flatten().fieldErrors, values: formValues };
+  }
+
+  const data = validatedFields.data;
+  console.log(data);
+
+  try {
+    await connectDB();
+
+    // Check for duplicate name
+    const existingCompany = await Company.findOne({
+      name: { $regex: new RegExp(`^${data.name}$`, "i") },
+    });
+
+    if (existingCompany) {
+      return { errors: { name: ["A company with this name already exists"] }, values: formValues };
+    }
+
+    // Create the company
+    const company = await Company.create({
+      name: data.name,
+      tagline: data.tagline,
+      logo: data.logo,
+      email: data.email,
+      phone: data.phone,
+      website: data.website,
+      address: {
+        street: data.street,
+        city: data.city,
+        state: data.state,
+        postalCode: data.postalCode,
+        country: data.country || "Kenya",
+      },
+      taxPin: data.taxPin,
+      vatNumber: data.vatNumber,
+      registrationNumber: data.registrationNumber,
+      bankName: data.bankName,
+      bankBranch: data.bankBranch,
+      accountName: data.accountName,
+      accountNumber: data.accountNumber,
+      swiftCode: data.swiftCode,
+      mpesaPaybill: data.mpesaPaybill,
+      mpesaTill: data.mpesaTill,
+      subscription: {
+        plan: data.plan || "free",
+        status: "trial",
+        trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days trial
+      },
+      settings: {
+        currency: data.currency || "KES",
+        defaultVatRate: data.defaultVatRate ?? 16,
+        fiscalYearStart: data.fiscalYearStart || 1,
+        defaultPaymentTermsDays: data.defaultPaymentTermsDays || 30,
+      },
+      createdBy: {
+        name: session.user.name,
+        id: session.user.id,
+      },
+    });
+
+    revalidatePath("/dashboard/admin/companies");
+  } catch (error) {
+    console.error("Create company error:", error);
+    return { errors: { _form: [error.message || "Failed to create company"] }, values: formValues };
+  }
+
+  redirect("/dashboard/admin/companies");
+}
+
+/**
+ * Update a company
+ * - SuperAdmin can update any company
+ * - Admin can only update their own company
+ */
+export async function updateCompany(prevState, formData) {
+  const session = await auth();
+
+  // Extract form values to preserve on error
+  const formValues = {
+    name: formData.get("name"),
+    tagline: formData.get("tagline"),
+    logo: formData.get("logo"),
+    email: formData.get("email"),
+    phone: formData.get("phone"),
+    website: formData.get("website"),
+    street: formData.get("street"),
+    city: formData.get("city"),
+    state: formData.get("state"),
+    postalCode: formData.get("postalCode"),
+    country: formData.get("country"),
+    taxPin: formData.get("taxPin"),
+    vatNumber: formData.get("vatNumber"),
+    registrationNumber: formData.get("registrationNumber"),
+    bankName: formData.get("bankName"),
+    bankBranch: formData.get("bankBranch"),
+    accountName: formData.get("accountName"),
+    accountNumber: formData.get("accountNumber"),
+    swiftCode: formData.get("swiftCode"),
+    mpesaPaybill: formData.get("mpesaPaybill"),
+    mpesaTill: formData.get("mpesaTill"),
+    currency: formData.get("currency"),
+    defaultVatRate: formData.get("defaultVatRate"),
+    fiscalYearStart: formData.get("fiscalYearStart"),
+    defaultPaymentTermsDays: formData.get("defaultPaymentTermsDays"),
+  };
+
+  if (!session?.user) {
+    return { errors: { _form: ["You must be logged in"] }, values: formValues };
+  }
+
+  if (!COMPANY_ADMIN_ROLES.includes(session.user.role)) {
+    return { errors: { _form: ["Unauthorized: Admin role required"] }, values: formValues };
+  }
+
+  const companyId = formData.get("companyId");
+  if (!companyId) {
+    return { errors: { _form: ["Company ID is required"] }, values: formValues };
+  }
+
+  const validatedFields = UpdateCompanySchema.safeParse(formValues);
+
+  if (!validatedFields.success) {
+    return { errors: validatedFields.error.flatten().fieldErrors, values: formValues };
+  }
+
+  const data = validatedFields.data;
+
+  try {
+    await connectDB();
+
+    const company = await Company.findById(companyId);
+    if (!company) {
+      return { errors: { _form: ["Company not found"] }, values: formValues };
+    }
+
+    // If not SuperAdmin, check if user belongs to this company
+    if (
+      session.user.role !== "SuperAdmin" &&
+      session.user.companyId !== companyId
+    ) {
+      return { errors: { _form: ["You can only update your own company"] }, values: formValues };
+    }
+
+    // Update fields
+    if (data.name) company.name = data.name;
+    if (data.tagline !== undefined) company.tagline = data.tagline;
+    if (data.logo !== undefined) company.logo = data.logo;
+    if (data.email) company.email = data.email;
+    if (data.phone !== undefined) company.phone = data.phone;
+    if (data.website !== undefined) company.website = data.website;
+
+    // Address
+    if (data.street !== undefined) company.address.street = data.street;
+    if (data.city !== undefined) company.address.city = data.city;
+    if (data.state !== undefined) company.address.state = data.state;
+    if (data.postalCode !== undefined)
+      company.address.postalCode = data.postalCode;
+    if (data.country !== undefined) company.address.country = data.country;
+
+    // Tax & Legal
+    if (data.taxPin !== undefined) company.taxPin = data.taxPin;
+    if (data.vatNumber !== undefined) company.vatNumber = data.vatNumber;
+    if (data.registrationNumber !== undefined)
+      company.registrationNumber = data.registrationNumber;
+
+    // Banking
+    if (data.bankName !== undefined) company.bankName = data.bankName;
+    if (data.bankBranch !== undefined) company.bankBranch = data.bankBranch;
+    if (data.accountName !== undefined) company.accountName = data.accountName;
+    if (data.accountNumber !== undefined)
+      company.accountNumber = data.accountNumber;
+    if (data.swiftCode !== undefined) company.swiftCode = data.swiftCode;
+
+    // M-Pesa
+    if (data.mpesaPaybill !== undefined)
+      company.mpesaPaybill = data.mpesaPaybill;
+    if (data.mpesaTill !== undefined) company.mpesaTill = data.mpesaTill;
+
+    // Settings
+    if (data.currency !== undefined) company.settings.currency = data.currency;
+    if (data.defaultVatRate !== undefined)
+      company.settings.defaultVatRate = data.defaultVatRate;
+    if (data.fiscalYearStart !== undefined)
+      company.settings.fiscalYearStart = data.fiscalYearStart;
+    if (data.defaultPaymentTermsDays !== undefined)
+      company.settings.defaultPaymentTermsDays = data.defaultPaymentTermsDays;
+
+    // Audit
+    company.lastModifiedBy = {
+      name: session.user.name,
+      id: session.user.id,
+    };
+
+    await company.save();
+
+    revalidatePath("/dashboard/admin/companies");
+    revalidatePath(`/dashboard/admin/companies/${companyId}`);
+    revalidatePath("/dashboard/company");
+  } catch (error) {
+    console.error("Update company error:", error);
+    return { errors: { _form: [error.message || "Failed to update company"] }, values: formValues };
+  }
+
+  // Redirect based on role (must be outside try/catch)
+  if (session.user.role === "SuperAdmin") {
+    redirect(`/dashboard/admin/companies/${companyId}`);
+  } else {
+    redirect("/dashboard/company");
+  }
+}
+
+/**
+ * Update company status (SuperAdmin only)
+ */
+export async function updateCompanyStatus(companyId, status) {
+  const session = await auth();
+
+  if (!session?.user) {
+    return { errors: { _form: ["You must be logged in"] } };
+  }
+
+  if (!SUPER_ADMIN_ROLES.includes(session.user.role)) {
+    return { errors: { _form: ["Unauthorized: SuperAdmin role required"] } };
+  }
+
+  if (!["active", "inactive", "suspended"].includes(status)) {
+    return { errors: { _form: ["Invalid status"] } };
+  }
+
+  try {
+    await connectDB();
+
+    const company = await Company.findById(companyId);
+    if (!company) {
+      return { errors: { _form: ["Company not found"] } };
+    }
+
+    company.status = status;
+    company.lastModifiedBy = {
+      name: session.user.name,
+      id: session.user.id,
+    };
+
+    await company.save();
+
+    revalidatePath("/dashboard/admin/companies");
+
+    return { success: true, message: `Company status updated to ${status}` };
+  } catch (error) {
+    console.error("Update company status error:", error);
+    return { errors: { _form: [error.message] } };
+  }
+}
+
+/**
+ * Update company subscription (SuperAdmin only)
+ */
+export async function updateCompanySubscription(companyId, subscriptionData) {
+  const session = await auth();
+
+  if (!session?.user) {
+    return { errors: { _form: ["You must be logged in"] } };
+  }
+
+  if (!SUPER_ADMIN_ROLES.includes(session.user.role)) {
+    return { errors: { _form: ["Unauthorized: SuperAdmin role required"] } };
+  }
+
+  try {
+    await connectDB();
+
+    const company = await Company.findById(companyId);
+    if (!company) {
+      return { errors: { _form: ["Company not found"] } };
+    }
+
+    // Update subscription fields
+    if (subscriptionData.plan)
+      company.subscription.plan = subscriptionData.plan;
+    if (subscriptionData.status)
+      company.subscription.status = subscriptionData.status;
+    if (subscriptionData.maxUsers)
+      company.subscription.maxUsers = subscriptionData.maxUsers;
+
+    company.lastModifiedBy = {
+      name: session.user.name,
+      id: session.user.id,
+    };
+
+    await company.save();
+
+    revalidatePath("/dashboard/admin/companies");
+
+    return { success: true, message: "Subscription updated successfully" };
+  } catch (error) {
+    console.error("Update subscription error:", error);
+    return { errors: { _form: [error.message] } };
+  }
+}
+
+/**
+ * Toggle company feature (SuperAdmin only)
+ */
+export async function toggleCompanyFeature(companyId, featureName, enabled) {
+  const session = await auth();
+
+  if (!session?.user) {
+    return { errors: { _form: ["You must be logged in"] } };
+  }
+
+  if (!SUPER_ADMIN_ROLES.includes(session.user.role)) {
+    return { errors: { _form: ["Unauthorized: SuperAdmin role required"] } };
+  }
+
+  const validFeatures = [
+    "inventory",
+    "sales",
+    "purchases",
+    "accounting",
+    "expenses",
+    "reports",
+    "multiCurrency",
+    "advancedReporting",
+    "apiAccess",
+  ];
+
+  if (!validFeatures.includes(featureName)) {
+    return { errors: { _form: ["Invalid feature name"] } };
+  }
+
+  try {
+    await connectDB();
+
+    const company = await Company.findById(companyId);
+    if (!company) {
+      return { errors: { _form: ["Company not found"] } };
+    }
+
+    company.features[featureName] = enabled;
+    company.lastModifiedBy = {
+      name: session.user.name,
+      id: session.user.id,
+    };
+
+    await company.save();
+
+    revalidatePath("/dashboard/admin/companies");
+
+    return {
+      success: true,
+      message: `Feature ${featureName} ${enabled ? "enabled" : "disabled"}`,
+    };
+  } catch (error) {
+    console.error("Toggle feature error:", error);
+    return { errors: { _form: [error.message] } };
+  }
+}
+
+/**
+ * Delete a company (SuperAdmin only)
+ * Note: In production, you'd want to soft delete or archive instead
+ */
+export async function deleteCompany(companyId) {
+  const session = await auth();
+
+  if (!session?.user) {
+    return { errors: { _form: ["You must be logged in"] } };
+  }
+
+  if (!SUPER_ADMIN_ROLES.includes(session.user.role)) {
+    return { errors: { _form: ["Unauthorized: SuperAdmin role required"] } };
+  }
+
+  try {
+    await connectDB();
+
+    const company = await Company.findById(companyId);
+    if (!company) {
+      return { errors: { _form: ["Company not found"] } };
+    }
+
+    // Soft delete - just mark as inactive
+    company.status = "inactive";
+    company.lastModifiedBy = {
+      name: session.user.name,
+      id: session.user.id,
+    };
+    await company.save();
+
+    // TODO: In production, you might want to:
+    // - Archive all company data
+    // - Deactivate all users
+    // - Send notification emails
+
+    revalidatePath("/dashboard/admin/companies");
+
+    return { success: true, message: "Company deactivated successfully" };
+  } catch (error) {
+    console.error("Delete company error:", error);
+    return { errors: { _form: [error.message] } };
+  }
+}

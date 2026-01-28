@@ -46,9 +46,14 @@ import { useRouter } from "next/navigation";
 import { ResetPasswordDialog } from "./ResetPasswordDialog";
 
 const roleColors = {
+  SuperAdmin: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
   Admin: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20",
   "Store Manager":
     "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
+  Manager: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
+  Accountant: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+  Technician: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20",
+  Employee: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
   User: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
   Viewer: "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20",
 };
@@ -68,8 +73,8 @@ export function UsersTable({ users, currentUser }) {
   const [isLoading, setIsLoading] = useState(false);
 
   const canEdit =
-    currentUser?.role === "Admin" || currentUser?.role === "Store Manager";
-  const canDelete = currentUser?.role === "Admin";
+    currentUser?.role === "SuperAdmin" || currentUser?.role === "Admin" || currentUser?.role === "Store Manager";
+  const canDelete = currentUser?.role === "SuperAdmin" || currentUser?.role === "Admin";
 
   const handleDelete = async () => {
     if (!selectedUser) return;

@@ -607,14 +607,64 @@ export async function createInvoice(prevState, formData) {
     // Format customer address from Party model
     const formatAddress = (address) => {
       if (!address) return "";
-      const parts = [
-        address.line1,
-        address.line2,
-        address.city,
-        address.postalCode,
-        address.country,
-      ].filter(Boolean);
-      return parts.join(", ");
+
+      // Handle case where address is a string
+      if (typeof address === "string") {
+        // Try to parse as JSON first
+        try {
+          const parsed = JSON.parse(address);
+          if (typeof parsed === "object" && parsed !== null) {
+            const parts = [
+              parsed.line1,
+              parsed.line2,
+              parsed.city,
+              parsed.postalCode,
+              parsed.country,
+            ].filter(Boolean);
+            return parts.join(", ");
+          }
+        } catch {
+          // Not valid JSON - check if it's a JS object literal like "{ country: 'Kenya' }"
+          if (address.startsWith("{") && address.endsWith("}")) {
+            try {
+              // Convert JS object literal to valid JSON
+              const jsonStr = address
+                .replace(/(\w+):/g, '"$1":')  // Quote keys
+                .replace(/'/g, '"');           // Replace single quotes
+              const parsed = JSON.parse(jsonStr);
+              if (typeof parsed === "object" && parsed !== null) {
+                const parts = [
+                  parsed.line1,
+                  parsed.line2,
+                  parsed.city,
+                  parsed.postalCode,
+                  parsed.country,
+                ].filter(Boolean);
+                return parts.join(", ");
+              }
+            } catch {
+              // Still couldn't parse, return as-is
+              return address;
+            }
+          }
+          // Not an object-like string, return as-is (might already be formatted)
+          return address;
+        }
+      }
+
+      // Handle case where address is an object
+      if (typeof address === "object" && address !== null) {
+        const parts = [
+          address.line1,
+          address.line2,
+          address.city,
+          address.postalCode,
+          address.country,
+        ].filter(Boolean);
+        return parts.join(", ");
+      }
+
+      return "";
     };
 
     // Create invoice using new Invoice model

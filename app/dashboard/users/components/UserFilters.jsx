@@ -20,8 +20,13 @@ export function UserRoleFilter({ currentRole }) {
       placeholder="All Roles"
       options={[
         { value: "all", label: "All Roles" },
+        { value: "SuperAdmin", label: "SuperAdmin" },
         { value: "Admin", label: "Admin" },
+        { value: "Manager", label: "Manager" },
+        { value: "Employee", label: "Employee" },
+        { value: "Technician", label: "Technician" },
         { value: "Store Manager", label: "Store Manager" },
+        { value: "Accountant", label: "Accountant" },
         { value: "User", label: "User" },
         { value: "Viewer", label: "Viewer" },
       ]}

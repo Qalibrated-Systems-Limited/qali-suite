@@ -539,6 +539,7 @@ fiscalPeriodSchema.methods.close = async function (closedBy) {
 
 /**
  * Create closing journal entry (close revenue/expense to retained earnings)
+ * This properly zeros out all revenue and expense accounts for the period
  */
 fiscalPeriodSchema.methods.createClosingJournalEntry = async function (user) {
   const Account = mongoose.model("Account");
@@ -554,45 +555,144 @@ fiscalPeriodSchema.methods.createClosingJournalEntry = async function (user) {
   }
 
   const lines = [];
-  const netIncome = this.closingBalances.netIncome || 0;
 
-  if (netIncome > 0) {
-    // Profit: Debit Revenue/Credit Retained Earnings
-    lines.push({
-      accountId: retainedEarningsAccount._id,
-      accountCode: retainedEarningsAccount.accountCode,
-      accountName: retainedEarningsAccount.accountName,
-      accountType: retainedEarningsAccount.accountType,
-      debit: 0,
-      credit: netIncome,
-      description: `Net income for ${this.periodName}`,
-    });
+  // ============================================
+  // 1. CLOSE ALL REVENUE ACCOUNTS
+  // Revenue has normal CREDIT balance, so DEBIT to close
+  // ============================================
+  const revenueAccounts = await Account.find({
+    accountType: "revenue",
+    isActive: true,
+  });
 
-    // This is simplified - in reality you'd close each revenue/expense account
-    // For now, we just record the net income transfer
-  } else if (netIncome < 0) {
-    // Loss: Debit Retained Earnings/Credit Expense
-    lines.push({
-      accountId: retainedEarningsAccount._id,
-      accountCode: retainedEarningsAccount.accountCode,
-      accountName: retainedEarningsAccount.accountName,
-      accountType: retainedEarningsAccount.accountType,
-      debit: Math.abs(netIncome),
-      credit: 0,
-      description: `Net loss for ${this.periodName}`,
-    });
+  for (const account of revenueAccounts) {
+    const balanceResult = await JournalEntry.aggregate([
+      {
+        $match: {
+          status: "posted",
+          entryDate: { $gte: this.startDate, $lte: this.endDate },
+        },
+      },
+      { $unwind: "$lines" },
+      { $match: { "lines.accountId": account._id } },
+      {
+        $group: {
+          _id: null,
+          totalDebit: { $sum: "$lines.debit" },
+          totalCredit: { $sum: "$lines.credit" },
+        },
+      },
+    ]);
+
+    if (balanceResult.length > 0) {
+      const { totalDebit, totalCredit } = balanceResult[0];
+      const balance = totalCredit - totalDebit; // Revenue normal balance is CREDIT
+
+      if (Math.abs(balance) > 0.01) {
+        // DEBIT revenue to zero it out (opposite of normal credit balance)
+        lines.push({
+          accountId: account._id,
+          accountCode: account.accountCode,
+          accountName: account.accountName,
+          accountType: "revenue",
+          debit: balance > 0 ? balance : 0,
+          credit: balance < 0 ? Math.abs(balance) : 0,
+          description: `Close ${account.accountName}`,
+        });
+      }
+    }
   }
 
-  // If no profit or loss, don't create entry
-  if (lines.length === 0) {
+  // ============================================
+  // 2. CLOSE ALL EXPENSE ACCOUNTS
+  // Expense has normal DEBIT balance, so CREDIT to close
+  // ============================================
+  const expenseAccounts = await Account.find({
+    accountType: "expense",
+    isActive: true,
+  });
+
+  for (const account of expenseAccounts) {
+    const balanceResult = await JournalEntry.aggregate([
+      {
+        $match: {
+          status: "posted",
+          entryDate: { $gte: this.startDate, $lte: this.endDate },
+        },
+      },
+      { $unwind: "$lines" },
+      { $match: { "lines.accountId": account._id } },
+      {
+        $group: {
+          _id: null,
+          totalDebit: { $sum: "$lines.debit" },
+          totalCredit: { $sum: "$lines.credit" },
+        },
+      },
+    ]);
+
+    if (balanceResult.length > 0) {
+      const { totalDebit, totalCredit } = balanceResult[0];
+      const balance = totalDebit - totalCredit; // Expense normal balance is DEBIT
+
+      if (Math.abs(balance) > 0.01) {
+        // CREDIT expense to zero it out (opposite of normal debit balance)
+        lines.push({
+          accountId: account._id,
+          accountCode: account.accountCode,
+          accountName: account.accountName,
+          accountType: "expense",
+          debit: balance < 0 ? Math.abs(balance) : 0,
+          credit: balance > 0 ? balance : 0,
+          description: `Close ${account.accountName}`,
+        });
+      }
+    }
+  }
+
+  // ============================================
+  // 3. ADD RETAINED EARNINGS BALANCING LINE
+  // ============================================
+  const totalDebits = lines.reduce((sum, l) => sum + (l.debit || 0), 0);
+  const totalCredits = lines.reduce((sum, l) => sum + (l.credit || 0), 0);
+  const netIncome = totalDebits - totalCredits;
+
+  // If no activity, don't create entry
+  if (lines.length === 0 || Math.abs(netIncome) < 0.01) {
     return null;
   }
 
-  // Generate entry number using centralized utility
+  // Add balancing line to Retained Earnings
+  // Profit (totalDebits > totalCredits): Credit Retained Earnings
+  // Loss (totalCredits > totalDebits): Debit Retained Earnings
+  lines.push({
+    accountId: retainedEarningsAccount._id,
+    accountCode: retainedEarningsAccount.accountCode,
+    accountName: retainedEarningsAccount.accountName,
+    accountType: "equity",
+    debit: netIncome < 0 ? Math.abs(netIncome) : 0,
+    credit: netIncome > 0 ? netIncome : 0,
+    description: `Net ${netIncome > 0 ? "income" : "loss"} for ${this.periodName}`,
+  });
+
+  // ============================================
+  // 4. VALIDATE BALANCE
+  // ============================================
+  const finalDebits = lines.reduce((sum, l) => sum + (l.debit || 0), 0);
+  const finalCredits = lines.reduce((sum, l) => sum + (l.credit || 0), 0);
+
+  if (Math.abs(finalDebits - finalCredits) > 0.01) {
+    throw new Error(
+      `Closing entry unbalanced: Debits ${finalDebits.toFixed(2)} ≠ Credits ${finalCredits.toFixed(2)}`
+    );
+  }
+
+  // ============================================
+  // 5. CREATE AND POST JOURNAL ENTRY
+  // ============================================
   const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
   const entryNumber = await generateUniqueEntryNumber("CLOSE");
 
-  // Create journal entry
   const journalEntry = await JournalEntry.create({
     entryNumber,
     entryDate: this.endDate,

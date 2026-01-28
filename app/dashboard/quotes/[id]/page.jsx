@@ -16,9 +16,10 @@ import {
   Mail,
   Phone,
 } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, serializeBsonType } from "@/lib/utils";
 import { QuoteDetailActions } from "../components/QuoteDetailActions";
 import { QuoteItemsTable } from "../components/QuoteItemsTable";
+import { getCompanyById } from "@/app/mongodb/queries/company-queries";
 
 export default async function QuoteDetailPage({ params, searchParams }) {
   const session = await auth();
@@ -32,11 +33,13 @@ export default async function QuoteDetailPage({ params, searchParams }) {
   const { user } = session;
 
   // Check permissions
-  if (!["Admin", "Accountant", "Sales"].includes(user.role)) {
+  if (!["Admin", "Accountant", "Sales", "SuperAdmin"].includes(user.role)) {
     return (
       <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-foreground mb-2">Access Denied</h2>
+          <h2 className="text-2xl font-bold text-foreground mb-2">
+            Access Denied
+          </h2>
           <p className="text-muted-foreground">
             Only Admins, Accountants, and Sales staff can view quotes.
           </p>
@@ -49,6 +52,14 @@ export default async function QuoteDetailPage({ params, searchParams }) {
 
   if (!quote) {
     notFound();
+  }
+
+  let company = null;
+  if (user.companyId) {
+    company = await getCompanyById(user.companyId);
+    if (company) {
+      company = serializeBsonType(company);
+    }
   }
 
   const formatDate = (dateString) => {
@@ -82,7 +93,9 @@ export default async function QuoteDetailPage({ params, searchParams }) {
   };
 
   const isExpired = quote.validUntil && new Date(quote.validUntil) < new Date();
-  const isExpiringSoon = quote.validUntil && !isExpired &&
+  const isExpiringSoon =
+    quote.validUntil &&
+    !isExpired &&
     new Date(quote.validUntil) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   // Check if we should show convert dialog
@@ -108,7 +121,10 @@ export default async function QuoteDetailPage({ params, searchParams }) {
               {quote.status}
             </Badge>
             {isExpiringSoon && quote.status !== "expired" && (
-              <Badge variant="outline" className="bg-orange-500/10 text-orange-600 border-orange-500/20">
+              <Badge
+                variant="outline"
+                className="bg-orange-500/10 text-orange-600 border-orange-500/20"
+              >
                 Expiring Soon
               </Badge>
             )}
@@ -122,6 +138,8 @@ export default async function QuoteDetailPage({ params, searchParams }) {
         {/* Actions - responsive */}
         <div className="w-full lg:w-auto">
           <QuoteDetailActions
+          
+            company={company}
             quote={quote}
             userRole={user.role}
             showConvertDialog={showConvertDialog}
@@ -167,7 +185,10 @@ export default async function QuoteDetailPage({ params, searchParams }) {
                   {quote.customer?.email && (
                     <div className="flex items-center gap-2 text-sm">
                       <Mail className="w-4 h-4 text-muted-foreground" />
-                      <a href={`mailto:${quote.customer.email}`} className="text-blue-500 hover:underline">
+                      <a
+                        href={`mailto:${quote.customer.email}`}
+                        className="text-blue-500 hover:underline"
+                      >
                         {quote.customer.email}
                       </a>
                     </div>
@@ -175,7 +196,10 @@ export default async function QuoteDetailPage({ params, searchParams }) {
                   {quote.customer?.phone && (
                     <div className="flex items-center gap-2 text-sm">
                       <Phone className="w-4 h-4 text-muted-foreground" />
-                      <a href={`tel:${quote.customer.phone}`} className="text-foreground hover:underline">
+                      <a
+                        href={`tel:${quote.customer.phone}`}
+                        className="text-foreground hover:underline"
+                      >
                         {quote.customer.phone}
                       </a>
                     </div>
@@ -287,14 +311,24 @@ export default async function QuoteDetailPage({ params, searchParams }) {
                     <Calendar className="w-4 h-4" />
                     Quote Date
                   </span>
-                  <span className="text-foreground">{formatDate(quote.quoteDate)}</span>
+                  <span className="text-foreground">
+                    {formatDate(quote.quoteDate)}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-2 text-muted-foreground">
                     <Clock className="w-4 h-4" />
                     Valid Until
                   </span>
-                  <span className={isExpired ? "text-red-500" : isExpiringSoon ? "text-orange-500" : "text-foreground"}>
+                  <span
+                    className={
+                      isExpired
+                        ? "text-red-500"
+                        : isExpiringSoon
+                          ? "text-orange-500"
+                          : "text-foreground"
+                    }
+                  >
                     {formatDate(quote.validUntil)}
                   </span>
                 </div>
@@ -306,22 +340,30 @@ export default async function QuoteDetailPage({ params, searchParams }) {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span className="text-foreground">{formatCurrency(quote.subtotal)}</span>
+                  <span className="text-foreground">
+                    {formatCurrency(quote.subtotal)}
+                  </span>
                 </div>
                 {quote.totalDiscount > 0 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Discount</span>
-                    <span className="text-red-500">-{formatCurrency(quote.totalDiscount)}</span>
+                    <span className="text-red-500">
+                      -{formatCurrency(quote.totalDiscount)}
+                    </span>
                   </div>
                 )}
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Tax</span>
-                  <span className="text-foreground">{formatCurrency(quote.taxAmount)}</span>
+                  <span className="text-foreground">
+                    {formatCurrency(quote.taxAmount)}
+                  </span>
                 </div>
                 <Separator />
                 <div className="flex justify-between text-lg font-bold">
                   <span>Total</span>
-                  <span className="text-green-500">{formatCurrency(quote.total)}</span>
+                  <span className="text-green-500">
+                    {formatCurrency(quote.total)}
+                  </span>
                 </div>
               </div>
 
@@ -334,7 +376,10 @@ export default async function QuoteDetailPage({ params, searchParams }) {
                       <span className="text-muted-foreground">Invoiced</span>
                       <span className="text-purple-500">
                         {formatCurrency(
-                          quote.invoices.reduce((sum, inv) => sum + (inv.amount || 0), 0)
+                          quote.invoices.reduce(
+                            (sum, inv) => sum + (inv.amount || 0),
+                            0,
+                          ),
                         )}
                       </span>
                     </div>
@@ -351,7 +396,9 @@ export default async function QuoteDetailPage({ params, searchParams }) {
                 <CardTitle className="text-lg">Sales Person</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="font-medium text-foreground">{quote.salesPerson.name}</p>
+                <p className="font-medium text-foreground">
+                  {quote.salesPerson.name}
+                </p>
                 {quote.salesPerson.commission?.rate > 0 && (
                   <p className="text-sm text-muted-foreground">
                     Commission: {quote.salesPerson.commission.rate}%

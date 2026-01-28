@@ -105,7 +105,7 @@ export function CreateButton({ user }) {
     "/dashboard/users": {
       href: "/dashboard/users/create",
       label: "User",
-      roles: ["Admin"],
+      roles: ["SuperAdmin", "Admin"],
     },
 
     "/dashboard/my-claims": {

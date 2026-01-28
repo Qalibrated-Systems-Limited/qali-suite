@@ -208,7 +208,7 @@ const journalEntrySchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  }
+  },
 );
 
 // ============================================
@@ -263,7 +263,7 @@ journalEntrySchema.methods.validateBalance = function () {
     const debits = this.totalDebits.toFixed(2);
     const credits = this.totalCredits.toFixed(2);
     throw new Error(
-      `Journal entry is not balanced! Debits: ${debits}, Credits: ${credits}`
+      `Journal entry is not balanced! Debits: ${debits}, Credits: ${credits}`,
     );
   }
   return true;
@@ -274,12 +274,12 @@ journalEntrySchema.methods.validateLines = function () {
   for (const line of this.lines) {
     if (line.debit > 0 && line.credit > 0) {
       throw new Error(
-        `Line for account ${line.accountName} has both debit and credit. Only one is allowed.`
+        `Line for account ${line.accountName} has both debit and credit. Only one is allowed.`,
       );
     }
     if (line.debit === 0 && line.credit === 0) {
       throw new Error(
-        `Line for account ${line.accountName} has zero amount. Remove this line.`
+        `Line for account ${line.accountName} has zero amount. Remove this line.`,
       );
     }
   }
@@ -299,7 +299,7 @@ journalEntrySchema.methods.validateAccounts = async function () {
 
     if (!account.canPost) {
       throw new Error(
-        `Cannot post to header account: ${account.accountName}. Use a detail account.`
+        `Cannot post to header account: ${account.accountName}. Use a detail account.`,
       );
     }
 
@@ -464,7 +464,7 @@ journalEntrySchema.methods.updateAccountBalances = async function () {
 // ============================================
 
 journalEntrySchema.statics.getARAgingReport = async function (
-  asOfDate = new Date()
+  asOfDate = new Date(),
 ) {
   const Account = mongoose.model("Account");
   const arAccount = await Account.findOne({
@@ -566,7 +566,7 @@ journalEntrySchema.statics.getARAgingReport = async function (
 };
 
 journalEntrySchema.statics.getAPAgingReport = async function (
-  asOfDate = new Date()
+  asOfDate = new Date(),
 ) {
   const Account = mongoose.model("Account");
   const apAccount = await Account.findOne({
@@ -693,7 +693,7 @@ journalEntrySchema.statics.getStatementOfAccount = async function ({
   let runningBalance = 0;
   const statement = transactions.map((entry) => {
     const line = entry.lines.find(
-      (l) => l.accountId.toString() === account._id.toString()
+      (l) => l.accountId.toString() === account._id.toString(),
     );
 
     let debit = 0;

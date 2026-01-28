@@ -1,0 +1,420 @@
+import mongoose from "mongoose";
+import validator from "validator";
+
+const Schema = mongoose.Schema;
+
+// ============================================
+// COMPANY SCHEMA - MULTI-TENANT CONFIGURATION
+// ============================================
+// Each company represents a tenant in the system.
+// All transactional data (invoices, bills, products, etc.)
+// will be linked to a company via companyId.
+// ============================================
+
+const companySchema = new Schema(
+  {
+    // ============================================
+    // BASIC INFORMATION
+    // ============================================
+    name: {
+      type: String,
+      required: [true, "Company name is required"],
+      trim: true,
+      maxLength: [100, "Company name cannot exceed 100 characters"],
+    },
+
+    slug: {
+      type: String,
+      unique: true,
+      lowercase: true,
+      trim: true,
+      index: true,
+    },
+
+    tagline: {
+      type: String,
+      trim: true,
+      maxLength: [200, "Tagline cannot exceed 200 characters"],
+    },
+
+    logo: {
+      type: String, // URL or path to logo
+      trim: true,
+    },
+
+    // ============================================
+    // CONTACT INFORMATION
+    // ============================================
+    email: {
+      type: String,
+      required: [true, "Company email is required"],
+      validate: [validator.isEmail, "Please enter a valid email address"],
+      trim: true,
+      lowercase: true,
+    },
+
+    phone: {
+      type: String,
+      trim: true,
+    },
+
+    website: {
+      type: String,
+      trim: true,
+    },
+
+    // ============================================
+    // ADDRESS
+    // ============================================
+    address: {
+      street: { type: String, trim: true },
+      city: { type: String, trim: true },
+      state: { type: String, trim: true },
+      postalCode: { type: String, trim: true },
+      country: { type: String, trim: true, default: "Kenya" },
+    },
+
+    // Full address for display on documents
+    fullAddress: {
+      type: String,
+      trim: true,
+    },
+
+    // ============================================
+    // TAX & LEGAL
+    // ============================================
+    taxPin: {
+      type: String, // KRA PIN for Kenya
+      trim: true,
+      uppercase: true,
+    },
+
+    vatNumber: {
+      type: String,
+      trim: true,
+    },
+
+    registrationNumber: {
+      type: String, // Business registration number
+      trim: true,
+    },
+
+    // ============================================
+    // BANKING DETAILS (for invoices/payments)
+    // ============================================
+    bankName: {
+      type: String,
+      trim: true,
+    },
+
+    bankBranch: {
+      type: String,
+      trim: true,
+    },
+
+    accountName: {
+      type: String,
+      trim: true,
+    },
+
+    accountNumber: {
+      type: String,
+      trim: true,
+    },
+
+    swiftCode: {
+      type: String,
+      trim: true,
+    },
+
+    // ============================================
+    // MOBILE MONEY (M-Pesa for Kenya)
+    // ============================================
+    mpesaPaybill: {
+      type: String,
+      trim: true,
+    },
+
+    mpesaTill: {
+      type: String,
+      trim: true,
+    },
+
+    // ============================================
+    // SUBSCRIPTION & BILLING
+    // ============================================
+    subscription: {
+      plan: {
+        type: String,
+        enum: ["free", "starter", "professional", "enterprise"],
+        default: "free",
+      },
+      status: {
+        type: String,
+        enum: ["active", "trial", "expired", "cancelled"],
+        default: "trial",
+      },
+      trialEndsAt: Date,
+      currentPeriodStart: Date,
+      currentPeriodEnd: Date,
+      maxUsers: {
+        type: Number,
+        default: 5,
+      },
+    },
+
+    // ============================================
+    // COMPANY SETTINGS
+    // ============================================
+    settings: {
+      // Currency & Locale
+      currency: {
+        type: String,
+        default: "KES",
+      },
+      currencySymbol: {
+        type: String,
+        default: "KES",
+      },
+      locale: {
+        type: String,
+        default: "en-KE",
+      },
+      timezone: {
+        type: String,
+        default: "Africa/Nairobi",
+      },
+
+      // Tax Settings
+      defaultVatRate: {
+        type: Number,
+        default: 16, // 16% VAT in Kenya
+      },
+      enableWithholdingTax: {
+        type: Boolean,
+        default: true,
+      },
+      defaultWhtRate: {
+        type: Number,
+        default: 5, // 5% WHT
+      },
+
+      // Fiscal Year
+      fiscalYearStart: {
+        type: Number, // Month (1-12)
+        default: 1, // January
+      },
+
+      // Document Numbering
+      invoicePrefix: {
+        type: String,
+        default: "INV",
+      },
+      invoiceNextNumber: {
+        type: Number,
+        default: 1,
+      },
+      billPrefix: {
+        type: String,
+        default: "BILL",
+      },
+      billNextNumber: {
+        type: Number,
+        default: 1,
+      },
+      quotePrefix: {
+        type: String,
+        default: "QT",
+      },
+      quoteNextNumber: {
+        type: Number,
+        default: 1,
+      },
+      poPrefix: {
+        type: String,
+        default: "PO",
+      },
+      poNextNumber: {
+        type: Number,
+        default: 1,
+      },
+
+      // Inventory Settings
+      defaultCostingMethod: {
+        type: String,
+        enum: ["average", "fifo", "lifo"],
+        default: "average",
+      },
+      lowStockThreshold: {
+        type: Number,
+        default: 10,
+      },
+
+      // Payment Terms
+      defaultPaymentTerms: {
+        type: String,
+        default: "Net 30",
+      },
+      defaultPaymentTermsDays: {
+        type: Number,
+        default: 30,
+      },
+    },
+
+    // ============================================
+    // FEATURE FLAGS (which modules are enabled)
+    // ============================================
+    features: {
+      inventory: { type: Boolean, default: true },
+      sales: { type: Boolean, default: true },
+      purchases: { type: Boolean, default: true },
+      accounting: { type: Boolean, default: true },
+      expenses: { type: Boolean, default: true },
+      reports: { type: Boolean, default: true },
+      multiCurrency: { type: Boolean, default: false },
+      advancedReporting: { type: Boolean, default: false },
+      apiAccess: { type: Boolean, default: false },
+    },
+
+    // ============================================
+    // STATUS
+    // ============================================
+    status: {
+      type: String,
+      enum: ["active", "inactive", "suspended"],
+      default: "active",
+      index: true,
+    },
+
+    // ============================================
+    // AUDIT TRAIL
+    // ============================================
+    createdBy: {
+      name: { type: String },
+      id: { type: String },
+    },
+    lastModifiedBy: {
+      name: { type: String },
+      id: { type: String },
+    },
+  },
+  {
+    timestamps: true,
+  },
+);
+
+// ============================================
+// INDEXES
+// ============================================
+companySchema.index({ name: 1 });
+companySchema.index({ "subscription.status": 1 });
+companySchema.index({ status: 1, "subscription.status": 1 });
+
+// ============================================
+// PRE-SAVE HOOKS
+// ============================================
+companySchema.pre("save", function (next) {
+  // Auto-generate slug from name if not provided
+  if (!this.slug && this.name) {
+    this.slug = this.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+  }
+
+  // Build full address from address components
+  if (this.address) {
+    const parts = [
+      this.address.street,
+      this.address.city,
+      this.address.state,
+      this.address.postalCode,
+      this.address.country,
+    ].filter(Boolean);
+    this.fullAddress = parts.join(", ");
+  }
+});
+
+// ============================================
+// INSTANCE METHODS
+// ============================================
+
+// Get next document number and increment
+companySchema.methods.getNextInvoiceNumber = async function () {
+  const prefix = this.settings.invoicePrefix;
+  const number = this.settings.invoiceNextNumber;
+  this.settings.invoiceNextNumber = number + 1;
+  await this.save();
+  return `${prefix}-${String(number).padStart(5, "0")}`;
+};
+
+companySchema.methods.getNextBillNumber = async function () {
+  const prefix = this.settings.billPrefix;
+  const number = this.settings.billNextNumber;
+  this.settings.billNextNumber = number + 1;
+  await this.save();
+  return `${prefix}-${String(number).padStart(5, "0")}`;
+};
+
+companySchema.methods.getNextQuoteNumber = async function () {
+  const prefix = this.settings.quotePrefix;
+  const number = this.settings.quoteNextNumber;
+  this.settings.quoteNextNumber = number + 1;
+  await this.save();
+  return `${prefix}-${String(number).padStart(5, "0")}`;
+};
+
+companySchema.methods.getNextPONumber = async function () {
+  const prefix = this.settings.poPrefix;
+  const number = this.settings.poNextNumber;
+  this.settings.poNextNumber = number + 1;
+  await this.save();
+  return `${prefix}-${String(number).padStart(5, "0")}`;
+};
+
+// Check if subscription is active
+companySchema.methods.isSubscriptionActive = function () {
+  if (this.subscription.status === "active") return true;
+  if (this.subscription.status === "trial") {
+    return new Date() < this.subscription.trialEndsAt;
+  }
+  return false;
+};
+
+// Check if feature is enabled
+companySchema.methods.hasFeature = function (featureName) {
+  return this.features[featureName] === true;
+};
+
+// ============================================
+// STATIC METHODS
+// ============================================
+
+// Find active companies
+companySchema.statics.findActive = function () {
+  return this.find({ status: "active" });
+};
+
+// Find by slug
+companySchema.statics.findBySlug = function (slug) {
+  return this.findOne({ slug: slug.toLowerCase() });
+};
+
+// ============================================
+// VIRTUALS
+// ============================================
+companySchema.virtual("isActive").get(function () {
+  return this.status === "active" && this.isSubscriptionActive();
+});
+
+// ============================================
+// MODEL EXPORT
+// ============================================
+const models = mongoose.models;
+let Company = models?.Company;
+
+if (!Company) {
+  Company = mongoose.model("Company", companySchema);
+}
+
+export default Company;

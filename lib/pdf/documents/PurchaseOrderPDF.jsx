@@ -355,12 +355,15 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 
-  // Footer - flows with content
+  // Footer - fixed at bottom of page
   footer: {
+    position: "absolute",
+    bottom: 25,
+    left: 30,
+    right: 30,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    paddingTop: 10,
-    marginTop: 8,
+    paddingTop: 8,
   },
   footerContent: {
     flexDirection: "row",
@@ -405,14 +408,6 @@ const styles = StyleSheet.create({
     color: colors.darkGray,
   },
 
-  // Fixed page number for multi-page
-  fixedPageNumber: {
-    position: "absolute",
-    bottom: 10,
-    right: 30,
-    fontSize: 7,
-    color: colors.gray,
-  },
 });
 
 // ============================================
@@ -457,21 +452,67 @@ const formatStatus = (status) => {
   return status.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
 };
 
+// Handle address in various formats: JSON string, JS object literal, or plain object
+const formatAddress = (address) => {
+  if (!address) return "";
+  if (typeof address === "string") {
+    // Try to parse as JSON first
+    try {
+      const parsed = JSON.parse(address);
+      if (typeof parsed === "object" && parsed !== null) {
+        const parts = [
+          parsed.street,
+          parsed.city,
+          parsed.state,
+          parsed.postalCode,
+          parsed.country,
+        ].filter(Boolean);
+        return parts.join(", ");
+      }
+    } catch {
+      // Check if it's a JS object literal format like {street: "...", city: "..."}
+      if (address.startsWith("{") && address.includes(":")) {
+        try {
+          // Convert JS object literal to JSON by adding quotes around keys
+          const jsonStr = address.replace(/(\w+):/g, '"$1":').replace(/'/g, '"');
+          const parsed = JSON.parse(jsonStr);
+          const parts = [
+            parsed.street,
+            parsed.city,
+            parsed.state,
+            parsed.postalCode,
+            parsed.country,
+          ].filter(Boolean);
+          return parts.join(", ");
+        } catch {
+          return address; // Return as-is if parsing fails
+        }
+      }
+      return address; // Return plain string as-is
+    }
+  }
+  // Handle plain object
+  if (typeof address === "object") {
+    const parts = [
+      address.street,
+      address.city,
+      address.state,
+      address.postalCode,
+      address.country,
+    ].filter(Boolean);
+    return parts.join(", ");
+  }
+  return String(address);
+};
+
 // ============================================
 // PURCHASE ORDER PDF COMPONENT
 // ============================================
 export const PurchaseOrderPDF = ({ data, company }) => {
-  const companyInfo = company || {
-    name: "QSL Technologies Ltd",
-    tagline: "Quality Systems & Logistics",
-    address: "Industrial Area, Enterprise Road",
-    city: "Nairobi, Kenya",
-    postalCode: "P.O. Box 12345-00100",
-    phone: "+254 700 123 456",
-    email: "procurement@qsl.co.ke",
-    website: "www.qsl.co.ke",
-    pin: "P051234567X",
-  };
+  // Use real company info from props with safe fallback
+  const safeCompany = company || {};
+  const companyAddress =
+    safeCompany.fullAddress || formatAddress(safeCompany.address) || "";
 
   // Destructure data matching SCHEMA STRUCTURE
   const {
@@ -516,7 +557,25 @@ export const PurchaseOrderPDF = ({ data, company }) => {
         {/* HEADER */}
         <View style={styles.header}>
           <View style={styles.logoSection}>
-            <Image src="/qsl.png" style={styles.logo} />
+            <Image src={safeCompany.logo || "/qsl.png"} style={styles.logo} />
+            <View style={styles.companyInfo}>
+              <Text style={styles.companyName}>
+                {safeCompany.name || "Company Name"}
+              </Text>
+              {safeCompany.tagline && (
+                <Text style={styles.companyTagline}>{safeCompany.tagline}</Text>
+              )}
+              {companyAddress && (
+                <Text style={styles.companyDetails}>{companyAddress}</Text>
+              )}
+              {(safeCompany.phone || safeCompany.email) && (
+                <Text style={styles.companyDetails}>
+                  {[safeCompany.phone, safeCompany.email]
+                    .filter(Boolean)
+                    .join(" • ")}
+                </Text>
+              )}
+            </View>
           </View>
           <View style={styles.documentTitle}>
             <Text style={styles.documentType}>PURCHASE ORDER</Text>
@@ -557,11 +616,12 @@ export const PurchaseOrderPDF = ({ data, company }) => {
           {/* Deliver To */}
           <View style={styles.infoBox}>
             <Text style={styles.infoBoxLabel}>Deliver To</Text>
-            <Text style={styles.infoBoxTitle}>{companyInfo.name}</Text>
-            <Text style={styles.infoBoxText}>
-              {deliveryAddress || companyInfo.address}
+            <Text style={styles.infoBoxTitle}>
+              {safeCompany.name || "Company Name"}
             </Text>
-            <Text style={styles.infoBoxText}>{companyInfo.city}</Text>
+            <Text style={styles.infoBoxText}>
+              {deliveryAddress || companyAddress}
+            </Text>
             {deliveryInstructions && (
               <Text
                 style={[
@@ -802,44 +862,42 @@ export const PurchaseOrderPDF = ({ data, company }) => {
           </View>
         </View>
 
-        {/* FOOTER - Flows with content, not fixed at bottom */}
-        <View style={styles.footer} wrap={false}>
+        {/* FOOTER - Fixed at bottom of every page */}
+        <View style={styles.footer} fixed>
           <View style={styles.footerContent}>
             <View style={styles.footerLeft}>
-              <Text style={styles.footerCompany}>{companyInfo.name}</Text>
-              <Text style={styles.footerAddress}>
-                {companyInfo.address}, {companyInfo.city}
-                {companyInfo.postalCode && ` • ${companyInfo.postalCode}`}
+              <Text style={styles.footerCompany}>
+                {safeCompany.name || "Company Name"}
               </Text>
+              {companyAddress && (
+                <Text style={styles.footerAddress}>{companyAddress}</Text>
+              )}
             </View>
             <View style={styles.footerCenter}>
               <Text style={styles.footerContact}>
-                Tel: {companyInfo.phone} • {companyInfo.email}
-                {companyInfo.website && ` • ${companyInfo.website}`}
+                {[
+                  safeCompany.phone && `Tel: ${safeCompany.phone}`,
+                  safeCompany.email,
+                  safeCompany.website,
+                ]
+                  .filter(Boolean)
+                  .join(" • ")}
               </Text>
             </View>
             <View style={styles.footerRight}>
-              <Text style={styles.footerPin}>PIN: {companyInfo.pin}</Text>
+              {safeCompany.taxPin && (
+                <Text style={styles.footerPin}>PIN: {safeCompany.taxPin}</Text>
+              )}
               <Text
                 style={styles.pageNumber}
                 render={({ pageNumber, totalPages }) =>
-                  totalPages > 1 ? `Page ${pageNumber} of ${totalPages}` : ""
+                  `Page ${pageNumber} of ${totalPages}`
                 }
               />
             </View>
           </View>
         </View>
 
-        {/* Fixed page number only for multi-page docs */}
-        {isMultiPage && (
-          <Text
-            style={styles.fixedPageNumber}
-            render={({ pageNumber, totalPages }) =>
-              `Page ${pageNumber} of ${totalPages}`
-            }
-            fixed
-          />
-        )}
       </Page>
     </Document>
   );

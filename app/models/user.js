@@ -47,6 +47,15 @@ const userSchema = new Schema(
       enum: userRoles,
       default: "User",
     },
+
+    // Multi-tenancy: Link user to a company
+    // SuperAdmin users may have null companyId (system-wide access)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      index: true,
+    },
+
     resetPasswordToken: String,
     resetPasswordExpire: Date,
   },

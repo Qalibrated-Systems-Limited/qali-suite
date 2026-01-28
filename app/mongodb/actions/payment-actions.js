@@ -2,13 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import dbConnect from "@/app/lib/db";
+
 import Payment from "@/app/models/payment";
 import Bill from "@/app/models/bill";
 import Invoice from "@/app/models/invoice";
-import Party from "@/app/models/party";
+import Party from "@/app/models/parties";
 import Account from "@/app/models/account";
 import { auth } from "@/auth";
+import dbConnect from "@/app/config/dbConnect";
+import { serializeBsonType } from "@/lib/utils";
 
 // ============================================
 // VALIDATION SCHEMAS
@@ -33,7 +35,7 @@ const CreatePaymentSchema = z
     amount: z.coerce.number().min(0.01, "Amount must be positive"),
     paymentMethod: z.enum(
       ["cash", "mpesa", "bank_transfer", "cheque", "card"],
-      { required_error: "Payment method is required" }
+      { required_error: "Payment method is required" },
     ),
     accountId: z.string().min(1, "Payment account is required"),
     partyId: z.string().min(1, "Party is required"),
@@ -67,7 +69,10 @@ const CreatePaymentSchema = z
       }
       return true;
     },
-    { message: "M-Pesa transaction code required", path: ["mpesaTransactionCode"] }
+    {
+      message: "M-Pesa transaction code required",
+      path: ["mpesaTransactionCode"],
+    },
   )
   .refine(
     (data) => {
@@ -76,7 +81,7 @@ const CreatePaymentSchema = z
       }
       return true;
     },
-    { message: "Cheque number required", path: ["chequeNumber"] }
+    { message: "Cheque number required", path: ["chequeNumber"] },
   );
 
 // ============================================
@@ -98,8 +103,11 @@ async function getCurrentUser() {
 // HELPER: Check role
 // ============================================
 function checkRole(user, allowedRoles) {
-  if (!allowedRoles.includes(user.role)) {
-    throw new Error(`Access denied. Required roles: ${allowedRoles.join(", ")}`);
+  const userRole = user.role?.toLowerCase();
+  if (!allowedRoles.some((r) => r.toLowerCase() === userRole)) {
+    throw new Error(
+      `Access denied. Required roles: ${allowedRoles.join(", ")}`,
+    );
   }
 }
 
@@ -201,7 +209,10 @@ export async function createPayment(prevState, formData) {
     }
 
     // Validate total allocations don't exceed amount
-    const totalAllocated = allocations.reduce((sum, a) => sum + a.amountAllocated, 0);
+    const totalAllocated = allocations.reduce(
+      (sum, a) => sum + a.amountAllocated,
+      0,
+    );
     if (totalAllocated > data.amount + 0.01) {
       return {
         success: false,
@@ -215,11 +226,20 @@ export async function createPayment(prevState, formData) {
       return { success: false, error: "Party not found" };
     }
 
-    // Validate party type matches payment type
-    if (data.paymentType === "received" && party.partyType !== "customer") {
-      return { success: false, error: "Received payments must be from customers" };
+    // Validate party type matches payment type ("both" qualifies for either)
+    if (
+      data.paymentType === "received" &&
+      !["customer", "both"].includes(party.type)
+    ) {
+      return {
+        success: false,
+        error: "Received payments must be from customers",
+      };
     }
-    if (data.paymentType === "made" && party.partyType !== "supplier") {
+    if (
+      data.paymentType === "made" &&
+      !["supplier", "both"].includes(party.type)
+    ) {
       return { success: false, error: "Made payments must be to suppliers" };
     }
 
@@ -229,7 +249,10 @@ export async function createPayment(prevState, formData) {
       return { success: false, error: "Payment account not found" };
     }
     if (!["cash", "bank", "mpesa"].includes(account.subType)) {
-      return { success: false, error: "Invalid account type. Must be cash, bank, or mpesa" };
+      return {
+        success: false,
+        error: "Invalid account type. Must be cash, bank, or mpesa",
+      };
     }
 
     // Generate payment number
@@ -252,7 +275,7 @@ export async function createPayment(prevState, formData) {
       },
 
       party: {
-        type: party.partyType,
+        type: party.type,
         partyId: party._id,
         name: party.name,
         email: party.email,
@@ -339,7 +362,10 @@ export async function updatePayment(id, prevState, formData) {
     }
 
     if (!payment.canEdit) {
-      return { success: false, error: "Cannot edit confirmed/cancelled payment" };
+      return {
+        success: false,
+        error: "Cannot edit confirmed/cancelled payment",
+      };
     }
 
     // Parse and validate (same as create)
@@ -411,7 +437,7 @@ export async function updatePayment(id, prevState, formData) {
     };
 
     payment.party = {
-      type: party.partyType,
+      type: party.type,
       partyId: party._id,
       name: party.name,
       email: party.email,
@@ -645,17 +671,7 @@ export async function getPayments(filters = {}) {
 
     return {
       success: true,
-      data: payments.map((p) => ({
-        ...p,
-        _id: p._id.toString(),
-        id: p._id.toString(),
-        account: p.account ? { ...p.account, id: p.account.id?.toString() } : null,
-        party: p.party ? { ...p.party, partyId: p.party.partyId?.toString() } : null,
-        journalEntryId: p.journalEntryId?.toString(),
-        paymentDate: p.paymentDate?.toISOString(),
-        createdAt: p.createdAt?.toISOString(),
-        updatedAt: p.updatedAt?.toISOString(),
-      })),
+      data: serializeBsonType(payments),
       pagination: {
         page,
         limit,
@@ -697,7 +713,14 @@ export async function getPaymentStats() {
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    const endOfMonth = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+    );
 
     const [
       statusCounts,
@@ -707,9 +730,7 @@ export async function getPaymentStats() {
       byMethod,
     ] = await Promise.all([
       // Count by status
-      Payment.aggregate([
-        { $group: { _id: "$status", count: { $sum: 1 } } },
-      ]),
+      Payment.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
 
       // This month received
       Payment.aggregate([
@@ -720,7 +741,9 @@ export async function getPaymentStats() {
             paymentDate: { $gte: startOfMonth, $lte: endOfMonth },
           },
         },
-        { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } },
+        {
+          $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } },
+        },
       ]),
 
       // This month made
@@ -732,7 +755,9 @@ export async function getPaymentStats() {
             paymentDate: { $gte: startOfMonth, $lte: endOfMonth },
           },
         },
-        { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } },
+        {
+          $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } },
+        },
       ]),
 
       // Unreconciled count

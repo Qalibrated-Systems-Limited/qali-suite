@@ -5,11 +5,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Shield, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { getCompaniesForDropdown } from "@/app/mongodb/queries/company-queries";
 
 async function CreateUserPage() {
   const session = await auth();
   const user = session?.user;
-  const canCreateUser = user?.role === "Admin";
+  const canCreateUser = user?.role === "Admin" || user?.role === "SuperAdmin";
+  const isSuperAdmin = user?.role === "SuperAdmin";
 
   if (!canCreateUser) {
     return (
@@ -47,6 +49,12 @@ async function CreateUserPage() {
     );
   }
 
+  // Fetch companies for SuperAdmin
+  let companies = [];
+  if (isSuperAdmin) {
+    companies = await getCompaniesForDropdown();
+  }
+
   return (
     <main className="flex flex-col gap-6">
       {/* Breadcrumb */}
@@ -62,7 +70,7 @@ async function CreateUserPage() {
       </div>
 
       {/* Form */}
-      <CreateUserForm />
+      <CreateUserForm companies={companies} isSuperAdmin={isSuperAdmin} />
     </main>
   );
 }

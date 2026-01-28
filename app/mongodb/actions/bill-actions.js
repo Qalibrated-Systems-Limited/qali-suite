@@ -1129,7 +1129,7 @@ export async function createBillPayment(billId, prevState, formData) {
       paymentNumber,
       paymentType: "made",
       paymentDate: payDate,
-      fiscalPeriod,
+      // fiscalPeriod,
       amount,
       paymentMethod,
       account: {

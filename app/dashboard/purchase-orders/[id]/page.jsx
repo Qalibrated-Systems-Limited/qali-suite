@@ -2,6 +2,8 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getPurchaseOrderById } from "@/app/mongodb/queries/purchase-order-queries";
+import { getCompanyById } from "@/app/mongodb/queries/company-queries";
+import { serializeBsonType } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -67,10 +69,22 @@ export default async function PurchaseOrderDetailPage({ params }) {
     );
   }
 
-  const po = await getPurchaseOrderById(resolvedParams.id);
+  let po = await getPurchaseOrderById(resolvedParams.id);
 
   if (!po) {
     notFound();
+  }
+
+  // Serialize BSON types for client components
+  po = serializeBsonType(po);
+
+  // Fetch company data for PDF generation
+  let company = null;
+  if (user.companyId) {
+    company = await getCompanyById(user.companyId);
+    if (company) {
+      company = serializeBsonType(company);
+    }
   }
 
   const formatCurrency = (amount) => {
@@ -187,7 +201,7 @@ export default async function PurchaseOrderDetailPage({ params }) {
                 </Link>
               </Button>
             )}
-            <POPDFDownloadButton purchaseOrder={po} />
+            <POPDFDownloadButton purchaseOrder={po} company={company} />
             <Button variant="outline" size="sm">
               <Printer className="mr-2 h-4 w-4" />
               Print

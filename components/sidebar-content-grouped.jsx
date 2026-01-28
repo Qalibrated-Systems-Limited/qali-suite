@@ -441,17 +441,28 @@ const getNavigationGroups = (user) => [
         label: "Users",
         id: "users",
         href: "/dashboard/users",
-        hidden: user?.role !== "Admin",
+        hidden: !["Admin", "SuperAdmin"].includes(user?.role),
       },
-      // Future HR items:
-      // {
-      //   icon: UserCheck,
-      //   label: "Employees",
-      //   id: "employees",
-      //   href: "/dashboard/employees",
-      //   badge: "Soon",
-      // },
+      {
+        icon: Building2,
+        label: "Companies",
+        id: "companies",
+        href: "/dashboard/admin/companies",
+        hidden: user?.role !== "SuperAdmin",
+      },
     ],
+  },
+
+  // ============================================
+  // COMPANY SETTINGS (for Admin)
+  // ============================================
+  {
+    type: "single",
+    icon: Building2,
+    label: "Company",
+    id: "company",
+    href: "/dashboard/company",
+    hidden: !["Admin", "SuperAdmin"].includes(user?.role),
   },
 
   // ============================================

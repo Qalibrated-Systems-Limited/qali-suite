@@ -1,6 +1,7 @@
 import { EditUserForm } from "./form";
 import { auth } from "@/auth";
 import { getUserById } from "@/app/mongodb/queries/user-queries";
+import { getCompaniesForDropdown } from "@/app/mongodb/queries/company-queries";
 import { notFound } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -14,8 +15,9 @@ async function EditUserPage(props) {
 
   const session = await auth();
   const currentUser = session?.user;
+  const isSuperAdmin = currentUser?.role === "SuperAdmin";
   const canEditUser =
-    currentUser?.role === "Admin" || currentUser?.role === "Manager";
+    currentUser?.role === "Admin" || currentUser?.role === "Manager" || isSuperAdmin;
 
   if (!canEditUser) {
     return (
@@ -63,9 +65,16 @@ async function EditUserPage(props) {
       ...user,
       cart: [],
       _id: user._id.toString(),
+      companyId: user.companyId?.toString() || "",
       createdAt: user.createdAt?.toString(),
       updatetAt: user.updatetAt?.toString(),
     };
+  }
+
+  // Fetch companies for SuperAdmin
+  let companies = [];
+  if (isSuperAdmin) {
+    companies = await getCompaniesForDropdown();
   }
 
   return (
@@ -87,7 +96,7 @@ async function EditUserPage(props) {
       </div>
 
       {/* Form */}
-      <EditUserForm user={user} />
+      <EditUserForm user={user} companies={companies} isSuperAdmin={isSuperAdmin} />
     </main>
   );
 }

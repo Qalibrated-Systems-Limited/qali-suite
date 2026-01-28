@@ -1,0 +1,498 @@
+"use client";
+
+import { useActionState } from "react";
+import { useRouter } from "next/navigation";
+import { createCompany, updateCompany } from "@/app/mongodb/actions/company-actions";
+import { toast } from "sonner";
+import { useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Building2, Mail, MapPin, CreditCard, Smartphone } from "lucide-react";
+
+export default function CompanyForm({ company = null, isSuperAdmin = false }) {
+  const router = useRouter();
+  const isEdit = !!company;
+
+  // Don't use .bind() - the companyId is passed via hidden input field
+  const action = isEdit ? updateCompany : createCompany;
+  const [state, formAction, isPending] = useActionState(action, {});
+
+  // Helper to get field value - prioritize submitted values on error, then company data
+  const v = (field, fallback = "") => state.values?.[field] ?? fallback;
+
+  // Show toast for form-level errors only
+  useEffect(() => {
+    if (state.errors?._form) {
+      toast.error(state.errors._form[0]);
+    }
+  }, [state.errors]);
+
+  return (
+    <form action={formAction} className="space-y-6">
+      {isEdit && <input type="hidden" name="companyId" value={company._id} />}
+
+      {state.errors?._form && (
+        <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
+          {state.errors._form[0]}
+        </div>
+      )}
+
+      {/* Basic Information */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Building2 className="h-5 w-5" />
+            Company Information
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">
+                Company Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="name"
+                name="name"
+                defaultValue={v("name", company?.name || "")}
+                placeholder="Acme Trading Ltd"
+                className="bg-background"
+              />
+              {state.errors?.name && (
+                <p className="text-sm text-destructive">{state.errors.name[0]}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="tagline">Tagline</Label>
+              <Input
+                id="tagline"
+                name="tagline"
+                defaultValue={v("tagline", company?.tagline || "")}
+                placeholder="Quality Products, Trusted Service"
+                className="bg-background"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="logo">Logo URL</Label>
+            <Input
+              id="logo"
+              name="logo"
+              defaultValue={v("logo", company?.logo || "")}
+              placeholder="/company-logo.png or https://..."
+              className="bg-background"
+            />
+            <p className="text-xs text-muted-foreground">
+              Path to your company logo (used in PDFs and documents)
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Contact Information */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Mail className="h-5 w-5" />
+            Contact Information
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">
+                Email <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                defaultValue={v("email", company?.email || "")}
+                placeholder="info@company.co.ke"
+                className="bg-background"
+              />
+              {state.errors?.email && (
+                <p className="text-sm text-destructive">{state.errors.email[0]}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="phone">Phone</Label>
+              <Input
+                id="phone"
+                name="phone"
+                defaultValue={v("phone", company?.phone || "")}
+                placeholder="+254 712 345 678"
+                className="bg-background"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="website">Website</Label>
+            <Input
+              id="website"
+              name="website"
+              defaultValue={v("website", company?.website || "")}
+              placeholder="https://www.company.co.ke"
+              className="bg-background"
+            />
+            {state.errors?.website && (
+              <p className="text-sm text-destructive">{state.errors.website[0]}</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Address */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <MapPin className="h-5 w-5" />
+            Address
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="street">Street Address</Label>
+            <Input
+              id="street"
+              name="street"
+              defaultValue={v("street", company?.address?.street || "")}
+              placeholder="123 Moi Avenue"
+              className="bg-background"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="city">City</Label>
+              <Input
+                id="city"
+                name="city"
+                defaultValue={v("city", company?.address?.city || "")}
+                placeholder="Nairobi"
+                className="bg-background"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="state">State/County</Label>
+              <Input
+                id="state"
+                name="state"
+                defaultValue={v("state", company?.address?.state || "")}
+                placeholder="Nairobi County"
+                className="bg-background"
+              />
+              {state.errors?.state && (
+                <p className="text-sm text-destructive">{state.errors.state[0]}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="postalCode">Postal Code</Label>
+              <Input
+                id="postalCode"
+                name="postalCode"
+                defaultValue={v("postalCode", company?.address?.postalCode || "")}
+                placeholder="00100"
+                className="bg-background"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="country">Country</Label>
+              <Input
+                id="country"
+                name="country"
+                defaultValue={v("country", company?.address?.country || "Kenya")}
+                placeholder="Kenya"
+                className="bg-background"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Tax & Legal */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Tax & Legal</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="taxPin">KRA PIN</Label>
+              <Input
+                id="taxPin"
+                name="taxPin"
+                defaultValue={v("taxPin", company?.taxPin || "")}
+                placeholder="P051234567X"
+                className="uppercase bg-background"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="vatNumber">VAT Number</Label>
+              <Input
+                id="vatNumber"
+                name="vatNumber"
+                defaultValue={v("vatNumber", company?.vatNumber || "")}
+                placeholder="VAT123456"
+                className="bg-background"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="registrationNumber">Registration No.</Label>
+              <Input
+                id="registrationNumber"
+                name="registrationNumber"
+                defaultValue={v("registrationNumber", company?.registrationNumber || "")}
+                placeholder="PVT-12345"
+                className="bg-background"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Banking Details */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <CreditCard className="h-5 w-5" />
+            Bank Details (for invoices)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="bankName">Bank Name</Label>
+              <Input
+                id="bankName"
+                name="bankName"
+                defaultValue={v("bankName", company?.bankName || "")}
+                placeholder="Equity Bank"
+                className="bg-background"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="bankBranch">Branch</Label>
+              <Input
+                id="bankBranch"
+                name="bankBranch"
+                defaultValue={v("bankBranch", company?.bankBranch || "")}
+                placeholder="Westlands"
+                className="bg-background"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="accountName">Account Name</Label>
+              <Input
+                id="accountName"
+                name="accountName"
+                defaultValue={v("accountName", company?.accountName || "")}
+                placeholder="Acme Trading Ltd"
+                className="bg-background"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="accountNumber">Account Number</Label>
+              <Input
+                id="accountNumber"
+                name="accountNumber"
+                defaultValue={v("accountNumber", company?.accountNumber || "")}
+                placeholder="0123456789012"
+                className="bg-background"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="swiftCode">SWIFT Code (optional)</Label>
+            <Input
+              id="swiftCode"
+              name="swiftCode"
+              defaultValue={v("swiftCode", company?.swiftCode || "")}
+              placeholder="EABORBIIXXX"
+              className="bg-background"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* M-Pesa */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Smartphone className="h-5 w-5" />
+            M-Pesa Details
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="mpesaPaybill">Paybill Number</Label>
+              <Input
+                id="mpesaPaybill"
+                name="mpesaPaybill"
+                defaultValue={v("mpesaPaybill", company?.mpesaPaybill || "")}
+                placeholder="247247"
+                className="bg-background"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mpesaTill">Till Number</Label>
+              <Input
+                id="mpesaTill"
+                name="mpesaTill"
+                defaultValue={v("mpesaTill", company?.mpesaTill || "")}
+                placeholder="123456"
+                className="bg-background"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Settings (only for SuperAdmin creating new companies) */}
+      {isSuperAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Company Settings</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="currency">Currency</Label>
+                <Select name="currency" defaultValue={v("currency", company?.settings?.currency || "KES")}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="KES">KES - Kenya Shilling</SelectItem>
+                    <SelectItem value="USD">USD - US Dollar</SelectItem>
+                    <SelectItem value="EUR">EUR - Euro</SelectItem>
+                    <SelectItem value="GBP">GBP - British Pound</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="defaultVatRate">VAT Rate (%)</Label>
+                <Input
+                  id="defaultVatRate"
+                  name="defaultVatRate"
+                  type="number"
+                  defaultValue={v("defaultVatRate", company?.settings?.defaultVatRate ?? 16)}
+                  min="0"
+                  max="100"
+                  className="bg-background"
+                />
+                {state.errors?.defaultVatRate && (
+                  <p className="text-sm text-destructive">{state.errors.defaultVatRate[0]}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="fiscalYearStart">Fiscal Year Start</Label>
+                <Select name="fiscalYearStart" defaultValue={v("fiscalYearStart", String(company?.settings?.fiscalYearStart || 1))}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">January</SelectItem>
+                    <SelectItem value="2">February</SelectItem>
+                    <SelectItem value="3">March</SelectItem>
+                    <SelectItem value="4">April</SelectItem>
+                    <SelectItem value="5">May</SelectItem>
+                    <SelectItem value="6">June</SelectItem>
+                    <SelectItem value="7">July</SelectItem>
+                    <SelectItem value="8">August</SelectItem>
+                    <SelectItem value="9">September</SelectItem>
+                    <SelectItem value="10">October</SelectItem>
+                    <SelectItem value="11">November</SelectItem>
+                    <SelectItem value="12">December</SelectItem>
+                  </SelectContent>
+                </Select>
+                {state.errors?.fiscalYearStart && (
+                  <p className="text-sm text-destructive">{state.errors.fiscalYearStart[0]}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="defaultPaymentTermsDays">Payment Terms (days)</Label>
+                <Input
+                  id="defaultPaymentTermsDays"
+                  name="defaultPaymentTermsDays"
+                  type="number"
+                  defaultValue={v("defaultPaymentTermsDays", company?.settings?.defaultPaymentTermsDays ?? 30)}
+                  min="0"
+                  className="bg-background"
+                />
+                {state.errors?.defaultPaymentTermsDays && (
+                  <p className="text-sm text-destructive">{state.errors.defaultPaymentTermsDays[0]}</p>
+                )}
+              </div>
+            </div>
+
+            {!isEdit && (
+              <div className="space-y-2">
+                <Label htmlFor="plan">Subscription Plan</Label>
+                <Select name="plan" defaultValue="starter">
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="free">Free (2 users)</SelectItem>
+                    <SelectItem value="starter">Starter (5 users)</SelectItem>
+                    <SelectItem value="professional">Professional (20 users)</SelectItem>
+                    <SelectItem value="enterprise">Enterprise (Unlimited)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Submit */}
+      <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3 pt-6 border-t">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => router.back()}
+          className="w-full sm:w-auto"
+        >
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          disabled={isPending}
+          className="w-full sm:w-auto bg-yellow-500 text-black hover:bg-yellow-600"
+        >
+          {isPending ? "Saving..." : isEdit ? "Update Company" : "Create Company"}
+        </Button>
+      </div>
+    </form>
+  );
+}

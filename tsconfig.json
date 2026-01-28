@@ -56,8 +56,11 @@
     "app/(logged-out)/login/page.jsx",
     ".next/dev/types/**/*.ts",
     "app/dashboard/components/app-sidebar.jsx",
-    "app/dashboard/invoices/components/Invoicetable.jsx"
-, "components/sidebar-content-grouped.jsx", "app/mongodb/actions/account-actions.js", "app/mongodb/actions/party-actions.js"  ],
+    "app/dashboard/invoices/components/Invoicetable.jsx",
+    "components/sidebar-content-grouped.jsx",
+    "app/mongodb/actions/account-actions.js",
+    "app/mongodb/actions/party-actions.js"
+  ],
   "exclude": [
     "node_modules"
   ]

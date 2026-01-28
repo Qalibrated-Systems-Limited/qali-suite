@@ -40,6 +40,7 @@ export function QuoteDetailActions({
   quote,
   userRole,
   showConvertDialog = false,
+  company,
 }) {
   const router = useRouter();
 
@@ -61,17 +62,31 @@ export function QuoteDetailActions({
   const cancelQuoteWithId = cancelQuote.bind(null, quote._id, cancelReason);
 
   // useActionState for form submissions
-  const [sendState, sendAction, isSendPending] = useActionState(sendQuoteWithId, null);
-  const [acceptState, acceptAction, isAcceptPending] = useActionState(acceptQuoteWithId, null);
-  const [rejectState, rejectAction, isRejectPending] = useActionState(rejectQuoteWithId, null);
-  const [cancelState, cancelAction, isCancelPending] = useActionState(cancelQuoteWithId, null);
+  const [sendState, sendAction, isSendPending] = useActionState(
+    sendQuoteWithId,
+    null,
+  );
+  const [acceptState, acceptAction, isAcceptPending] = useActionState(
+    acceptQuoteWithId,
+    null,
+  );
+  const [rejectState, rejectAction, isRejectPending] = useActionState(
+    rejectQuoteWithId,
+    null,
+  );
+  const [cancelState, cancelAction, isCancelPending] = useActionState(
+    cancelQuoteWithId,
+    null,
+  );
 
   // Permission checks
   const canEdit = quote.status === "draft";
   const canSend = quote.status === "draft";
   const canAcceptReject = quote.status === "sent";
   const canConvert = ["sent", "accepted"].includes(quote.status);
-  const canCancel = !["cancelled", "converted", "rejected"].includes(quote.status);
+  const canCancel = !["cancelled", "converted", "rejected"].includes(
+    quote.status,
+  );
 
   return (
     <div className="flex flex-wrap gap-2">
@@ -134,7 +149,7 @@ export function QuoteDetailActions({
       )}
 
       {/* Download PDF */}
-      <QuotePDFDownloadButton quote={quote} />
+      <QuotePDFDownloadButton quote={quote} company={company} />
 
       {/* Duplicate */}
       <Button variant="outline" asChild>
@@ -163,8 +178,8 @@ export function QuoteDetailActions({
           <AlertDialogHeader>
             <AlertDialogTitle>Send Quote to Customer</AlertDialogTitle>
             <AlertDialogDescription>
-              Mark quote {quote.quoteNumber} as sent to the customer.
-              This will change the status to "sent" and record the sent date.
+              Mark quote {quote.quoteNumber} as sent to the customer. This will
+              change the status to "sent" and record the sent date.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -176,7 +191,9 @@ export function QuoteDetailActions({
           )}
 
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isSendPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isSendPending}>
+              Cancel
+            </AlertDialogCancel>
             <form action={sendAction}>
               <Button
                 type="submit"
@@ -201,8 +218,8 @@ export function QuoteDetailActions({
           <AlertDialogHeader>
             <AlertDialogTitle>Accept Quote</AlertDialogTitle>
             <AlertDialogDescription>
-              Mark quote {quote.quoteNumber} as accepted by the customer.
-              You can then convert it to an invoice.
+              Mark quote {quote.quoteNumber} as accepted by the customer. You
+              can then convert it to an invoice.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -214,7 +231,9 @@ export function QuoteDetailActions({
           )}
 
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isAcceptPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isAcceptPending}>
+              Cancel
+            </AlertDialogCancel>
             <form action={acceptAction}>
               <Button
                 type="submit"
@@ -263,7 +282,9 @@ export function QuoteDetailActions({
           )}
 
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isRejectPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRejectPending}>
+              Cancel
+            </AlertDialogCancel>
             <form action={rejectAction}>
               <Button
                 type="submit"
@@ -288,8 +309,8 @@ export function QuoteDetailActions({
           <AlertDialogHeader>
             <AlertDialogTitle>Cancel Quote</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to cancel quote {quote.quoteNumber}?
-              This action cannot be undone.
+              Are you sure you want to cancel quote {quote.quoteNumber}? This
+              action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -313,7 +334,9 @@ export function QuoteDetailActions({
           )}
 
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isCancelPending}>Keep Quote</AlertDialogCancel>
+            <AlertDialogCancel disabled={isCancelPending}>
+              Keep Quote
+            </AlertDialogCancel>
             <form action={cancelAction}>
               <Button
                 type="submit"

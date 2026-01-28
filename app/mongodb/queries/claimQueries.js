@@ -1,5 +1,8 @@
 import mongoose from "mongoose";
 import EmployeeClaim from "../../models/employeesClaims";
+import dbConnect from "../../config/dbConnect";
+
+dbConnect();
 
 const ITEMS_PER_PAGE = 20;
 

@@ -34,8 +34,7 @@ async function UsersPage(props) {
   const currentPage = Number(searchParams.page) || 1;
 
   // Check permissions
-  const canManageUsers =
-    user?.role === "Admin" || user?.role === "Store Manager";
+  const canManageUsers = user?.role === "Admin" || user?.role === "SuperAdmin";
 
   if (!canManageUsers) {
     return (

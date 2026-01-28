@@ -10,6 +10,7 @@ type UserType = {
   name: string;
   role: string;
   email: string;
+  companyId?: string;
 };
 async function getUser(email: string) {
   try {
@@ -43,6 +44,7 @@ export const { auth, signIn, signOut } = NextAuth({
               name: user.name,
               role: user.role,
               email: user.email,
+              companyId: user.companyId?.toString(),
             } as UserType;
         }
         return null;

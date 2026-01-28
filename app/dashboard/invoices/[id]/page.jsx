@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getInvoiceById } from "@/app/mongodb/queries/invoice-queries";
+import { getCompanyById } from "@/app/mongodb/queries/company-queries";
 import { serializeBsonType } from "@/lib/utils";
 import Account from "@/app/models/account";
 import dbConnect from "@/app/config/dbConnect";
@@ -32,10 +33,6 @@ export default async function InvoiceDetailsPage({ params }) {
   const resolvedParams = await params;
   const session = await auth();
 
-  if (!session?.user) {
-    redirect("/login");
-  }
-
   const { user } = session;
 
   // Check permissions
@@ -62,6 +59,16 @@ export default async function InvoiceDetailsPage({ params }) {
 
   // Serialize BSON types (ObjectId, Date) for client components
   invoice = serializeBsonType(invoice);
+
+  // Fetch company data for PDF generation
+  let company = null;
+  if (user.companyId) {
+    company = await getCompanyById(user.companyId);
+    if (company) {
+      company = serializeBsonType(company);
+      console.log(company.tagline);
+    }
+  }
 
   // Fetch payment accounts for the payment dialog
   await dbConnect();
@@ -173,7 +180,7 @@ export default async function InvoiceDetailsPage({ params }) {
 
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-2">
-            <InvoicePDFDownloadButton invoice={invoice} />
+            <InvoicePDFDownloadButton invoice={invoice} company={company} />
             <Button
               variant="outline"
               size="sm"
@@ -182,14 +189,14 @@ export default async function InvoiceDetailsPage({ params }) {
               <Mail className="mr-2 h-4 w-4" />
               Send Email
             </Button>
-            <Button
+            {/* <Button
               variant="outline"
               size="sm"
               className="border-border hover:bg-accent"
             >
               <Printer className="mr-2 h-4 w-4" />
               Print
-            </Button>
+            </Button> */}
           </div>
         </div>
       </div>
