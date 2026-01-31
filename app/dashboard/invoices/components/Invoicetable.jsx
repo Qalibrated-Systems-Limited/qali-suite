@@ -19,13 +19,11 @@ import {
   XCircle,
   DollarSign,
   FileText,
-  Printer,
   Edit,
   CheckCircle,
   Loader2,
 } from "lucide-react";
 import { InvoicePrintDialog } from "./invoicePrintDialog";
-import { DownloadInvoicePDF } from "./Download";
 import { InvoicePaymentDialog } from "./InvoicePaymentDialog";
 import { completeInvoice } from "@/app/mongodb/invoice-actions";
 
@@ -273,9 +271,6 @@ export function InvoicesTable({ invoices, paymentAccounts = [] }) {
                           </>
                         )}
 
-                        <DropdownMenuItem asChild>
-                          <DownloadInvoicePDF invoice={invoice} />
-                        </DropdownMenuItem>
                         <DropdownMenuItem>
                           <Mail className="mr-2 h-4 w-4" />
                           Send Email
@@ -362,10 +357,6 @@ export function InvoicesTable({ invoices, paymentAccounts = [] }) {
                       <PostInvoiceButton invoiceId={invoice._id} />
                     </>
                   )}
-
-                  <DropdownMenuItem asChild>
-                    <DownloadInvoicePDF invoice={invoice} />
-                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>

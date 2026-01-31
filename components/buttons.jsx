@@ -1,6 +1,7 @@
 import { PencilIcon, PlusIcon, Plus, Download, FileText } from "lucide-react";
 import Link from "next/link";
 import { Button } from "./ui/button";
+import { IconEdit } from "@tabler/icons-react";
 
 export function CreateButton({ path, title }) {
   return (

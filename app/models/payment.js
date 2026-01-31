@@ -168,7 +168,7 @@ const paymentSchema = new Schema(
     party: {
       type: {
         type: String,
-        enum: ["customer", "supplier", "both"],
+        enum: ["customer", "supplier"],
         required: [true, "Party type is required"],
       },
       partyId: {
@@ -426,20 +426,48 @@ paymentSchema.methods.validate = async function () {
 };
 
 // ============================================
-// METHOD: Confirm payment
+// METHOD: Confirm payment (with transaction)
+// If externalSession is provided, uses it (caller manages transaction)
+// If not provided, creates and manages its own transaction
 // ============================================
-paymentSchema.methods.confirm = async function (user) {
+paymentSchema.methods.confirm = async function (user, externalSession = null) {
   if (!this.canConfirm) {
     throw new Error(`Cannot confirm payment in status: ${this.status}`);
   }
 
-  // Validate
+  // Validate before starting transaction
   await this.validate();
 
   const userInfo = formatUser(user);
 
-  // Create journal entry
-  const journalEntry = await this.createJournalEntry(userInfo);
+  // If external session provided, use it without managing transaction
+  if (externalSession) {
+    return this._confirmWithSession(userInfo, externalSession);
+  }
+
+  // No external session - create and manage our own transaction
+  const session = await mongoose.startSession();
+
+  try {
+    session.startTransaction();
+
+    await this._confirmWithSession(userInfo, session);
+
+    await session.commitTransaction();
+
+    return this;
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
+};
+
+// Internal helper for confirm logic
+paymentSchema.methods._confirmWithSession = async function (userInfo, session) {
+  // Create journal entry within transaction
+  const journalEntry = await this.createJournalEntry(userInfo, session);
 
   // Update status
   this.status = "confirmed";
@@ -448,10 +476,10 @@ paymentSchema.methods.confirm = async function (user) {
   this.journalEntryId = journalEntry._id;
   this.lastModifiedBy = userInfo;
 
-  await this.save();
+  await this.save({ session });
 
-  // Update allocated documents
-  await this.updateAllocatedDocuments();
+  // Update allocated documents within transaction
+  await this.updateAllocatedDocuments(session);
 
   return this;
 };
@@ -459,14 +487,16 @@ paymentSchema.methods.confirm = async function (user) {
 // ============================================
 // METHOD: Create Journal Entry
 // ============================================
-paymentSchema.methods.createJournalEntry = async function (user) {
+paymentSchema.methods.createJournalEntry = async function (user, session = null) {
   const Account = mongoose.model("Account");
   const JournalEntry = mongoose.model("JournalEntry");
 
+  const queryOptions = session ? { session } : {};
+
   // Get system accounts
   const [arAccount, apAccount] = await Promise.all([
-    Account.findOne({ systemAccount: "accounts_receivable" }),
-    Account.findOne({ systemAccount: "accounts_payable" }),
+    Account.findOne({ systemAccount: "accounts_receivable" }, null, queryOptions),
+    Account.findOne({ systemAccount: "accounts_payable" }, null, queryOptions),
   ]);
 
   if (!arAccount || !apAccount) {
@@ -521,7 +551,7 @@ paymentSchema.methods.createJournalEntry = async function (user) {
 
   // Generate entry number
   const prefix = this.paymentType === "received" ? "JE-REC" : "JE-PAY";
-  const entryNumber = await this.constructor.generateJENumber(prefix);
+  const entryNumber = await this.constructor.generateJENumber(prefix, session);
 
   // Create and post
   const journalEntry = new JournalEntry({
@@ -546,8 +576,8 @@ paymentSchema.methods.createJournalEntry = async function (user) {
     createdBy: user,
   });
 
-  await journalEntry.save();
-  await journalEntry.post(user);
+  await journalEntry.save({ session });
+  await journalEntry.post(user, session);
 
   return journalEntry;
 };
@@ -555,11 +585,13 @@ paymentSchema.methods.createJournalEntry = async function (user) {
 // ============================================
 // METHOD: Update allocated documents
 // ============================================
-paymentSchema.methods.updateAllocatedDocuments = async function () {
+paymentSchema.methods.updateAllocatedDocuments = async function (session = null) {
   const Invoice = mongoose.model("Invoice");
   const Bill = mongoose.model("Bill");
 
-  // Prepare payment details to pass to recordPayment (avoids re-querying within transaction)
+  const queryOptions = session ? { session } : {};
+
+  // Prepare payment details to pass to recordPayment
   const paymentDetails = {
     paymentDate: this.paymentDate,
     paymentNumber: this.paymentNumber,
@@ -567,38 +599,38 @@ paymentSchema.methods.updateAllocatedDocuments = async function () {
   };
 
   for (const alloc of this.allocations) {
-    try {
-      if (alloc.documentType === "invoice") {
-        const invoice = await Invoice.findById(alloc.documentId);
-        if (invoice && typeof invoice.recordPayment === "function") {
-          await invoice.recordPayment(
-            this._id,
-            alloc.amountAllocated,
-            paymentDetails
-          );
-        }
-      } else if (alloc.documentType === "bill") {
-        const bill = await Bill.findById(alloc.documentId);
-        if (bill && typeof bill.recordPayment === "function") {
-          await bill.recordPayment(
-            this._id,
-            this.paymentNumber,
-            alloc.amountAllocated,
-            this.paymentMethod,
-            this.reference ||
-              this.mpesaDetails?.transactionCode ||
-              this.bankDetails?.chequeNumber,
-            this.paymentDate,
-            this.confirmedBy
-          );
-        }
+    if (alloc.documentType === "invoice") {
+      const invoice = await Invoice.findById(alloc.documentId).session(session);
+      if (!invoice) {
+        throw new Error(`Invoice ${alloc.documentNumber} not found`);
       }
-    } catch (err) {
-      console.error(
-        `Failed to update ${alloc.documentType} ${alloc.documentNumber}:`,
-        err
-      );
-      // Continue with other allocations
+      if (typeof invoice.recordPayment === "function") {
+        await invoice.recordPayment(
+          this._id,
+          alloc.amountAllocated,
+          paymentDetails,
+          session
+        );
+      }
+    } else if (alloc.documentType === "bill") {
+      const bill = await Bill.findById(alloc.documentId).session(session);
+      if (!bill) {
+        throw new Error(`Bill ${alloc.documentNumber} not found`);
+      }
+      if (typeof bill.recordPayment === "function") {
+        await bill.recordPayment(
+          this._id,
+          this.paymentNumber,
+          alloc.amountAllocated,
+          this.paymentMethod,
+          this.reference ||
+            this.mpesaDetails?.transactionCode ||
+            this.bankDetails?.chequeNumber,
+          this.paymentDate,
+          this.confirmedBy,
+          session
+        );
+      }
     }
   }
 };

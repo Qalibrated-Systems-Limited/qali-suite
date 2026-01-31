@@ -153,34 +153,34 @@ function serializePayment(payment) {
 // CREATE PAYMENT
 // ============================================
 export async function createPayment(prevState, formData) {
+  // Parse form data early so we can return it on any error
+  const rawData = {
+    paymentType: formData.get("paymentType") || "",
+    paymentDate: formData.get("paymentDate") || "",
+    amount: formData.get("amount") || "",
+    paymentMethod: formData.get("paymentMethod") || "",
+    accountId: formData.get("accountId") || "",
+    partyId: formData.get("partyId") || "",
+    description: formData.get("description") || "",
+    reference: formData.get("reference") || "",
+    notes: formData.get("notes") || "",
+    mpesaTransactionCode: formData.get("mpesaTransactionCode") || "",
+    mpesaPhoneNumber: formData.get("mpesaPhoneNumber") || "",
+    mpesaReceiptNumber: formData.get("mpesaReceiptNumber") || "",
+    bankName: formData.get("bankName") || "",
+    bankAccountNumber: formData.get("bankAccountNumber") || "",
+    chequeNumber: formData.get("chequeNumber") || "",
+    bankTransactionReference: formData.get("bankTransactionReference") || "",
+    cardLast4Digits: formData.get("cardLast4Digits") || "",
+    cardType: formData.get("cardType") || "",
+    cardApprovalCode: formData.get("cardApprovalCode") || "",
+    allocations: formData.get("allocations") || "",
+  };
+
   try {
     await dbConnect();
     const user = await getCurrentUser();
     checkRole(user, ["admin", "manager", "accountant"]);
-
-    // Parse form data
-    const rawData = {
-      paymentType: formData.get("paymentType"),
-      paymentDate: formData.get("paymentDate"),
-      amount: formData.get("amount"),
-      paymentMethod: formData.get("paymentMethod"),
-      accountId: formData.get("accountId"),
-      partyId: formData.get("partyId"),
-      description: formData.get("description"),
-      reference: formData.get("reference"),
-      notes: formData.get("notes"),
-      mpesaTransactionCode: formData.get("mpesaTransactionCode"),
-      mpesaPhoneNumber: formData.get("mpesaPhoneNumber"),
-      mpesaReceiptNumber: formData.get("mpesaReceiptNumber"),
-      bankName: formData.get("bankName"),
-      bankAccountNumber: formData.get("bankAccountNumber"),
-      chequeNumber: formData.get("chequeNumber"),
-      bankTransactionReference: formData.get("bankTransactionReference"),
-      cardLast4Digits: formData.get("cardLast4Digits"),
-      cardType: formData.get("cardType"),
-      cardApprovalCode: formData.get("cardApprovalCode"),
-      allocations: formData.get("allocations"),
-    };
 
     // Validate
     const validated = CreatePaymentSchema.safeParse(rawData);
@@ -189,6 +189,7 @@ export async function createPayment(prevState, formData) {
         success: false,
         error: "Validation failed",
         fieldErrors: validated.error.flatten().fieldErrors,
+        formData: rawData,
       };
     }
 
@@ -204,7 +205,7 @@ export async function createPayment(prevState, formData) {
           allocations = validatedAllocs.data;
         }
       } catch (e) {
-        return { success: false, error: "Invalid allocations format" };
+        return { success: false, error: "Invalid allocations format", formData: rawData };
       }
     }
 
@@ -217,13 +218,14 @@ export async function createPayment(prevState, formData) {
       return {
         success: false,
         error: `Total allocated (${totalAllocated}) exceeds payment amount (${data.amount})`,
+        formData: rawData,
       };
     }
 
     // Get party
     const party = await Party.findById(data.partyId);
     if (!party) {
-      return { success: false, error: "Party not found" };
+      return { success: false, error: "Party not found", formData: rawData };
     }
 
     // Validate party type matches payment type ("both" qualifies for either)
@@ -234,35 +236,44 @@ export async function createPayment(prevState, formData) {
       return {
         success: false,
         error: "Received payments must be from customers",
+        formData: rawData,
       };
     }
     if (
       data.paymentType === "made" &&
       !["supplier", "both"].includes(party.type)
     ) {
-      return { success: false, error: "Made payments must be to suppliers" };
+      return { success: false, error: "Made payments must be to suppliers", formData: rawData };
     }
 
     // Get account
     const account = await Account.findById(data.accountId);
     if (!account) {
-      return { success: false, error: "Payment account not found" };
+      return { success: false, error: "Payment account not found", formData: rawData };
     }
     if (!["cash", "bank", "mpesa"].includes(account.subType)) {
       return {
         success: false,
         error: "Invalid account type. Must be cash, bank, or mpesa",
+        formData: rawData,
       };
     }
 
     // Generate payment number
     const paymentNumber = await Payment.generatePaymentNumber(data.paymentType);
 
+    // Calculate fiscal period from payment date (YYYY-MM)
+    const paymentDateObj = new Date(data.paymentDate);
+    const fiscalPeriod = `${paymentDateObj.getFullYear()}-${String(
+      paymentDateObj.getMonth() + 1
+    ).padStart(2, "0")}`;
+
     // Build payment document
     const paymentData = {
       paymentNumber,
       paymentType: data.paymentType,
       paymentDate: new Date(data.paymentDate),
+      fiscalPeriod,
       amount: data.amount,
       currency: "KES",
       paymentMethod: data.paymentMethod,
@@ -275,7 +286,8 @@ export async function createPayment(prevState, formData) {
       },
 
       party: {
-        type: party.type,
+        // Derive party role from payment type (not the party's general type)
+        type: data.paymentType === "received" ? "customer" : "supplier",
         partyId: party._id,
         name: party.name,
         email: party.email,
@@ -343,7 +355,7 @@ export async function createPayment(prevState, formData) {
     };
   } catch (error) {
     console.error("Create payment error:", error);
-    return { success: false, error: error.message };
+    return { success: false, error: error.message, formData: rawData };
   }
 }
 
@@ -832,11 +844,11 @@ export async function getUnpaidDocuments(partyId, documentType) {
       }));
     } else if (documentType === "invoice") {
       documents = await Invoice.find({
-        "customer.partyId": partyId,
+        "customer.id": partyId,  // Invoice uses customer.id, not customer.partyId
         status: "completed",
         paymentStatus: { $in: ["unpaid", "partial"] },
       })
-        .select("invoiceNumber invoiceDate total balance dueDate")
+        .select("invoiceNumber invoiceDate total amountDue dueDate")
         .sort({ dueDate: 1 })
         .lean();
 
@@ -845,7 +857,7 @@ export async function getUnpaidDocuments(partyId, documentType) {
         documentNumber: d.invoiceNumber,
         documentDate: d.invoiceDate?.toISOString(),
         originalAmount: d.total || 0,
-        balance: d.balance || 0,
+        balance: d.amountDue || 0,  // Invoice uses amountDue, not balance
         dueDate: d.dueDate?.toISOString(),
       }));
     }

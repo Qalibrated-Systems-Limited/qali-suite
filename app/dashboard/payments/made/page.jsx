@@ -229,9 +229,18 @@ async function PaymentsList({ searchParams, userRole }) {
 export default async function PaymentsMadePage({ searchParams }) {
   const session = await auth();
   const canCreate = ["Admin", "Manager", "Accountant"].includes(session?.user?.role);
+  const params = await searchParams;
+  const successMessage = params?.success === "true" ? params?.message : null;
 
   return (
     <div className="space-y-6">
+      {successMessage && (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4 text-emerald-700 dark:text-emerald-400">
+          <CheckCircle2 className="h-5 w-5 shrink-0" />
+          <p className="text-sm font-medium">{successMessage}</p>
+        </div>
+      )}
+
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Payments Made</h1>

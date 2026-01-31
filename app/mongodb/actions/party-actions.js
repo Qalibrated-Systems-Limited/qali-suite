@@ -57,26 +57,8 @@ const CreateEmployeePartySchema = z.object({
  * Create a new party (customer/supplier/employee)
  */
 export async function createParty(prevState, formData) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
-    return {
-      errors: {
-        _form: ["You must be logged in"],
-      },
-    };
-  }
-
-  if (!["Admin", "Accountant"].includes(session.user.role)) {
-    return {
-      errors: {
-        _form: ["Unauthorized: Admin or Accountant role required"],
-      },
-    };
-  }
-
-  // Validate
-  const validatedFields = CreatePartySchema.safeParse({
+  // Extract form values to preserve on error
+  const formValues = {
     name: formData.get("name"),
     type: formData.get("type"),
     displayName: formData.get("displayName"),
@@ -94,11 +76,31 @@ export async function createParty(prevState, formData) {
     bankName: formData.get("bankName"),
     accountNumber: formData.get("accountNumber"),
     notes: formData.get("notes"),
-  });
+  };
+
+  // Auth check
+  const session = await auth();
+  if (!session?.user) {
+    return {
+      errors: { _form: ["You must be logged in"] },
+      values: formValues,
+    };
+  }
+
+  if (!["Admin", "Accountant"].includes(session.user.role)) {
+    return {
+      errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+      values: formValues,
+    };
+  }
+
+  // Validate
+  const validatedFields = CreatePartySchema.safeParse(formValues);
 
   if (!validatedFields.success) {
     return {
       errors: validatedFields.error.flatten().fieldErrors,
+      values: formValues,
     };
   }
 
@@ -114,9 +116,8 @@ export async function createParty(prevState, formData) {
       });
       if (existingEmail) {
         return {
-          errors: {
-            email: ["A party with this email already exists"],
-          },
+          errors: { email: ["A party with this email already exists"] },
+          values: formValues,
         };
       }
     }
@@ -128,9 +129,8 @@ export async function createParty(prevState, formData) {
       });
       if (existingPin) {
         return {
-          errors: {
-            taxPin: ["A party with this KRA PIN already exists"],
-          },
+          errors: { taxPin: ["A party with this KRA PIN already exists"] },
+          values: formValues,
         };
       }
     }
@@ -173,9 +173,8 @@ export async function createParty(prevState, formData) {
   } catch (error) {
     console.error("Create party error:", error);
     return {
-      errors: {
-        _form: [error.message || "Failed to create party"],
-      },
+      errors: { _form: [error.message || "Failed to create party"] },
+      values: formValues,
     };
   }
 }

@@ -147,28 +147,33 @@ function isOwner(user, createdBy) {
 // ============================================
 export async function createBill(prevState, formData) {
   let mongoSession = null;
+  let createdBillId = null;
+  let createdBillNumber = null;
+
+  // 1. Parse form data early to preserve on errors
+  const rawData = parseFormData(formData);
 
   try {
-    // 1. Auth check
+    // 2. Auth check
     const session = await auth();
     if (!session?.user) {
-      return { success: false, error: "Please sign in to continue" };
+      return { success: false, error: "Please sign in to continue", values: rawData };
     }
 
     const user = session.user;
 
-    // 2. Role check
+    // 3. Role check
     if (!hasRole(user, BILL_ROLES.CREATE)) {
       return {
         success: false,
         error: "You don't have permission to create bills",
+        values: rawData,
       };
     }
 
     await dbConnect();
 
-    // 3. Parse and validate form data
-    const rawData = parseFormData(formData);
+    // 4. Validate form data
     const validation = CreateBillSchema.safeParse(rawData);
 
     if (!validation.success) {
@@ -182,6 +187,7 @@ export async function createBill(prevState, formData) {
         success: false,
         error: "Please fix the validation errors",
         fieldErrors,
+        values: rawData,
       };
     }
 
@@ -191,7 +197,7 @@ export async function createBill(prevState, formData) {
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    // 5. Validate supplier exists and is correct type
+    // 6. Validate supplier exists and is correct type
     const supplier = await Party.findById(data.supplierId)
       .session(mongoSession)
       .lean();
@@ -201,6 +207,7 @@ export async function createBill(prevState, formData) {
         success: false,
         error: "Supplier not found",
         fieldErrors: { supplierId: "Supplier not found" },
+        values: rawData,
       };
     }
 
@@ -210,10 +217,11 @@ export async function createBill(prevState, formData) {
         success: false,
         error: "Selected party is not a supplier",
         fieldErrors: { supplierId: "Selected party is not a supplier" },
+        values: rawData,
       };
     }
 
-    // 6. Process line items
+    // 7. Process line items
     const processedLines = [];
 
     for (let i = 0; i < data.lines.length; i++) {
@@ -229,6 +237,7 @@ export async function createBill(prevState, formData) {
           success: false,
           error: `Line ${i + 1}: Account not found`,
           fieldErrors: { [`lines.${i}.accountId`]: "Account not found" },
+          values: rawData,
         };
       }
 
@@ -240,6 +249,7 @@ export async function createBill(prevState, formData) {
           fieldErrors: {
             [`lines.${i}.accountId`]: "Must be expense or asset account",
           },
+          values: rawData,
         };
       }
 
@@ -254,6 +264,7 @@ export async function createBill(prevState, formData) {
           fieldErrors: {
             [`lines.${i}.accountId`]: "Cannot post to header account",
           },
+          values: rawData,
         };
       }
 
@@ -379,20 +390,18 @@ export async function createBill(prevState, formData) {
       { session: mongoSession }
     );
 
-    // 11. Commit transaction and end session
+    // 12. Commit transaction and end session
     await mongoSession.commitTransaction();
     mongoSession.endSession();
     mongoSession = null; // Prevent finally from trying to end again
 
-    // 12. Revalidate and redirect
-    revalidatePath("/dashboard/bills");
-    redirect(`/dashboard/bills/${bill._id}?success=Bill ${billNumber} created`);
-  } catch (error) {
-    // Handle redirect (it throws NEXT_REDIRECT)
-    if (error?.digest?.startsWith("NEXT_REDIRECT")) {
-      throw error;
-    }
+    // Store for redirect
+    createdBillId = bill._id;
+    createdBillNumber = billNumber;
 
+    // 13. Revalidate
+    revalidatePath("/dashboard/bills");
+  } catch (error) {
     // Abort transaction on error
     if (mongoSession) {
       await mongoSession.abortTransaction();
@@ -402,12 +411,16 @@ export async function createBill(prevState, formData) {
     return {
       success: false,
       error: error.message || "Failed to create bill. Please try again.",
+      values: rawData,
     };
   } finally {
     if (mongoSession) {
       mongoSession.endSession();
     }
   }
+
+  // Redirect outside try/catch (redirect throws NEXT_REDIRECT)
+  redirect(`/dashboard/bills/${createdBillId}?success=Bill ${createdBillNumber} created`);
 }
 
 // ============================================
@@ -416,32 +429,36 @@ export async function createBill(prevState, formData) {
 export async function updateBill(billId, prevState, formData) {
   let mongoSession = null;
 
+  // 1. Parse form data early to preserve on errors
+  const rawData = parseFormData(formData);
+
   try {
-    // 1. Auth check
+    // 2. Auth check
     const session = await auth();
     if (!session?.user) {
-      return { success: false, error: "Please sign in to continue" };
+      return { success: false, error: "Please sign in to continue", values: rawData };
     }
 
     const user = session.user;
 
     await dbConnect();
 
-    // 2. Get bill (outside transaction for read)
+    // 3. Get bill (outside transaction for read)
     const bill = await Bill.findById(billId);
     if (!bill) {
-      return { success: false, error: "Bill not found" };
+      return { success: false, error: "Bill not found", values: rawData };
     }
 
-    // 3. Check if editable
+    // 4. Check if editable
     if (!bill.canEdit) {
       return {
         success: false,
         error: `Cannot edit bill in ${bill.status} status`,
+        values: rawData,
       };
     }
 
-    // 4. Authorization: Owner, Manager, or Admin
+    // 5. Authorization: Owner, Manager, or Admin
     const canEdit =
       isOwner(user, bill.createdBy) || hasRole(user, ["Admin", "Manager"]);
 
@@ -449,11 +466,11 @@ export async function updateBill(billId, prevState, formData) {
       return {
         success: false,
         error: "You can only edit bills you created",
+        values: rawData,
       };
     }
 
-    // 5. Parse and validate
-    const rawData = parseFormData(formData);
+    // 6. Validate form data
     const validation = CreateBillSchema.safeParse(rawData);
 
     if (!validation.success) {
@@ -467,6 +484,7 @@ export async function updateBill(billId, prevState, formData) {
         success: false,
         error: "Please fix the validation errors",
         fieldErrors,
+        values: rawData,
       };
     }
 
@@ -476,7 +494,7 @@ export async function updateBill(billId, prevState, formData) {
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    // 7. Update supplier if changed (with null-safe check)
+    // 8. Update supplier if changed (with null-safe check)
     if (data.supplierId !== bill.supplier?.partyId?.toString()) {
       const supplier = await Party.findById(data.supplierId)
         .session(mongoSession)
@@ -487,6 +505,7 @@ export async function updateBill(billId, prevState, formData) {
           success: false,
           error: "Supplier not found",
           fieldErrors: { supplierId: "Supplier not found" },
+          values: rawData,
         };
       }
 
@@ -496,6 +515,7 @@ export async function updateBill(billId, prevState, formData) {
           success: false,
           error: "Selected party is not a supplier",
           fieldErrors: { supplierId: "Selected party is not a supplier" },
+          values: rawData,
         };
       }
 
@@ -513,7 +533,7 @@ export async function updateBill(billId, prevState, formData) {
       };
     }
 
-    // 8. Process lines
+    // 9. Process lines
     const processedLines = [];
 
     for (let i = 0; i < data.lines.length; i++) {
@@ -528,6 +548,7 @@ export async function updateBill(billId, prevState, formData) {
           success: false,
           error: `Line ${i + 1}: Account not found`,
           fieldErrors: { [`lines.${i}.accountId`]: "Account not found" },
+          values: rawData,
         };
       }
 
@@ -539,6 +560,7 @@ export async function updateBill(billId, prevState, formData) {
           fieldErrors: {
             [`lines.${i}.accountId`]: "Must be expense or asset account",
           },
+          values: rawData,
         };
       }
 
@@ -553,6 +575,7 @@ export async function updateBill(billId, prevState, formData) {
           fieldErrors: {
             [`lines.${i}.accountId`]: "Cannot post to header account",
           },
+          values: rawData,
         };
       }
 
@@ -655,21 +678,15 @@ export async function updateBill(billId, prevState, formData) {
 
     await bill.save({ session: mongoSession });
 
-    // 10. Commit transaction and end session
+    // 11. Commit transaction and end session
     await mongoSession.commitTransaction();
     mongoSession.endSession();
     mongoSession = null; // Prevent finally from trying to end again
 
-    // 11. Revalidate and redirect
+    // 12. Revalidate
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
-    redirect(`/dashboard/bills/${billId}?success=Bill updated successfully`);
   } catch (error) {
-    // Handle redirect (it throws NEXT_REDIRECT)
-    if (error?.digest?.startsWith("NEXT_REDIRECT")) {
-      throw error;
-    }
-
     // Abort transaction on error
     if (mongoSession) {
       await mongoSession.abortTransaction();
@@ -679,12 +696,16 @@ export async function updateBill(billId, prevState, formData) {
     return {
       success: false,
       error: error.message || "Failed to update bill. Please try again.",
+      values: rawData,
     };
   } finally {
     if (mongoSession) {
       mongoSession.endSession();
     }
   }
+
+  // Redirect outside try/catch (redirect throws NEXT_REDIRECT)
+  redirect(`/dashboard/bills/${billId}?success=Bill updated successfully`);
 }
 
 // ============================================
@@ -1129,7 +1150,7 @@ export async function createBillPayment(billId, prevState, formData) {
       paymentNumber,
       paymentType: "made",
       paymentDate: payDate,
-      // fiscalPeriod,
+      fiscalPeriod,
       amount,
       paymentMethod,
       account: {
@@ -1164,7 +1185,8 @@ export async function createBillPayment(billId, prevState, formData) {
     await payment.save({ session: mongoSession });
 
     // Confirm payment (creates JE and updates bill via updateAllocatedDocuments)
-    await payment.confirm(user);
+    // Pass session so it uses our transaction instead of creating its own
+    await payment.confirm(user, mongoSession);
 
     await mongoSession.commitTransaction();
 
@@ -1195,6 +1217,11 @@ export async function createBillPayment(billId, prevState, formData) {
 // ============================================
 // RECORD PAYMENT (For use with Payment module)
 // ============================================
+// @deprecated This function is no longer needed. Use createBillPayment instead,
+// which creates a Payment document and calls payment.confirm() to handle
+// the bill update within a transaction. The payment.confirm() method calls
+// updateAllocatedDocuments() which properly updates the bill with session support.
+// ============================================
 export async function recordBillPayment(
   billId,
   paymentId,
@@ -1203,75 +1230,17 @@ export async function recordBillPayment(
   method,
   reference
 ) {
-  try {
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, error: "Please sign in to continue" };
-    }
+  console.warn(
+    "recordBillPayment is deprecated. Use createBillPayment instead."
+  );
 
-    const user = session.user;
-
-    // Role check
-    if (!hasRole(user, BILL_ROLES.PAYMENT)) {
-      return {
-        success: false,
-        error: "You don't have permission to record payments",
-      };
-    }
-
-    await dbConnect();
-
-    const bill = await Bill.findById(billId);
-    if (!bill) {
-      return { success: false, error: "Bill not found" };
-    }
-
-    if (!bill.canPay) {
-      return {
-        success: false,
-        error:
-          bill.status !== "approved"
-            ? "Bill must be approved before payment"
-            : "Bill is already fully paid",
-      };
-    }
-
-    if (amount > bill.amounts?.balance + 0.01) {
-      return {
-        success: false,
-        error: `Payment amount (${amount}) exceeds balance (${bill.amounts?.balance})`,
-      };
-    }
-
-    await bill.recordPayment(
-      paymentId,
-      paymentNumber,
-      amount,
-      method,
-      reference,
-      new Date(),
-      formatUser(session)
-    );
-
-    revalidatePath("/dashboard/bills");
-    revalidatePath(`/dashboard/bills/${billId}`);
-    revalidatePath("/dashboard/payments");
-
-    return {
-      success: true,
-      message: `Payment of ${amount} recorded on bill ${bill.billNumber}`,
-      data: {
-        paymentStatus: bill.paymentStatus,
-        balance: bill.amounts?.balance,
-      },
-    };
-  } catch (error) {
-    console.error("Record payment error:", error);
-    return {
-      success: false,
-      error: error.message || "Failed to record payment",
-    };
-  }
+  // This function should not be called directly anymore.
+  // Payment.confirm() handles bill updates via updateAllocatedDocuments()
+  return {
+    success: false,
+    error:
+      "This function is deprecated. Use createBillPayment to create and confirm payments.",
+  };
 }
 
 // ============================================

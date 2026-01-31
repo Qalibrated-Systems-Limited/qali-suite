@@ -19,28 +19,50 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 
-export default function PartyForm({ party = null }) {
+export default function PartyForm({ party = null, lockedType = null }) {
   const router = useRouter();
   const isEdit = !!party;
+  const effectiveType = lockedType || party?.type || "";
 
   // Use different action based on mode
   const action = isEdit ? updateParty.bind(null, party._id) : createParty;
   const [state, formAction, isPending] = useActionState(action, {});
 
-  // Handle success
+  // Handle success - redirect to appropriate page
   useEffect(() => {
     if (state.success) {
       toast.success(state.message);
       if (isEdit) {
         router.push(`/dashboard/parties/${party._id}`);
+      } else if (lockedType === "customer") {
+        router.push("/dashboard/customers");
+      } else if (lockedType === "supplier") {
+        router.push("/dashboard/suppliers");
       } else {
         router.push("/dashboard/parties");
       }
     }
-  }, [state.success, state.message, router, isEdit, party]);
+  }, [state.success, state.message, router, isEdit, party, lockedType]);
+
+  // Dynamic title based on type
+  const getTitle = () => {
+    if (isEdit) return "Edit Party";
+    if (lockedType === "customer") return "New Customer";
+    if (lockedType === "supplier") return "New Supplier";
+    if (lockedType === "employee") return "New Employee";
+    return "New Party";
+  };
 
   return (
     <form action={formAction} className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">{getTitle()}</h1>
+        <p className="text-muted-foreground">
+          {isEdit ? "Update party information" : "Fill in the details below"}
+        </p>
+      </div>
+
       {/* General Error */}
       {state.errors?._form && (
         <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
@@ -59,8 +81,8 @@ export default function PartyForm({ party = null }) {
             <Label htmlFor="type">
               Party Type <span className="text-destructive">*</span>
             </Label>
-            <Select name="type" defaultValue={party?.type || ""}>
-              <SelectTrigger>
+            <Select name="type" defaultValue={state.values?.type ?? effectiveType} disabled={!!lockedType}>
+              <SelectTrigger className={lockedType ? "bg-muted" : ""}>
                 <SelectValue placeholder="Select type..." />
               </SelectTrigger>
               <SelectContent>
@@ -70,6 +92,9 @@ export default function PartyForm({ party = null }) {
                 <SelectItem value="both">Both (Customer & Supplier)</SelectItem>
               </SelectContent>
             </Select>
+            {lockedType && (
+              <input type="hidden" name="type" value={lockedType} />
+            )}
             {state.errors?.type && (
               <p className="text-sm text-destructive">{state.errors.type[0]}</p>
             )}
@@ -83,7 +108,7 @@ export default function PartyForm({ party = null }) {
             <Input
               id="name"
               name="name"
-              defaultValue={party?.name || ""}
+              defaultValue={state.values?.name ?? party?.name ?? ""}
               placeholder="Full legal name"
               className="bg-background"
             />
@@ -98,7 +123,7 @@ export default function PartyForm({ party = null }) {
             <Input
               id="displayName"
               name="displayName"
-              defaultValue={party?.displayName || ""}
+              defaultValue={state.values?.displayName ?? party?.displayName ?? ""}
               placeholder="Short name for invoices"
               className="bg-background"
             />
@@ -124,7 +149,7 @@ export default function PartyForm({ party = null }) {
                 id="email"
                 name="email"
                 type="email"
-                defaultValue={party?.email || ""}
+                defaultValue={state.values?.email ?? party?.email ?? ""}
                 placeholder="email@example.com"
                 className="bg-background"
               />
@@ -142,7 +167,7 @@ export default function PartyForm({ party = null }) {
                 id="phone"
                 name="phone"
                 type="tel"
-                defaultValue={party?.phone || ""}
+                defaultValue={state.values?.phone ?? party?.phone ?? ""}
                 placeholder="+254 700 000 000"
                 className="bg-background"
               />
@@ -155,7 +180,7 @@ export default function PartyForm({ party = null }) {
             <Input
               id="taxPin"
               name="taxPin"
-              defaultValue={party?.taxPin || ""}
+              defaultValue={state.values?.taxPin ?? party?.taxPin ?? ""}
               placeholder="A000000000X"
               className="uppercase bg-background"
               maxLength={11}
@@ -186,7 +211,7 @@ export default function PartyForm({ party = null }) {
               <Input
                 id="employeeNumber"
                 name="employeeNumber"
-                defaultValue={party?.employeeNumber || ""}
+                defaultValue={state.values?.employeeNumber ?? party?.employeeNumber ?? ""}
                 placeholder="EMP001"
                 className="bg-background"
               />
@@ -197,7 +222,7 @@ export default function PartyForm({ party = null }) {
               <Input
                 id="department"
                 name="department"
-                defaultValue={party?.department || ""}
+                defaultValue={state.values?.department ?? party?.department ?? ""}
                 placeholder="Finance"
                 className="bg-background"
               />
@@ -208,7 +233,7 @@ export default function PartyForm({ party = null }) {
               <Input
                 id="designation"
                 name="designation"
-                defaultValue={party?.designation || ""}
+                defaultValue={state.values?.designation ?? party?.designation ?? ""}
                 placeholder="Accountant"
                 className="bg-background"
               />
@@ -228,7 +253,7 @@ export default function PartyForm({ party = null }) {
               <Checkbox
                 id="isContractor"
                 name="isContractor"
-                defaultChecked={party?.isContractor || false}
+                defaultChecked={state.values?.isContractor ?? party?.isContractor ?? false}
               />
               <Label
                 htmlFor="isContractor"
@@ -242,7 +267,7 @@ export default function PartyForm({ party = null }) {
               <Checkbox
                 id="whtApplicable"
                 name="whtApplicable"
-                defaultChecked={party?.whtApplicable || false}
+                defaultChecked={state.values?.whtApplicable ?? party?.whtApplicable ?? false}
               />
               <Label
                 htmlFor="whtApplicable"
@@ -255,7 +280,7 @@ export default function PartyForm({ party = null }) {
 
           <div className="space-y-2">
             <Label htmlFor="whtRate">WHT Rate (%)</Label>
-            <Select name="whtRate" defaultValue={String(party?.whtRate || 0)}>
+            <Select name="whtRate" defaultValue={String(state.values?.whtRate ?? party?.whtRate ?? 0)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -286,7 +311,7 @@ export default function PartyForm({ party = null }) {
                 id="creditLimit"
                 name="creditLimit"
                 type="number"
-                defaultValue={party?.creditTerms?.creditLimit || 0}
+                defaultValue={state.values?.creditLimit ?? party?.creditTerms?.creditLimit ?? 0}
                 min="0"
                 step="0.01"
                 className="bg-background"
@@ -299,7 +324,7 @@ export default function PartyForm({ party = null }) {
                 id="paymentTermsDays"
                 name="paymentTermsDays"
                 type="number"
-                defaultValue={party?.creditTerms?.paymentTermsDays || 30}
+                defaultValue={state.values?.paymentTermsDays ?? party?.creditTerms?.paymentTermsDays ?? 30}
                 min="0"
                 className="bg-background"
               />
@@ -322,7 +347,7 @@ export default function PartyForm({ party = null }) {
               <Input
                 id="bankName"
                 name="bankName"
-                defaultValue={party?.paymentDetails?.bankName || ""}
+                defaultValue={state.values?.bankName ?? party?.paymentDetails?.bankName ?? ""}
                 placeholder="KCB Bank"
                 className="bg-background"
               />
@@ -333,7 +358,7 @@ export default function PartyForm({ party = null }) {
               <Input
                 id="accountNumber"
                 name="accountNumber"
-                defaultValue={party?.paymentDetails?.accountNumber || ""}
+                defaultValue={state.values?.accountNumber ?? party?.paymentDetails?.accountNumber ?? ""}
                 placeholder="1234567890"
                 className="bg-background"
               />
@@ -353,7 +378,7 @@ export default function PartyForm({ party = null }) {
             <Textarea
               id="notes"
               name="notes"
-              defaultValue={party?.notes || ""}
+              defaultValue={state.values?.notes ?? party?.notes ?? ""}
               rows={4}
               placeholder="Additional information..."
               className="bg-background resize-none"

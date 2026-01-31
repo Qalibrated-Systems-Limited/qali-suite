@@ -1177,11 +1177,13 @@ invoiceSchema.methods.generateUniqueEntryNumber = async function (
  * @param {Date} paymentDetails.paymentDate
  * @param {string} paymentDetails.paymentNumber
  * @param {string} paymentDetails.paymentMethod
+ * @param {ClientSession} session - Optional MongoDB session for transactions
  */
 invoiceSchema.methods.recordPayment = async function (
   paymentId,
   amount,
-  paymentDetails = null
+  paymentDetails = null,
+  session = null
 ) {
   // Only completed invoices can accept payments
   if (this.status !== "completed") {
@@ -1211,7 +1213,7 @@ invoiceSchema.methods.recordPayment = async function (
   } else {
     // Fallback: query for payment (for backward compatibility)
     const Payment = mongoose.model("Payment");
-    const payment = await Payment.findById(paymentId);
+    const payment = await Payment.findById(paymentId).session(session);
 
     if (!payment) {
       throw new Error(`Payment not found (ID: ${paymentId})`);
@@ -1255,17 +1257,17 @@ invoiceSchema.methods.recordPayment = async function (
     const JournalEntry = mongoose.model("JournalEntry");
     const je = await JournalEntry.findById(
       this.accounting.revenueJournalEntryId
-    );
+    ).session(session);
 
     if (je) {
       je.amountPaid = this.amountPaid;
       je.amountOutstanding = this.amountDue;
       je.isFullyPaid = this.amountDue <= 0.01;
-      await je.save();
+      await je.save({ session });
     }
   }
 
-  await this.save();
+  await this.save({ session });
   return this;
 };
 

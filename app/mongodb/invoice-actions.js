@@ -72,9 +72,8 @@ export async function updateInvoice(invoiceId, prevState, formData) {
 
     try {
       // Fetch the existing invoice
-      const existingInvoice = await Invoice.findById(invoiceId).session(
-        mongoSession
-      );
+      const existingInvoice =
+        await Invoice.findById(invoiceId).session(mongoSession);
 
       if (!existingInvoice) {
         await mongoSession.abortTransaction();
@@ -218,7 +217,7 @@ export async function updateInvoice(invoiceId, prevState, formData) {
                 notes: `Stock restored - item removed from invoice`,
               },
             ],
-            { session: mongoSession }
+            { session: mongoSession },
           );
           // Don't add to newLineItems (item removed)
           continue;
@@ -229,7 +228,7 @@ export async function updateInvoice(invoiceId, prevState, formData) {
           // Check stock availability
           if (product.stock < newQuantity) {
             throw new Error(
-              `Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${newQuantity}`
+              `Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${newQuantity}`,
             );
           }
 
@@ -268,7 +267,7 @@ export async function updateInvoice(invoiceId, prevState, formData) {
                 notes: `Stock deducted - new item added to invoice`,
               },
             ],
-            { session: mongoSession }
+            { session: mongoSession },
           );
 
           newMovementIds.push(movement[0]._id);
@@ -295,7 +294,7 @@ export async function updateInvoice(invoiceId, prevState, formData) {
             // Check if enough stock available
             if (product.stock < difference) {
               throw new Error(
-                `Insufficient stock for ${product.name}. Available: ${product.stock}, Additional needed: ${difference}`
+                `Insufficient stock for ${product.name}. Available: ${product.stock}, Additional needed: ${difference}`,
               );
             }
 
@@ -333,7 +332,7 @@ export async function updateInvoice(invoiceId, prevState, formData) {
                   notes: `Quantity increased from ${oldQuantity} to ${newQuantity} (difference: ${difference})`,
                 },
               ],
-              { session: mongoSession }
+              { session: mongoSession },
             );
 
             newMovementIds.push(movement[0]._id);
@@ -374,7 +373,7 @@ export async function updateInvoice(invoiceId, prevState, formData) {
                   notes: `Quantity decreased from ${oldQuantity} to ${newQuantity} (difference: ${restoreQuantity} restored)`,
                 },
               ],
-              { session: mongoSession }
+              { session: mongoSession },
             );
           }
 
@@ -629,8 +628,8 @@ export async function createInvoice(prevState, formData) {
             try {
               // Convert JS object literal to valid JSON
               const jsonStr = address
-                .replace(/(\w+):/g, '"$1":')  // Quote keys
-                .replace(/'/g, '"');           // Replace single quotes
+                .replace(/(\w+):/g, '"$1":') // Quote keys
+                .replace(/'/g, '"'); // Replace single quotes
               const parsed = JSON.parse(jsonStr);
               if (typeof parsed === "object" && parsed !== null) {
                 const parts = [
@@ -671,7 +670,9 @@ export async function createInvoice(prevState, formData) {
     const invoice = await Invoice.create({
       invoiceNumber,
       invoiceDate: new Date(data.invoiceDate),
-      dueDate: data.dueDate ? new Date(data.dueDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Default 30 days
+      dueDate: data.dueDate
+        ? new Date(data.dueDate)
+        : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Default 30 days
       customer: {
         id: customer._id.toString(),
         name: customer.displayName || customer.name,
@@ -719,54 +720,14 @@ export async function createInvoice(prevState, formData) {
 // ============================================
 // UPDATE INVOICE PAYMENT STATUS
 // ============================================
+// @deprecated Use createInvoicePayment instead - this legacy function
+// doesn't create a Payment document, doesn't use transactions, and
+// doesn't create journal entries. Use createInvoicePayment for proper
+// accounting integration.
+// ============================================
 export async function updateInvoicePayment(invoiceId, prevState, formData) {
-  try {
-    const authSession = await auth();
-    const user = authSession?.user;
-
-    if (!user) {
-      return {
-        message: "Unauthorized",
-        success: false,
-      };
-    }
-
-    if (user.role !== "Admin" && user.role !== "Accountant") {
-      return {
-        message: "Access denied",
-        success: false,
-      };
-    }
-
-    const amount = Number(formData.get("amount"));
-    const paymentMethod = formData.get("paymentMethod");
-    const reference = formData.get("reference");
-
-    const invoice = await Invoice.findById(invoiceId);
-
-    if (!invoice) {
-      return {
-        message: "Invoice not found",
-        success: false,
-      };
-    }
-
-    await invoice.recordPayment(amount, paymentMethod, reference);
-
-    revalidatePath("/dashboard/invoices");
-    revalidatePath(`/dashboard/invoices/${invoiceId}`);
-
-    return {
-      message: "Payment recorded successfully",
-      success: true,
-    };
-  } catch (error) {
-    console.error("Update payment error:", error);
-    return {
-      message: "Database error: failed to record payment",
-      success: false,
-    };
-  }
+  // Redirect to proper function
+  return createInvoicePayment(invoiceId, prevState, formData);
 }
 
 // ============================================
@@ -858,16 +819,15 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
       return {
         success: false,
         error: `Payment amount (${amount.toFixed(
-          2
+          2,
         )}) exceeds balance (${invoice.amountDue?.toFixed(2)})`,
         fieldErrors: { amount: "Amount exceeds outstanding balance" },
       };
     }
 
     // Get payment account
-    const paymentAccount = await Account.findById(accountId).session(
-      mongoSession
-    );
+    const paymentAccount =
+      await Account.findById(accountId).session(mongoSession);
     if (!paymentAccount) {
       await mongoSession.abortTransaction();
       return {
@@ -895,7 +855,7 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
     // Calculate fiscal period from payment date
     const payDate = new Date(paymentDate);
     const fiscalPeriod = `${payDate.getFullYear()}-${String(
-      payDate.getMonth() + 1
+      payDate.getMonth() + 1,
     ).padStart(2, "0")}`;
 
     // Get customer info
@@ -947,7 +907,8 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
     await payment.save({ session: mongoSession });
 
     // Confirm payment (creates JE and updates invoice via updateAllocatedDocuments)
-    await payment.confirm(user);
+    // Pass session so it uses our transaction instead of creating its own
+    await payment.confirm(user, mongoSession);
 
     await mongoSession.commitTransaction();
 
@@ -1007,7 +968,7 @@ export async function cancelInvoice(invoiceId, reason = "") {
     // - Lifetime totals adjustments
     await invoice.cancel(
       { name: user.name, id: user.id },
-      reason || `Cancelled by ${user.name}`
+      reason || `Cancelled by ${user.name}`,
     );
   } catch (error) {
     console.error("Cancel invoice error:", error);

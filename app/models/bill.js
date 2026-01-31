@@ -546,7 +546,7 @@ billSchema.methods.approve = async function (user) {
 
   const FiscalPeriod = mongoose.model("FiscalPeriod");
   const JournalEntry = mongoose.model("JournalEntry");
-  // const TaxTransaction = mongoose.model("TaxTransaction");
+  const TaxTransaction = mongoose.model("TaxTransaction");
   const Account = mongoose.model("Account");
   const Product = mongoose.model("Product");
   const StockMovement = mongoose.model("StockMovement");
@@ -896,7 +896,8 @@ billSchema.methods.recordPayment = async function (
   method,
   reference,
   paidAt,
-  recordedBy
+  recordedBy,
+  session = null
 ) {
   if (!this.canPay) {
     throw new Error(`Cannot record payment for bill in status: ${this.status}`);
@@ -939,7 +940,7 @@ billSchema.methods.recordPayment = async function (
     this.paymentStatus = "partial";
   }
 
-  await this.save();
+  await this.save({ session });
   return this;
 };
 
@@ -1004,7 +1005,6 @@ billSchema.statics.generateBillNumber = async function (session = null) {
   const counterId = `bill-${date.getFullYear()}${String(
     date.getMonth() + 1
   ).padStart(2, "0")}`;
-  const queryOptions = session ? { session } : {};
 
   const maxAttempts = 5;
 
@@ -1014,7 +1014,10 @@ billSchema.statics.generateBillNumber = async function (session = null) {
       const billNumber = `${prefix}-${String(seq).padStart(4, "0")}`;
 
       // Verify this number doesn't already exist (handles stale counters)
-      const exists = await this.exists({ billNumber, ...queryOptions });
+      let existsQuery = this.exists({ billNumber });
+      if (session) existsQuery = existsQuery.session(session);
+      const exists = await existsQuery;
+
       if (!exists) {
         return billNumber;
       }
@@ -1029,13 +1032,11 @@ billSchema.statics.generateBillNumber = async function (session = null) {
         counterError.message
       );
 
-      const lastBill = await this.findOne(
-        { billNumber: { $regex: `^${prefix}` } },
-        null,
-        queryOptions
-      )
+      let findQuery = this.findOne({ billNumber: { $regex: `^${prefix}` } })
         .sort({ billNumber: -1 })
         .lean();
+      if (session) findQuery = findQuery.session(session);
+      const lastBill = await findQuery;
 
       let nextNum = 1;
       if (lastBill?.billNumber) {
@@ -1045,7 +1046,10 @@ billSchema.statics.generateBillNumber = async function (session = null) {
 
       const billNumber = `${prefix}-${String(nextNum).padStart(4, "0")}`;
 
-      const exists = await this.exists({ billNumber, ...queryOptions });
+      let existsQuery = this.exists({ billNumber });
+      if (session) existsQuery = existsQuery.session(session);
+      const exists = await existsQuery;
+
       if (!exists) {
         return billNumber;
       }

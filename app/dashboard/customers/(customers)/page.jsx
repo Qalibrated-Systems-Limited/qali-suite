@@ -1,57 +1,42 @@
-import Pagination from "../../../../components/pagination";
-
-import Search from "../../../../components/search";
-import AccounTable from "../table";
-
 import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "../../../../components/ui/card";
+  getPartiesPaginated,
+  fetchPartyPages,
+} from "@/app/mongodb/queries/partyQueries";
+import Pagination from "@/components/pagination";
+import CustomerListClient from "../components/CustomerListClient";
 
-import { Button } from "../../../../components/ui/button";
-import Link from "next/link";
-import {
-  fetchAccountsPages,
-  searchAccounts,
-} from "../../../mongodb/queries/queries";
+export const metadata = {
+  title: "Customers | ERP System",
+  description: "Manage your customers",
+};
 
-async function page(props) {
-  const searchParams = await props.searchParams;
+export default async function CustomersPage({ searchParams }) {
+  const params = await searchParams;
 
-  const query = searchParams.query || "";
+  const query = params?.query || "";
+  const currentPage = Number(params?.page) || 1;
 
-  const currentPage = Number(searchParams.page) || 1;
-  const totalPages = await fetchAccountsPages(query);
-
-  const accounts = await searchAccounts(query, currentPage);
+  const totalPages = await fetchPartyPages(query, "customer");
+  const customers = await getPartiesPaginated(query, currentPage, "customer");
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-col gap-4">
-          <CardTitle>Accounts</CardTitle>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Customers</h1>
+        <p className="text-muted-foreground">
+          {customers.length > 0
+            ? `${customers.length} customer${customers.length !== 1 ? "s" : ""} found`
+            : "No customers yet"}
+        </p>
+      </div>
 
-          <div className="mt-4 flex flex-col lg:flex-row items-center gap-8 md:mt-8">
-            <Search placeholder="Search accounts..." />
+      <CustomerListClient customers={customers} />
 
-            <Link href={"/dashboard/customers/create"}>
-              <Button>Create</Button>
-            </Link>
-          </div>
+      {totalPages > 1 && (
+        <div className="flex justify-center">
+          <Pagination totalPages={totalPages} />
         </div>
-      </CardHeader>
-      <CardContent>
-        <AccounTable accounts={accounts} />
-      </CardContent>
-
-      <CardFooter>
-        <Pagination totalPages={totalPages} />
-      </CardFooter>
-    </Card>
+      )}
+    </div>
   );
 }
-
-export default page;

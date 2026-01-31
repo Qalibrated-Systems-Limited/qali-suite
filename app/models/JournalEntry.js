@@ -345,7 +345,7 @@ journalEntrySchema.methods.validateBeforePosting = async function () {
 // ============================================
 // POST METHOD (WITH VALIDATION)
 // ============================================
-journalEntrySchema.methods.post = async function (postedBy) {
+journalEntrySchema.methods.post = async function (postedBy, session = null) {
   if (this.status === "posted") {
     throw new Error("Journal entry is already posted");
   }
@@ -362,9 +362,9 @@ journalEntrySchema.methods.post = async function (postedBy) {
   this.postedAt = new Date();
   this.postedBy = postedBy;
 
-  await this.save();
+  await this.save({ session });
 
-  // Update account balances (async - don't wait)
+  // Update account balances (async - don't wait, outside transaction)
   this.updateAccountBalances().catch(console.error);
 
   return this;

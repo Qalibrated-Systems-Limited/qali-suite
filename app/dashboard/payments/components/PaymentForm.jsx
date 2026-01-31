@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition, useCallback } from "react";
+import { useState, useEffect, useCallback, useActionState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Loader2,
@@ -8,7 +8,6 @@ import {
   AlertTriangle,
   Plus,
   Trash2,
-  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { toast } from "sonner";
 import {
   createPayment,
   getUnpaidDocuments,
@@ -38,13 +36,19 @@ const PAYMENT_METHODS = [
   { value: "card", label: "Card" },
 ];
 
+const initialState = {
+  success: false,
+  error: null,
+  fieldErrors: {},
+  formData: null,
+  data: null,
+};
+
 export function PaymentForm({ paymentType, parties = [] }) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState(null);
-  const [fieldErrors, setFieldErrors] = useState({});
+  const [state, formAction, isPending] = useActionState(createPayment, initialState);
 
-  // Form state
+  // Form state - initialize from state.formData if present (for error recovery)
   const [partyId, setPartyId] = useState("");
   const [amount, setAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(
@@ -72,6 +76,52 @@ export function PaymentForm({ paymentType, parties = [] }) {
 
   const isReceived = paymentType === "received";
   const docType = isReceived ? "invoice" : "bill";
+
+  // Restore form data from state on error
+  useEffect(() => {
+    if (state.formData && !state.success) {
+      setPartyId(state.formData.partyId || "");
+      setAmount(state.formData.amount || "");
+      setPaymentDate(state.formData.paymentDate || new Date().toISOString().split("T")[0]);
+      setPaymentMethod(state.formData.paymentMethod || "");
+      setAccountId(state.formData.accountId || "");
+      setDescription(state.formData.description || "");
+      setReference(state.formData.reference || "");
+      setNotes(state.formData.notes || "");
+      setMpesaTransactionCode(state.formData.mpesaTransactionCode || "");
+      setMpesaPhoneNumber(state.formData.mpesaPhoneNumber || "");
+      setBankName(state.formData.bankName || "");
+      setChequeNumber(state.formData.chequeNumber || "");
+      setBankTransactionReference(state.formData.bankTransactionReference || "");
+      // Restore allocations if present
+      if (state.formData.allocations) {
+        try {
+          const parsed = JSON.parse(state.formData.allocations);
+          setAllocations(parsed);
+        } catch {
+          // ignore parse errors
+        }
+      }
+    }
+  }, [state]);
+
+  // Handle success - redirect with success message in URL
+  useEffect(() => {
+    if (state.success && state.data) {
+      const backUrl = isReceived
+        ? "/dashboard/payments/received"
+        : "/dashboard/payments/made";
+      const params = new URLSearchParams({
+        success: "true",
+        message: `Payment ${state.data.paymentNumber} created as draft`,
+      });
+      router.push(`${backUrl}?${params.toString()}`);
+    }
+  }, [state.success, state.data, isReceived, router]);
+
+  // Extract errors from state
+  const error = state.error;
+  const fieldErrors = state.fieldErrors || {};
 
   // Load payment accounts on mount
   useEffect(() => {
@@ -180,58 +230,15 @@ export function PaymentForm({ paymentType, parties = [] }) {
     setAllocations(newAllocations);
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError(null);
-    setFieldErrors({});
-
-    const formData = new FormData();
-    formData.append("paymentType", paymentType);
-    formData.append("paymentDate", paymentDate);
-    formData.append("amount", amount);
-    formData.append("paymentMethod", paymentMethod);
-    formData.append("accountId", accountId);
-    formData.append("partyId", partyId);
-    formData.append("description", description);
-    formData.append("reference", reference);
-    formData.append("notes", notes);
-
-    // Method-specific
-    if (paymentMethod === "mpesa") {
-      formData.append("mpesaTransactionCode", mpesaTransactionCode);
-      formData.append("mpesaPhoneNumber", mpesaPhoneNumber);
-    }
-    if (paymentMethod === "bank_transfer" || paymentMethod === "cheque") {
-      formData.append("bankName", bankName);
-      formData.append("chequeNumber", chequeNumber);
-      formData.append("bankTransactionReference", bankTransactionReference);
-    }
-
-    // Allocations as JSON
-    if (allocations.length > 0) {
-      formData.append("allocations", JSON.stringify(allocations));
-    }
-
-    startTransition(async () => {
-      const result = await createPayment(null, formData);
-
-      if (result.success) {
-        toast.success(`Payment ${result.data.paymentNumber} created as draft`);
-        const backUrl = isReceived
-          ? "/dashboard/payments/received"
-          : "/dashboard/payments/made";
-        router.push(backUrl);
-      } else {
-        setError(result.error);
-        if (result.fieldErrors) {
-          setFieldErrors(result.fieldErrors);
-        }
-      }
-    });
-  };
+  // Serialize allocations for form submission
+  const allocationsJson = allocations.length > 0 ? JSON.stringify(allocations) : "";
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form action={formAction} className="space-y-6">
+      {/* Hidden inputs for form data */}
+      <input type="hidden" name="paymentType" value={paymentType} />
+      <input type="hidden" name="allocations" value={allocationsJson} />
+
       {error && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
@@ -256,6 +263,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
                 {isReceived ? "Customer" : "Supplier"}{" "}
                 <span className="text-destructive">*</span>
               </Label>
+              <input type="hidden" name="partyId" value={partyId} />
               <Select value={partyId} onValueChange={setPartyId} disabled={isPending}>
                 <SelectTrigger className={fieldErrors.partyId ? "border-destructive" : ""}>
                   <SelectValue
@@ -286,6 +294,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
                 </span>
                 <Input
                   type="number"
+                  name="amount"
                   step="0.01"
                   min="0.01"
                   value={amount}
@@ -307,6 +316,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
               </Label>
               <Input
                 type="date"
+                name="paymentDate"
                 value={paymentDate}
                 onChange={(e) => setPaymentDate(e.target.value)}
                 disabled={isPending}
@@ -318,6 +328,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
               <Label>
                 Payment Method <span className="text-destructive">*</span>
               </Label>
+              <input type="hidden" name="paymentMethod" value={paymentMethod} />
               <Select
                 value={paymentMethod}
                 onValueChange={setPaymentMethod}
@@ -346,6 +357,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
               <Label>
                 Payment Account <span className="text-destructive">*</span>
               </Label>
+              <input type="hidden" name="accountId" value={accountId} />
               <Select
                 value={accountId}
                 onValueChange={setAccountId}
@@ -375,6 +387,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
             <div className="space-y-2">
               <Label>Reference</Label>
               <Input
+                name="reference"
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
                 placeholder="e.g., cheque #, M-Pesa code"
@@ -389,6 +402,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
               Description <span className="text-destructive">*</span>
             </Label>
             <Input
+              name="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Payment description"
@@ -417,6 +431,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
                   Transaction Code <span className="text-destructive">*</span>
                 </Label>
                 <Input
+                  name="mpesaTransactionCode"
                   value={mpesaTransactionCode}
                   onChange={(e) =>
                     setMpesaTransactionCode(e.target.value.toUpperCase())
@@ -431,6 +446,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
               <div className="space-y-2">
                 <Label>Phone Number</Label>
                 <Input
+                  name="mpesaPhoneNumber"
                   value={mpesaPhoneNumber}
                   onChange={(e) => setMpesaPhoneNumber(e.target.value)}
                   placeholder="e.g., 0712345678"
@@ -452,6 +468,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
               <div className="space-y-2">
                 <Label>Bank Name</Label>
                 <Input
+                  name="bankName"
                   value={bankName}
                   onChange={(e) => setBankName(e.target.value)}
                   placeholder="e.g., KCB, Equity"
@@ -464,6 +481,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
                     Cheque Number <span className="text-destructive">*</span>
                   </Label>
                   <Input
+                    name="chequeNumber"
                     value={chequeNumber}
                     onChange={(e) => setChequeNumber(e.target.value)}
                     placeholder="Cheque number"
@@ -475,6 +493,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
               <div className="space-y-2">
                 <Label>Transaction Reference</Label>
                 <Input
+                  name="bankTransactionReference"
                   value={bankTransactionReference}
                   onChange={(e) => setBankTransactionReference(e.target.value)}
                   placeholder="Bank reference"
@@ -694,6 +713,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
           <div className="space-y-2">
             <Label>Notes</Label>
             <Textarea
+              name="notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Optional notes..."
