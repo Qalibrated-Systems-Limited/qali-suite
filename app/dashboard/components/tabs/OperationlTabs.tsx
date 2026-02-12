@@ -10,14 +10,18 @@ import {
   CheckCircle,
   XCircle,
   ChevronRight,
-  Plus,
-  ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Queries
 import { StockRequest } from "../../../models/requests";
 import EmployeeClaim from "../../../models/employeesClaims";
+
+// Tenant Scoping
+import { getTenantContext } from "@/lib/utils/tenant-utils";
+import mongoose from "mongoose";
+
+const ObjectId = mongoose.Types.ObjectId;
 
 // Utils
 import { formatCurrency } from "@/lib/utils";
@@ -59,17 +63,26 @@ export async function OperationsTab() {
 // OPERATIONS STATS
 // ============================================
 async function OperationsStats() {
+  // Tenant scoping - only show company's data
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
   const [pendingRequests, pendingClaims, todayApproved, todayRejected] =
     await Promise.all([
-      StockRequest.countDocuments({ status: "pending" }),
-      EmployeeClaim.countDocuments({ status: "submitted" }),
+      StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
+      EmployeeClaim.countDocuments({ ...tenantMatch, status: "submitted" }),
       StockRequest.countDocuments({
+        ...tenantMatch,
         status: "approved",
-        updatedAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+        updatedAt: { $gte: todayStart },
       }),
       StockRequest.countDocuments({
+        ...tenantMatch,
         status: "rejected",
-        updatedAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+        updatedAt: { $gte: todayStart },
       }),
     ]);
 
@@ -189,7 +202,11 @@ function QuickActionsBar() {
 // PENDING REQUESTS CARD
 // ============================================
 async function PendingRequestsCard() {
-  const requests = await StockRequest.find({ status: "pending" })
+  // Tenant scoping - only show company's requests
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
+  const requests = await StockRequest.find({ ...tenantMatch, status: "pending" })
     .sort({ createdAt: -1 })
     .limit(5)
     .lean();
@@ -305,7 +322,11 @@ async function PendingRequestsCard() {
 // PENDING CLAIMS CARD
 // ============================================
 async function PendingClaimsCard() {
-  const claims = await EmployeeClaim.find({ status: "submitted" })
+  // Tenant scoping - only show company's claims
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
+  const claims = await EmployeeClaim.find({ ...tenantMatch, status: "submitted" })
     .sort({ submittedAt: -1 })
     .limit(5)
     .lean();
@@ -422,12 +443,16 @@ async function PendingClaimsCard() {
 // RECENT ACTIVITY CARD
 // ============================================
 async function RecentActivityCard() {
+  // Tenant scoping - only show company's activity
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const [recentRequests, recentClaims] = await Promise.all([
-    StockRequest.find({ status: { $in: ["approved", "rejected"] } })
+    StockRequest.find({ ...tenantMatch, status: { $in: ["approved", "rejected"] } })
       .sort({ updatedAt: -1 })
       .limit(3)
       .lean(),
-    EmployeeClaim.find({ status: { $in: ["approved", "rejected", "paid"] } })
+    EmployeeClaim.find({ ...tenantMatch, status: { $in: ["approved", "rejected", "paid"] } })
       .sort({ updatedAt: -1 })
       .limit(3)
       .lean(),

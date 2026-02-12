@@ -1,19 +1,23 @@
 "use server";
 
-import { auth } from "@/auth";
 import Quote from "@/app/models/quote";
 import Party from "@/app/models/parties";
 import Product from "@/app/models/product";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import {
+  getTenantContext,
+  getCompanyIdForCreate,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // HELPER: Format user for audit
 // ============================================
-function formatUser(session) {
+function formatUser({ user }) {
   return {
-    name: session?.user?.name || "Unknown",
-    id: session?.user?.id || "unknown",
+    name: user?.name || "Unknown",
+    id: user?.id || "unknown",
   };
 }
 
@@ -21,13 +25,25 @@ function formatUser(session) {
 // CREATE QUOTE
 // ============================================
 export async function createQuote(prevState, formData) {
-  const session = await auth();
-  const user = session?.user;
-
-  if (!user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
       success: false,
-      error: "Unauthorized",
+      error: error.message,
+    };
+  }
+
+  // Get tenant companyId for create
+  let tenantCompanyId;
+  try {
+    tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
     };
   }
 
@@ -38,10 +54,12 @@ export async function createQuote(prevState, formData) {
     // Parse form data
     const data = JSON.parse(formData.get("data"));
 
-    // Validate customer
+    // Validate customer (tenant-scoped)
     let customerData;
     if (data.customerId) {
-      const customer = await Party.findById(data.customerId);
+      const customer = await Party.findOne(
+        withTenantScope({ _id: data.customerId }, tenantCompanyId, isSuperAdmin)
+      );
       if (customer) {
         customerData = {
           partyId: customer._id,
@@ -125,9 +143,11 @@ export async function createQuote(prevState, formData) {
       // Adjust amount to be after discount (matching schema calculation)
       processedItem.amount = amountAfterDiscount;
 
-      // Add product reference if provided
+      // Add product reference if provided (tenant-scoped)
       if (item.productId) {
-        const product = await Product.findById(item.productId);
+        const product = await Product.findOne(
+          withTenantScope({ _id: item.productId }, tenantCompanyId, isSuperAdmin)
+        );
         if (product) {
           processedItem.product = {
             id: product._id,
@@ -151,8 +171,8 @@ export async function createQuote(prevState, formData) {
     const taxAmount = processedItems.reduce((sum, item) => sum + item.taxAmount, 0);
     const total = processedItems.reduce((sum, item) => sum + item.lineTotal, 0);
 
-    // Generate quote number
-    const quoteNumber = await Quote.generateQuoteNumber();
+    // Generate quote number (tenant-scoped)
+    const quoteNumber = await Quote.generateQuoteNumber(tenantCompanyId);
 
     // Calculate validity (default 30 days)
     const quoteDate = data.quoteDate ? new Date(data.quoteDate) : new Date();
@@ -160,8 +180,9 @@ export async function createQuote(prevState, formData) {
       ? new Date(data.validUntil)
       : new Date(quoteDate.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-    // Create quote
+    // Create quote with tenant companyId
     const quote = new Quote({
+      companyId: tenantCompanyId,
       quoteNumber,
       quoteDate,
       validUntil,
@@ -175,7 +196,7 @@ export async function createQuote(prevState, formData) {
       notes: data.notes,
       termsAndConditions: data.termsAndConditions,
       internalNotes: data.internalNotes,
-      createdBy: formatUser(session),
+      createdBy: formatUser({ user }),
       status: "draft",
     });
 
@@ -200,13 +221,14 @@ export async function createQuote(prevState, formData) {
 // UPDATE QUOTE
 // ============================================
 export async function updateQuote(quoteId, prevState, formData) {
-  const session = await auth();
-  const user = session?.user;
-
-  if (!user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
       success: false,
-      error: "Unauthorized",
+      error: error.message,
     };
   }
 
@@ -214,7 +236,10 @@ export async function updateQuote(quoteId, prevState, formData) {
   await dbConnect();
 
   try {
-    const quote = await Quote.findById(quoteId);
+    // Find quote with tenant scoping
+    const quote = await Quote.findOne(
+      withTenantScope({ _id: quoteId }, companyId, isSuperAdmin)
+    );
     if (!quote) {
       return {
         success: false,
@@ -231,9 +256,11 @@ export async function updateQuote(quoteId, prevState, formData) {
 
     const data = JSON.parse(formData.get("data"));
 
-    // Update customer if changed
+    // Update customer if changed (tenant-scoped)
     if (data.customerId) {
-      const customer = await Party.findById(data.customerId);
+      const customer = await Party.findOne(
+        withTenantScope({ _id: data.customerId }, companyId, isSuperAdmin)
+      );
       if (customer) {
         quote.customer = {
           partyId: customer._id,
@@ -282,8 +309,11 @@ export async function updateQuote(quoteId, prevState, formData) {
         processedItem.lineTotal = amountAfterDiscount + processedItem.taxAmount;
         processedItem.amount = amountAfterDiscount;
 
+        // Product lookup (tenant-scoped)
         if (item.productId) {
-          const product = await Product.findById(item.productId);
+          const product = await Product.findOne(
+            withTenantScope({ _id: item.productId }, companyId, isSuperAdmin)
+          );
           if (product) {
             processedItem.product = {
               id: product._id,
@@ -320,7 +350,7 @@ export async function updateQuote(quoteId, prevState, formData) {
       quote.internalNotes = data.internalNotes;
     }
 
-    quote.lastModifiedBy = formatUser(session);
+    quote.lastModifiedBy = formatUser({ user });
 
     await quote.save();
 
@@ -344,23 +374,27 @@ export async function updateQuote(quoteId, prevState, formData) {
 // SEND QUOTE TO CUSTOMER
 // ============================================
 export async function sendQuote(quoteId) {
-  const session = await auth();
-  const user = session?.user;
-
-  if (!user) {
-    return { message: "Unauthorized" };
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return { message: error.message };
   }
 
   const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
-  const quote = await Quote.findById(quoteId);
+  // Find quote with tenant scoping
+  const quote = await Quote.findOne(
+    withTenantScope({ _id: quoteId }, companyId, isSuperAdmin)
+  );
   if (!quote) {
     return { message: "Quote not found" };
   }
 
   try {
-    await quote.send(formatUser(session));
+    await quote.send(formatUser({ user }));
   } catch (error) {
     console.error("Send quote error:", error);
     return { message: error.message || "Failed to send quote" };
@@ -375,23 +409,27 @@ export async function sendQuote(quoteId) {
 // ACCEPT QUOTE (Customer accepted)
 // ============================================
 export async function acceptQuote(quoteId) {
-  const session = await auth();
-  const user = session?.user;
-
-  if (!user) {
-    return { message: "Unauthorized" };
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return { message: error.message };
   }
 
   const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
-  const quote = await Quote.findById(quoteId);
+  // Find quote with tenant scoping
+  const quote = await Quote.findOne(
+    withTenantScope({ _id: quoteId }, companyId, isSuperAdmin)
+  );
   if (!quote) {
     return { message: "Quote not found" };
   }
 
   try {
-    await quote.accept(formatUser(session));
+    await quote.accept(formatUser({ user }));
   } catch (error) {
     console.error("Accept quote error:", error);
     return { message: error.message || "Failed to accept quote" };
@@ -406,23 +444,27 @@ export async function acceptQuote(quoteId) {
 // REJECT QUOTE
 // ============================================
 export async function rejectQuote(quoteId, reason = "") {
-  const session = await auth();
-  const user = session?.user;
-
-  if (!user) {
-    return { message: "Unauthorized" };
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return { message: error.message };
   }
 
   const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
-  const quote = await Quote.findById(quoteId);
+  // Find quote with tenant scoping
+  const quote = await Quote.findOne(
+    withTenantScope({ _id: quoteId }, companyId, isSuperAdmin)
+  );
   if (!quote) {
     return { message: "Quote not found" };
   }
 
   try {
-    await quote.reject(formatUser(session), reason || "Customer declined");
+    await quote.reject(formatUser({ user }), reason || "Customer declined");
   } catch (error) {
     console.error("Reject quote error:", error);
     return { message: error.message || "Failed to reject quote" };
@@ -437,23 +479,27 @@ export async function rejectQuote(quoteId, reason = "") {
 // CANCEL QUOTE
 // ============================================
 export async function cancelQuote(quoteId, reason = "") {
-  const session = await auth();
-  const user = session?.user;
-
-  if (!user) {
-    return { message: "Unauthorized" };
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return { message: error.message };
   }
 
   const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
-  const quote = await Quote.findById(quoteId);
+  // Find quote with tenant scoping
+  const quote = await Quote.findOne(
+    withTenantScope({ _id: quoteId }, companyId, isSuperAdmin)
+  );
   if (!quote) {
     return { message: "Quote not found" };
   }
 
   try {
-    await quote.cancel(formatUser(session), reason || `Cancelled by ${user.name}`);
+    await quote.cancel(formatUser({ user }), reason || `Cancelled by ${user.name}`);
   } catch (error) {
     console.error("Cancel quote error:", error);
     return { message: error.message || "Failed to cancel quote" };
@@ -468,13 +514,14 @@ export async function cancelQuote(quoteId, reason = "") {
 // CONVERT QUOTE TO INVOICE
 // ============================================
 export async function convertQuoteToInvoice(quoteId, prevState, formData) {
-  const session = await auth();
-  const user = session?.user;
-
-  if (!user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
       success: false,
-      error: "Unauthorized",
+      error: error.message,
     };
   }
 
@@ -482,7 +529,10 @@ export async function convertQuoteToInvoice(quoteId, prevState, formData) {
   await dbConnect();
 
   try {
-    const quote = await Quote.findById(quoteId);
+    // Find quote with tenant scoping
+    const quote = await Quote.findOne(
+      withTenantScope({ _id: quoteId }, companyId, isSuperAdmin)
+    );
     if (!quote) {
       return {
         success: false,
@@ -508,6 +558,7 @@ export async function convertQuoteToInvoice(quoteId, prevState, formData) {
     }
 
     const invoiceData = {
+      companyId: quote.companyId, // Pass tenant companyId for the invoice
       invoiceDate: data.invoiceDate ? new Date(data.invoiceDate) : new Date(),
       dueDate: data.dueDate ? new Date(data.dueDate) : null,
       vatPercentage: data.vatPercentage || 16,
@@ -517,7 +568,7 @@ export async function convertQuoteToInvoice(quoteId, prevState, formData) {
     const invoice = await quote.convertToInvoice(
       data.selectedItems,
       invoiceData,
-      formatUser(session)
+      formatUser({ user })
     );
 
     revalidatePath("/dashboard/quotes");
@@ -542,16 +593,20 @@ export async function convertQuoteToInvoice(quoteId, prevState, formData) {
 // GET ACTIVE QUOTES FOR CUSTOMER
 // ============================================
 export async function getActiveQuotesForCustomer(customerId) {
-  const session = await auth();
-  if (!session?.user) {
-    return { success: false, error: "Unauthorized", quotes: [] };
+  // Auth check with tenant context
+  let companyId, isSuperAdmin;
+  try {
+    ({ companyId, isSuperAdmin } = await getTenantContext());
+  } catch (error) {
+    return { success: false, error: error.message, quotes: [] };
   }
 
   const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
   try {
-    const quotes = await Quote.getQuotesWithAvailableItems(customerId);
+    // Get quotes with tenant scoping
+    const quotes = await Quote.getQuotesWithAvailableItems(customerId, companyId, isSuperAdmin);
 
     // Serialize for client
     const serialized = quotes.map((quote) => ({
@@ -600,9 +655,12 @@ export async function getActiveQuotesForCustomer(customerId) {
 // GET QUOTE STATS
 // ============================================
 export async function getQuoteStats() {
-  const session = await auth();
-  if (!session?.user) {
-    return { success: false, error: "Unauthorized" };
+  // Auth check with tenant context
+  let companyId, isSuperAdmin;
+  try {
+    ({ companyId, isSuperAdmin } = await getTenantContext());
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 
   const dbConnect = (await import("@/app/config/dbConnect")).default;
@@ -613,11 +671,14 @@ export async function getQuoteStats() {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const sevenDaysAhead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
+    // Build tenant match condition
+    const tenantMatch = isSuperAdmin ? {} : { companyId };
+
     const [statusCounts, monthlyStats, expiringCount, conversionRate] =
       await Promise.all([
-        // Count by status
+        // Count by status (tenant-scoped)
         Quote.aggregate([
-          { $match: { status: { $nin: ["cancelled"] } } },
+          { $match: { ...tenantMatch, status: { $nin: ["cancelled"] } } },
           {
             $group: {
               _id: "$status",
@@ -627,10 +688,11 @@ export async function getQuoteStats() {
           },
         ]),
 
-        // This month stats
+        // This month stats (tenant-scoped)
         Quote.aggregate([
           {
             $match: {
+              ...tenantMatch,
               quoteDate: { $gte: startOfMonth },
               status: { $ne: "cancelled" },
             },
@@ -644,16 +706,19 @@ export async function getQuoteStats() {
           },
         ]),
 
-        // Expiring soon count
-        Quote.countDocuments({
-          status: { $in: ["draft", "sent"] },
-          validUntil: { $gte: now, $lte: sevenDaysAhead },
-        }),
+        // Expiring soon count (tenant-scoped)
+        Quote.countDocuments(
+          withTenantScope({
+            status: { $in: ["draft", "sent"] },
+            validUntil: { $gte: now, $lte: sevenDaysAhead },
+          }, companyId, isSuperAdmin)
+        ),
 
-        // Conversion rate (this month)
+        // Conversion rate (this month, tenant-scoped)
         Quote.aggregate([
           {
             $match: {
+              ...tenantMatch,
               quoteDate: { $gte: startOfMonth },
               status: { $ne: "cancelled" },
             },
@@ -708,18 +773,22 @@ export async function getQuoteStats() {
 // DELETE QUOTE (Draft only)
 // ============================================
 export async function deleteQuote(quoteId) {
-  const session = await auth();
-  const user = session?.user;
-
-  if (!user) {
-    return { success: false, error: "Unauthorized" };
+  // Auth check with tenant context
+  let companyId, isSuperAdmin;
+  try {
+    ({ companyId, isSuperAdmin } = await getTenantContext());
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 
   const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
   try {
-    const quote = await Quote.findById(quoteId);
+    // Find quote with tenant scoping
+    const quote = await Quote.findOne(
+      withTenantScope({ _id: quoteId }, companyId, isSuperAdmin)
+    );
     if (!quote) {
       return { success: false, error: "Quote not found" };
     }
@@ -731,7 +800,10 @@ export async function deleteQuote(quoteId) {
       };
     }
 
-    await Quote.findByIdAndDelete(quoteId);
+    // Delete with tenant scoping
+    await Quote.findOneAndDelete(
+      withTenantScope({ _id: quoteId }, companyId, isSuperAdmin)
+    );
 
     revalidatePath("/dashboard/quotes");
 
@@ -746,27 +818,32 @@ export async function deleteQuote(quoteId) {
 // CLONE QUOTE
 // ============================================
 export async function cloneQuote(quoteId) {
-  const session = await auth();
-  const user = session?.user;
-
-  if (!user) {
-    return { success: false, error: "Unauthorized" };
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 
   const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
   try {
-    const originalQuote = await Quote.findById(quoteId).lean();
+    // Find original quote with tenant scoping
+    const originalQuote = await Quote.findOne(
+      withTenantScope({ _id: quoteId }, companyId, isSuperAdmin)
+    ).lean();
     if (!originalQuote) {
       return { success: false, error: "Quote not found" };
     }
 
-    // Generate new quote number
-    const quoteNumber = await Quote.generateQuoteNumber();
+    // Generate new quote number (tenant-scoped)
+    const quoteNumber = await Quote.generateQuoteNumber(originalQuote.companyId);
 
-    // Create cloned quote
+    // Create cloned quote with same tenant
     const newQuote = new Quote({
+      companyId: originalQuote.companyId,
       quoteNumber,
       quoteDate: new Date(),
       validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
@@ -781,7 +858,7 @@ export async function cloneQuote(quoteId) {
       notes: originalQuote.notes,
       termsAndConditions: originalQuote.termsAndConditions,
       internalNotes: `Cloned from ${originalQuote.quoteNumber}`,
-      createdBy: formatUser(session),
+      createdBy: formatUser({ user }),
       status: "draft",
     });
 

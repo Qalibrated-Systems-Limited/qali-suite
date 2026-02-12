@@ -4,6 +4,13 @@ import Account from "../../models/account";
 import connectDB from "../../config/dbConnect";
 import { unstable_noStore as noStore } from "next/cache";
 import User from "@/app/models/user";
+import {
+  getTenantContext,
+  withTenantScope,
+  withTenantPipeline,
+} from "@/lib/utils/tenant-utils";
+import { ObjectId } from "mongodb";
+import { serializeBsonType } from "@/lib/utils";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -21,15 +28,18 @@ const ITEMS_PER_PAGE = 20;
 export async function getPartiesPaginated(
   searchTerm = "",
   page = 1,
-  type = null
+  type = null,
 ) {
   noStore();
   await connectDB();
 
+  // Get tenant context for scoping
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
-  // Build filter query
-  let matchQuery = {};
+  // Build filter query with tenant scope
+  let matchQuery = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
 
   // Type filter
   if (type) {
@@ -71,7 +81,7 @@ export async function getPartiesPaginated(
     updatedAt: res.updatedAt ? res.updatedAt.toISOString() : null,
   }));
 
-  return result;
+  return serializeBsonType(result);
 }
 
 /**
@@ -84,8 +94,11 @@ export async function fetchPartyPages(searchTerm = "", type = null) {
   noStore();
   await connectDB();
 
-  // Build filter query
-  let matchQuery = {};
+  // Get tenant context for scoping
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  // Build filter query with tenant scope
+  let matchQuery = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
 
   // Type filter
   if (type) {
@@ -135,15 +148,24 @@ export async function fetchPartyPages(searchTerm = "", type = null) {
 export async function getPartyById(partyId) {
   await connectDB();
 
+  // Get tenant context for access validation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   const party = await Party.findById(partyId).lean();
 
   if (!party) {
     return null;
   }
 
+  // Validate tenant access
+  if (!isSuperAdmin && party.companyId?.toString() !== companyId) {
+    return null;
+  }
+
   return {
     ...party,
     _id: party._id.toString(),
+    companyId: party.companyId?.toString(),
     userId: party.userId ? party.userId.toString() : null,
     createdAt: party.createdAt ? party.createdAt.toISOString() : null,
     updatedAt: party.updatedAt ? party.updatedAt.toISOString() : null,
@@ -158,9 +180,14 @@ export async function getPartyById(partyId) {
 export async function getCustomers(activeOnly = true) {
   await connectDB();
 
-  const query = {
-    type: { $in: ["customer", "both"] },
-  };
+  // Get tenant context for scoping
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const query = withTenantScope(
+    { type: { $in: ["customer", "both"] } },
+    companyId,
+    isSuperAdmin,
+  );
 
   if (activeOnly) {
     query.isActive = true;
@@ -185,9 +212,14 @@ export async function getCustomers(activeOnly = true) {
 export async function getSuppliers(activeOnly = true) {
   await connectDB();
 
-  const query = {
-    type: { $in: ["supplier", "both"] },
-  };
+  // Get tenant context for scoping
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const query = withTenantScope(
+    { type: { $in: ["supplier", "both"] } },
+    companyId,
+    isSuperAdmin,
+  );
 
   if (activeOnly) {
     query.isActive = true;
@@ -196,7 +228,7 @@ export async function getSuppliers(activeOnly = true) {
   const suppliers = await Party.find(query)
     .sort({ name: 1 })
     .select(
-      "name displayName email phone taxPin cachedBalance paymentDetails whtApplicable whtRate"
+      "name displayName email phone taxPin cachedBalance paymentDetails whtApplicable whtRate",
     )
     .lean();
 
@@ -214,9 +246,10 @@ export async function getSuppliers(activeOnly = true) {
 export async function getEmployees(activeOnly = true) {
   await connectDB();
 
-  const query = {
-    type: "employee",
-  };
+  // Get tenant context for scoping
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const query = withTenantScope({ type: "employee" }, companyId, isSuperAdmin);
 
   if (activeOnly) {
     query.isActive = true;
@@ -225,7 +258,7 @@ export async function getEmployees(activeOnly = true) {
   const employees = await Party.find(query)
     .sort({ name: 1 })
     .select(
-      "name displayName email phone userId employeeNumber department designation cachedBalance"
+      "name displayName email phone userId employeeNumber department designation cachedBalance",
     )
     .lean();
 
@@ -244,10 +277,12 @@ export async function getEmployees(activeOnly = true) {
 export async function getEmployeeByUserId(userId) {
   await connectDB();
 
-  const employee = await Party.findOne({
-    userId,
-    type: "employee",
-  }).lean();
+  // Get tenant context for scoping
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const employee = await Party.findOne(
+    withTenantScope({ userId, type: "employee" }, companyId, isSuperAdmin),
+  ).lean();
 
   if (!employee) {
     return null;
@@ -268,55 +303,81 @@ export async function getPartyStats() {
   noStore();
   await connectDB();
 
+  // Get tenant context for scoping
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantFilter = isSuperAdmin ? {} : { companyId };
+
   const [customers, suppliers, employees, withBalance] = await Promise.all([
     Party.countDocuments({
+      ...tenantFilter,
       type: { $in: ["customer", "both"] },
       isActive: true,
     }),
 
     Party.countDocuments({
+      ...tenantFilter,
       type: { $in: ["supplier", "both"] },
       isActive: true,
     }),
 
     Party.countDocuments({
+      ...tenantFilter,
       type: "employee",
       isActive: true,
     }),
 
     Party.countDocuments({
+      ...tenantFilter,
       cachedBalance: { $ne: 0 },
       isActive: true,
     }),
   ]);
 
-  // Get total AR and AP
+  // Get total AR and AP (accounts are also tenant-scoped)
   const [arAccount, apAccount] = await Promise.all([
-    Account.findOne({ systemAccount: "accounts_receivable" }),
-    Account.findOne({ systemAccount: "accounts_payable" }),
+    Account.findOne(
+      withTenantScope(
+        { systemAccount: "accounts_receivable" },
+        companyId,
+        isSuperAdmin,
+      ),
+    ),
+    Account.findOne(
+      withTenantScope(
+        { systemAccount: "accounts_payable" },
+        companyId,
+        isSuperAdmin,
+      ),
+    ),
   ]);
 
   let totalAR = 0;
   let totalAP = 0;
 
   if (arAccount) {
-    const arResult = await JournalEntry.aggregate([
-      {
-        $match: {
-          status: "posted",
-          "lines.accountId": arAccount._id,
-        },
-      },
-      { $unwind: "$lines" },
-      { $match: { "lines.accountId": arAccount._id } },
-      {
-        $group: {
-          _id: null,
-          totalDebit: { $sum: "$lines.debit" },
-          totalCredit: { $sum: "$lines.credit" },
-        },
-      },
-    ]);
+    const arResult = await JournalEntry.aggregate(
+      withTenantPipeline(
+        [
+          {
+            $match: {
+              status: "posted",
+              "lines.accountId": arAccount._id,
+            },
+          },
+          { $unwind: "$lines" },
+          { $match: { "lines.accountId": arAccount._id } },
+          {
+            $group: {
+              _id: null,
+              totalDebit: { $sum: "$lines.debit" },
+              totalCredit: { $sum: "$lines.credit" },
+            },
+          },
+        ],
+        companyId,
+        isSuperAdmin,
+      ),
+    );
 
     if (arResult.length > 0) {
       totalAR = arResult[0].totalDebit - arResult[0].totalCredit;
@@ -324,23 +385,29 @@ export async function getPartyStats() {
   }
 
   if (apAccount) {
-    const apResult = await JournalEntry.aggregate([
-      {
-        $match: {
-          status: "posted",
-          "lines.accountId": apAccount._id,
-        },
-      },
-      { $unwind: "$lines" },
-      { $match: { "lines.accountId": apAccount._id } },
-      {
-        $group: {
-          _id: null,
-          totalDebit: { $sum: "$lines.debit" },
-          totalCredit: { $sum: "$lines.credit" },
-        },
-      },
-    ]);
+    const apResult = await JournalEntry.aggregate(
+      withTenantPipeline(
+        [
+          {
+            $match: {
+              status: "posted",
+              "lines.accountId": apAccount._id,
+            },
+          },
+          { $unwind: "$lines" },
+          { $match: { "lines.accountId": apAccount._id } },
+          {
+            $group: {
+              _id: null,
+              totalDebit: { $sum: "$lines.debit" },
+              totalCredit: { $sum: "$lines.credit" },
+            },
+          },
+        ],
+        companyId,
+        isSuperAdmin,
+      ),
+    );
 
     if (apResult.length > 0) {
       totalAP = apResult[0].totalCredit - apResult[0].totalDebit;
@@ -367,9 +434,10 @@ export async function getPartyStats() {
 export async function searchParties(searchTerm, type = null, limit = 50) {
   await connectDB();
 
-  const query = {
-    isActive: true,
-  };
+  // Get tenant context for scoping
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const query = withTenantScope({ isActive: true }, companyId, isSuperAdmin);
 
   if (type) {
     if (type === "customer") {
@@ -410,9 +478,17 @@ export async function getCustomersWithAging(asOfDate = new Date()) {
   noStore();
   await connectDB();
 
-  const arAccount = await Account.findOne({
-    systemAccount: "accounts_receivable",
-  });
+  // Get tenant context for scoping
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantFilter = isSuperAdmin ? {} : { companyId };
+
+  const arAccount = await Account.findOne(
+    withTenantScope(
+      { systemAccount: "accounts_receivable" },
+      companyId,
+      isSuperAdmin,
+    ),
+  );
 
   if (!arAccount) {
     throw new Error("Accounts Receivable account not configured");
@@ -421,6 +497,7 @@ export async function getCustomersWithAging(asOfDate = new Date()) {
   const result = await JournalEntry.aggregate([
     {
       $match: {
+        ...tenantFilter,
         status: "posted",
         entryDate: { $lte: new Date(asOfDate) },
         "party.type": "customer",
@@ -520,9 +597,17 @@ export async function getSuppliersWithAging(asOfDate = new Date()) {
   noStore();
   await connectDB();
 
-  const apAccount = await Account.findOne({
-    systemAccount: "accounts_payable",
-  });
+  // Get tenant context for scoping
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantFilter = isSuperAdmin ? {} : { companyId };
+
+  const apAccount = await Account.findOne(
+    withTenantScope(
+      { systemAccount: "accounts_payable" },
+      companyId,
+      isSuperAdmin,
+    ),
+  );
 
   if (!apAccount) {
     throw new Error("Accounts Payable account not configured");
@@ -531,6 +616,7 @@ export async function getSuppliersWithAging(asOfDate = new Date()) {
   const result = await JournalEntry.aggregate([
     {
       $match: {
+        ...tenantFilter,
         status: "posted",
         entryDate: { $lte: new Date(asOfDate) },
         "party.type": "supplier",
@@ -628,7 +714,12 @@ export async function getSuppliersWithAging(asOfDate = new Date()) {
 export async function getUsers() {
   await connectDB();
 
-  const users = await User.find({ status: "Active" })
+  // Get tenant context for scoping
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const users = await User.find(
+    withTenantScope({ status: "Active" }, companyId, isSuperAdmin),
+  )
     .select("name email role department")
     .sort({ name: 1 })
     .lean();

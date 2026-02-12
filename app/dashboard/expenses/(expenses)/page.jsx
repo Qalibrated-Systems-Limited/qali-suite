@@ -1,0 +1,66 @@
+import { Suspense } from "react";
+import ExpenseList from "../components/ExpenseList";
+import { getExpenses, getExpenseSummary, getExpenseCategories } from "@/app/mongodb/queries/expense-queries";
+
+export const metadata = {
+  title: "Expenses | ERP",
+  description: "Manage business expenses",
+};
+
+export default async function ExpensesPage({ searchParams }) {
+  const params = await searchParams;
+  const page = parseInt(params?.page) || 1;
+
+  const filters = {
+    status: params?.status || null,
+    category: params?.category || null,
+    search: params?.search || null,
+    startDate: params?.startDate || null,
+    endDate: params?.endDate || null,
+  };
+
+  // Fetch data in parallel
+  const [expenseData, summary] = await Promise.all([
+    getExpenses(page, filters),
+    getExpenseSummary(),
+  ]);
+
+  const categories = getExpenseCategories();
+
+  return (
+    <div className="p-4 sm:p-6 space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold">Expenses</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Track and manage business expenses
+        </p>
+      </div>
+
+      {/* Content */}
+      <Suspense fallback={<ExpenseListSkeleton />}>
+        <ExpenseList
+          expenses={expenseData.expenses}
+          pagination={expenseData.pagination}
+          summary={summary}
+          categories={categories}
+          filters={filters}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+function ExpenseListSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-24 bg-muted rounded-lg" />
+        ))}
+      </div>
+      <div className="h-12 bg-muted rounded" />
+      <div className="h-96 bg-muted rounded-lg" />
+    </div>
+  );
+}

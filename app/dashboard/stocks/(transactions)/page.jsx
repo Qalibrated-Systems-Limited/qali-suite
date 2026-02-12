@@ -2,7 +2,7 @@ import {
   searchStock,
   fetchStockPages,
   fetchStockData,
-} from "../../../mongodb/queries/queries";
+} from "../../../mongodb/queries/product-queries";
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";
 import { ResponsiveInventoryTable } from "../table";
@@ -37,11 +37,12 @@ async function StockPage(props) {
   const userCart = await User.findById(userId).select("cart");
 
   // Serialize cart data for client component
-  const cart = userCart?.cart?.map((item) => ({
-    ...item.toObject(),
-    _id: item._id?.toString(),
-    productId: item.productId?.toString(),
-  })) ?? [];
+  const cart =
+    userCart?.cart?.map((item) => ({
+      ...item.toObject(),
+      _id: item._id?.toString(),
+      productId: item.productId?.toString(),
+    })) ?? [];
 
   const canCreateStock = user.role === "Store Manager" || user.role === "Admin";
 
@@ -58,7 +59,7 @@ async function StockPage(props) {
   // Calculate stats
   const totalItems = stock.length;
   const lowStock = stock.filter(
-    (item) => item.stock > 0 && item.stock < 10
+    (item) => item.stock > 0 && item.stock < 10,
   ).length;
   const outOfStock = stock.filter((item) => item.stock === 0).length;
   const inStock = stock.filter((item) => item.stock >= 10).length;

@@ -3,6 +3,8 @@ import { StockMovement } from "../../models/stockmovement";
 import Counter from "../../models/counter";
 import { sanitizeSearchTerm } from "../../../lib/utils/sanitize";
 import { serializeBsonType } from "@/lib/utils";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { ObjectId } from "mongodb";
 
 const ITEMS_PER_PAGE = 20;
 dbConnect();
@@ -14,15 +16,21 @@ export const fetchMovementPages = async (
   searchTerm,
   filters = {},
   userId = null,
-  userRole = null
+  userRole = null,
 ) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const { movementType, direction, startDate, endDate } = filters;
 
   // Sanitize search term to prevent NoSQL injection
   const safeSearchTerm = sanitizeSearchTerm(searchTerm);
 
   // Build filter conditions
-  let additionalFilters = {};
+  let additionalFilters = { ...tenantMatch };
 
   // Role-based filtering for non-managers
   if (
@@ -120,8 +128,14 @@ export const searchMovements = async (
   page = 1,
   filters = {},
   userId = null,
-  userRole = null
+  userRole = null,
 ) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const { movementType, direction, startDate, endDate, productId } = filters;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
@@ -129,7 +143,7 @@ export const searchMovements = async (
   const safeSearchTerm = sanitizeSearchTerm(searchTerm);
 
   // Build filter conditions
-  let additionalFilters = {};
+  let additionalFilters = { ...tenantMatch };
 
   // Role-based filtering for non-managers
   // Technicians/Users only see movements where they are involved
@@ -218,12 +232,18 @@ export const searchMovements = async (
 export const getMovementStats = async (
   filters = {},
   userId = null,
-  userRole = null
+  userRole = null,
 ) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const { movementType, direction, startDate, endDate } = filters;
 
   // Build filter conditions
-  let matchConditions = {};
+  let matchConditions = { ...tenantMatch };
 
   // Role-based filtering for non-managers
   if (userId && userRole !== "Admin" && userRole !== "Store Manager") {
@@ -284,7 +304,7 @@ export const getMovementStats = async (
           $sum: {
             $cond: [
               { $eq: ["$direction", "in"] },
-              { $multiply: ["$quantity", { $ifNull: ["$unitPrice", 0] }] },
+              { $ifNull: ["$costing.totalValue", { $ifNull: ["$costing.totalCost", 0] }] },
               0,
             ],
           },
@@ -293,7 +313,7 @@ export const getMovementStats = async (
           $sum: {
             $cond: [
               { $eq: ["$direction", "out"] },
-              { $multiply: ["$quantity", { $ifNull: ["$unitPrice", 0] }] },
+              { $ifNull: ["$costing.totalValue", { $ifNull: ["$costing.totalCost", 0] }] },
               0,
             ],
           },
@@ -337,7 +357,16 @@ export const getMovementStats = async (
 // GET MOVEMENT BY ID
 // ============================================
 export const getMovementById = async (movementId) => {
-  const movement = await StockMovement.findById(movementId).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
+  const movement = await StockMovement.findOne({
+    ...tenantMatch,
+    _id: movementId,
+  }).lean();
 
   if (!movement) {
     return null;
@@ -360,7 +389,13 @@ export const getMovementById = async (movementId) => {
 // GET PRODUCT MOVEMENT HISTORY
 // ============================================
 export const getProductMovementHistory = async (productId, limit = 50) => {
-  const movements = await StockMovement.find({ productId })
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
+  const movements = await StockMovement.find({ ...tenantMatch, productId })
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
@@ -387,7 +422,7 @@ export const generateMovementNumber = async (session = null) => {
   const counter = await Counter.findOneAndUpdate(
     { name: counterId },
     { $inc: { seq: 1 } },
-    { upsert: true, new: true, session }
+    { upsert: true, new: true, session },
   );
 
   if (!counter) {

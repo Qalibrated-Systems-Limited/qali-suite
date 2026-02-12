@@ -6,6 +6,13 @@ const vehicleSchema =
   Schema &&
   new Schema(
     {
+      // Company (Tenant)
+      companyId: {
+        type: Schema.Types.ObjectId,
+        ref: "Company",
+        required: [true, "Company ID is required"],
+        index: true,
+      },
       creator: {
         name: { required: true, type: String },
         id: { required: true, type: String },
@@ -26,7 +33,6 @@ const vehicleSchema =
       numberPlate: {
         type: String,
         required: [true, "Please enter number plate"],
-        unique: true,
         uppercase: true,
       },
     },
@@ -37,6 +43,13 @@ const vehicleSchema =
 
 // Compare vehicle password
 // Generate password reset token
+
+// Indexes
+// Unique number plate per company
+vehicleSchema.index({ companyId: 1, numberPlate: 1 }, { unique: true });
+// Query indexes
+vehicleSchema.index({ companyId: 1, status: 1 });
+vehicleSchema.index({ companyId: 1, vehicleType: 1 });
 
 vehicleSchema.statics.findByPlate = async function (numberPlate) {
   return this.findOne({ numberPlate });

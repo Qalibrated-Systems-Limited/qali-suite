@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { useFormState } from "react-dom";
+import { useActionState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -18,23 +17,12 @@ import { escalateCheckout } from "@/app/mongodb/checkout-action";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
 export function EscalateDialog({ checkout, open, onOpenChange }) {
-  const [state, formAction] = useFormState(
+  const [state, formAction, isPending] = useActionState(
     escalateCheckout.bind(null, checkout._id),
     {
       message: "",
     }
   );
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const handleSubmit = async (formData) => {
-    setIsSubmitting(true);
-    await formAction(formData);
-    setIsSubmitting(false);
-
-    if (state.message === "success") {
-      onOpenChange(false);
-    }
-  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -49,7 +37,7 @@ export function EscalateDialog({ checkout, open, onOpenChange }) {
           </DialogDescription>
         </DialogHeader>
 
-        <form action={handleSubmit}>
+        <form action={formAction}>
           <div className="space-y-4 py-4">
             {/* Checkout Info */}
             <div className="space-y-2 p-3 bg-red-500/5 rounded-lg border border-red-500/20">
@@ -129,17 +117,17 @@ export function EscalateDialog({ checkout, open, onOpenChange }) {
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
-              disabled={isSubmitting}
+              disabled={isPending}
               className="border-[#30363d] text-gray-300 hover:bg-[#1f2937] hover:text-white"
             >
               Cancel
             </Button>
             <Button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isPending}
               className="bg-red-500 text-white hover:bg-red-600"
             >
-              {isSubmitting ? (
+              {isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Escalating...

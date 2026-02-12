@@ -3,12 +3,16 @@ import { StockRequest } from "../../models/requests";
 import { ItemCheckout } from "../../models/checkouts";
 import { StockMovement } from "../../models/stockmovement";
 import dbConnect from "../../config/dbConnect";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 // ============================================
 // DASHBOARD OVERVIEW STATS
 // ============================================
 dbConnect();
 export const getDashboardStats = async () => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
@@ -23,16 +27,17 @@ export const getDashboardStats = async () => {
     monthlyMovements,
   ] = await Promise.all([
     // Total products
-    Product.countDocuments(),
+    Product.countDocuments(tenantMatch),
 
     // Low stock items (1-9)
-    Product.countDocuments({ stock: { $gte: 1, $lte: 9 } }),
+    Product.countDocuments({ ...tenantMatch, stock: { $gte: 1, $lte: 9 } }),
 
     // Out of stock
-    Product.countDocuments({ stock: 0 }),
+    Product.countDocuments({ ...tenantMatch, stock: 0 }),
 
     // Total stock value
     Product.aggregate([
+      { $match: tenantMatch },
       {
         $group: {
           _id: null,
@@ -44,19 +49,21 @@ export const getDashboardStats = async () => {
     ]).then((result) => result[0]?.totalValue || 0),
 
     // Pending requests
-    StockRequest.countDocuments({ status: "pending" }),
+    StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
 
     // Active checkouts
-    ItemCheckout.countDocuments({ status: "checked_out" }),
+    ItemCheckout.countDocuments({ ...tenantMatch, status: "checked_out" }),
 
     // Overdue checkouts
     ItemCheckout.countDocuments({
+      ...tenantMatch,
       status: "checked_out",
       expectedReturnDate: { $lt: now },
     }),
 
     // This month's movements
     StockMovement.countDocuments({
+      ...tenantMatch,
       createdAt: { $gte: startOfMonth },
     }),
   ]);
@@ -77,6 +84,10 @@ export const getDashboardStats = async () => {
 // STOCK MOVEMENT TREND (Last 7 days)
 // ============================================
 export const getMovementTrend = async (days = 7) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
   startDate.setHours(0, 0, 0, 0);
@@ -84,6 +95,7 @@ export const getMovementTrend = async (days = 7) => {
   const movements = await StockMovement.aggregate([
     {
       $match: {
+        ...tenantMatch,
         createdAt: { $gte: startDate },
       },
     },
@@ -119,7 +131,12 @@ export const getMovementTrend = async (days = 7) => {
 // STOCK BY CATEGORY
 // ============================================
 export const getStockByCategory = async () => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const categoryData = await Product.aggregate([
+    { $match: tenantMatch },
     {
       $group: {
         _id: "$category",
@@ -145,7 +162,11 @@ export const getStockByCategory = async () => {
 // RECENT REQUESTS (Latest 5)
 // ============================================
 export const getRecentRequests = async (limit = 5) => {
-  const requests = await StockRequest.find()
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
+  const requests = await StockRequest.find(tenantMatch)
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
@@ -165,7 +186,11 @@ export const getRecentRequests = async (limit = 5) => {
 // RECENT MOVEMENTS (Latest 10)
 // ============================================
 export const getRecentMovements = async (limit = 10) => {
-  const movements = await StockMovement.find()
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
+  const movements = await StockMovement.find(tenantMatch)
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
@@ -186,7 +211,12 @@ export const getRecentMovements = async (limit = 10) => {
 // LOW STOCK ALERTS
 // ============================================
 export const getLowStockAlerts = async (threshold = 10) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const lowStockItems = await Product.find({
+    ...tenantMatch,
     stock: { $lte: threshold, $gte: 1 },
   })
     .sort({ stock: 1 })
@@ -207,9 +237,14 @@ export const getLowStockAlerts = async (threshold = 10) => {
 // OVERDUE CHECKOUTS
 // ============================================
 export const getOverdueCheckouts = async () => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const now = new Date();
 
   const overdueItems = await ItemCheckout.find({
+    ...tenantMatch,
     status: "checked_out",
     expectedReturnDate: { $lt: now },
   })
@@ -237,7 +272,12 @@ export const getOverdueCheckouts = async () => {
 // TOP PRODUCTS (Most Moved)
 // ============================================
 export const getTopProducts = async (limit = 5) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const topProducts = await StockMovement.aggregate([
+    { $match: tenantMatch },
     {
       $group: {
         _id: "$productId",
@@ -268,7 +308,12 @@ export const getTopProducts = async (limit = 5) => {
 // REQUEST STATUS BREAKDOWN
 // ============================================
 export const getRequestStatusBreakdown = async () => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const breakdown = await StockRequest.aggregate([
+    { $match: tenantMatch },
     {
       $group: {
         _id: "$status",

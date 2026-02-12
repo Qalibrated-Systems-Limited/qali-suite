@@ -3,9 +3,13 @@
 import dbConnect from "@/app/config/dbConnect";
 import InventoryAdjustment from "@/app/models/inventoryAdjustment";
 import Product from "@/app/models/product";
-import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import mongoose from "mongoose";
+import {
+  getTenantContext,
+  getCompanyIdForCreate,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 /**
  * Create Stock Adjustment with automatic journal entry creation
@@ -16,15 +20,16 @@ export async function createStockAdjustment(prevState, formData) {
   try {
     await dbConnect();
 
-    const sessionData = await auth();
-    if (!sessionData?.user) {
+    // Auth check with tenant context
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
       return {
-        message: "Unauthorized",
+        message: error.message,
         success: false,
       };
     }
-
-    const user = sessionData.user;
 
     // Check permission
     if (!["Admin", "Store Manager", "Accountant"].includes(user.role)) {
@@ -34,14 +39,22 @@ export async function createStockAdjustment(prevState, formData) {
       };
     }
 
+    // Get tenant companyId for create
+    let tenantCompanyId;
+    try {
+      tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+    } catch (error) {
+      return {
+        message: error.message,
+        success: false,
+      };
+    }
+
     // Parse form data
     const adjustmentData = JSON.parse(formData.get("adjustmentData"));
 
     const { adjustmentDate, adjustmentType, description, notes, items } =
       adjustmentData;
-
-
-      console.log(items)
 
     // Validation
     if (!adjustmentDate || !adjustmentType) {
@@ -58,19 +71,32 @@ export async function createStockAdjustment(prevState, formData) {
       };
     }
 
+    // Validate quantities are positive integers
+    for (const item of items) {
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+        return {
+          message: `Invalid quantity for ${item.productName || 'item'}: must be a positive whole number`,
+          success: false,
+        };
+      }
+    }
+
     // Start MongoDB session for transaction
     session = await mongoose.startSession();
     session.startTransaction();
 
-    // Generate adjustment number
+    // Generate adjustment number (tenant-scoped)
     const adjustmentNumber =
-      await InventoryAdjustment.generateAdjustmentNumber();
+      await InventoryAdjustment.generateAdjustmentNumber(tenantCompanyId);
 
     // Prepare adjustment lines
     const lines = [];
 
     for (const item of items) {
-      const product = await Product.findById(item.productId).session(session);
+      // Find product with tenant scoping
+      const product = await Product.findOne(
+        withTenantScope({ _id: item.productId }, tenantCompanyId, isSuperAdmin)
+      ).session(session);
 
       if (!product) {
         throw new Error(`Product not found: ${item.productId}`);
@@ -105,6 +131,7 @@ export async function createStockAdjustment(prevState, formData) {
     const adjustment = await InventoryAdjustment.create(
       [
         {
+          companyId: tenantCompanyId,
           adjustmentNumber,
           adjustmentDate: new Date(adjustmentDate),
           adjustmentType,

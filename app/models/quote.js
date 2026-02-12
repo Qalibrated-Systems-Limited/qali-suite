@@ -148,16 +148,22 @@ quoteLineSchema.virtual("isFullyInvoiced").get(function () {
 // ============================================
 const quoteSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // ==========================================
     // IDENTIFICATION
     // ==========================================
     quoteNumber: {
       type: String,
       required: [true, "Quote number is required"],
-      unique: true,
       uppercase: true,
       trim: true,
-      index: true,
     },
 
     // ==========================================
@@ -354,11 +360,14 @@ const quoteSchema = new Schema(
 // ============================================
 // INDEXES
 // ============================================
-quoteSchema.index({ quoteDate: -1, status: 1 });
-quoteSchema.index({ "customer.partyId": 1, status: 1 });
-quoteSchema.index({ "customer.id": 1, status: 1 });
-quoteSchema.index({ validUntil: 1, status: 1 });
-quoteSchema.index({ "salesPerson.employeeId": 1, status: 1 });
+// Unique quote number per company
+quoteSchema.index({ companyId: 1, quoteNumber: 1 }, { unique: true });
+// Query indexes - all prefixed with companyId for tenant isolation
+quoteSchema.index({ companyId: 1, quoteDate: -1, status: 1 });
+quoteSchema.index({ companyId: 1, "customer.partyId": 1, status: 1 });
+quoteSchema.index({ companyId: 1, "customer.id": 1, status: 1 });
+quoteSchema.index({ companyId: 1, validUntil: 1, status: 1 });
+quoteSchema.index({ companyId: 1, "salesPerson.employeeId": 1, status: 1 });
 
 // ============================================
 // VIRTUALS
@@ -717,7 +726,7 @@ quoteSchema.methods.convertToInvoice = async function (
   // Generate invoice number
   const { generateInvoiceNumber } =
     await import("@/app/mongodb/queries/invoice-queries");
-  const invoiceNumber = await generateInvoiceNumber();
+  const invoiceNumber = await generateInvoiceNumber(this.companyId);
 
   // Create invoice
   const invoiceDate = invoiceData.invoiceDate || new Date();
@@ -735,6 +744,7 @@ quoteSchema.methods.convertToInvoice = async function (
   const total = subtotal + taxAmount;
 
   const invoice = new Invoice({
+    companyId: this.companyId,
     invoiceNumber,
     invoiceDate,
     dueDate,
@@ -773,18 +783,30 @@ quoteSchema.methods.convertToInvoice = async function (
 };
 
 // ============================================
-// STATIC: Generate Quote Number
+// STATIC: Generate Quote Number with Company Code Prefix
 // ============================================
-quoteSchema.statics.generateQuoteNumber = async function (session = null) {
+quoteSchema.statics.generateQuoteNumber = async function (companyId = null, session = null) {
   const ErpCounter = mongoose.model("ErpCounter");
+  const Company = mongoose.model("Company");
   const date = new Date();
-  const prefix = `QSL-QT-${date.getFullYear()}${String(
-    date.getMonth() + 1,
-  ).padStart(2, "0")}`;
-  const counterId = `quote-${date.getFullYear()}${String(
-    date.getMonth() + 1,
-  ).padStart(2, "0")}`;
-  const queryOptions = session ? { session } : {};
+  const yearMonth = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+  // Fetch company code for prefix
+  let companyCode = null;
+  if (companyId) {
+    let companyQuery = Company.findById(companyId).select("code").lean();
+    if (session) companyQuery = companyQuery.session(session);
+    const company = await companyQuery;
+    companyCode = company?.code || null;
+  }
+
+  // Build prefix: QT-{CODE}-{YYYYMM} or QT-{YYYYMM}
+  const prefix = companyCode ? `QT-${companyCode}-${yearMonth}` : `QT-${yearMonth}`;
+
+  // Build counter ID with company code for tenant isolation
+  const counterId = companyCode
+    ? `quote-${companyCode.toLowerCase()}-${yearMonth}`
+    : `quote-${yearMonth}`;
 
   const maxAttempts = 5;
 
@@ -793,7 +815,11 @@ quoteSchema.statics.generateQuoteNumber = async function (session = null) {
       const seq = await ErpCounter.getNextSequence(counterId, session);
       const quoteNumber = `${prefix}-${String(seq).padStart(4, "0")}`;
 
-      const exists = await this.exists({ quoteNumber, ...queryOptions });
+      // Use .session() method chaining to avoid ClientSession serialization error
+      let existsQuery = this.exists({ quoteNumber });
+      if (session) existsQuery = existsQuery.session(session);
+      const exists = await existsQuery;
+
       if (!exists) {
         return quoteNumber;
       }
@@ -806,13 +832,12 @@ quoteSchema.statics.generateQuoteNumber = async function (session = null) {
         counterError.message,
       );
 
-      const lastQuote = await this.findOne(
-        { quoteNumber: { $regex: `^${prefix}` } },
-        null,
-        queryOptions,
-      )
+      // Fallback: find last quote number and increment
+      let lastQuoteQuery = this.findOne({ quoteNumber: { $regex: `^${prefix}` } })
         .sort({ quoteNumber: -1 })
         .lean();
+      if (session) lastQuoteQuery = lastQuoteQuery.session(session);
+      const lastQuote = await lastQuoteQuery;
 
       let nextNum = 1;
       if (lastQuote?.quoteNumber) {
@@ -822,7 +847,10 @@ quoteSchema.statics.generateQuoteNumber = async function (session = null) {
 
       const quoteNumber = `${prefix}-${String(nextNum).padStart(4, "0")}`;
 
-      const exists = await this.exists({ quoteNumber, ...queryOptions });
+      let existsQuery = this.exists({ quoteNumber });
+      if (session) existsQuery = existsQuery.session(session);
+      const exists = await existsQuery;
+
       if (!exists) {
         return quoteNumber;
       }
@@ -833,6 +861,7 @@ quoteSchema.statics.generateQuoteNumber = async function (session = null) {
     );
   }
 
+  // Ultimate fallback with timestamp
   const timestamp = Date.now().toString(36).toUpperCase();
   const random = Math.random().toString(36).substring(2, 4).toUpperCase();
   return `${prefix}-${timestamp}${random}`;

@@ -4,6 +4,10 @@ import Party from "../../models/parties";
 import Product from "../../models/product";
 import Account from "../../models/account";
 import { serializeBsonType } from "@/lib/utils";
+import {
+  getTenantContext,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // FETCH ACTIVE SUPPLIERS
@@ -11,10 +15,19 @@ import { serializeBsonType } from "@/lib/utils";
 export const fetchActiveSuppliers = async () => {
   await dbConnect();
 
-  const suppliers = await Party.find({
-    type: { $in: ["supplier", "both"] },
-    isActive: true,
-  })
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const suppliers = await Party.find(
+    withTenantScope(
+      {
+        type: { $in: ["supplier", "both"] },
+        isActive: true,
+      },
+      companyId,
+      isSuperAdmin
+    )
+  )
     .sort({ name: 1 })
     .lean();
 
@@ -52,9 +65,12 @@ export const fetchActiveSuppliers = async () => {
 export const fetchAllProducts = async () => {
   await dbConnect();
 
-  const products = await Product.find({
-    status: "active",
-  })
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const products = await Product.find(
+    withTenantScope({ status: "active" }, companyId, isSuperAdmin)
+  )
     .sort({ name: 1 })
     .lean();
 
@@ -80,11 +96,20 @@ export const fetchAllProducts = async () => {
 export const fetchPurchaseAccounts = async () => {
   await dbConnect();
 
-  const accounts = await Account.find({
-    accountType: { $in: ["expense", "asset"] },
-    isActive: true,
-    canPost: { $ne: false }, // Exclude header accounts
-  })
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const accounts = await Account.find(
+    withTenantScope(
+      {
+        accountType: { $in: ["expense", "asset"] },
+        isActive: true,
+        canPost: { $ne: false }, // Exclude header accounts
+      },
+      companyId,
+      isSuperAdmin
+    )
+  )
     .sort({ accountCode: 1 })
     .lean();
 
@@ -108,11 +133,15 @@ export const searchPurchaseOrders = async (
 ) => {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const ITEMS_PER_PAGE = 10;
   const skip = (page - 1) * ITEMS_PER_PAGE;
 
-  // Build query conditions
-  const conditions = [];
+  // Build query conditions - start with tenant filter
+  const conditions = [tenantMatch];
 
   // Text search
   if (query) {
@@ -144,7 +173,7 @@ export const searchPurchaseOrders = async (
     conditions.push({ poDate: { $lte: new Date(filters.endDate) } });
   }
 
-  const matchQuery = conditions.length > 0 ? { $and: conditions } : {};
+  const matchQuery = { $and: conditions };
 
   const purchaseOrders = await PurchaseOrder.find(matchQuery)
     .sort({ poDate: -1, createdAt: -1 })
@@ -161,10 +190,14 @@ export const searchPurchaseOrders = async (
 export const fetchPurchaseOrderPages = async (query = "", filters = {}) => {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const ITEMS_PER_PAGE = 10;
 
-  // Build query conditions (same as searchPurchaseOrders)
-  const conditions = [];
+  // Build query conditions - start with tenant filter
+  const conditions = [tenantMatch];
 
   if (query) {
     conditions.push({
@@ -192,7 +225,7 @@ export const fetchPurchaseOrderPages = async (query = "", filters = {}) => {
     conditions.push({ poDate: { $lte: new Date(filters.endDate) } });
   }
 
-  const matchQuery = conditions.length > 0 ? { $and: conditions } : {};
+  const matchQuery = { $and: conditions };
 
   const count = await PurchaseOrder.countDocuments(matchQuery);
   return Math.ceil(count / ITEMS_PER_PAGE);
@@ -204,7 +237,12 @@ export const fetchPurchaseOrderPages = async (query = "", filters = {}) => {
 export const getPurchaseOrderById = async (id) => {
   await dbConnect();
 
-  const po = await PurchaseOrder.findById(id).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const po = await PurchaseOrder.findOne(
+    withTenantScope({ _id: id }, companyId, isSuperAdmin)
+  ).lean();
 
   if (!po) return null;
 
@@ -217,8 +255,12 @@ export const getPurchaseOrderById = async (id) => {
 export const getPurchaseOrderStats = async (filters = {}) => {
   await dbConnect();
 
-  // Build base query
-  const conditions = [];
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
+  // Build base query - start with tenant filter
+  const conditions = [tenantMatch];
 
   if (filters.startDate) {
     conditions.push({ poDate: { $gte: new Date(filters.startDate) } });
@@ -227,7 +269,7 @@ export const getPurchaseOrderStats = async (filters = {}) => {
     conditions.push({ poDate: { $lte: new Date(filters.endDate) } });
   }
 
-  const baseMatch = conditions.length > 0 ? { $and: conditions } : {};
+  const baseMatch = { $and: conditions };
 
   const stats = await PurchaseOrder.aggregate([
     { $match: baseMatch },
@@ -284,13 +326,19 @@ export const getPurchaseOrderStats = async (filters = {}) => {
 export const getOpenPurchaseOrders = async (supplierId = null) => {
   await dbConnect();
 
-  const query = {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  let query = {
     status: { $in: ["sent", "confirmed", "partial"] },
   };
 
   if (supplierId) {
     query["supplier.partyId"] = supplierId;
   }
+
+  // Apply tenant scoping
+  query = withTenantScope(query, companyId, isSuperAdmin);
 
   const pos = await PurchaseOrder.find(query)
     .sort({ expectedDeliveryDate: 1, poDate: -1 })
@@ -331,10 +379,16 @@ export const getPurchaseOrdersBySupplier = async (
 ) => {
   await dbConnect();
 
-  const query = { "supplier.partyId": supplierId };
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  let query = { "supplier.partyId": supplierId };
   if (status) {
     query.status = Array.isArray(status) ? { $in: status } : status;
   }
+
+  // Apply tenant scoping
+  query = withTenantScope(query, companyId, isSuperAdmin);
 
   const pos = await PurchaseOrder.find(query).sort({ poDate: -1 }).lean();
 
@@ -347,12 +401,21 @@ export const getPurchaseOrdersBySupplier = async (
 export const getOverduePurchaseOrders = async () => {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   const now = new Date();
 
-  const pos = await PurchaseOrder.find({
-    status: { $in: ["sent", "confirmed", "partial"] },
-    expectedDeliveryDate: { $lt: now },
-  })
+  const pos = await PurchaseOrder.find(
+    withTenantScope(
+      {
+        status: { $in: ["sent", "confirmed", "partial"] },
+        expectedDeliveryDate: { $lt: now },
+      },
+      companyId,
+      isSuperAdmin
+    )
+  )
     .sort({ expectedDeliveryDate: 1 })
     .lean();
 
@@ -365,13 +428,22 @@ export const getOverduePurchaseOrders = async () => {
 export const getExpiringPurchaseOrders = async (daysAhead = 7) => {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   const now = new Date();
   const futureDate = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
 
-  const pos = await PurchaseOrder.find({
-    status: { $in: ["draft", "sent"] },
-    validUntil: { $gte: now, $lte: futureDate },
-  })
+  const pos = await PurchaseOrder.find(
+    withTenantScope(
+      {
+        status: { $in: ["draft", "sent"] },
+        validUntil: { $gte: now, $lte: futureDate },
+      },
+      companyId,
+      isSuperAdmin
+    )
+  )
     .sort({ validUntil: 1 })
     .lean();
 

@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
 import User from "./app/models/user";
+import Company from "./app/models/Company";
 import { authOptions } from "./auth.config";
 import dbConnect from "./app/config/dbConnect";
 
@@ -11,6 +12,7 @@ type UserType = {
   role: string;
   email: string;
   companyId?: string;
+  companyCode?: string;
 };
 async function getUser(email: string) {
   try {
@@ -38,14 +40,22 @@ export const { auth, signIn, signOut } = NextAuth({
           if (!user) return null;
           const passwordsMatch = await user.comparePassword(password);
 
-          if (passwordsMatch)
+          if (passwordsMatch) {
+            // Fetch company code if user has a companyId
+            let companyCode: string | undefined;
+            if (user.companyId) {
+              const company = await Company.findById(user.companyId).select("code").lean();
+              companyCode = company?.code;
+            }
             return {
               id: user._id.toString(),
               name: user.name,
               role: user.role,
               email: user.email,
               companyId: user.companyId?.toString(),
+              companyCode,
             } as UserType;
+          }
         }
         return null;
       },

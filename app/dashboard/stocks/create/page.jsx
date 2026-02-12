@@ -1,4 +1,3 @@
-import { AddProductForm } from "./form";
 import { auth } from "../../../../auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";

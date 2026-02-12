@@ -59,27 +59,16 @@ function initialiseQty(request, open) {
 export function ApproveDialog({ request, open, onOpenChange }) {
   const initialState = { message: "" };
   const approveWithId = approveRequest.bind(null, request._id);
-  const [state, dispatch, isPending] = useActionState(
-    approveWithId,
-    initialState
-  );
+  const [state, dispatch] = useActionState(approveWithId, initialState);
+  const [isPending, startTransition] = useTransition();
 
-  // ✅ NEW: Track approved quantities for each item
+  // Track approved quantities for each item
   const [approvedQuantities, setApprovedQuantities] = useState(() =>
     initialiseQty(request, open)
   );
   const [itemNotes, setItemNotes] = useState({});
   const [comments, setComments] = useState("");
   const [conditions, setConditions] = useState("");
-
-  // Initialize with requested quantities
-  useState(() => {});
-
-  // Close dialog on success
-  if (state.message === "success" && open) {
-    onOpenChange(false);
-    window.location.reload();
-  }
 
   const handleQuantityChange = (itemId, value, maxQuantity) => {
     const qty = parseInt(value) || 0;
@@ -106,7 +95,9 @@ export function ApproveDialog({ request, open, onOpenChange }) {
       }
     });
 
-    dispatch(formData);
+    startTransition(() => {
+      dispatch(formData);
+    });
   };
 
   const totalRequested = request.items.reduce(
@@ -376,11 +367,6 @@ export function RejectDialog({ request, open, onOpenChange }) {
     },
   });
 
-  if (state.message === "success" && open) {
-    onOpenChange(false);
-    window.location.reload();
-  }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -491,12 +477,6 @@ export function FulfillDialog({ request, open, onOpenChange }) {
     }
   }, [open, request]);
 
-  // Close and reload on success
-  if (state.message === "success" && open) {
-    onOpenChange(false);
-    window.location.reload();
-  }
-
   const handleQuantityChange = (itemId, value, maxQuantity) => {
     const qty = parseInt(value) || 0;
     setItemQuantities((prev) => ({
@@ -575,7 +555,7 @@ export function FulfillDialog({ request, open, onOpenChange }) {
                         <div className="flex-1">
                           <p className="font-semibold">{item.productName}</p>
                           <p className="text-xs text-muted-foreground">
-                            SKU: {item.SKU} • Purpose: {item.purpose}
+                            SKU: {item.SKU} • Type: {request.requestType?.replace(/_/g, " ")}
                           </p>
                           {item.requiresReturn && (
                             <Badge variant="outline" className="mt-1 text-xs">
@@ -669,7 +649,7 @@ export function FulfillDialog({ request, open, onOpenChange }) {
                             </div>
 
                             {(item.requiresReturn ||
-                              item.purpose !== "sale") && (
+                              request.requestType !== "sale") && (
                               <div className="md:col-span-2">
                                 <label className="text-xs font-medium">
                                   Serial Numbers (Optional, comma-separated)
@@ -823,11 +803,6 @@ export function CancelDialog({ request, open, onOpenChange }) {
       reason: "",
     },
   });
-
-  if (state.message === "success" && open) {
-    onOpenChange(false);
-    window.location.reload();
-  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

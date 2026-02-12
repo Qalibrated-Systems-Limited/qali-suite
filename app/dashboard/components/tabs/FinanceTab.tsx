@@ -13,7 +13,6 @@ import {
   FileText,
   Users,
   DollarSign,
-  CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +25,10 @@ import {
 } from "@/app/mongodb/queries/erp-dashboard-queries";
 import Invoice from "../../../models/invoice";
 import EmployeeClaim from "../../../models/employeesClaims";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
+import mongoose from "mongoose";
+
+const ObjectId = mongoose.Types.ObjectId;
 
 // Charts
 import { RevenueTrendChart } from "../RevenueTrendChart";
@@ -250,7 +253,12 @@ async function FinanceAlertsBar() {
 // PENDING PAYMENTS CARD - Actionable List
 // ============================================
 async function PendingPaymentsCard() {
+  // Tenant scoping - only show company's invoices
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const invoices = await Invoice.find({
+    ...tenantMatch,
     paymentStatus: { $in: ["unpaid", "partial"] },
     dueDate: { $lte: new Date() },
   })
@@ -328,7 +336,12 @@ async function PendingPaymentsCard() {
 // PENDING CLAIMS CARD - Actionable List
 // ============================================
 async function PendingClaimsCard() {
+  // Tenant scoping - only show company's claims
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const claims = await EmployeeClaim.find({
+    ...tenantMatch,
     status: { $in: ["submitted", "approved"] },
   })
     .sort({ submittedAt: -1 })

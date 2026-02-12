@@ -1,30 +1,51 @@
 import { auth } from "@/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { FileText, TrendingUp, TrendingDown, Info } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
+import {
+  FileText,
+  TrendingUp,
+  TrendingDown,
+  Info,
+  Plus,
+  Package,
+  ArrowUpDown,
+} from "lucide-react";
+import {
+  getAdjustments,
+  getAdjustmentStats,
+} from "@/app/mongodb/queries/adjustment-queries";
 
-// Placeholder - will be replaced with actual queries
-async function getAdjustments() {
-  // TODO: Replace with actual MongoDB query
-  return [];
-}
+import { AdjustmentsFilters } from "../components/AdjustmentsFilters";
+import { formatCurrency } from "@/lib/utils/erp-utils";
+import { formatDate } from "@/lib/pdf";
 
-async function getAdjustmentStats() {
-  // TODO: Replace with actual aggregation
-  return {
-    totalAdjustments: 0,
-    increasedValue: 0,
-    decreasedValue: 0,
-  };
-}
+const ADJUSTMENT_TYPE_LABELS = {
+  physical_count: "Physical Count",
+  damage: "Damage",
+  expiry: "Expiry",
+  theft: "Theft/Loss",
+  correction: "Correction",
+  write_off: "Write Off",
+  found: "Found",
+  other: "Other",
+};
 
-export default async function AdjustmentsPage(props) {
+const STATUS_STYLES = {
+  draft: "bg-yellow-500/10 text-yellow-600 border-yellow-500/20",
+  approved: "bg-green-500/10 text-green-600 border-green-500/20",
+  cancelled: "bg-red-500/10 text-red-600 border-red-500/20",
+};
+
+export default async function AdjustmentsPage({ searchParams }) {
   const session = await auth();
   const { user } = session;
 
-  // Check if user has permission (Admin, Store Manager, Accountant)
+  // Check if user has permission
   const hasPermission = ["Admin", "Store Manager", "Accountant"].includes(
-    user?.role
+    user?.role,
   );
 
   if (!hasPermission) {
@@ -46,11 +67,20 @@ export default async function AdjustmentsPage(props) {
     );
   }
 
-  const searchParams = await props.searchParams;
-  const currentPage = Number(searchParams.page) || 1;
+  const params = await searchParams;
+  const currentPage = Number(params?.page) || 1;
+  const status = params?.status || "all";
+  const adjustmentType = params?.type || "all";
+  const search = params?.search || "";
 
-  const [adjustments, stats] = await Promise.all([
-    getAdjustments(),
+  const [{ adjustments, pagination }, stats] = await Promise.all([
+    getAdjustments({
+      page: currentPage,
+      limit: 20,
+      status: status !== "all" ? status : null,
+      adjustmentType: adjustmentType !== "all" ? adjustmentType : null,
+      search: search || null,
+    }),
     getAdjustmentStats(),
   ]);
 
@@ -58,16 +88,16 @@ export default async function AdjustmentsPage(props) {
     <div className="container mx-auto px-4 py-6 max-w-7xl">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2">
+        <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-1">
           Stock Adjustments
         </h1>
-        <p className="text-sm sm:text-base text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Manage inventory adjustments and corrections
         </p>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4 mb-6">
         <Card className="bg-card border-border">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
@@ -79,6 +109,22 @@ export default async function AdjustmentsPage(props) {
             <div className="text-xl sm:text-2xl font-bold text-foreground">
               {stats.totalAdjustments}
             </div>
+            <p className="text-xs text-muted-foreground mt-1">This month</p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
+              Items Adjusted
+            </CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl sm:text-2xl font-bold text-foreground">
+              {stats.totalItems || 0}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Line items</p>
           </CardContent>
         </Card>
 
@@ -91,8 +137,9 @@ export default async function AdjustmentsPage(props) {
           </CardHeader>
           <CardContent>
             <div className="text-xl sm:text-2xl font-bold text-green-600">
-              +{stats.increasedValue}
+              +{formatCurrency(stats.totalIncreaseValue || 0)}
             </div>
+            <p className="text-xs text-muted-foreground mt-1">Stock added</p>
           </CardContent>
         </Card>
 
@@ -105,39 +152,242 @@ export default async function AdjustmentsPage(props) {
           </CardHeader>
           <CardContent>
             <div className="text-xl sm:text-2xl font-bold text-red-600">
-              -{stats.decreasedValue}
+              -{formatCurrency(stats.totalDecreaseValue || 0)}
             </div>
+            <p className="text-xs text-muted-foreground mt-1">Stock removed</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Empty State */}
-      {adjustments.length === 0 && (
+      {/* Filters */}
+      <AdjustmentsFilters
+        currentStatus={status}
+        currentType={adjustmentType}
+        currentSearch={search}
+      />
+
+      {/* Adjustments Table */}
+      {adjustments.length === 0 ? (
         <Card className="bg-card border-border">
           <CardContent className="p-6 sm:p-12">
             <div className="flex flex-col items-center justify-center text-center">
               <FileText className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground mb-4" />
               <h3 className="text-base sm:text-lg font-semibold text-foreground mb-2">
-                No stock adjustments yet
+                No stock adjustments found
               </h3>
-              <p className="text-xs sm:text-sm text-muted-foreground max-w-md">
-                Stock adjustments are used to correct inventory discrepancies,
-                record damaged goods, or account for inventory loss/gain. Use
-                the "Create Stock Adjustment" button in the header to get
-                started.
+              <p className="text-xs sm:text-sm text-muted-foreground max-w-md mb-4">
+                {search || status !== "all" || adjustmentType !== "all"
+                  ? "Try adjusting your filters to find what you're looking for."
+                  : "Stock adjustments are used to correct inventory discrepancies, record damaged goods, or account for inventory loss/gain."}
               </p>
+              {!search && status === "all" && adjustmentType === "all" && (
+                <Button
+                  asChild
+                  className="bg-yellow-500 hover:bg-yellow-600 text-black"
+                >
+                  <Link href="/dashboard/adjustments/create">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create First Adjustment
+                  </Link>
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
-      )}
-
-      {/* TODO: Add Adjustments Table when data exists */}
-      {adjustments.length > 0 && (
+      ) : (
         <Card className="bg-card border-border">
-          <CardContent className="p-4 sm:p-6">
-            <p className="text-muted-foreground text-xs sm:text-sm">
-              Adjustments table coming soon...
-            </p>
+          <CardContent className="p-0">
+            {/* Desktop Table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    <th className="text-left p-4 text-xs font-medium text-muted-foreground">
+                      Adjustment #
+                    </th>
+                    <th className="text-left p-4 text-xs font-medium text-muted-foreground">
+                      Date
+                    </th>
+                    <th className="text-left p-4 text-xs font-medium text-muted-foreground">
+                      Type
+                    </th>
+                    <th className="text-center p-4 text-xs font-medium text-muted-foreground">
+                      Items
+                    </th>
+                    <th className="text-right p-4 text-xs font-medium text-muted-foreground">
+                      <span className="flex items-center justify-end gap-1">
+                        <TrendingUp className="h-3 w-3 text-green-600" />
+                        Increase
+                      </span>
+                    </th>
+                    <th className="text-right p-4 text-xs font-medium text-muted-foreground">
+                      <span className="flex items-center justify-end gap-1">
+                        <TrendingDown className="h-3 w-3 text-red-600" />
+                        Decrease
+                      </span>
+                    </th>
+                    <th className="text-center p-4 text-xs font-medium text-muted-foreground">
+                      Status
+                    </th>
+                    <th className="text-left p-4 text-xs font-medium text-muted-foreground">
+                      Created By
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adjustments.map((adjustment) => (
+                    <tr
+                      key={adjustment._id}
+                      className="border-b border-border hover:bg-muted/30 transition-colors"
+                    >
+                      <td className="p-4">
+                        <Link
+                          href={`/dashboard/adjustments/${adjustment._id}`}
+                          className="text-sm font-medium text-foreground hover:text-yellow-600 transition-colors"
+                        >
+                          {adjustment.adjustmentNumber}
+                        </Link>
+                      </td>
+                      <td className="p-4 text-sm text-muted-foreground">
+                        {formatDate(adjustment.adjustmentDate)}
+                      </td>
+                      <td className="p-4">
+                        <span className="text-sm text-foreground">
+                          {ADJUSTMENT_TYPE_LABELS[adjustment.adjustmentType] ||
+                            adjustment.adjustmentType}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center">
+                        <span className="text-sm text-muted-foreground">
+                          {adjustment.lines?.length || 0}
+                        </span>
+                      </td>
+                      <td className="p-4 text-right">
+                        {adjustment.totalIncreaseValue > 0 ? (
+                          <span className="text-sm font-medium text-green-600">
+                            +{formatCurrency(adjustment.totalIncreaseValue)}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            -
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-4 text-right">
+                        {adjustment.totalDecreaseValue > 0 ? (
+                          <span className="text-sm font-medium text-red-600">
+                            -{formatCurrency(adjustment.totalDecreaseValue)}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            -
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-4 text-center">
+                        <Badge
+                          variant="outline"
+                          className={STATUS_STYLES[adjustment.status]}
+                        >
+                          {adjustment.status}
+                        </Badge>
+                      </td>
+                      <td className="p-4 text-sm text-muted-foreground">
+                        {adjustment.createdBy?.name || "Unknown"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards */}
+            <div className="md:hidden divide-y divide-border">
+              {adjustments.map((adjustment) => (
+                <Link
+                  key={adjustment._id}
+                  href={`/dashboard/adjustments/${adjustment._id}`}
+                  className="block p-4 hover:bg-muted/30 transition-colors"
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        {adjustment.adjustmentNumber}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDate(adjustment.adjustmentDate)}
+                      </p>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className={STATUS_STYLES[adjustment.status]}
+                    >
+                      {adjustment.status}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">
+                      {ADJUSTMENT_TYPE_LABELS[adjustment.adjustmentType]} •{" "}
+                      {adjustment.lines?.length || 0} items
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {adjustment.totalIncreaseValue > 0 && (
+                        <span className="text-green-600">
+                          +{formatCurrency(adjustment.totalIncreaseValue)}
+                        </span>
+                      )}
+                      {adjustment.totalDecreaseValue > 0 && (
+                        <span className="text-red-600">
+                          -{formatCurrency(adjustment.totalDecreaseValue)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+
+            {/* Pagination */}
+            {pagination.totalPages > 1 && (
+              <div className="flex items-center justify-between p-4 border-t border-border">
+                <p className="text-sm text-muted-foreground">
+                  Showing {(pagination.page - 1) * pagination.limit + 1} to{" "}
+                  {Math.min(
+                    pagination.page * pagination.limit,
+                    pagination.total,
+                  )}{" "}
+                  of {pagination.total} adjustments
+                </p>
+                <div className="flex items-center gap-2">
+                  {pagination.hasPrev && (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link
+                        href={`/dashboard/adjustments?page=${pagination.page - 1}${
+                          status !== "all" ? `&status=${status}` : ""
+                        }${adjustmentType !== "all" ? `&type=${adjustmentType}` : ""}${
+                          search ? `&search=${search}` : ""
+                        }`}
+                      >
+                        Previous
+                      </Link>
+                    </Button>
+                  )}
+                  {pagination.hasNext && (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link
+                        href={`/dashboard/adjustments?page=${pagination.page + 1}${
+                          status !== "all" ? `&status=${status}` : ""
+                        }${adjustmentType !== "all" ? `&type=${adjustmentType}` : ""}${
+                          search ? `&search=${search}` : ""
+                        }`}
+                      >
+                        Next
+                      </Link>
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

@@ -23,6 +23,19 @@ const companySchema = new Schema(
       maxLength: [100, "Company name cannot exceed 100 characters"],
     },
 
+    // Short code used in document numbers (e.g., JE-QSL-REC-0001)
+    code: {
+      type: String,
+      required: [true, "Company code is required"],
+      trim: true,
+      uppercase: true,
+      minLength: [2, "Company code must be at least 2 characters"],
+      maxLength: [6, "Company code cannot exceed 6 characters"],
+      match: [/^[A-Z0-9]+$/, "Company code must be alphanumeric"],
+      unique: true,
+      index: true,
+    },
+
     slug: {
       type: String,
       unique: true,

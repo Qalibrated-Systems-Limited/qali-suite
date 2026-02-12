@@ -44,13 +44,23 @@ import {
   ChevronsUpDown,
   Loader2,
   AlertCircle,
+  Truck,
+  ChevronDown,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { createInvoice } from "@/app/mongodb/invoice-actions";
 
 export default function CreateInvoiceFormClient({
   customers = [],
   products = [],
+  checkouts = [],
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -86,12 +96,35 @@ export default function CreateInvoiceFormClient({
     setCustomerSearchOpen(false);
   };
 
+  // Tax rate presets for Kenya
+  const TAX_RATE_OPTIONS = [
+    { value: 16, label: "16% VAT", description: "Standard rate" },
+    { value: 0, label: "0% Exempt", description: "VAT exempt goods" },
+    { value: 8, label: "8% Reduced", description: "Petroleum products" },
+  ];
+
+  // Service category presets
+  const SERVICE_CATEGORIES = [
+    { value: "labor", label: "Labor", defaultUnit: "hrs" },
+    { value: "mileage", label: "Mileage", defaultUnit: "km" },
+    { value: "accommodation", label: "Accommodation", defaultUnit: "nights" },
+    { value: "installation", label: "Installation", defaultUnit: "service" },
+    { value: "consultation", label: "Consultation", defaultUnit: "hrs" },
+    { value: "maintenance", label: "Maintenance", defaultUnit: "service" },
+    { value: "repair", label: "Repair", defaultUnit: "service" },
+    { value: "other", label: "Other Service", defaultUnit: "service" },
+  ];
+
+  // Checkout search state
+  const [checkoutSearchOpen, setCheckoutSearchOpen] = useState(false);
+
   // Add Stock Item
   const addStockItem = (product) => {
     // ERP: Use costing.costPrice for COGS, pricing.sellingPrice for default selling price
     const costPrice = Number(product.costing?.costPrice) || 0;
     const defaultSellingPrice = Number(product.pricing?.sellingPrice) || Number(product.price) || 0;
     const minimumPrice = Number(product.pricing?.minimumPrice) || 0;
+    const defaultTaxRate = product.taxRate ?? 16; // Use product's tax rate or default 16%
 
     const newItem = {
       id: Date.now(),
@@ -102,8 +135,10 @@ export default function CreateInvoiceFormClient({
       availableStock: product.stock,
       quantity: 1,
       costPrice: costPrice,
+      catalogPrice: defaultSellingPrice, // Original catalog price (read-only reference)
       sellingPrice: defaultSellingPrice, // Admin can edit this
       minimumPrice: minimumPrice,
+      taxRate: defaultTaxRate, // Per-item tax rate
       total: defaultSellingPrice * 1,
     };
 
@@ -125,22 +160,72 @@ export default function CreateInvoiceFormClient({
     );
   };
 
+  // Calculate price deviation percentage
+  const getPriceDeviation = (item) => {
+    if (!item.catalogPrice || item.catalogPrice === 0) return null;
+    const deviation = ((item.sellingPrice - item.catalogPrice) / item.catalogPrice) * 100;
+    return deviation;
+  };
+
   // Remove Stock Item
   const removeStockItem = (id) => {
     setStockItems(stockItems.filter((item) => item.id !== id));
   };
 
-  // Add Service Item
-  const addServiceItem = () => {
+  // Add item from technician checkout (trunk stock)
+  const addCheckoutItem = (checkout) => {
+    // Check if already added
+    const exists = stockItems.some((item) => item.checkoutId === checkout._id);
+    if (exists) {
+      setCheckoutSearchOpen(false);
+      return;
+    }
+
+    const product = checkout.product;
+    const costPrice = product?.costPrice || 0;
+    const sellingPrice = product?.sellingPrice || 0;
+
+    const newItem = {
+      id: Date.now(),
+      productId: checkout.productId,
+      name: checkout.productSnapshot?.name || product?.name,
+      SKU: checkout.productSnapshot?.SKU || product?.SKU,
+      unit: product?.unit || "pcs",
+      availableStock: checkout.quantity, // Limited to checkout quantity
+      quantity: checkout.quantity,
+      costPrice: costPrice,
+      catalogPrice: sellingPrice,
+      sellingPrice: sellingPrice,
+      taxRate: 16,
+      total: sellingPrice * checkout.quantity,
+      // Checkout tracking
+      checkoutId: checkout._id,
+      checkoutNumber: checkout.checkoutNumber,
+      stockSource: "technician", // Mark as from technician stock
+      technicianName: checkout.checkedOutTo?.name,
+    };
+
+    setStockItems([...stockItems, newItem]);
+    setCheckoutSearchOpen(false);
+  };
+
+  // Add Service Item (with optional category preset)
+  const addServiceItem = (category = null) => {
+    const categoryConfig = category
+      ? SERVICE_CATEGORIES.find((c) => c.value === category)
+      : null;
+
     setServiceItems([
       ...serviceItems,
       {
         id: Date.now(),
-        name: "",
+        name: categoryConfig?.label || "",
+        category: category || "other",
         description: "",
-        unit: "service", // Default unit
+        unit: categoryConfig?.defaultUnit || "service",
         quantity: 1,
         unitPrice: 0,
+        taxRate: 16,
         total: 0,
       },
     ]);
@@ -183,7 +268,7 @@ export default function CreateInvoiceFormClient({
     );
   };
 
-  // Calculate Totals
+  // Calculate Totals (with per-item tax rates)
   const calculateTotals = () => {
     const stockSubtotal = stockItems.reduce((sum, item) => sum + item.total, 0);
     const serviceSubtotal = serviceItems.reduce(
@@ -193,7 +278,21 @@ export default function CreateInvoiceFormClient({
     const subtotal = stockSubtotal + serviceSubtotal;
     const discountAmount = (subtotal * discountPercentage) / 100;
     const subtotalAfterDiscount = subtotal - discountAmount;
-    const vatAmount = (subtotalAfterDiscount * vatPercentage) / 100;
+
+    // Calculate tax per item (proportionally adjusted for discount)
+    const discountFactor = subtotal > 0 ? (subtotal - discountAmount) / subtotal : 1;
+
+    const stockTax = stockItems.reduce((sum, item) => {
+      const adjustedAmount = item.total * discountFactor;
+      return sum + (adjustedAmount * (item.taxRate || 0)) / 100;
+    }, 0);
+
+    const serviceTax = serviceItems.reduce((sum, item) => {
+      const adjustedAmount = item.total * discountFactor;
+      return sum + (adjustedAmount * (item.taxRate || 0)) / 100;
+    }, 0);
+
+    const vatAmount = stockTax + serviceTax;
     const total = subtotalAfterDiscount + vatAmount;
 
     return {
@@ -244,8 +343,16 @@ export default function CreateInvoiceFormClient({
       customerId: selectedCustomer._id,
       invoiceDate,
       dueDate,
-      stockItems,
-      serviceItems,
+      stockItems: stockItems.map((item) => ({
+        ...item,
+        relatedCheckout: item.checkoutId
+          ? { checkoutId: item.checkoutId, checkoutNumber: item.checkoutNumber }
+          : undefined,
+      })),
+      serviceItems: serviceItems.map((item) => ({
+        ...item,
+        serviceCategory: item.category || "other",
+      })),
       discountPercentage,
       vatPercentage,
       notes,
@@ -443,107 +550,246 @@ export default function CreateInvoiceFormClient({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Popover open={stockSearchOpen} onOpenChange={setStockSearchOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full justify-between"
-              >
-                <span className="flex items-center gap-2">
-                  <Search className="h-4 w-4" />
-                  Search stock items...
-                </span>
-                <ChevronsUpDown className="ml-2 h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-125 p-0">
-              <Command>
-                <CommandInput placeholder="Search products..." />
-                <CommandList>
-                  <CommandEmpty>No products found.</CommandEmpty>
-                  <CommandGroup>
-                    {products.map((product) => (
-                      <CommandItem
-                        key={product._id}
-                        value={`${product.name} ${product.SKU}`}
-                        onSelect={() => addStockItem(product)}
-                      >
-                        <div className="flex-1">
-                          <p className="font-medium">{product.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {product.SKU} • Stock: {product.stock} • KES{" "}
-                            {product.pricing?.sellingPrice || product.price}
-                          </p>
-                        </div>
-                        <Plus className="h-4 w-4 text-green-500" />
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-
-          {stockItems.map((item) => (
-            <div key={item.id} className="p-4 bg-muted/50 rounded-lg border">
-              <div className="flex justify-between mb-2">
-                <div>
-                  <p className="font-medium">{item.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {item.SKU} • Available: {item.availableStock}
-                  </p>
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Store Inventory Search */}
+            <Popover open={stockSearchOpen} onOpenChange={setStockSearchOpen}>
+              <PopoverTrigger asChild>
                 <Button
                   type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeStockItem(item.id)}
-                  className="text-red-500"
+                  variant="outline"
+                  className="w-full justify-between"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <span className="flex items-center gap-2">
+                    <Package className="h-4 w-4 text-blue-500" />
+                    From Store Inventory
+                  </span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4" />
                 </Button>
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                <div>
-                  <Label className="text-xs">Qty</Label>
-                  <Input
-                    type="number"
-                    value={item.quantity}
-                    onChange={(e) =>
-                      updateStockItem(item.id, "quantity", e.target.value)
-                    }
-                    min="1"
-                    max={item.availableStock}
-                    className="h-8"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">Cost</Label>
-                  <Input value={item.costPrice} disabled className="h-8" />
-                </div>
-                <div>
-                  <Label className="text-xs">Price</Label>
-                  <Input
-                    type="number"
-                    value={item.sellingPrice}
-                    onChange={(e) =>
-                      updateStockItem(item.id, "sellingPrice", e.target.value)
-                    }
-                    className="h-8"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">Total</Label>
-                  <Input
-                    value={formatCurrency(item.total)}
+              </PopoverTrigger>
+              <PopoverContent className="w-125 p-0">
+                <Command>
+                  <CommandInput placeholder="Search products..." />
+                  <CommandList>
+                    <CommandEmpty>No products found.</CommandEmpty>
+                    <CommandGroup heading="Store Inventory">
+                      {products.map((product) => (
+                        <CommandItem
+                          key={product._id}
+                          value={`${product.name} ${product.SKU}`}
+                          onSelect={() => addStockItem(product)}
+                        >
+                          <div className="flex-1">
+                            <p className="font-medium">{product.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {product.SKU} • Stock: {product.stock} • KES{" "}
+                              {product.pricing?.sellingPrice || product.price}
+                            </p>
+                          </div>
+                          <Plus className="h-4 w-4 text-green-500" />
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+
+            {/* Technician Stock (Checkouts) Search */}
+            {/* Only show checkouts that match the selected customer */}
+            {(() => {
+              // Filter checkouts by selected customer
+              const customerCheckouts = selectedCustomer
+                ? checkouts.filter((co) =>
+                    co.customer?.id === selectedCustomer._id &&
+                    !stockItems.some((si) => si.checkoutId === co._id)
+                  )
+                : [];
+
+              if (!selectedCustomer) {
+                return (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-between border-orange-500/30 opacity-50 cursor-not-allowed"
                     disabled
-                    className="h-8 font-semibold"
-                  />
+                  >
+                    <span className="flex items-center gap-2">
+                      <Truck className="h-4 w-4 text-orange-500" />
+                      Select customer first
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4" />
+                  </Button>
+                );
+              }
+
+              if (customerCheckouts.length === 0) {
+                return null; // No matching checkouts for this customer
+              }
+
+              return (
+                <Popover open={checkoutSearchOpen} onOpenChange={setCheckoutSearchOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-between border-orange-500/30 hover:border-orange-500"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Truck className="h-4 w-4 text-orange-500" />
+                        From Technician Stock ({customerCheckouts.length})
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-125 p-0">
+                    <Command>
+                      <CommandInput placeholder="Search checked-out items..." />
+                      <CommandList>
+                        <CommandEmpty>No checkout items found for this customer.</CommandEmpty>
+                        <CommandGroup heading={`Items for ${selectedCustomer.name || selectedCustomer.displayName}`}>
+                          {customerCheckouts.map((checkout) => (
+                            <CommandItem
+                              key={checkout._id}
+                              value={`${checkout.productSnapshot?.name} ${checkout.checkoutNumber} ${checkout.checkedOutTo?.name}`}
+                              onSelect={() => addCheckoutItem(checkout)}
+                            >
+                              <div className="flex-1">
+                                <p className="font-medium">{checkout.productSnapshot?.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {checkout.checkoutNumber} • Qty: {checkout.quantity} •{" "}
+                                  With: {checkout.checkedOutTo?.name}
+                                </p>
+                              </div>
+                              <Plus className="h-4 w-4 text-orange-500" />
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              );
+            })()}
+          </div>
+
+          {stockItems.map((item) => {
+            const deviation = getPriceDeviation(item);
+            const hasDeviation = deviation !== null && Math.abs(deviation) > 0.01;
+
+            return (
+              <div key={item.id} className="p-4 bg-muted/50 rounded-lg border">
+                <div className="flex justify-between mb-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{item.name}</p>
+                      {item.stockSource === "technician" && (
+                        <Badge variant="outline" className="bg-orange-500/10 text-orange-600 border-orange-500/20 text-xs">
+                          <Truck className="w-3 h-3 mr-1" />
+                          {item.technicianName}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {item.SKU} • Available: {item.availableStock}
+                      {item.catalogPrice > 0 && (
+                        <span className="ml-2">
+                          • Catalog: {formatCurrency(item.catalogPrice)}
+                        </span>
+                      )}
+                      {item.checkoutNumber && (
+                        <span className="ml-2">• {item.checkoutNumber}</span>
+                      )}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeStockItem(item.id)}
+                    className="text-red-500"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-5 gap-2">
+                  <div>
+                    <Label className="text-xs">Qty</Label>
+                    <Input
+                      type="number"
+                      value={item.quantity}
+                      onChange={(e) =>
+                        updateStockItem(item.id, "quantity", e.target.value)
+                      }
+                      min="1"
+                      max={item.availableStock}
+                      className="h-8"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Cost</Label>
+                    <Input value={item.costPrice} disabled className="h-8" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Price</Label>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        value={item.sellingPrice}
+                        onChange={(e) =>
+                          updateStockItem(item.id, "sellingPrice", e.target.value)
+                        }
+                        className={cn(
+                          "h-8",
+                          hasDeviation && deviation < 0 && "border-orange-500 bg-orange-500/5",
+                          hasDeviation && deviation > 0 && "border-green-500 bg-green-500/5"
+                        )}
+                      />
+                      {hasDeviation && (
+                        <span
+                          className={cn(
+                            "absolute -top-5 right-0 text-[10px] font-medium px-1 rounded",
+                            deviation < 0
+                              ? "text-orange-600 bg-orange-500/10"
+                              : "text-green-600 bg-green-500/10"
+                          )}
+                        >
+                          {deviation > 0 ? "+" : ""}{deviation.toFixed(0)}%
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs">VAT %</Label>
+                    <Select
+                      value={String(item.taxRate)}
+                      onValueChange={(val) =>
+                        updateStockItem(item.id, "taxRate", val)
+                      }
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TAX_RATE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={String(opt.value)}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Total</Label>
+                    <Input
+                      value={formatCurrency(item.total)}
+                      disabled
+                      className="h-8 font-semibold"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </CardContent>
       </Card>
 
@@ -555,15 +801,29 @@ export default function CreateInvoiceFormClient({
               <Wrench className="w-5 h-5 text-purple-500" />
               Services
             </CardTitle>
-            <Button
-              type="button"
-              size="sm"
-              onClick={addServiceItem}
-              className="bg-purple-600 hover:bg-purple-700 text-white"
-            >
-              <Plus className="w-4 h-4 mr-1" />
-              Add Service
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="bg-purple-600 hover:bg-purple-700 text-white"
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Add Service
+                  <ChevronDown className="w-3 h-3 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {SERVICE_CATEGORIES.map((cat) => (
+                  <DropdownMenuItem
+                    key={cat.value}
+                    onClick={() => addServiceItem(cat.value)}
+                  >
+                    {cat.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -638,8 +898,8 @@ export default function CreateInvoiceFormClient({
                     />
                   </div>
 
-                  {/* Unit, Quantity, Price, Total */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {/* Unit, Quantity, Price, VAT, Total */}
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                     <div>
                       <Label className="text-xs text-muted-foreground mb-1 block">
                         Unit <span className="text-red-500">*</span>
@@ -652,9 +912,6 @@ export default function CreateInvoiceFormClient({
                         placeholder="hour, km, day"
                         className="bg-background border-border text-foreground"
                       />
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        e.g., hour, km, service
-                      </p>
                     </div>
                     <div>
                       <Label className="text-xs text-muted-foreground mb-1 block">
@@ -674,7 +931,7 @@ export default function CreateInvoiceFormClient({
                     </div>
                     <div>
                       <Label className="text-xs text-muted-foreground mb-1 block">
-                        Unit Price (KES)
+                        Unit Price
                       </Label>
                       <Input
                         type="number"
@@ -691,6 +948,28 @@ export default function CreateInvoiceFormClient({
                         step="0.01"
                         className="bg-background border-border text-foreground"
                       />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block">
+                        VAT %
+                      </Label>
+                      <Select
+                        value={String(item.taxRate)}
+                        onValueChange={(val) =>
+                          updateServiceItem(item.id, "taxRate", Number(val))
+                        }
+                      >
+                        <SelectTrigger className="bg-background border-border">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TAX_RATE_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.value} value={String(opt.value)}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div>
                       <Label className="text-xs text-muted-foreground mb-1 block">
@@ -715,31 +994,23 @@ export default function CreateInvoiceFormClient({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Calculator className="w-5 h-5 text-green-500" />
-            Calculations
+            Summary
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Discount %</Label>
-              <Input
-                type="number"
-                value={discountPercentage}
-                onChange={(e) => setDiscountPercentage(Number(e.target.value))}
-                min="0"
-                max="100"
-              />
-            </div>
-            <div>
-              <Label>VAT %</Label>
-              <Input
-                type="number"
-                value={vatPercentage}
-                onChange={(e) => setVatPercentage(Number(e.target.value))}
-                min="0"
-                max="100"
-              />
-            </div>
+          <div>
+            <Label>Overall Discount %</Label>
+            <Input
+              type="number"
+              value={discountPercentage}
+              onChange={(e) => setDiscountPercentage(Number(e.target.value))}
+              min="0"
+              max="100"
+              className="max-w-50"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Applied proportionally to all items
+            </p>
           </div>
           <Separator />
           <div className="space-y-2">
@@ -761,7 +1032,7 @@ export default function CreateInvoiceFormClient({
             )}
             <div className="flex justify-between">
               <span className="text-muted-foreground">
-                VAT ({vatPercentage}%):
+                VAT (per item rates):
               </span>
               <span>{formatCurrency(totals.vatAmount)}</span>
             </div>

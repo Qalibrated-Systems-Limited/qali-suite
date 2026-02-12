@@ -146,11 +146,13 @@ async function EmployeeStatsCards({ userId }: { userId: string }) {
     getEmployeeFinancialSummary(userId),
   ]);
 
+  const totalClaims = summary.pendingClaims + summary.approvedClaims + summary.paidClaims;
+
   return (
     <MetricCardsGrid cols={4}>
       <MetricCard
         title="My Claims"
-        value={summary.myClaims}
+        value={totalClaims}
         subtitle="Total submitted"
         icon="FileText"
         iconColor="text-blue-500"
@@ -158,11 +160,11 @@ async function EmployeeStatsCards({ userId }: { userId: string }) {
       />
       <MetricCard
         title="Pending"
-        value={summary.pendingApproval}
+        value={summary.pendingClaims}
         subtitle="Awaiting review"
         icon="Clock"
         iconColor="text-orange-500"
-        alert={summary.pendingApproval > 0}
+        alert={summary.pendingClaims > 0}
         href="/dashboard/my-claims?status=submitted"
       />
       <MetricCard

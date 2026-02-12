@@ -16,6 +16,7 @@ interface ActivityCardProps {
   className?: string;
   isEmpty?: boolean;
   emptyState?: React.ReactNode;
+  icon?: string;
 }
 
 export function ActivityCard({
@@ -26,6 +27,7 @@ export function ActivityCard({
   className,
   isEmpty = false,
   emptyState,
+  icon,
 }: ActivityCardProps) {
   return (
     <Card
@@ -77,6 +79,7 @@ interface ActivityItemProps {
   title: string;
   subtitle?: string;
   value?: string | number;
+  time?: string;
   badge?: {
     label: string;
     variant?: "default" | "secondary" | "outline" | "destructive";
@@ -84,15 +87,18 @@ interface ActivityItemProps {
   };
   href?: string;
   icon?: React.ReactNode;
+  isLast?: boolean;
 }
 
 export function ActivityItem({
   title,
   subtitle,
   value,
+  time,
   badge,
   href,
   icon,
+  isLast,
 }: ActivityItemProps) {
   const content = (
     <div
@@ -152,13 +158,52 @@ export function ActivityItem({
 interface EmptyStateProps {
   title: string;
   description?: string;
+  icon?: string;
   action?: {
     label: string;
     href: string;
   };
 }
 
-export function EmptyState({ title, description, action }: EmptyStateProps) {
+// ============================================
+// LIST ITEM - For alerts and simple lists
+// ============================================
+interface ListItemProps {
+  title: string;
+  value?: string | number;
+  href?: string;
+  badge?: {
+    label: string;
+    variant?: string;
+    className?: string;
+  };
+}
+
+export function ListItem({ title, value, href, badge }: ListItemProps) {
+  const content = (
+    <div className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 transition-colors">
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-foreground">{title}</span>
+        {badge && (
+          <span className={`text-xs px-1.5 py-0.5 rounded border ${badge.className || ""}`}>
+            {badge.label}
+          </span>
+        )}
+      </div>
+      {value !== undefined && (
+        <span className="text-sm font-medium text-foreground tabular-nums">{value}</span>
+      )}
+    </div>
+  );
+
+  if (href) {
+    return <Link href={href}>{content}</Link>;
+  }
+
+  return content;
+}
+
+export function EmptyState({ title, description, icon, action }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center text-center py-8 px-4">
       <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mb-3">

@@ -1,32 +1,46 @@
 import Account from "../../models/account";
 import JournalEntry from "../../models/JournalEntry";
 import dbConnect from "../../config/dbConnect";
+import {
+  getTenantContext,
+  withTenantScope,
+  validateTenantAccess,
+  getCompanyIdForCreate,
+  withTenantPipeline,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // ACCOUNT SERVICE - ORCHESTRATION LAYER
 // Uses schema methods where they exist
+// Multi-tenant: All operations scoped by companyId
 // ============================================
 
 export class AccountService {
   /**
    * Create account with hierarchy management
    */
-  static async createAccount(data, user) {
+  static async createAccount(data, user, explicitCompanyId = null) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const targetCompanyId = getCompanyIdForCreate(
+      explicitCompanyId,
+      companyId,
+      isSuperAdmin
+    );
 
-    // Validate uniqueness
-    const existingAccount = await Account.findOne({
-      accountCode: data.accountCode,
-    });
+    // Validate uniqueness within company
+    const existingAccount = await Account.findOne(
+      withTenantScope({ accountCode: data.accountCode }, targetCompanyId, false)
+    );
 
     if (existingAccount) {
       throw new Error(`Account code ${data.accountCode} already exists`);
     }
 
     if (data.systemAccount) {
-      const existingSystem = await Account.findOne({
-        systemAccount: data.systemAccount,
-      });
+      const existingSystem = await Account.findOne(
+        withTenantScope({ systemAccount: data.systemAccount }, targetCompanyId, false)
+      );
       if (existingSystem) {
         throw new Error(`System account ${data.systemAccount} already exists`);
       }
@@ -36,6 +50,11 @@ export class AccountService {
     if (data.parentAccount) {
       const parent = await Account.findById(data.parentAccount);
       if (!parent) throw new Error("Parent account not found");
+
+      // Validate parent belongs to same tenant
+      if (!validateTenantAccess(parent, targetCompanyId, false)) {
+        throw new Error("Parent account not found");
+      }
 
       if (parent.accountType !== data.accountType) {
         throw new Error(
@@ -61,6 +80,7 @@ export class AccountService {
 
     return await Account.create({
       ...data,
+      companyId: targetCompanyId,
       createdBy: { name: user.name, id: user.id },
     });
   }
@@ -70,6 +90,7 @@ export class AccountService {
    */
   static async getAccounts(filters = {}) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const query = { isActive: true };
     if (filters.accountType) query.accountType = filters.accountType;
@@ -77,7 +98,9 @@ export class AccountService {
     if (filters.subType) query.subType = filters.subType;
     if (filters.systemAccount) query.systemAccount = filters.systemAccount;
 
-    return await Account.find(query).sort({ accountCode: 1 }).lean();
+    return await Account.find(withTenantScope(query, companyId, isSuperAdmin))
+      .sort({ accountCode: 1 })
+      .lean();
   }
 
   /**
@@ -85,8 +108,11 @@ export class AccountService {
    */
   static async getChartOfAccounts() {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    const accounts = await Account.find({ isActive: true })
+    const accounts = await Account.find(
+      withTenantScope({ isActive: true }, companyId, isSuperAdmin)
+    )
       .sort({ accountCode: 1 })
       .lean();
 
@@ -116,9 +142,15 @@ export class AccountService {
    */
   static async getAccountById(accountId, includeBalance = false) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const account = await Account.findById(accountId);
     if (!account) throw new Error("Account not found");
+
+    // Validate tenant access
+    if (!validateTenantAccess(account, companyId, isSuperAdmin)) {
+      throw new Error("Account not found");
+    }
 
     if (includeBalance) {
       // USE SCHEMA METHOD
@@ -133,9 +165,15 @@ export class AccountService {
    */
   static async updateAccount(accountId, data, user) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const account = await Account.findById(accountId);
     if (!account) throw new Error("Account not found");
+
+    // Validate tenant access
+    if (!validateTenantAccess(account, companyId, isSuperAdmin)) {
+      throw new Error("Account not found");
+    }
 
     if (account.systemAccount && data.systemAccount !== account.systemAccount) {
       throw new Error("Cannot change system account designation");
@@ -151,7 +189,7 @@ export class AccountService {
     }
 
     Object.keys(data).forEach((key) => {
-      if (key !== "systemAccount" && key !== "accountCode") {
+      if (key !== "systemAccount" && key !== "accountCode" && key !== "companyId") {
         account[key] = data[key];
       }
     });
@@ -167,9 +205,15 @@ export class AccountService {
    */
   static async deleteAccount(accountId, user) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const account = await Account.findById(accountId);
     if (!account) throw new Error("Account not found");
+
+    // Validate tenant access
+    if (!validateTenantAccess(account, companyId, isSuperAdmin)) {
+      throw new Error("Account not found");
+    }
 
     // USE SCHEMA METHOD if it exists
     if (typeof account.canDelete === "function") {
@@ -183,10 +227,13 @@ export class AccountService {
         throw new Error(`Cannot delete system account: ${account.accountName}`);
       }
 
-      const childCount = await Account.countDocuments({
-        parentAccount: accountId,
-        isActive: true,
-      });
+      const childCount = await Account.countDocuments(
+        withTenantScope(
+          { parentAccount: accountId, isActive: true },
+          companyId,
+          isSuperAdmin
+        )
+      );
 
       if (childCount > 0) {
         throw new Error(
@@ -206,13 +253,19 @@ export class AccountService {
 
     if (account.parentAccount) {
       const parent = await Account.findById(account.parentAccount);
-      const siblingCount = await Account.countDocuments({
-        parentAccount: account.parentAccount,
-        isActive: true,
-        _id: { $ne: accountId },
-      });
+      const siblingCount = await Account.countDocuments(
+        withTenantScope(
+          {
+            parentAccount: account.parentAccount,
+            isActive: true,
+            _id: { $ne: accountId },
+          },
+          companyId,
+          isSuperAdmin
+        )
+      );
 
-      if (siblingCount === 0) {
+      if (siblingCount === 0 && parent) {
         parent.canPost = true;
         await parent.save();
       }
@@ -226,9 +279,15 @@ export class AccountService {
    */
   static async calculateAccountBalance(accountId) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const account = await Account.findById(accountId);
     if (!account) throw new Error("Account not found");
+
+    // Validate tenant access
+    if (!validateTenantAccess(account, companyId, isSuperAdmin)) {
+      throw new Error("Account not found");
+    }
 
     // USE SCHEMA METHOD
     return await account.calculateActualBalance();
@@ -239,9 +298,15 @@ export class AccountService {
    */
   static async getBalanceWithChildren(accountId) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const account = await Account.findById(accountId);
     if (!account) throw new Error("Account not found");
+
+    // Validate tenant access
+    if (!validateTenantAccess(account, companyId, isSuperAdmin)) {
+      throw new Error("Account not found");
+    }
 
     // USE SCHEMA METHOD
     return await account.getBalanceWithChildren();
@@ -252,17 +317,13 @@ export class AccountService {
    */
   static async getPostableAccounts(accountType = null) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    // USE SCHEMA STATIC if available
-    if (typeof Account.getPostableAccounts === "function") {
-      return await Account.getPostableAccounts(accountType);
-    }
-
-    // Fallback
+    // Fallback with tenant scoping (schema statics may not be tenant-aware)
     const query = { canPost: true, isActive: true };
     if (accountType) query.accountType = accountType;
 
-    return await Account.find(query)
+    return await Account.find(withTenantScope(query, companyId, isSuperAdmin))
       .sort({ accountCode: 1 })
       .select("accountCode accountName accountType subType")
       .lean();
@@ -273,17 +334,16 @@ export class AccountService {
    */
   static async getSystemAccount(systemAccountName) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    // USE SCHEMA STATIC if available
-    if (typeof Account.getSystemAccount === "function") {
-      return await Account.getSystemAccount(systemAccountName);
-    }
-
-    // Fallback
-    const account = await Account.findOne({
-      systemAccount: systemAccountName,
-      isActive: true,
-    }).lean();
+    // Tenant-scoped query
+    const account = await Account.findOne(
+      withTenantScope(
+        { systemAccount: systemAccountName, isActive: true },
+        companyId,
+        isSuperAdmin
+      )
+    ).lean();
 
     if (!account) {
       throw new Error(
@@ -299,17 +359,11 @@ export class AccountService {
    */
   static async getAccountsByType(accountType) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    // USE SCHEMA STATIC if available
-    if (typeof Account.getByType === "function") {
-      return await Account.getByType(accountType);
-    }
-
-    // Fallback
-    return await Account.find({
-      accountType,
-      isActive: true,
-    })
+    return await Account.find(
+      withTenantScope({ accountType, isActive: true }, companyId, isSuperAdmin)
+    )
       .sort({ accountCode: 1 })
       .lean();
   }
@@ -319,17 +373,15 @@ export class AccountService {
    */
   static async getRootAccounts() {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    // USE SCHEMA STATIC if available
-    if (typeof Account.getRootAccounts === "function") {
-      return await Account.getRootAccounts();
-    }
-
-    // Fallback
-    return await Account.find({
-      parentAccount: null,
-      isActive: true,
-    })
+    return await Account.find(
+      withTenantScope(
+        { parentAccount: null, isActive: true },
+        companyId,
+        isSuperAdmin
+      )
+    )
       .sort({ accountCode: 1 })
       .lean();
   }
@@ -339,14 +391,21 @@ export class AccountService {
    */
   static async searchAccounts(searchTerm) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    return await Account.find({
-      isActive: true,
-      $or: [
-        { accountCode: { $regex: searchTerm, $options: "i" } },
-        { accountName: { $regex: searchTerm, $options: "i" } },
-      ],
-    })
+    return await Account.find(
+      withTenantScope(
+        {
+          isActive: true,
+          $or: [
+            { accountCode: { $regex: searchTerm, $options: "i" } },
+            { accountName: { $regex: searchTerm, $options: "i" } },
+          ],
+        },
+        companyId,
+        isSuperAdmin
+      )
+    )
       .sort({ accountCode: 1 })
       .limit(50)
       .lean();
@@ -357,10 +416,11 @@ export class AccountService {
    */
   static async hasTransactions(accountId) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    const count = await JournalEntry.countDocuments({
-      "lines.accountId": accountId,
-    });
+    const count = await JournalEntry.countDocuments(
+      withTenantScope({ "lines.accountId": accountId }, companyId, isSuperAdmin)
+    );
 
     return count > 0;
   }
@@ -370,18 +430,28 @@ export class AccountService {
    */
   static async getAccountSummary(accountId, startDate, endDate) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const account = await Account.findById(accountId);
     if (!account) throw new Error("Account not found");
+
+    // Validate tenant access
+    if (!validateTenantAccess(account, companyId, isSuperAdmin)) {
+      throw new Error("Account not found");
+    }
 
     const dateFilter = {};
     if (startDate) dateFilter.$gte = new Date(startDate);
     if (endDate) dateFilter.$lte = new Date(endDate);
 
-    const query = {
-      status: "posted",
-      "lines.accountId": accountId,
-    };
+    const query = withTenantScope(
+      {
+        status: "posted",
+        "lines.accountId": accountId,
+      },
+      companyId,
+      isSuperAdmin
+    );
 
     if (Object.keys(dateFilter).length > 0) {
       query.entryDate = dateFilter;
@@ -438,9 +508,16 @@ export class AccountService {
    */
   static async validateAccountForPosting(accountId) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const account = await Account.findById(accountId);
     if (!account) throw new Error("Account not found");
+
+    // Validate tenant access
+    if (!validateTenantAccess(account, companyId, isSuperAdmin)) {
+      throw new Error("Account not found");
+    }
+
     if (!account.isActive)
       throw new Error(`Account "${account.accountName}" is inactive`);
     if (!account.canPost) {
@@ -457,11 +534,11 @@ export class AccountService {
    */
   static async refreshAllBalances() {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    const accounts = await Account.find({
-      canPost: true,
-      isActive: true,
-    });
+    const accounts = await Account.find(
+      withTenantScope({ canPost: true, isActive: true }, companyId, isSuperAdmin)
+    );
 
     let updated = 0;
 

@@ -20,6 +20,14 @@ function formatUserForAudit(user) {
 // ============================================
 const fiscalPeriodSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // Period Identification
     year: {
       type: Number,
@@ -47,11 +55,9 @@ const fiscalPeriodSchema = new Schema(
     periodCode: {
       type: String,
       required: [true, "Period code is required"],
-      unique: true,
       // e.g., "2025-01", "2025-Q1"
       trim: true,
       uppercase: true,
-      index: true,
     },
 
     // Period Dates
@@ -278,9 +284,12 @@ const fiscalPeriodSchema = new Schema(
 // ============================================
 // COMPOUND INDEXES
 // ============================================
-fiscalPeriodSchema.index({ year: -1, month: -1 }, { unique: true });
-fiscalPeriodSchema.index({ status: 1, endDate: -1 });
-fiscalPeriodSchema.index({ periodType: 1, year: -1 });
+// Unique period per company
+fiscalPeriodSchema.index({ companyId: 1, year: -1, month: -1 }, { unique: true });
+fiscalPeriodSchema.index({ companyId: 1, periodCode: 1 }, { unique: true });
+// Query indexes
+fiscalPeriodSchema.index({ companyId: 1, status: 1, endDate: -1 });
+fiscalPeriodSchema.index({ companyId: 1, periodType: 1, year: -1 });
 
 // ============================================
 // VIRTUALS
@@ -691,9 +700,10 @@ fiscalPeriodSchema.methods.createClosingJournalEntry = async function (user) {
   // 5. CREATE AND POST JOURNAL ENTRY
   // ============================================
   const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
-  const entryNumber = await generateUniqueEntryNumber("CLOSE");
+  const entryNumber = await generateUniqueEntryNumber("CLOSE", this.companyId);
 
   const journalEntry = await JournalEntry.create({
+    companyId: this.companyId,
     entryNumber,
     entryDate: this.endDate,
     entryType: "closing",
@@ -805,10 +815,17 @@ fiscalPeriodSchema.statics.getByCode = function (periodCode) {
 fiscalPeriodSchema.statics.createMonthPeriod = async function (
   year,
   month,
-  createdBy
+  createdBy,
+  companyId = null
 ) {
-  // Check if period already exists
-  const existing = await this.findOne({ year, month });
+  // Build query filter with companyId for tenant isolation
+  const filter = { year, month };
+  if (companyId) {
+    filter.companyId = companyId;
+  }
+
+  // Check if period already exists for this company
+  const existing = await this.findOne(filter);
   if (existing) {
     throw new Error(`Period ${year}-${month} already exists`);
   }
@@ -833,7 +850,7 @@ fiscalPeriodSchema.statics.createMonthPeriod = async function (
 
   const userInfo = formatUserForAudit(createdBy);
 
-  const period = await this.create({
+  const periodData = {
     year,
     month,
     periodName: `${monthNames[month - 1]} ${year}`,
@@ -843,7 +860,14 @@ fiscalPeriodSchema.statics.createMonthPeriod = async function (
     periodType: "month",
     status: "open",
     createdBy: userInfo,
-  });
+  };
+
+  // Add companyId if provided
+  if (companyId) {
+    periodData.companyId = companyId;
+  }
+
+  const period = await this.create(periodData);
 
   return period;
 };
@@ -853,13 +877,14 @@ fiscalPeriodSchema.statics.createMonthPeriod = async function (
  */
 fiscalPeriodSchema.statics.createYearPeriods = async function (
   year,
-  createdBy
+  createdBy,
+  companyId = null
 ) {
   const periods = [];
 
   for (let month = 1; month <= 12; month++) {
     try {
-      const period = await this.createMonthPeriod(year, month, createdBy);
+      const period = await this.createMonthPeriod(year, month, createdBy, companyId);
       periods.push(period);
     } catch (error) {
       console.error(`Failed to create period ${year}-${month}:`, error.message);

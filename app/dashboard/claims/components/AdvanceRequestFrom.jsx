@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useActionState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
@@ -9,12 +9,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   ArrowLeft,
   Loader2,
   Send,
   DollarSign,
   MapPin,
   Calendar,
+  Briefcase,
+  FolderKanban,
+  Wallet,
+  Building2,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -22,6 +33,7 @@ import {
   updateClaim,
 } from "@/app/mongodb/actions/claim-action";
 import { toast } from "sonner";
+import { ADVANCE_TYPES } from "@/lib/utils";
 
 function SubmitButton({ isEdit, pending }) {
   return (
@@ -45,9 +57,46 @@ function SubmitButton({ isEdit, pending }) {
   );
 }
 
+// Helper function to get icon for advance type
+function getAdvanceTypeIcon(type) {
+  switch (type) {
+    case "travel":
+      return <MapPin className="w-4 h-4" />;
+    case "petty_cash":
+      return <Wallet className="w-4 h-4" />;
+    case "project":
+      return <FolderKanban className="w-4 h-4" />;
+    case "operational":
+      return <Building2 className="w-4 h-4" />;
+    default:
+      return <Briefcase className="w-4 h-4" />;
+  }
+}
+
+// Helper function to get tip text based on advance type
+function getAdvanceTip(type) {
+  switch (type) {
+    case "travel":
+      return "Travel advances must be settled with receipts within 7 days after your return.";
+    case "petty_cash":
+      return "Petty cash advances are for small recurring office expenses. Keep all receipts for reconciliation.";
+    case "project":
+      return "Project advances are tied to specific project budgets. Include your project code for tracking.";
+    case "operational":
+      return "Operational advances are for general business expenses. Submit receipts within 14 days.";
+    default:
+      return "Advances must be settled with receipts after use.";
+  }
+}
+
 export function AdvanceRequestForm({ claim = null }) {
   const router = useRouter();
   const isEdit = !!claim;
+
+  // Track selected advance type
+  const [advanceType, setAdvanceType] = useState(
+    claim?.advanceDetails?.advanceType || "travel"
+  );
 
   // Use different action based on mode
   const action = isEdit
@@ -69,14 +118,35 @@ export function AdvanceRequestForm({ claim = null }) {
     return new Date(date).toISOString().split("T")[0];
   };
 
+  // Update advanceType from state if validation failed
   useEffect(() => {
+    if (state?.values?.advanceType) {
+      setAdvanceType(state.values.advanceType);
+    }
+  }, [state?.values?.advanceType]);
+
+  useEffect(() => {
+    console.log("Form state changed:", state);
     if (state?.success) {
       toast.success(state.message || "Advance request submitted successfully", {
         description: `Request ${state.claimNumber} is now pending approval`,
       });
       router.push(`/dashboard/claims/${state.claimId}`);
-    } else if (state?.errors?._form) {
-      toast.error(state.errors._form[0]);
+    } else if (state?.errors) {
+      // Show form-level errors
+      if (state.errors._form) {
+        toast.error(state.errors._form[0]);
+      }
+      // Show field-level errors as a summary toast
+      const fieldErrors = Object.entries(state.errors)
+        .filter(([key]) => key !== "_form")
+        .map(([key, msgs]) => `${key}: ${msgs[0]}`)
+        .join(", ");
+      if (fieldErrors) {
+        toast.error("Please fix the following errors", {
+          description: fieldErrors,
+        });
+      }
     }
   }, [state, router]);
 
@@ -122,11 +192,47 @@ export function AdvanceRequestForm({ claim = null }) {
             </div>
           )}
 
-          {/* Info Banner */}
+          {/* Advance Type Selector */}
+          <div className="space-y-3">
+            <Label htmlFor="advanceType" className="text-sm sm:text-base font-medium">
+              Advance Type <span className="text-red-500">*</span>
+            </Label>
+            {/* Hidden input to submit the value with the form */}
+            <input type="hidden" name="advanceType" value={advanceType} />
+            <Select
+              value={advanceType}
+              onValueChange={setAdvanceType}
+            >
+              <SelectTrigger className="h-12">
+                <SelectValue placeholder="Select advance type" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(ADVANCE_TYPES).map(([value, { label, description }]) => (
+                  <SelectItem key={value} value={value}>
+                    <div className="flex items-center gap-2">
+                      {getAdvanceTypeIcon(value)}
+                      <div>
+                        <span className="font-medium">{label}</span>
+                        <span className="text-muted-foreground ml-2 text-sm">
+                          - {description}
+                        </span>
+                      </div>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {state?.errors?.advanceType && (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                {state.errors.advanceType[0]}
+              </p>
+            )}
+          </div>
+
+          {/* Info Banner - Dynamic based on type */}
           <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-800 p-4 sm:p-5">
             <p className="text-sm sm:text-base text-blue-800 dark:text-blue-300">
-              💡 <strong>Tip:</strong> Advance requests must be settled with
-              receipts within 7 days after your return.
+              💡 <strong>Tip:</strong> {getAdvanceTip(advanceType)}
             </p>
           </div>
 
@@ -156,7 +262,8 @@ export function AdvanceRequestForm({ claim = null }) {
                   step="1"
                   required
                   placeholder="e.g., 20000"
-                  defaultValue={claim?.advanceDetails?.requestedAmount || ""}
+                  defaultValue={state?.values?.requestedAmount ?? claim?.advanceDetails?.requestedAmount ?? ""}
+                  key={`amount-${state?.values?.requestedAmount ?? "init"}`}
                   className="text-xl sm:text-2xl font-bold h-14 sm:h-16"
                 />
                 {state?.errors?.requestedAmount && (
@@ -181,7 +288,8 @@ export function AdvanceRequestForm({ claim = null }) {
                   required
                   minLength={10}
                   placeholder="e.g., Client support visit to Mombasa"
-                  defaultValue={claim?.advanceDetails?.purpose || ""}
+                  defaultValue={state?.values?.purpose ?? claim?.advanceDetails?.purpose ?? ""}
+                  key={`purpose-${state?.values?.purpose ?? "init"}`}
                   className="h-12"
                 />
                 {state?.errors?.purpose && (
@@ -196,86 +304,137 @@ export function AdvanceRequestForm({ claim = null }) {
             </div>
           </div>
 
-          {/* Travel Details Section */}
-          <div className="space-y-5 pt-4 border-t border-border">
-            <div className="flex items-center gap-2 text-foreground">
-              <Calendar className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
-              <h3 className="text-base sm:text-lg font-semibold">
-                Travel Details
-              </h3>
-            </div>
+          {/* Travel Details Section - Only for travel type */}
+          {advanceType === "travel" && (
+            <div className="space-y-5 pt-4 border-t border-border">
+              <div className="flex items-center gap-2 text-foreground">
+                <Calendar className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
+                <h3 className="text-base sm:text-lg font-semibold">
+                  Travel Details
+                </h3>
+              </div>
 
-            <div className="grid grid-cols-1 gap-5">
-              {/* Destination */}
+              <div className="grid grid-cols-1 gap-5">
+                {/* Destination */}
+                <div className="space-y-2.5">
+                  <Label
+                    htmlFor="destination"
+                    className="text-sm sm:text-base font-medium"
+                  >
+                    Destination <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                    <Input
+                      id="destination"
+                      name="destination"
+                      type="text"
+                      placeholder="e.g., Mombasa"
+                      defaultValue={state?.values?.destination ?? claim?.advanceDetails?.destination ?? ""}
+                      key={`dest-${state?.values?.destination ?? "init"}`}
+                      className="pl-11 h-12"
+                    />
+                  </div>
+                  {state?.errors?.destination && (
+                    <p className="text-sm text-red-600 dark:text-red-400">
+                      {state.errors.destination[0]}
+                    </p>
+                  )}
+                </div>
+
+                {/* Travel Dates */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
+                  {/* Travel Start Date */}
+                  <div className="space-y-2.5">
+                    <Label
+                      htmlFor="travelFromDate"
+                      className="text-sm sm:text-base font-medium"
+                    >
+                      Travel Start Date <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="travelFromDate"
+                      name="travelFromDate"
+                      type="date"
+                      min={today}
+                      max={maxDateStr}
+                      defaultValue={state?.values?.travelFromDate ?? formatDateForInput(claim?.advanceDetails?.travelDates?.from)}
+                      key={`from-${state?.values?.travelFromDate ?? "init"}`}
+                      className="h-12"
+                    />
+                    {state?.errors?.travelFromDate && (
+                      <p className="text-sm text-red-600 dark:text-red-400">
+                        {state.errors.travelFromDate[0]}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Travel End Date */}
+                  <div className="space-y-2.5">
+                    <Label
+                      htmlFor="travelToDate"
+                      className="text-sm sm:text-base font-medium"
+                    >
+                      Travel End Date <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="travelToDate"
+                      name="travelToDate"
+                      type="date"
+                      min={today}
+                      max={maxDateStr}
+                      defaultValue={state?.values?.travelToDate ?? formatDateForInput(claim?.advanceDetails?.travelDates?.to)}
+                      key={`to-${state?.values?.travelToDate ?? "init"}`}
+                      className="h-12"
+                    />
+                    {state?.errors?.travelToDate && (
+                      <p className="text-sm text-red-600 dark:text-red-400">
+                        {state.errors.travelToDate[0]}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Project Details Section - Only for project type */}
+          {advanceType === "project" && (
+            <div className="space-y-5 pt-4 border-t border-border">
+              <div className="flex items-center gap-2 text-foreground">
+                <FolderKanban className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
+                <h3 className="text-base sm:text-lg font-semibold">
+                  Project Details
+                </h3>
+              </div>
+
               <div className="space-y-2.5">
                 <Label
-                  htmlFor="destination"
+                  htmlFor="projectCode"
                   className="text-sm sm:text-base font-medium"
                 >
-                  Destination <span className="text-red-500">*</span>
+                  Project Code <span className="text-red-500">*</span>
                 </Label>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                  <Input
-                    id="destination"
-                    name="destination"
-                    type="text"
-                    required
-                    placeholder="e.g., Mombasa"
-                    defaultValue={claim?.advanceDetails?.destination || ""}
-                    className="pl-11 h-12"
-                  />
-                </div>
-              </div>
-
-              {/* Travel Dates */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-                {/* Travel Start Date */}
-                <div className="space-y-2.5">
-                  <Label
-                    htmlFor="travelFromDate"
-                    className="text-sm sm:text-base font-medium"
-                  >
-                    Travel Start Date <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="travelFromDate"
-                    name="travelFromDate"
-                    type="date"
-                    required
-                    min={today}
-                    max={maxDateStr}
-                    defaultValue={formatDateForInput(
-                      claim?.advanceDetails?.travelDates?.from
-                    )}
-                    className="h-12"
-                  />
-                </div>
-
-                {/* Travel End Date */}
-                <div className="space-y-2.5">
-                  <Label
-                    htmlFor="travelToDate"
-                    className="text-sm sm:text-base font-medium"
-                  >
-                    Travel End Date <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="travelToDate"
-                    name="travelToDate"
-                    type="date"
-                    required
-                    min={today}
-                    max={maxDateStr}
-                    defaultValue={formatDateForInput(
-                      claim?.advanceDetails?.travelDates?.to
-                    )}
-                    className="h-12"
-                  />
-                </div>
+                <Input
+                  id="projectCode"
+                  name="projectCode"
+                  type="text"
+                  placeholder="e.g., PRJ-2024-001"
+                  defaultValue={state?.values?.projectCode ?? claim?.advanceDetails?.projectCode ?? ""}
+                  key={`proj-${state?.values?.projectCode ?? "init"}`}
+                  className="h-12"
+                />
+                {state?.errors?.projectCode && (
+                  <p className="text-sm text-red-600 dark:text-red-400">
+                    {state.errors.projectCode[0]}
+                  </p>
+                )}
+                <p className="text-xs sm:text-sm text-muted-foreground">
+                  Enter the project code this advance is associated with
+                </p>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Estimated Expenses Section */}
           <div className="space-y-4 pt-4 border-t border-border">
@@ -293,7 +452,8 @@ export function AdvanceRequestForm({ claim = null }) {
               name="estimatedExpenses"
               rows={4}
               placeholder="e.g.,&#10;- Transport: KES 8,000&#10;- Accommodation: KES 6,000&#10;- Meals: KES 4,000&#10;- Miscellaneous: KES 2,000"
-              defaultValue={claim?.advanceDetails?.estimatedExpenses || ""}
+              defaultValue={state?.values?.estimatedExpenses ?? claim?.advanceDetails?.estimatedExpenses ?? ""}
+              key={`expenses-${state?.values?.estimatedExpenses ?? "init"}`}
               className="font-mono text-sm resize-none"
             />
           </div>
@@ -309,7 +469,8 @@ export function AdvanceRequestForm({ claim = null }) {
               name="notes"
               rows={3}
               placeholder="Any additional information for your manager..."
-              defaultValue={claim?.notes || ""}
+              defaultValue={state?.values?.notes ?? claim?.notes ?? ""}
+              key={`notes-${state?.values?.notes ?? "init"}`}
               className="resize-none"
             />
           </div>
@@ -337,7 +498,11 @@ export function AdvanceRequestForm({ claim = null }) {
         <ol className="text-sm sm:text-base text-muted-foreground space-y-2 list-decimal list-inside">
           <li>Your manager will review and approve/reject your request</li>
           <li>If approved, the accountant will process the payment</li>
-          <li>After your trip, submit receipts to settle the advance</li>
+          <li>
+            {advanceType === "travel"
+              ? "After your trip, submit receipts to settle the advance"
+              : "Submit receipts to settle the advance after use"}
+          </li>
           <li>Any unused amount must be returned to the company</li>
         </ol>
       </Card>

@@ -26,6 +26,7 @@ import {
   RecalculateBalanceButton,
 } from "../components/actionButtons";
 import { auth } from "@/auth";
+import { serializeBsonType } from "@/lib/utils";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
@@ -184,8 +185,8 @@ export default async function AccountDetailPage({ params }) {
                           account.cachedBalance > 0
                             ? "text-green-600 dark:text-green-400"
                             : account.cachedBalance < 0
-                            ? "text-red-600 dark:text-red-400"
-                            : "text-muted-foreground"
+                              ? "text-red-600 dark:text-red-400"
+                              : "text-muted-foreground"
                         }`}
                       >
                         {formatCurrency(Math.abs(account.cachedBalance))}

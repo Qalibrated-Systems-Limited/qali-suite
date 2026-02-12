@@ -8,11 +8,18 @@ const Schema = mongoose.Schema;
 // ============================================
 const accountSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // Basic Information
     accountCode: {
       type: String,
       required: [true, "Account code is required"],
-      unique: true,
       trim: true,
       uppercase: true,
       index: true,
@@ -82,7 +89,6 @@ const accountSchema = new Schema(
       type: String,
       enum: accountSystemTypes,
       default: null,
-      unique: true,
       sparse: true,
       index: true,
     },
@@ -147,21 +153,29 @@ const accountSchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  }
+  },
 );
 
 // ============================================
 // COMPOUND INDEXES FOR QUERY EFFICIENCY
 // ============================================
-accountSchema.index({ accountType: 1, isActive: 1 });
-accountSchema.index({ canPost: 1, isActive: 1 });
-accountSchema.index({ ancestors: 1 }); // Critical for hierarchy queries
+// Unique account code per company
+accountSchema.index({ companyId: 1, accountCode: 1 }, { unique: true });
+// Unique system account per company
+accountSchema.index(
+  { companyId: 1, systemAccount: 1 },
+  { unique: true, sparse: true },
+);
+// Query indexes
+accountSchema.index({ companyId: 1, accountType: 1, isActive: 1 });
+accountSchema.index({ companyId: 1, canPost: 1, isActive: 1 });
+accountSchema.index({ companyId: 1, ancestors: 1 }); // Critical for hierarchy queries
 
 // In Account schema, add a pre-remove hook
 accountSchema.pre("remove", function (next) {
   if (this.systemAccount) {
     throw new Error(
-      `Cannot delete system account: ${this.accountName}. This account is required for system operation.`
+      `Cannot delete system account: ${this.accountName}. This account is required for system operation.`,
     );
   }
 });

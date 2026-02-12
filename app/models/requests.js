@@ -1,4 +1,4 @@
-import { priority, purposeForItemsRemovalFromStock } from "@/lib/utils";
+import { priority, purposeForItemsRemovalFromStock, stockRequestTypes } from "@/lib/utils";
 import mongoose from "mongoose";
 export const runtime = "nodejs";
 
@@ -6,14 +6,51 @@ const Schema = mongoose.Schema;
 
 const stockRequestSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
     requestNumber: {
       type: String,
       required: true,
-      unique: true,
     },
-    customer: {
+    // Request-level type (industry standard approach)
+    requestType: {
       type: String,
-      required: true,
+      enum: stockRequestTypes,
+      required: [true, "Request type is required"],
+      index: true,
+    },
+    // Customer/Party snapshot (same pattern as Invoice)
+    customer: {
+      id: {
+        type: String,
+        required: function() {
+          return this.requestType !== "internal";
+        },
+        index: true,
+      },
+      name: {
+        type: String,
+        required: function() {
+          return this.requestType !== "internal";
+        },
+        trim: true,
+      },
+      email: {
+        type: String,
+        trim: true,
+        lowercase: true,
+      },
+      phone: {
+        type: String,
+        trim: true,
+      },
+      address: String,
+      taxPin: String,
     },
     requester: {
       name: {
@@ -70,10 +107,10 @@ const stockRequestSchema = new Schema(
         },
         unitPrice: Number,
         unit: String,
+        // Legacy: Item-level purpose (optional, derives from request.requestType)
         purpose: {
           type: String,
           enum: purposeForItemsRemovalFromStock,
-          required: true,
         },
         purposeDetails: String,
         requiresReturn: {
@@ -187,6 +224,15 @@ const stockRequestSchema = new Schema(
     totalValue: {
       type: Number,
       default: 0,
+    },
+    // Draft invoice (created at fulfillment for "sale" type requests)
+    draftInvoice: {
+      invoiceId: {
+        type: Schema.Types.ObjectId,
+        ref: "Invoice",
+      },
+      invoiceNumber: String,
+      createdAt: Date,
     },
     approvalHistory: [
       {
@@ -475,6 +521,19 @@ stockRequestSchema.methods.canFulfill = function () {
 stockRequestSchema.methods.hasUnfulfilledItems = function () {
   return this.items.some((item) => (item.remainingToFulfill || 0) > 0);
 };
+
+// ============================================
+// INDEXES
+// ============================================
+// Unique request number per company
+stockRequestSchema.index({ companyId: 1, requestNumber: 1 }, { unique: true });
+// Query indexes - prefixed with companyId for tenant isolation
+stockRequestSchema.index({ companyId: 1, status: 1, createdAt: -1 });
+stockRequestSchema.index({ companyId: 1, "requester.department": 1, status: 1 });
+stockRequestSchema.index({ companyId: 1, priority: 1, status: 1 });
+stockRequestSchema.index({ companyId: 1, requiredByDate: 1, status: 1 });
+stockRequestSchema.index({ companyId: 1, requestType: 1, status: 1 });
+stockRequestSchema.index({ companyId: 1, "customer.id": 1, status: 1 });
 
 const models = mongoose.models;
 let StockRequest = models ? models.StockRequest : null;

@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import EmployeeClaim from "../../models/employeesClaims";
 import dbConnect from "../../config/dbConnect";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { ObjectId } from "mongodb";
 
 dbConnect();
 
@@ -10,6 +12,12 @@ const ITEMS_PER_PAGE = 20;
 // FETCH CLAIM PAGES (for pagination)
 // ============================================
 export const fetchClaimPages = async (searchTerm = "", filters = {}) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const { status, claimType, userId, userRole } = filters;
 
   // Build filter conditions
@@ -35,6 +43,7 @@ export const fetchClaimPages = async (searchTerm = "", filters = {}) => {
   const transactionSearchStage = {
     $match: {
       $and: [
+        tenantMatch,
         additionalFilters,
         {
           $or: [
@@ -49,7 +58,7 @@ export const fetchClaimPages = async (searchTerm = "", filters = {}) => {
   };
 
   const baseFilterStage = {
-    $match: additionalFilters,
+    $match: { ...tenantMatch, ...additionalFilters },
   };
 
   const countStage = {
@@ -78,6 +87,12 @@ export const fetchClaimPages = async (searchTerm = "", filters = {}) => {
 // SEARCH CLAIMS WITH PAGINATION
 // ============================================
 export const searchClaims = async (searchTerm = "", page = 1, filters = {}) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const { status, claimType, userId, userRole } = filters;
 
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
@@ -105,6 +120,7 @@ export const searchClaims = async (searchTerm = "", page = 1, filters = {}) => {
   const searchStage = {
     $match: {
       $and: [
+        tenantMatch,
         additionalFilters,
         {
           $or: [
@@ -119,7 +135,7 @@ export const searchClaims = async (searchTerm = "", page = 1, filters = {}) => {
   };
 
   const baseFilterStage = {
-    $match: additionalFilters,
+    $match: { ...tenantMatch, ...additionalFilters },
   };
 
   const paginationStage = [{ $skip: skipRecords }, { $limit: ITEMS_PER_PAGE }];
@@ -199,7 +215,7 @@ export const getUserClaims = async (
   userId,
   searchTerm = "",
   page = 1,
-  filters = {}
+  filters = {},
 ) => {
   return searchClaims(searchTerm, page, {
     ...filters,
@@ -212,8 +228,12 @@ export const getUserClaims = async (
 // GET CLAIM STATS
 // ============================================
 export const getClaimStats = async (userId = null, userRole = null) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   // Build base filter for user role
-  let baseFilter = {};
+  let baseFilter = { ...tenantMatch };
   if (userRole === "employee" || userRole === "user") {
     baseFilter["employee.userId"] = userId;
   }
@@ -258,8 +278,15 @@ export const getClaimStats = async (userId = null, userRole = null) => {
 // GET SINGLE CLAIM BY ID
 // ============================================
 export const getClaimById = async (claimId) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const id = new mongoose.Types.ObjectId(claimId);
-  const claim = await EmployeeClaim.findById(id).lean();
+  const claim = await EmployeeClaim.findOne({
+    ...tenantMatch,
+    _id: id,
+  }).lean();
 
   if (!claim) {
     return null;
@@ -293,7 +320,7 @@ export const getClaimsByType = async (
   claimType,
   searchTerm = "",
   page = 1,
-  userId = null
+  userId = null,
 ) => {
   const filters = { claimType };
 
@@ -309,7 +336,12 @@ export const getClaimsByType = async (
 // GET ADVANCE REQUESTS NEEDING SETTLEMENT
 // ============================================
 export const getAdvancesNeedingSettlement = async (userId) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const claims = await EmployeeClaim.find({
+    ...tenantMatch,
     "employee.userId": userId,
     claimType: "advance_request",
     status: "paid",
@@ -323,6 +355,7 @@ export const getAdvancesNeedingSettlement = async (userId) => {
   for (const claim of claims) {
     // Check if there's a settlement for this advance
     const settlement = await EmployeeClaim.findOne({
+      ...tenantMatch,
       claimType: "advance_return",
       "returnDetails.advancePaymentId": claim.advancePaymentId,
     }).lean();
@@ -353,7 +386,7 @@ export const searchUserClaims = async (
   userRole,
   searchTerm = "",
   page = 1,
-  filters = {}
+  filters = {},
 ) => {
   console.log("User in searchUserClaims:", userId, userRole);
   // Employees can only see their own claims
@@ -372,7 +405,7 @@ export const fetchUserClaimPages = async (
   userId,
   userRole,
   searchTerm = "",
-  filters = {}
+  filters = {},
 ) => {
   // Employees can only see their own claims
   if (userRole === "employee" || userRole === "user") {

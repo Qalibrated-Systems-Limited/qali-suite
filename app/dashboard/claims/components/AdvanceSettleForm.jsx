@@ -9,12 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   ArrowLeft,
   Loader2,
@@ -29,24 +35,113 @@ import {
   Calendar,
   MapPin,
   Info,
+  ChevronsUpDown,
+  Check,
 } from "lucide-react";
 import Link from "next/link";
 import { settleAdvance } from "../../../mongodb/actions/claim-action";
 import { toast } from "sonner";
 import { format, isAfter, isBefore, parseISO } from "date-fns";
+import {
+  cn,
+  EXPENSE_CATEGORIES,
+  getGroupedCategories,
+  getSuggestedCategories,
+} from "@/lib/utils";
 
 // ============================================
-// EXPENSE CATEGORIES
+// CATEGORY COMBOBOX COMPONENT
 // ============================================
-const categories = [
-  { value: "transport", label: "Transport", icon: "🚗" },
-  { value: "accommodation", label: "Accommodation", icon: "🏨" },
-  { value: "meals", label: "Meals", icon: "🍽️" },
-  { value: "fuel", label: "Fuel", icon: "⛽" },
-  { value: "supplies", label: "Supplies", icon: "📦" },
-  { value: "telecommunications", label: "Telecommunications", icon: "📱" },
-  { value: "other", label: "Other", icon: "📋" },
-];
+function CategoryCombobox({ value, onValueChange, advanceType }) {
+  const [open, setOpen] = useState(false);
+  const groupedCategories = getGroupedCategories();
+  const suggestedCategories = getSuggestedCategories(advanceType);
+
+  const selectedCategory = value ? EXPENSE_CATEGORIES[value] : null;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="h-11 w-full justify-between font-normal"
+        >
+          {selectedCategory ? (
+            <span className="flex items-center gap-2">
+              <span>{selectedCategory.icon}</span>
+              <span>{selectedCategory.label}</span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Select category...</span>
+          )}
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-75 p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search categories..." />
+          <CommandList>
+            <CommandEmpty>No category found.</CommandEmpty>
+            {/* Suggested categories for this advance type */}
+            <CommandGroup heading="Suggested">
+              {suggestedCategories.map((catValue) => {
+                const cat = EXPENSE_CATEGORIES[catValue];
+                if (!cat) return null;
+                return (
+                  <CommandItem
+                    key={catValue}
+                    value={catValue}
+                    onSelect={() => {
+                      onValueChange(catValue);
+                      setOpen(false);
+                    }}
+                  >
+                    <Check
+                      className={cn(
+                        "mr-2 h-4 w-4",
+                        value === catValue ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                    <span className="mr-2">{cat.icon}</span>
+                    {cat.label}
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+            {/* All categories grouped */}
+            {Object.entries(groupedCategories).map(([group, categories]) => (
+              <CommandGroup key={group} heading={group}>
+                {categories
+                  .filter((cat) => !suggestedCategories.includes(cat.value))
+                  .map((cat) => (
+                    <CommandItem
+                      key={cat.value}
+                      value={cat.value}
+                      onSelect={() => {
+                        onValueChange(cat.value);
+                        setOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          value === cat.value ? "opacity-100" : "opacity-0"
+                        )}
+                      />
+                      <span className="mr-2">{cat.icon}</span>
+                      {cat.label}
+                    </CommandItem>
+                  ))}
+              </CommandGroup>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // ============================================
 // SUBMIT BUTTON COMPONENT
@@ -83,6 +178,7 @@ function ExpenseItemCard({
   onRemove,
   canRemove,
   travelDates,
+  advanceType,
   errors,
 }) {
   const today = new Date().toISOString().split("T")[0];
@@ -90,8 +186,9 @@ function ExpenseItemCard({
     ? new Date(travelDates.from).toISOString().split("T")[0]
     : undefined;
 
-  // Check if date is outside travel dates
+  // Check if date is outside travel dates (only relevant for travel advances)
   const isDateOutsideTravel =
+    advanceType === "travel" &&
     item.date &&
     travelDates?.from &&
     travelDates?.to &&
@@ -112,9 +209,9 @@ function ExpenseItemCard({
           <span className="text-sm sm:text-base font-semibold text-foreground">
             Expense #{index + 1}
           </span>
-          {item.category && (
+          {item.category && EXPENSE_CATEGORIES[item.category] && (
             <span className="text-lg">
-              {categories.find((c) => c.value === item.category)?.icon}
+              {EXPENSE_CATEGORIES[item.category].icon}
             </span>
           )}
         </div>
@@ -166,25 +263,11 @@ function ExpenseItemCard({
           <Label className="text-sm sm:text-base font-medium">
             Category <span className="text-red-500">*</span>
           </Label>
-          <Select
-            required
+          <CategoryCombobox
             value={item.category}
             onValueChange={(value) => onUpdate("category", value)}
-          >
-            <SelectTrigger className="h-11">
-              <SelectValue placeholder="Select category" />
-            </SelectTrigger>
-            <SelectContent>
-              {categories.map((cat) => (
-                <SelectItem key={cat.value} value={cat.value}>
-                  <span className="flex items-center gap-2">
-                    <span>{cat.icon}</span>
-                    <span>{cat.label}</span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            advanceType={advanceType}
+          />
         </div>
 
         {/* Description */}
@@ -269,6 +352,9 @@ export function AdvanceSettlementForm({ advanceClaim }) {
 
   const action = settleAdvance.bind(null, advanceClaim._id);
   const [state, formAction, pending] = useActionState(action, null);
+
+  // Get the advance type for conditional rendering
+  const advanceType = advanceClaim.advanceDetails?.advanceType || "travel";
 
   // Expense items state
   const [items, setItems] = useState([
@@ -468,30 +554,54 @@ export function AdvanceSettlementForm({ advanceClaim }) {
               {advanceClaim.advanceDetails?.purpose || "N/A"}
             </p>
           </div>
-          <div>
-            <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-              <MapPin className="w-3 h-3" />
-              Destination
-            </p>
-            <p className="text-sm font-medium text-foreground">
-              {advanceClaim.advanceDetails?.destination || "N/A"}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-              <Calendar className="w-3 h-3" />
-              Travel Period
-            </p>
-            <p className="text-sm font-medium text-foreground">
-              {advanceClaim.advanceDetails?.travelDates?.from
-                ? `${formatDateShort(
-                    advanceClaim.advanceDetails.travelDates.from
-                  )} - ${formatDateShort(
-                    advanceClaim.advanceDetails.travelDates.to
-                  )}`
-                : "N/A"}
-            </p>
-          </div>
+          {/* Travel-specific: Destination */}
+          {advanceType === "travel" && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                <MapPin className="w-3 h-3" />
+                Destination
+              </p>
+              <p className="text-sm font-medium text-foreground">
+                {advanceClaim.advanceDetails?.destination || "N/A"}
+              </p>
+            </div>
+          )}
+          {/* Travel-specific: Travel Period */}
+          {advanceType === "travel" && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                <Calendar className="w-3 h-3" />
+                Travel Period
+              </p>
+              <p className="text-sm font-medium text-foreground">
+                {advanceClaim.advanceDetails?.travelDates?.from
+                  ? `${formatDateShort(
+                      advanceClaim.advanceDetails.travelDates.from
+                    )} - ${formatDateShort(
+                      advanceClaim.advanceDetails.travelDates.to
+                    )}`
+                  : "N/A"}
+              </p>
+            </div>
+          )}
+          {/* Project-specific: Project Code */}
+          {advanceType === "project" && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Project Code</p>
+              <p className="text-sm font-medium text-foreground">
+                {advanceClaim.advanceDetails?.projectCode || "N/A"}
+              </p>
+            </div>
+          )}
+          {/* Non-travel types: Advance Type label */}
+          {advanceType !== "travel" && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Advance Type</p>
+              <p className="text-sm font-medium text-foreground capitalize">
+                {advanceType?.replace("_", " ") || "N/A"}
+              </p>
+            </div>
+          )}
         </div>
       </Card>
 
@@ -534,6 +644,7 @@ export function AdvanceSettlementForm({ advanceClaim }) {
                     <span className="font-bold">2.</span>
                     <span>
                       Your manager will review and approve the settlement
+                      {advanceType === "project" && " against the project budget"}
                     </span>
                   </li>
                   <li className="flex items-start gap-2">
@@ -591,6 +702,7 @@ export function AdvanceSettlementForm({ advanceClaim }) {
                   onRemove={() => removeItem(item.id)}
                   canRemove={items.length > 1}
                   travelDates={advanceClaim.advanceDetails?.travelDates}
+                  advanceType={advanceType}
                   errors={itemErrors[item.id]}
                 />
               ))}
@@ -704,7 +816,11 @@ export function AdvanceSettlementForm({ advanceClaim }) {
               name="notes"
               rows={3}
               maxLength={500}
-              placeholder="Any additional information about your trip or expenses..."
+              placeholder={
+                advanceType === "travel"
+                  ? "Any additional information about your trip or expenses..."
+                  : "Any additional information about your expenses..."
+              }
               className="resize-none"
             />
             <p className="text-xs text-muted-foreground mt-2">
@@ -756,7 +872,10 @@ export function AdvanceSettlementForm({ advanceClaim }) {
             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-yellow-500 text-black text-xs font-bold flex items-center justify-center">
               1
             </span>
-            <span>Your manager reviews the settlement and actual expenses</span>
+            <span>
+              Your manager reviews the settlement and actual expenses
+              {advanceType === "project" && " against project budget"}
+            </span>
           </li>
           <li className="flex items-start gap-3">
             <span className="flex-shrink-0 w-6 h-6 rounded-full bg-yellow-500 text-black text-xs font-bold flex items-center justify-center">

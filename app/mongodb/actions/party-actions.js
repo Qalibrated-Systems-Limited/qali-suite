@@ -1,10 +1,14 @@
 "use server";
 
 import { z } from "zod";
-import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import Party from "../../models/parties";
 import connectDB from "../../config/dbConnect";
+import {
+  getTenantContext,
+  getCompanyIdForCreate,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // ZOD SCHEMAS
@@ -78,18 +82,31 @@ export async function createParty(prevState, formData) {
     notes: formData.get("notes"),
   };
 
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
-      errors: { _form: ["You must be logged in"] },
+      errors: { _form: [error.message] },
       values: formValues,
     };
   }
 
-  if (!["Admin", "Accountant"].includes(session.user.role)) {
+  if (!["Admin", "Accountant"].includes(user.role)) {
     return {
       errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+      values: formValues,
+    };
+  }
+
+  // Get tenant companyId for create
+  let tenantCompanyId;
+  try {
+    tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+  } catch (error) {
+    return {
+      errors: { _form: [error.message] },
       values: formValues,
     };
   }
@@ -109,11 +126,11 @@ export async function createParty(prevState, formData) {
   try {
     await connectDB();
 
-    // Check for duplicate email
+    // Check for duplicate email (tenant-scoped)
     if (data.email) {
-      const existingEmail = await Party.findOne({
-        email: data.email.toLowerCase(),
-      });
+      const existingEmail = await Party.findOne(
+        withTenantScope({ email: data.email.toLowerCase() }, tenantCompanyId, isSuperAdmin)
+      );
       if (existingEmail) {
         return {
           errors: { email: ["A party with this email already exists"] },
@@ -122,11 +139,11 @@ export async function createParty(prevState, formData) {
       }
     }
 
-    // Check for duplicate tax PIN
+    // Check for duplicate tax PIN (tenant-scoped)
     if (data.taxPin) {
-      const existingPin = await Party.findOne({
-        taxPin: data.taxPin.toUpperCase(),
-      });
+      const existingPin = await Party.findOne(
+        withTenantScope({ taxPin: data.taxPin.toUpperCase() }, tenantCompanyId, isSuperAdmin)
+      );
       if (existingPin) {
         return {
           errors: { taxPin: ["A party with this KRA PIN already exists"] },
@@ -135,8 +152,9 @@ export async function createParty(prevState, formData) {
       }
     }
 
-    // Create party
+    // Create party with tenant companyId
     await Party.create({
+      companyId: tenantCompanyId,
       ...data,
       email: data.email?.toLowerCase(),
       taxPin: data.taxPin?.toUpperCase(),
@@ -149,12 +167,12 @@ export async function createParty(prevState, formData) {
         accountNumber: data.accountNumber,
       },
       createdBy: {
-        name: session.user.name,
-        id: session.user.id,
+        name: user.name,
+        id: user.id,
       },
       lastModifiedBy: {
-        name: session.user.name,
-        id: session.user.id,
+        name: user.name,
+        id: user.id,
       },
     });
 
@@ -184,15 +202,17 @@ export async function createParty(prevState, formData) {
  * Uses bind() to pass partyId
  */
 export async function updateParty(partyId, prevState, formData) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
-      errors: { _form: ["You must be logged in"] },
+      errors: { _form: [error.message] },
     };
   }
 
-  if (!["Admin", "Accountant"].includes(session.user.role)) {
+  if (!["Admin", "Accountant"].includes(user.role)) {
     return {
       errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
     };
@@ -230,19 +250,24 @@ export async function updateParty(partyId, prevState, formData) {
   try {
     await connectDB();
 
-    const party = await Party.findById(partyId);
+    // Find party with tenant scoping
+    const party = await Party.findOne(
+      withTenantScope({ _id: partyId }, companyId, isSuperAdmin)
+    );
     if (!party) {
       return {
         errors: { _form: ["Party not found"] },
       };
     }
 
-    // Check for duplicate email (excluding current party)
+    // Check for duplicate email (excluding current party, tenant-scoped)
     if (data.email && data.email !== party.email) {
-      const existingEmail = await Party.findOne({
-        email: data.email.toLowerCase(),
-        _id: { $ne: partyId },
-      });
+      const existingEmail = await Party.findOne(
+        withTenantScope({
+          email: data.email.toLowerCase(),
+          _id: { $ne: partyId },
+        }, companyId, isSuperAdmin)
+      );
       if (existingEmail) {
         return {
           errors: { email: ["A party with this email already exists"] },
@@ -250,12 +275,14 @@ export async function updateParty(partyId, prevState, formData) {
       }
     }
 
-    // Check for duplicate tax PIN (excluding current party)
+    // Check for duplicate tax PIN (excluding current party, tenant-scoped)
     if (data.taxPin && data.taxPin !== party.taxPin) {
-      const existingPin = await Party.findOne({
-        taxPin: data.taxPin.toUpperCase(),
-        _id: { $ne: partyId },
-      });
+      const existingPin = await Party.findOne(
+        withTenantScope({
+          taxPin: data.taxPin.toUpperCase(),
+          _id: { $ne: partyId },
+        }, companyId, isSuperAdmin)
+      );
       if (existingPin) {
         return {
           errors: { taxPin: ["A party with this KRA PIN already exists"] },
@@ -283,8 +310,8 @@ export async function updateParty(partyId, prevState, formData) {
     });
 
     party.lastModifiedBy = {
-      name: session.user.name,
-      id: session.user.id,
+      name: user.name,
+      id: user.id,
     };
 
     await party.save();
@@ -313,15 +340,17 @@ export async function updateParty(partyId, prevState, formData) {
  * Uses bind() to pass partyId
  */
 export async function deleteParty(partyId) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
-      errors: { _form: ["You must be logged in"] },
+      errors: { _form: [error.message] },
     };
   }
 
-  if (session.user.role !== "Admin") {
+  if (user.role !== "Admin") {
     return {
       errors: { _form: ["Unauthorized: Admin role required"] },
     };
@@ -330,25 +359,28 @@ export async function deleteParty(partyId) {
   try {
     await connectDB();
 
-    const party = await Party.findById(partyId);
+    // Find party with tenant scoping
+    const party = await Party.findOne(
+      withTenantScope({ _id: partyId }, companyId, isSuperAdmin)
+    );
     if (!party) {
       return {
         errors: { _form: ["Party not found"] },
       };
     }
 
-    // Check for transactions
+    // Check for transactions (tenant-scoped)
     const JournalEntry = (await import("../../models/JournalEntry")).default;
-    const transactionCount = await JournalEntry.countDocuments({
-      "party.id": partyId,
-    });
+    const transactionCount = await JournalEntry.countDocuments(
+      withTenantScope({ "party.id": partyId }, companyId, isSuperAdmin)
+    );
 
     if (transactionCount > 0) {
       // Soft delete
       party.isActive = false;
       party.lastModifiedBy = {
-        name: session.user.name,
-        id: session.user.id,
+        name: user.name,
+        id: user.id,
       };
       await party.save();
 
@@ -361,8 +393,10 @@ export async function deleteParty(partyId) {
         message: `Party deactivated (${transactionCount} transactions exist)`,
       };
     } else {
-      // Hard delete
-      await Party.findByIdAndDelete(partyId);
+      // Hard delete (tenant-scoped)
+      await Party.findOneAndDelete(
+        withTenantScope({ _id: partyId }, companyId, isSuperAdmin)
+      );
 
       revalidatePath("/dashboard/parties");
       revalidatePath("/dashboard/customers");
@@ -386,15 +420,17 @@ export async function deleteParty(partyId) {
  * Uses bind() to pass partyId and isActive
  */
 export async function togglePartyStatus(partyId, isActive) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
-      errors: { _form: ["You must be logged in"] },
+      errors: { _form: [error.message] },
     };
   }
 
-  if (!["Admin", "Accountant"].includes(session.user.role)) {
+  if (!["Admin", "Accountant"].includes(user.role)) {
     return {
       errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
     };
@@ -403,7 +439,10 @@ export async function togglePartyStatus(partyId, isActive) {
   try {
     await connectDB();
 
-    const party = await Party.findById(partyId);
+    // Find party with tenant scoping
+    const party = await Party.findOne(
+      withTenantScope({ _id: partyId }, companyId, isSuperAdmin)
+    );
     if (!party) {
       return {
         errors: { _form: ["Party not found"] },
@@ -412,8 +451,8 @@ export async function togglePartyStatus(partyId, isActive) {
 
     party.isActive = isActive;
     party.lastModifiedBy = {
-      name: session.user.name,
-      id: session.user.id,
+      name: user.name,
+      id: user.id,
     };
 
     await party.save();
@@ -440,15 +479,17 @@ export async function togglePartyStatus(partyId, isActive) {
  * Uses bind() to pass partyId
  */
 export async function refreshPartyBalance(partyId) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
-      errors: { _form: ["You must be logged in"] },
+      errors: { _form: [error.message] },
     };
   }
 
-  if (!["Admin", "Accountant"].includes(session.user.role)) {
+  if (!["Admin", "Accountant"].includes(user.role)) {
     return {
       errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
     };
@@ -457,7 +498,10 @@ export async function refreshPartyBalance(partyId) {
   try {
     await connectDB();
 
-    const party = await Party.findById(partyId);
+    // Find party with tenant scoping
+    const party = await Party.findOne(
+      withTenantScope({ _id: partyId }, companyId, isSuperAdmin)
+    );
     if (!party) {
       return {
         errors: { _form: ["Party not found"] },
@@ -487,15 +531,17 @@ export async function refreshPartyBalance(partyId) {
  * Refresh all party balances
  */
 export async function refreshAllPartyBalances() {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
-      errors: { _form: ["You must be logged in"] },
+      errors: { _form: [error.message] },
     };
   }
 
-  if (session.user.role !== "Admin") {
+  if (user.role !== "Admin") {
     return {
       errors: { _form: ["Unauthorized: Admin role required"] },
     };
@@ -504,7 +550,10 @@ export async function refreshAllPartyBalances() {
   try {
     await connectDB();
 
-    const parties = await Party.find({ isActive: true });
+    // Get parties with tenant scoping
+    const parties = await Party.find(
+      withTenantScope({ isActive: true }, companyId, isSuperAdmin)
+    );
 
     let successCount = 0;
     let errorCount = 0;
@@ -544,15 +593,17 @@ export async function refreshAllPartyBalances() {
  * Uses bind() to pass partyId and newType
  */
 export async function convertPartyType(partyId, newType) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
-      errors: { _form: ["You must be logged in"] },
+      errors: { _form: [error.message] },
     };
   }
 
-  if (session.user.role !== "Admin") {
+  if (user.role !== "Admin") {
     return {
       errors: { _form: ["Unauthorized: Admin role required"] },
     };
@@ -561,7 +612,10 @@ export async function convertPartyType(partyId, newType) {
   try {
     await connectDB();
 
-    const party = await Party.findById(partyId);
+    // Find party with tenant scoping
+    const party = await Party.findOne(
+      withTenantScope({ _id: partyId }, companyId, isSuperAdmin)
+    );
     if (!party) {
       return {
         errors: { _form: ["Party not found"] },
@@ -592,8 +646,8 @@ export async function convertPartyType(partyId, newType) {
 
     party.type = newType;
     party.lastModifiedBy = {
-      name: session.user.name,
-      id: session.user.id,
+      name: user.name,
+      id: user.id,
     };
 
     await party.save();
@@ -619,17 +673,29 @@ export async function convertPartyType(partyId, newType) {
  * Create employee party linked to user
  */
 export async function createEmployeeParty(prevState, formData) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
-      errors: { _form: ["You must be logged in"] },
+      errors: { _form: [error.message] },
     };
   }
 
-  if (!["Admin", "Accountant"].includes(session.user.role)) {
+  if (!["Admin", "Accountant"].includes(user.role)) {
     return {
       errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+    };
+  }
+
+  // Get tenant companyId for create
+  let tenantCompanyId;
+  try {
+    tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+  } catch (error) {
+    return {
+      errors: { _form: [error.message] },
     };
   }
 
@@ -656,42 +722,47 @@ export async function createEmployeeParty(prevState, formData) {
   try {
     await connectDB();
 
-    // Verify user exists
+    // Verify user exists (tenant-scoped)
     const User = (await import("../../models/user")).default;
-    const user = await User.findById(data.userId);
-    if (!user) {
+    const targetUser = await User.findOne(
+      withTenantScope({ _id: data.userId }, tenantCompanyId, isSuperAdmin)
+    );
+    if (!targetUser) {
       return {
         errors: { userId: ["User not found"] },
       };
     }
 
-    // Check if employee party already exists
-    const existingParty = await Party.findOne({ userId: data.userId });
+    // Check if employee party already exists (tenant-scoped)
+    const existingParty = await Party.findOne(
+      withTenantScope({ userId: data.userId }, tenantCompanyId, isSuperAdmin)
+    );
     if (existingParty) {
       return {
         errors: { _form: ["Employee party already exists for this user"] },
       };
     }
 
-    // Create employee party
+    // Create employee party with tenant companyId
     await Party.create({
+      companyId: tenantCompanyId,
       type: "employee",
       userId: data.userId,
-      name: data.name || user.name,
-      email: data.email || user.email,
+      name: data.name || targetUser.name,
+      email: data.email || targetUser.email,
       phone: data.phone,
-      employeeNumber: data.employeeNumber || user.employeeNumber,
-      department: data.department || user.department,
+      employeeNumber: data.employeeNumber || targetUser.employeeNumber,
+      department: data.department || targetUser.department,
       designation: data.designation,
       taxPin: data.taxPin?.toUpperCase(),
       isActive: true,
       createdBy: {
-        name: session.user.name,
-        id: session.user.id,
+        name: user.name,
+        id: user.id,
       },
       lastModifiedBy: {
-        name: session.user.name,
-        id: session.user.id,
+        name: user.name,
+        id: user.id,
       },
     });
 
@@ -715,15 +786,17 @@ export async function createEmployeeParty(prevState, formData) {
  * Uses bind() to pass userId and partyId
  */
 export async function linkUserToParty(userId, partyId) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
     return {
-      errors: { _form: ["You must be logged in"] },
+      errors: { _form: [error.message] },
     };
   }
 
-  if (session.user.role !== "Admin") {
+  if (user.role !== "Admin") {
     return {
       errors: { _form: ["Unauthorized: Admin role required"] },
     };
@@ -732,25 +805,31 @@ export async function linkUserToParty(userId, partyId) {
   try {
     await connectDB();
 
-    // Verify user exists
+    // Verify user exists (tenant-scoped)
     const User = (await import("../../models/user")).default;
-    const user = await User.findById(userId);
-    if (!user) {
+    const targetUser = await User.findOne(
+      withTenantScope({ _id: userId }, companyId, isSuperAdmin)
+    );
+    if (!targetUser) {
       return {
         errors: { _form: ["User not found"] },
       };
     }
 
-    // Verify party exists
-    const party = await Party.findById(partyId);
+    // Verify party exists (tenant-scoped)
+    const party = await Party.findOne(
+      withTenantScope({ _id: partyId }, companyId, isSuperAdmin)
+    );
     if (!party) {
       return {
         errors: { _form: ["Party not found"] },
       };
     }
 
-    // Check if user already linked
-    const existingLink = await Party.findOne({ userId });
+    // Check if user already linked (tenant-scoped)
+    const existingLink = await Party.findOne(
+      withTenantScope({ userId }, companyId, isSuperAdmin)
+    );
     if (existingLink && existingLink._id.toString() !== partyId) {
       return {
         errors: { _form: ["User is already linked to another party"] },
@@ -760,8 +839,8 @@ export async function linkUserToParty(userId, partyId) {
     party.userId = userId;
     party.type = "employee";
     party.lastModifiedBy = {
-      name: session.user.name,
-      id: session.user.id,
+      name: user.name,
+      id: user.id,
     };
 
     await party.save();

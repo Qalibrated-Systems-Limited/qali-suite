@@ -1,13 +1,19 @@
-import mongoose from "mongoose";
+ import mongoose from "mongoose";
 
 const Schema = mongoose.Schema;
 
 const itemCheckoutSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
     checkoutNumber: {
       type: String,
       required: true,
-      unique: true,
     },
     productId: {
       type: Schema.Types.ObjectId,
@@ -54,7 +60,7 @@ const itemCheckoutSchema = new Schema(
     actualReturnDate: Date,
     status: {
       type: String,
-      enum: ["checked_out", "returned", "overdue", "lost", "damaged"],
+      enum: ["checked_out", "returned", "overdue", "lost", "damaged", "converted_to_sale", "expensed"],
       default: "checked_out",
     },
     returnedDate: Date,
@@ -86,7 +92,9 @@ const itemCheckoutSchema = new Schema(
       requestId: {
         type: Schema.Types.ObjectId,
         ref: "StockRequest",
+        index: true,
       },
+      requestNumber: String,
       movementId: {
         type: Schema.Types.ObjectId,
         ref: "StockMovement",
@@ -94,6 +102,71 @@ const itemCheckoutSchema = new Schema(
       returnMovementId: {
         type: Schema.Types.ObjectId,
         ref: "StockMovement",
+      },
+    },
+    // Request type from parent request (for tracking flow)
+    requestType: {
+      type: String,
+      enum: ["demo", "installation", "repair", "internal"],
+      index: true,
+    },
+    // Conversion to sale tracking (customer info fetched from parent request)
+    saleConversion: {
+      converted: {
+        type: Boolean,
+        default: false,
+      },
+      convertedAt: Date,
+      convertedBy: {
+        name: String,
+        id: String,
+      },
+      invoiceId: {
+        type: Schema.Types.ObjectId,
+        ref: "Invoice",
+      },
+      invoiceNumber: String,
+      // Partial conversion (some items returned, some sold)
+      quantitySold: {
+        type: Number,
+        default: 0,
+      },
+      quantityReturned: {
+        type: Number,
+        default: 0,
+      },
+    },
+    // Expense tracking (for internal use items consumed/used)
+    expenseConversion: {
+      expensed: {
+        type: Boolean,
+        default: false,
+      },
+      expensedAt: Date,
+      expensedBy: {
+        name: String,
+        id: String,
+      },
+      expenseAccount: {
+        id: {
+          type: Schema.Types.ObjectId,
+          ref: "Account",
+        },
+        code: String,
+        name: String,
+      },
+      journalEntryId: {
+        type: Schema.Types.ObjectId,
+        ref: "JournalEntry",
+      },
+      reason: String,
+      quantityExpensed: {
+        type: Number,
+        default: 0,
+      },
+      totalCost: {
+        type: Number,
+        default: 0,
       },
     },
     checkoutNotes: String,
@@ -119,11 +192,15 @@ const itemCheckoutSchema = new Schema(
 // ============================================
 // INDEXES
 // ============================================
-// itemCheckoutSchema.index({ checkoutNumber: 1 });
-// itemCheckoutSchema.index({ status: 1 });
-// itemCheckoutSchema.index({ "checkedOutTo.id": 1 });
-// itemCheckoutSchema.index({ expectedReturnDate: 1 });
-// itemCheckoutSchema.index({ productId: 1 });
+// Unique checkout number per company
+itemCheckoutSchema.index({ companyId: 1, checkoutNumber: 1 }, { unique: true });
+// Query indexes - prefixed with companyId for tenant isolation
+itemCheckoutSchema.index({ companyId: 1, status: 1 });
+itemCheckoutSchema.index({ companyId: 1, "checkedOutTo.id": 1 });
+itemCheckoutSchema.index({ companyId: 1, expectedReturnDate: 1, status: 1 });
+itemCheckoutSchema.index({ companyId: 1, productId: 1 });
+itemCheckoutSchema.index({ companyId: 1, requestType: 1, status: 1 });
+itemCheckoutSchema.index({ companyId: 1, "saleConversion.converted": 1 });
 
 // ============================================
 // VIRTUALS

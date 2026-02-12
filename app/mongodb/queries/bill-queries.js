@@ -13,6 +13,10 @@
 
 import Bill from "@/app/models/bill";
 import dbConnect from "@/app/config/dbConnect";
+import {
+  getTenantContext,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // SERIALIZATION HELPER
@@ -168,8 +172,11 @@ export async function getBills({
   try {
     await dbConnect();
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     // Build query
-    const query = {};
+    let query = {};
 
     // Search filter
     if (search) {
@@ -195,6 +202,9 @@ export async function getBills({
     if (supplierId) {
       query["supplier.partyId"] = supplierId;
     }
+
+    // Apply tenant scoping
+    query = withTenantScope(query, companyId, isSuperAdmin);
 
     // Build sort
     const sort = { [sortBy]: sortOrder === "asc" ? 1 : -1 };
@@ -242,7 +252,12 @@ export async function getBillById(id) {
   try {
     await dbConnect();
 
-    const bill = await Bill.findById(id).lean();
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const bill = await Bill.findOne(
+      withTenantScope({ _id: id }, companyId, isSuperAdmin)
+    ).lean();
 
     if (!bill) {
       return { bill: null, error: "Bill not found" };
@@ -262,7 +277,12 @@ export async function getBillsStats() {
   try {
     await dbConnect();
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const tenantMatch = isSuperAdmin ? {} : { companyId };
+
     const stats = await Bill.aggregate([
+      { $match: tenantMatch },
       {
         $facet: {
           // Count by status
@@ -395,7 +415,10 @@ export async function getUnpaidBills(supplierId = null) {
   try {
     await dbConnect();
 
-    const query = {
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    let query = {
       status: "approved",
       paymentStatus: { $in: ["unpaid", "partial"] },
     };
@@ -403,6 +426,9 @@ export async function getUnpaidBills(supplierId = null) {
     if (supplierId) {
       query["supplier.partyId"] = supplierId;
     }
+
+    // Apply tenant scoping
+    query = withTenantScope(query, companyId, isSuperAdmin);
 
     const bills = await Bill.find(query)
       .select(
@@ -436,13 +462,18 @@ export async function getAPAgingReport() {
   try {
     await dbConnect();
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const bills = await Bill.find({
-      status: "approved",
-      paymentStatus: { $in: ["unpaid", "partial"] },
-    })
+    const bills = await Bill.find(
+      withTenantScope({
+        status: "approved",
+        paymentStatus: { $in: ["unpaid", "partial"] },
+      }, companyId, isSuperAdmin)
+    )
       .select("billNumber supplier dueDate amounts")
       .lean();
 

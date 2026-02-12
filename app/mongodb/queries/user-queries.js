@@ -1,5 +1,9 @@
 import dbConnect from "../../config/dbConnect";
 import User from "../../models/user";
+import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import mongoose from "mongoose";
+
+const ObjectId = mongoose.Types.ObjectId;
 
 const ITEMS_PER_PAGE = 20;
 
@@ -9,11 +13,14 @@ dbConnect();
 // SEARCH USERS WITH FILTERS
 // ============================================
 export const searchUsers = async (searchTerm, page = 1, filters = {}) => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
   const { role, status, department } = filters;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
-  // Build filter conditions
-  let matchConditions = {};
+  // Build filter conditions with tenant scope
+  let matchConditions = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
 
   if (role && role !== "all") {
     matchConditions.role = role;
@@ -83,9 +90,13 @@ export const searchUsers = async (searchTerm, page = 1, filters = {}) => {
 // FETCH USER PAGES
 // ============================================
 export const fetchUserPages = async (searchTerm, filters = {}) => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
   const { role, status, department } = filters;
 
-  let matchConditions = {};
+  // Build filter conditions with tenant scope
+  let matchConditions = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
 
   if (role && role !== "all") {
     matchConditions.role = role;
@@ -143,9 +154,13 @@ export const fetchUserPages = async (searchTerm, filters = {}) => {
 // GET USER STATS
 // ============================================
 export const getUserStats = async (filters = {}) => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
   const { role, status, department } = filters;
 
-  let matchConditions = {};
+  // Build filter conditions with tenant scope
+  let matchConditions = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
 
   if (role && role !== "all") {
     matchConditions.role = role;
@@ -208,7 +223,10 @@ export const getUserStats = async (filters = {}) => {
 // GET USER BY ID
 // ============================================
 export const getUserById = async (userId) => {
-  const user = await User.findById(userId).select("-password").lean();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const query = withTenantScope({ _id: userId }, companyId, isSuperAdmin);
+  const user = await User.findOne(query).select("-password").lean();
 
   if (!user) {
     return null;
@@ -226,6 +244,9 @@ export const getUserById = async (userId) => {
 // GET DEPARTMENTS LIST
 // ============================================
 export const getDepartments = async () => {
-  const departments = await User.distinct("department");
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const query = isSuperAdmin ? {} : { companyId };
+  const departments = await User.distinct("department", query);
   return departments.filter(Boolean); // Remove null/undefined
 };

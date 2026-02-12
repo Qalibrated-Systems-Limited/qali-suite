@@ -21,6 +21,8 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Minus,
+  Building2,
+  Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -47,6 +49,8 @@ const icons = {
   AlertCircle,
   CheckSquare,
   XSquare,
+  Building2,
+  Bell,
 };
 
 export type IconName = keyof typeof icons;

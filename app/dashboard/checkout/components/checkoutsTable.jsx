@@ -26,10 +26,13 @@ import {
   AlertTriangle,
   Clock,
   Package,
+  Receipt,
+  ShoppingCart,
 } from "lucide-react";
 import { ReturnDialog } from "./ReturnDialog";
 import { ViewCheckoutDialog } from "./ViewCheckoutDialog";
 import { EscalateDialog } from "./EscalateDialog";
+import { ExpenseInternalDialog } from "./ExpenseInternalDialog";
 
 const statusConfig = {
   checked_out: {
@@ -57,13 +60,24 @@ const statusConfig = {
     color: "bg-orange-500/10 text-orange-500 border-orange-500/20",
     icon: AlertTriangle,
   },
+  converted_to_sale: {
+    label: "Sold",
+    color: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+    icon: ShoppingCart,
+  },
+  expensed: {
+    label: "Expensed",
+    color: "bg-purple-500/10 text-purple-500 border-purple-500/20",
+    icon: Receipt,
+  },
 };
 
-export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
+export function CheckoutsTable({ checkouts, canManageCheckouts, userId, expenseAccounts = [] }) {
   const [selectedCheckout, setSelectedCheckout] = useState(null);
   const [returnDialogOpen, setReturnDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [escalateDialogOpen, setEscalateDialogOpen] = useState(false);
+  const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
 
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
@@ -84,6 +98,15 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
       checkout.status === "checked_out" &&
       checkout.isOverdue &&
       !checkout.isEscalated
+    );
+  };
+
+  // Can expense internal use checkouts (not for sale)
+  const canExpense = (checkout) => {
+    return (
+      canManageCheckouts &&
+      checkout.status === "checked_out" &&
+      checkout.requestType === "internal"
     );
   };
 
@@ -277,6 +300,22 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
                                   </DropdownMenuItem>
                                 </>
                               )}
+
+                              {canExpense(checkout) && (
+                                <>
+                                  <DropdownMenuSeparator className="bg-border" />
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedCheckout(checkout);
+                                      setExpenseDialogOpen(true);
+                                    }}
+                                    className="text-purple-500 focus:bg-purple-500/10 focus:text-purple-500 cursor-pointer"
+                                  >
+                                    <Receipt className="mr-2 h-4 w-4" />
+                                    Expense Item
+                                  </DropdownMenuItem>
+                                </>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
@@ -424,6 +463,21 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
                           <span className="sr-only">Escalate</span>
                         </Button>
                       )}
+
+                      {canExpense(checkout) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedCheckout(checkout);
+                            setExpenseDialogOpen(true);
+                          }}
+                          className="border-purple-500/20 text-purple-500 hover:bg-purple-500/10"
+                        >
+                          <Receipt className="h-4 w-4" />
+                          <span className="sr-only">Expense</span>
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -452,6 +506,13 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId }) {
             checkout={selectedCheckout}
             open={escalateDialogOpen}
             onOpenChange={setEscalateDialogOpen}
+          />
+
+          <ExpenseInternalDialog
+            checkout={selectedCheckout}
+            expenseAccounts={expenseAccounts}
+            open={expenseDialogOpen}
+            onOpenChange={setExpenseDialogOpen}
           />
         </>
       )}

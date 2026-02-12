@@ -194,7 +194,7 @@ function BillsTable({ bills, userRole }) {
           Create your first bill to get started.
         </p>
         <Button asChild className="mt-4">
-          <Link href="/dashboard/bills/new">
+          <Link href="/dashboard/bills/create">
             <Plus className="h-4 w-4 mr-2" />
             Create Bill
           </Link>
@@ -337,7 +337,7 @@ function BillsCards({ bills, userRole }) {
           Create your first bill to get started.
         </p>
         <Button asChild className="mt-4">
-          <Link href="/dashboard/bills/new">
+          <Link href="/dashboard/bills/create">
             <Plus className="h-4 w-4 mr-2" />
             Create Bill
           </Link>
@@ -475,7 +475,7 @@ async function BillsList({ searchParams, userRole }) {
 export default async function BillsPage({ searchParams }) {
   const session = await auth();
   const canCreate = ["Admin", "Manager", "Accountant"].includes(
-    session?.user?.role
+    session?.user?.role,
   );
 
   return (

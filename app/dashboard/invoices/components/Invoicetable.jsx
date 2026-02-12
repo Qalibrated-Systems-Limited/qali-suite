@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -26,20 +26,31 @@ import {
 import { InvoicePrintDialog } from "./invoicePrintDialog";
 import { InvoicePaymentDialog } from "./InvoicePaymentDialog";
 import { completeInvoice } from "@/app/mongodb/invoice-actions";
+import { toast } from "sonner";
 
-// Post Invoice Button with form wrapper
+// Post Invoice Button with form wrapper and error handling
 function PostInvoiceButton({ invoiceId }) {
-  const { pending } = useFormStatus();
   const postInvoiceWithId = completeInvoice.bind(null, invoiceId);
+  const [state, formAction, isPending] = useActionState(postInvoiceWithId, null);
+
+  // Show error toast when action fails
+  useEffect(() => {
+    if (state?.message) {
+      toast.error("Failed to post invoice", {
+        description: state.message,
+        duration: 5000,
+      });
+    }
+  }, [state]);
 
   return (
-    <form action={postInvoiceWithId}>
+    <form action={formAction}>
       <button
         type="submit"
-        disabled={pending}
+        disabled={isPending}
         className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none text-blue-600 dark:text-blue-400 hover:bg-accent focus:bg-accent disabled:pointer-events-none disabled:opacity-50"
       >
-        {pending ? (
+        {isPending ? (
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
         ) : (
           <CheckCircle className="mr-2 h-4 w-4" />

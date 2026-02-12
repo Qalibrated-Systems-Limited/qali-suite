@@ -28,7 +28,7 @@ import NextForm from "next/form";
 import { IconClipboardList } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { createRequestFromCartSchema } from "@/app/mongodb/validators";
-import { departments } from "@/lib/utils";
+import { departments, stockRequestTypes, stockRequestTypeConfig } from "@/lib/utils";
 import { createRequestFromCart } from "@/app/mongodb/actions";
 import { IconAlertCircle } from "@tabler/icons-react";
 
@@ -47,24 +47,19 @@ export function CreateRequestFromCartForm({
     resolver: zodResolver(createRequestFromCartSchema),
     defaultValues: {
       customer: "",
-      purpose: "sale",
+      requestType: "sale",
       priority: "normal",
       department: "",
       notes: "",
-      purposeDetails: "",
       requiredByDate: "",
     },
   });
 
-  const purposeOptions = [
-    { value: "sale", label: "Sale to Customer" },
-    { value: "technician_test", label: "Testing by Technician" },
-    { value: "customer_demo", label: "Customer Demonstration" },
-    { value: "internal_use", label: "Internal Use" },
-    { value: "installation", label: "Installation" },
-    { value: "repair", label: "Repair/Maintenance" },
-    { value: "other", label: "Other" },
-  ];
+  // Use stockRequestTypes from lib/utils (industry standard types)
+  const requestTypeOptions = stockRequestTypes.map((type) => ({
+    value: type,
+    label: stockRequestTypeConfig[type]?.label || type,
+  }));
 
   const priorityOptions = [
     { value: "low", label: "Low", color: "text-gray-500" },
@@ -183,26 +178,26 @@ export function CreateRequestFromCartForm({
 
           {/* Two Column Layout */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Purpose */}
+            {/* Request Type */}
             <FormField
               control={form.control}
-              name="purpose"
+              name="requestType"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="text-sm">Purpose *</FormLabel>
+                  <FormLabel className="text-sm">Request Type *</FormLabel>
                   <Select
                     onValueChange={field.onChange}
-                    name="purpose"
+                    name="requestType"
                     defaultValue="sale"
                   >
                     <FormControl>
                       <SelectTrigger className="h-10">
-                        <SelectValue placeholder="Select purpose" />
+                        <SelectValue placeholder="Select request type" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
                       <SelectGroup>
-                        {purposeOptions.map((option) => (
+                        {requestTypeOptions.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
                           </SelectItem>
@@ -211,9 +206,9 @@ export function CreateRequestFromCartForm({
                     </SelectContent>
                   </Select>
                   <FormMessage />
-                  {state.errors?.purpose && (
+                  {state.errors?.requestType && (
                     <p className="text-xs text-destructive">
-                      {state.errors.purpose[0]}
+                      {state.errors.requestType[0]}
                     </p>
                   )}
                 </FormItem>
@@ -277,30 +272,6 @@ export function CreateRequestFromCartForm({
                 </FormControl>
                 <FormDescription className="text-xs">
                   When do you need these items?
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          {/* Purpose Details */}
-          <FormField
-            control={form.control}
-            name="purposeDetails"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-sm">
-                  Additional Details (Optional)
-                </FormLabel>
-                <FormControl>
-                  <Input
-                    {...field}
-                    placeholder="e.g., Installation at ABC Site, Testing for XYZ Project"
-                    className="h-10"
-                  />
-                </FormControl>
-                <FormDescription className="text-xs">
-                  Provide specific details about this request
                 </FormDescription>
                 <FormMessage />
               </FormItem>

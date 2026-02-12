@@ -8,12 +8,18 @@ const Schema = mongoose.Schema;
 // ============================================
 const stockMovementSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // Movement Identification
     movementNumber: {
       type: String,
       required: true,
-      unique: true,
-      index: true,
     },
 
     // Product Information
@@ -279,18 +285,20 @@ const stockMovementSchema = new Schema(
 // ============================================
 // INDEXES
 // ============================================
-stockMovementSchema.index({ movementNumber: 1 });
-stockMovementSchema.index({ productId: 1, createdAt: -1 });
-stockMovementSchema.index({ movementType: 1, status: 1 });
-stockMovementSchema.index({ "performedBy.id": 1 });
-stockMovementSchema.index({ createdAt: -1 });
-stockMovementSchema.index({ direction: 1, movementType: 1 });
+// Unique movement number per company
+stockMovementSchema.index({ companyId: 1, movementNumber: 1 }, { unique: true });
+// Query indexes - all prefixed with companyId for tenant isolation
+stockMovementSchema.index({ companyId: 1, productId: 1, createdAt: -1 });
+stockMovementSchema.index({ companyId: 1, movementType: 1, status: 1 });
+stockMovementSchema.index({ companyId: 1, "performedBy.id": 1 });
+stockMovementSchema.index({ companyId: 1, createdAt: -1 });
+stockMovementSchema.index({ companyId: 1, direction: 1, movementType: 1 });
 
-// NEW: Finance-related indexes
-stockMovementSchema.index({ "accounting.journalEntryId": 1 });
-stockMovementSchema.index({ "accounting.affectsAccounting": 1, status: 1 });
-stockMovementSchema.index({ "relatedDocuments.billId": 1 });
-stockMovementSchema.index({ "relatedDocuments.invoiceId": 1 });
+// Finance-related indexes
+stockMovementSchema.index({ companyId: 1, "accounting.journalEntryId": 1 });
+stockMovementSchema.index({ companyId: 1, "accounting.affectsAccounting": 1, status: 1 });
+stockMovementSchema.index({ companyId: 1, "relatedDocuments.billId": 1 });
+stockMovementSchema.index({ companyId: 1, "relatedDocuments.invoiceId": 1 });
 
 // ============================================
 // VIRTUALS
@@ -541,9 +549,10 @@ stockMovementSchema.methods.createJournalEntry = async function (user) {
   // Create journal entry
   if (lines.length > 0) {
     const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
-    const entryNumber = await generateUniqueEntryNumber("STK");
+    const entryNumber = await generateUniqueEntryNumber("STK", this.companyId);
 
     const journalEntry = await JournalEntry.create({
+      companyId: this.companyId,
       entryNumber,
       entryDate: this.createdAt || new Date(),
       entryType,
@@ -735,18 +744,33 @@ stockMovementSchema.statics.getIssuedToUser = function (userId) {
   });
 };
 
-stockMovementSchema.statics.generateMovementNumber = async function () {
-  const today = format(new Date(), "ddMMyy");
-  const counterId = `MOV-${today}`;
-
+stockMovementSchema.statics.generateMovementNumber = async function (companyId = null) {
+  const Company = mongoose.model("Company");
   const Counter = mongoose.model("Counter");
+
+  // Fetch company code for prefix
+  let companyCode = null;
+  if (companyId) {
+    const company = await Company.findById(companyId).select("code").lean();
+    companyCode = company?.code || null;
+  }
+
+  const today = format(new Date(), "ddMMyy");
+
+  // Build counter ID with company code for tenant isolation
+  const counterId = companyCode
+    ? `mov-${companyCode.toLowerCase()}-${today}`
+    : `mov-${today}`;
 
   const counter = await Counter.findOneAndUpdate(
     { name: counterId },
     { $inc: { seq: 1 } },
-    { upsert: true, new: true } // ✅ Use session
+    { upsert: true, new: true }
   );
-  return `${counterId}-${String(counter.seq).padStart(4, "0")}`;
+
+  // Format: MOV-{CODE}-{DDMMYY}-{NNNN} or MOV-{DDMMYY}-{NNNN}
+  const prefix = companyCode ? `MOV-${companyCode}` : "MOV";
+  return `${prefix}-${today}-${String(counter.seq).padStart(4, "0")}`;
 };
 
 // ============================================

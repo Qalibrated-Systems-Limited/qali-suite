@@ -11,9 +11,15 @@ import { ItemCheckout } from "../models/checkouts";
 import { StockMovement } from "../models/stockmovement";
 import { format } from "date-fns";
 import DeliveryNote from "../models/dnote";
+import Invoice from "../models/invoice";
 import dbConnect from "../config/dbConnect";
 import Account from "../models/account";
 import JournalEntry from "../models/JournalEntry";
+import {
+  getTenantContext,
+  validateTenantAccess,
+} from "@/lib/utils/tenant-utils";
+import { stockRequestTypes, stockRequestTypeConfig } from "@/lib/utils";
 
 // ============================================
 // 1. APPROVE REQUEST (Manager/Admin only)
@@ -33,10 +39,13 @@ async function generateRequestNumber(session) {
   return `${counterId}-${String(counter.seq).padStart(3, "0")}`;
 }
 export async function approveRequest(requestId, prevState, formData) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  let session;
+  let success = false;
 
   try {
+    session = await mongoose.startSession();
+    session.startTransaction();
+
     const rawFormData = Object.fromEntries(formData.entries());
     const comments = rawFormData.comments || "";
     const conditions = rawFormData.conditions || "";
@@ -44,6 +53,7 @@ export async function approveRequest(requestId, prevState, formData) {
     // Get authenticated user
     const userSession = await auth();
     if (!userSession?.user) {
+      await session.abortTransaction();
       return { message: "Unauthorized. Please log in." };
     }
 
@@ -55,23 +65,39 @@ export async function approveRequest(requestId, prevState, formData) {
 
     // Check if user has permission to approve
     if (userRole !== "manager" && userRole !== "admin") {
+      await session.abortTransaction();
       return { message: "Only managers and admins can approve requests." };
+    }
+
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    if (!companyId && !isSuperAdmin) {
+      await session.abortTransaction();
+      return { message: "Company context required" };
     }
 
     // Get request
     const request = await StockRequest.findById(requestId).session(session);
 
     if (!request) {
+      await session.abortTransaction();
       return { message: "Request not found" };
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(request, companyId, isSuperAdmin)) {
+      await session.abortTransaction();
+      return { message: "Access denied to this request" };
     }
 
     // Check if request can be approved
     if (!request.canApprove(user.id)) {
+      await session.abortTransaction();
       return { message: "This request cannot be approved" };
     }
 
     // ========================================
-    // ✅ NEW: Extract per-item approvals
+    // Extract per-item approvals
     // ========================================
     const itemApprovals = {};
 
@@ -104,36 +130,46 @@ export async function approveRequest(requestId, prevState, formData) {
         comments,
         conditions,
       },
-      itemApprovals // ✅ Pass item-specific approvals
+      itemApprovals
     );
 
     await session.commitTransaction();
-
-    // TODO: Send notification to requester and storekeeper
+    revalidatePath("/dashboard/requests");
+    success = true;
   } catch (error) {
-    await session.abortTransaction();
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
     console.error("Error approving request:", error);
     return { message: error.message || "Failed to approve request" };
   } finally {
-    session.endSession();
+    if (session) {
+      session.endSession();
+    }
   }
 
-  revalidatePath("/dashboard/requests");
-  return { message: "success" };
+  // Redirect after success (outside try/catch)
+  if (success) {
+    redirect("/dashboard/requests");
+  }
 }
 
 // ============================================
 // 2. REJECT REQUEST (Manager/Admin only)
 // ============================================
 export async function rejectRequest(requestId, prevState, formData) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  let session;
+  let success = false;
 
   try {
+    session = await mongoose.startSession();
+    session.startTransaction();
+
     const rawFormData = Object.fromEntries(formData.entries());
     const reason = rawFormData.reason;
 
     if (!reason || reason.trim().length < 10) {
+      await session.abortTransaction();
       return {
         message:
           "Please provide a detailed reason for rejection (minimum 10 characters)",
@@ -143,6 +179,7 @@ export async function rejectRequest(requestId, prevState, formData) {
     // Get authenticated user
     const userSession = await auth();
     if (!userSession?.user) {
+      await session.abortTransaction();
       return { message: "Unauthorized. Please log in." };
     }
 
@@ -150,18 +187,34 @@ export async function rejectRequest(requestId, prevState, formData) {
 
     // Check if user has permission to reject
     if (user.role !== "manager" && user.role !== "admin") {
+      await session.abortTransaction();
       return { message: "Only managers and admins can reject requests." };
+    }
+
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    if (!companyId && !isSuperAdmin) {
+      await session.abortTransaction();
+      return { message: "Company context required" };
     }
 
     // Get request
     const request = await StockRequest.findById(requestId).session(session);
 
     if (!request) {
+      await session.abortTransaction();
       return { message: "Request not found" };
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(request, companyId, isSuperAdmin)) {
+      await session.abortTransaction();
+      return { message: "Access denied to this request" };
     }
 
     // Check if request is pending
     if (request.status !== "pending") {
+      await session.abortTransaction();
       return { message: "Only pending requests can be rejected" };
     }
 
@@ -173,18 +226,24 @@ export async function rejectRequest(requestId, prevState, formData) {
     });
 
     await session.commitTransaction();
-
-    // TODO: Send notification to requester
+    revalidatePath("/dashboard/requests");
+    success = true;
   } catch (error) {
-    await session.abortTransaction();
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
     console.error("Error rejecting request:", error);
-    return { message: "Failed to reject request" };
+    return { message: error.message || "Failed to reject request" };
   } finally {
-    session.endSession();
+    if (session) {
+      session.endSession();
+    }
   }
 
-  revalidatePath("/dashboard/requests");
-  return { message: "success" };
+  // Redirect after success (outside try/catch)
+  if (success) {
+    redirect("/dashboard/requests");
+  }
 }
 
 // ============================================
@@ -266,8 +325,8 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
           serialNo: rawFormData[`serialNo_${item._id}`] || "",
         };
 
-        // Categorize based on purpose
-        if (item.purpose === "sale") {
+        // Categorize based on request type (industry standard)
+        if (request.requestType === "sale") {
           salesItems.push(itemData);
         } else {
           loanItems.push(itemData);
@@ -354,6 +413,9 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
           session
         );
 
+        // Use product's pricing fields (nested enhanced pricing preferred)
+        const effectiveUnitPrice = updatedProduct.pricing?.sellingPrice || updatedProduct.price || 0;
+
         await StockMovement.create(
           [
             {
@@ -369,7 +431,13 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
               quantity: fulfilledQty,
               previousStock: updatedProduct.stock + fulfilledQty,
               newStock: updatedProduct.stock,
-              unitPrice: item.unitPrice,
+              costing: {
+                unitCost: updatedProduct.costing?.costPrice || 0,
+                totalCost: fulfilledQty * (updatedProduct.costing?.costPrice || 0),
+                unitPrice: effectiveUnitPrice,
+                totalValue: fulfilledQty * effectiveUnitPrice,
+                averageCostAtMovement: updatedProduct.costing?.costPrice || 0,
+              },
               performedBy: {
                 name: user.name,
                 id: user.id,
@@ -405,6 +473,9 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
           session
         );
 
+        // Use product's pricing fields (nested enhanced pricing preferred)
+        const effectiveUnitPrice = updatedProduct.pricing?.sellingPrice || updatedProduct.price || 0;
+
         const movement = await StockMovement.create(
           [
             {
@@ -420,7 +491,13 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
               quantity: fulfilledQty,
               previousStock: updatedProduct.stock + fulfilledQty,
               newStock: updatedProduct.stock,
-              unitPrice: item.unitPrice,
+              costing: {
+                unitCost: updatedProduct.costing?.costPrice || 0,
+                totalCost: fulfilledQty * (updatedProduct.costing?.costPrice || 0),
+                unitPrice: effectiveUnitPrice,
+                totalValue: fulfilledQty * effectiveUnitPrice,
+                averageCostAtMovement: updatedProduct.costing?.costPrice || 0,
+              },
               performedBy: {
                 name: user.name,
                 id: user.id,
@@ -430,7 +507,7 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
                 name: request.requester.name,
                 id: request.requester.id,
                 department: request.requester.department,
-                purpose: item.purpose,
+                purpose: request.requestType,
               },
               relatedDocuments: {
                 requestId: request._id,
@@ -441,7 +518,7 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
                 new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
               notes: `Loaned from request ${
                 request.requestNumber
-              } - ${getPurposeLabel(item.purpose)}`,
+              } - ${getPurposeLabel(request.requestType)}`,
             },
           ],
           { session }
@@ -478,17 +555,18 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
                 id: user.id,
                 role: "storekeeper",
               },
-              purpose: item.purpose,
+              purpose: request.requestType,
               purposeDetails:
-                item.purposeDetails || getPurposeLabel(item.purpose),
+                item.purposeDetails || getPurposeLabel(request.requestType),
               expectedReturnDate: expectedReturn,
               relatedDocuments: {
                 requestId: request._id,
                 movementId: movement[0]._id,
               },
+              requestType: request.requestType, // Track request type for conversion flow
               checkoutNotes: `Loaned from request ${
                 request.requestNumber
-              } for ${getPurposeLabel(item.purpose)}`,
+              } for ${getPurposeLabel(request.requestType)}`,
             },
           ],
           { session }
@@ -582,14 +660,18 @@ export async function generateMovementNo(session) {
 // 4. CANCEL REQUEST
 // ============================================
 export async function cancelRequest(requestId, prevState, formData) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  let session;
+  let success = false;
 
   try {
+    session = await mongoose.startSession();
+    session.startTransaction();
+
     const rawFormData = Object.fromEntries(formData.entries());
     const reason = rawFormData.reason;
 
     if (!reason || reason.trim().length < 10) {
+      await session.abortTransaction();
       return {
         message:
           "Please provide a reason for cancellation (minimum 10 characters)",
@@ -599,16 +681,31 @@ export async function cancelRequest(requestId, prevState, formData) {
     // Get authenticated user
     const userSession = await auth();
     if (!userSession?.user) {
+      await session.abortTransaction();
       return { message: "Unauthorized. Please log in." };
     }
 
     const user = userSession.user;
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    if (!companyId && !isSuperAdmin) {
+      await session.abortTransaction();
+      return { message: "Company context required" };
+    }
+
     // Get request
     const request = await StockRequest.findById(requestId).session(session);
 
     if (!request) {
+      await session.abortTransaction();
       return { message: "Request not found" };
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(request, companyId, isSuperAdmin)) {
+      await session.abortTransaction();
+      return { message: "Access denied to this request" };
     }
 
     // Check permissions
@@ -618,6 +715,7 @@ export async function cancelRequest(requestId, prevState, formData) {
       user.role === "admin";
 
     if (!canCancel) {
+      await session.abortTransaction();
       return { message: "You don't have permission to cancel this request" };
     }
 
@@ -626,6 +724,7 @@ export async function cancelRequest(requestId, prevState, formData) {
       request.status === "fulfilled" ||
       request.status === "partially_fulfilled"
     ) {
+      await session.abortTransaction();
       return { message: "Cannot cancel a fulfilled request" };
     }
 
@@ -633,18 +732,24 @@ export async function cancelRequest(requestId, prevState, formData) {
     await request.cancel(reason);
 
     await session.commitTransaction();
-
-    // TODO: Send notification
+    revalidatePath("/dashboard/requests");
+    success = true;
   } catch (error) {
-    await session.abortTransaction();
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
     console.error("Error canceling request:", error);
-    return { message: "Failed to cancel request" };
+    return { message: error.message || "Failed to cancel request" };
   } finally {
-    session.endSession();
+    if (session) {
+      session.endSession();
+    }
   }
 
-  revalidatePath("/dashboard/requests");
-  return { message: "success" };
+  // Redirect after success (outside try/catch)
+  if (success) {
+    redirect("/dashboard/requests");
+  }
 }
 
 async function generateCheckoutNumber(session) {
@@ -666,6 +771,21 @@ async function generateCheckoutNumber(session) {
 export async function createStockRequest(prevState, formData) {
   let session;
 
+  // Extract raw form data early to return on error
+  const rawData = {
+    requestType: formData.get("requestType"),
+    customerId: formData.get("customerId"),
+    customerName: formData.get("customerName"),
+    customerEmail: formData.get("customerEmail"),
+    customerPhone: formData.get("customerPhone"),
+    customerAddress: formData.get("customerAddress"),
+    customerTaxPin: formData.get("customerTaxPin"),
+    priority: formData.get("priority") || "normal",
+    notes: formData.get("notes") || "",
+    requiredByDate: formData.get("requiredByDate"),
+    items: formData.get("items"),
+  };
+
   try {
     session = await mongoose.startSession();
     session.startTransaction();
@@ -673,37 +793,75 @@ export async function createStockRequest(prevState, formData) {
     // Get authenticated user
     const userSession = await auth();
     if (!userSession?.user) {
-      throw new Error("Unauthorized. Please log in.");
+      return {
+        success: false,
+        error: "Unauthorized. Please log in.",
+        values: rawData,
+      };
     }
 
     const user = userSession.user;
 
-    // Extract form data
-    const customer = formData.get("customer");
-    const priority = formData.get("priority") || "normal";
-    const notes = formData.get("notes") || "";
-    const requiredByDateStr = formData.get("requiredByDate");
-    const itemsJson = formData.get("items");
-
-    // Validate required fields
-    if (!customer || !customer.trim()) {
-      throw new Error("Customer name is required");
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    if (!companyId && !isSuperAdmin) {
+      return {
+        success: false,
+        error: "Company context required",
+        values: rawData,
+      };
     }
 
-    if (!itemsJson) {
-      throw new Error("No items provided");
+    // Field-level validation
+    const fieldErrors = {};
+
+    // Validate request type
+    if (!rawData.requestType || !stockRequestTypes.includes(rawData.requestType)) {
+      fieldErrors.requestType = "Please select a valid request type";
+    }
+
+    // Get type config to check if customer is required
+    const typeConfig = stockRequestTypeConfig[rawData.requestType];
+    const requiresCustomer = typeConfig?.requiresCustomer ?? true;
+
+    // Validate customer (conditionally based on request type)
+    if (requiresCustomer && (!rawData.customerId || !rawData.customerName?.trim())) {
+      fieldErrors.customer = "Please select a customer";
+    }
+
+    // Validate items
+    if (!rawData.items) {
+      fieldErrors.items = "No items provided";
     }
 
     // Parse items
-    let items;
-    try {
-      items = JSON.parse(itemsJson);
-    } catch (error) {
-      throw new Error("Invalid items data");
+    let items = [];
+    if (rawData.items) {
+      try {
+        items = JSON.parse(rawData.items);
+      } catch (error) {
+        fieldErrors.items = "Invalid items data";
+      }
     }
 
-    if (!items || items.length === 0) {
-      throw new Error("Please add at least one item to the request");
+    if (items.length === 0 && !fieldErrors.items) {
+      fieldErrors.items = "Please add at least one item to the request";
+    }
+
+    // Validate priority
+    const validPriorities = ["low", "normal", "high", "urgent"];
+    if (!validPriorities.includes(rawData.priority)) {
+      fieldErrors.priority = "Invalid priority selected";
+    }
+
+    // If there are field errors, return them
+    if (Object.keys(fieldErrors).length > 0) {
+      return {
+        success: false,
+        error: "Please fix the validation errors",
+        fieldErrors,
+        values: rawData,
+      };
     }
 
     // Validate and prepare items
@@ -714,27 +872,39 @@ export async function createStockRequest(prevState, formData) {
       const product = await Product.findById(item.productId).session(session);
 
       if (!product) {
-        throw new Error(`Product ${item.productName} not found`);
+        return {
+          success: false,
+          error: `Product ${item.productName} not found`,
+          fieldErrors: { items: `Product ${item.productName} not found` },
+          values: rawData,
+        };
       }
 
-      if (item.requestedQuantity > product.stock) {
-        throw new Error(
-          `Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${item.requestedQuantity}`
-        );
+      // Use available stock (quantityAvailable or fallback to stock)
+      const availableStock = product.inventory?.quantityAvailable ?? product.inventory?.quantityOnHand ?? product.stock ?? 0;
+
+      if (item.requestedQuantity > availableStock) {
+        return {
+          success: false,
+          error: `Insufficient stock for ${product.name}`,
+          fieldErrors: {
+            items: `Insufficient stock for ${product.name}. Available: ${availableStock}, Requested: ${item.requestedQuantity}`,
+          },
+          values: rawData,
+        };
       }
+
+      // Use modern pricing fields with fallback
+      const unitPrice = product.pricing?.sellingPrice ?? product.price ?? 0;
 
       validatedItems.push({
         productId: product._id,
         productName: product.name,
         SKU: product.SKU,
-        currentStock: product.stock,
+        currentStock: availableStock,
         requestedQuantity: item.requestedQuantity,
-        unitPrice: product.price || 0,
+        unitPrice,
         unit: product.unit,
-        purpose: item.purpose,
-        purposeDetails: item.purposeDetails || "",
-        requiresReturn: item.requiresReturn || false,
-        expectedReturnDate: item.expectedReturnDate || null,
         notes: item.notes || "",
         approvedQuantity: 0,
         fulfillments: [],
@@ -749,16 +919,30 @@ export async function createStockRequest(prevState, formData) {
 
     // Parse required by date
     let requiredByDate = null;
-    if (requiredByDateStr) {
-      requiredByDate = new Date(requiredByDateStr);
+    if (rawData.requiredByDate) {
+      requiredByDate = new Date(rawData.requiredByDate);
     }
 
+    // Build customer object (only for non-internal requests)
+    const customerData = requiresCustomer ? {
+      id: rawData.customerId,
+      name: rawData.customerName.trim(),
+      email: rawData.customerEmail || "",
+      phone: rawData.customerPhone || "",
+      address: rawData.customerAddress || "",
+      taxPin: rawData.customerTaxPin || "",
+    } : {
+      id: "",
+      name: "Internal Use",
+    };
+
     // Create request
-    const newRequest = await StockRequest.create(
+    await StockRequest.create(
       [
         {
           requestNumber,
-          customer: customer.trim(),
+          requestType: rawData.requestType,
+          customer: customerData,
           requester: {
             name: user.name,
             id: user.id,
@@ -768,11 +952,12 @@ export async function createStockRequest(prevState, formData) {
           },
           items: validatedItems,
           status: "pending",
-          priority,
-          notes,
+          priority: rawData.priority,
+          notes: rawData.notes,
           requiredByDate,
           approvalHistory: [],
           attachments: [],
+          companyId, // Tenant isolation
         },
       ],
       { session }
@@ -781,13 +966,6 @@ export async function createStockRequest(prevState, formData) {
     await session.commitTransaction();
 
     revalidatePath("/dashboard/requests");
-
-    // Return success with request ID
-    return {
-      message: "success",
-      requestId: newRequest[0]._id.toString(),
-      requestNumber: newRequest[0].requestNumber,
-    };
   } catch (error) {
     if (session && session.inTransaction()) {
       await session.abortTransaction();
@@ -795,13 +973,18 @@ export async function createStockRequest(prevState, formData) {
 
     console.error("Error creating stock request:", error);
     return {
-      message: error.message || "Failed to create stock request",
+      success: false,
+      error: error.message || "Failed to create stock request",
+      values: rawData,
     };
   } finally {
     if (session) {
       await session.endSession();
     }
   }
+
+  // Redirect on success (must be outside try-catch)
+  redirect("/dashboard/requests");
 }
 
 // ============================================
@@ -833,11 +1016,23 @@ export async function returnItemCheckout(checkoutId, prevState, formData) {
       throw new Error("Only store managers can process returns.");
     }
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    if (!companyId && !isSuperAdmin) {
+      throw new Error("Company context required");
+    }
+
     // Get checkout
     const checkout = await ItemCheckout.findById(checkoutId).session(session);
 
     if (!checkout) {
       throw new Error("Checkout not found");
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(checkout, companyId, isSuperAdmin)) {
+      await session.abortTransaction();
+      throw new Error("Access denied to this checkout");
     }
 
     if (checkout.status !== "checked_out") {
@@ -884,12 +1079,12 @@ export async function returnItemCheckout(checkoutId, prevState, formData) {
           quantity: checkout.quantity,
           previousStock: updatedProduct.stock - checkout.quantity,
           newStock: updatedProduct.stock,
-          unitPrice: 0,
-          totalValue: 0,
           costing: {
             unitCost: updatedProduct.costing?.costPrice || 0,
             totalCost: checkout.quantity * (updatedProduct.costing?.costPrice || 0),
-            averageCostAtMovement: updatedProduct.costing?.costPrice,
+            unitPrice: updatedProduct.pricing?.sellingPrice || updatedProduct.price || 0,
+            totalValue: checkout.quantity * (updatedProduct.pricing?.sellingPrice || updatedProduct.price || 0),
+            averageCostAtMovement: updatedProduct.costing?.costPrice || 0,
           },
           accounting: {
             affectsAccounting: true,
@@ -910,6 +1105,7 @@ export async function returnItemCheckout(checkoutId, prevState, formData) {
             checkoutNumber: checkout.checkoutNumber,
           },
           notes: `Returned by ${checkout.checkedOutTo.name} - ${returnCondition} condition`,
+          companyId, // Tenant isolation
         },
       ],
       { session }
@@ -922,7 +1118,8 @@ export async function returnItemCheckout(checkoutId, prevState, formData) {
       movement[0],
       totalCost,
       user,
-      session
+      session,
+      companyId
     );
 
     // Update movement with journal entry ID
@@ -981,20 +1178,48 @@ async function createFulfillmentJournalEntry(
   stockMovement,
   totalCost,
   user,
-  session
+  session,
+  companyId = null
 ) {
+  // Build account query filter (with or without companyId)
+  const accountFilter = companyId ? { companyId } : {};
+
   // Get system accounts
-  const techStockAccount = await Account.findOne({
+  let techStockAccount = await Account.findOne({
+    ...accountFilter,
     systemAccount: "technician_stock",
   }).session(session);
 
   const inventoryAccount = await Account.findOne({
+    ...accountFilter,
     systemAccount: "inventory",
   }).session(session);
 
+  // Auto-create technician_stock account if it doesn't exist
+  if (!techStockAccount && inventoryAccount) {
+    const newAccount = await Account.create(
+      [
+        {
+          companyId: companyId || inventoryAccount.companyId,
+          accountCode: "1310",
+          accountName: "Technician Stock",
+          accountType: "asset",
+          subType: "inventory",
+          systemAccount: "technician_stock",
+          canPost: true,
+          isActive: true,
+          level: 2,
+          description: "Stock issued to technicians for demo, installation, or repair",
+        },
+      ],
+      { session }
+    );
+    techStockAccount = newAccount[0];
+  }
+
   if (!techStockAccount) {
     throw new Error(
-      "Technician Stock account not found. Please create system account 'technician_stock'"
+      "Technician Stock account not found and could not be created. Please create system account 'technician_stock'"
     );
   }
 
@@ -1013,7 +1238,7 @@ async function createFulfillmentJournalEntry(
       {
         entryNumber,
         entryDate: new Date(),
-        entryType: "inventory_transfer",
+        entryType: "transfer", // Transfer between Inventory and Technician Stock accounts
         description: `Stock issued to technician - ${stockMovement.movementNumber}`,
         lines: [
           {
@@ -1044,16 +1269,20 @@ async function createFulfillmentJournalEntry(
           name: user.name,
           id: user.id,
         },
+        companyId, // Tenant isolation
       },
     ],
     { session }
   );
 
-  // Post journal entry
-  await journalEntry[0].post({
-    name: user.name,
-    id: user.id,
-  });
+  // Post journal entry (pass session for transaction support)
+  await journalEntry[0].post(
+    {
+      name: user.name,
+      id: user.id,
+    },
+    session
+  );
 
   return journalEntry[0];
 }
@@ -1066,16 +1295,44 @@ async function createReturnJournalEntry(
   stockMovement,
   totalCost,
   user,
-  session
+  session,
+  companyId = null
 ) {
+  // Build account query filter (with or without companyId)
+  const accountFilter = companyId ? { companyId } : {};
+
   // Get system accounts
-  const techStockAccount = await Account.findOne({
+  let techStockAccount = await Account.findOne({
+    ...accountFilter,
     systemAccount: "technician_stock",
   }).session(session);
 
   const inventoryAccount = await Account.findOne({
+    ...accountFilter,
     systemAccount: "inventory",
   }).session(session);
+
+  // Auto-create technician_stock account if it doesn't exist
+  if (!techStockAccount && inventoryAccount) {
+    const newAccount = await Account.create(
+      [
+        {
+          companyId: companyId || inventoryAccount.companyId,
+          accountCode: "1310",
+          accountName: "Technician Stock",
+          accountType: "asset",
+          subType: "inventory",
+          systemAccount: "technician_stock",
+          canPost: true,
+          isActive: true,
+          level: 2,
+          description: "Stock issued to technicians for demo, installation, or repair",
+        },
+      ],
+      { session }
+    );
+    techStockAccount = newAccount[0];
+  }
 
   if (!techStockAccount || !inventoryAccount) {
     throw new Error("System accounts not found");
@@ -1090,7 +1347,7 @@ async function createReturnJournalEntry(
       {
         entryNumber,
         entryDate: new Date(),
-        entryType: "inventory_transfer",
+        entryType: "transfer", // Reversal - return from Technician Stock to Inventory
         description: `Stock returned from technician - ${stockMovement.movementNumber}`,
         lines: [
           {
@@ -1121,16 +1378,20 @@ async function createReturnJournalEntry(
           name: user.name,
           id: user.id,
         },
+        companyId, // Tenant isolation
       },
     ],
     { session }
   );
 
-  // Post journal entry
-  await journalEntry[0].post({
-    name: user.name,
-    id: user.id,
-  });
+  // Post journal entry (pass session for transaction support)
+  await journalEntry[0].post(
+    {
+      name: user.name,
+      id: user.id,
+    },
+    session
+  );
 
   return journalEntry[0];
 }
@@ -1177,6 +1438,24 @@ async function generateDeliveryNoteNumber(session) {
   return `${counterId}-${String(counter.seq).padStart(3, "0")}`;
 }
 
+async function generateInvoiceNumber(companyId, session) {
+  // Get company code for prefix
+  const Company = mongoose.model("Company");
+  const company = await Company.findById(companyId).session(session);
+  const companyCode = company?.code || company?.name?.substring(0, 3).toUpperCase() || "INV";
+
+  const today = format(new Date(), "yyMM");
+  const counterId = `${companyCode}-INV-${today}`;
+
+  const counter = await Counter.findOneAndUpdate(
+    { name: counterId },
+    { $inc: { seq: 1 } },
+    { upsert: true, new: true, session }
+  );
+
+  return `${counterId}-${String(counter.seq).padStart(4, "0")}`;
+}
+
 function getPurposeLabel(purpose) {
   const labels = {
     sale: "Sale to Customer",
@@ -1195,6 +1474,7 @@ function getPurposeLabel(purpose) {
 // ============================================
 export async function fulfillRequest(requestId, prevState, formData) {
   let session;
+  let success = false;
 
   try {
     session = await mongoose.startSession();
@@ -1205,7 +1485,8 @@ export async function fulfillRequest(requestId, prevState, formData) {
     // Get authenticated user
     const userSession = await auth();
     if (!userSession?.user) {
-      throw new Error("Unauthorized. Please log in.");
+      await session.abortTransaction();
+      return { message: "Unauthorized. Please log in." };
     }
 
     const user = userSession.user;
@@ -1219,11 +1500,23 @@ export async function fulfillRequest(requestId, prevState, formData) {
       throw new Error("Only store managers can fulfill requests.");
     }
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    if (!companyId && !isSuperAdmin) {
+      throw new Error("Company context required");
+    }
+
     // Get request
     const request = await StockRequest.findById(requestId).session(session);
 
     if (!request) {
       throw new Error("Request not found");
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(request, companyId, isSuperAdmin)) {
+      await session.abortTransaction();
+      throw new Error("Access denied to this request");
     }
 
     // Check if can fulfill
@@ -1300,7 +1593,11 @@ export async function fulfillRequest(requestId, prevState, formData) {
       // CREATE STOCK MOVEMENT
       // ========================================
       const movementNumber = await generateMovementNumber(session);
-      const isSale = item.purpose === "sale";
+      const isSale = request.requestType === "sale";
+
+      // Use product's pricing fields (nested enhanced pricing preferred)
+      const effectiveUnitPrice = updatedProduct.pricing?.sellingPrice || updatedProduct.price || 0;
+      const effectiveUnitCost = updatedProduct.costing?.costPrice || 0;
 
       const movement = await StockMovement.create(
         [
@@ -1317,14 +1614,12 @@ export async function fulfillRequest(requestId, prevState, formData) {
             quantity: fulfillQty,
             previousStock: updatedProduct.stock + fulfillQty,
             newStock: updatedProduct.stock,
-            unitPrice: item.unitPrice,
-            totalValue: fulfillQty * (item.unitPrice || 0),
             costing: {
-              unitCost: updatedProduct.costing?.costPrice || 0,
-              totalCost: fulfillQty * (updatedProduct.costing?.costPrice || 0),
-              unitPrice: item.unitPrice || updatedProduct.pricing?.sellingPrice,
-              totalValue: fulfillQty * (item.unitPrice || 0),
-              averageCostAtMovement: updatedProduct.costing?.costPrice,
+              unitCost: effectiveUnitCost,
+              totalCost: fulfillQty * effectiveUnitCost,
+              unitPrice: effectiveUnitPrice,
+              totalValue: fulfillQty * effectiveUnitPrice,
+              averageCostAtMovement: effectiveUnitCost,
             },
 
             // ============================================
@@ -1340,19 +1635,20 @@ export async function fulfillRequest(requestId, prevState, formData) {
               role: userRole,
             },
             issuedTo: {
-              name: isSale ? request.customer : request.requester.name,
-              id: isSale ? "" : request.requester.id,
+              name: isSale ? request.customer?.name : request.requester.name,
+              id: isSale ? request.customer?.id : request.requester.id,
               department: isSale ? "External" : request.requester.department,
-              purpose: item.purpose,
+              purpose: request.requestType,
             },
             relatedDocuments: {
               requestId: request._id,
             },
-            requiresReturn: !isSale && item.requiresReturn,
-            expectedReturnDate: item.expectedReturnDate,
-            notes: `${getPurposeLabel(item.purpose)} - Request ${
+            requiresReturn: !isSale,
+            expectedReturnDate: null,
+            notes: `${stockRequestTypeConfig[request.requestType]?.label || request.requestType} - Request ${
               request.requestNumber
             }`,
+            companyId, // Tenant isolation
           },
         ],
         { session }
@@ -1367,7 +1663,8 @@ export async function fulfillRequest(requestId, prevState, formData) {
         movement[0],
         totalCost,
         user,
-        session
+        session,
+        companyId
       );
 
       // Update movement with journal entry ID
@@ -1390,16 +1687,16 @@ export async function fulfillRequest(requestId, prevState, formData) {
             {
               deliveryNumber: dNoteNumber,
               customer: {
-                name: request.customer || "Unknown",
-                address: "",
-                phone: "",
+                name: request.customer?.name || "Unknown",
+                address: request.customer?.address || "",
+                phone: request.customer?.phone || "",
               },
               items: [
                 {
                   id: product.SKU,
                   name: product.name,
                   quantity: fulfillQty,
-                  unitPrice: item.unitPrice || product.price,
+                  unitPrice: item.unitPrice || product.pricing?.sellingPrice || product.price,
                   unit: product.unit,
                   type: "Stock",
                   serialNo: serialNos,
@@ -1412,6 +1709,7 @@ export async function fulfillRequest(requestId, prevState, formData) {
                 id: user.id,
                 name: user.name,
               },
+              companyId, // Tenant isolation
             },
           ],
           { session }
@@ -1421,13 +1719,14 @@ export async function fulfillRequest(requestId, prevState, formData) {
       }
 
       // ========================================
-      // HANDLE LOANS (Create Checkout)
+      // HANDLE CHECKOUTS (for demo, installation, repair types)
       // ========================================
-      if (!isSale && item.requiresReturn) {
+      const typeConfig = stockRequestTypeConfig[request.requestType];
+      const createsCheckout = typeConfig?.createsCheckout || false;
+
+      if (createsCheckout) {
         const checkoutNumber = await generateCheckoutNumber(session);
-        const expectedReturn =
-          item.expectedReturnDate ||
-          new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        const expectedReturn = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
         const checkout = await ItemCheckout.create(
           [
@@ -1452,15 +1751,17 @@ export async function fulfillRequest(requestId, prevState, formData) {
                 id: user.id,
                 role: userRole,
               },
-              purpose: item.purpose,
-              purposeDetails:
-                item.purposeDetails || getPurposeLabel(item.purpose),
+              purpose: request.requestType,
+              purposeDetails: typeConfig?.description || request.requestType,
               expectedReturnDate: expectedReturn,
               relatedDocuments: {
                 requestId: request._id,
+                requestNumber: request.requestNumber,
                 movementId: movement[0]._id,
               },
-              checkoutNotes: `Checkout from request ${request.requestNumber}`,
+              requestType: request.requestType, // Track request type for conversion flow
+              checkoutNotes: `Checkout from request ${request.requestNumber} for ${request.customer?.name || "internal use"}`,
+              companyId, // Tenant isolation
             },
           ],
           { session }
@@ -1492,6 +1793,107 @@ export async function fulfillRequest(requestId, prevState, formData) {
     }
 
     // ========================================
+    // CREATE DRAFT INVOICE (for "sale" type requests)
+    // ========================================
+    if (request.requestType === "sale" && !request.draftInvoice?.invoiceId) {
+      const invoiceNumber = await generateInvoiceNumber(companyId, session);
+
+      // Prepare invoice items from fulfilled items
+      const invoiceItems = [];
+      for (const item of request.items) {
+        const fulfilledQty = item.fulfillments.reduce((sum, f) => sum + (f.quantity || 0), 0);
+        if (fulfilledQty > 0) {
+          const product = await Product.findById(item.productId).session(session);
+          const unitCost = product?.costing?.costPrice || 0;
+          const amount = fulfilledQty * (item.unitPrice || 0);
+          const totalCost = fulfilledQty * unitCost;
+
+          invoiceItems.push({
+            itemType: "product",
+            productId: item.productId,
+            productSKU: item.SKU,
+            productName: item.productName,
+            description: item.productName,
+            unit: item.unit,
+            quantity: fulfilledQty,
+            unitPrice: item.unitPrice || 0,
+            amount,
+            costing: {
+              unitCost,
+              totalCost,
+              grossProfit: amount - totalCost,
+              marginPercentage: amount > 0 ? ((amount - totalCost) / amount) * 100 : 0,
+            },
+            taxRate: 16, // Kenya VAT 16%
+            taxAmount: (amount * 16) / 100,
+            relatedRequest: {
+              requestId: request._id,
+              requestNumber: request.requestNumber,
+              technicianId: request.requester.id,
+              technicianName: request.requester.name,
+            },
+          });
+        }
+      }
+
+      if (invoiceItems.length > 0) {
+        const subtotal = invoiceItems.reduce((sum, item) => sum + item.amount, 0);
+        const totalTax = invoiceItems.reduce((sum, item) => sum + item.taxAmount, 0);
+        const totalCOGS = invoiceItems.reduce((sum, item) => sum + item.costing.totalCost, 0);
+        const total = subtotal + totalTax;
+
+        const draftInvoice = await Invoice.create(
+          [
+            {
+              companyId,
+              invoiceNumber,
+              invoiceDate: new Date(),
+              dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+              customer: {
+                id: request.customer?.id || "",
+                name: request.customer?.name || "Unknown",
+                email: request.customer?.email || "",
+                phone: request.customer?.phone || "",
+                address: request.customer?.address || "",
+                taxPin: request.customer?.taxPin || "",
+              },
+              items: invoiceItems,
+              subtotal,
+              totalDiscount: 0,
+              taxAmount: totalTax,
+              total,
+              totalCOGS,
+              grossProfit: subtotal - totalCOGS,
+              grossMarginPercentage: subtotal > 0 ? ((subtotal - totalCOGS) / subtotal) * 100 : 0,
+              status: "draft",
+              paymentStatus: "unpaid",
+              amountPaid: 0,
+              amountDue: total,
+              source: {
+                type: "stock_request",
+                requestId: request._id,
+                requestNumber: request.requestNumber,
+              },
+              notes: `Draft invoice from stock request ${request.requestNumber}. Pending service charges.`,
+              createdBy: {
+                name: user.name,
+                id: user.id,
+              },
+            },
+          ],
+          { session }
+        );
+
+        // Update request with draft invoice reference
+        request.draftInvoice = {
+          invoiceId: draftInvoice[0]._id,
+          invoiceNumber: draftInvoice[0].invoiceNumber,
+          createdAt: new Date(),
+        };
+      }
+    }
+
+    // ========================================
     // SAVE REQUEST (recalculation already done by addFulfillment)
     // ========================================
     await request.save({ session });
@@ -1504,11 +1906,9 @@ export async function fulfillRequest(requestId, prevState, formData) {
     revalidatePath("/dashboard/checkouts");
     revalidatePath("/dashboard/dnotes");
     revalidatePath("/dashboard/movement");
+    revalidatePath("/dashboard/invoices");
 
-    return {
-      message: "success",
-      details: `Fulfilled ${itemsFulfilledCount} item(s)`,
-    };
+    success = true;
   } catch (error) {
     if (session?.inTransaction()) {
       await session.abortTransaction();
@@ -1522,5 +1922,10 @@ export async function fulfillRequest(requestId, prevState, formData) {
     if (session) {
       await session.endSession();
     }
+  }
+
+  // Redirect after success (outside try/catch)
+  if (success) {
+    redirect("/dashboard/requests");
   }
 }

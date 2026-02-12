@@ -109,7 +109,7 @@ const billLineSchema = new Schema(
       poLineIndex: Number,
     },
   },
-  { _id: true }
+  { _id: true },
 );
 
 // ============================================
@@ -118,12 +118,21 @@ const billLineSchema = new Schema(
 const billSchema = new Schema(
   {
     // ==========================================
+    // COMPANY (TENANT)
+    // ==========================================
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
+    // ==========================================
     // IDENTIFICATION
     // ==========================================
     billNumber: {
       type: String,
       required: [true, "Bill number is required"],
-      unique: true,
       uppercase: true,
       trim: true,
       index: true,
@@ -397,17 +406,20 @@ const billSchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  }
+  },
 );
 
 // ============================================
 // INDEXES
 // ============================================
-billSchema.index({ billDate: -1, status: 1 });
-billSchema.index({ dueDate: 1, paymentStatus: 1 });
-billSchema.index({ "supplier.partyId": 1, status: 1 });
-billSchema.index({ fiscalPeriod: 1, status: 1 });
-billSchema.index({ status: 1, paymentStatus: 1 });
+// Unique bill number per company
+billSchema.index({ companyId: 1, billNumber: 1 }, { unique: true });
+// Query indexes
+billSchema.index({ companyId: 1, billDate: -1, status: 1 });
+billSchema.index({ companyId: 1, dueDate: 1, paymentStatus: 1 });
+billSchema.index({ companyId: 1, "supplier.partyId": 1, status: 1 });
+billSchema.index({ companyId: 1, fiscalPeriod: 1, status: 1 });
+billSchema.index({ companyId: 1, status: 1, paymentStatus: 1 });
 
 // ============================================
 // VIRTUALS
@@ -496,7 +508,7 @@ billSchema.pre("save", function (next) {
     const d = new Date(this.billDate);
     this.fiscalPeriod = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
       2,
-      "0"
+      "0",
     )}`;
   }
 });
@@ -556,9 +568,14 @@ billSchema.methods.approve = async function (user) {
   // ==========================================
   // 1. Find or Create Fiscal Period (auto-create on-the-fly like QuickBooks/Xero)
   // ==========================================
-  let fiscalPeriod = await FiscalPeriod.findOne({
+  const periodFilter = {
     periodCode: this.fiscalPeriod, // periodCode is "YYYY-MM" format
-  });
+  };
+  if (this.companyId) {
+    periodFilter.companyId = this.companyId;
+  }
+
+  let fiscalPeriod = await FiscalPeriod.findOne(periodFilter);
 
   if (!fiscalPeriod) {
     // Auto-create the fiscal period from bill's fiscalPeriod (YYYY-MM)
@@ -568,16 +585,15 @@ billSchema.methods.approve = async function (user) {
       fiscalPeriod = await FiscalPeriod.createMonthPeriod(
         year,
         month,
-        userInfo
+        userInfo,
+        this.companyId,
       );
     } catch (createError) {
       // Handle race condition - period may have been created by another request
-      fiscalPeriod = await FiscalPeriod.findOne({
-        periodCode: this.fiscalPeriod,
-      });
+      fiscalPeriod = await FiscalPeriod.findOne(periodFilter);
       if (!fiscalPeriod) {
         throw new Error(
-          `Failed to create fiscal period: ${createError.message}`
+          `Failed to create fiscal period: ${createError.message}`,
         );
       }
     }
@@ -592,14 +608,15 @@ billSchema.methods.approve = async function (user) {
   }
 
   // ==========================================
-  // 2. Get Required System Accounts
+  // 2. Get Required System Accounts (tenant-scoped)
   // ==========================================
+  const accountFilter = this.companyId ? { companyId: this.companyId } : {};
   const [apAccount, vatInputAccount, whtPayableAccount, inventoryAccount] =
     await Promise.all([
-      Account.findOne({ systemAccount: "accounts_payable" }),
-      Account.findOne({ systemAccount: "vat_input" }),
-      Account.findOne({ systemAccount: "wht_payable" }),
-      Account.findOne({ systemAccount: "inventory" }),
+      Account.findOne({ ...accountFilter, systemAccount: "accounts_payable" }),
+      Account.findOne({ ...accountFilter, systemAccount: "vat_input" }),
+      Account.findOne({ ...accountFilter, systemAccount: "wht_payable" }),
+      Account.findOne({ ...accountFilter, systemAccount: "inventory" }),
     ]);
 
   if (!apAccount) {
@@ -707,8 +724,8 @@ billSchema.methods.approve = async function (user) {
   if (Math.abs(totalDebits - totalCredits) > 0.01) {
     throw new Error(
       `Journal entry not balanced: Debits ${totalDebits.toFixed(
-        2
-      )} ≠ Credits ${totalCredits.toFixed(2)}`
+        2,
+      )} ≠ Credits ${totalCredits.toFixed(2)}`,
     );
   }
 
@@ -718,6 +735,7 @@ billSchema.methods.approve = async function (user) {
   const entryNumber = await this.generateJENumber();
 
   const journalEntry = new JournalEntry({
+    companyId: this.companyId,
     entryNumber,
     entryDate: this.billDate,
     entryType: "purchase",
@@ -760,13 +778,14 @@ billSchema.methods.approve = async function (user) {
           await product.increaseInventory(
             sm.quantity,
             sm.unitCost,
-            `Purchased via Bill ${this.billNumber}`
+            `Purchased via Bill ${this.billNumber}`,
           );
         }
 
-        // Create stock movement record
-        const movementNumber = await StockMovement.generateMovementNumber();
+        // Create stock movement record (with tenant scoping)
+        const movementNumber = await StockMovement.generateMovementNumber(this.companyId);
         await StockMovement.create({
+          companyId: this.companyId, // Tenant scoping
           movementNumber,
           productId: product._id,
           productSnapshot: {
@@ -796,7 +815,7 @@ billSchema.methods.approve = async function (user) {
     } catch (smError) {
       console.error(
         `Stock movement error for product ${sm.productId}:`,
-        smError
+        smError,
       );
       // Continue - don't fail the whole bill for stock movement issues
     }
@@ -871,7 +890,7 @@ billSchema.methods.cancel = async function (user, reason) {
     if (je && je.status === "posted") {
       await je.reverse(
         userInfo,
-        `Bill ${this.billNumber} cancelled: ${reason}`
+        `Bill ${this.billNumber} cancelled: ${reason}`,
       );
     }
   }
@@ -897,7 +916,7 @@ billSchema.methods.recordPayment = async function (
   reference,
   paidAt,
   recordedBy,
-  session = null
+  session = null,
 ) {
   if (!this.canPay) {
     throw new Error(`Cannot record payment for bill in status: ${this.status}`);
@@ -909,7 +928,7 @@ billSchema.methods.recordPayment = async function (
 
   if (amount > this.amounts.balance + 0.01) {
     throw new Error(
-      `Payment ${amount} exceeds balance ${this.amounts.balance}`
+      `Payment ${amount} exceeds balance ${this.amounts.balance}`,
     );
   }
 
@@ -950,7 +969,7 @@ billSchema.methods.recordPayment = async function (
 billSchema.methods.reversePayment = async function (paymentId, amount) {
   // Find and remove the payment from array
   const paymentIndex = this.payments.findIndex(
-    (p) => p.paymentId.toString() === paymentId.toString()
+    (p) => p.paymentId.toString() === paymentId.toString(),
   );
 
   if (paymentIndex === -1) {
@@ -978,11 +997,10 @@ billSchema.methods.reversePayment = async function (paymentId, amount) {
 // ============================================
 // METHOD: Generate JE Number
 // ============================================
-billSchema.methods.generateJENumber = async function () {
-  const { generateUniqueEntryNumber } = await import(
-    "@/lib/utils/server-utils"
-  );
-  return generateUniqueEntryNumber("BILL");
+billSchema.methods.generateJENumber = async function (session = null) {
+  const { generateUniqueEntryNumber } =
+    await import("@/lib/utils/server-utils");
+  return generateUniqueEntryNumber("BILL", this.companyId, session);
 };
 
 // ============================================
@@ -996,25 +1014,51 @@ billSchema.methods.generateJENumber = async function () {
 // ============================================
 // STATIC: Generate Bill Number (Atomic with Verification)
 // ============================================
-billSchema.statics.generateBillNumber = async function (session = null) {
+billSchema.statics.generateBillNumber = async function (
+  companyId = null,
+  session = null,
+) {
   const ErpCounter = mongoose.model("ErpCounter");
+  const Company = mongoose.model("Company");
+
+  // Fetch company code for prefix
+  let companyCode = null;
+  if (companyId) {
+    const company = await Company.findById(companyId).select("code").lean();
+    companyCode = company?.code || null;
+  }
+
   const date = new Date();
-  const prefix = `QSL-BILL-${date.getFullYear()}${String(
-    date.getMonth() + 1
+  const yearMonth = `${date.getFullYear()}${String(
+    date.getMonth() + 1,
   ).padStart(2, "0")}`;
-  const counterId = `bill-${date.getFullYear()}${String(
-    date.getMonth() + 1
-  ).padStart(2, "0")}`;
+
+  // Build prefix with company code: BILL-{CODE}-{YYYYMM}
+  const prefix = companyCode
+    ? `BILL-${companyCode}-${yearMonth}`
+    : `BILL-${yearMonth}`;
+
+  // Counter key includes company code for tenant isolation
+  const counterId = companyCode
+    ? `bill-${companyCode.toLowerCase()}-${yearMonth}`
+    : `bill-${yearMonth}`;
+
+  // Build tenant filter for queries
+  const tenantFilter = companyId ? { companyId } : {};
 
   const maxAttempts = 5;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const seq = await ErpCounter.getNextSequence(counterId, session);
+      const seq = await ErpCounter.getNextSequence(
+        counterId,
+        companyId,
+        session,
+      );
       const billNumber = `${prefix}-${String(seq).padStart(4, "0")}`;
 
       // Verify this number doesn't already exist (handles stale counters)
-      let existsQuery = this.exists({ billNumber });
+      let existsQuery = this.exists({ ...tenantFilter, billNumber });
       if (session) existsQuery = existsQuery.session(session);
       const exists = await existsQuery;
 
@@ -1029,10 +1073,15 @@ billSchema.statics.generateBillNumber = async function (session = null) {
       // Counter failed - use query-based fallback
       console.warn(
         `Counter failed for ${counterId}, attempt ${attempt + 1}:`,
-        counterError.message
+        counterError.message,
       );
 
-      let findQuery = this.findOne({ billNumber: { $regex: `^${prefix}` } })
+      // Escape special regex characters in prefix
+      const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      let findQuery = this.findOne({
+        ...tenantFilter,
+        billNumber: { $regex: `^${escapedPrefix}-\\d+$` },
+      })
         .sort({ billNumber: -1 })
         .lean();
       if (session) findQuery = findQuery.session(session);
@@ -1046,7 +1095,7 @@ billSchema.statics.generateBillNumber = async function (session = null) {
 
       const billNumber = `${prefix}-${String(nextNum).padStart(4, "0")}`;
 
-      let existsQuery = this.exists({ billNumber });
+      let existsQuery = this.exists({ ...tenantFilter, billNumber });
       if (session) existsQuery = existsQuery.session(session);
       const exists = await existsQuery;
 
@@ -1057,7 +1106,7 @@ billSchema.statics.generateBillNumber = async function (session = null) {
 
     // Exponential backoff before retry
     await new Promise((resolve) =>
-      setTimeout(resolve, 50 * Math.pow(2, attempt))
+      setTimeout(resolve, 50 * Math.pow(2, attempt)),
     );
   }
 

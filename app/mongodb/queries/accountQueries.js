@@ -2,6 +2,8 @@ import Account from "../../models/account";
 import JournalEntry from "../../models/JournalEntry";
 import AccountService from "../services/accountService";
 import dbConnect from "../../config/dbConnect";
+import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { serializeBsonType } from "@/lib/utils";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -17,8 +19,11 @@ const ITEMS_PER_PAGE = 20;
 export async function getAccounts(page = 1, filters = {}) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   const skip = (page - 1) * ITEMS_PER_PAGE;
-  const query = { isActive: true };
+  let query = { isActive: true };
 
   // Apply filters
   if (filters.accountType) query.accountType = filters.accountType;
@@ -33,6 +38,9 @@ export async function getAccounts(page = 1, filters = {}) {
     ];
   }
 
+  // Apply tenant scoping
+  query = withTenantScope(query, companyId, isSuperAdmin);
+
   // Parallel queries for performance
   const [accounts, total] = await Promise.all([
     Account.find(query)
@@ -40,7 +48,7 @@ export async function getAccounts(page = 1, filters = {}) {
       .skip(skip)
       .limit(ITEMS_PER_PAGE)
       .select(
-        "accountCode accountName accountType subType canPost cachedBalance balanceUpdatedAt systemAccount"
+        "accountCode accountName accountType subType canPost cachedBalance balanceUpdatedAt systemAccount",
       )
       .lean(), // Performance optimization
     Account.countDocuments(query),
@@ -73,7 +81,12 @@ export async function getChartOfAccounts() {
 export async function getAccountById(accountId, includeTransactions = false) {
   await dbConnect();
 
-  const account = await Account.findById(accountId).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const account = await Account.findOne(
+    withTenantScope({ _id: accountId }, companyId, isSuperAdmin),
+  ).lean();
   if (!account) return null;
 
   if (includeTransactions) {
@@ -88,7 +101,7 @@ export async function getAccountById(accountId, includeTransactions = false) {
 
     account.recentTransactions = recentTransactions.map((entry) => {
       const line = entry.lines.find(
-        (l) => l.accountId.toString() === accountId.toString()
+        (l) => l.accountId.toString() === accountId.toString(),
       );
       return {
         entryNumber: entry.entryNumber,
@@ -101,17 +114,7 @@ export async function getAccountById(accountId, includeTransactions = false) {
   }
 
   // Serialize ObjectIds for Next.js
-  return {
-    ...account,
-    _id: account._id.toString(),
-    parentAccount: account.parentAccount
-      ? account.parentAccount.toString()
-      : null,
-    ancestors: account.ancestors?.map((id) => id.toString()) || [],
-    createdAt: account.createdAt?.toISOString(),
-    updatedAt: account.updatedAt?.toISOString(),
-    balanceUpdatedAt: account.balanceUpdatedAt?.toISOString(),
-  };
+  return serializeBsonType(account);
 }
 
 /**
@@ -130,15 +133,24 @@ export async function getAccountDetails(accountId, startDate, endDate) {
 export async function searchAccounts(searchTerm, limit = 50) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   if (!searchTerm || searchTerm.trim().length === 0) return [];
 
-  return await Account.find({
-    isActive: true,
-    $or: [
-      { accountCode: { $regex: searchTerm, $options: "i" } },
-      { accountName: { $regex: searchTerm, $options: "i" } },
-    ],
-  })
+  const query = withTenantScope(
+    {
+      isActive: true,
+      $or: [
+        { accountCode: { $regex: searchTerm, $options: "i" } },
+        { accountName: { $regex: searchTerm, $options: "i" } },
+      ],
+    },
+    companyId,
+    isSuperAdmin,
+  );
+
+  return await Account.find(query)
     .sort({ accountCode: 1 })
     .limit(limit)
     .select("accountCode accountName accountType subType canPost")
@@ -152,12 +164,14 @@ export async function searchAccounts(searchTerm, limit = 50) {
 export async function getPostableAccounts(accountType = null) {
   await dbConnect();
 
-  if (typeof Account.getPostableAccounts === "function") {
-    return await Account.getPostableAccounts(accountType);
-  }
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  const query = { canPost: true, isActive: true };
+  let query = { canPost: true, isActive: true };
   if (accountType) query.accountType = accountType;
+
+  // Apply tenant scoping
+  query = withTenantScope(query, companyId, isSuperAdmin);
 
   return await Account.find(query)
     .sort({ accountCode: 1 })
@@ -173,15 +187,20 @@ export async function getAccountLedger(
   accountId,
   page = 1,
   startDate = null,
-  endDate = null
+  endDate = null,
 ) {
   await dbConnect();
 
-  const account = await Account.findById(accountId);
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const account = await Account.findOne(
+    withTenantScope({ _id: accountId }, companyId, isSuperAdmin),
+  );
   if (!account) return null;
 
   const skip = (page - 1) * ITEMS_PER_PAGE;
-  const query = {
+  let query = {
     status: "posted",
     "lines.accountId": accountId,
   };
@@ -191,6 +210,9 @@ export async function getAccountLedger(
     if (startDate) query.entryDate.$gte = new Date(startDate);
     if (endDate) query.entryDate.$lte = new Date(endDate);
   }
+
+  // Apply tenant scoping to journal entries
+  query = withTenantScope(query, companyId, isSuperAdmin);
 
   const [entries, total] = await Promise.all([
     JournalEntry.find(query)
@@ -210,7 +232,7 @@ export async function getAccountLedger(
   const transactions = entries
     .map((entry) => {
       const line = entry.lines.find(
-        (l) => l.accountId.toString() === accountId.toString()
+        (l) => l.accountId.toString() === accountId.toString(),
       );
       if (!line) return null;
 
@@ -260,9 +282,24 @@ export async function getAccountLedger(
 export async function getAccountStats() {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
+  const baseQuery = withTenantScope(
+    { isActive: true },
+    companyId,
+    isSuperAdmin,
+  );
+  const postableQuery = withTenantScope(
+    { isActive: true, canPost: true },
+    companyId,
+    isSuperAdmin,
+  );
+
   const [stats, total, postableTotal] = await Promise.all([
     Account.aggregate([
-      { $match: { isActive: true } },
+      { $match: { ...tenantMatch, isActive: true } },
       {
         $group: {
           _id: "$accountType",
@@ -271,8 +308,8 @@ export async function getAccountStats() {
         },
       },
     ]),
-    Account.countDocuments({ isActive: true }),
-    Account.countDocuments({ isActive: true, canPost: true }),
+    Account.countDocuments(baseQuery),
+    Account.countDocuments(postableQuery),
   ]);
 
   return {
@@ -294,13 +331,16 @@ export async function getAccountStats() {
 export async function getAccountsByType(accountType) {
   await dbConnect();
 
-  if (typeof Account.getByType === "function") {
-    return await Account.getByType(accountType);
-  }
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  return await Account.find({ accountType, isActive: true })
-    .sort({ accountCode: 1 })
-    .lean();
+  const query = withTenantScope(
+    { accountType, isActive: true },
+    companyId,
+    isSuperAdmin,
+  );
+
+  return await Account.find(query).sort({ accountCode: 1 }).lean();
 }
 
 /**
@@ -309,13 +349,16 @@ export async function getAccountsByType(accountType) {
 export async function getRootAccounts() {
   await dbConnect();
 
-  if (typeof Account.getRootAccounts === "function") {
-    return await Account.getRootAccounts();
-  }
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  return await Account.find({ parentAccount: null, isActive: true })
-    .sort({ accountCode: 1 })
-    .lean();
+  const query = withTenantScope(
+    { parentAccount: null, isActive: true },
+    companyId,
+    isSuperAdmin,
+  );
+
+  return await Account.find(query).sort({ accountCode: 1 }).lean();
 }
 
 /**
@@ -333,18 +376,24 @@ export async function getSystemAccount(systemAccountName) {
 export async function getAccountsWithBalances(
   accountType = null,
   startDate = null,
-  endDate = null
+  endDate = null,
 ) {
   await dbConnect();
 
-  const query = { canPost: true, isActive: true };
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  let query = { canPost: true, isActive: true };
   if (accountType) query.accountType = accountType;
+
+  // Apply tenant scoping
+  query = withTenantScope(query, companyId, isSuperAdmin);
 
   const accounts = await Account.find(query).lean();
 
   const accountsWithBalances = await Promise.all(
     accounts.map(async (account) => {
-      const jeQuery = {
+      let jeQuery = {
         status: "posted",
         "lines.accountId": account._id,
       };
@@ -354,6 +403,9 @@ export async function getAccountsWithBalances(
         if (startDate) jeQuery.entryDate.$gte = new Date(startDate);
         if (endDate) jeQuery.entryDate.$lte = new Date(endDate);
       }
+
+      // Apply tenant scoping to journal entries query
+      jeQuery = withTenantScope(jeQuery, companyId, isSuperAdmin);
 
       const result = await JournalEntry.aggregate([
         { $match: jeQuery },
@@ -383,7 +435,7 @@ export async function getAccountsWithBalances(
           : totalCredit - totalDebit;
 
       return { ...account, balance };
-    })
+    }),
   );
 
   return accountsWithBalances.filter((acc) => Math.abs(acc.balance) > 0.01);
@@ -394,13 +446,18 @@ export async function getAccountsWithBalances(
  * Returns tree structure for expand/collapse UI
  */
 export async function getAccountsGrouped() {
-  dbConnect();
+  await dbConnect();
+
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const query = withTenantScope({ isActive: true }, companyId, isSuperAdmin);
 
   // Fetch all active accounts
-  const accounts = await Account.find({ isActive: true })
+  const accounts = await Account.find(query)
     .sort({ accountCode: 1 })
     .select(
-      "_id accountCode accountName accountType subType parentId canPost cachedBalance isActive systemAccount"
+      "_id accountCode accountName accountType subType parentId canPost cachedBalance isActive systemAccount",
     )
     .lean();
 
@@ -449,6 +506,34 @@ export async function getAccountsGrouped() {
   return rootsByType;
 }
 
+/**
+ * Get postable expense accounts for internal use expensing
+ * Returns only active, postable expense accounts for the expense dialog
+ */
+export async function getExpenseAccountsForDialog() {
+  await dbConnect();
+
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const query = withTenantScope(
+    {
+      accountType: "expense",
+      canPost: true,
+      isActive: true,
+    },
+    companyId,
+    isSuperAdmin,
+  );
+
+  const accounts = await Account.find(query)
+    .sort({ accountCode: 1 })
+    .select("_id accountCode accountName subType")
+    .lean();
+
+  return serializeBsonType(accounts);
+}
+
 export default {
   getAccounts,
   getChartOfAccounts,
@@ -462,4 +547,5 @@ export default {
   getAccountLedger,
   getAccountStats,
   getAccountsWithBalances,
+  getExpenseAccountsForDialog,
 };

@@ -12,6 +12,7 @@ import Account from "@/app/models/account";
 import Product from "@/app/models/product";
 import dbConnect from "@/app/config/dbConnect";
 import { auth } from "@/auth";
+import { serializeBsonType } from "@/lib/utils";
 
 // ============================================
 // METADATA
@@ -135,7 +136,7 @@ async function BillEditFormWrapper({ billId }) {
 
   return (
     <BillForm
-      bill={bill}
+      bill={serializeBsonType(bill)}
       suppliers={suppliers}
       accounts={accounts}
       products={products}

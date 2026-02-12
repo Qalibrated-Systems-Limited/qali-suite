@@ -2,7 +2,18 @@ import mongoose from "mongoose";
 import validator from "validator";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
-import { userRoles } from "@/lib/utils";
+
+export const userRoles = [
+  "SuperAdmin", // System-wide admin (manages all companies)
+  "Admin", // Company-level admin
+  "Store Manager",
+  "User",
+  "Viewer",
+  "Manager",
+  "Accountant",
+  "Employee",
+  "Technician",
+];
 
 const Schema = mongoose.Schema;
 
@@ -59,7 +70,7 @@ const userSchema = new Schema(
     resetPasswordToken: String,
     resetPasswordExpire: Date,
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Encrypting password before saving user
@@ -99,3 +110,4 @@ if (!User) {
 }
 
 export default User;
+export { User };

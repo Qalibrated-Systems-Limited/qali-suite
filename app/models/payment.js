@@ -59,10 +59,9 @@ const paymentSchema = new Schema(
     paymentNumber: {
       type: String,
       required: [true, "Payment number is required"],
-      unique: true,
       uppercase: true,
       trim: true,
-      index: true,
+      // Unique per company - see compound index below
     },
 
     paymentType: {
@@ -86,6 +85,16 @@ const paymentSchema = new Schema(
       type: String,
       required: true,
       match: [/^\d{4}-\d{2}$/, "Fiscal period must be YYYY-MM format"],
+      index: true,
+    },
+
+    // ==========================================
+    // MULTI-TENANCY
+    // ==========================================
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
       index: true,
     },
 
@@ -298,10 +307,14 @@ const paymentSchema = new Schema(
 // ============================================
 // INDEXES
 // ============================================
-paymentSchema.index({ paymentDate: -1, status: 1 });
-paymentSchema.index({ paymentType: 1, "party.partyId": 1 });
-paymentSchema.index({ fiscalPeriod: 1, paymentType: 1 });
-paymentSchema.index({ "reconciliation.isReconciled": 1, paymentMethod: 1 });
+// Compound unique: paymentNumber unique per company
+paymentSchema.index({ companyId: 1, paymentNumber: 1 }, { unique: true });
+
+// Tenant-scoped query indexes
+paymentSchema.index({ companyId: 1, paymentDate: -1, status: 1 });
+paymentSchema.index({ companyId: 1, paymentType: 1, "party.partyId": 1 });
+paymentSchema.index({ companyId: 1, fiscalPeriod: 1, paymentType: 1 });
+paymentSchema.index({ companyId: 1, "reconciliation.isReconciled": 1, paymentMethod: 1 });
 paymentSchema.index({ "allocations.documentId": 1 });
 
 // ============================================
@@ -412,7 +425,11 @@ paymentSchema.methods.validate = async function () {
 
   // Validate fiscal period is open
   const FiscalPeriod = mongoose.model("FiscalPeriod");
-  const period = await FiscalPeriod.findOne({ period: this.fiscalPeriod });
+  const periodFilter = { periodCode: this.fiscalPeriod };
+  if (this.companyId) {
+    periodFilter.companyId = this.companyId;
+  }
+  const period = await FiscalPeriod.findOne(periodFilter);
 
   if (period && period.status === "closed") {
     errors.push(`Fiscal period ${this.fiscalPeriod} is closed`);
@@ -551,10 +568,11 @@ paymentSchema.methods.createJournalEntry = async function (user, session = null)
 
   // Generate entry number
   const prefix = this.paymentType === "received" ? "JE-REC" : "JE-PAY";
-  const entryNumber = await this.constructor.generateJENumber(prefix, session);
+  const entryNumber = await this.constructor.generateJENumber(prefix, this.companyId, session);
 
   // Create and post
   const journalEntry = new JournalEntry({
+    companyId: this.companyId,
     entryNumber,
     entryDate: this.paymentDate,
     entryType:
@@ -730,31 +748,53 @@ paymentSchema.methods.reconcile = async function (user, statementRef) {
 // ============================================
 paymentSchema.statics.generatePaymentNumber = async function (
   type,
+  companyId = null,
   session = null
 ) {
   const ErpCounter = mongoose.model("ErpCounter");
+  const Company = mongoose.model("Company");
+
+  // Fetch company code for prefix
+  let companyCode = null;
+  if (companyId) {
+    const company = await Company.findById(companyId).select("code").lean();
+    companyCode = company?.code || null;
+  }
 
   const date = new Date();
-  const prefix =
-    type === "received" || type === "RECEIVED" ? "PAY-REC" : "PAY-MADE";
+  const typePrefix =
+    type === "received" || type === "RECEIVED" ? "REC" : "MADE";
   const yearMonth = `${date.getFullYear()}${String(
     date.getMonth() + 1
   ).padStart(2, "0")}`;
 
-  const pattern = `${prefix}-${yearMonth}`;
-  const counterKey = `payment-${pattern.toLowerCase()}`;
-  const queryOptions = session ? { session } : {};
+  // Build pattern with company code prefix: PAY-{CODE}-{TYPE}-{YYYYMM}
+  const pattern = companyCode
+    ? `PAY-${companyCode}-${typePrefix}-${yearMonth}`
+    : `PAY-${typePrefix}-${yearMonth}`;
+
+  // Counter key includes company code for tenant isolation
+  const counterKey = companyCode
+    ? `payment-${companyCode.toLowerCase()}-${typePrefix.toLowerCase()}-${yearMonth}`
+    : `payment-${typePrefix.toLowerCase()}-${yearMonth}`;
+
+  // Include companyId in verification queries for tenant isolation
+  const tenantFilter = companyId ? { companyId } : {};
 
   const maxAttempts = 5;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      // Use atomic counter for sequence generation
-      const seq = await ErpCounter.getNextSequence(counterKey, session);
+      // Use atomic counter for sequence generation (tenant-scoped)
+      const seq = await ErpCounter.getNextSequence(counterKey, companyId, session);
       const paymentNumber = `${pattern}-${String(seq).padStart(4, "0")}`;
 
-      // Verify this number doesn't already exist (handles stale counters)
-      const exists = await this.exists({ paymentNumber, ...queryOptions });
+      // Verify this number doesn't already exist within the same company
+      // Use .session() method chaining instead of spreading into query filter
+      let existsQuery = this.exists({ ...tenantFilter, paymentNumber });
+      if (session) existsQuery = existsQuery.session(session);
+      const exists = await existsQuery;
+
       if (!exists) {
         return paymentNumber;
       }
@@ -771,13 +811,16 @@ paymentSchema.statics.generatePaymentNumber = async function (
         counterError.message
       );
 
-      const lastPayment = await this.findOne(
-        { paymentNumber: { $regex: `^${pattern}` } },
-        null,
-        queryOptions
-      )
+      // Escape special regex characters in pattern
+      const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      let findQuery = this.findOne({
+        ...tenantFilter,
+        paymentNumber: { $regex: `^${escapedPattern}-\\d+$` },
+      })
         .sort({ paymentNumber: -1 })
         .lean();
+      if (session) findQuery = findQuery.session(session);
+      const lastPayment = await findQuery;
 
       let nextNum = 1;
       if (lastPayment?.paymentNumber) {
@@ -787,7 +830,10 @@ paymentSchema.statics.generatePaymentNumber = async function (
 
       const paymentNumber = `${pattern}-${String(nextNum).padStart(4, "0")}`;
 
-      const exists = await this.exists({ paymentNumber, ...queryOptions });
+      let existsQuery = this.exists({ ...tenantFilter, paymentNumber });
+      if (session) existsQuery = existsQuery.session(session);
+      const exists = await existsQuery;
+
       if (!exists) {
         return paymentNumber;
       }
@@ -810,6 +856,7 @@ paymentSchema.statics.generatePaymentNumber = async function (
 // ============================================
 paymentSchema.statics.generateJENumber = async function (
   prefix,
+  companyId = null,
   session = null
 ) {
   const { generateUniqueEntryNumber } = await import(
@@ -817,7 +864,7 @@ paymentSchema.statics.generateJENumber = async function (
   );
   // Extract the type from prefix (e.g., "JE-REC" -> "REC", "JE-PAY" -> "PAY")
   const normalizedPrefix = prefix.replace(/^JE-/, "");
-  return generateUniqueEntryNumber(normalizedPrefix, session);
+  return generateUniqueEntryNumber(normalizedPrefix, companyId, session);
 };
 
 // ============================================

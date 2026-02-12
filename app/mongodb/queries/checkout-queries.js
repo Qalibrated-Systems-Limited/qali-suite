@@ -1,5 +1,8 @@
 import { ItemCheckout } from "../../models/checkouts";
 import mongoose from "mongoose";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { ObjectId } from "mongodb";
+import { serializeBsonType } from "@/lib/utils";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -7,6 +10,12 @@ const ITEMS_PER_PAGE = 20;
 // FETCH CHECKOUTS WITH FILTERS
 // ============================================
 export const fetchCheckoutPages = async (searchTerm, filters = {}) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const { status, dueStatus } = filters;
 
   // Build filter conditions
@@ -24,7 +33,7 @@ export const fetchCheckoutPages = async (searchTerm, filters = {}) => {
       case "due-soon":
         // Due within 3 days
         const threeDaysFromNow = new Date(
-          now.getTime() + 3 * 24 * 60 * 60 * 1000
+          now.getTime() + 3 * 24 * 60 * 60 * 1000,
         );
         additionalFilters.expectedReturnDate = {
           $gte: now,
@@ -42,6 +51,7 @@ export const fetchCheckoutPages = async (searchTerm, filters = {}) => {
   const transactionSearchStage = {
     $match: {
       $and: [
+        tenantMatch,
         additionalFilters,
         {
           $or: [
@@ -59,7 +69,7 @@ export const fetchCheckoutPages = async (searchTerm, filters = {}) => {
   };
 
   const baseFilterStage = {
-    $match: additionalFilters,
+    $match: { ...tenantMatch, ...additionalFilters },
   };
 
   const countStage = {
@@ -88,6 +98,12 @@ export const fetchCheckoutPages = async (searchTerm, filters = {}) => {
 // SEARCH CHECKOUTS WITH PAGINATION
 // ============================================
 export const searchCheckouts = async (searchTerm, page = 1, filters = {}) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const { status, dueStatus } = filters;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
@@ -105,7 +121,7 @@ export const searchCheckouts = async (searchTerm, page = 1, filters = {}) => {
     switch (dueStatus) {
       case "due-soon":
         const threeDaysFromNow = new Date(
-          now.getTime() + 3 * 24 * 60 * 60 * 1000
+          now.getTime() + 3 * 24 * 60 * 60 * 1000,
         );
         additionalFilters.expectedReturnDate = {
           $gte: now,
@@ -123,6 +139,7 @@ export const searchCheckouts = async (searchTerm, page = 1, filters = {}) => {
   const searchStage = {
     $match: {
       $and: [
+        tenantMatch,
         additionalFilters,
         {
           $or: [
@@ -140,7 +157,7 @@ export const searchCheckouts = async (searchTerm, page = 1, filters = {}) => {
   };
 
   const baseFilterStage = {
-    $match: additionalFilters,
+    $match: { ...tenantMatch, ...additionalFilters },
   };
 
   const paginationStage = [{ $skip: skipRecords }, { $limit: ITEMS_PER_PAGE }];
@@ -167,7 +184,7 @@ export const searchCheckouts = async (searchTerm, page = 1, filters = {}) => {
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       daysOverdue = days > 0 ? days : 0;
       daysUntilDue = Math.ceil(
-        (new Date(checkout.expectedReturnDate) - now) / (1000 * 60 * 60 * 24)
+        (new Date(checkout.expectedReturnDate) - now) / (1000 * 60 * 60 * 24),
       );
     }
 
@@ -194,28 +211,34 @@ export const searchCheckouts = async (searchTerm, page = 1, filters = {}) => {
     };
   });
 
-  return result;
+  return serializeBsonType(result);
 };
 
 // ============================================
 // GET CHECKOUT STATS
 // ============================================
 export const getCheckoutStats = async () => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const now = new Date();
   const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
 
   const [total, active, overdue, dueSoon, returned] = await Promise.all([
-    ItemCheckout.countDocuments(),
-    ItemCheckout.countDocuments({ status: "checked_out" }),
+    ItemCheckout.countDocuments(tenantMatch),
+    ItemCheckout.countDocuments({ ...tenantMatch, status: "checked_out" }),
     ItemCheckout.countDocuments({
+      ...tenantMatch,
       status: "checked_out",
       expectedReturnDate: { $lt: now },
     }),
     ItemCheckout.countDocuments({
+      ...tenantMatch,
       status: "checked_out",
       expectedReturnDate: { $gte: now, $lte: threeDaysFromNow },
     }),
-    ItemCheckout.countDocuments({ status: "returned" }),
+    ItemCheckout.countDocuments({ ...tenantMatch, status: "returned" }),
   ]);
 
   return {
@@ -231,7 +254,14 @@ export const getCheckoutStats = async () => {
 // GET SINGLE CHECKOUT BY ID
 // ============================================
 export const getCheckoutById = async (checkoutId) => {
-  const checkout = await ItemCheckout.findById(checkoutId).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
+  const checkout = await ItemCheckout.findOne({
+    ...tenantMatch,
+    _id: checkoutId,
+  }).lean();
 
   if (!checkout) {
     return null;
@@ -246,7 +276,7 @@ export const getCheckoutById = async (checkoutId) => {
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
     daysOverdue = days > 0 ? days : 0;
     daysUntilDue = Math.ceil(
-      (new Date(checkout.expectedReturnDate) - now) / (1000 * 60 * 60 * 24)
+      (new Date(checkout.expectedReturnDate) - now) / (1000 * 60 * 60 * 24),
     );
   }
 
@@ -270,7 +300,11 @@ export const getCheckoutById = async (checkoutId) => {
 // GET USER CHECKOUTS
 // ============================================
 export const getUserCheckouts = async (userId, activeOnly = false) => {
-  const query = { "checkedOutTo.id": userId };
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
+  const query = { ...tenantMatch, "checkedOutTo.id": userId };
 
   if (activeOnly) {
     query.status = { $in: ["checked_out", "overdue"] };
@@ -291,6 +325,95 @@ export const getUserCheckouts = async (userId, activeOnly = false) => {
 };
 
 // ============================================
+// GET ACTIVE CHECKOUTS FOR INVOICE (Technician Stock)
+// Returns checkouts that can be added to invoices
+// ============================================
+// RULES:
+// 1. "sale" type requests → Draft invoice already created during fulfillment → EXCLUDE
+// 2. "internal" type requests → Cannot be invoiced (return to store or expense) → EXCLUDE
+// 3. "demo", "installation", "repair" → Can be invoiced → INCLUDE
+// 4. Must match customer when adding to invoice (filtered in UI)
+// 5. Checkouts with saleConversion.invoiceId already exist → EXCLUDE
+// ============================================
+export const getActiveCheckouts = async () => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+
+  // Import StockRequest to get customer info
+  const { StockRequest } = await import("../../models/requests");
+
+  const checkouts = await ItemCheckout.find({
+    ...tenantMatch,
+    status: "checked_out",
+    // Exclude already converted checkouts
+    "saleConversion.converted": { $ne: true },
+    // Exclude checkouts that already have a draft invoice created
+    "saleConversion.invoiceId": { $exists: false },
+    // Only include types that CAN be invoiced (demo, installation, repair)
+    // Exclude: "sale" (already has invoice), "internal" (not for sale)
+    requestType: { $in: ["demo", "installation", "repair"] },
+  })
+    .populate("productId", "name SKU unit pricing costing stock")
+    .sort({ checkoutDate: -1 })
+    .lean();
+
+  // Get customer info from parent requests
+  const requestIds = [...new Set(checkouts
+    .filter(c => c.relatedDocuments?.requestId)
+    .map(c => c.relatedDocuments.requestId.toString()))];
+
+  const requests = await StockRequest.find({
+    _id: { $in: requestIds },
+  }).select("_id customer").lean();
+
+  // Create a map of requestId -> customer
+  const requestCustomerMap = new Map();
+  for (const req of requests) {
+    requestCustomerMap.set(req._id.toString(), req.customer);
+  }
+
+  return checkouts.map((checkout) => {
+    const product = checkout.productId;
+    const requestId = checkout.relatedDocuments?.requestId?.toString();
+    const customer = requestId ? requestCustomerMap.get(requestId) : null;
+
+    return {
+      _id: checkout._id.toString(),
+      checkoutNumber: checkout.checkoutNumber,
+      productId: product?._id?.toString() || null,
+      productSnapshot: checkout.productSnapshot,
+      product: product
+        ? {
+            _id: product._id.toString(),
+            name: product.name,
+            SKU: product.SKU,
+            unit: product.unit,
+            sellingPrice: product.pricing?.sellingPrice || 0,
+            costPrice: product.costing?.costPrice || 0,
+            stock: product.stock || 0,
+          }
+        : null,
+      quantity: checkout.quantity,
+      checkedOutTo: checkout.checkedOutTo,
+      checkoutDate: checkout.checkoutDate?.toISOString(),
+      expectedReturnDate: checkout.expectedReturnDate?.toISOString(),
+      requestType: checkout.requestType,
+      // Include customer info from parent request for filtering
+      customer: customer
+        ? {
+            id: customer.id,
+            name: customer.name,
+          }
+        : null,
+      relatedDocuments: {
+        requestId: requestId || null,
+        requestNumber: checkout.relatedDocuments?.requestNumber || null,
+      },
+    };
+  });
+};
+
+// ============================================
 // GENERATE CHECKOUT NUMBER
 // ============================================
 export const generateCheckoutNumber = async (session = null) => {
@@ -303,7 +426,7 @@ export const generateCheckoutNumber = async (session = null) => {
   const counter = await Counter.findOneAndUpdate(
     { name: counterId },
     { $inc: { seq: 1 } },
-    { upsert: true, new: true, session }
+    { upsert: true, new: true, session },
   );
 
   if (!counter) {

@@ -2,6 +2,10 @@ import { ItemCheckout } from "@/app/models/checkouts";
 import Product from "@/app/models/product";
 import { StockRequest } from "@/app/models/requests";
 import { StockMovement } from "@/app/models/stockmovement";
+import {
+  getTenantContext,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 const { default: dbConnect } = require("@/app/config/dbConnect");
 
@@ -9,7 +13,10 @@ dbConnect();
 
 export async function getProduct(id) {
   try {
-    const product = await Product.findById(id).lean();
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const query = withTenantScope({ _id: id }, companyId, isSuperAdmin);
+    const product = await Product.findOne(query).lean();
     if (!product) return null;
 
     // Convert MongoDB document to plain object
@@ -22,7 +29,10 @@ export async function getProduct(id) {
 
 export async function getAProductRecentMovements(productId, limit = 5) {
   try {
-    const movements = await StockMovement.find({ productId })
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const query = withTenantScope({ productId }, companyId, isSuperAdmin);
+    const movements = await StockMovement.find(query)
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean();
@@ -36,10 +46,18 @@ export async function getAProductRecentMovements(productId, limit = 5) {
 
 export async function getAProductPendingRequests(productId) {
   try {
-    const requests = await StockRequest.find({
-      "items.productId": productId,
-      status: { $in: ["pending", "approved", "partial"] },
-    })
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const query = withTenantScope(
+      {
+        "items.productId": productId,
+        status: { $in: ["pending", "approved", "partial"] },
+      },
+      companyId,
+      isSuperAdmin
+    );
+
+    const requests = await StockRequest.find(query)
       .sort({ createdAt: -1 })
       .limit(5)
       .lean();
@@ -53,10 +71,18 @@ export async function getAProductPendingRequests(productId) {
 
 export async function getAProductActiveCheckouts(productId) {
   try {
-    const checkouts = await ItemCheckout.find({
-      productId,
-      status: { $in: ["checked_out", "overdue"] },
-    })
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const query = withTenantScope(
+      {
+        productId,
+        status: { $in: ["checked_out", "overdue"] },
+      },
+      companyId,
+      isSuperAdmin
+    );
+
+    const checkouts = await ItemCheckout.find(query)
       .sort({ createdAt: -1 })
       .limit(5)
       .lean();
@@ -67,3 +93,9 @@ export async function getAProductActiveCheckouts(productId) {
     return [];
   }
 }
+
+
+
+
+
+

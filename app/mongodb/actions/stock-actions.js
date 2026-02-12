@@ -3,23 +3,21 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { auth } from "@/auth";
 
 import Product from "@/app/models/product";
 import { StockMovement } from "../../models/stockmovement";
 import dbConnect from "@/app/config/dbConnect";
 import Category from "@/app/models/category";
 import mongoose from "mongoose";
+import {
+  getTenantContext,
+  getCompanyIdForCreate,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // AUTH HELPERS
 // ============================================
-
-async function getCurrentUser() {
-  const session = await auth();
-  if (!session?.user) return null;
-  return session.user;
-}
 
 function checkPermission(
   user,
@@ -53,9 +51,9 @@ const addProductSchema = z.object({
     .min(0, "Selling price must be positive")
     .optional(),
   taxRate: z.coerce.number().min(0).max(100).default(16),
-  initialStock: z.coerce.number().min(0).default(0),
-  reorderLevel: z.coerce.number().min(0).default(10),
-  reorderQuantity: z.coerce.number().min(0).default(20),
+  initialStock: z.coerce.number().int("Stock must be a whole number").min(0).default(0),
+  reorderLevel: z.coerce.number().int("Reorder level must be a whole number").min(0).default(10),
+  reorderQuantity: z.coerce.number().int("Reorder quantity must be a whole number").min(0).default(20),
   costingMethod: z
     .enum(["weighted_average", "fifo", "lifo"])
     .default("weighted_average"),
@@ -78,8 +76,8 @@ const updateProductSchema = z.object({
   sellingPrice: z.coerce.number().min(0).optional(),
   taxRate: z.coerce.number().min(0).max(100).default(16),
   taxExempt: z.coerce.boolean().default(false),
-  reorderLevel: z.coerce.number().min(0).default(10),
-  reorderQuantity: z.coerce.number().min(0).default(20),
+  reorderLevel: z.coerce.number().int("Reorder level must be a whole number").min(0).default(10),
+  reorderQuantity: z.coerce.number().int("Reorder quantity must be a whole number").min(0).default(20),
   costingMethod: z
     .enum(["weighted_average", "fifo", "lifo"])
     .default("weighted_average"),
@@ -90,7 +88,7 @@ const updateProductSchema = z.object({
   isActive: z.coerce.boolean().default(true),
   supplierName: z.string().optional(),
   supplierCode: z.string().optional(),
-  leadTime: z.coerce.number().min(0).optional(),
+  leadTime: z.coerce.number().int("Lead time must be a whole number").min(0).optional(),
 });
 
 // ============================================
@@ -98,14 +96,32 @@ const updateProductSchema = z.object({
 // ============================================
 
 export async function addProduct(prevState, formData) {
-  // Auth check
-  const user = await getCurrentUser();
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return {
+      error: { _form: [error.message] },
+    };
+  }
+
   const permError = checkPermission(user, [
     "admin",
     "manager",
     "store manager",
   ]);
   if (permError) return permError;
+
+  // Get tenant companyId for create
+  let tenantCompanyId;
+  try {
+    tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+  } catch (error) {
+    return {
+      error: { _form: [error.message] },
+    };
+  }
 
   // Parse form data
   const rawData = {
@@ -139,9 +155,13 @@ export async function addProduct(prevState, formData) {
 
   const data = validationResult.data;
 
-  const category = await Category.findOne({
-    _id: new mongoose.Types.ObjectId(data.category),
-  });
+  // Connect to database
+  await dbConnect();
+
+  // Validate category exists (tenant-scoped)
+  const category = await Category.findOne(
+    withTenantScope({ _id: new mongoose.Types.ObjectId(data.category) }, tenantCompanyId, isSuperAdmin)
+  );
   if (!category) {
     return {
       error: {
@@ -150,11 +170,10 @@ export async function addProduct(prevState, formData) {
     };
   }
 
-  // Connect to database
-  dbConnect();
-
-  // Check for duplicate SKU
-  const existingProduct = await Product.findOne({ sku: data.sku });
+  // Check for duplicate SKU (tenant-scoped)
+  const existingProduct = await Product.findOne(
+    withTenantScope({ SKU: data.sku }, tenantCompanyId, isSuperAdmin)
+  );
   if (existingProduct) {
     return {
       error: {
@@ -196,6 +215,7 @@ export async function addProduct(prevState, formData) {
       allowNegativeStock: data.allowNegativeStock,
     };
     product = await Product.create({
+      companyId: tenantCompanyId,
       name: data.name,
       SKU: data.sku,
       costing,
@@ -242,43 +262,39 @@ export async function addProduct(prevState, formData) {
   // Create initial stock movement if there's initial stock
   if (data.initialStock > 0 && data.trackInventory) {
     try {
-      const movementNumber = await generateMovementNumber();
+      const movementNumber = await generateMovementNumber(tenantCompanyId);
       const productSnapshot = {
         name: product.name,
         SKU: product.SKU,
         category: product.category,
         unit: product.unit,
       };
-      const costing = {
-        unitCost: canSetPricing ? data.costPrice || 0 : 0,
-        totalCost:
-          (canSetPricing ? data.costPrice || 0 : 0) * data.initialStock,
-      };
+      const unitCost = canSetPricing ? data.costPrice || 0 : 0;
+      const unitPrice = canSetPricing ? data.sellingPrice || data.costPrice || 0 : 0;
 
       await StockMovement.create({
+        companyId: tenantCompanyId,
         movementNumber,
-        movementDate: new Date(),
         movementType: "initial",
         direction: "in",
         previousStock: 0,
         newStock: data.initialStock,
-        costing,
+        costing: {
+          unitCost: unitCost,
+          totalCost: unitCost * data.initialStock,
+          unitPrice: unitPrice,
+          totalValue: unitPrice * data.initialStock,
+        },
         productId: product._id,
-        productSKU: product.SKU,
         productSnapshot,
-        productName: product.name,
         quantity: data.initialStock,
-        unitCost: data.costPrice || 0,
-        totalCost: (data.costPrice || 0) * data.initialStock,
-        balanceBefore: 0,
-        balanceAfter: data.initialStock,
-        reference: `Initial stock for ${product.sku}`,
         status: "posted",
         performedBy: {
           id: user.id,
           name: user.name,
         },
         postedAt: new Date(),
+        notes: `Initial stock for ${product.SKU}`,
       });
     } catch (error) {
       console.error("Failed to create initial stock movement:", error);
@@ -306,8 +322,16 @@ export async function addProduct(prevState, formData) {
 // ============================================
 
 export async function updateProduct(productId, prevState, formData) {
-  // Auth check
-  const user = await getCurrentUser();
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return {
+      error: { _form: [error.message] },
+    };
+  }
+
   const permError = checkPermission(user, [
     "admin",
     "manager",
@@ -366,10 +390,10 @@ export async function updateProduct(productId, prevState, formData) {
   // Connect to database
   await dbConnect();
 
-  // Validate category exists and get category name
-  const category = await Category.findOne({
-    _id: new mongoose.Types.ObjectId(data.category),
-  });
+  // Validate category exists and get category name (tenant-scoped)
+  const category = await Category.findOne(
+    withTenantScope({ _id: new mongoose.Types.ObjectId(data.category) }, companyId, isSuperAdmin)
+  );
   if (!category) {
     return {
       error: {
@@ -378,8 +402,10 @@ export async function updateProduct(productId, prevState, formData) {
     };
   }
 
-  // Find product
-  const product = await Product.findById(productId);
+  // Find product (tenant-scoped)
+  const product = await Product.findOne(
+    withTenantScope({ _id: productId }, companyId, isSuperAdmin)
+  );
   if (!product) {
     return {
       error: {
@@ -388,12 +414,14 @@ export async function updateProduct(productId, prevState, formData) {
     };
   }
 
-  // Check SKU uniqueness (if changed)
+  // Check SKU uniqueness (if changed, tenant-scoped)
   if (data.sku !== product.SKU) {
-    const existingProduct = await Product.findOne({
-      SKU: data.sku,
-      _id: { $ne: productId },
-    });
+    const existingProduct = await Product.findOne(
+      withTenantScope({
+        SKU: data.sku,
+        _id: { $ne: productId },
+      }, companyId, isSuperAdmin)
+    );
     if (existingProduct) {
       return {
         error: {
@@ -480,9 +508,12 @@ export async function updateProduct(productId, prevState, formData) {
     };
   }
 
-  // Update product
+  // Update product (tenant-scoped)
   try {
-    await Product.findByIdAndUpdate(productId, updateData);
+    await Product.findOneAndUpdate(
+      withTenantScope({ _id: productId }, companyId, isSuperAdmin),
+      updateData
+    );
   } catch (error) {
     console.error("Failed to update product:", error);
     return {
@@ -507,8 +538,16 @@ export async function updateProduct(productId, prevState, formData) {
 // ============================================
 
 export async function deleteProduct(productId) {
-  // Auth check
-  const user = await getCurrentUser();
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return {
+      error: { _form: [error.message] },
+    };
+  }
+
   const permError = checkPermission(user, ["admin", "manager"]);
   if (permError) return permError;
 
@@ -523,8 +562,10 @@ export async function deleteProduct(productId) {
 
   await dbConnect();
 
-  // Find product
-  const product = await Product.findById(productId);
+  // Find product (tenant-scoped)
+  const product = await Product.findOne(
+    withTenantScope({ _id: productId }, companyId, isSuperAdmin)
+  );
   if (!product) {
     return {
       error: {
@@ -545,21 +586,24 @@ export async function deleteProduct(productId) {
     };
   }
 
-  // Check for related movements
-  const movementCount = await StockMovement.countDocuments({
-    product: productId,
-  });
+  // Check for related movements (tenant-scoped)
+  const movementCount = await StockMovement.countDocuments(
+    withTenantScope({ productId: productId }, companyId, isSuperAdmin)
+  );
   if (movementCount > 0) {
-    // Soft delete instead
+    // Soft delete instead (tenant-scoped)
     try {
-      await Product.findByIdAndUpdate(productId, {
-        isActive: false,
-        deletedAt: new Date(),
-        deletedBy: {
-          id: user.id,
-          name: user.name,
-        },
-      });
+      await Product.findOneAndUpdate(
+        withTenantScope({ _id: productId }, companyId, isSuperAdmin),
+        {
+          isActive: false,
+          deletedAt: new Date(),
+          deletedBy: {
+            id: user.id,
+            name: user.name,
+          },
+        }
+      );
     } catch (error) {
       console.error("Failed to deactivate product:", error);
       return {
@@ -575,9 +619,11 @@ export async function deleteProduct(productId) {
     );
   }
 
-  // Hard delete if no history
+  // Hard delete if no history (tenant-scoped)
   try {
-    await Product.findByIdAndDelete(productId);
+    await Product.findOneAndDelete(
+      withTenantScope({ _id: productId }, companyId, isSuperAdmin)
+    );
   } catch (error) {
     console.error("Failed to delete product:", error);
     return {
@@ -596,13 +642,14 @@ export async function deleteProduct(productId) {
 // HELPER: Generate Movement Number
 // ============================================
 
-async function generateMovementNumber() {
+async function generateMovementNumber(tenantCompanyId) {
   const today = new Date();
   const dateStr = today.toISOString().slice(2, 10).replace(/-/g, "");
   const prefix = `MOV-${dateStr}`;
 
-  // Find the highest number for today
+  // Find the highest number for today (tenant-scoped)
   const lastMovement = await StockMovement.findOne({
+    companyId: tenantCompanyId,
     movementNumber: { $regex: `^${prefix}` },
   })
     .sort({ movementNumber: -1 })
@@ -634,20 +681,34 @@ export async function getProducts(options = {}) {
     sortOrder = "asc",
   } = options;
 
+  // Get tenant context
+  let companyId, isSuperAdmin;
+  try {
+    ({ companyId, isSuperAdmin } = await getTenantContext());
+  } catch (error) {
+    return {
+      products: [],
+      pagination: { page: 1, limit, total: 0, totalPages: 0 },
+    };
+  }
+
   await dbConnect();
 
-  // Build query
-  const query = {};
+  // Build query with tenant scoping
+  let query = {};
   if (isActive !== undefined) query.isActive = isActive;
   if (category) query.category = category;
   if (type) query.type = type;
   if (search) {
     query.$or = [
       { name: { $regex: search, $options: "i" } },
-      { sku: { $regex: search, $options: "i" } },
+      { SKU: { $regex: search, $options: "i" } },
       { description: { $regex: search, $options: "i" } },
     ];
   }
+
+  // Apply tenant scope
+  query = withTenantScope(query, companyId, isSuperAdmin);
 
   // Execute query
   const skip = (page - 1) * limit;
@@ -696,9 +757,20 @@ export async function getProducts(options = {}) {
 export async function getProduct(productId) {
   if (!productId) return null;
 
+  // Get tenant context
+  let companyId, isSuperAdmin;
+  try {
+    ({ companyId, isSuperAdmin } = await getTenantContext());
+  } catch (error) {
+    return null;
+  }
+
   await dbConnect();
 
-  const product = await Product.findById(productId)
+  // Find product with tenant scoping
+  const product = await Product.findOne(
+    withTenantScope({ _id: productId }, companyId, isSuperAdmin)
+  )
     .populate("category", "name")
     .lean();
 

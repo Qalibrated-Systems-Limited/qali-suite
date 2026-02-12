@@ -1,4 +1,4 @@
-import { reimbursementCategories } from "@/lib/utils";
+import { reimbursementCategories, advanceTypesList } from "@/lib/utils";
 import mongoose from "mongoose";
 
 const Schema = mongoose.Schema;
@@ -8,12 +8,18 @@ const Schema = mongoose.Schema;
 // ============================================
 const employeeClaimSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // Claim Identification
     claimNumber: {
       type: String,
       required: [true, "Claim number is required"],
-      unique: true,
-      index: true,
     },
 
     claimDate: {
@@ -66,19 +72,34 @@ const employeeClaimSchema = new Schema(
       index: true,
     },
 
-    // For Advance Request (e.g., travel advance)
+    // For Advance Request (travel, petty_cash, project, operational)
     advanceDetails: {
+      advanceType: {
+        type: String,
+        enum: {
+          values: advanceTypesList,
+          message: "{VALUE} is not a valid advance type",
+        },
+        default: "travel",
+      },
       requestedAmount: {
         type: Number,
         min: 0,
       },
       purpose: String,
+      // Travel-specific (optional - required only for travel type)
       travelDates: {
         from: Date,
         to: Date,
       },
       destination: String,
+      // Project-specific (optional - required only for project type)
+      projectCode: String,
+      // Common optional
       estimatedExpenses: String,
+      approvedAmount: Number,
+      disbursedAmount: Number,
+      disbursementDate: Date,
     },
 
     // For Advance Return (after trip/activity)
@@ -292,10 +313,13 @@ const employeeClaimSchema = new Schema(
 // ============================================
 // COMPOUND INDEXES FOR QUERY EFFICIENCY
 // ============================================
-employeeClaimSchema.index({ claimDate: -1, status: 1 });
-employeeClaimSchema.index({ "employee.userId": 1, status: 1 });
-employeeClaimSchema.index({ "employee.partyId": 1, status: 1 });
-employeeClaimSchema.index({ claimType: 1, status: 1 });
+// Unique claim number per company
+employeeClaimSchema.index({ companyId: 1, claimNumber: 1 }, { unique: true });
+// Query indexes - prefixed with companyId for tenant isolation
+employeeClaimSchema.index({ companyId: 1, claimDate: -1, status: 1 });
+employeeClaimSchema.index({ companyId: 1, "employee.userId": 1, status: 1 });
+employeeClaimSchema.index({ companyId: 1, "employee.partyId": 1, status: 1 });
+employeeClaimSchema.index({ companyId: 1, claimType: 1, status: 1 });
 
 // ============================================
 // VIRTUALS

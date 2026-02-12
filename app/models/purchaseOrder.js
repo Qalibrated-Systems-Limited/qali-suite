@@ -122,16 +122,22 @@ poLineSchema.virtual("isFullyReceived").get(function () {
 // ============================================
 const purchaseOrderSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // ==========================================
     // IDENTIFICATION
     // ==========================================
     poNumber: {
       type: String,
       required: [true, "PO number is required"],
-      unique: true,
       uppercase: true,
       trim: true,
-      index: true,
     },
 
     // ==========================================
@@ -340,10 +346,13 @@ const purchaseOrderSchema = new Schema(
 // ============================================
 // INDEXES
 // ============================================
-purchaseOrderSchema.index({ poDate: -1, status: 1 });
-purchaseOrderSchema.index({ "supplier.partyId": 1, status: 1 });
-purchaseOrderSchema.index({ status: 1, expectedDeliveryDate: 1 });
-purchaseOrderSchema.index({ validUntil: 1, status: 1 });
+// Unique PO number per company
+purchaseOrderSchema.index({ companyId: 1, poNumber: 1 }, { unique: true });
+// Query indexes - all prefixed with companyId for tenant isolation
+purchaseOrderSchema.index({ companyId: 1, poDate: -1, status: 1 });
+purchaseOrderSchema.index({ companyId: 1, "supplier.partyId": 1, status: 1 });
+purchaseOrderSchema.index({ companyId: 1, status: 1, expectedDeliveryDate: 1 });
+purchaseOrderSchema.index({ companyId: 1, validUntil: 1, status: 1 });
 
 // ============================================
 // VIRTUALS
@@ -657,7 +666,7 @@ purchaseOrderSchema.methods.convertToBill = async function (
   }
 
   // Generate bill number
-  const billNumber = await Bill.generateBillNumber();
+  const billNumber = await Bill.generateBillNumber(this.companyId);
 
   // Calculate fiscal period
   const billDate = billData.billDate || new Date();

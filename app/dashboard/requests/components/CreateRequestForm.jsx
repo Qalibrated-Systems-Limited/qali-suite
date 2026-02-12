@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { useFormState } from "react-dom";
+import { useState, startTransition } from "react";
+import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,8 +44,18 @@ import {
   IconX,
   IconAlertCircle,
 } from "@tabler/icons-react";
-import { cn } from "@/lib/utils";
-import { useActionState } from "react";
+import { cn, stockRequestTypes, stockRequestTypeConfig } from "@/lib/utils";
+
+// ============================================
+// HELPER: Get available stock from product
+// ============================================
+function getAvailableStock(product) {
+  return product.inventory?.quantityAvailable ?? product.inventory?.quantityOnHand ?? product.stock ?? 0;
+}
+
+function getSellingPrice(product) {
+  return product.pricing?.sellingPrice ?? product.price ?? 0;
+}
 
 // ============================================
 // PRODUCT SEARCH COMBOBOX
@@ -87,27 +96,101 @@ function ProductSearchCombobox({ products, onSelect, disabled }) {
               No products found
             </div>
           ) : (
-            filteredProducts.map((product) => (
+            filteredProducts.map((product) => {
+              const availableStock = getAvailableStock(product);
+              return (
+                <button
+                  key={product._id}
+                  className="w-full px-4 py-2 text-left hover:bg-accent flex items-center justify-between"
+                  onClick={() => {
+                    onSelect(product);
+                    setOpen(false);
+                    setSearchTerm("");
+                  }}
+                >
+                  <div className="flex-1">
+                    <p className="font-medium">{product.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      SKU: {product.SKU} • Available: {availableStock} {product.unit}
+                    </p>
+                  </div>
+                  {availableStock === 0 && (
+                    <Badge variant="destructive" className="ml-2">
+                      Out of Stock
+                    </Badge>
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ============================================
+// CUSTOMER SEARCH COMBOBOX
+// ============================================
+function CustomerSearchCombobox({ customers, selectedCustomer, onSelect, disabled, error }) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const filteredCustomers = customers.filter((c) =>
+    `${c.name} ${c.email || ""} ${c.phone || ""}`.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          className={cn(
+            "w-full justify-between",
+            error && "border-destructive"
+          )}
+          disabled={disabled}
+        >
+          {selectedCustomer ? (
+            <span className="truncate">{selectedCustomer.name}</span>
+          ) : (
+            <span className="text-muted-foreground">Select customer...</span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-100 p-0" align="start">
+        <div className="p-2">
+          <Input
+            placeholder="Search by name, email, or phone..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="mb-2"
+          />
+        </div>
+        <div className="max-h-75 overflow-y-auto">
+          {filteredCustomers.length === 0 ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">
+              No customers found
+            </div>
+          ) : (
+            filteredCustomers.map((customer) => (
               <button
-                key={product._id}
+                key={customer._id}
                 className="w-full px-4 py-2 text-left hover:bg-accent flex items-center justify-between"
                 onClick={() => {
-                  onSelect(product);
+                  onSelect(customer);
                   setOpen(false);
                   setSearchTerm("");
                 }}
               >
                 <div className="flex-1">
-                  <p className="font-medium">{product.name}</p>
+                  <p className="font-medium">{customer.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    SKU: {product.SKU} • Stock: {product.stock} {product.unit}
+                    {customer.email && `${customer.email} • `}
+                    {customer.phone || "No phone"}
                   </p>
                 </div>
-                {product.stock === 0 && (
-                  <Badge variant="destructive" className="ml-2">
-                    Out of Stock
-                  </Badge>
-                )}
               </button>
             ))
           )}
@@ -122,29 +205,55 @@ function ProductSearchCombobox({ products, onSelect, disabled }) {
 // ============================================
 export function CreateStockRequestForm({
   products = [],
+  customers = [],
   user,
   createRequestAction,
 }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [state, formAction] = useActionState(createRequestAction, {
-    message: "",
-  });
+  const [state, formAction, isPending] = useActionState(createRequestAction, null);
+
+  // Extract errors from state - field errors and form-level error
+  const fieldErrors = state?.fieldErrors || {};
+  const formError = state?.error || null;
 
   // Form state
-  const [customer, setCustomer] = useState("");
-  const [priority, setPriority] = useState("normal");
-  const [requiredByDate, setRequiredByDate] = useState();
-  const [notes, setNotes] = useState("");
-  const [items, setItems] = useState([]);
+  const [requestType, setRequestType] = useState(state?.values?.requestType || "");
+  const [selectedCustomer, setSelectedCustomer] = useState(() => {
+    // Restore customer from state if available
+    if (state?.values?.customerId && state?.values?.customerName) {
+      return {
+        _id: state.values.customerId,
+        name: state.values.customerName,
+        email: state.values.customerEmail || "",
+        phone: state.values.customerPhone || "",
+      };
+    }
+    return null;
+  });
+  const [priority, setPriority] = useState(state?.values?.priority || "normal");
+  const [requiredByDate, setRequiredByDate] = useState(
+    state?.values?.requiredByDate ? new Date(state.values.requiredByDate) : undefined
+  );
+  const [notes, setNotes] = useState(state?.values?.notes || "");
+
+  // Determine if customer is required based on request type
+  const typeConfig = stockRequestTypeConfig[requestType];
+  const requiresCustomer = typeConfig?.requiresCustomer ?? true;
+  const [items, setItems] = useState(() => {
+    if (state?.values?.items) {
+      try {
+        return typeof state.values.items === 'string'
+          ? JSON.parse(state.values.items)
+          : state.values.items;
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
 
   // Item being added
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [quantity, setQuantity] = useState("");
-  const [purpose, setPurpose] = useState("");
-  const [purposeDetails, setPurposeDetails] = useState("");
-  const [requiresReturn, setRequiresReturn] = useState(false);
-  const [expectedReturnDate, setExpectedReturnDate] = useState();
   const [itemNotes, setItemNotes] = useState("");
 
   // ============================================
@@ -161,16 +270,12 @@ export function CreateStockRequestForm({
       return;
     }
 
-    if (!purpose) {
-      alert("Please select a purpose");
-      return;
-    }
-
     const qty = parseInt(quantity);
+    const availableStock = getAvailableStock(selectedProduct);
 
-    if (qty > selectedProduct.stock) {
+    if (qty > availableStock) {
       alert(
-        `Only ${selectedProduct.stock} ${selectedProduct.unit} available in stock`
+        `Only ${availableStock} ${selectedProduct.unit} available in stock`
       );
       return;
     }
@@ -180,14 +285,10 @@ export function CreateStockRequestForm({
       productId: selectedProduct._id,
       productName: selectedProduct.name,
       SKU: selectedProduct.SKU,
-      currentStock: selectedProduct.stock,
+      currentStock: availableStock,
       requestedQuantity: qty,
-      unitPrice: selectedProduct.price || 0,
+      unitPrice: getSellingPrice(selectedProduct),
       unit: selectedProduct.unit,
-      purpose,
-      purposeDetails,
-      requiresReturn: purpose !== "sale" && requiresReturn,
-      expectedReturnDate: requiresReturn ? expectedReturnDate : null,
       notes: itemNotes,
     };
 
@@ -196,10 +297,6 @@ export function CreateStockRequestForm({
     // Reset item form
     setSelectedProduct(null);
     setQuantity("");
-    setPurpose("");
-    setPurposeDetails("");
-    setRequiresReturn(false);
-    setExpectedReturnDate(undefined);
     setItemNotes("");
   };
 
@@ -231,33 +328,42 @@ export function CreateStockRequestForm({
   };
 
   // ============================================
-  // HANDLE SUCCESS
-  // ============================================
-  useEffect(() => {
-    if (state.message === "success") {
-      router.push("/dashboard/requests");
-      router.refresh();
-    }
-  }, [state.message, router]);
-
-  // ============================================
   // SUBMIT FORM
   // ============================================
   const handleSubmit = (e) => {
     e.preventDefault();
+
+    if (!requestType) {
+      alert("Please select a request type");
+      return;
+    }
 
     if (items.length === 0) {
       alert("Please add at least one item to the request");
       return;
     }
 
-    if (!customer.trim()) {
-      alert("Please enter customer name");
+    if (requiresCustomer && !selectedCustomer) {
+      alert("Please select a customer");
       return;
     }
 
     const formData = new FormData();
-    formData.append("customer", customer);
+    formData.append("requestType", requestType);
+
+    // Customer data (or "Internal" for internal requests)
+    if (requiresCustomer && selectedCustomer) {
+      formData.append("customerId", selectedCustomer._id);
+      formData.append("customerName", selectedCustomer.name);
+      formData.append("customerEmail", selectedCustomer.email || "");
+      formData.append("customerPhone", selectedCustomer.phone || "");
+      formData.append("customerAddress", selectedCustomer.address?.line1 || "");
+      formData.append("customerTaxPin", selectedCustomer.taxPin || "");
+    } else {
+      formData.append("customerId", "");
+      formData.append("customerName", "Internal Use");
+    }
+
     formData.append("priority", priority);
     formData.append("notes", notes);
     if (requiredByDate) {
@@ -274,13 +380,13 @@ export function CreateStockRequestForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {/* Error Message */}
-      {state.message && state.message !== "success" && (
-        <Card className="border-destructive">
+      {/* Form-level Error Message */}
+      {formError && (
+        <Card className="border-destructive bg-destructive/5">
           <CardContent className="pt-6">
             <div className="flex items-center gap-2 text-destructive">
               <IconAlertCircle className="h-5 w-5" />
-              <p>{state.message}</p>
+              <p>{formError}</p>
             </div>
           </CardContent>
         </Card>
@@ -295,26 +401,80 @@ export function CreateStockRequestForm({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Request Type - Full Width */}
+          <div className="space-y-2">
+            <Label htmlFor="requestType">
+              Request Type <span className="text-destructive">*</span>
+            </Label>
+            <Select value={requestType} onValueChange={setRequestType}>
+              <SelectTrigger className={fieldErrors.requestType ? "border-destructive" : ""}>
+                <SelectValue placeholder="Select request type..." />
+              </SelectTrigger>
+              <SelectContent>
+                {stockRequestTypes.map((type) => (
+                  <SelectItem key={type} value={type}>
+                    <div className="flex flex-col">
+                      <span>{stockRequestTypeConfig[type]?.label || type}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {typeConfig && (
+              <p className="text-xs text-muted-foreground">{typeConfig.description}</p>
+            )}
+            {fieldErrors.requestType && (
+              <p className="text-xs text-destructive">{fieldErrors.requestType}</p>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Customer */}
-            <div className="space-y-2">
-              <Label htmlFor="customer">
-                Customer / Project <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="customer"
-                value={customer}
-                onChange={(e) => setCustomer(e.target.value)}
-                placeholder="Enter customer name or project"
-                required
-              />
-            </div>
+            {/* Customer - conditional based on requestType */}
+            {requiresCustomer && (
+              <div className="space-y-2">
+                <Label>
+                  Customer <span className="text-destructive">*</span>
+                </Label>
+                <CustomerSearchCombobox
+                  customers={customers}
+                  selectedCustomer={selectedCustomer}
+                  onSelect={setSelectedCustomer}
+                  disabled={false}
+                  error={fieldErrors.customer}
+                />
+                {selectedCustomer && (
+                  <div className="p-2 bg-muted rounded-md flex items-center justify-between text-sm">
+                    <div>
+                      <p className="font-medium">{selectedCustomer.name}</p>
+                      {(selectedCustomer.email || selectedCustomer.phone) && (
+                        <p className="text-xs text-muted-foreground">
+                          {selectedCustomer.email && `${selectedCustomer.email}`}
+                          {selectedCustomer.email && selectedCustomer.phone && " • "}
+                          {selectedCustomer.phone}
+                        </p>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelectedCustomer(null)}
+                    >
+                      <IconX className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+                {fieldErrors.customer && (
+                  <p className="text-xs text-destructive">{fieldErrors.customer}</p>
+                )}
+              </div>
+            )}
 
             {/* Priority */}
             <div className="space-y-2">
               <Label htmlFor="priority">Priority</Label>
               <Select value={priority} onValueChange={setPriority}>
-                <SelectTrigger>
+                <SelectTrigger className={fieldErrors.priority ? "border-destructive" : ""}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -324,6 +484,9 @@ export function CreateStockRequestForm({
                   <SelectItem value="urgent">Urgent</SelectItem>
                 </SelectContent>
               </Select>
+              {fieldErrors.priority && (
+                <p className="text-xs text-destructive">{fieldErrors.priority}</p>
+              )}
             </div>
 
             {/* Required By Date */}
@@ -352,7 +515,11 @@ export function CreateStockRequestForm({
                     selected={requiredByDate}
                     onSelect={setRequiredByDate}
                     initialFocus
-                    disabled={(date) => date < new Date()}
+                    disabled={(date) => {
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      return date < today;
+                    }}
                   />
                 </PopoverContent>
               </Popover>
@@ -374,18 +541,25 @@ export function CreateStockRequestForm({
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Any additional information about this request..."
               rows={3}
+              className={fieldErrors.notes ? "border-destructive" : ""}
             />
+            {fieldErrors.notes && (
+              <p className="text-xs text-destructive">{fieldErrors.notes}</p>
+            )}
           </div>
         </CardContent>
       </Card>
 
       {/* Add Items Section */}
-      <Card>
+      <Card className={fieldErrors.items ? "border-destructive" : ""}>
         <CardHeader>
           <CardTitle>Add Items</CardTitle>
           <CardDescription>
             Search and add products to your request
           </CardDescription>
+          {fieldErrors.items && (
+            <p className="text-xs text-destructive mt-2">{fieldErrors.items}</p>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Product Search */}
@@ -402,7 +576,7 @@ export function CreateStockRequestForm({
                   <p className="font-medium">{selectedProduct.name}</p>
                   <p className="text-sm text-muted-foreground">
                     SKU: {selectedProduct.SKU} • Available:{" "}
-                    {selectedProduct.stock} {selectedProduct.unit}
+                    {getAvailableStock(selectedProduct)} {selectedProduct.unit}
                   </p>
                 </div>
                 <Button
@@ -419,7 +593,7 @@ export function CreateStockRequestForm({
 
           {selectedProduct && (
             <>
-              {/* Quantity and Purpose */}
+              {/* Quantity */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="quantity">
@@ -429,110 +603,21 @@ export function CreateStockRequestForm({
                     id="quantity"
                     type="number"
                     min="1"
-                    max={selectedProduct.stock}
+                    max={getAvailableStock(selectedProduct)}
                     value={quantity}
                     onChange={(e) => setQuantity(e.target.value)}
                     placeholder="Enter quantity"
                   />
                 </div>
-
                 <div className="space-y-2">
-                  <Label htmlFor="purpose">
-                    Purpose <span className="text-destructive">*</span>
-                  </Label>
-                  <Select value={purpose} onValueChange={setPurpose}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select purpose" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="sale">Sale to Customer</SelectItem>
-                      <SelectItem value="customer_demo">
-                        Customer Demo
-                      </SelectItem>
-                      <SelectItem value="technician_test">
-                        Technician Testing
-                      </SelectItem>
-                      <SelectItem value="installation">Installation</SelectItem>
-                      <SelectItem value="repair">Repair/Maintenance</SelectItem>
-                      <SelectItem value="internal_use">Internal Use</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="itemNotes">Item Notes</Label>
+                  <Input
+                    id="itemNotes"
+                    value={itemNotes}
+                    onChange={(e) => setItemNotes(e.target.value)}
+                    placeholder="Notes for this item (optional)..."
+                  />
                 </div>
-              </div>
-
-              {/* Purpose Details */}
-              <div className="space-y-2">
-                <Label htmlFor="purposeDetails">Purpose Details</Label>
-                <Input
-                  id="purposeDetails"
-                  value={purposeDetails}
-                  onChange={(e) => setPurposeDetails(e.target.value)}
-                  placeholder="Provide more details about the purpose..."
-                />
-              </div>
-
-              {/* Return Info (if not sale) */}
-              {purpose && purpose !== "sale" && (
-                <div className="space-y-4 p-4 bg-muted rounded-md">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="requiresReturn"
-                      checked={requiresReturn}
-                      onChange={(e) => setRequiresReturn(e.target.checked)}
-                      className="rounded border-gray-300"
-                    />
-                    <Label htmlFor="requiresReturn" className="cursor-pointer">
-                      This item requires return
-                    </Label>
-                  </div>
-
-                  {requiresReturn && (
-                    <div className="space-y-2">
-                      <Label>Expected Return Date</Label>
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "w-full justify-start text-left font-normal",
-                              !expectedReturnDate && "text-muted-foreground"
-                            )}
-                          >
-                            <IconCalendar className="mr-2 h-4 w-4" />
-                            {expectedReturnDate ? (
-                              format(expectedReturnDate, "PPP")
-                            ) : (
-                              <span>Pick a date</span>
-                            )}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
-                          <Calendar
-                            mode="single"
-                            selected={expectedReturnDate}
-                            onSelect={setExpectedReturnDate}
-                            initialFocus
-                            disabled={(date) => date < new Date()}
-                          />
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Item Notes */}
-              <div className="space-y-2">
-                <Label htmlFor="itemNotes">Item Notes</Label>
-                <Textarea
-                  id="itemNotes"
-                  value={itemNotes}
-                  onChange={(e) => setItemNotes(e.target.value)}
-                  placeholder="Any specific notes for this item..."
-                  rows={2}
-                />
               </div>
 
               {/* Add Button */}
@@ -564,8 +649,7 @@ export function CreateStockRequestForm({
                   <TableRow>
                     <TableHead>Product</TableHead>
                     <TableHead>Quantity</TableHead>
-                    <TableHead>Purpose</TableHead>
-                    <TableHead>Return?</TableHead>
+                    <TableHead>Notes</TableHead>
                     <TableHead className="text-right">Value</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
@@ -585,13 +669,10 @@ export function CreateStockRequestForm({
                         {item.requestedQuantity} {item.unit}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{item.purpose}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        {item.requiresReturn ? (
-                          <Badge variant="secondary">Yes</Badge>
+                        {item.notes ? (
+                          <span className="text-sm text-muted-foreground">{item.notes}</span>
                         ) : (
-                          <span className="text-muted-foreground">No</span>
+                          <span className="text-muted-foreground">-</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right font-medium">
@@ -657,12 +738,9 @@ export function CreateStockRequestForm({
                         </div>
                       </div>
 
-                      <div className="flex gap-2">
-                        <Badge variant="outline">{item.purpose}</Badge>
-                        {item.requiresReturn && (
-                          <Badge variant="secondary">Requires Return</Badge>
-                        )}
-                      </div>
+                      {item.notes && (
+                        <p className="text-sm text-muted-foreground">{item.notes}</p>
+                      )}
                     </div>
                   </CardContent>
                 </Card>

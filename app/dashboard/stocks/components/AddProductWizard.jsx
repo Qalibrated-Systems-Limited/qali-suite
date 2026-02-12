@@ -534,8 +534,17 @@ export default function AddProductWizard({
 
       case "inventory":
         if (formData.trackInventory) {
-          if (formData.initialStock && parseInt(formData.initialStock) < 0) {
-            newErrors.initialStock = ["Initial stock cannot be negative"];
+          const initialStock = Number(formData.initialStock);
+          if (formData.initialStock && (!Number.isInteger(initialStock) || initialStock < 0)) {
+            newErrors.initialStock = ["Initial stock must be a non-negative whole number"];
+          }
+          const reorderLevel = Number(formData.reorderLevel);
+          if (formData.reorderLevel && (!Number.isInteger(reorderLevel) || reorderLevel < 0)) {
+            newErrors.reorderLevel = ["Reorder level must be a non-negative whole number"];
+          }
+          const reorderQty = Number(formData.reorderQuantity);
+          if (formData.reorderQuantity && (!Number.isInteger(reorderQty) || reorderQty < 0)) {
+            newErrors.reorderQuantity = ["Reorder quantity must be a non-negative whole number"];
           }
         }
         break;

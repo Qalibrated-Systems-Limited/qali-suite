@@ -1,12 +1,14 @@
 import Account from "../../models/account";
 import JournalEntry from "../../models/JournalEntry";
+import { ObjectId } from "mongodb";
 
 import connectDB from "../../config/dbConnect";
+import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 
 // ============================================
 // REPORT SERVICE - FINANCIAL REPORTS
 // ============================================
-     
+
 export class ReportService {
   /**
    * Generate Profit & Loss Statement (Income Statement)
@@ -14,38 +16,47 @@ export class ReportService {
   static async generateProfitLoss(startDate, endDate) {
     await connectDB();
 
-    // Get revenue and expense accounts
-    const [revenueAccounts, expenseAccounts] = await Promise.all([
-      Account.find({ accountType: "revenue", isActive: true }).lean(),
-      Account.find({ accountType: "expense", isActive: true }).lean(),
-    ]);
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    // Calculate totals for each account
-    const revenueWithBalances = await this.calculateAccountBalances(
-      revenueAccounts,
+    // Single query for all P&L accounts
+    const allAccounts = await Account.find(
+      withTenantScope(
+        { accountType: { $in: ["revenue", "expense"] }, isActive: true },
+        companyId,
+        isSuperAdmin,
+      ),
+    ).lean();
+
+    // Single aggregation for all P&L accounts
+    const allWithBalances = await this.calculateAccountBalances(
+      allAccounts,
       startDate,
-      endDate
+      endDate,
+      companyId,
+      isSuperAdmin,
     );
 
-    const expensesWithBalances = await this.calculateAccountBalances(
-      expenseAccounts,
-      startDate,
-      endDate
+    // Split by account type in JS
+    const revenueWithBalances = allWithBalances.filter(
+      (a) => a.accountType === "revenue",
+    );
+    const expensesWithBalances = allWithBalances.filter(
+      (a) => a.accountType === "expense",
     );
 
     const totalRevenue = revenueWithBalances.reduce(
       (sum, acc) => sum + acc.balance,
-      0
+      0,
     );
     const totalExpenses = expensesWithBalances.reduce(
       (sum, acc) => sum + acc.balance,
-      0
+      0,
     );
 
     const grossProfit = totalRevenue;
     const netIncome = totalRevenue - totalExpenses;
-    const netMargin =
-      totalRevenue > 0 ? (netIncome / totalRevenue) * 100 : 0;
+    const netMargin = totalRevenue > 0 ? (netIncome / totalRevenue) * 100 : 0;
 
     return {
       reportName: "Profit & Loss Statement",
@@ -76,43 +87,72 @@ export class ReportService {
   static async generateBalanceSheet(asOfDate) {
     await connectDB();
 
-    // Get all balance sheet accounts
-    const [assets, liabilities, equity] = await Promise.all([
-      Account.find({ accountType: "asset", isActive: true }).lean(),
-      Account.find({ accountType: "liability", isActive: true }).lean(),
-      Account.find({ accountType: "equity", isActive: true }).lean(),
-    ]);
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    // Calculate balances as of date
-    const assetsWithBalances = await this.calculateAccountBalances(
-      assets,
+    // Fetch all account types (including revenue/expense for current year earnings)
+    const allAccounts = await Account.find(
+      withTenantScope(
+        {
+          accountType: { $in: ["asset", "liability", "equity", "revenue", "expense"] },
+          isActive: true,
+        },
+        companyId,
+        isSuperAdmin,
+      ),
+    ).lean();
+
+    // Single aggregation for all accounts
+    const allWithBalances = await this.calculateAccountBalances(
+      allAccounts,
       null,
-      asOfDate
+      asOfDate,
+      companyId,
+      isSuperAdmin,
     );
 
-    const liabilitiesWithBalances = await this.calculateAccountBalances(
-      liabilities,
-      null,
-      asOfDate
+    // Split by account type
+    const assetsWithBalances = allWithBalances.filter(
+      (a) => a.accountType === "asset",
+    );
+    const liabilitiesWithBalances = allWithBalances.filter(
+      (a) => a.accountType === "liability",
+    );
+    const equityWithBalances = allWithBalances.filter(
+      (a) => a.accountType === "equity",
     );
 
-    const equityWithBalances = await this.calculateAccountBalances(
-      equity,
-      null,
-      asOfDate
-    );
+    // Current Year Earnings = remaining revenue - expense balances
+    // (closed periods already zeroed out via closing JEs into Retained Earnings)
+    const currentRevenue = allWithBalances
+      .filter((a) => a.accountType === "revenue")
+      .reduce((sum, acc) => sum + acc.balance, 0);
+    const currentExpenses = allWithBalances
+      .filter((a) => a.accountType === "expense")
+      .reduce((sum, acc) => sum + acc.balance, 0);
+    const currentYearEarnings = currentRevenue - currentExpenses;
+
+    if (Math.abs(currentYearEarnings) > 0.01) {
+      equityWithBalances.push({
+        accountCode: "CYE",
+        accountName: "Current Year Earnings",
+        accountType: "equity",
+        subType: "current_year_earnings",
+        balance: currentYearEarnings,
+      });
+    }
 
     const totalAssets = assetsWithBalances.reduce(
       (sum, acc) => sum + acc.balance,
-      0
+      0,
     );
     const totalLiabilities = liabilitiesWithBalances.reduce(
       (sum, acc) => sum + acc.balance,
-      0
+      0,
     );
     const totalEquity = equityWithBalances.reduce(
       (sum, acc) => sum + acc.balance,
-      0
+      0,
     );
 
     const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
@@ -124,32 +164,39 @@ export class ReportService {
       assets: {
         current: assetsWithBalances.filter((a) =>
           ["cash", "bank", "accounts_receivable", "inventory"].includes(
-            a.subType
-          )
+            a.subType,
+          ),
         ),
         fixed: assetsWithBalances.filter((a) =>
-          ["fixed_asset"].includes(a.subType)
+          ["fixed_asset"].includes(a.subType),
         ),
         other: assetsWithBalances.filter(
           (a) =>
-            !["cash", "bank", "accounts_receivable", "inventory", "fixed_asset"].includes(
-              a.subType
-            )
+            ![
+              "cash",
+              "bank",
+              "accounts_receivable",
+              "inventory",
+              "fixed_asset",
+            ].includes(a.subType),
         ),
         total: totalAssets,
       },
       liabilities: {
         current: liabilitiesWithBalances.filter((l) =>
-          ["accounts_payable", "tax_payable"].includes(l.subType)
+          ["accounts_payable", "tax_payable"].includes(l.subType),
         ),
         longTerm: liabilitiesWithBalances.filter((l) =>
-          ["loan", "long_term_liability"].includes(l.subType)
+          ["loan", "long_term_liability"].includes(l.subType),
         ),
         other: liabilitiesWithBalances.filter(
           (l) =>
-            !["accounts_payable", "tax_payable", "loan", "long_term_liability"].includes(
-              l.subType
-            )
+            ![
+              "accounts_payable",
+              "tax_payable",
+              "loan",
+              "long_term_liability",
+            ].includes(l.subType),
         ),
         total: totalLiabilities,
       },
@@ -174,62 +221,65 @@ export class ReportService {
   static async generateTrialBalance(asOfDate) {
     await connectDB();
 
-    // Get all postable accounts
-    const accounts = await Account.find({
-      canPost: true,
-      isActive: true,
-    }).lean();
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const tenantMatch = isSuperAdmin
+      ? {}
+      : { companyId: new ObjectId(companyId) };
 
-    // Calculate debits and credits for each account
-    const accountsWithBalances = [];
-
-    for (const account of accounts) {
-      const result = await JournalEntry.aggregate([
-        {
-          $match: {
-            status: "posted",
-            entryDate: { $lte: new Date(asOfDate) },
-          },
+    // Single aggregation: group all journal lines by accountId, then lookup account details
+    const result = await JournalEntry.aggregate([
+      {
+        $match: {
+          ...tenantMatch,
+          status: "posted",
+          entryDate: { $lte: new Date(asOfDate) },
         },
-        { $unwind: "$lines" },
-        { $match: { "lines.accountId": account._id } },
-        {
-          $group: {
-            _id: null,
-            totalDebit: { $sum: "$lines.debit" },
-            totalCredit: { $sum: "$lines.credit" },
-          },
+      },
+      { $unwind: "$lines" },
+      {
+        $group: {
+          _id: "$lines.accountId",
+          totalDebit: { $sum: "$lines.debit" },
+          totalCredit: { $sum: "$lines.credit" },
         },
-      ]);
+      },
+      {
+        $lookup: {
+          from: "accounts",
+          localField: "_id",
+          foreignField: "_id",
+          as: "account",
+        },
+      },
+      { $unwind: "$account" },
+      {
+        $match: {
+          "account.canPost": true,
+          "account.isActive": true,
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          accountCode: "$account.accountCode",
+          accountName: "$account.accountName",
+          accountType: "$account.accountType",
+          debit: "$totalDebit",
+          credit: "$totalCredit",
+        },
+      },
+      { $sort: { accountCode: 1 } },
+    ]);
 
-      if (result.length > 0) {
-        const { totalDebit, totalCredit } = result[0];
-
-        accountsWithBalances.push({
-          accountCode: account.accountCode,
-          accountName: account.accountName,
-          accountType: account.accountType,
-          debit: totalDebit,
-          credit: totalCredit,
-        });
-      }
-    }
-
-    const totalDebits = accountsWithBalances.reduce(
-      (sum, acc) => sum + acc.debit,
-      0
-    );
-    const totalCredits = accountsWithBalances.reduce(
-      (sum, acc) => sum + acc.credit,
-      0
-    );
-
+    const totalDebits = result.reduce((sum, acc) => sum + acc.debit, 0);
+    const totalCredits = result.reduce((sum, acc) => sum + acc.credit, 0);
     const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
 
     return {
       reportName: "Trial Balance",
       asOfDate: new Date(asOfDate),
-      accounts: accountsWithBalances,
+      accounts: result,
       summary: {
         totalDebits,
         totalCredits,
@@ -245,34 +295,82 @@ export class ReportService {
   static async generateCashFlow(startDate, endDate) {
     await connectDB();
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     // Get cash and bank accounts
-    const cashAccounts = await Account.find({
-      subType: { $in: ["cash", "bank", "mpesa"] },
-      isActive: true,
-    }).lean();
+    const cashAccounts = await Account.find(
+      withTenantScope(
+        { subType: { $in: ["cash", "bank", "mpesa"] }, isActive: true },
+        companyId,
+        isSuperAdmin,
+      ),
+    ).lean();
 
     const cashAccountIds = cashAccounts.map((a) => a._id);
 
     // Get all cash transactions
-    const transactions = await JournalEntry.find({
-      status: "posted",
-      entryDate: { $gte: new Date(startDate), $lte: new Date(endDate) },
-      "lines.accountId": { $in: cashAccountIds },
+    const transactions = await JournalEntry.find(
+      withTenantScope(
+        {
+          status: "posted",
+          entryDate: { $gte: new Date(startDate), $lte: new Date(endDate) },
+          "lines.accountId": { $in: cashAccountIds },
+        },
+        companyId,
+        isSuperAdmin,
+      ),
+    ).lean();
+
+    // Build lookup for account details (need accountType and subType for categorization)
+    const allAccountIds = new Set();
+    for (const entry of transactions) {
+      for (const line of entry.lines) {
+        allAccountIds.add(line.accountId.toString());
+      }
+    }
+
+    const accountDetails = await Account.find({
+      _id: { $in: Array.from(allAccountIds) },
     }).lean();
 
-    // Categorize transactions
+    const accountMap = new Map();
+    for (const acc of accountDetails) {
+      accountMap.set(acc._id.toString(), acc);
+    }
+
+    // Categorize transactions based on contra account
     const operating = [];
     const investing = [];
     const financing = [];
 
     for (const entry of transactions) {
-      const cashLine = entry.lines.find((l) =>
-        cashAccountIds.some((id) => id.equals(l.accountId))
+      // Find the cash line(s)
+      const cashLines = entry.lines.filter((l) =>
+        cashAccountIds.some((id) => id.equals(l.accountId)),
       );
 
-      if (!cashLine) continue;
+      if (cashLines.length === 0) continue;
 
-      const amount = (cashLine.debit || 0) - (cashLine.credit || 0);
+      // Calculate total cash impact
+      const amount = cashLines.reduce(
+        (sum, l) => sum + (l.debit || 0) - (l.credit || 0),
+        0,
+      );
+
+      // Skip zero-amount entries
+      if (Math.abs(amount) < 0.01) continue;
+
+      // Find contra lines (non-cash accounts)
+      const contraLines = entry.lines.filter(
+        (l) => !cashAccountIds.some((id) => id.equals(l.accountId)),
+      );
+
+      // Check if this is a transfer between cash accounts (exclude from cash flow)
+      if (contraLines.length === 0) {
+        // Internal transfer between bank accounts — not a real cash flow
+        continue;
+      }
 
       const transaction = {
         date: entry.entryDate,
@@ -281,33 +379,51 @@ export class ReportService {
         amount,
       };
 
-      // Categorize based on entry type
-      if (
-        ["sale", "purchase", "expense", "payment_received", "payment_made"].includes(
-          entry.entryType
-        )
-      ) {
-        operating.push(transaction);
-      } else if (entry.entryType === "transfer") {
-        // Could be investing or financing
+      // Categorize based on contra account characteristics
+      let category = "operating"; // default
+
+      for (const contra of contraLines) {
+        const acc = accountMap.get(contra.accountId.toString());
+        if (!acc) continue;
+
+        // Investing: fixed assets, investments, other long-term assets
+        if (
+          acc.subType === "fixed_asset" ||
+          acc.subType === "investment" ||
+          (acc.accountType === "asset" && acc.subType === "other_asset")
+        ) {
+          category = "investing";
+          break;
+        }
+
+        // Financing: loans, equity, owner drawings, dividends
+        if (
+          acc.subType === "loan" ||
+          acc.subType === "long_term_liability" ||
+          acc.accountType === "equity" ||
+          acc.subType === "owner_drawings" ||
+          acc.subType === "retained_earnings" ||
+          acc.subType === "share_capital"
+        ) {
+          category = "financing";
+          break;
+        }
+
+        // Operating: revenue, expense, AR, AP, inventory, tax (default)
+      }
+
+      if (category === "investing") {
         investing.push(transaction);
+      } else if (category === "financing") {
+        financing.push(transaction);
       } else {
         operating.push(transaction);
       }
     }
 
-    const operatingCashFlow = operating.reduce(
-      (sum, t) => sum + t.amount,
-      0
-    );
-    const investingCashFlow = investing.reduce(
-      (sum, t) => sum + t.amount,
-      0
-    );
-    const financingCashFlow = financing.reduce(
-      (sum, t) => sum + t.amount,
-      0
-    );
+    const operatingCashFlow = operating.reduce((sum, t) => sum + t.amount, 0);
+    const investingCashFlow = investing.reduce((sum, t) => sum + t.amount, 0);
+    const financingCashFlow = financing.reduce((sum, t) => sum + t.amount, 0);
 
     const netCashFlow =
       operatingCashFlow + investingCashFlow + financingCashFlow;
@@ -345,13 +461,18 @@ export class ReportService {
   static async generateGeneralLedger(accountId, startDate, endDate) {
     await connectDB();
 
-    const account = await Account.findById(accountId);
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const account = await Account.findOne(
+      withTenantScope({ _id: accountId }, companyId, isSuperAdmin),
+    );
 
     if (!account) {
       throw new Error("Account not found");
     }
 
-    const query = {
+    let query = {
       status: "posted",
       "lines.accountId": accountId,
     };
@@ -365,6 +486,9 @@ export class ReportService {
         query.entryDate.$lte = new Date(endDate);
       }
     }
+
+    // Apply tenant scoping
+    query = withTenantScope(query, companyId, isSuperAdmin);
 
     const entries = await JournalEntry.find(query)
       .sort({ entryDate: 1, entryNumber: 1 })
@@ -380,7 +504,7 @@ export class ReportService {
 
     for (const entry of entries) {
       const line = entry.lines.find(
-        (l) => l.accountId.toString() === accountId.toString()
+        (l) => l.accountId.toString() === accountId.toString(),
       );
 
       if (!line) continue;
@@ -429,10 +553,18 @@ export class ReportService {
   static async generateAgedReceivables(asOfDate = new Date()) {
     await connectDB();
 
-    const Account = (await import("../models/account")).default;
-    const arAccount = await Account.findOne({
-      systemAccount: "accounts_receivable",
-    });
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const tenantMatch = isSuperAdmin ? {} : { companyId };
+
+    const Account = (await import("../../models/account")).default;
+    const arAccount = await Account.findOne(
+      withTenantScope(
+        { systemAccount: "accounts_receivable" },
+        companyId,
+        isSuperAdmin,
+      ),
+    );
 
     if (!arAccount) {
       throw new Error("Accounts Receivable account not configured");
@@ -441,6 +573,7 @@ export class ReportService {
     const result = await JournalEntry.aggregate([
       {
         $match: {
+          ...tenantMatch,
           status: "posted",
           entryDate: { $lte: new Date(asOfDate) },
           "party.type": "customer",
@@ -496,7 +629,9 @@ export class ReportService {
             customerName: "$party.name",
           },
           current: {
-            $sum: { $cond: [{ $eq: ["$agingBucket", "current"] }, "$amount", 0] },
+            $sum: {
+              $cond: [{ $eq: ["$agingBucket", "current"] }, "$amount", 0],
+            },
           },
           days0_30: {
             $sum: { $cond: [{ $eq: ["$agingBucket", "0-30"] }, "$amount", 0] },
@@ -539,7 +674,7 @@ export class ReportService {
         overdue: result.reduce(
           (sum, c) =>
             sum + c.days0_30 + c.days31_60 + c.days61_90 + c.days90plus,
-          0
+          0,
         ),
       },
     };
@@ -551,10 +686,18 @@ export class ReportService {
   static async generateAgedPayables(asOfDate = new Date()) {
     await connectDB();
 
-    const Account = (await import("../models/account")).default;
-    const apAccount = await Account.findOne({
-      systemAccount: "accounts_payable",
-    });
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const tenantMatch = isSuperAdmin ? {} : { companyId };
+
+    const Account = (await import("../../models/account")).default;
+    const apAccount = await Account.findOne(
+      withTenantScope(
+        { systemAccount: "accounts_payable" },
+        companyId,
+        isSuperAdmin,
+      ),
+    );
 
     if (!apAccount) {
       throw new Error("Accounts Payable account not configured");
@@ -563,6 +706,7 @@ export class ReportService {
     const result = await JournalEntry.aggregate([
       {
         $match: {
+          ...tenantMatch,
           status: "posted",
           entryDate: { $lte: new Date(asOfDate) },
           "party.type": "supplier",
@@ -618,7 +762,9 @@ export class ReportService {
             supplierName: "$party.name",
           },
           current: {
-            $sum: { $cond: [{ $eq: ["$agingBucket", "current"] }, "$amount", 0] },
+            $sum: {
+              $cond: [{ $eq: ["$agingBucket", "current"] }, "$amount", 0],
+            },
           },
           days0_30: {
             $sum: { $cond: [{ $eq: ["$agingBucket", "0-30"] }, "$amount", 0] },
@@ -661,7 +807,7 @@ export class ReportService {
         overdue: result.reduce(
           (sum, s) =>
             sum + s.days0_30 + s.days31_60 + s.days61_90 + s.days90plus,
-          0
+          0,
         ),
       },
     };
@@ -674,59 +820,79 @@ export class ReportService {
   /**
    * Calculate account balances for a list of accounts
    */
-  static async calculateAccountBalances(accounts, startDate, endDate) {
-    const accountsWithBalances = [];
+  static async calculateAccountBalances(
+    accounts,
+    startDate,
+    endDate,
+    companyId = null,
+    isSuperAdmin = false,
+  ) {
+    if (accounts.length === 0) return [];
 
-    for (const account of accounts) {
-      const query = {
-        status: "posted",
-        "lines.accountId": account._id,
-      };
+    const tenantMatch = isSuperAdmin
+      ? {}
+      : companyId
+        ? { companyId: new ObjectId(companyId) }
+        : {};
+    const accountIds = accounts.map((a) => a._id);
 
-      if (startDate || endDate) {
-        query.entryDate = {};
-        if (startDate) {
-          query.entryDate.$gte = new Date(startDate);
-        }
-        if (endDate) {
-          query.entryDate.$lte = new Date(endDate);
-        }
-      }
+    // Build date filter
+    const dateFilter = {};
+    if (startDate) dateFilter.$gte = new Date(startDate);
+    if (endDate) dateFilter.$lte = new Date(endDate);
 
-      const result = await JournalEntry.aggregate([
-        { $match: query },
-        { $unwind: "$lines" },
-        { $match: { "lines.accountId": account._id } },
-        {
-          $group: {
-            _id: null,
-            totalDebit: { $sum: "$lines.debit" },
-            totalCredit: { $sum: "$lines.credit" },
-          },
+    const matchStage = {
+      ...tenantMatch,
+      status: "posted",
+    };
+    if (startDate || endDate) {
+      matchStage.entryDate = dateFilter;
+    }
+
+    // Single aggregation for all accounts
+    const results = await JournalEntry.aggregate([
+      { $match: matchStage },
+      { $unwind: "$lines" },
+      { $match: { "lines.accountId": { $in: accountIds } } },
+      {
+        $group: {
+          _id: "$lines.accountId",
+          totalDebit: { $sum: "$lines.debit" },
+          totalCredit: { $sum: "$lines.credit" },
         },
-      ]);
+      },
+    ]);
 
-      if (result.length > 0) {
-        const { totalDebit, totalCredit } = result[0];
+    // Build a lookup map from aggregation results
+    const balanceMap = new Map();
+    for (const row of results) {
+      balanceMap.set(row._id.toString(), row);
+    }
 
-        const normalSide = ["asset", "expense"].includes(account.accountType)
-          ? "debit"
-          : "credit";
+    // Map back to account details
+    const accountsWithBalances = [];
+    for (const account of accounts) {
+      const row = balanceMap.get(account._id.toString());
+      if (!row) continue;
 
-        const balance =
-          normalSide === "debit"
-            ? totalDebit - totalCredit
-            : totalCredit - totalDebit;
+      const { totalDebit, totalCredit } = row;
+      const normalSide = ["asset", "expense"].includes(account.accountType)
+        ? "debit"
+        : "credit";
 
-        if (Math.abs(balance) > 0.01) {
-          accountsWithBalances.push({
-            accountCode: account.accountCode,
-            accountName: account.accountName,
-            accountType: account.accountType,
-            subType: account.subType,
-            balance,
-          });
-        }
+      const balance =
+        normalSide === "debit"
+          ? totalDebit - totalCredit
+          : totalCredit - totalDebit;
+
+      if (Math.abs(balance) > 0.01) {
+        accountsWithBalances.push({
+          accountCode: account.accountCode,
+          accountName: account.accountName,
+          accountType: account.accountType,
+          subType: account.subType,
+          balance,
+        });
       }
     }
 

@@ -5,9 +5,12 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import Category from "@/app/models/category";
-import { auth } from "@/auth";
 import dbConnect from "@/app/config/dbConnect";
-dbConnect();
+import {
+  getTenantContext,
+  getCompanyIdForCreate,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // VALIDATION SCHEMAS
@@ -40,18 +43,6 @@ const categorySchema = z.object({
 });
 
 // ============================================
-// HELPER: Get current user
-// ============================================
-
-async function getCurrentUser() {
-  const session = await auth();
-  if (!session?.user) {
-    return null;
-  }
-  return session.user;
-}
-
-// ============================================
 // HELPER: Check admin permission (returns error or null)
 // ============================================
 
@@ -80,11 +71,29 @@ function checkAdminPermission(user) {
 // ============================================
 
 export async function createCategory(prevState, formData) {
-  const user = await getCurrentUser();
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return {
+      error: { _form: [error.message] },
+    };
+  }
 
   // Check permissions
   const permError = checkAdminPermission(user);
   if (permError) return permError;
+
+  // Get tenant companyId for create
+  let tenantCompanyId;
+  try {
+    tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+  } catch (error) {
+    return {
+      error: { _form: [error.message] },
+    };
+  }
 
   await dbConnect();
 
@@ -118,9 +127,11 @@ export async function createCategory(prevState, formData) {
 
   const validated = validationResult.data;
 
-  // Check for circular reference if parent is set
+  // Check for circular reference if parent is set (tenant-scoped)
   if (validated.parent) {
-    const parentCategory = await Category.findById(validated.parent);
+    const parentCategory = await Category.findOne(
+      withTenantScope({ _id: validated.parent }, tenantCompanyId, isSuperAdmin)
+    );
     if (!parentCategory) {
       return {
         error: {
@@ -130,11 +141,13 @@ export async function createCategory(prevState, formData) {
     }
   }
 
-  // Check for duplicate name
-  const existingCategory = await Category.findOne({
-    name: { $regex: new RegExp(`^${validated.name}$`, "i") },
-    isDeleted: false,
-  });
+  // Check for duplicate name (tenant-scoped)
+  const existingCategory = await Category.findOne(
+    withTenantScope({
+      name: { $regex: new RegExp(`^${validated.name}$`, "i") },
+      isDeleted: false,
+    }, tenantCompanyId, isSuperAdmin)
+  );
 
   if (existingCategory) {
     return {
@@ -144,9 +157,10 @@ export async function createCategory(prevState, formData) {
     };
   }
 
-  // Create category
+  // Create category with tenant companyId
   try {
     await Category.create({
+      companyId: tenantCompanyId,
       ...validated,
       parent: validated.parent || null,
       createdBy: {
@@ -187,7 +201,15 @@ export async function createCategory(prevState, formData) {
 // ============================================
 
 export async function updateCategory(categoryId, prevState, formData) {
-  const user = await getCurrentUser();
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return {
+      error: { _form: [error.message] },
+    };
+  }
 
   // Check permissions
   const permError = checkAdminPermission(user);
@@ -195,7 +217,10 @@ export async function updateCategory(categoryId, prevState, formData) {
 
   await dbConnect();
 
-  const category = await Category.findById(categoryId);
+  // Find category with tenant scoping
+  const category = await Category.findOne(
+    withTenantScope({ _id: categoryId }, companyId, isSuperAdmin)
+  );
   if (!category) {
     return {
       error: {
@@ -257,12 +282,14 @@ export async function updateCategory(categoryId, prevState, formData) {
     }
   }
 
-  // Check for duplicate name (excluding current category)
-  const existingCategory = await Category.findOne({
-    name: { $regex: new RegExp(`^${validated.name}$`, "i") },
-    _id: { $ne: categoryId },
-    isDeleted: false,
-  });
+  // Check for duplicate name (excluding current category, tenant-scoped)
+  const existingCategory = await Category.findOne(
+    withTenantScope({
+      name: { $regex: new RegExp(`^${validated.name}$`, "i") },
+      _id: { $ne: categoryId },
+      isDeleted: false,
+    }, companyId, isSuperAdmin)
+  );
 
   if (existingCategory) {
     return {
@@ -290,14 +317,18 @@ export async function updateCategory(categoryId, prevState, formData) {
 
     await category.save();
 
-    // Update children paths if name or parent changed
+    // Update children paths if name or parent changed (tenant-scoped)
+    // Optimized: batch fetch all descendants instead of N+1 individual queries
     if (nameChanged || parentChanged) {
       const descendants = await category.getDescendants();
-      for (const desc of descendants) {
-        const descCategory = await Category.findById(desc._id);
-        if (descCategory) {
-          await descCategory.save(); // Triggers pre-save to update path
-        }
+      if (descendants.length > 0) {
+        const descendantIds = descendants.map(d => d._id);
+        // Batch fetch all descendants as Mongoose documents in one query
+        const descCategories = await Category.find(
+          withTenantScope({ _id: { $in: descendantIds } }, companyId, isSuperAdmin)
+        );
+        // Save all descendants to trigger pre-save hook (updates path)
+        await Promise.all(descCategories.map(dc => dc.save()));
       }
     }
   } catch (error) {
@@ -320,7 +351,15 @@ export async function updateCategory(categoryId, prevState, formData) {
 // ============================================
 
 export async function deleteCategory(categoryId) {
-  const user = await getCurrentUser();
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return {
+      error: { _form: [error.message] },
+    };
+  }
 
   // Check permissions
   const permError = checkAdminPermission(user);
@@ -328,7 +367,10 @@ export async function deleteCategory(categoryId) {
 
   await dbConnect();
 
-  const category = await Category.findById(categoryId);
+  // Find category with tenant scoping
+  const category = await Category.findOne(
+    withTenantScope({ _id: categoryId }, companyId, isSuperAdmin)
+  );
   if (!category) {
     return {
       error: {
@@ -348,11 +390,13 @@ export async function deleteCategory(categoryId) {
     };
   }
 
-  // Check for child categories
-  const childCount = await Category.countDocuments({
-    parent: category._id,
-    isDeleted: false,
-  });
+  // Check for child categories (tenant-scoped)
+  const childCount = await Category.countDocuments(
+    withTenantScope({
+      parent: category._id,
+      isDeleted: false,
+    }, companyId, isSuperAdmin)
+  );
 
   if (childCount > 0) {
     return {
@@ -394,9 +438,20 @@ export async function deleteCategory(categoryId) {
 
 export async function getCategory(categoryId) {
   try {
+    // Get tenant context
+    let companyId, isSuperAdmin;
+    try {
+      ({ companyId, isSuperAdmin } = await getTenantContext());
+    } catch (error) {
+      return { error: error.message };
+    }
+
     await dbConnect();
 
-    const category = await Category.findById(categoryId).lean();
+    // Find category with tenant scoping
+    const category = await Category.findOne(
+      withTenantScope({ _id: categoryId }, companyId, isSuperAdmin)
+    ).lean();
 
     if (!category) {
       return { error: "Category not found" };
@@ -421,8 +476,17 @@ export async function getCategory(categoryId) {
 
 export async function getCategories(includeInactive = false) {
   try {
+    // Get tenant context
+    let companyId, isSuperAdmin;
+    try {
+      ({ companyId, isSuperAdmin } = await getTenantContext());
+    } catch (error) {
+      return { error: { _form: [error.message] }, categories: [] };
+    }
+
     await dbConnect();
-    const categories = await Category.getFlatList(includeInactive);
+    // Pass tenant context to getFlatList (model method should handle it)
+    const categories = await Category.getFlatList(includeInactive, companyId, isSuperAdmin);
 
     return {
       categories: categories.map((cat) => ({
@@ -452,8 +516,17 @@ export async function getCategories(includeInactive = false) {
 
 export async function searchCategories(query) {
   try {
+    // Get tenant context
+    let companyId, isSuperAdmin;
+    try {
+      ({ companyId, isSuperAdmin } = await getTenantContext());
+    } catch (error) {
+      return { categories: [] };
+    }
+
     await dbConnect();
-    const categories = await Category.search(query, 15);
+    // Pass tenant context to search method
+    const categories = await Category.search(query, 15, companyId, isSuperAdmin);
 
     return {
       categories: categories.map((cat) => ({
@@ -483,7 +556,20 @@ export async function searchCategories(query) {
 
 export async function getCategoryTree(activeOnly = false) {
   try {
-    const query = activeOnly ? { isActive: true } : {};
+    // Get tenant context
+    let companyId, isSuperAdmin;
+    try {
+      ({ companyId, isSuperAdmin } = await getTenantContext());
+    } catch (error) {
+      return { error: error.message, tree: [] };
+    }
+
+    await dbConnect();
+
+    // Build query with tenant scoping
+    let query = activeOnly ? { isActive: true } : {};
+    query = withTenantScope(query, companyId, isSuperAdmin);
+
     const categories = await Category.find(query)
       .sort({ sortOrder: 1, name: 1 })
       .lean();
@@ -537,14 +623,36 @@ export async function getCategoryTree(activeOnly = false) {
 // ============================================
 
 export async function seedDefaultCategories() {
-  const user = await getCurrentUser();
+  // Auth check with tenant context
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return {
+      error: { _form: [error.message] },
+    };
+  }
 
   // Check permissions
   const permError = checkAdminPermission(user);
   if (permError) return permError;
 
-  // Check if categories already exist
-  const existingCount = await Category.countDocuments({ isDeleted: false });
+  // Get tenant companyId for create
+  let tenantCompanyId;
+  try {
+    tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+  } catch (error) {
+    return {
+      error: { _form: [error.message] },
+    };
+  }
+
+  await dbConnect();
+
+  // Check if categories already exist (tenant-scoped)
+  const existingCount = await Category.countDocuments(
+    withTenantScope({ isDeleted: false }, tenantCompanyId, isSuperAdmin)
+  );
   if (existingCount > 0) {
     return {
       error: {
@@ -633,6 +741,7 @@ export async function seedDefaultCategories() {
   try {
     for (const catData of defaultCategories) {
       await Category.create({
+        companyId: tenantCompanyId,
         ...catData,
         createdBy: { id: user.id, name: user.name },
         lastModifiedBy: { id: user.id, name: user.name },

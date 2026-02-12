@@ -456,23 +456,23 @@ export default async function InvoiceDetailsPage({ params }) {
                 </span>
               </div>
 
-              {invoice.discountPercentage > 0 && (
+              {(invoice.totalDiscount > 0 || invoice.discountAmount > 0) && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">
-                    Discount ({invoice.discountPercentage}%):
+                    Discount:
                   </span>
                   <span className="font-medium text-red-600 dark:text-red-400">
-                    -{formatCurrency(invoice.discountAmount)}
+                    -{formatCurrency(invoice.totalDiscount || invoice.discountAmount || 0)}
                   </span>
                 </div>
               )}
 
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">
-                  VAT ({invoice.taxRate}%):
+                  VAT:
                 </span>
                 <span className="font-medium text-foreground">
-                  {formatCurrency(invoice.taxAmount)}
+                  {formatCurrency(invoice.taxAmount || 0)}
                 </span>
               </div>
 

@@ -322,12 +322,31 @@ function ProductCombobox({ products, index, defaultValue, defaultCustomName, onP
 
 // ============================================
 // ACCOUNT COMBOBOX COMPONENT
+// Groups accounts by type: Expense (services) vs Asset (inventory)
 // ============================================
 function AccountCombobox({ accounts, index, defaultValue, error }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(defaultValue || "");
+  const [searchValue, setSearchValue] = useState("");
 
   const selectedAccount = accounts.find((a) => a._id === value);
+
+  // Group accounts by type
+  const expenseAccounts = accounts.filter((a) => a.accountType === "expense");
+  const assetAccounts = accounts.filter((a) => a.accountType === "asset");
+
+  // Filter by search
+  const filterAccounts = (list) =>
+    list.filter(
+      (a) =>
+        !searchValue ||
+        a.accountName.toLowerCase().includes(searchValue.toLowerCase()) ||
+        a.accountCode.toLowerCase().includes(searchValue.toLowerCase())
+    );
+
+  const filteredExpense = filterAccounts(expenseAccounts);
+  const filteredAsset = filterAccounts(assetAccounts);
+  const hasResults = filteredExpense.length > 0 || filteredAsset.length > 0;
 
   return (
     <div className="space-y-1">
@@ -345,7 +364,17 @@ function AccountCombobox({ accounts, index, defaultValue, error }) {
             )}
           >
             {selectedAccount ? (
-              <span className="truncate">
+              <span className="truncate flex items-center gap-2">
+                <span
+                  className={cn(
+                    "text-[10px] font-medium px-1.5 py-0.5 rounded",
+                    selectedAccount.accountType === "expense"
+                      ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"
+                      : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                  )}
+                >
+                  {selectedAccount.accountType === "expense" ? "EXP" : "INV"}
+                </span>
                 {selectedAccount.accountCode} - {selectedAccount.accountName}
               </span>
             ) : (
@@ -354,38 +383,113 @@ function AccountCombobox({ accounts, index, defaultValue, error }) {
             <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[300px] p-0" align="start">
-          <Command>
-            <CommandInput placeholder="Search accounts..." />
+        <PopoverContent className="w-[340px] p-0" align="start">
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder="Search accounts..."
+              value={searchValue}
+              onValueChange={setSearchValue}
+            />
             <CommandList>
-              <CommandEmpty>No account found.</CommandEmpty>
-              <CommandGroup>
-                {accounts.map((account) => (
-                  <CommandItem
-                    key={account._id}
-                    value={`${account.accountCode} ${account.accountName}`}
-                    onSelect={() => {
-                      setValue(account._id);
-                      setOpen(false);
-                    }}
+              {!hasResults && (
+                <CommandEmpty>
+                  <div className="py-2 text-center">
+                    <p className="text-sm text-muted-foreground mb-2">
+                      No account found.
+                    </p>
+                    <Link
+                      href="/dashboard/accounts/create"
+                      className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                      onClick={() => setOpen(false)}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Create new account
+                    </Link>
+                  </div>
+                </CommandEmpty>
+              )}
+
+              {/* Expense Accounts - for services, utilities, consumables */}
+              {filteredExpense.length > 0 && (
+                <CommandGroup heading="Expense Accounts (Services, Costs)">
+                  {filteredExpense.slice(0, 8).map((account) => (
+                    <CommandItem
+                      key={account._id}
+                      value={`${account.accountCode} ${account.accountName}`}
+                      onSelect={() => {
+                        setValue(account._id);
+                        setOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          value === account._id ? "opacity-100" : "opacity-0"
+                        )}
+                      />
+                      <div className="flex flex-col flex-1">
+                        <span className="font-medium">
+                          <span className="font-mono text-xs text-muted-foreground mr-1.5">
+                            {account.accountCode}
+                          </span>
+                          {account.accountName}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">
+                        EXP
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+
+              {/* Inventory Accounts - for stock/goods purchases */}
+              {filteredAsset.length > 0 && (
+                <CommandGroup heading="Inventory Accounts (Stock Purchases)">
+                  {filteredAsset.slice(0, 8).map((account) => (
+                    <CommandItem
+                      key={account._id}
+                      value={`${account.accountCode} ${account.accountName}`}
+                      onSelect={() => {
+                        setValue(account._id);
+                        setOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          value === account._id ? "opacity-100" : "opacity-0"
+                        )}
+                      />
+                      <div className="flex flex-col flex-1">
+                        <span className="font-medium">
+                          <span className="font-mono text-xs text-muted-foreground mr-1.5">
+                            {account.accountCode}
+                          </span>
+                          {account.accountName}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        INV
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+
+              {/* Quick create link at bottom */}
+              {hasResults && (
+                <div className="border-t px-2 py-2">
+                  <Link
+                    href="/dashboard/accounts/create"
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary"
+                    onClick={() => setOpen(false)}
                   >
-                    <Check
-                      className={cn(
-                        "mr-2 h-4 w-4",
-                        value === account._id ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                    <div className="flex flex-col">
-                      <span className="font-medium">
-                        {account.accountCode} - {account.accountName}
-                      </span>
-                      <span className="text-xs text-muted-foreground capitalize">
-                        {account.accountType}
-                      </span>
-                    </div>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
+                    <Plus className="h-3.5 w-3.5" />
+                    Create new account
+                  </Link>
+                </div>
+              )}
             </CommandList>
           </Command>
         </PopoverContent>
@@ -455,7 +559,7 @@ function LineItem({
         {/* Account Selection */}
         <div className="space-y-2">
           <Label className="text-sm font-medium">
-            Expense Account <span className="text-destructive">*</span>
+            Account <span className="text-destructive">*</span>
           </Label>
           <AccountCombobox
             accounts={accounts}
@@ -463,6 +567,9 @@ function LineItem({
             defaultValue={line?.account?.id?.toString() || ""}
             error={lineErrors[`lines.${index}.accountId`]}
           />
+          <p className="text-xs text-muted-foreground">
+            Expense for services, Inventory for stock purchases
+          </p>
           {lineErrors[`lines.${index}.accountId`] && (
             <p className="text-xs text-destructive">
               {lineErrors[`lines.${index}.accountId`]}

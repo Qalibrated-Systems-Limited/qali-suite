@@ -20,12 +20,18 @@ function formatUserForAudit(user) {
 // ============================================
 const inventoryAdjustmentSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // Adjustment Identification
     adjustmentNumber: {
       type: String,
       required: [true, "Adjustment number is required"],
-      unique: true,
-      index: true,
     },
 
     adjustmentDate: {
@@ -224,9 +230,12 @@ const inventoryAdjustmentSchema = new Schema(
 // ============================================
 // INDEXES
 // ============================================
-inventoryAdjustmentSchema.index({ adjustmentDate: -1, status: 1 });
-inventoryAdjustmentSchema.index({ adjustmentType: 1, status: 1 });
-inventoryAdjustmentSchema.index({ status: 1, createdAt: -1 });
+// Unique adjustment number per company
+inventoryAdjustmentSchema.index({ companyId: 1, adjustmentNumber: 1 }, { unique: true });
+// Query indexes - prefixed with companyId for tenant isolation
+inventoryAdjustmentSchema.index({ companyId: 1, adjustmentDate: -1, status: 1 });
+inventoryAdjustmentSchema.index({ companyId: 1, adjustmentType: 1, status: 1 });
+inventoryAdjustmentSchema.index({ companyId: 1, status: 1, createdAt: -1 });
 
 // ============================================
 // VIRTUALS
@@ -398,9 +407,10 @@ inventoryAdjustmentSchema.methods.approve = async function (approvedBy) {
       }
 
       // Create stock movement
-      const movementNumber = await StockMovement.generateMovementNumber();
+      const movementNumber = await StockMovement.generateMovementNumber(this.companyId);
 
       const movement = await StockMovement.create({
+        companyId: this.companyId, // Tenant scoping
         movementNumber,
         productId: product._id,
         productSnapshot: {
@@ -503,12 +513,14 @@ inventoryAdjustmentSchema.methods.createJournalEntry = async function (user) {
   const Account = mongoose.model("Account");
   const JournalEntry = mongoose.model("JournalEntry");
 
-  // Get accounts
+  // Get accounts (tenant-scoped)
   const inventoryAccount = await Account.findOne({
+    companyId: this.companyId,
     systemAccount: "inventory",
   });
   console.log(inventoryAccount, "inventory");
   const adjustmentAccount = await Account.findOne({
+    companyId: this.companyId,
     subType: "inventory_adjustment",
   });
 
@@ -596,8 +608,9 @@ inventoryAdjustmentSchema.methods.createJournalEntry = async function (user) {
   // Generate entry number
   const entryNumber = await this.generateUniqueEntryNumber();
 
-  // Create journal entry
+  // Create journal entry (with tenant scoping)
   const journalEntry = await JournalEntry.create({
+    companyId: this.companyId, // Tenant scoping
     entryNumber,
     entryDate: this.adjustmentDate,
     entryType: "adjustment",
@@ -622,7 +635,7 @@ inventoryAdjustmentSchema.methods.createJournalEntry = async function (user) {
  */
 inventoryAdjustmentSchema.methods.generateUniqueEntryNumber = async function (session = null) {
   const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
-  return generateUniqueEntryNumber("ADJ", session);
+  return generateUniqueEntryNumber("ADJ", this.companyId, session);
 };
 
 /**
@@ -722,32 +735,35 @@ inventoryAdjustmentSchema.statics.getSummaryByType = async function (
 };
 
 /**
- * Generate adjustment number
+ * Generate adjustment number with company code prefix
  */
-inventoryAdjustmentSchema.statics.generateAdjustmentNumber = async function () {
-  const lastAdjustment = await this.findOne({
-    adjustmentNumber: /^ADJ-/,
-  })
-    .sort({ adjustmentNumber: -1 })
-    .limit(1)
-    .lean();
+inventoryAdjustmentSchema.statics.generateAdjustmentNumber = async function (companyId = null) {
+  const Company = mongoose.model("Company");
+  const Counter = mongoose.model("Counter");
 
-  const year = new Date().getFullYear();
-  let nextNum = 1;
-
-  if (lastAdjustment?.adjustmentNumber) {
-    const match = lastAdjustment.adjustmentNumber.match(/\d+$/);
-    if (match) {
-      const lastYear = parseInt(
-        lastAdjustment.adjustmentNumber.match(/\d{4}/)[0]
-      );
-      if (lastYear === year) {
-        nextNum = parseInt(match[0], 10) + 1;
-      }
-    }
+  // Fetch company code for prefix
+  let companyCode = null;
+  if (companyId) {
+    const company = await Company.findById(companyId).select("code").lean();
+    companyCode = company?.code || null;
   }
 
-  return `ADJ-${year}-${String(nextNum).padStart(4, "0")}`;
+  const year = new Date().getFullYear();
+
+  // Build counter ID with company code for tenant isolation
+  const counterId = companyCode
+    ? `adj-${companyCode.toLowerCase()}-${year}`
+    : `adj-${year}`;
+
+  const counter = await Counter.findOneAndUpdate(
+    { name: counterId },
+    { $inc: { seq: 1 } },
+    { upsert: true, new: true }
+  );
+
+  // Format: ADJ-{CODE}-{YYYY}-{NNNN} or ADJ-{YYYY}-{NNNN}
+  const prefix = companyCode ? `ADJ-${companyCode}` : "ADJ";
+  return `${prefix}-${year}-${String(counter.seq).padStart(4, "0")}`;
 };
 
 // ============================================

@@ -5,6 +5,7 @@ import DeliveryNote from "../../models/dnote";
 
 import { startOfMonth, endOfMonth } from "date-fns";
 import dbConnect from "@/app/config/dbConnect";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 dbConnect();
 
@@ -18,17 +19,16 @@ export async function searchDeliveryNotes(
   filters = {}
 ) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      throw new Error("Unauthorized");
-    }
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const tenantMatch = isSuperAdmin ? {} : { companyId };
 
     const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
     const { returnType, startDate, endDate, reason, technician } = filters;
 
     // Build filter conditions
-    let additionalFilters = {};
+    let additionalFilters = { ...tenantMatch };
 
     // Return type filter
     if (returnType && returnType !== "all") {

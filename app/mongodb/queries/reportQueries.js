@@ -1,6 +1,7 @@
 import ReportService from "../services/reportsService";
 import JournalEntry from "../../models/JournalEntry";
 import dbConnect from "../../config/dbConnect";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 // ============================================
 // REPORT QUERIES - FINANCIAL REPORTS
@@ -228,9 +229,14 @@ export async function getAvailableDateRanges() {
 export async function getRevenueByAccount(startDate, endDate) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const result = await JournalEntry.aggregate([
     {
       $match: {
+        ...tenantMatch,
         status: "posted",
         entryDate: {
           $gte: new Date(startDate),
@@ -291,9 +297,14 @@ export async function getRevenueByAccount(startDate, endDate) {
 export async function getExpensesByAccount(startDate, endDate) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const result = await JournalEntry.aggregate([
     {
       $match: {
+        ...tenantMatch,
         status: "posted",
         entryDate: {
           $gte: new Date(startDate),

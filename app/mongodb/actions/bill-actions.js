@@ -39,6 +39,11 @@ import Party from "@/app/models/parties";
 import Product from "@/app/models/product";
 import Account from "@/app/models/account";
 import dbConnect from "@/app/config/dbConnect";
+import {
+  getTenantContext,
+  getCompanyIdForCreate,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // CONSTANTS
@@ -154,13 +159,11 @@ export async function createBill(prevState, formData) {
   const rawData = parseFormData(formData);
 
   try {
-    // 2. Auth check
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, error: "Please sign in to continue", values: rawData };
-    }
+    // 2. Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    const user = session.user;
+    // Get companyId for the bill (SuperAdmin must specify, regular users use their own)
+    const tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
 
     // 3. Role check
     if (!hasRole(user, BILL_ROLES.CREATE)) {
@@ -197,8 +200,10 @@ export async function createBill(prevState, formData) {
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    // 6. Validate supplier exists and is correct type
-    const supplier = await Party.findById(data.supplierId)
+    // 6. Validate supplier exists, is correct type, and belongs to tenant
+    const supplier = await Party.findOne(
+      withTenantScope({ _id: data.supplierId }, tenantCompanyId, isSuperAdmin)
+    )
       .session(mongoSession)
       .lean();
     if (!supplier) {
@@ -227,8 +232,10 @@ export async function createBill(prevState, formData) {
     for (let i = 0; i < data.lines.length; i++) {
       const line = data.lines[i];
 
-      // Validate account
-      const account = await Account.findById(line.accountId)
+      // Validate account belongs to tenant
+      const account = await Account.findOne(
+        withTenantScope({ _id: line.accountId }, tenantCompanyId, isSuperAdmin)
+      )
         .session(mongoSession)
         .lean();
       if (!account) {
@@ -268,7 +275,7 @@ export async function createBill(prevState, formData) {
         };
       }
 
-      // Get product if specified, or use custom product name
+      // Get product if specified, or use custom product name (tenant-scoped)
       let productData = null;
       if (
         line.productId &&
@@ -276,7 +283,9 @@ export async function createBill(prevState, formData) {
         line.productId !== "none" &&
         line.productId !== ""
       ) {
-        const product = await Product.findById(line.productId)
+        const product = await Product.findOne(
+          withTenantScope({ _id: line.productId }, tenantCompanyId, isSuperAdmin)
+        )
           .session(mongoSession)
           .lean();
         if (product) {
@@ -324,8 +333,8 @@ export async function createBill(prevState, formData) {
       });
     }
 
-    // 7. Generate bill number atomically
-    const billNumber = await Bill.generateBillNumber(mongoSession);
+    // 7. Generate bill number atomically (tenant-scoped)
+    const billNumber = await Bill.generateBillNumber(tenantCompanyId, mongoSession);
 
     // 8. Calculate fiscal period
     const billDate = new Date(data.billDate);
@@ -367,10 +376,11 @@ export async function createBill(prevState, formData) {
       balance: netPayable,
     };
 
-    // 11. Create bill
+    // 11. Create bill (with tenant companyId)
     const [bill] = await Bill.create(
       [
         {
+          companyId: tenantCompanyId,
           billNumber,
           supplierInvoiceNumber: data.supplierInvoiceNumber || "",
           billDate: data.billDate,
@@ -384,7 +394,7 @@ export async function createBill(prevState, formData) {
           description: data.description || "",
           internalNotes: data.internalNotes || "",
           status: "draft",
-          createdBy: formatUser(session),
+          createdBy: formatUser(user),
         },
       ],
       { session: mongoSession }
@@ -433,18 +443,15 @@ export async function updateBill(billId, prevState, formData) {
   const rawData = parseFormData(formData);
 
   try {
-    // 2. Auth check
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, error: "Please sign in to continue", values: rawData };
-    }
-
-    const user = session.user;
+    // 2. Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     await dbConnect();
 
-    // 3. Get bill (outside transaction for read)
-    const bill = await Bill.findById(billId);
+    // 3. Get bill (tenant-scoped)
+    const bill = await Bill.findOne(
+      withTenantScope({ _id: billId }, companyId, isSuperAdmin)
+    );
     if (!bill) {
       return { success: false, error: "Bill not found", values: rawData };
     }
@@ -494,9 +501,14 @@ export async function updateBill(billId, prevState, formData) {
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    // 8. Update supplier if changed (with null-safe check)
+    // Use bill's companyId for lookups
+    const billCompanyId = bill.companyId;
+
+    // 8. Update supplier if changed (with null-safe check, tenant-scoped)
     if (data.supplierId !== bill.supplier?.partyId?.toString()) {
-      const supplier = await Party.findById(data.supplierId)
+      const supplier = await Party.findOne(
+        withTenantScope({ _id: data.supplierId }, billCompanyId, isSuperAdmin)
+      )
         .session(mongoSession)
         .lean();
       if (!supplier) {
@@ -533,13 +545,15 @@ export async function updateBill(billId, prevState, formData) {
       };
     }
 
-    // 9. Process lines
+    // 9. Process lines (tenant-scoped lookups)
     const processedLines = [];
 
     for (let i = 0; i < data.lines.length; i++) {
       const line = data.lines[i];
 
-      const account = await Account.findById(line.accountId)
+      const account = await Account.findOne(
+        withTenantScope({ _id: line.accountId }, billCompanyId, isSuperAdmin)
+      )
         .session(mongoSession)
         .lean();
       if (!account) {
@@ -579,7 +593,7 @@ export async function updateBill(billId, prevState, formData) {
         };
       }
 
-      // Get product if specified, or use custom product name
+      // Get product if specified, or use custom product name (tenant-scoped)
       let productData = null;
       if (
         line.productId &&
@@ -587,7 +601,9 @@ export async function updateBill(billId, prevState, formData) {
         line.productId !== "none" &&
         line.productId !== ""
       ) {
-        const product = await Product.findById(line.productId)
+        const product = await Product.findOne(
+          withTenantScope({ _id: line.productId }, billCompanyId, isSuperAdmin)
+        )
           .session(mongoSession)
           .lean();
         if (product) {
@@ -634,7 +650,7 @@ export async function updateBill(billId, prevState, formData) {
       });
     }
 
-    // 9. Recalculate bill amounts
+    // 10. Recalculate bill amounts
     const subtotal = processedLines.reduce((sum, line) => sum + line.amount, 0);
     const vatTotal = processedLines.reduce(
       (sum, line) => sum + (line.vat?.amount || 0),
@@ -663,7 +679,7 @@ export async function updateBill(billId, prevState, formData) {
     };
     bill.description = data.description || "";
     bill.internalNotes = data.internalNotes || "";
-    bill.lastModifiedBy = formatUser(session);
+    bill.lastModifiedBy = formatUser({ user });
 
     // Update fiscal period
     const billDate = new Date(data.billDate);
@@ -713,16 +729,15 @@ export async function updateBill(billId, prevState, formData) {
 // ============================================
 export async function submitBill(billId) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, error: "Please sign in to continue" };
-    }
-
-    const user = session.user;
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     await dbConnect();
 
-    const bill = await Bill.findById(billId);
+    // Get bill (tenant-scoped)
+    const bill = await Bill.findOne(
+      withTenantScope({ _id: billId }, companyId, isSuperAdmin)
+    );
     if (!bill) {
       return { success: false, error: "Bill not found" };
     }
@@ -746,7 +761,7 @@ export async function submitBill(billId) {
     }
 
     // Use schema method
-    await bill.submit(formatUser(session));
+    await bill.submit(formatUser({ user }));
 
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
@@ -769,12 +784,8 @@ export async function submitBill(billId) {
 // ============================================
 export async function approveBill(billId) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, error: "Please sign in to continue" };
-    }
-
-    const user = session.user;
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     // Role check: Only Manager and Admin
     if (!hasRole(user, BILL_ROLES.APPROVE)) {
@@ -786,7 +797,10 @@ export async function approveBill(billId) {
 
     await dbConnect();
 
-    const bill = await Bill.findById(billId);
+    // Get bill (tenant-scoped)
+    const bill = await Bill.findOne(
+      withTenantScope({ _id: billId }, companyId, isSuperAdmin)
+    );
     if (!bill) {
       return { success: false, error: "Bill not found" };
     }
@@ -808,7 +822,7 @@ export async function approveBill(billId) {
 
     // Use schema method (creates JE, stock movements, tax transactions)
     // The approve method should use its own transaction internally
-    await bill.approve(formatUser(session));
+    await bill.approve(formatUser({ user }));
 
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
@@ -836,12 +850,8 @@ export async function approveBill(billId) {
 // ============================================
 export async function rejectBill(billId, prevState, formData) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, error: "Please sign in to continue" };
-    }
-
-    const user = session.user;
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     // Role check
     if (!hasRole(user, BILL_ROLES.APPROVE)) {
@@ -865,7 +875,10 @@ export async function rejectBill(billId, prevState, formData) {
 
     await dbConnect();
 
-    const bill = await Bill.findById(billId);
+    // Get bill (tenant-scoped)
+    const bill = await Bill.findOne(
+      withTenantScope({ _id: billId }, companyId, isSuperAdmin)
+    );
     if (!bill) {
       return { success: false, error: "Bill not found" };
     }
@@ -877,7 +890,7 @@ export async function rejectBill(billId, prevState, formData) {
       };
     }
 
-    await bill.reject(formatUser(session), validation.data.reason);
+    await bill.reject(formatUser({ user }), validation.data.reason);
 
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
@@ -900,12 +913,8 @@ export async function rejectBill(billId, prevState, formData) {
 // ============================================
 export async function cancelBill(billId, prevState, formData) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, error: "Please sign in to continue" };
-    }
-
-    const user = session.user;
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     // Role check
     if (!hasRole(user, BILL_ROLES.CANCEL)) {
@@ -929,7 +938,10 @@ export async function cancelBill(billId, prevState, formData) {
 
     await dbConnect();
 
-    const bill = await Bill.findById(billId);
+    // Get bill (tenant-scoped)
+    const bill = await Bill.findOne(
+      withTenantScope({ _id: billId }, companyId, isSuperAdmin)
+    );
     if (!bill) {
       return { success: false, error: "Bill not found" };
     }
@@ -944,7 +956,7 @@ export async function cancelBill(billId, prevState, formData) {
       };
     }
 
-    await bill.cancel(formatUser(session), validation.data.reason);
+    await bill.cancel(formatUser({ user }), validation.data.reason);
 
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
@@ -968,16 +980,15 @@ export async function cancelBill(billId, prevState, formData) {
 // ============================================
 export async function deleteBill(billId) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, error: "Please sign in to continue" };
-    }
-
-    const user = session.user;
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     await dbConnect();
 
-    const bill = await Bill.findById(billId);
+    // Get bill (tenant-scoped)
+    const bill = await Bill.findOne(
+      withTenantScope({ _id: billId }, companyId, isSuperAdmin)
+    );
     if (!bill) {
       return { success: false, error: "Bill not found" };
     }
@@ -1030,12 +1041,8 @@ export async function createBillPayment(billId, prevState, formData) {
   const mongoSession = await mongoose.startSession();
 
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, error: "Please sign in to continue" };
-    }
-
-    const user = session.user;
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     // Role check
     if (!hasRole(user, BILL_ROLES.PAYMENT)) {
@@ -1082,12 +1089,17 @@ export async function createBillPayment(billId, prevState, formData) {
 
     mongoSession.startTransaction();
 
-    // Get bill
-    const bill = await Bill.findById(billId).session(mongoSession);
+    // Get bill (tenant-scoped)
+    const bill = await Bill.findOne(
+      withTenantScope({ _id: billId }, companyId, isSuperAdmin)
+    ).session(mongoSession);
     if (!bill) {
       await mongoSession.abortTransaction();
       return { success: false, error: "Bill not found" };
     }
+
+    // Use bill's companyId for subsequent lookups
+    const billCompanyId = bill.companyId;
 
     if (!bill.canPay) {
       await mongoSession.abortTransaction();
@@ -1111,10 +1123,10 @@ export async function createBillPayment(billId, prevState, formData) {
       };
     }
 
-    // Get payment account
-    const paymentAccount = await Account.findById(accountId).session(
-      mongoSession
-    );
+    // Get payment account (tenant-scoped)
+    const paymentAccount = await Account.findOne(
+      withTenantScope({ _id: accountId }, billCompanyId, isSuperAdmin)
+    ).session(mongoSession);
     if (!paymentAccount) {
       await mongoSession.abortTransaction();
       return {
@@ -1136,8 +1148,8 @@ export async function createBillPayment(billId, prevState, formData) {
     // Import Payment model dynamically to avoid circular deps
     const Payment = (await import("@/app/models/payment")).default;
 
-    // Generate payment number
-    const paymentNumber = await Payment.generatePaymentNumber("MADE");
+    // Generate payment number (tenant-scoped)
+    const paymentNumber = await Payment.generatePaymentNumber("MADE", billCompanyId, mongoSession);
 
     // Calculate fiscal period from payment date
     const payDate = new Date(paymentDate);
@@ -1145,8 +1157,9 @@ export async function createBillPayment(billId, prevState, formData) {
       payDate.getMonth() + 1
     ).padStart(2, "0")}`;
 
-    // Create payment document
+    // Create payment document (with tenant companyId)
     const payment = new Payment({
+      companyId: billCompanyId,
       paymentNumber,
       paymentType: "made",
       paymentDate: payDate,
@@ -1179,7 +1192,7 @@ export async function createBillPayment(billId, prevState, formData) {
       reference,
       notes,
       status: "draft",
-      createdBy: formatUser(session),
+      createdBy: formatUser({ user }),
     });
 
     await payment.save({ session: mongoSession });
@@ -1248,12 +1261,8 @@ export async function recordBillPayment(
 // ============================================
 export async function reverseBillPayment(billId, paymentId, amount) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, error: "Please sign in to continue" };
-    }
-
-    const user = session.user;
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     // Only Admin can reverse payments
     if (!hasRole(user, ["Admin"])) {
@@ -1265,7 +1274,10 @@ export async function reverseBillPayment(billId, paymentId, amount) {
 
     await dbConnect();
 
-    const bill = await Bill.findById(billId);
+    // Get bill (tenant-scoped)
+    const bill = await Bill.findOne(
+      withTenantScope({ _id: billId }, companyId, isSuperAdmin)
+    );
     if (!bill) {
       return { success: false, error: "Bill not found" };
     }

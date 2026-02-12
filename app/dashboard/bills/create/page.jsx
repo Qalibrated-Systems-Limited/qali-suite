@@ -33,14 +33,19 @@ async function getBillFormData() {
     .sort({ name: 1 })
     .lean();
 
-  // Fetch expense and asset accounts for bill lines (only detail accounts that can receive postings)
+  // Fetch expense accounts and inventory asset accounts for bill lines
+  // - Expense accounts: for services, utilities, consumables
+  // - Inventory asset accounts: for stock/goods purchases (not bank, receivables, etc.)
   const accounts = await Account.find({
-    accountType: { $in: ["expense", "asset"] },
+    $or: [
+      { accountType: "expense" },
+      { accountType: "asset", subType: "inventory" },
+    ],
     isActive: { $ne: false },
-    canPost: true, // Filter out header accounts
+    canPost: true,
   })
-    .select("_id accountCode accountName accountType")
-    .sort({ accountCode: 1 })
+    .select("_id accountCode accountName accountType subType")
+    .sort({ accountType: -1, accountCode: 1 }) // expense first, then asset
     .lean();
 
   // Fetch products (optional - for inventory purchases)
@@ -68,6 +73,7 @@ async function getBillFormData() {
     accountCode: a.accountCode,
     accountName: a.accountName,
     accountType: a.accountType,
+    subType: a.subType || null,
   }));
 
   const serializedProducts = products.map((p) => ({
@@ -131,7 +137,7 @@ async function BillFormWrapper() {
           </p>
         </div>
         <Button asChild>
-          <Link href="/dashboard/parties/new?type=supplier">
+          <Link href="/dashboard/parties/create?type=supplier">
             Add Supplier
           </Link>
         </Button>
@@ -146,13 +152,13 @@ async function BillFormWrapper() {
           <FileText className="h-6 w-6 text-muted-foreground" />
         </div>
         <div>
-          <h3 className="font-semibold">No Expense Accounts Found</h3>
+          <h3 className="font-semibold">No Accounts Found</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            You need expense or asset accounts in your chart of accounts.
+            You need expense accounts (for services) or inventory accounts (for stock purchases) in your chart of accounts.
           </p>
         </div>
         <Button asChild>
-          <Link href="/dashboard/accounts/new">
+          <Link href="/dashboard/accounts/create">
             Add Account
           </Link>
         </Button>

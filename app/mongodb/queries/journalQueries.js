@@ -2,6 +2,10 @@ import JournalEntry from "../../models/JournalEntry";
 
 import JournalEntryService from "../services/journalService";
 import dbConnect from "../../config/dbConnect";
+import {
+  getTenantContext,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -17,8 +21,11 @@ const ITEMS_PER_PAGE = 20;
 export async function getJournalEntries(page = 1, filters = {}) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   const skip = (page - 1) * ITEMS_PER_PAGE;
-  const query = {};
+  let query = {};
 
   // Status filter
   if (filters.status) {
@@ -62,6 +69,9 @@ export async function getJournalEntries(page = 1, filters = {}) {
     ];
   }
 
+  // Apply tenant scoping
+  query = withTenantScope(query, companyId, isSuperAdmin);
+
   // Parallel queries for performance
   const [entries, total] = await Promise.all([
     JournalEntry.find(query)
@@ -90,7 +100,12 @@ export async function getJournalEntries(page = 1, filters = {}) {
 export async function getJournalEntryById(entryId) {
   await dbConnect();
 
-  const entry = await JournalEntry.findById(entryId).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const entry = await JournalEntry.findOne(
+    withTenantScope({ _id: entryId }, companyId, isSuperAdmin)
+  ).lean();
 
   if (!entry) {
     return null;
@@ -118,7 +133,12 @@ export async function getJournalEntryById(entryId) {
 export async function getDraftEntries() {
   await dbConnect();
 
-  const entries = await JournalEntry.find({ status: "draft" })
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const entries = await JournalEntry.find(
+    withTenantScope({ status: "draft" }, companyId, isSuperAdmin)
+  )
     .sort({ createdAt: -1 })
     .limit(50)
     .select("entryNumber entryDate entryType description createdBy createdAt")
@@ -134,7 +154,10 @@ export async function getDraftEntries() {
 export async function getEntryStats(filters = {}) {
   await dbConnect();
 
-  const query = {};
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  let query = {};
 
   // Date range
   if (filters.startDate || filters.endDate) {
@@ -147,6 +170,9 @@ export async function getEntryStats(filters = {}) {
   if (filters.fiscalPeriodId) {
     query.fiscalPeriodId = filters.fiscalPeriodId;
   }
+
+  // Apply tenant scoping
+  query = withTenantScope(query, companyId, isSuperAdmin);
 
   const [statusStats, typeStats, total] = await Promise.all([
     // Count by status
@@ -194,17 +220,26 @@ export async function getGeneralLedger(accountId, startDate, endDate) {
 export async function searchJournalEntries(searchTerm, limit = 50) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   if (!searchTerm || searchTerm.trim().length === 0) {
     return [];
   }
 
-  return await JournalEntry.find({
-    $or: [
-      { entryNumber: { $regex: searchTerm, $options: "i" } },
-      { description: { $regex: searchTerm, $options: "i" } },
-      { reference: { $regex: searchTerm, $options: "i" } },
-    ],
-  })
+  const query = withTenantScope(
+    {
+      $or: [
+        { entryNumber: { $regex: searchTerm, $options: "i" } },
+        { description: { $regex: searchTerm, $options: "i" } },
+        { reference: { $regex: searchTerm, $options: "i" } },
+      ],
+    },
+    companyId,
+    isSuperAdmin
+  );
+
+  return await JournalEntry.find(query)
     .sort({ entryDate: -1 })
     .limit(limit)
     .select("entryNumber entryDate entryType description status")
@@ -218,7 +253,12 @@ export async function searchJournalEntries(searchTerm, limit = 50) {
 export async function getRecentEntries(limit = 10) {
   await dbConnect();
 
-  return await JournalEntry.find({ status: "posted" })
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  return await JournalEntry.find(
+    withTenantScope({ status: "posted" }, companyId, isSuperAdmin)
+  )
     .sort({ postedAt: -1 })
     .limit(limit)
     .select("entryNumber entryDate entryType description postedBy postedAt")
@@ -286,14 +326,20 @@ export async function getStatementOfAccount(partyId) {
 export async function getEntriesByPeriod(fiscalPeriodId) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const [entries, stats] = await Promise.all([
-    JournalEntry.find({ fiscalPeriodId, status: "posted" })
+    JournalEntry.find(
+      withTenantScope({ fiscalPeriodId, status: "posted" }, companyId, isSuperAdmin)
+    )
       .sort({ entryDate: -1 })
       .select("entryNumber entryDate entryType description")
       .lean(),
 
     JournalEntry.aggregate([
-      { $match: { fiscalPeriodId, status: "posted" } },
+      { $match: { ...tenantMatch, fiscalPeriodId, status: "posted" } },
       { $unwind: "$lines" },
       {
         $lookup: {
@@ -326,6 +372,206 @@ export async function getEntriesByPeriod(fiscalPeriodId) {
   };
 }
 
+/**
+ * Get journal stats for dashboard cards
+ * Returns: total entries, this month count/volume, drafts, reversals
+ */
+export async function getJournalStatsForDashboard() {
+  await dbConnect();
+
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
+  // Get current month boundaries
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+
+  const [totalEntries, thisMonthStats, lastMonthCount, draftCount, reversalCount] =
+    await Promise.all([
+      // Total entries
+      JournalEntry.countDocuments(withTenantScope({}, companyId, isSuperAdmin)),
+
+      // This month entries + volume
+      JournalEntry.aggregate([
+        {
+          $match: {
+            ...tenantMatch,
+            entryDate: { $gte: startOfMonth },
+            status: "posted",
+          },
+        },
+        { $unwind: "$lines" },
+        {
+          $group: {
+            _id: null,
+            count: { $addToSet: "$_id" },
+            totalDebits: { $sum: "$lines.debit" },
+          },
+        },
+        {
+          $project: {
+            count: { $size: "$count" },
+            totalDebits: 1,
+          },
+        },
+      ]),
+
+      // Last month count (for trend calculation)
+      JournalEntry.countDocuments(
+        withTenantScope(
+          {
+            entryDate: { $gte: startOfLastMonth, $lte: endOfLastMonth },
+            status: "posted",
+          },
+          companyId,
+          isSuperAdmin
+        )
+      ),
+
+      // Draft count
+      JournalEntry.countDocuments(
+        withTenantScope({ status: "draft" }, companyId, isSuperAdmin)
+      ),
+
+      // Reversals this month
+      JournalEntry.countDocuments(
+        withTenantScope(
+          {
+            status: "reversed",
+            reversedAt: { $gte: startOfMonth },
+          },
+          companyId,
+          isSuperAdmin
+        )
+      ),
+    ]);
+
+  const thisMonth = thisMonthStats[0] || { count: 0, totalDebits: 0 };
+  const trend =
+    lastMonthCount > 0
+      ? Math.round(((thisMonth.count - lastMonthCount) / lastMonthCount) * 100)
+      : 0;
+
+  return {
+    totalEntries,
+    thisMonthEntries: thisMonth.count,
+    thisMonthVolume: thisMonth.totalDebits,
+    draftCount,
+    reversalCount,
+    trend,
+  };
+}
+
+/**
+ * Get journal entries for timeline view (with full lines)
+ * Supports cursor-based pagination for better performance
+ */
+export async function getJournalEntriesForTimeline(filters = {}, limit = 20, cursor = null) {
+  await dbConnect();
+
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  let query = {};
+
+  // Cursor-based pagination
+  if (cursor) {
+    query._id = { $lt: cursor };
+  }
+
+  // Status filter
+  if (filters.status && filters.status !== "all") {
+    query.status = filters.status;
+  }
+
+  // Entry type filter
+  if (filters.entryType && filters.entryType !== "all") {
+    query.entryType = filters.entryType;
+  }
+
+  // Period/date filter
+  if (filters.period && filters.period !== "all") {
+    const now = new Date();
+    let startDate, endDate;
+
+    switch (filters.period) {
+      case "today":
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        break;
+      case "this_week":
+        const dayOfWeek = now.getDay();
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - dayOfWeek);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 7);
+        break;
+      case "this_month":
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        break;
+      case "this_quarter":
+        const quarter = Math.floor(now.getMonth() / 3);
+        startDate = new Date(now.getFullYear(), quarter * 3, 1);
+        endDate = new Date(now.getFullYear(), quarter * 3 + 3, 1);
+        break;
+      case "this_year":
+        startDate = new Date(now.getFullYear(), 0, 1);
+        endDate = new Date(now.getFullYear() + 1, 0, 1);
+        break;
+    }
+
+    if (startDate && endDate) {
+      query.entryDate = { $gte: startDate, $lt: endDate };
+    }
+  }
+
+  // Custom date range
+  if (filters.dateFrom || filters.dateTo) {
+    query.entryDate = query.entryDate || {};
+    if (filters.dateFrom) query.entryDate.$gte = new Date(filters.dateFrom);
+    if (filters.dateTo) {
+      const endDate = new Date(filters.dateTo);
+      endDate.setDate(endDate.getDate() + 1);
+      query.entryDate.$lt = endDate;
+    }
+  }
+
+  // Search filter
+  if (filters.search && filters.search.trim()) {
+    query.$or = [
+      { entryNumber: { $regex: filters.search, $options: "i" } },
+      { description: { $regex: filters.search, $options: "i" } },
+      { reference: { $regex: filters.search, $options: "i" } },
+      { "party.name": { $regex: filters.search, $options: "i" } },
+    ];
+  }
+
+  // Apply tenant scoping
+  query = withTenantScope(query, companyId, isSuperAdmin);
+
+  // Fetch entries with lines (needed for timeline display)
+  const entries = await JournalEntry.find(query)
+    .sort({ entryDate: -1, _id: -1 })
+    .limit(limit + 1) // Fetch one extra to check if there are more
+    .lean();
+
+  // Calculate totals for each entry
+  const entriesWithTotals = entries.slice(0, limit).map((entry) => ({
+    ...entry,
+    totalDebits: entry.lines?.reduce((sum, line) => sum + (line.debit || 0), 0) || 0,
+    totalCredits: entry.lines?.reduce((sum, line) => sum + (line.credit || 0), 0) || 0,
+  }));
+
+  return {
+    entries: entriesWithTotals,
+    hasMore: entries.length > limit,
+    nextCursor: entries.length > limit ? entries[limit - 1]._id : null,
+  };
+}
+
 export default {
   getJournalEntries,
   getJournalEntryById,
@@ -338,4 +584,6 @@ export default {
   getAPAgingReport,
   getStatementOfAccount,
   getEntriesByPeriod,
+  getJournalStatsForDashboard,
+  getJournalEntriesForTimeline,
 };

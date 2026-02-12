@@ -7,12 +7,18 @@ const Schema = mongoose.Schema;
 // ============================================
 const expenseSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // Expense Identification
     expenseNumber: {
       type: String,
       required: [true, "Expense number is required"],
-      unique: true,
-      index: true,
     },
 
     expenseDate: {
@@ -249,11 +255,14 @@ const expenseSchema = new Schema(
 // ============================================
 // COMPOUND INDEXES FOR QUERY EFFICIENCY
 // ============================================
-expenseSchema.index({ expenseDate: -1, status: 1 });
-expenseSchema.index({ category: 1, status: 1 });
-expenseSchema.index({ "vendor.id": 1 });
-expenseSchema.index({ isReimbursable: 1, employeeId: 1 });
-expenseSchema.index({ status: 1, approvedAt: -1 });
+// Unique expense number per company
+expenseSchema.index({ companyId: 1, expenseNumber: 1 }, { unique: true });
+// Query indexes - all prefixed with companyId for tenant isolation
+expenseSchema.index({ companyId: 1, expenseDate: -1, status: 1 });
+expenseSchema.index({ companyId: 1, category: 1, status: 1 });
+expenseSchema.index({ companyId: 1, "vendor.id": 1 });
+expenseSchema.index({ companyId: 1, isReimbursable: 1, employeeId: 1 });
+expenseSchema.index({ companyId: 1, status: 1, approvedAt: -1 });
 
 // ============================================
 // VIRTUALS
@@ -425,8 +434,10 @@ expenseSchema.methods.markAsPaid = async function (paidBy, paymentDetails) {
   this.status = "paid";
   await this.save();
 
-  // Create journal entry
-  await this.createJournalEntry(paidBy);
+  // Create journal entry (skip if already exists - handles retry scenarios)
+  if (!this.journalEntryId) {
+    await this.createJournalEntry(paidBy);
+  }
 
   return this;
 };
@@ -497,10 +508,11 @@ expenseSchema.methods.createJournalEntry = async function (user) {
 
   // Generate entry number using centralized utility
   const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
-  const entryNumber = await generateUniqueEntryNumber("EXP");
+  const entryNumber = await generateUniqueEntryNumber("EXP", this.companyId);
 
   // Create journal entry
   const journalEntry = await JournalEntry.create({
+    companyId: this.companyId,
     entryNumber,
     entryDate: this.expenseDate,
     entryType: "expense",
@@ -570,6 +582,103 @@ expenseSchema.statics.getExpensesByCategory = function (startDate, endDate) {
       $sort: { totalAmount: -1 },
     },
   ]);
+};
+
+// ============================================
+// GENERATE EXPENSE NUMBER (Atomic with Verification)
+// ============================================
+expenseSchema.statics.generateExpenseNumber = async function (
+  companyId = null,
+  session = null
+) {
+  const ErpCounter = mongoose.model("ErpCounter");
+  const Company = mongoose.model("Company");
+
+  // Fetch company code for prefix
+  let companyCode = null;
+  if (companyId) {
+    const company = await Company.findById(companyId).select("code").lean();
+    companyCode = company?.code || null;
+  }
+
+  const date = new Date();
+  const yearMonth = `${date.getFullYear()}${String(
+    date.getMonth() + 1
+  ).padStart(2, "0")}`;
+
+  // Build prefix with company code: EXP-{CODE}-{YYYYMM}
+  const prefix = companyCode
+    ? `EXP-${companyCode}-${yearMonth}`
+    : `EXP-${yearMonth}`;
+
+  // Counter key includes company code for tenant isolation
+  const counterId = companyCode
+    ? `exp-${companyCode.toLowerCase()}-${yearMonth}`
+    : `exp-${yearMonth}`;
+
+  // Build tenant filter for queries
+  const tenantFilter = companyId ? { companyId } : {};
+
+  const maxAttempts = 5;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const seq = await ErpCounter.getNextSequence(counterId, companyId, session);
+      const expenseNumber = `${prefix}-${String(seq).padStart(4, "0")}`;
+
+      // Verify this number doesn't already exist
+      let existsQuery = this.exists({ ...tenantFilter, expenseNumber });
+      if (session) existsQuery = existsQuery.session(session);
+      const exists = await existsQuery;
+
+      if (!exists) {
+        return expenseNumber;
+      }
+
+      console.warn(`Expense number ${expenseNumber} already exists, retrying...`);
+      continue;
+    } catch (counterError) {
+      console.warn(
+        `Counter failed for ${counterId}, attempt ${attempt + 1}:`,
+        counterError.message
+      );
+
+      // Escape special regex characters in prefix
+      const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      let findQuery = this.findOne({
+        ...tenantFilter,
+        expenseNumber: { $regex: `^${escapedPrefix}-\\d+$` },
+      })
+        .sort({ expenseNumber: -1 })
+        .lean();
+      if (session) findQuery = findQuery.session(session);
+      const lastExpense = await findQuery;
+
+      let nextNum = 1;
+      if (lastExpense?.expenseNumber) {
+        const match = lastExpense.expenseNumber.match(/(\d+)$/);
+        if (match) nextNum = parseInt(match[1], 10) + 1;
+      }
+
+      const expenseNumber = `${prefix}-${String(nextNum).padStart(4, "0")}`;
+
+      let existsQuery = this.exists({ ...tenantFilter, expenseNumber });
+      if (session) existsQuery = existsQuery.session(session);
+      const exists = await existsQuery;
+      if (!exists) {
+        return expenseNumber;
+      }
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, 50 * Math.pow(2, attempt))
+    );
+  }
+
+  // Ultimate fallback with timestamp
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `${prefix}-${timestamp}-${random}`;
 };
 
 // ============================================

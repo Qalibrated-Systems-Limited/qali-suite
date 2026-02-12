@@ -283,8 +283,12 @@ export async function addStock(prevState, formData) {
           quantity: quantity,
           previousStock: 0, // New product, previous stock is 0
           newStock: quantity,
-          unitPrice: unitPrice,
-          totalValue: totalValue,
+          costing: {
+            unitCost: Number(data.costPrice || data.price || 0),
+            totalCost: quantity * Number(data.costPrice || data.price || 0),
+            unitPrice: unitPrice,
+            totalValue: totalValue,
+          },
           performedBy: {
             name: user.name,
             id: user.id,
@@ -402,8 +406,12 @@ export async function updateStock(productId, prevState, formData) {
             quantity: quantity,
             previousStock: oldStock,
             newStock: newStock,
-            unitPrice: unitPrice,
-            totalValue: totalValue,
+            costing: {
+              unitCost: Number(currentProduct.costing?.costPrice || data.price || 0),
+              totalCost: quantity * Number(currentProduct.costing?.costPrice || data.price || 0),
+              unitPrice: unitPrice,
+              totalValue: totalValue,
+            },
             performedBy: {
               name: user.name,
               id: user.id,
@@ -1309,7 +1317,7 @@ export async function createRequestFromCart(prevState, formData) {
       const itemValue = product.price * cartItem.quantity;
       totalValue += itemValue;
 
-      // Add to request items
+      // Add to request items (purpose now at request level)
       requestItems.push({
         productId: product._id,
         productName: product.name,
@@ -1318,18 +1326,22 @@ export async function createRequestFromCart(prevState, formData) {
         requestedQuantity: cartItem.quantity,
         unitPrice: product.price,
         unit: product.unit || "pcs",
-        purpose: data.purpose,
-        purposeDetails: data.purposeDetails || "",
         notes: "",
-        requiresReturn:
-          data.purpose === "technician_test" ||
-          data.purpose === "customer_demo",
       });
     }
 
+    // Determine if this request type requires return
+    const requiresReturn = ["demo", "installation", "repair"].includes(data.requestType);
+
     // 6. Create stock request
     const requestData = {
-      customer: customer.name,
+      requestType: data.requestType, // Request-level type (industry standard)
+      customer: {
+        id: customer._id.toString(),
+        name: customer.name,
+        email: customer.email || "",
+        phone: customer.phone || "",
+      },
       requestNumber: requestNo,
 
       requester: {

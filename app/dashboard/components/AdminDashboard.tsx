@@ -25,11 +25,12 @@ export async function AdminDashboardPage() {
     redirect("/login");
   }
 
+  const sessionUser = session.user as { id?: string; name?: string; email?: string; role?: string };
   const user = {
-    id: session.user.id || "",
-    name: session.user.name || "User",
-    email: session.user.email || "",
-    role: session.user.role || "Employee",
+    id: sessionUser.id || "",
+    name: sessionUser.name || "User",
+    email: sessionUser.email || "",
+    role: sessionUser.role || "Employee",
   };
 
   const firstName = user.name?.split(" ")[0] || "Admin";

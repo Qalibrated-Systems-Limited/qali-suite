@@ -20,6 +20,7 @@ export const authOptions = {
         token.role = customUser.role;
         token.id = customUser.id;
         token.companyId = customUser.companyId;
+        token.companyCode = customUser.companyCode;
         token.user = customUser;
       }
       return token;
@@ -32,6 +33,7 @@ export const authOptions = {
           emailVerified: new Date(),
           id: token.id,
           companyId: token.companyId,
+          companyCode: token.companyCode,
         };
         session.user = customUser;
       }

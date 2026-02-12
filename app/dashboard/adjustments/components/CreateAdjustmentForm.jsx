@@ -100,8 +100,9 @@ export function CreateAdjustmentForm({ user, products }) {
       return;
     }
 
-    if (!quantity || parseFloat(quantity) <= 0) {
-      alert("Please enter a valid quantity");
+    const parsedQty = Number(quantity);
+    if (!quantity || !Number.isInteger(parsedQty) || parsedQty <= 0) {
+      alert("Please enter a valid whole number quantity (no decimals)");
       return;
     }
 
@@ -110,7 +111,7 @@ export function CreateAdjustmentForm({ user, products }) {
       return;
     }
 
-    const qty = parseFloat(quantity);
+    const qty = parsedQty;
     const currentStock = selectedProduct.stock || 0;
     const newStock =
       itemType === "increase" ? currentStock + qty : currentStock - qty;

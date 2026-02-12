@@ -55,8 +55,8 @@ export default function CompanyForm({ company = null, isSuperAdmin = false }) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2 md:col-span-2">
               <Label htmlFor="name">
                 Company Name <span className="text-destructive">*</span>
               </Label>
@@ -73,15 +73,35 @@ export default function CompanyForm({ company = null, isSuperAdmin = false }) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="tagline">Tagline</Label>
+              <Label htmlFor="code">
+                Company Code <span className="text-destructive">*</span>
+              </Label>
               <Input
-                id="tagline"
-                name="tagline"
-                defaultValue={v("tagline", company?.tagline || "")}
-                placeholder="Quality Products, Trusted Service"
-                className="bg-background"
+                id="code"
+                name="code"
+                defaultValue={v("code", company?.code || "")}
+                placeholder="ACME"
+                className="bg-background uppercase"
+                maxLength={6}
               />
+              <p className="text-xs text-muted-foreground">
+                2-6 chars, used in document numbers
+              </p>
+              {state.errors?.code && (
+                <p className="text-sm text-destructive">{state.errors.code[0]}</p>
+              )}
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="tagline">Tagline</Label>
+            <Input
+              id="tagline"
+              name="tagline"
+              defaultValue={v("tagline", company?.tagline || "")}
+              placeholder="Quality Products, Trusted Service"
+              className="bg-background"
+            />
           </div>
 
           <div className="space-y-2">

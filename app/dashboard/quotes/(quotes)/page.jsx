@@ -1,6 +1,5 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import {
   searchQuotes,
   fetchQuotePages,
@@ -9,7 +8,6 @@ import {
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import {
   QuoteStatusTabs,
   QuoteDateFilter,
@@ -21,7 +19,6 @@ import {
 import { QuotesTable } from "../components/QuotesTable";
 import {
   FileText,
-  Plus,
   CheckCircle,
   Send,
   AlertTriangle,
@@ -80,22 +77,11 @@ async function QuotesPage(props) {
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Quotes</h1>
-          <p className="text-muted-foreground">
-            Create and manage customer quotations
-          </p>
-        </div>
-        <Button
-          asChild
-          className="bg-yellow-500 hover:bg-yellow-600 text-black font-medium"
-        >
-          <Link href="/dashboard/quotes/create">
-            <Plus className="mr-2 h-4 w-4" />
-            New Quote
-          </Link>
-        </Button>
+      <div>
+        <h1 className="text-3xl font-bold text-foreground">Quotes</h1>
+        <p className="text-muted-foreground">
+          Create and manage customer quotations
+        </p>
       </div>
 
       {/* Stats Cards */}

@@ -11,7 +11,14 @@ const nestedSchema = new mongoose.Schema({
   serialNo: [String],
 });
 const deliveryNoteSchema = new mongoose.Schema({
-  deliveryNumber: { type: String, required: true, unique: true },
+  // Company (Tenant)
+  companyId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Company",
+    required: [true, "Company ID is required"],
+    index: true,
+  },
+  deliveryNumber: { type: String, required: true },
   date: { type: Date, default: Date.now },
   reason: String,
 
@@ -35,6 +42,14 @@ const deliveryNoteSchema = new mongoose.Schema({
 
   notes: { type: String },
 });
+
+// Indexes
+// Unique delivery number per company
+deliveryNoteSchema.index({ companyId: 1, deliveryNumber: 1 }, { unique: true });
+// Query indexes
+deliveryNoteSchema.index({ companyId: 1, date: -1 });
+deliveryNoteSchema.index({ companyId: 1, "customer.id": 1 });
+deliveryNoteSchema.index({ companyId: 1, "technician.id": 1 });
 
 const models = mongoose.models;
 let DeliveryNote = models ? models.DeliveryNote : null;

@@ -2,32 +2,51 @@ import FiscalPeriod from "../../models/fiscalPeriod";
 import JournalEntry from "../../models/JournalEntry";
 import Account from "../../models/account";
 import connectDB from "../../config/dbConnect";
+import {
+  getTenantContext,
+  withTenantScope,
+  validateTenantAccess,
+  getCompanyIdForCreate,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // FISCAL PERIOD SERVICE - PERIOD MANAGEMENT
+// Multi-tenant: All operations scoped by companyId
 // ============================================
 
 export class FiscalPeriodService {
   /**
    * Create a new fiscal period
    */
-  static async createFiscalPeriod(data, user) {
+  static async createFiscalPeriod(data, user, explicitCompanyId = null) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const targetCompanyId = getCompanyIdForCreate(
+      explicitCompanyId,
+      companyId,
+      isSuperAdmin
+    );
 
     // Validate dates
     if (new Date(data.startDate) >= new Date(data.endDate)) {
       throw new Error("End date must be after start date");
     }
 
-    // Check for overlapping periods
-    const overlapping = await FiscalPeriod.findOne({
-      $or: [
+    // Check for overlapping periods within company
+    const overlapping = await FiscalPeriod.findOne(
+      withTenantScope(
         {
-          startDate: { $lte: new Date(data.endDate) },
-          endDate: { $gte: new Date(data.startDate) },
+          $or: [
+            {
+              startDate: { $lte: new Date(data.endDate) },
+              endDate: { $gte: new Date(data.startDate) },
+            },
+          ],
         },
-      ],
-    });
+        targetCompanyId,
+        false
+      )
+    );
 
     if (overlapping) {
       throw new Error(
@@ -46,8 +65,10 @@ export class FiscalPeriodService {
             (startDate.getMonth() + 1) / 3
           )}`;
 
-    // Check if period code already exists
-    const existingCode = await FiscalPeriod.findOne({ periodCode });
+    // Check if period code already exists within company
+    const existingCode = await FiscalPeriod.findOne(
+      withTenantScope({ periodCode }, targetCompanyId, false)
+    );
     if (existingCode) {
       throw new Error(
         `Period code ${periodCode} already exists. Use a different start date.`
@@ -56,6 +77,7 @@ export class FiscalPeriodService {
 
     const fiscalPeriod = await FiscalPeriod.create({
       ...data,
+      companyId: targetCompanyId,
       periodCode,
       status: "open",
       createdBy: {
@@ -72,6 +94,7 @@ export class FiscalPeriodService {
    */
   static async getFiscalPeriods(filters = {}) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const query = {};
 
@@ -87,7 +110,9 @@ export class FiscalPeriodService {
       query.periodType = filters.periodType;
     }
 
-    const periods = await FiscalPeriod.find(query)
+    const periods = await FiscalPeriod.find(
+      withTenantScope(query, companyId, isSuperAdmin)
+    )
       .sort({ startDate: -1 })
       .lean();
 
@@ -99,10 +124,16 @@ export class FiscalPeriodService {
    */
   static async getFiscalPeriodById(periodId) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const period = await FiscalPeriod.findById(periodId).lean();
 
     if (!period) {
+      throw new Error("Fiscal period not found");
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(period, companyId, isSuperAdmin)) {
       throw new Error("Fiscal period not found");
     }
 
@@ -114,14 +145,21 @@ export class FiscalPeriodService {
    */
   static async getCurrentPeriod() {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const now = new Date();
 
-    const period = await FiscalPeriod.findOne({
-      startDate: { $lte: now },
-      endDate: { $gte: now },
-      status: "open",
-    }).lean();
+    const period = await FiscalPeriod.findOne(
+      withTenantScope(
+        {
+          startDate: { $lte: now },
+          endDate: { $gte: now },
+          status: "open",
+        },
+        companyId,
+        isSuperAdmin
+      )
+    ).lean();
 
     return period;
   }
@@ -131,11 +169,18 @@ export class FiscalPeriodService {
    */
   static async getPeriodByDate(date) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    const period = await FiscalPeriod.findOne({
-      startDate: { $lte: new Date(date) },
-      endDate: { $gte: new Date(date) },
-    }).lean();
+    const period = await FiscalPeriod.findOne(
+      withTenantScope(
+        {
+          startDate: { $lte: new Date(date) },
+          endDate: { $gte: new Date(date) },
+        },
+        companyId,
+        isSuperAdmin
+      )
+    ).lean();
 
     return period;
   }
@@ -145,10 +190,16 @@ export class FiscalPeriodService {
    */
   static async updateFiscalPeriod(periodId, data, user) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const period = await FiscalPeriod.findById(periodId);
 
     if (!period) {
+      throw new Error("Fiscal period not found");
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(period, companyId, isSuperAdmin)) {
       throw new Error("Fiscal period not found");
     }
 
@@ -161,7 +212,7 @@ export class FiscalPeriodService {
 
     // Update fields
     Object.keys(data).forEach((key) => {
-      if (key !== "periodCode" && key !== "status") {
+      if (key !== "periodCode" && key !== "status" && key !== "companyId") {
         period[key] = data[key];
       }
     });
@@ -181,6 +232,7 @@ export class FiscalPeriodService {
    */
   static async closeFiscalPeriod(periodId, user) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const period = await FiscalPeriod.findById(periodId);
 
@@ -188,15 +240,23 @@ export class FiscalPeriodService {
       throw new Error("Fiscal period not found");
     }
 
+    // Validate tenant access
+    if (!validateTenantAccess(period, companyId, isSuperAdmin)) {
+      throw new Error("Fiscal period not found");
+    }
+
     if (period.status !== "open") {
       throw new Error(`Cannot close period. Current status: ${period.status}`);
     }
 
-    // Check for draft journal entries
-    const draftCount = await JournalEntry.countDocuments({
-      fiscalPeriodId: periodId,
-      status: "draft",
-    });
+    // Check for draft journal entries within company
+    const draftCount = await JournalEntry.countDocuments(
+      withTenantScope(
+        { fiscalPeriodId: periodId, status: "draft" },
+        companyId,
+        isSuperAdmin
+      )
+    );
 
     if (draftCount > 0) {
       throw new Error(
@@ -236,10 +296,16 @@ export class FiscalPeriodService {
    */
   static async reopenFiscalPeriod(periodId, user, reason) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const period = await FiscalPeriod.findById(periodId);
 
     if (!period) {
+      throw new Error("Fiscal period not found");
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(period, companyId, isSuperAdmin)) {
       throw new Error("Fiscal period not found");
     }
 
@@ -275,10 +341,16 @@ export class FiscalPeriodService {
    */
   static async lockFiscalPeriod(periodId, user, reason) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const period = await FiscalPeriod.findById(periodId);
 
     if (!period) {
+      throw new Error("Fiscal period not found");
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(period, companyId, isSuperAdmin)) {
       throw new Error("Fiscal period not found");
     }
 
@@ -308,6 +380,7 @@ export class FiscalPeriodService {
    */
   static async calculatePeriodStatistics(periodId) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const period = await FiscalPeriod.findById(periodId);
 
@@ -315,25 +388,37 @@ export class FiscalPeriodService {
       throw new Error("Fiscal period not found");
     }
 
+    // Validate tenant access
+    if (!validateTenantAccess(period, companyId, isSuperAdmin)) {
+      throw new Error("Fiscal period not found");
+    }
+
     const [jeCount, revenueResult, expenseResult] = await Promise.all([
-      // Count journal entries
-      JournalEntry.countDocuments({
-        fiscalPeriodId: periodId,
-        status: "posted",
-      }),
+      // Count journal entries within company
+      JournalEntry.countDocuments(
+        withTenantScope(
+          { fiscalPeriodId: periodId, status: "posted" },
+          companyId,
+          isSuperAdmin
+        )
+      ),
 
       // Calculate revenue
       this.calculateAccountTypeTotal(
         "revenue",
         period.startDate,
-        period.endDate
+        period.endDate,
+        companyId,
+        isSuperAdmin
       ),
 
       // Calculate expenses
       this.calculateAccountTypeTotal(
         "expense",
         period.startDate,
-        period.endDate
+        period.endDate,
+        companyId,
+        isSuperAdmin
       ),
     ]);
 
@@ -358,10 +443,16 @@ export class FiscalPeriodService {
    */
   static async calculateClosingBalances(periodId) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const period = await FiscalPeriod.findById(periodId);
 
     if (!period) {
+      throw new Error("Fiscal period not found");
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(period, companyId, isSuperAdmin)) {
       throw new Error("Fiscal period not found");
     }
 
@@ -371,7 +462,9 @@ export class FiscalPeriodService {
     for (const accountType of accountTypes) {
       const balance = await this.calculateAccountTypeBalance(
         accountType,
-        period.endDate
+        period.endDate,
+        companyId,
+        isSuperAdmin
       );
       closingBalances[
         `total${accountType.charAt(0).toUpperCase() + accountType.slice(1)}`
@@ -393,6 +486,7 @@ export class FiscalPeriodService {
    */
   static async createClosingJournalEntry(period, user) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const netIncome =
       period.closingBalances?.netIncome || period.statistics?.netIncome || 0;
@@ -402,10 +496,14 @@ export class FiscalPeriodService {
       return null;
     }
 
-    // Get retained earnings account
-    const retainedEarningsAccount = await Account.findOne({
-      systemAccount: "retained_earnings",
-    });
+    // Get retained earnings account within company
+    const retainedEarningsAccount = await Account.findOne(
+      withTenantScope(
+        { systemAccount: "retained_earnings" },
+        companyId,
+        isSuperAdmin
+      )
+    );
 
     if (!retainedEarningsAccount) {
       console.warn(
@@ -414,7 +512,7 @@ export class FiscalPeriodService {
       return null;
     }
 
-    const JournalEntryService = (await import("./journalEntryService")).default;
+    const JournalService = (await import("./journalService")).default;
 
     const lines = [];
 
@@ -452,11 +550,13 @@ export class FiscalPeriodService {
 
     // For a balanced entry, we need both sides
     // This is simplified - in reality you'd close all revenue and expense accounts
-    const revenueAccounts = await Account.find({
-      accountType: "revenue",
-      isActive: true,
-      canPost: true,
-    });
+    const revenueAccounts = await Account.find(
+      withTenantScope(
+        { accountType: "revenue", isActive: true, canPost: true },
+        companyId,
+        isSuperAdmin
+      )
+    );
 
     // Close revenue accounts (debit revenue, credit retained earnings)
     // Simplified version - just one summary line
@@ -484,11 +584,11 @@ export class FiscalPeriodService {
     };
 
     try {
-      const closingEntry = await JournalEntryService.createJournalEntry(
+      const closingEntry = await JournalService.createJournalEntry(
         entryData,
         user
       );
-      await JournalEntryService.postJournalEntry(closingEntry._id, user);
+      await JournalService.postJournalEntry(closingEntry._id, user);
 
       return closingEntry;
     } catch (error) {
@@ -500,7 +600,7 @@ export class FiscalPeriodService {
   /**
    * Create periods for a year
    */
-  static async createYearPeriods(year, periodType = "month", user) {
+  static async createYearPeriods(year, periodType = "month", user, explicitCompanyId = null) {
     await connectDB();
 
     const periods = [];
@@ -535,7 +635,8 @@ export class FiscalPeriodService {
               endDate,
               periodType: "month",
             },
-            user
+            user,
+            explicitCompanyId
           );
           periods.push(period);
         } catch (error) {
@@ -561,7 +662,8 @@ export class FiscalPeriodService {
               endDate,
               periodType: "quarter",
             },
-            user
+            user,
+            explicitCompanyId
           );
           periods.push(period);
         } catch (error) {
@@ -580,19 +682,40 @@ export class FiscalPeriodService {
   /**
    * Calculate account type total for a period
    */
-  static async calculateAccountTypeTotal(accountType, startDate, endDate) {
-    const accounts = await Account.find({
-      accountType,
-      isActive: true,
-      canPost: true,
-    }).distinct("_id");
+  static async calculateAccountTypeTotal(
+    accountType,
+    startDate,
+    endDate,
+    companyId = null,
+    isSuperAdmin = false
+  ) {
+    // If companyId not passed, get from context
+    let tenantCompanyId = companyId;
+    let tenantIsSuperAdmin = isSuperAdmin;
+    if (!companyId) {
+      const context = await getTenantContext();
+      tenantCompanyId = context.companyId;
+      tenantIsSuperAdmin = context.isSuperAdmin;
+    }
+
+    const accounts = await Account.find(
+      withTenantScope(
+        { accountType, isActive: true, canPost: true },
+        tenantCompanyId,
+        tenantIsSuperAdmin
+      )
+    ).distinct("_id");
 
     const result = await JournalEntry.aggregate([
       {
-        $match: {
-          status: "posted",
-          entryDate: { $gte: new Date(startDate), $lte: new Date(endDate) },
-        },
+        $match: withTenantScope(
+          {
+            status: "posted",
+            entryDate: { $gte: new Date(startDate), $lte: new Date(endDate) },
+          },
+          tenantCompanyId,
+          tenantIsSuperAdmin
+        ),
       },
       { $unwind: "$lines" },
       { $match: { "lines.accountId": { $in: accounts } } },
@@ -620,19 +743,39 @@ export class FiscalPeriodService {
   /**
    * Calculate account type balance as of a date
    */
-  static async calculateAccountTypeBalance(accountType, asOfDate) {
-    const accounts = await Account.find({
-      accountType,
-      isActive: true,
-      canPost: true,
-    }).distinct("_id");
+  static async calculateAccountTypeBalance(
+    accountType,
+    asOfDate,
+    companyId = null,
+    isSuperAdmin = false
+  ) {
+    // If companyId not passed, get from context
+    let tenantCompanyId = companyId;
+    let tenantIsSuperAdmin = isSuperAdmin;
+    if (!companyId) {
+      const context = await getTenantContext();
+      tenantCompanyId = context.companyId;
+      tenantIsSuperAdmin = context.isSuperAdmin;
+    }
+
+    const accounts = await Account.find(
+      withTenantScope(
+        { accountType, isActive: true, canPost: true },
+        tenantCompanyId,
+        tenantIsSuperAdmin
+      )
+    ).distinct("_id");
 
     const result = await JournalEntry.aggregate([
       {
-        $match: {
-          status: "posted",
-          entryDate: { $lte: new Date(asOfDate) },
-        },
+        $match: withTenantScope(
+          {
+            status: "posted",
+            entryDate: { $lte: new Date(asOfDate) },
+          },
+          tenantCompanyId,
+          tenantIsSuperAdmin
+        ),
       },
       { $unwind: "$lines" },
       { $match: { "lines.accountId": { $in: accounts } } },
@@ -662,10 +805,16 @@ export class FiscalPeriodService {
    */
   static async getPeriodSummary(periodId) {
     await connectDB();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const period = await FiscalPeriod.findById(periodId).lean();
 
     if (!period) {
+      throw new Error("Fiscal period not found");
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(period, companyId, isSuperAdmin)) {
       throw new Error("Fiscal period not found");
     }
 

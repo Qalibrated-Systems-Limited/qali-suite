@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { AdminDashboardPage } from "./components/AdminDashboard";
 import EmployeeDashboard from "./components/EmployeeDashborad";
 import AccountantDashboard from "./components/AccountantDashboard";
+import SuperAdminDashboard from "./components/SuperAdminDashboard";
 
 // ============================================
 // MAIN DASHBOARD ROUTER
@@ -26,10 +27,13 @@ export default async function DashboardPage() {
   }
 
   const { user } = session;
-  const userRole = user.role || "Employee";
+  const userRole = (user as { role?: string }).role || "Employee";
 
   // Route to appropriate dashboard based on role
   switch (userRole) {
+    case "SuperAdmin":
+      return <SuperAdminDashboard />;
+
     case "Admin":
     case "Manager":
     case "Store Manager":

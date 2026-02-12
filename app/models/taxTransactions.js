@@ -20,12 +20,18 @@ function formatUserForAudit(user) {
 // ============================================
 const taxTransactionSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // Transaction Identification
     transactionNumber: {
       type: String,
       required: [true, "Transaction number is required"],
-      unique: true,
-      index: true,
     },
 
     transactionDate: {
@@ -39,7 +45,26 @@ const taxTransactionSchema = new Schema(
       type: String,
       required: [true, "Tax type is required"],
       enum: {
-        values: ["vat_input", "vat_output", "wht", "other"],
+        values: [
+          // VAT Transactions
+          "vat_input", // VAT on purchases (claimable)
+          "vat_output", // VAT on sales (payable)
+          // Withholding Taxes
+          "wht", // Withholding Tax on supplier payments
+          "wht_received", // WHT certificate received (from customer)
+          // Payroll Taxes
+          "paye", // Pay As You Earn (employee income tax)
+          "nssf", // National Social Security Fund
+          "nhif", // National Hospital Insurance Fund
+          "housing_levy", // Housing Levy (1.5%)
+          // Other Taxes
+          "excise_duty", // Excise duty on specific goods/services
+          "advance_tax", // Advance tax on certain income
+          "dst", // Digital Services Tax (1.5%)
+          "turnover_tax", // Turnover Tax (for small businesses)
+          "cgt", // Capital Gains Tax (on asset disposal)
+          "other", // Other miscellaneous taxes
+        ],
         message: "{VALUE} is not a valid tax type",
       },
       index: true,
@@ -259,24 +284,46 @@ const taxTransactionSchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  }
+  },
 );
 
 // ============================================
 // COMPOUND INDEXES
 // ============================================
-taxTransactionSchema.index({ transactionDate: -1, taxType: 1 });
-taxTransactionSchema.index({ "party.id": 1, taxType: 1 });
-taxTransactionSchema.index({ taxType: 1, "kraTracking.filed": 1 });
-taxTransactionSchema.index({ taxType: 1, "kraTracking.remitted": 1 });
-taxTransactionSchema.index({ "kraTracking.filingPeriod": 1, taxType: 1 });
+// Unique transaction number per company
+taxTransactionSchema.index(
+  { companyId: 1, transactionNumber: 1 },
+  { unique: true },
+);
+// Query indexes - all prefixed with companyId for tenant isolation
+taxTransactionSchema.index({ companyId: 1, transactionDate: -1, taxType: 1 });
+taxTransactionSchema.index({ companyId: 1, "party.id": 1, taxType: 1 });
 taxTransactionSchema.index({
+  companyId: 1,
+  taxType: 1,
+  "kraTracking.filed": 1,
+});
+taxTransactionSchema.index({
+  companyId: 1,
+  taxType: 1,
+  "kraTracking.remitted": 1,
+});
+taxTransactionSchema.index({
+  companyId: 1,
+  "kraTracking.filingPeriod": 1,
+  taxType: 1,
+});
+taxTransactionSchema.index({
+  companyId: 1,
   "sourceDocument.type": 1,
   "sourceDocument.id": 1,
 });
 
 // ============================================
 // VIRTUALS
+// ============================================
+// ============================================
+// VIRTUALS - Tax Type Checks
 // ============================================
 taxTransactionSchema.virtual("isVATInput").get(function () {
   return this.taxType === "vat_input";
@@ -287,23 +334,59 @@ taxTransactionSchema.virtual("isVATOutput").get(function () {
 });
 
 taxTransactionSchema.virtual("isWHT").get(function () {
-  return this.taxType === "wht";
+  return this.taxType === "wht" || this.taxType === "wht_received";
 });
 
+taxTransactionSchema.virtual("isPayrollTax").get(function () {
+  return ["paye", "nssf", "nhif", "housing_levy"].includes(this.taxType);
+});
+
+taxTransactionSchema.virtual("isVAT").get(function () {
+  return this.taxType === "vat_input" || this.taxType === "vat_output";
+});
+
+// ============================================
+// VIRTUALS - Status Checks
+// ============================================
 taxTransactionSchema.virtual("needsFiling").get(function () {
   return !this.kraTracking.filed;
 });
 
 taxTransactionSchema.virtual("needsRemittance").get(function () {
-  return this.isWHT && !this.kraTracking.remitted;
+  // WHT and payroll taxes need remittance to KRA
+  const remittableTaxes = ["wht", "paye", "nssf", "nhif", "housing_levy"];
+  return remittableTaxes.includes(this.taxType) && !this.kraTracking.remitted;
 });
 
 taxTransactionSchema.virtual("needsCertificate").get(function () {
   return (
-    this.isWHT &&
+    this.taxType === "wht" &&
     this.kraTracking.remitted &&
     !this.kraTracking.certificateIssued
   );
+});
+
+// Filing deadline based on tax type (Kenya rules)
+taxTransactionSchema.virtual("filingDeadline").get(function () {
+  if (!this.kraTracking.filingPeriod) return null;
+
+  const [year, month] = this.kraTracking.filingPeriod.split("-").map(Number);
+  const deadlines = {
+    vat_input: 20, // VAT: 20th of following month
+    vat_output: 20, // VAT: 20th of following month
+    wht: 20, // WHT: 20th of following month
+    paye: 9, // PAYE: 9th of following month
+    nssf: 15, // NSSF: 15th of following month
+    nhif: 9, // NHIF: 9th of following month
+    housing_levy: 9, // Housing Levy: 9th of following month
+  };
+
+  const deadlineDay = deadlines[this.taxType] || 20;
+  // Get following month
+  const deadlineMonth = month === 12 ? 1 : month + 1;
+  const deadlineYear = month === 12 ? year + 1 : year;
+
+  return new Date(deadlineYear, deadlineMonth - 1, deadlineDay);
 });
 
 // ============================================
@@ -315,7 +398,7 @@ taxTransactionSchema.virtual("needsCertificate").get(function () {
  */
 taxTransactionSchema.methods.markAsFiled = async function (
   filedBy,
-  filingReference
+  filingReference,
 ) {
   const userInfo = formatUserForAudit(filedBy);
 
@@ -335,7 +418,7 @@ taxTransactionSchema.methods.markAsFiled = async function (
  */
 taxTransactionSchema.methods.markAsRemitted = async function (
   remittedBy,
-  remittanceReference
+  remittanceReference,
 ) {
   if (!this.isWHT) {
     throw new Error("Only WHT transactions can be marked as remitted");
@@ -359,7 +442,7 @@ taxTransactionSchema.methods.markAsRemitted = async function (
  */
 taxTransactionSchema.methods.issueCertificate = async function (
   issuedBy,
-  certificateNumber
+  certificateNumber,
 ) {
   if (!this.isWHT) {
     throw new Error("Only WHT transactions can have certificates");
@@ -371,7 +454,7 @@ taxTransactionSchema.methods.issueCertificate = async function (
 
   if (this.kraTracking.certificateIssued) {
     throw new Error(
-      `Certificate already issued: ${this.kraTracking.certificateNumber}`
+      `Certificate already issued: ${this.kraTracking.certificateNumber}`,
     );
   }
 
@@ -405,18 +488,27 @@ taxTransactionSchema.methods.reconcile = async function (reconciledBy, notes) {
 };
 
 // ============================================
-// STATIC METHODS
+// STATIC METHODS (All tenant-scoped)
 // ============================================
 
 /**
- * Get transactions by type
+ * Get transactions by type (tenant-scoped)
+ * @param {ObjectId} companyId - Required company ID for tenant isolation
+ * @param {String} taxType - Tax type to filter by
+ * @param {Date} startDate - Optional start date
+ * @param {Date} endDate - Optional end date
  */
 taxTransactionSchema.statics.getByType = function (
+  companyId,
   taxType,
   startDate,
-  endDate
+  endDate,
 ) {
-  const query = { taxType };
+  if (!companyId) {
+    throw new Error("companyId is required for tenant isolation");
+  }
+
+  const query = { companyId, taxType };
 
   if (startDate && endDate) {
     query.transactionDate = { $gte: startDate, $lte: endDate };
@@ -426,10 +518,16 @@ taxTransactionSchema.statics.getByType = function (
 };
 
 /**
- * Get unfiled transactions
+ * Get unfiled transactions (tenant-scoped)
+ * @param {ObjectId} companyId - Required company ID for tenant isolation
+ * @param {String} taxType - Optional tax type filter
  */
-taxTransactionSchema.statics.getUnfiled = function (taxType = null) {
-  const query = { "kraTracking.filed": false };
+taxTransactionSchema.statics.getUnfiled = function (companyId, taxType = null) {
+  if (!companyId) {
+    throw new Error("companyId is required for tenant isolation");
+  }
+
+  const query = { companyId, "kraTracking.filed": false };
 
   if (taxType) {
     query.taxType = taxType;
@@ -439,10 +537,16 @@ taxTransactionSchema.statics.getUnfiled = function (taxType = null) {
 };
 
 /**
- * Get unremitted WHT
+ * Get unremitted WHT (tenant-scoped)
+ * @param {ObjectId} companyId - Required company ID for tenant isolation
  */
-taxTransactionSchema.statics.getUnremittedWHT = function () {
+taxTransactionSchema.statics.getUnremittedWHT = function (companyId) {
+  if (!companyId) {
+    throw new Error("companyId is required for tenant isolation");
+  }
+
   return this.find({
+    companyId,
     taxType: "wht",
     "kraTracking.remitted": false,
   })
@@ -451,14 +555,26 @@ taxTransactionSchema.statics.getUnremittedWHT = function () {
 };
 
 /**
- * Get VAT return for period
+ * Get VAT return for period (tenant-scoped)
+ * @param {ObjectId} companyId - Required company ID for tenant isolation
+ * @param {String} filingPeriod - Filing period in YYYY-MM format
  */
-taxTransactionSchema.statics.getVATReturn = async function (filingPeriod) {
+taxTransactionSchema.statics.getVATReturn = async function (
+  companyId,
+  filingPeriod,
+) {
+  if (!companyId) {
+    throw new Error("companyId is required for tenant isolation");
+  }
+
+  const companyObjectId = new mongoose.Types.ObjectId(companyId);
+
   const [input, output] = await Promise.all([
     // VAT Input (purchases)
     this.aggregate([
       {
         $match: {
+          companyId: companyObjectId,
           taxType: "vat_input",
           "kraTracking.filingPeriod": filingPeriod,
         },
@@ -476,6 +592,7 @@ taxTransactionSchema.statics.getVATReturn = async function (filingPeriod) {
     this.aggregate([
       {
         $match: {
+          companyId: companyObjectId,
           taxType: "vat_output",
           "kraTracking.filingPeriod": filingPeriod,
         },
@@ -505,15 +622,26 @@ taxTransactionSchema.statics.getVATReturn = async function (filingPeriod) {
 };
 
 /**
- * Get WHT report by rate
+ * Get WHT report by rate (tenant-scoped)
+ * @param {ObjectId} companyId - Required company ID for tenant isolation
+ * @param {Date} startDate - Start date
+ * @param {Date} endDate - End date
  */
 taxTransactionSchema.statics.getWHTReportByRate = async function (
+  companyId,
   startDate,
-  endDate
+  endDate,
 ) {
+  if (!companyId) {
+    throw new Error("companyId is required for tenant isolation");
+  }
+
+  const companyObjectId = new mongoose.Types.ObjectId(companyId);
+
   return this.aggregate([
     {
       $match: {
+        companyId: companyObjectId,
         taxType: "wht",
         transactionDate: { $gte: startDate, $lte: endDate },
       },
@@ -546,15 +674,26 @@ taxTransactionSchema.statics.getWHTReportByRate = async function (
 };
 
 /**
- * Get WHT report by party
+ * Get WHT report by party (tenant-scoped)
+ * @param {ObjectId} companyId - Required company ID for tenant isolation
+ * @param {Date} startDate - Start date
+ * @param {Date} endDate - End date
  */
 taxTransactionSchema.statics.getWHTReportByParty = async function (
+  companyId,
   startDate,
-  endDate
+  endDate,
 ) {
+  if (!companyId) {
+    throw new Error("companyId is required for tenant isolation");
+  }
+
+  const companyObjectId = new mongoose.Types.ObjectId(companyId);
+
   return this.aggregate([
     {
       $match: {
+        companyId: companyObjectId,
         taxType: "wht",
         transactionDate: { $gte: startDate, $lte: endDate },
       },
@@ -593,7 +732,7 @@ taxTransactionSchema.statics.getWHTReportByParty = async function (
  */
 taxTransactionSchema.statics.createFromInvoice = async function (
   invoice,
-  createdBy
+  createdBy,
 ) {
   // Validate invoice object
   if (!invoice || !invoice._id) {
@@ -613,18 +752,22 @@ taxTransactionSchema.statics.createFromInvoice = async function (
   // Determine filing period
   const invoiceDate = new Date(invoice.invoiceDate);
   const filingPeriod = `${invoiceDate.getFullYear()}-${String(
-    invoiceDate.getMonth() + 1
+    invoiceDate.getMonth() + 1,
   ).padStart(2, "0")}`;
 
-  // Get VAT Output account
+  // Get VAT Output account (tenant-scoped)
   const Account = mongoose.model("Account");
-  const vatAccount = await Account.findOne({ systemAccount: "vat_output" });
+  const vatAccount = await Account.findOne({
+    companyId: invoice.companyId,
+    systemAccount: "vat_output",
+  });
 
   if (!vatAccount) {
-    throw new Error("VAT Output account not configured");
+    throw new Error("VAT Output account not configured for this company");
   }
 
   const taxTransaction = await this.create({
+    companyId: invoice.companyId, // Tenant scoping
     transactionNumber: `VAT-OUT-${invoice.invoiceNumber}`,
     transactionDate: invoice.invoiceDate,
     taxType: "vat_output",
@@ -665,40 +808,68 @@ taxTransactionSchema.statics.createFromInvoice = async function (
 
 /**
  * Create from bill (VAT Input + WHT)
+ *
+ * Bill schema uses:
+ * - amounts.vat, amounts.subtotal, amounts.total, amounts.wht, amounts.netPayable
+ * - supplier.partyId (not supplier.id)
+ * - accounting.journalEntryId
+ * - whtApplicable and whtRate at bill level
  */
 taxTransactionSchema.statics.createFromBill = async function (bill, createdBy) {
   const transactions = [];
   const userInfo = formatUserForAudit(createdBy);
 
-  // Determine filing period
+  // Validate bill object
+  if (!bill || !bill._id) {
+    throw new Error("Invalid bill: missing bill or bill._id");
+  }
+
+  if (!bill.supplier || !bill.supplier.partyId) {
+    throw new Error("Invalid bill: missing supplier information");
+  }
+
+  // Determine filing period from bill date
   const billDate = new Date(bill.billDate);
   const filingPeriod = `${billDate.getFullYear()}-${String(
-    billDate.getMonth() + 1
+    billDate.getMonth() + 1,
   ).padStart(2, "0")}`;
 
   const Account = mongoose.model("Account");
 
-  // VAT Input
-  if (bill.taxAmount > 0) {
-    const vatAccount = await Account.findOne({ systemAccount: "vat_input" });
+  // ==========================================
+  // VAT Input (from purchases)
+  // ==========================================
+  const vatAmount = bill.amounts?.vat || 0;
+
+  if (vatAmount > 0) {
+    const vatAccount = await Account.findOne({
+      companyId: bill.companyId,
+      systemAccount: "vat_input",
+    });
 
     if (!vatAccount) {
-      throw new Error("VAT Input account not configured");
+      throw new Error("VAT Input account not configured for this company");
     }
 
+    // Calculate effective VAT rate from amounts (or default to 16%)
+    const subtotal = bill.amounts?.subtotal || 0;
+    const effectiveVatRate =
+      subtotal > 0 ? Math.round((vatAmount / subtotal) * 100) : 16;
+
     const vatTransaction = await this.create({
+      companyId: bill.companyId,
       transactionNumber: `VAT-IN-${bill.billNumber}`,
       transactionDate: bill.billDate,
       taxType: "vat_input",
-      taxCode: "VAT-16",
-      taxRate: 16,
-      baseAmount: bill.subtotal,
-      taxAmount: bill.taxAmount,
-      totalAmount: bill.total,
+      taxCode: `VAT-${effectiveVatRate}`,
+      taxRate: effectiveVatRate,
+      baseAmount: subtotal,
+      taxAmount: vatAmount,
+      totalAmount: bill.amounts?.total || subtotal + vatAmount,
       currency: bill.currency || "KES",
       party: {
         type: "supplier",
-        id: bill.supplier.id,
+        id: bill.supplier.partyId.toString(),
         name: bill.supplier.name,
         taxPin: bill.supplier.taxPin,
         email: bill.supplier.email,
@@ -714,7 +885,7 @@ taxTransactionSchema.statics.createFromBill = async function (bill, createdBy) {
         filingPeriod,
         filed: false,
       },
-      journalEntryId: bill.journalEntryId,
+      journalEntryId: bill.accounting?.journalEntryId,
       accountId: vatAccount._id,
       accountCode: vatAccount.accountCode,
       accountName: vatAccount.accountName,
@@ -725,33 +896,38 @@ taxTransactionSchema.statics.createFromBill = async function (bill, createdBy) {
     transactions.push(vatTransaction);
   }
 
-  // WHT
-  if (bill.withholdingTaxAmount > 0) {
-    const whtAccount = await Account.findOne({ systemAccount: "wht_payable" });
+  // ==========================================
+  // WHT (Withholding Tax on supplier payments)
+  // ==========================================
+  const whtAmount = bill.amounts?.wht || 0;
+
+  if (whtAmount > 0 && bill.whtApplicable) {
+    const whtAccount = await Account.findOne({
+      companyId: bill.companyId,
+      systemAccount: "wht_payable",
+    });
 
     if (!whtAccount) {
-      throw new Error("WHT Payable account not configured");
+      throw new Error("WHT Payable account not configured for this company");
     }
 
-    // Determine WHT rate from bill lines
-    const whtLine = bill.lines.find(
-      (line) => line.whtApplicable && line.whtRate > 0
-    );
-    const whtRate = whtLine?.whtRate || 5;
+    // Get WHT rate from bill (defaults to 5% if not specified)
+    const whtRate = bill.whtRate || 5;
 
     const whtTransaction = await this.create({
+      companyId: bill.companyId,
       transactionNumber: `WHT-${bill.billNumber}`,
       transactionDate: bill.billDate,
       taxType: "wht",
       taxCode: `WHT-${whtRate}`,
       taxRate: whtRate,
-      baseAmount: bill.subtotal,
-      taxAmount: bill.withholdingTaxAmount,
-      totalAmount: bill.netPayable,
+      baseAmount: bill.amounts?.subtotal || 0,
+      taxAmount: whtAmount,
+      totalAmount: bill.amounts?.netPayable || 0,
       currency: bill.currency || "KES",
       party: {
         type: "supplier",
-        id: bill.supplier.id,
+        id: bill.supplier.partyId.toString(),
         name: bill.supplier.name,
         taxPin: bill.supplier.taxPin,
         email: bill.supplier.email,
@@ -768,11 +944,11 @@ taxTransactionSchema.statics.createFromBill = async function (bill, createdBy) {
         filed: false,
         remitted: false,
       },
-      journalEntryId: bill.journalEntryId,
+      journalEntryId: bill.accounting?.journalEntryId,
       accountId: whtAccount._id,
       accountCode: whtAccount.accountCode,
       accountName: whtAccount.accountName,
-      description: `WHT ${whtRate}% on payment to ${bill.supplier.name}`,
+      description: `WHT ${whtRate}% withheld on payment to ${bill.supplier.name}`,
       createdBy: userInfo,
     });
 

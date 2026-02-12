@@ -94,6 +94,18 @@ const systemAccounts = [
     description: "Products held for sale",
   },
   {
+    accountCode: "1310",
+    accountName: "Technician Stock",
+    accountType: "asset",
+    subType: "inventory",
+    systemAccount: "technician_stock",
+    parentAccount: null,
+    canPost: true,
+    isActive: true,
+    level: 2,
+    description: "Stock issued to technicians for demo, installation, or repair",
+  },
+  {
     accountCode: "1350",
     accountName: "VAT Input",
     accountType: "asset",
@@ -104,6 +116,18 @@ const systemAccounts = [
     isActive: true,
     level: 2,
     description: "VAT paid on purchases (reclaimable from KRA)",
+  },
+  {
+    accountCode: "1360",
+    accountName: "Supplier Advance",
+    accountType: "asset",
+    subType: "prepaid_expense",
+    systemAccount: "supplier_advance",
+    parentAccount: null,
+    canPost: true,
+    isActive: true,
+    level: 2,
+    description: "Prepayments to suppliers (overpayments on bills)",
   },
 
   // ============================================
@@ -166,6 +190,18 @@ const systemAccounts = [
     isActive: true,
     level: 2,
     description: "Withholding tax to remit to KRA",
+  },
+  {
+    accountCode: "2140",
+    accountName: "Customer Advance",
+    accountType: "liability",
+    subType: "customer_deposit",
+    systemAccount: "customer_advance",
+    parentAccount: null,
+    canPost: true,
+    isActive: true,
+    level: 2,
+    description: "Customer deposits and overpayments",
   },
 
   // ============================================
@@ -625,6 +661,7 @@ async function seedChartOfAccounts() {
           "1200",
           "1300",
           "1350",
+          "1360", // Supplier Advance
           "1500",
         ]) {
           const child = accountMap.get(code);
@@ -666,7 +703,7 @@ async function seedChartOfAccounts() {
         currentLiabilities.path = "2000/2100";
         await currentLiabilities.save();
 
-        for (const code of ["2110", "2120", "2130"]) {
+        for (const code of ["2110", "2120", "2130", "2140"]) {
           const child = accountMap.get(code);
           if (child) {
             child.parentAccount = currentLiabilities._id;

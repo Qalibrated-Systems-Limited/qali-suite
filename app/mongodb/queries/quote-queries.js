@@ -1,6 +1,10 @@
 import Quote from "@/app/models/quote";
 import dbConnect from "@/app/config/dbConnect";
 import { serializeBsonType } from "@/lib/utils";
+import {
+  getTenantContext,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // SEARCH QUOTES
@@ -8,11 +12,14 @@ import { serializeBsonType } from "@/lib/utils";
 export async function searchQuotes(query = "", page = 1, filters = {}) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   const ITEMS_PER_PAGE = 10;
   const skip = (page - 1) * ITEMS_PER_PAGE;
 
   // Build filter query
-  const filterQuery = {};
+  let filterQuery = {};
 
   // Search by quote number or customer name
   if (query) {
@@ -53,6 +60,9 @@ export async function searchQuotes(query = "", page = 1, filters = {}) {
     filterQuery.validUntil = { $gte: now, $lte: futureDate };
   }
 
+  // Apply tenant scoping
+  filterQuery = withTenantScope(filterQuery, companyId, isSuperAdmin);
+
   const quotes = await Quote.find(filterQuery)
     .sort({ quoteDate: -1, createdAt: -1 })
     .skip(skip)
@@ -69,9 +79,12 @@ export async function searchQuotes(query = "", page = 1, filters = {}) {
 export async function fetchQuotePages(query = "", filters = {}) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   const ITEMS_PER_PAGE = 10;
 
-  const filterQuery = {};
+  let filterQuery = {};
 
   if (query) {
     filterQuery.$or = [
@@ -100,6 +113,9 @@ export async function fetchQuotePages(query = "", filters = {}) {
     ];
   }
 
+  // Apply tenant scoping
+  filterQuery = withTenantScope(filterQuery, companyId, isSuperAdmin);
+
   const count = await Quote.countDocuments(filterQuery);
   return Math.ceil(count / ITEMS_PER_PAGE);
 }
@@ -110,11 +126,15 @@ export async function fetchQuotePages(query = "", filters = {}) {
 export async function getQuoteStats(filters = {}) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const now = new Date();
   const sevenDaysAhead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
   // Build base query
-  const baseQuery = {};
+  const baseQuery = { ...tenantMatch };
   if (filters.startDate) {
     baseQuery.quoteDate = baseQuery.quoteDate || {};
     baseQuery.quoteDate.$gte = new Date(filters.startDate);
@@ -212,7 +232,12 @@ export async function getQuoteStats(filters = {}) {
 export async function getQuoteById(id) {
   await dbConnect();
 
-  const quote = await Quote.findById(id).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const quote = await Quote.findOne(
+    withTenantScope({ _id: id }, companyId, isSuperAdmin)
+  ).lean();
   if (!quote) return null;
 
   return serializeBsonType(quote);
@@ -224,16 +249,25 @@ export async function getQuoteById(id) {
 export async function getActiveQuotesForCustomer(customerId) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   const now = new Date();
 
-  const quotes = await Quote.find({
-    $or: [
-      { "customer.partyId": customerId },
-      { "customer.id": customerId },
-    ],
-    status: { $in: ["sent", "accepted"] },
-    validUntil: { $gte: now },
-  })
+  const quotes = await Quote.find(
+    withTenantScope(
+      {
+        $or: [
+          { "customer.partyId": customerId },
+          { "customer.id": customerId },
+        ],
+        status: { $in: ["sent", "accepted"] },
+        validUntil: { $gte: now },
+      },
+      companyId,
+      isSuperAdmin
+    )
+  )
     .sort({ quoteDate: -1 })
     .lean();
 
@@ -246,9 +280,12 @@ export async function getActiveQuotesForCustomer(customerId) {
 export async function getRecentQuotes(limit = 5) {
   await dbConnect();
 
-  const quotes = await Quote.find({
-    status: { $ne: "cancelled" },
-  })
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const quotes = await Quote.find(
+    withTenantScope({ status: { $ne: "cancelled" } }, companyId, isSuperAdmin)
+  )
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
@@ -262,13 +299,22 @@ export async function getRecentQuotes(limit = 5) {
 export async function getExpiringQuotes(daysAhead = 7) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   const now = new Date();
   const futureDate = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
 
-  const quotes = await Quote.find({
-    status: { $in: ["draft", "sent"] },
-    validUntil: { $gte: now, $lte: futureDate },
-  })
+  const quotes = await Quote.find(
+    withTenantScope(
+      {
+        status: { $in: ["draft", "sent"] },
+        validUntil: { $gte: now, $lte: futureDate },
+      },
+      companyId,
+      isSuperAdmin
+    )
+  )
     .sort({ validUntil: 1 })
     .lean();
 
@@ -281,9 +327,12 @@ export async function getExpiringQuotes(daysAhead = 7) {
 export async function getQuotesWithAvailableItems(customerId = null) {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   const now = new Date();
 
-  const query = {
+  let query = {
     status: { $in: ["sent", "accepted"] },
     validUntil: { $gte: now },
   };
@@ -294,6 +343,9 @@ export async function getQuotesWithAvailableItems(customerId = null) {
       { "customer.id": customerId },
     ];
   }
+
+  // Apply tenant scoping
+  query = withTenantScope(query, companyId, isSuperAdmin);
 
   const quotes = await Quote.find(query).sort({ quoteDate: -1 }).lean();
 
@@ -314,9 +366,13 @@ export async function getQuotesWithAvailableItems(customerId = null) {
 }
 
 // ============================================
-// GENERATE QUOTE NUMBER
+// GENERATE QUOTE NUMBER (with company code prefix)
 // ============================================
 export async function generateQuoteNumber() {
   await dbConnect();
-  return Quote.generateQuoteNumber();
+
+  // Get tenant context for company code prefix
+  const { companyId } = await getTenantContext();
+
+  return Quote.generateQuoteNumber(companyId);
 }

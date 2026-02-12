@@ -7,12 +7,16 @@ const dbConnect = async () => {
   }
 
   // Validate environment variable
-  // if (!process.env.DB_LOCAL_URI) {
-  //   throw new Error("DB_LOCAL_URI environment variable is not defined");
-  // }
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    throw new Error(
+      "MONGODB_URI environment variable is not defined. " +
+        "Please add it to your .env.local file."
+    );
+  }
 
   try {
-    await mongoose.connect(process.env.DB_LOCAL_URI, {
+    await mongoose.connect(uri, {
       // Connection pool configuration for production
       maxPoolSize: 10,
       minPoolSize: 2,

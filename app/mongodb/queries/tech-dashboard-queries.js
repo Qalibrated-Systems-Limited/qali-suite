@@ -148,7 +148,7 @@ export const getMyRequests = async (userId, limit = 10) => {
     itemCount: request.items?.length || 0,
     createdAt: request.createdAt.toISOString(),
     updatedAt: request.updatedAt?.toISOString(),
-    purpose: request.purpose,
+    requestType: request.requestType,
     approvedBy: request.approvedBy,
   }));
 };

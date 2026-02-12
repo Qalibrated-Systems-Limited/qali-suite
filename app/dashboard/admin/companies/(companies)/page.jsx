@@ -1,17 +1,13 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import {
   searchCompanies,
   fetchCompanyPages,
   getCompanyStats,
 } from "@/app/mongodb/queries/company-queries";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Building2,
-  Plus,
-  Users,
   CheckCircle,
   XCircle,
   AlertCircle,
@@ -59,25 +55,16 @@ export default async function CompaniesPage({ searchParams }) {
   return (
     <div className="container py-6 space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-yellow-500/10 rounded-lg">
-            <Building2 className="h-6 w-6 text-yellow-600" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold">Companies</h1>
-            <p className="text-muted-foreground">
-              Manage all tenant companies
-            </p>
-          </div>
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-yellow-500/10 rounded-lg">
+          <Building2 className="h-6 w-6 text-yellow-600" />
         </div>
-
-        <Button asChild className="bg-yellow-500 text-black hover:bg-yellow-600">
-          <Link href="/dashboard/admin/companies/create">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Company
-          </Link>
-        </Button>
+        <div>
+          <h1 className="text-2xl font-bold">Companies</h1>
+          <p className="text-muted-foreground">
+            Manage all tenant companies
+          </p>
+        </div>
       </div>
 
       {/* Stats Cards */}

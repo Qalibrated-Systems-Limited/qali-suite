@@ -2,12 +2,12 @@
 
 import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
-import { auth } from "@/auth";
 import EmployeeClaim from "../../models/employeesClaims";
+import Company from "../../models/Company";
 import Party from "../../models/parties";
 import Account from "../../models/account";
 import JournalEntry from "../../models/JournalEntry";
-import Counter from "../../models/counter";
+import ErpCounter from "../../models/erp-counter";
 import { format } from "date-fns";
 import dbConnect from "../../config/dbConnect";
 import { generateUniqueEntryNumber } from "@/lib/utils/server-utils";
@@ -17,6 +17,11 @@ import {
   reimbursementSchema,
 } from "../validators";
 import { z } from "zod";
+import {
+  getTenantContext,
+  getCompanyIdForCreate,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 dbConnect();
 
@@ -42,19 +47,35 @@ function formatUserForAudit(user) {
 }
 
 // ============================================
-// HELPER: Generate claim number
+// HELPER: Generate claim number (tenant-scoped)
 // ============================================
-async function generateClaimNumber(session) {
+async function generateClaimNumber(tenantCompanyId, session) {
   const today = format(new Date(), "yyyyMM");
-  const counterId = `CLAIM-${today}`;
 
-  const counter = await Counter.findOneAndUpdate(
-    { name: counterId },
-    { $inc: { seq: 1 } },
-    { upsert: true, new: true, session }
+  // Fetch company code for prefix
+  let companyCode = null;
+  if (tenantCompanyId) {
+    const company = await Company.findById(tenantCompanyId)
+      .select("code")
+      .lean();
+    companyCode = company?.code || null;
+  }
+
+  // Build tenant-scoped counter name
+  const counterName = companyCode
+    ? `claim-${companyCode.toLowerCase()}-${today}`
+    : `claim-${today}`;
+
+  // Use ErpCounter.getNextSequence for proper tenant-scoped counter
+  const seq = await ErpCounter.getNextSequence(
+    counterName,
+    tenantCompanyId,
+    session,
   );
 
-  return `${counterId}-${String(counter.seq).padStart(4, "0")}`;
+  // Format: CLAIM-{CODE}-{YYYYMM}-{NNNN} or CLAIM-{YYYYMM}-{NNNN}
+  const prefix = companyCode ? `CLAIM-${companyCode}` : "CLAIM";
+  return `${prefix}-${today}-${String(seq).padStart(4, "0")}`;
 }
 const paymentSchema = z.object({
   paymentMethod: z.enum(["cash", "bank", "mpesa"], {
@@ -78,11 +99,28 @@ export async function createAdvanceRequest(prevState, formData) {
   let session;
 
   try {
-    const { user } = await auth();
-    if (!user) {
+    await dbConnect();
+
+    // Auth check with tenant context
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
       return {
         errors: {
-          _form: ["You must be logged in"],
+          _form: [error.message],
+        },
+      };
+    }
+
+    // Get tenant companyId for create
+    let tenantCompanyId;
+    try {
+      tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+    } catch (error) {
+      return {
+        errors: {
+          _form: [error.message],
         },
       };
     }
@@ -90,11 +128,14 @@ export async function createAdvanceRequest(prevState, formData) {
     session = await mongoose.startSession();
     session.startTransaction();
 
-    // Get employee's party record
-    const party = await Party.findOne({
-      userId: user.id,
-      type: "employee",
-    }).session(session);
+    // Get employee's party record (tenant-scoped)
+    const party = await Party.findOne(
+      withTenantScope(
+        { userId: user.id, type: "employee" },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
 
     if (!party) {
       return {
@@ -106,54 +147,87 @@ export async function createAdvanceRequest(prevState, formData) {
       };
     }
 
-    // Extract form data
-    const requestedAmount = parseFloat(formData.get("requestedAmount"));
-    const purpose = formData.get("purpose");
-    const destination = formData.get("destination");
-    const travelFromDate = formData.get("travelFromDate");
-    const travelToDate = formData.get("travelToDate");
-    const estimatedExpenses = formData.get("estimatedExpenses");
-    const notes = formData.get("notes");
+    // Extract form data (keep raw values for form persistence)
+    console.log("=== createAdvanceRequest called ===");
+    console.log("advanceType from form:", formData.get("advanceType"));
+    const rawValues = {
+      advanceType: formData.get("advanceType") || "travel",
+      requestedAmount: formData.get("requestedAmount"),
+      purpose: formData.get("purpose"),
+      destination: formData.get("destination"),
+      travelFromDate: formData.get("travelFromDate"),
+      travelToDate: formData.get("travelToDate"),
+      projectCode: formData.get("projectCode"),
+      estimatedExpenses: formData.get("estimatedExpenses"),
+      notes: formData.get("notes"),
+    };
+
+    const requestedAmount = parseFloat(rawValues.requestedAmount);
+    const {
+      advanceType,
+      purpose,
+      destination,
+      travelFromDate,
+      travelToDate,
+      projectCode,
+      estimatedExpenses,
+      notes,
+    } = rawValues;
 
     const validatedFields = advanceRequestSchema.safeParse({
+      advanceType,
       requestedAmount,
       purpose,
       destination,
       travelFromDate,
       travelToDate,
+      projectCode,
       estimatedExpenses,
       notes,
     });
 
     if (!validatedFields.success) {
       const fieldErrors = validatedFields.error.flatten().fieldErrors;
+      console.log("Validation errors:", JSON.stringify(fieldErrors, null, 2));
+      console.log("Raw values:", JSON.stringify(rawValues, null, 2));
       return {
         errors: fieldErrors,
+        values: rawValues,
       };
     }
 
     const data = validatedFields.data;
 
-    // Validation
+    // Generate claim number (tenant-scoped)
+    const claimNumber = await generateClaimNumber(tenantCompanyId, session);
 
-    const fromDate = new Date(travelFromDate);
-    const toDate = new Date(travelToDate);
+    // Build advanceDetails based on type
+    const advanceDetails = {
+      advanceType: data.advanceType,
+      requestedAmount,
+      purpose: data.purpose.trim(),
+      estimatedExpenses: data.estimatedExpenses?.trim() || "",
+    };
 
-    if (toDate < fromDate) {
-      return {
-        errors: {
-          _form: ["Travel end date cannot be before start date"],
-        },
+    // Add travel-specific fields only for travel type
+    if (data.advanceType === "travel") {
+      advanceDetails.destination = data.destination?.trim() || "";
+      advanceDetails.travelDates = {
+        from: new Date(data.travelFromDate),
+        to: new Date(data.travelToDate),
       };
     }
 
-    // Generate claim number
-    const claimNumber = await generateClaimNumber(session);
+    // Add project-specific fields only for project type
+    if (data.advanceType === "project") {
+      advanceDetails.projectCode = data.projectCode?.trim() || "";
+    }
 
     // Create claim
     const claim = await EmployeeClaim.create(
       [
         {
+          companyId: tenantCompanyId,
           claimNumber,
           claimDate: new Date(),
           employee: {
@@ -165,24 +239,15 @@ export async function createAdvanceRequest(prevState, formData) {
             email: user.email,
           },
           claimType: "advance_request",
-          advanceDetails: {
-            requestedAmount,
-            purpose: purpose.trim(),
-            travelDates: {
-              from: fromDate,
-              to: toDate,
-            },
-            destination: destination?.trim() || "",
-            estimatedExpenses: estimatedExpenses?.trim() || "",
-          },
+          advanceDetails,
           totalAmount: requestedAmount,
-          description: `Advance request for ${purpose.trim()}`,
-          notes: notes?.trim() || "",
+          description: `${data.advanceType.replace("_", " ")} advance for ${data.purpose.trim()}`,
+          notes: data.notes?.trim() || "",
           status: "draft",
           createdBy: formatUserForAudit(user),
         },
       ],
-      { session }
+      { session },
     );
 
     // Submit immediately
@@ -224,28 +289,46 @@ export async function createAdvanceRequest(prevState, formData) {
 // 2. CREATE REIMBURSEMENT CLAIM
 // ============================================
 export async function createReimbursement(prevState, formData) {
-  // Get authenticated user
-  const userSession = await auth();
-  if (!userSession?.user) {
-    return {
-      errors: {
-        _form: ["You must be logged in to create a claim"],
-      },
-    };
-  }
-
-  const user = userSession.user;
   let session;
 
   try {
+    await dbConnect();
+
+    // Auth check with tenant context
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
+      return {
+        errors: {
+          _form: [error.message],
+        },
+      };
+    }
+
+    // Get tenant companyId for create
+    let tenantCompanyId;
+    try {
+      tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+    } catch (error) {
+      return {
+        errors: {
+          _form: [error.message],
+        },
+      };
+    }
+
     session = await mongoose.startSession();
     session.startTransaction();
 
-    // Get employee's party record
-    const party = await Party.findOne({
-      userId: user.id,
-      type: "employee",
-    }).session(session);
+    // Get employee's party record (tenant-scoped)
+    const party = await Party.findOne(
+      withTenantScope(
+        { userId: user.id, type: "employee" },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
 
     if (!party) {
       return {
@@ -325,16 +408,17 @@ export async function createReimbursement(prevState, formData) {
     // Calculate total
     const totalAmount = validatedItems.reduce(
       (sum, item) => sum + item.amount,
-      0
+      0,
     );
 
-    // Generate claim number
-    const claimNumber = await generateClaimNumber(session);
+    // Generate claim number (tenant-scoped)
+    const claimNumber = await generateClaimNumber(tenantCompanyId, session);
 
     // Create claim
     const claim = await EmployeeClaim.create(
       [
         {
+          companyId: tenantCompanyId,
           claimNumber,
           claimDate: new Date(),
           employee: {
@@ -354,7 +438,7 @@ export async function createReimbursement(prevState, formData) {
           createdBy: formatUserForAudit(user),
         },
       ],
-      { session }
+      { session },
     );
 
     // Submit immediately
@@ -399,16 +483,16 @@ export async function approveEmployeeClaim(claimId, prevState, formData) {
   let session;
 
   try {
-    session = await mongoose.startSession();
-    session.startTransaction();
+    await dbConnect();
 
-    // Get authenticated user
-    const userSession = await auth();
-    if (!userSession?.user) {
-      throw new Error("Unauthorized. Please log in.");
+    // Auth check with tenant context
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
+      throw new Error(error.message);
     }
 
-    const user = userSession.user;
     const userRole = user.role?.toLowerCase();
 
     // Check permissions
@@ -416,8 +500,13 @@ export async function approveEmployeeClaim(claimId, prevState, formData) {
       throw new Error("Only managers and admins can approve claims");
     }
 
-    // Get claim
-    const claim = await EmployeeClaim.findById(claimId).session(session);
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    // Get claim (tenant-scoped)
+    const claim = await EmployeeClaim.findOne(
+      withTenantScope({ _id: claimId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!claim) {
       throw new Error("Claim not found");
@@ -462,16 +551,16 @@ export async function rejectEmployeeClaim(claimId, prevState, formData) {
   let session;
 
   try {
-    session = await mongoose.startSession();
-    session.startTransaction();
+    await dbConnect();
 
-    // Get authenticated user
-    const userSession = await auth();
-    if (!userSession?.user) {
-      throw new Error("Unauthorized. Please log in.");
+    // Auth check with tenant context
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
+      throw new Error(error.message);
     }
 
-    const user = userSession.user;
     const userRole = user.role?.toLowerCase();
 
     // Check permissions
@@ -483,12 +572,17 @@ export async function rejectEmployeeClaim(claimId, prevState, formData) {
 
     if (!reason || reason.trim().length < 10) {
       throw new Error(
-        "Please provide a detailed reason for rejection (minimum 10 characters)"
+        "Please provide a detailed reason for rejection (minimum 10 characters)",
       );
     }
 
-    // Get claim
-    const claim = await EmployeeClaim.findById(claimId).session(session);
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    // Get claim (tenant-scoped)
+    const claim = await EmployeeClaim.findOne(
+      withTenantScope({ _id: claimId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!claim) {
       throw new Error("Claim not found");
@@ -527,23 +621,37 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
     await dbConnect();
 
     // ============================================
-    // 1. AUTH CHECK
+    // 1. AUTH CHECK WITH TENANT CONTEXT
     // ============================================
-    const userSession = await auth();
-    if (!userSession?.user) {
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
       return {
         errors: {
-          _form: ["You must be logged in to settle an advance"],
+          _form: [error.message],
         },
       };
     }
 
-    const user = userSession.user;
+    // Get tenant companyId for create
+    let tenantCompanyId;
+    try {
+      tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+    } catch (error) {
+      return {
+        errors: {
+          _form: [error.message],
+        },
+      };
+    }
 
     // ============================================
     // 2. GET ADVANCE CLAIM (before transaction for validation)
     // ============================================
-    const advanceClaim = await EmployeeClaim.findById(advanceClaimId);
+    const advanceClaim = await EmployeeClaim.findOne(
+      withTenantScope({ _id: advanceClaimId }, companyId, isSuperAdmin),
+    );
 
     if (!advanceClaim) {
       return {
@@ -607,12 +715,18 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
       };
     }
 
-    // Also check if any settlement exists for this advance
-    const existingSettlement = await EmployeeClaim.findOne({
-      claimType: "advance_return",
-      "returnDetails.advanceClaimId": advanceClaimId,
-      status: { $nin: ["rejected"] }, // Ignore rejected settlements
-    });
+    // Also check if any settlement exists for this advance (tenant-scoped)
+    const existingSettlement = await EmployeeClaim.findOne(
+      withTenantScope(
+        {
+          claimType: "advance_return",
+          "returnDetails.advanceClaimId": advanceClaimId,
+          status: { $nin: ["rejected"] }, // Ignore rejected settlements
+        },
+        companyId,
+        isSuperAdmin,
+      ),
+    );
 
     if (existingSettlement) {
       return {
@@ -670,7 +784,7 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
       if (fieldErrors.items) {
         // Check if it's array-level or item-level errors
         const itemErrors = validatedFields.error.errors.filter(
-          (e) => e.path[0] === "items" && e.path.length > 1
+          (e) => e.path[0] === "items" && e.path.length > 1,
         );
 
         if (itemErrors.length > 0) {
@@ -739,9 +853,12 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
     session.startTransaction();
 
     // ============================================
-    // 11. GENERATE SETTLEMENT NUMBER
+    // 11. GENERATE SETTLEMENT NUMBER (tenant-scoped)
     // ============================================
-    const settlementNumber = await generateClaimNumber(session);
+    const settlementNumber = await generateClaimNumber(
+      tenantCompanyId,
+      session,
+    );
 
     // ============================================
     // 12. CREATE SETTLEMENT CLAIM
@@ -749,6 +866,7 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
     const settlementClaim = await EmployeeClaim.create(
       [
         {
+          companyId: tenantCompanyId,
           claimNumber: settlementNumber,
           claimDate: new Date(),
           employee: advanceClaim.employee, // Copy employee info
@@ -777,7 +895,7 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
           createdBy: formatUserForAudit(user),
         },
       ],
-      { session }
+      { session },
     );
 
     // ============================================
@@ -813,10 +931,10 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
         balance > 0
           ? `You will need to return KES ${balance.toLocaleString()} to the company`
           : balance < 0
-          ? `The company will reimburse you KES ${Math.abs(
-              balance
-            ).toLocaleString()}`
-          : "Your expenses exactly match the advance amount",
+            ? `The company will reimburse you KES ${Math.abs(
+                balance,
+              ).toLocaleString()}`
+            : "Your expenses exactly match the advance amount",
     };
   } catch (error) {
     if (session?.inTransaction()) {
@@ -857,18 +975,28 @@ export async function closeSettlementt(settlementId, prevState, formData) {
   let session;
 
   try {
-    session = await mongoose.startSession();
-    session.startTransaction();
+    await dbConnect();
 
-    // Get authenticated user
-    const userSession = await auth();
-    if (!userSession?.user) {
+    // Auth check with tenant context
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
       return {
-        message: "Unauthorized. Please log in.",
+        message: error.message,
       };
     }
 
-    const user = userSession.user;
+    // Get tenant companyId for create
+    let tenantCompanyId;
+    try {
+      tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+    } catch (error) {
+      return {
+        message: error.message,
+      };
+    }
+
     const userRole = user.role?.toLowerCase();
 
     // Check permissions
@@ -876,10 +1004,13 @@ export async function closeSettlementt(settlementId, prevState, formData) {
       throw new Error("Only accountants and admins can close settlements");
     }
 
-    // Get settlement claim
-    const settlement = await EmployeeClaim.findById(settlementId).session(
-      session
-    );
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    // Get settlement claim (tenant-scoped)
+    const settlement = await EmployeeClaim.findOne(
+      withTenantScope({ _id: settlementId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!settlement) {
       throw new Error("Settlement not found");
@@ -894,15 +1025,21 @@ export async function closeSettlementt(settlementId, prevState, formData) {
       throw new Error("Settlement must be approved first");
     }
 
-    // Get expense accounts
+    // Get expense accounts (tenant-scoped)
     const expenseAccounts = {};
     for (const item of settlement.items) {
       if (!expenseAccounts[item.category]) {
         // Find or create expense account for category
-        let account = await Account.findOne({
-          accountName: new RegExp(`^${item.category}`, "i"),
-          accountType: "expense",
-        }).session(session);
+        let account = await Account.findOne(
+          withTenantScope(
+            {
+              accountName: new RegExp(`^${item.category}`, "i"),
+              accountType: "expense",
+            },
+            tenantCompanyId,
+            isSuperAdmin,
+          ),
+        ).session(session);
 
         if (!account) {
           throw new Error(`Expense account for ${item.category} not found`);
@@ -912,14 +1049,22 @@ export async function closeSettlementt(settlementId, prevState, formData) {
       }
     }
 
-    // Get system accounts
-    const employeeAdvancesAccount = await Account.findOne({
-      systemAccount: "employee_advances",
-    }).session(session);
+    // Get system accounts (tenant-scoped)
+    const employeeAdvancesAccount = await Account.findOne(
+      withTenantScope(
+        { systemAccount: "employee_advances" },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
 
-    const employeePayablesAccount = await Account.findOne({
-      systemAccount: "employee_payables",
-    }).session(session);
+    const employeePayablesAccount = await Account.findOne(
+      withTenantScope(
+        { systemAccount: "employee_payables" },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
 
     if (!employeeAdvancesAccount || !employeePayablesAccount) {
       throw new Error("System accounts not configured");
@@ -928,7 +1073,10 @@ export async function closeSettlementt(settlementId, prevState, formData) {
     // ============================================
     // CREATE JOURNAL ENTRY FOR SETTLEMENT
     // ============================================
-    const entryNumber = await generateUniqueEntryNumber("SETTLE");
+    const entryNumber = await generateUniqueEntryNumber(
+      "SETTLE",
+      tenantCompanyId,
+    );
     const journalLines = [];
 
     // DEBIT: Expense accounts (by category)
@@ -997,6 +1145,7 @@ export async function closeSettlementt(settlementId, prevState, formData) {
     const journalEntry = await JournalEntry.create(
       [
         {
+          companyId: tenantCompanyId,
           entryNumber,
           entryDate: new Date(),
           entryType: "advance_settlement",
@@ -1016,21 +1165,25 @@ export async function closeSettlementt(settlementId, prevState, formData) {
           createdBy: formatUserForAudit(user),
         },
       ],
-      { session }
+      { session },
     );
 
-    // Post journal entry
-    await journalEntry[0].post(formatUserForAudit(user));
+    // Post journal entry (pass session for transaction)
+    await journalEntry[0].post(formatUserForAudit(user), session);
 
     // Update settlement
     settlement.journalEntryIds.push(journalEntry[0]._id);
     settlement.status = "closed";
     await settlement.save({ session });
 
-    // Update party balance
-    const party = await Party.findById(settlement.employee.partyId).session(
-      session
-    );
+    // Update party balance (tenant-scoped)
+    const party = await Party.findOne(
+      withTenantScope(
+        { _id: settlement.employee.partyId },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
     if (party) {
       await party.calculateActualBalance();
     }
@@ -1068,24 +1221,29 @@ export async function updateClaim(claimId, prevState, formData) {
   let session;
 
   try {
-    session = await mongoose.startSession();
-    session.startTransaction();
+    await dbConnect();
 
-    // Get authenticated user
-    const userSession = await auth();
-    if (!userSession?.user) {
+    // Auth check with tenant context
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
       return {
         errors: {
-          _form: ["You must be logged in to update a claim"],
+          _form: [error.message],
         },
       };
     }
 
-    const user = userSession.user;
     const userRole = user.role?.toLowerCase();
 
-    // Get claim
-    const claim = await EmployeeClaim.findById(claimId).session(session);
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    // Get claim (tenant-scoped)
+    const claim = await EmployeeClaim.findOne(
+      withTenantScope({ _id: claimId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!claim) {
       return {
@@ -1223,7 +1381,7 @@ export async function updateClaim(claimId, prevState, formData) {
       const validatedItems = items.map((item) => {
         if (!item.date || !item.category || !item.description || !item.amount) {
           throw new Error(
-            "All expense items must have date, category, description, and amount"
+            "All expense items must have date, category, description, and amount",
           );
         }
 
@@ -1244,7 +1402,7 @@ export async function updateClaim(claimId, prevState, formData) {
       // Calculate total
       const totalAmount = validatedItems.reduce(
         (sum, item) => sum + item.amount,
-        0
+        0,
       );
 
       // Update claim
@@ -1319,24 +1477,37 @@ const paySettlementBalanceSchema = z.object({
 // ============================================
 
 // ============================================
-// HELPER: Get payment account by method
+// HELPER: Get payment account by method (tenant-scoped)
 // ============================================
-async function getPaymentAccount(paymentMethod, session = null) {
+async function getPaymentAccount(
+  paymentMethod,
+  session = null,
+  tenantCompanyId = null,
+  isSuperAdmin = false,
+) {
   const systemAccountMap = {
     cash: "cash",
-    bank: "bank",
+    bank: ["bank", "bank_main"],
     mpesa: "mpesa",
   };
 
-  const query = Account.findOne({
-    systemAccount: systemAccountMap[paymentMethod],
-  });
+  const value = systemAccountMap[paymentMethod];
+  const baseQuery = Array.isArray(value)
+    ? { systemAccount: { $in: value } }
+    : { systemAccount: value };
+  const scopedQuery = tenantCompanyId
+    ? withTenantScope(baseQuery, tenantCompanyId, isSuperAdmin)
+    : baseQuery;
+
+  const query = Account.findOne(scopedQuery);
+  console.log(scopedQuery);
 
   if (session) {
     query.session(session);
   }
 
   const account = await query;
+  console.log(account);
 
   if (!account) {
     return null;
@@ -1355,18 +1526,31 @@ export async function closeSettlement(settlementId, prevState, formData) {
     await dbConnect();
 
     // ============================================
-    // AUTH CHECK
+    // AUTH CHECK WITH TENANT CONTEXT
     // ============================================
-    const userSession = await auth();
-    if (!userSession?.user) {
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
       return {
         errors: {
-          _form: ["Unauthorized. Please log in."],
+          _form: [error.message],
         },
       };
     }
 
-    const user = userSession.user;
+    // Get tenant companyId for create
+    let tenantCompanyId;
+    try {
+      tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+    } catch (error) {
+      return {
+        errors: {
+          _form: [error.message],
+        },
+      };
+    }
+
     const userRole = user.role?.toLowerCase();
 
     if (userRole !== "accountant" && userRole !== "admin") {
@@ -1397,11 +1581,11 @@ export async function closeSettlement(settlementId, prevState, formData) {
     session.startTransaction();
 
     // ============================================
-    // GET SETTLEMENT CLAIM
+    // GET SETTLEMENT CLAIM (tenant-scoped)
     // ============================================
-    const settlement = await EmployeeClaim.findById(settlementId).session(
-      session
-    );
+    const settlement = await EmployeeClaim.findOne(
+      withTenantScope({ _id: settlementId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!settlement) {
       return {
@@ -1430,15 +1614,21 @@ export async function closeSettlement(settlementId, prevState, formData) {
     }
 
     // ============================================
-    // GET EXPENSE ACCOUNTS BY CATEGORY
+    // GET EXPENSE ACCOUNTS BY CATEGORY (tenant-scoped)
     // ============================================
     const expenseAccounts = {};
     for (const item of settlement.items) {
       if (!expenseAccounts[item.category]) {
-        const account = await Account.findOne({
-          accountName: new RegExp(`^${item.category}`, "i"),
-          accountType: "expense",
-        }).session(session);
+        const account = await Account.findOne(
+          withTenantScope(
+            {
+              accountName: new RegExp(`^${item.category}`, "i"),
+              accountType: "expense",
+            },
+            tenantCompanyId,
+            isSuperAdmin,
+          ),
+        ).session(session);
 
         if (!account) {
           return {
@@ -1455,15 +1645,23 @@ export async function closeSettlement(settlementId, prevState, formData) {
     }
 
     // ============================================
-    // GET SYSTEM ACCOUNTS
+    // GET SYSTEM ACCOUNTS (tenant-scoped)
     // ============================================
-    const employeeAdvanceAccount = await Account.findOne({
-      systemAccount: "employee_advance", // singular - matches your chart of accounts
-    }).session(session);
+    const employeeAdvanceAccount = await Account.findOne(
+      withTenantScope(
+        { systemAccount: "employee_advance" },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
 
-    const employeePayablesAccount = await Account.findOne({
-      systemAccount: "employee_payables", // plural - matches your chart of accounts
-    }).session(session);
+    const employeePayablesAccount = await Account.findOne(
+      withTenantScope(
+        { systemAccount: "employee_payables" },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
 
     if (!employeeAdvanceAccount) {
       return {
@@ -1569,11 +1767,11 @@ export async function closeSettlement(settlementId, prevState, formData) {
     // ============================================
     const totalDebits = journalLines.reduce(
       (sum, l) => sum + (l.debit || 0),
-      0
+      0,
     );
     const totalCredits = journalLines.reduce(
       (sum, l) => sum + (l.credit || 0),
-      0
+      0,
     );
 
     if (Math.abs(totalDebits - totalCredits) > 0.01) {
@@ -1581,7 +1779,7 @@ export async function closeSettlement(settlementId, prevState, formData) {
         errors: {
           _form: [
             `Journal entry calculation error. Debits: ${totalDebits.toFixed(
-              2
+              2,
             )}, Credits: ${totalCredits.toFixed(2)}. Please contact support.`,
           ],
         },
@@ -1591,11 +1789,15 @@ export async function closeSettlement(settlementId, prevState, formData) {
     // ============================================
     // CREATE JOURNAL ENTRY
     // ============================================
-    const entryNumber = await generateUniqueEntryNumber("SETTLE");
+    const entryNumber = await generateUniqueEntryNumber(
+      "SETTLE",
+      tenantCompanyId,
+    );
 
     const journalEntry = await JournalEntry.create(
       [
         {
+          companyId: tenantCompanyId,
           entryNumber,
           entryDate: new Date(),
           entryType: "advance_settlement",
@@ -1615,11 +1817,11 @@ export async function closeSettlement(settlementId, prevState, formData) {
           createdBy: formatUserForAudit(user),
         },
       ],
-      { session }
+      { session },
     );
 
-    // Post journal entry
-    await journalEntry[0].post(formatUserForAudit(user));
+    // Post journal entry (pass session for transaction)
+    await journalEntry[0].post(formatUserForAudit(user), session);
 
     // ============================================
     // UPDATE SETTLEMENT
@@ -1638,10 +1840,14 @@ export async function closeSettlement(settlementId, prevState, formData) {
 
     await settlement.save({ session });
 
-    // Update party balance
-    const party = await Party.findById(settlement.employee.partyId).session(
-      session
-    );
+    // Update party balance (tenant-scoped)
+    const party = await Party.findOne(
+      withTenantScope(
+        { _id: settlement.employee.partyId },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
     if (party) {
       await party.calculateActualBalance();
     }
@@ -1661,10 +1867,10 @@ export async function closeSettlement(settlementId, prevState, formData) {
         balance === 0
           ? "Settlement closed successfully"
           : balance > 0
-          ? `Settlement processed. Employee owes KES ${balance.toLocaleString()}`
-          : `Settlement processed. Company owes employee KES ${Math.abs(
-              balance
-            ).toLocaleString()}`,
+            ? `Settlement processed. Employee owes KES ${balance.toLocaleString()}`
+            : `Settlement processed. Company owes employee KES ${Math.abs(
+                balance,
+              ).toLocaleString()}`,
       balance,
       status: settlement.status,
     };
@@ -1698,18 +1904,31 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
     await dbConnect();
 
     // ============================================
-    // AUTH CHECK
+    // AUTH CHECK WITH TENANT CONTEXT
     // ============================================
-    const userSession = await auth();
-    if (!userSession?.user) {
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
       return {
         errors: {
-          _form: ["Unauthorized. Please log in."],
+          _form: [error.message],
         },
       };
     }
 
-    const user = userSession.user;
+    // Get tenant companyId for create
+    let tenantCompanyId;
+    try {
+      tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+    } catch (error) {
+      return {
+        errors: {
+          _form: [error.message],
+        },
+      };
+    }
+
     const userRole = user.role?.toLowerCase();
 
     if (userRole !== "accountant" && userRole !== "admin") {
@@ -1721,9 +1940,11 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
     }
 
     // ============================================
-    // GET SETTLEMENT FIRST (need balance for validation)
+    // GET SETTLEMENT FIRST (need balance for validation, tenant-scoped)
     // ============================================
-    const settlementCheck = await EmployeeClaim.findById(settlementId);
+    const settlementCheck = await EmployeeClaim.findOne(
+      withTenantScope({ _id: settlementId }, companyId, isSuperAdmin),
+    );
 
     if (!settlementCheck) {
       return {
@@ -1771,11 +1992,11 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
     session.startTransaction();
 
     // ============================================
-    // GET SETTLEMENT
+    // GET SETTLEMENT (tenant-scoped)
     // ============================================
-    const settlement = await EmployeeClaim.findById(settlementId).session(
-      session
-    );
+    const settlement = await EmployeeClaim.findOne(
+      withTenantScope({ _id: settlementId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (settlement.claimType !== "advance_return") {
       return {
@@ -1806,9 +2027,14 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
     }
 
     // ============================================
-    // GET ACCOUNTS
+    // GET ACCOUNTS (tenant-scoped)
     // ============================================
-    const paymentAccount = await getPaymentAccount(data.paymentMethod, session);
+    const paymentAccount = await getPaymentAccount(
+      data.paymentMethod,
+      session,
+      tenantCompanyId,
+      isSuperAdmin,
+    );
 
     if (!paymentAccount) {
       return {
@@ -1820,9 +2046,13 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
       };
     }
 
-    const employeeAdvanceAccount = await Account.findOne({
-      systemAccount: "employee_advance",
-    }).session(session);
+    const employeeAdvanceAccount = await Account.findOne(
+      withTenantScope(
+        { systemAccount: "employee_advance" },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
 
     if (!employeeAdvanceAccount) {
       return {
@@ -1837,11 +2067,12 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
     // DR: Cash/Bank (asset increase)
     // CR: Employee Advance (asset decrease)
     // ============================================
-    const entryNumber = await generateUniqueEntryNumber("RET");
+    const entryNumber = await generateUniqueEntryNumber("RET", tenantCompanyId);
 
     const journalEntry = await JournalEntry.create(
       [
         {
+          companyId: tenantCompanyId,
           entryNumber,
           entryDate: new Date(),
           entryType: "advance_return",
@@ -1881,11 +2112,11 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
           createdBy: formatUserForAudit(user),
         },
       ],
-      { session }
+      { session },
     );
 
-    // Post journal entry
-    await journalEntry[0].post(formatUserForAudit(user));
+    // Post journal entry (pass session for transaction)
+    await journalEntry[0].post(formatUserForAudit(user), session);
 
     // ============================================
     // UPDATE SETTLEMENT
@@ -1903,10 +2134,14 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
 
     await settlement.save({ session });
 
-    // Update party balance
-    const party = await Party.findById(settlement.employee.partyId).session(
-      session
-    );
+    // Update party balance (tenant-scoped)
+    const party = await Party.findOne(
+      withTenantScope(
+        { _id: settlement.employee.partyId },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
     if (party) {
       await party.calculateActualBalance();
     }
@@ -1961,18 +2196,31 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
     await dbConnect();
 
     // ============================================
-    // AUTH CHECK
+    // AUTH CHECK WITH TENANT CONTEXT
     // ============================================
-    const userSession = await auth();
-    if (!userSession?.user) {
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
       return {
         errors: {
-          _form: ["Unauthorized. Please log in."],
+          _form: [error.message],
         },
       };
     }
 
-    const user = userSession.user;
+    // Get tenant companyId for create
+    let tenantCompanyId;
+    try {
+      tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+    } catch (error) {
+      return {
+        errors: {
+          _form: [error.message],
+        },
+      };
+    }
+
     const userRole = user.role?.toLowerCase();
 
     if (userRole !== "accountant" && userRole !== "admin") {
@@ -2007,11 +2255,11 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
     session.startTransaction();
 
     // ============================================
-    // GET SETTLEMENT
+    // GET SETTLEMENT (tenant-scoped)
     // ============================================
-    const settlement = await EmployeeClaim.findById(settlementId).session(
-      session
-    );
+    const settlement = await EmployeeClaim.findOne(
+      withTenantScope({ _id: settlementId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!settlement) {
       return {
@@ -2052,9 +2300,14 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
     const amountOwed = Math.abs(balance);
 
     // ============================================
-    // GET ACCOUNTS
+    // GET ACCOUNTS (tenant-scoped)
     // ============================================
-    const paymentAccount = await getPaymentAccount(data.paymentMethod, session);
+    const paymentAccount = await getPaymentAccount(
+      data.paymentMethod,
+      session,
+      tenantCompanyId,
+      isSuperAdmin,
+    );
 
     if (!paymentAccount) {
       return {
@@ -2066,9 +2319,13 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
       };
     }
 
-    const employeePayablesAccount = await Account.findOne({
-      systemAccount: "employee_payables",
-    }).session(session);
+    const employeePayablesAccount = await Account.findOne(
+      withTenantScope(
+        { systemAccount: "employee_payables" },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
 
     if (!employeePayablesAccount) {
       return {
@@ -2083,11 +2340,12 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
     // DR: Employee Payables (liability decrease)
     // CR: Cash/Bank (asset decrease)
     // ============================================
-    const entryNumber = await generateUniqueEntryNumber("PAY");
+    const entryNumber = await generateUniqueEntryNumber("PAY", tenantCompanyId);
 
     const journalEntry = await JournalEntry.create(
       [
         {
+          companyId: tenantCompanyId,
           entryNumber,
           entryDate: new Date(),
           entryType: "payment_made",
@@ -2127,11 +2385,11 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
           createdBy: formatUserForAudit(user),
         },
       ],
-      { session }
+      { session },
     );
 
-    // Post journal entry
-    await journalEntry[0].post(formatUserForAudit(user));
+    // Post journal entry (pass session for transaction)
+    await journalEntry[0].post(formatUserForAudit(user), session);
 
     // ============================================
     // UPDATE SETTLEMENT
@@ -2144,10 +2402,14 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
 
     await settlement.save({ session });
 
-    // Update party balance
-    const party = await Party.findById(settlement.employee.partyId).session(
-      session
-    );
+    // Update party balance (tenant-scoped)
+    const party = await Party.findOne(
+      withTenantScope(
+        { _id: settlement.employee.partyId },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
     if (party) {
       await party.calculateActualBalance();
     }
@@ -2199,18 +2461,31 @@ export async function payAdvance(claimId, prevState, formData) {
     await dbConnect();
 
     // ============================================
-    // 1. AUTH CHECK
+    // 1. AUTH CHECK WITH TENANT CONTEXT
     // ============================================
-    const userSession = await auth();
-    if (!userSession?.user) {
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
       return {
         errors: {
-          _form: ["Unauthorized. Please log in."],
+          _form: [error.message],
         },
       };
     }
 
-    const user = userSession.user;
+    // Get tenant companyId for create
+    let tenantCompanyId;
+    try {
+      tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+    } catch (error) {
+      return {
+        errors: {
+          _form: [error.message],
+        },
+      };
+    }
+
     const userRole = user.role?.toLowerCase();
 
     if (userRole !== "accountant" && userRole !== "admin") {
@@ -2245,9 +2520,11 @@ export async function payAdvance(claimId, prevState, formData) {
     session.startTransaction();
 
     // ============================================
-    // 4. GET CLAIM
+    // 4. GET CLAIM (tenant-scoped)
     // ============================================
-    const claim = await EmployeeClaim.findById(claimId).session(session);
+    const claim = await EmployeeClaim.findOne(
+      withTenantScope({ _id: claimId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!claim) {
       return {
@@ -2281,11 +2558,15 @@ export async function payAdvance(claimId, prevState, formData) {
     }
 
     // ============================================
-    // 6. GET SYSTEM ACCOUNTS
+    // 6. GET SYSTEM ACCOUNTS (tenant-scoped)
     // ============================================
-    const employeeAdvanceAccount = await Account.findOne({
-      systemAccount: "employee_advance", // ✅ Matches your chart of accounts
-    }).session(session);
+    const employeeAdvanceAccount = await Account.findOne(
+      withTenantScope(
+        { systemAccount: "employee_advance" },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
 
     if (!employeeAdvanceAccount) {
       return {
@@ -2297,7 +2578,12 @@ export async function payAdvance(claimId, prevState, formData) {
       };
     }
 
-    const paymentAccount = await getPaymentAccount(data.paymentMethod, session);
+    const paymentAccount = await getPaymentAccount(
+      data.paymentMethod,
+      session,
+      tenantCompanyId,
+      isSuperAdmin,
+    );
 
     if (!paymentAccount) {
       return {
@@ -2314,12 +2600,13 @@ export async function payAdvance(claimId, prevState, formData) {
     // DR: Employee Advance (Asset) - employee owes us
     // CR: Cash/Bank/M-Pesa (Asset) - money going out
     // ============================================
-    const entryNumber = await generateUniqueEntryNumber("ADV");
+    const entryNumber = await generateUniqueEntryNumber("ADV", tenantCompanyId);
     const amount = claim.totalAmount;
 
     const journalEntry = await JournalEntry.create(
       [
         {
+          companyId: tenantCompanyId,
           entryNumber,
           entryDate: new Date(),
           entryType: "advance",
@@ -2361,11 +2648,11 @@ export async function payAdvance(claimId, prevState, formData) {
           createdBy: formatUserForAudit(user),
         },
       ],
-      { session }
+      { session },
     );
 
-    // Post journal entry
-    await journalEntry[0].post(formatUserForAudit(user));
+    // Post journal entry (pass session for transaction)
+    await journalEntry[0].post(formatUserForAudit(user), session);
 
     // ============================================
     // 8. UPDATE CLAIM
@@ -2378,9 +2665,15 @@ export async function payAdvance(claimId, prevState, formData) {
     await claim.save({ session });
 
     // ============================================
-    // 9. UPDATE PARTY BALANCE
+    // 9. UPDATE PARTY BALANCE (tenant-scoped)
     // ============================================
-    const party = await Party.findById(claim.employee.partyId).session(session);
+    const party = await Party.findOne(
+      withTenantScope(
+        { _id: claim.employee.partyId },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
     if (party) {
       await party.calculateActualBalance();
     }
@@ -2431,18 +2724,31 @@ export async function payReimbursement(claimId, prevState, formData) {
     await dbConnect();
 
     // ============================================
-    // 1. AUTH CHECK
+    // 1. AUTH CHECK WITH TENANT CONTEXT
     // ============================================
-    const userSession = await auth();
-    if (!userSession?.user) {
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
       return {
         errors: {
-          _form: ["Unauthorized. Please log in."],
+          _form: [error.message],
         },
       };
     }
 
-    const user = userSession.user;
+    // Get tenant companyId for create
+    let tenantCompanyId;
+    try {
+      tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+    } catch (error) {
+      return {
+        errors: {
+          _form: [error.message],
+        },
+      };
+    }
+
     const userRole = user.role?.toLowerCase();
 
     if (userRole !== "accountant" && userRole !== "admin") {
@@ -2477,9 +2783,11 @@ export async function payReimbursement(claimId, prevState, formData) {
     session.startTransaction();
 
     // ============================================
-    // 4. GET CLAIM
+    // 4. GET CLAIM (tenant-scoped)
     // ============================================
-    const claim = await EmployeeClaim.findById(claimId).session(session);
+    const claim = await EmployeeClaim.findOne(
+      withTenantScope({ _id: claimId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!claim) {
       return {
@@ -2513,15 +2821,21 @@ export async function payReimbursement(claimId, prevState, formData) {
     }
 
     // ============================================
-    // 6. GET EXPENSE ACCOUNTS BY CATEGORY
+    // 6. GET EXPENSE ACCOUNTS BY CATEGORY (tenant-scoped)
     // ============================================
     const expenseAccounts = {};
     for (const item of claim.items) {
       if (!expenseAccounts[item.category]) {
-        const account = await Account.findOne({
-          accountName: new RegExp(`^${item.category}`, "i"),
-          accountType: "expense",
-        }).session(session);
+        const account = await Account.findOne(
+          withTenantScope(
+            {
+              accountName: new RegExp(`^${item.category}`, "i"),
+              accountType: "expense",
+            },
+            tenantCompanyId,
+            isSuperAdmin,
+          ),
+        ).session(session);
 
         if (!account) {
           return {
@@ -2538,11 +2852,15 @@ export async function payReimbursement(claimId, prevState, formData) {
     }
 
     // ============================================
-    // 7. GET SYSTEM ACCOUNTS
+    // 7. GET SYSTEM ACCOUNTS (tenant-scoped)
     // ============================================
-    const employeePayablesAccount = await Account.findOne({
-      systemAccount: "employee_payables",
-    }).session(session);
+    const employeePayablesAccount = await Account.findOne(
+      withTenantScope(
+        { systemAccount: "employee_payables" },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
 
     if (!employeePayablesAccount) {
       return {
@@ -2554,7 +2872,12 @@ export async function payReimbursement(claimId, prevState, formData) {
       };
     }
 
-    const paymentAccount = await getPaymentAccount(data.paymentMethod, session);
+    const paymentAccount = await getPaymentAccount(
+      data.paymentMethod,
+      session,
+      tenantCompanyId,
+      isSuperAdmin,
+    );
 
     if (!paymentAccount) {
       return {
@@ -2571,7 +2894,10 @@ export async function payReimbursement(claimId, prevState, formData) {
     // DR: Expense Accounts (by category)
     // CR: Employee Payables (we owe employee)
     // ============================================
-    const expenseEntryNumber = await generateUniqueEntryNumber("EXP");
+    const expenseEntryNumber = await generateUniqueEntryNumber(
+      "EXP",
+      tenantCompanyId,
+    );
     const expenseLines = [];
 
     // Group expenses by category
@@ -2611,6 +2937,7 @@ export async function payReimbursement(claimId, prevState, formData) {
     const expenseJE = await JournalEntry.create(
       [
         {
+          companyId: tenantCompanyId,
           entryNumber: expenseEntryNumber,
           entryDate: new Date(),
           entryType: "expense",
@@ -2630,21 +2957,25 @@ export async function payReimbursement(claimId, prevState, formData) {
           createdBy: formatUserForAudit(user),
         },
       ],
-      { session }
+      { session },
     );
 
-    await expenseJE[0].post(formatUserForAudit(user));
+    await expenseJE[0].post(formatUserForAudit(user), session);
 
     // ============================================
     // 9. CREATE JOURNAL ENTRY #2: PAYMENT
     // DR: Employee Payables (clear liability)
     // CR: Cash/Bank/M-Pesa (money out)
     // ============================================
-    const paymentEntryNumber = await generateUniqueEntryNumber("PAY");
+    const paymentEntryNumber = await generateUniqueEntryNumber(
+      "PAY",
+      tenantCompanyId,
+    );
 
     const paymentJE = await JournalEntry.create(
       [
         {
+          companyId: tenantCompanyId,
           entryNumber: paymentEntryNumber,
           entryDate: new Date(),
           entryType: "payment_made",
@@ -2686,10 +3017,10 @@ export async function payReimbursement(claimId, prevState, formData) {
           createdBy: formatUserForAudit(user),
         },
       ],
-      { session }
+      { session },
     );
 
-    await paymentJE[0].post(formatUserForAudit(user));
+    await paymentJE[0].post(formatUserForAudit(user), session);
 
     // ============================================
     // 10. UPDATE CLAIM
@@ -2702,9 +3033,15 @@ export async function payReimbursement(claimId, prevState, formData) {
     await claim.save({ session });
 
     // ============================================
-    // 11. UPDATE PARTY BALANCE
+    // 11. UPDATE PARTY BALANCE (tenant-scoped)
     // ============================================
-    const party = await Party.findById(claim.employee.partyId).session(session);
+    const party = await Party.findOne(
+      withTenantScope(
+        { _id: claim.employee.partyId },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    ).session(session);
     if (party) {
       await party.calculateActualBalance();
     }

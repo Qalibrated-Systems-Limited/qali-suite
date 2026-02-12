@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useActionState } from "react";
 import {
   Mail,
@@ -10,7 +10,10 @@ import {
   DollarSign,
   AlertTriangle,
   CheckCircle,
+  ReceiptText,
+  Edit,
 } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -24,6 +27,8 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cancelInvoice, completeInvoice } from "@/app/mongodb/invoice-actions";
 import { InvoicePaymentDialog } from "./InvoicePaymentDialog";
+import { IssueCreditNoteDialog } from "./IssueCreditNoteDialog";
+import { toast } from "sonner";
 
 export function InvoiceDetailActions({
   invoice,
@@ -33,6 +38,7 @@ export function InvoiceDetailActions({
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [postDialogOpen, setPostDialogOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [creditNoteDialogOpen, setCreditNoteDialogOpen] = useState(false);
 
   // Bind invoice ID to actions
   const completeInvoiceWithId = completeInvoice.bind(null, invoice._id);
@@ -48,6 +54,28 @@ export function InvoiceDetailActions({
     null
   );
 
+  // Show toast notifications for errors
+  useEffect(() => {
+    if (postState?.message) {
+      toast.error("Failed to post invoice", {
+        description: postState.message,
+        duration: 5000,
+      });
+    }
+  }, [postState]);
+
+  useEffect(() => {
+    if (cancelState?.message) {
+      toast.error("Failed to cancel invoice", {
+        description: cancelState.message,
+        duration: 5000,
+      });
+    }
+  }, [cancelState]);
+
+  const canEdit =
+    (invoice.status === "draft" || invoice.status === "sent") &&
+    invoice.paymentStatus !== "paid";
   const canPost = invoice.status === "draft" || invoice.status === "sent";
   const canPay =
     invoice.paymentStatus !== "paid" && invoice.status === "completed";
@@ -55,9 +83,34 @@ export function InvoiceDetailActions({
     invoice.status !== "cancelled" &&
     invoice.paymentStatus !== "paid" &&
     userRole?.toLowerCase() === "admin";
+  // Calculate total already credited
+  const totalCredited = (invoice.creditNotes || []).reduce(
+    (sum, cn) => sum + (cn.amount || 0),
+    0
+  );
+  const remainingCreditable = invoice.total - totalCredited;
+
+  const canIssueCreditNote =
+    invoice.status === "completed" &&
+    ["Admin", "Accountant"].includes(userRole) &&
+    remainingCreditable > 0.01;
 
   return (
     <div className="space-y-2">
+      {/* Edit Invoice (for drafts) */}
+      {canEdit && (
+        <Button
+          variant="outline"
+          className="w-full border-yellow-500/20 text-yellow-600 hover:bg-yellow-500/10"
+          asChild
+        >
+          <Link href={`/dashboard/invoices/${invoice._id}/update`}>
+            <Edit className="mr-2 h-4 w-4" />
+            Edit Invoice
+          </Link>
+        </Button>
+      )}
+
       {/* Post Invoice (for drafts) */}
       {canPost && (
         <Button
@@ -92,6 +145,18 @@ export function InvoiceDetailActions({
         <Download className="mr-2 h-4 w-4" />
         Download PDF
       </Button>
+
+      {/* Issue Credit Note */}
+      {canIssueCreditNote && (
+        <Button
+          variant="outline"
+          className="w-full border-orange-500/20 text-orange-600 hover:bg-orange-500/10"
+          onClick={() => setCreditNoteDialogOpen(true)}
+        >
+          <ReceiptText className="mr-2 h-4 w-4" />
+          Issue Credit Note
+        </Button>
+      )}
 
       {/* Cancel Invoice */}
       {canCancel && (
@@ -193,6 +258,13 @@ export function InvoiceDetailActions({
         onOpenChange={setPaymentDialogOpen}
         invoice={invoice}
         paymentAccounts={paymentAccounts}
+      />
+
+      {/* Credit Note Dialog */}
+      <IssueCreditNoteDialog
+        open={creditNoteDialogOpen}
+        onOpenChange={setCreditNoteDialogOpen}
+        invoice={invoice}
       />
     </div>
   );

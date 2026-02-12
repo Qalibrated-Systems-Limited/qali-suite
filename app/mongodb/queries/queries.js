@@ -18,12 +18,21 @@ import DeliveryNote from "../../models/dnote";
 import { StockRequest } from "../../models/requests";
 import { request } from "http";
 import { sanitizeSearchTerm } from "../../../lib/utils/sanitize";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { ObjectId } from "mongodb";
+import { serializeBsonType } from "@/lib/utils";
 
 dbConnect();
 const ITEMS_PER_PAGE = 20;
 
 export const fetchTodaySummary = async () => {
   noStore();
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const matchStage1 = {
     $match: {
       "firstWeight.date": {
@@ -39,10 +48,10 @@ export const fetchTodaySummary = async () => {
     $match: {
       "firstWeight.date": {
         $gte: new Date(
-          new Date().setDate(new Date().getDate() - new Date().getDay() + 1)
+          new Date().setDate(new Date().getDate() - new Date().getDay() + 1),
         ), // Start of the week (Monday)
         $lt: new Date(
-          new Date().setDate(new Date().getDate() - new Date().getDay() + 8)
+          new Date().setDate(new Date().getDate() - new Date().getDay() + 8),
         ), // Start of next week (Monday)
       },
     },
@@ -109,6 +118,7 @@ export const fetchTodaySummary = async () => {
 
   const matchStage = {
     $match: {
+      ...tenantMatch,
       isComplete: true,
     },
   };
@@ -142,9 +152,18 @@ export const getCustomers = async () => {
 
 export const fetchCardsData = async () => {
   noStore();
-  const customers = await Accounts.countDocuments({ isActive: true });
-  const transactions = await Transactions.countDocuments();
-  const vehicles = await Vehicles.countDocuments();
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
+  const customers = await Accounts.countDocuments({
+    ...tenantMatch,
+    isActive: true,
+  });
+  const transactions = await Transactions.countDocuments(tenantMatch);
+  const vehicles = await Vehicles.countDocuments(tenantMatch);
 
   const data = await Promise.all([transactions, vehicles, customers]);
 
@@ -157,8 +176,15 @@ export const fetchCardsData = async () => {
 
 export const monthlyAggregates = async () => {
   noStore();
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const matchStage = {
     $match: {
+      ...tenantMatch,
       "firstWeight.date": {
         $gte: new Date(new Date().getFullYear(), 0, 1),
         $lt: new Date(new Date().getFullYear() + 1, 0, 1),
@@ -196,15 +222,22 @@ export const monthlyAggregates = async () => {
 };
 
 export const weeklyAggregates = async () => {
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const matchStage = {
     $match: {
+      ...tenantMatch,
       isComplete: true,
       "firstWeight.date": {
         $gte: new Date(
-          new Date().setDate(new Date().getDate() - new Date().getDay() + 1)
+          new Date().setDate(new Date().getDate() - new Date().getDay() + 1),
         ), // Start of the week (Monday)
         $lt: new Date(
-          new Date().setDate(new Date().getDate() - new Date().getDay() + 8)
+          new Date().setDate(new Date().getDate() - new Date().getDay() + 8),
         ), // Start of next week (Monday)
       },
     },
@@ -419,150 +452,19 @@ export const searchAccounts = async (searchTerm, page = 1) => {
   }
 };
 
-//Products or stock queries
-
-export const fetchStockPages = async (searchTerm, filters = {}) => {
-  const { category, quantity } = filters;
-
-  // Sanitize search term to prevent NoSQL injection
-  const safeSearchTerm = sanitizeSearchTerm(searchTerm);
-
-  // Build filter conditions
-  let additionalFilters = {};
-
-  // Category filter
-  if (category) {
-    additionalFilters.category = category;
-  }
-
-  // Quantity/Stock level filter
-  if (quantity) {
-    switch (quantity) {
-      case "in-stock":
-        additionalFilters.stock = { $gte: 10 };
-        break;
-      case "low-stock":
-        additionalFilters.stock = { $gte: 1, $lte: 9 };
-        break;
-      case "out-of-stock":
-        additionalFilters.stock = 0;
-        break;
-    }
-  }
-
-  const transactionSearchStage = {
-    $match: {
-      $and: [
-        additionalFilters,
-        {
-          $or: [
-            { name: { $regex: safeSearchTerm, $options: "i" } },
-            { SKU: { $regex: safeSearchTerm, $options: "i" } },
-          ],
-        },
-      ],
-    },
-  };
-
-  const baseFilterStage = {
-    $match: additionalFilters,
-  };
-
-  const countStage = {
-    $count: "totalRecords",
-  };
-
-  let pipeline = [baseFilterStage, countStage];
-
-  if (safeSearchTerm && safeSearchTerm.length > 0) {
-    pipeline = [transactionSearchStage, countStage];
-  }
-
-  const result = await Product.aggregate(pipeline);
-
-  let count = 0;
-  if (result && result.length > 0) {
-    count = result[0].totalRecords;
-  }
-
-  const noOfPages = Math.ceil(Number(count) / ITEMS_PER_PAGE);
-
-  return noOfPages;
-};
-
-export const searchStock = async (searchTerm, page = 1, filters = {}) => {
-  const { category, quantity } = filters;
-  const skipRecords = (page - 1) * ITEMS_PER_PAGE;
-
-  // Sanitize search term to prevent NoSQL injection
-  const safeSearchTerm = sanitizeSearchTerm(searchTerm);
-
-  // Build filter conditions
-  let additionalFilters = {};
-
-  // Category filter
-  if (category) {
-    additionalFilters.category = category;
-  }
-
-  // Quantity/Stock level filter
-  if (quantity) {
-    switch (quantity) {
-      case "in-stock":
-        additionalFilters.stock = { $gte: 10 };
-        break;
-      case "low-stock":
-        additionalFilters.stock = { $gte: 1, $lte: 9 };
-        break;
-      case "out-of-stock":
-        additionalFilters.stock = 0;
-        break;
-    }
-  }
-
-  const searchStage = {
-    $match: {
-      $and: [
-        additionalFilters,
-        {
-          $or: [
-            { name: { $regex: safeSearchTerm, $options: "i" } },
-            { SKU: { $regex: safeSearchTerm, $options: "i" } },
-          ],
-        },
-      ],
-    },
-  };
-
-  const baseFilterStage = {
-    $match: additionalFilters,
-  };
-
-  const paginationStage = [{ $skip: skipRecords }, { $limit: ITEMS_PER_PAGE }];
-
-  const sortStage = { $sort: { createdAt: -1 } };
-
-  let pipeline = [baseFilterStage, sortStage, ...paginationStage];
-
-  if (safeSearchTerm && safeSearchTerm.length > 0) {
-    pipeline = [searchStage, sortStage, ...paginationStage];
-  }
-
-  let result = await Product.aggregate(pipeline);
-  result = result.map((res) => {
-    return { ...res, _id: res._id.toString() };
-  });
-
-  return result;
-};
-
 export const fetchRequestPages = async (
   searchTerm,
   userId,
   userRole,
-  filters = {}
+  filters = {},
 ) => {
   const { status, priority, customer, startDate, endDate } = filters;
+
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
 
   // Sanitize search term to prevent NoSQL injection
   const safeSearchTerm = sanitizeSearchTerm(searchTerm);
@@ -571,7 +473,7 @@ export const fetchRequestPages = async (
   let roleFilter = {};
 
   if (userRole === "admin" || userRole === "manager") {
-    // Can see all requests
+    // Can see all requests (within tenant)
     roleFilter = {};
   } else if (userRole === "Store Manager" || userRole === "storekeeper") {
     // Can see approved requests (for fulfillment) OR their own requests
@@ -618,20 +520,24 @@ export const fetchRequestPages = async (
     }
   }
 
-  // Combine role filter with additional filters
+  // Combine role filter with additional filters and tenant match
   const combinedFilter = {
+    ...tenantMatch,
     ...additionalFilters,
   };
 
   const transactionSearchStage = {
     $match: {
       $and: [
+        tenantMatch, // Apply tenant isolation first
         roleFilter, // Apply role filter
-        combinedFilter, // Apply other filters
+        additionalFilters, // Apply other filters
         {
           $or: [
             { "requester.name": { $regex: safeSearchTerm, $options: "i" } },
-            { "requester.department": { $regex: safeSearchTerm, $options: "i" } },
+            {
+              "requester.department": { $regex: safeSearchTerm, $options: "i" },
+            },
             { requestNumber: { $regex: safeSearchTerm, $options: "i" } },
             { customer: { $regex: safeSearchTerm, $options: "i" } },
           ],
@@ -640,10 +546,10 @@ export const fetchRequestPages = async (
     },
   };
 
-  // If no search term, combine role and additional filters
+  // If no search term, combine tenant, role and additional filters
   const baseFilterStage = {
     $match: {
-      $and: [roleFilter, combinedFilter],
+      $and: [tenantMatch, roleFilter, additionalFilters],
     },
   };
 
@@ -674,9 +580,15 @@ export const searchRequests = async (
   page = 1,
   userId,
   userRole,
-  filters = {}
+  filters = {},
 ) => {
   const { status, priority, customer, startDate, endDate } = filters;
+
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
 
   // Sanitize search term to prevent NoSQL injection
   const safeSearchTerm = sanitizeSearchTerm(searchTerm);
@@ -685,7 +597,7 @@ export const searchRequests = async (
   let roleFilter = {};
 
   if (userRole === "admin" || userRole === "manager") {
-    // Admins and managers can see all requests
+    // Admins and managers can see all requests (within tenant)
     roleFilter = {};
   } else if (userRole === "Store Manager" || userRole === "storekeeper") {
     // Store managers can see:
@@ -736,20 +648,24 @@ export const searchRequests = async (
 
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
-  // Combine role filter with additional filters
+  // Combine tenant match with additional filters
   const combinedFilter = {
+    ...tenantMatch,
     ...additionalFilters,
   };
 
   const searchStage = {
     $match: {
       $and: [
-        roleFilter, // Apply role filter first
-        combinedFilter, // Apply other filters
+        tenantMatch, // Apply tenant isolation first
+        roleFilter, // Apply role filter
+        additionalFilters, // Apply other filters
         {
           $or: [
             { "requester.name": { $regex: safeSearchTerm, $options: "i" } },
-            { "requester.department": { $regex: safeSearchTerm, $options: "i" } },
+            {
+              "requester.department": { $regex: safeSearchTerm, $options: "i" },
+            },
             { requestNumber: { $regex: safeSearchTerm, $options: "i" } },
             { customer: { $regex: safeSearchTerm, $options: "i" } },
           ],
@@ -758,10 +674,10 @@ export const searchRequests = async (
     },
   };
 
-  // If no search term, combine role and additional filters
+  // If no search term, combine tenant, role and additional filters
   const baseFilterStage = {
     $match: {
-      $and: [roleFilter, combinedFilter],
+      $and: [tenantMatch, roleFilter, additionalFilters],
     },
   };
 
@@ -860,12 +776,19 @@ export const searchRequests = async (
     };
   });
 
-  return result;
+  return serializeBsonType(result);
 };
 export const extractStock = async () => {
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
+  const matchStage = { $match: tenantMatch };
   const sortStage = { $sort: { category: 1 } };
 
-  let pipeline = [sortStage];
+  let pipeline = [matchStage, sortStage];
 
   let result = await Product.aggregate(pipeline);
   result = result.map((res) => {
@@ -880,7 +803,7 @@ export async function generateReport(
   endDate,
   vehicle,
   commodity,
-  customer
+  customer,
 ) {
   try {
     // Step 1: Define the match filter based on the inputs
@@ -1080,6 +1003,13 @@ export const searchInvoice = async (searchTerm, page = 1) => {
 };
 
 export const fetchLatestInvoices = async () => {
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
+  const matchStage = { $match: tenantMatch };
   const projectStage = {
     $project: {
       invoiceNumber: 1,
@@ -1101,7 +1031,7 @@ export const fetchLatestInvoices = async () => {
   const limitStage = { $limit: 3 };
 
   const sortStage = { $sort: { createdAt: -1 } };
-  const pipeline = [sortStage, limitStage, sortStage, projectStage];
+  const pipeline = [matchStage, sortStage, limitStage, projectStage];
 
   let result = await Invoice.aggregate(pipeline);
   if (result && result.length > 0) {
@@ -1241,7 +1171,13 @@ export const searchStockTx = async (searchTerm, page = 1) => {
 };
 
 export const getStockAggregate = async () => {
-  const matchStage = { $match: { stock: { $gt: 0 } } };
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
+  const matchStage = { $match: { ...tenantMatch, stock: { $gt: 0 } } };
   const groupStage = {
     $group: {
       _id: null,
@@ -1257,12 +1193,24 @@ export const getStockAggregate = async () => {
 };
 
 export const invoicesCount = async () => {
-  const result = await Invoice.countDocuments();
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
+  const result = await Invoice.countDocuments(tenantMatch);
 
   return result;
 };
 
 export const getTotalSaleThisMonth = async () => {
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   // Define the start and end of the current month
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
@@ -1276,8 +1224,9 @@ export const getTotalSaleThisMonth = async () => {
   // Aggregation pipeline
   const result = await StockTransaction.aggregate([
     {
-      // Match transactions from the current month
+      // Match transactions from the current month (with tenant isolation)
       $match: {
+        ...tenantMatch,
         date: {
           $gte: startOfMonth,
           $lt: endOfMonth,
@@ -1307,6 +1256,12 @@ export const getTotalSaleThisMonth = async () => {
 export const monthlySalesDistro = async () => {
   noStore();
 
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const now = new Date();
   const currentYear = now.getFullYear();
 
@@ -1318,6 +1273,7 @@ export const monthlySalesDistro = async () => {
   const endOfHalfYear = new Date(currentYear, isFirstHalf ? 6 : 12, 1); // July 1st or January 1st of the next year
   const matchStage = {
     $match: {
+      ...tenantMatch,
       date: {
         $gte: startOfHalfYear,
         $lt: endOfHalfYear,
@@ -1376,6 +1332,12 @@ export const monthlySalesDistro = async () => {
 export const quartelySummary = async () => {
   noStore();
 
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
@@ -1389,6 +1351,7 @@ export const quartelySummary = async () => {
 
   const matchStage = {
     $match: {
+      ...tenantMatch,
       date: {
         $gte: startOfQuarter,
         $lt: endOfQuarter,
@@ -1445,6 +1408,13 @@ export const quartelySummary = async () => {
 };
 
 export async function getTopSellingProducts() {
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
+  const matchStage = { $match: tenantMatch };
   const groupStage = {
     $group: {
       _id: "$SKU",
@@ -1477,7 +1447,13 @@ export async function getTopSellingProducts() {
   };
   const sortStage = { $sort: { Sales: -1 } };
   const limitStage = { $limit: 10 };
-  const pipeline = [groupStage, sortStage, limitStage, projectStage];
+  const pipeline = [
+    matchStage,
+    groupStage,
+    sortStage,
+    limitStage,
+    projectStage,
+  ];
   const result = await StockTransaction.aggregate(pipeline);
 
   return result;
@@ -1485,6 +1461,12 @@ export async function getTopSellingProducts() {
 
 export const quarterlySalesDistro = async () => {
   noStore();
+
+  // Get tenant context for multi-tenant isolation
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
 
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -1495,6 +1477,7 @@ export const quarterlySalesDistro = async () => {
 
   const matchStage = {
     $match: {
+      ...tenantMatch,
       date: {
         $gte: startOfYear,
         $lt: endOfYear,
@@ -1645,34 +1628,4 @@ export const searchDnotes = async (searchTerm, page = 1) => {
   } catch (e) {
     throw new Error("Could not get dNotes");
   }
-};
-
-export const fetchStockData = async () => {
-  const projectStage = {
-    $project: {
-      stock: 1,
-      SKU: 1,
-      name: 1,
-      price: 1,
-      unit: 1,
-      category: { $toUpper: "$category" },
-    },
-  };
-  const sortStage = { $sort: { category: 1 } };
-  // Organize stock by department
-
-  const stockItems = await Product.aggregate([projectStage, sortStage]);
-
-  return stockItems.reduce((acc, item) => {
-    const dept = item.category || "Uncategorized";
-    if (!acc[dept]) acc[dept] = [];
-    acc[dept].push({
-      name: item.name,
-      quantity: item.stock.$numberInt || item.stock,
-      SKU: item.SKU,
-      price: item.price,
-      unit: item.unit,
-    });
-    return acc;
-  }, {});
 };

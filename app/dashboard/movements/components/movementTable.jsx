@@ -66,11 +66,18 @@ export function MovementsTable({ movements }) {
   };
 
   const formatCurrency = (amount) => {
+    // Handle undefined, null, or NaN values
+    const safeAmount = typeof amount === "number" && !isNaN(amount) ? amount : 0;
     return new Intl.NumberFormat("en-KE", {
       style: "currency",
       currency: "KES",
       minimumFractionDigits: 0,
-    }).format(amount);
+    }).format(safeAmount);
+  };
+
+  // Get movement value from costing fields (schema-defined)
+  const getMovementValue = (movement) => {
+    return movement.costing?.totalValue || movement.costing?.totalCost || 0;
   };
 
   return (
@@ -186,7 +193,7 @@ export function MovementsTable({ movements }) {
                         </TableCell>
 
                         <TableCell className="font-medium text-foreground">
-                          {formatCurrency(movement.totalValue)}
+                          {formatCurrency(getMovementValue(movement))}
                         </TableCell>
 
                         <TableCell>
@@ -298,7 +305,7 @@ export function MovementsTable({ movements }) {
                       <div>
                         <p className="text-muted-foreground text-xs">Value</p>
                         <p className="font-medium text-foreground">
-                          {formatCurrency(movement.totalValue)}
+                          {formatCurrency(getMovementValue(movement))}
                         </p>
                       </div>
                       <div>

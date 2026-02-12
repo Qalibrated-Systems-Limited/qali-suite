@@ -37,6 +37,10 @@ import Party from "@/app/models/parties";
 import Product from "@/app/models/product";
 import Account from "@/app/models/account";
 import dbConnect from "@/app/config/dbConnect";
+import {
+  getTenantContext,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // CONSTANTS
@@ -174,6 +178,12 @@ export async function createPurchaseOrder(prevState, formData) {
 
     await dbConnect();
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    if (!companyId && !isSuperAdmin) {
+      return { success: false, error: "Company context required" };
+    }
+
     // 3. Parse and validate form data
     const rawData = parseFormData(formData);
     const validation = CreatePOSchema.safeParse(rawData);
@@ -198,8 +208,10 @@ export async function createPurchaseOrder(prevState, formData) {
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    // 5. Validate supplier exists and is correct type
-    const supplier = await Party.findById(data.supplierId)
+    // 5. Validate supplier exists and is correct type (tenant-scoped)
+    const supplier = await Party.findOne(
+      withTenantScope({ _id: data.supplierId }, companyId, isSuperAdmin)
+    )
       .session(mongoSession)
       .lean();
     if (!supplier) {
@@ -220,18 +232,44 @@ export async function createPurchaseOrder(prevState, formData) {
       };
     }
 
-    // 6. Process line items
-    const processedLines = [];
+    // 6. Process line items - batch fetch accounts and products to avoid N+1 queries
 
+    // Collect all unique IDs first
+    const accountIds = data.lines
+      .filter(line => line.accountId && line.accountId !== "" && line.accountId !== "none")
+      .map(line => line.accountId);
+
+    const productIds = data.lines
+      .filter(line => line.productId && line.productId !== "No Product" && line.productId !== "none" && line.productId !== "")
+      .map(line => line.productId);
+
+    // Batch fetch all accounts and products in parallel
+    const [accounts, products] = await Promise.all([
+      accountIds.length > 0
+        ? Account.find(
+            withTenantScope({ _id: { $in: accountIds } }, companyId, isSuperAdmin)
+          ).session(mongoSession).lean()
+        : [],
+      productIds.length > 0
+        ? Product.find(
+            withTenantScope({ _id: { $in: productIds } }, companyId, isSuperAdmin)
+          ).session(mongoSession).lean()
+        : [],
+    ]);
+
+    // Create lookup maps for O(1) access
+    const accountMap = new Map(accounts.map(a => [a._id.toString(), a]));
+    const productMap = new Map(products.map(p => [p._id.toString(), p]));
+
+    // Process lines using maps (no additional queries)
+    const processedLines = [];
     for (let i = 0; i < data.lines.length; i++) {
       const line = data.lines[i];
 
-      // Get account if specified (for expense categorization)
+      // Get account from map if specified
       let accountData = null;
       if (line.accountId && line.accountId !== "" && line.accountId !== "none") {
-        const account = await Account.findById(line.accountId)
-          .session(mongoSession)
-          .lean();
+        const account = accountMap.get(line.accountId);
         if (account) {
           accountData = {
             id: account._id,
@@ -242,17 +280,10 @@ export async function createPurchaseOrder(prevState, formData) {
         }
       }
 
-      // Get product if specified
+      // Get product from map if specified
       let productData = null;
-      if (
-        line.productId &&
-        line.productId !== "No Product" &&
-        line.productId !== "none" &&
-        line.productId !== ""
-      ) {
-        const product = await Product.findById(line.productId)
-          .session(mongoSession)
-          .lean();
+      if (line.productId && line.productId !== "No Product" && line.productId !== "none" && line.productId !== "") {
+        const product = productMap.get(line.productId);
         if (product) {
           productData = {
             id: product._id,
@@ -314,6 +345,7 @@ export async function createPurchaseOrder(prevState, formData) {
     const [po] = await PurchaseOrder.create(
       [
         {
+          companyId, // Add tenant context
           poNumber,
           poDate: data.poDate,
           expectedDeliveryDate: data.expectedDeliveryDate || null,
@@ -390,8 +422,13 @@ export async function updatePurchaseOrder(poId, prevState, formData) {
 
     await dbConnect();
 
-    // 2. Get PO
-    const po = await PurchaseOrder.findById(poId);
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    // 2. Get PO (tenant-scoped)
+    const po = await PurchaseOrder.findOne(
+      withTenantScope({ _id: poId }, companyId, isSuperAdmin)
+    );
     if (!po) {
       return { success: false, error: "Purchase order not found" };
     }
@@ -439,9 +476,11 @@ export async function updatePurchaseOrder(poId, prevState, formData) {
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    // 7. Update supplier if changed
+    // 7. Update supplier if changed (tenant-scoped)
     if (data.supplierId !== po.supplier?.partyId?.toString()) {
-      const supplier = await Party.findById(data.supplierId)
+      const supplier = await Party.findOne(
+        withTenantScope({ _id: data.supplierId }, companyId, isSuperAdmin)
+      )
         .session(mongoSession)
         .lean();
       if (!supplier) {
@@ -474,7 +513,7 @@ export async function updatePurchaseOrder(poId, prevState, formData) {
       };
     }
 
-    // 8. Process lines
+    // 8. Process lines (tenant-scoped lookups)
     const processedLines = [];
 
     for (let i = 0; i < data.lines.length; i++) {
@@ -482,7 +521,9 @@ export async function updatePurchaseOrder(poId, prevState, formData) {
 
       let accountData = null;
       if (line.accountId && line.accountId !== "" && line.accountId !== "none") {
-        const account = await Account.findById(line.accountId)
+        const account = await Account.findOne(
+          withTenantScope({ _id: line.accountId }, companyId, isSuperAdmin)
+        )
           .session(mongoSession)
           .lean();
         if (account) {
@@ -502,7 +543,9 @@ export async function updatePurchaseOrder(poId, prevState, formData) {
         line.productId !== "none" &&
         line.productId !== ""
       ) {
-        const product = await Product.findById(line.productId)
+        const product = await Product.findOne(
+          withTenantScope({ _id: line.productId }, companyId, isSuperAdmin)
+        )
           .session(mongoSession)
           .lean();
         if (product) {
@@ -605,7 +648,12 @@ export async function sendPurchaseOrder(poId) {
 
     await dbConnect();
 
-    const po = await PurchaseOrder.findById(poId);
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const po = await PurchaseOrder.findOne(
+      withTenantScope({ _id: poId }, companyId, isSuperAdmin)
+    );
     if (!po) {
       return { success: false, error: "Purchase order not found" };
     }
@@ -669,7 +717,12 @@ export async function confirmPurchaseOrder(poId) {
 
     await dbConnect();
 
-    const po = await PurchaseOrder.findById(poId);
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const po = await PurchaseOrder.findOne(
+      withTenantScope({ _id: poId }, companyId, isSuperAdmin)
+    );
     if (!po) {
       return { success: false, error: "Purchase order not found" };
     }
@@ -734,7 +787,12 @@ export async function cancelPurchaseOrder(poId, prevState, formData) {
 
     await dbConnect();
 
-    const po = await PurchaseOrder.findById(poId);
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const po = await PurchaseOrder.findOne(
+      withTenantScope({ _id: poId }, companyId, isSuperAdmin)
+    );
     if (!po) {
       return { success: false, error: "Purchase order not found" };
     }
@@ -781,7 +839,12 @@ export async function deletePurchaseOrder(poId) {
 
     await dbConnect();
 
-    const po = await PurchaseOrder.findById(poId);
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const po = await PurchaseOrder.findOne(
+      withTenantScope({ _id: poId }, companyId, isSuperAdmin)
+    );
     if (!po) {
       return { success: false, error: "Purchase order not found" };
     }
@@ -907,12 +970,17 @@ export async function convertPOToBill(poId, prevState, formData) {
 
     const data = validation.data;
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     // Start transaction
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    // Get PO
-    const po = await PurchaseOrder.findById(poId).session(mongoSession);
+    // Get PO (tenant-scoped)
+    const po = await PurchaseOrder.findOne(
+      withTenantScope({ _id: poId }, companyId, isSuperAdmin)
+    ).session(mongoSession);
     if (!po) {
       await mongoSession.abortTransaction();
       return { success: false, error: "Purchase order not found" };
@@ -953,10 +1021,10 @@ export async function convertPOToBill(poId, prevState, formData) {
       }
     }
 
-    // Get default inventory account for product lines
-    const inventoryAccount = await Account.findOne({
-      systemAccount: "inventory",
-    }).session(mongoSession);
+    // Get default inventory account for product lines (tenant-scoped)
+    const inventoryAccount = await Account.findOne(
+      withTenantScope({ systemAccount: "inventory" }, companyId, isSuperAdmin)
+    ).session(mongoSession);
 
     // Use schema method to convert
     const bill = await po.convertToBill(
@@ -1017,7 +1085,12 @@ export async function getAvailablePOLines(poId) {
 
     await dbConnect();
 
-    const po = await PurchaseOrder.findById(poId).lean();
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const po = await PurchaseOrder.findOne(
+      withTenantScope({ _id: poId }, companyId, isSuperAdmin)
+    ).lean();
     if (!po) {
       return { success: false, error: "Purchase order not found" };
     }

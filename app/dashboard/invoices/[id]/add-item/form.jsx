@@ -222,6 +222,8 @@ export default function AddItemForm({ products, id }) {
                           placeholder="Enter quantity"
                           {...field}
                           type="number"
+                          min="1"
+                          step="1"
                         />
                       </FormControl>
                       <div

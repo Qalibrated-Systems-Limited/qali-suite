@@ -5,7 +5,9 @@ import {
   fetchActiveCustomers,
   fetchAvailableProducts,
 } from "@/app/mongodb/queries/invoice-queries";
+import { getActiveCheckouts } from "@/app/mongodb/queries/checkout-queries";
 import EditInvoiceFormClient from "../../components/EditInvoiceForm";
+import { serializeBsonType } from "@/lib/utils";
 
 export default async function EditInvoicePage({ params }) {
   const resolvedParams = await params;
@@ -34,11 +36,13 @@ export default async function EditInvoicePage({ params }) {
   }
 
   // Fetch invoice data
-  const invoice = await getInvoiceById(resolvedParams.id);
+  const result = await getInvoiceById(resolvedParams.id);
 
-  if (!invoice) {
+  if (!result) {
     notFound();
   }
+
+  const invoice = serializeBsonType(result);
 
   // Can't edit paid or cancelled invoices
   if (invoice.status === "paid" || invoice.status === "cancelled") {
@@ -64,10 +68,11 @@ export default async function EditInvoicePage({ params }) {
     );
   }
 
-  // Fetch customers and products in parallel
-  const [customers, products] = await Promise.all([
+  // Fetch customers, products, and active checkouts in parallel
+  const [customers, products, checkouts] = await Promise.all([
     fetchActiveCustomers(),
     fetchAvailableProducts(),
+    getActiveCheckouts(),
   ]);
 
   return (
@@ -75,6 +80,7 @@ export default async function EditInvoicePage({ params }) {
       invoice={invoice}
       customers={customers}
       products={products}
+      checkouts={checkouts}
       user={user}
     />
   );

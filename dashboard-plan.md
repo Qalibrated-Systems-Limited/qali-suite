@@ -2,7 +2,7 @@
 #                    ERP DASHBOARD MASTER PLAN
 #                    Complete Feature Reference
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Generated: January 2025
+#  Generated: January 2026
 #  System: Multi-tenant ERP (Stock, Accounting, HR)
 #  Target: Admin, Accountant, Store Manager, Employee roles
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -11,6 +11,7 @@
 ## TABLE OF CONTENTS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+0. SUPERADMIN DASHBOARD (Platform Management) ⭐ NEW
 1. EXECUTIVE SUMMARY DASHBOARD (CEO/Owner View)
 2. ADMIN DASHBOARD (Operations Manager)
 3. ACCOUNTANT DASHBOARD (Finance Team)
@@ -19,6 +20,138 @@
 6. DATA SOURCES & QUERIES
 7. UTILITY FUNCTIONS
 8. IMPLEMENTATION STATUS
+
+
+═══════════════════════════════════════════════════════════════════════════════
+## 0. SUPERADMIN DASHBOARD (Platform Management) ⭐ NEW
+═══════════════════════════════════════════════════════════════════════════════
+
+PURPOSE: Multi-tenant platform oversight. Answer: "How are all companies doing?"
+
+ROUTE: /dashboard (when role === "SuperAdmin")
+ACCESS: SuperAdmin role only (no companyId attached)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  TOP ROW: PLATFORM METRICS (4 Cards)                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │
+│  │ 🏢 COMPANIES│ │ 👥 USERS    │ │ 💰 MRR      │ │ ⚠️ ALERTS   │           │
+│  │             │ │             │ │             │ │             │           │
+│  │ 12 Active   │ │ 156 Total   │ │ KES 450K    │ │ 3 Critical  │           │
+│  │ 2 Trial     │ │ 23 Active   │ │ ▲ 8% MoM    │ │ 5 Warnings  │           │
+│  │ 1 Suspended │ │ Today       │ │             │ │             │           │
+│  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SECOND ROW: SUBSCRIPTION OVERVIEW                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────┐           │
+│  │ Subscription Distribution                      [Donut Chart] │           │
+│  │                                                              │           │
+│  │   ┌───────────────────────────────────────┐                  │           │
+│  │   │ 🟢 Enterprise    3 companies   25%    │                  │           │
+│  │   │ 🔵 Professional  5 companies   42%    │                  │           │
+│  │   │ 🟡 Starter       2 companies   17%    │                  │           │
+│  │   │ ⚪ Free/Trial    2 companies   17%    │                  │           │
+│  │   └───────────────────────────────────────┘                  │           │
+│  │                                                              │           │
+│  └─────────────────────────────────────────────────────────────┘           │
+│                                                                             │
+│  ┌─────────────────────────────┐ ┌─────────────────────────────┐           │
+│  │ 📅 Trials Expiring Soon    │ │ 💳 Subscriptions Expiring   │           │
+│  │                             │ │                             │           │
+│  │ Acme Corp      2 days       │ │ TechStart Ltd   7 days      │           │
+│  │ NewBiz Inc     5 days       │ │ Global Trade    14 days     │           │
+│  │ [Extend] [Convert]          │ │ [Renew] [Contact]           │           │
+│  └─────────────────────────────┘ └─────────────────────────────┘           │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  THIRD ROW: COMPANY HEALTH OVERVIEW                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Company                │ Status  │ Users │ Revenue  │ Health │ Action│   │
+│  ├─────────────────────────────────────────────────────────────────────┤   │
+│  │ Qalibrated Scales     │ 🟢 Active│ 25    │ KES 2.5M │ ████░  │ [→]   │   │
+│  │ TechStart Ltd         │ 🟢 Active│ 12    │ KES 800K │ ███░░  │ [→]   │   │
+│  │ Global Trade Inc      │ 🟡 Trial │ 5     │ KES 0    │ ██░░░  │ [→]   │   │
+│  │ Suspended Corp        │ 🔴 Susp. │ 8     │ KES 150K │ █░░░░  │ [→]   │   │
+│  │                                                                       │   │
+│  │ [View All Companies →]                                                │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  FOURTH ROW: PLATFORM ACTIVITY & ALERTS                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────┐ ┌─────────────────────────────┐           │
+│  │ 📊 Platform Activity        │ │ 🚨 System Alerts            │           │
+│  │ (Last 30 Days)              │ │                             │           │
+│  │                             │ │ 🔴 3 companies overdue      │           │
+│  │ [Stacked Area Chart]        │ │    on payments              │           │
+│  │ • New Users                 │ │                             │           │
+│  │ • Active Sessions           │ │ 🟡 2 trials expiring        │           │
+│  │ • Transactions              │ │    within 3 days            │           │
+│  │                             │ │                             │           │
+│  │ Colors:                     │ │ 🟡 1 company at user        │           │
+│  │ • Users: #3b82f6            │ │    limit (25/25)            │           │
+│  │ • Sessions: #10b981         │ │                             │           │
+│  │ • Transactions: #f59e0b     │ │ [View All Alerts →]         │           │
+│  └─────────────────────────────┘ └─────────────────────────────┘           │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  FIFTH ROW: QUICK ACTIONS & RECENT ACTIVITY                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  QUICK ACTIONS:                                                             │
+│  [+ New Company] [+ New User] [📧 Bulk Email] [📊 Generate Report]         │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Recent Platform Activity (Timeline)                                  │   │
+│  ├─────────────────────────────────────────────────────────────────────┤   │
+│  │ ● 5m ago   New user "John" added to Qalibrated Scales               │   │
+│  │ ● 1h ago   TechStart Ltd upgraded to Professional plan              │   │
+│  │ ● 2h ago   New company "Fresh Produce Ltd" registered               │   │
+│  │ ● 3h ago   Global Trade Inc trial started                           │   │
+│  │ ● Yesterday  Payment received from Acme Corp - KES 50,000           │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+METRICS SOURCE (SuperAdmin):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Company Count:      Company.countDocuments({ status: "active" })
+• User Count:         User.countDocuments() (across all companies)
+• Active Users:       User.find({ lastLoginAt: { $gte: today } })
+• MRR:               Company.aggregate([...sum subscription amounts])
+• Trials Expiring:    Company.find({ "subscription.status": "trial",
+                                     "subscription.trialEndsAt": { $lte: soon } })
+• Subscription Dist:  Company.aggregate([...group by plan])
+• Company Health:     Calculated from: user activity, transaction count,
+                      payment status, data usage
+• Platform Activity:  Aggregate across User logins, JournalEntry, StockMovement
+• Alerts:            Computed from subscription status, payment overdue,
+                     user limits, trial expiry
+
+SUPERADMIN SPECIFIC PAGES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• /dashboard/admin/companies         - Company list & management
+• /dashboard/admin/companies/[id]    - Individual company detail
+• /dashboard/admin/companies/new     - Create new company
+• /dashboard/admin/users             - All users across companies
+• /dashboard/admin/subscriptions     - Subscription management
+• /dashboard/admin/reports           - Cross-company reports
+• /dashboard/admin/settings          - Platform settings
 
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -495,6 +628,50 @@ PURPOSE: Self-service portal. Answer: "What's my status?"
 All queries use JournalEntry as the SOURCE OF TRUTH for financial data.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+### SUPERADMIN QUERIES (Cross-Tenant)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ QUERY                  │ SOURCE           │ FILTER                        │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Total Companies        │ Company          │ countDocuments()              │
+│                        │                  │ Group by status               │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Total Users            │ User             │ countDocuments()              │
+│                        │                  │ (no companyId filter)         │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Active Users Today     │ User             │ lastLoginAt >= todayStart     │
+├────────────────────────────────────────────────────────────────────────────┤
+│ MRR (Monthly Revenue)  │ Company          │ aggregate: sum subscription   │
+│                        │                  │ where status: "active"        │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Subscription by Plan   │ Company          │ aggregate: group by plan      │
+│                        │                  │ count per plan type           │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Trials Expiring        │ Company          │ subscription.status: "trial"  │
+│                        │                  │ trialEndsAt <= now + 7days    │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Subscriptions Expiring │ Company          │ subscription.expiresAt <=     │
+│                        │                  │ now + 30days                  │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Company Health Score   │ Calculated       │ Based on:                     │
+│                        │                  │ • User activity (logins)      │
+│                        │                  │ • Transaction volume          │
+│                        │                  │ • Payment status              │
+│                        │                  │ • Feature usage               │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Platform Activity      │ Multiple         │ Aggregate across all:         │
+│                        │                  │ • User.find({createdAt})      │
+│                        │                  │ • JournalEntry.count()        │
+│                        │                  │ • StockMovement.count()       │
+├────────────────────────────────────────────────────────────────────────────┤
+│ System Alerts          │ Calculated       │ • Overdue payments            │
+│                        │                  │ • Expiring trials             │
+│                        │                  │ • User limit warnings         │
+│                        │                  │ • Inactive companies          │
+└────────────────────────────────────────────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ### FINANCIAL QUERIES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -636,6 +813,9 @@ Usage:
 ┌────────────────────────────────────────────────────────────────────────────┐
 │ FEATURE                │ SCHEMA │ ACTIONS │ UI    │ QUERIES │ PRIORITY   │
 ├────────────────────────────────────────────────────────────────────────────┤
+│ Multi-Tenancy          │ 100%   │ 95%     │ 80%   │ 90%     │ 🟢 DONE    │
+│ Company Management     │ 100%   │ 100%    │ 80%   │ 80%     │ 🟢 DONE    │
+│ Dashboard - SuperAdmin │ -      │ -       │ 0%    │ 20%     │ 🔴 HIGH    │
 │ Bills                  │ 95%    │ 20%     │ 20%   │ 50%     │ 🔴 HIGH    │
 │ Expenses               │ 90%    │ 15%     │ 15%   │ 30%     │ 🔴 HIGH    │
 │ Invoices               │ 90%    │ 80%     │ 70%   │ 70%     │ 🟡 MEDIUM  │
@@ -655,14 +835,44 @@ Usage:
 ### NEXT STEPS (Recommended Order)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. ✅ Fix dashboard queries (use JournalEntry as source)
-2. 🔲 Complete Bills server actions + UI
-3. 🔲 Complete Expenses server actions + UI  
-4. 🔲 Finish Invoice actions (payments, etc.)
-5. 🔲 Finish Claims actions (settle advances)
-6. 🔲 Build Executive Summary Dashboard
-7. 🔲 Build Accountant Dashboard
-8. 🔲 Add Bank Reconciliation (Phase 2)
+PHASE 1: Multi-Tenancy (✅ COMPLETE)
+────────────────────────────────────
+1. ✅ Add companyId to all models
+2. ✅ Create tenant-utils.js (getTenantContext, withTenantScope)
+3. ✅ Update all query files with tenant scoping
+4. ✅ Update all action files with tenant scoping
+5. ✅ Auth integration (companyId in session)
+6. ✅ Company CRUD actions (SuperAdmin)
+7. 🔲 Finish remaining query files (queries.js, tech-dashboard-queries.js)
+8. 🔲 Database migration script for existing data
+
+PHASE 2: SuperAdmin Dashboard (🔴 HIGH PRIORITY)
+────────────────────────────────────────────────
+1. 🔲 Build SuperAdmin dashboard queries (company-queries.js)
+2. 🔲 Build SuperAdmin dashboard UI components
+3. 🔲 Company list with health metrics
+4. 🔲 Subscription management UI
+5. 🔲 Platform-wide activity tracking
+6. 🔲 Cross-company reporting
+
+PHASE 3: Core Features
+────────────────────────────────────
+1. 🔲 Complete Bills server actions + UI
+2. 🔲 Complete Expenses server actions + UI
+3. 🔲 Finish Invoice actions (payments, etc.)
+4. 🔲 Finish Claims actions (settle advances)
+
+PHASE 4: Dashboards
+────────────────────────────────────
+1. 🔲 Build Executive Summary Dashboard
+2. 🔲 Build Accountant Dashboard
+3. 🔲 Enhance Admin Dashboard
+
+PHASE 5: Future
+────────────────────────────────────
+1. 🔲 Add Bank Reconciliation
+2. 🔲 Advanced Reports
+3. 🔲 API Access for integrations
 
 
 ═══════════════════════════════════════════════════════════════════════════════

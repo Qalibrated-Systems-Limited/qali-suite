@@ -4,7 +4,7 @@ import { units } from "../utils/units";
 import {
   departments,
   priority,
-  purposeForItemsRemovalFromStock,
+  stockRequestTypes,
   reimbursementCategories,
 } from "@/lib/utils";
 import { de } from "date-fns/locale";
@@ -19,8 +19,8 @@ export const accountForm = z.object({
 
 export const createRequestFromCartSchema = z.object({
   customer: z.string().min(1, "Customer is required"),
-  purpose: z.enum(purposeForItemsRemovalFromStock, {
-    required_error: "Please select a purpose",
+  requestType: z.enum(stockRequestTypes, {
+    required_error: "Please select a request type",
   }),
   priority: z.enum(priority, {
     required_error: "Please select priority",
@@ -33,7 +33,6 @@ export const createRequestFromCartSchema = z.object({
     .string()
     .min(10, "Please provide more details (at least 10 characters)")
     .max(500),
-  purposeDetails: z.string().optional(),
 });
 
 const ruimbursementPaymentSchema = z.object({
@@ -87,8 +86,15 @@ export const reimbursementSchema = z.object({
   items: itemsSchema,
 });
 
+// Define advance types as a const tuple for z.enum
+const advanceTypesEnum = ["travel", "petty_cash", "project", "operational"];
+
 export const advanceRequestSchema = z
   .object({
+    advanceType: z.enum(advanceTypesEnum, {
+      required_error: "Please select an advance type",
+    }),
+
     requestedAmount: z.coerce
       .number()
       .positive("Requested amount must be greater than zero"),
@@ -98,30 +104,86 @@ export const advanceRequestSchema = z
       .min(5, "Purpose is required")
       .max(200, "Purpose is too long"),
 
-    destination: z
-      .string()
-      .min(2, "Destination is required")
-      .max(100, "Destination is too long"),
+    // Travel-specific (optional - validated conditionally)
+    destination: z.preprocess(
+      (val) => (val === null ? undefined : val),
+      z.string().max(100, "Destination is too long").optional()
+    ),
 
-    travelFromDate: z.coerce.date({
-      invalid_type_error: "Invalid travel start date",
-    }),
+    travelFromDate: z.preprocess(
+      (val) => (val === null ? undefined : val),
+      z.string().optional()
+    ),
 
-    travelToDate: z.coerce.date({
-      invalid_type_error: "Invalid travel end date",
-    }),
-    //estimated exp LIKE meals -2k ,accommodation -5k, transport -3k etc  required
+    travelToDate: z.preprocess(
+      (val) => (val === null ? undefined : val),
+      z.string().optional()
+    ),
 
-    estimatedExpenses: z
-      .string()
-      .max(200, "Estimated expenses too long")
-      .optional()
-      .or(z.literal("")),
-    notes: z.string().max(500, "Notes too long").optional().or(z.literal("")),
+    // Project-specific (optional - validated conditionally)
+    projectCode: z.preprocess(
+      (val) => (val === null ? undefined : val),
+      z.string().max(50, "Project code is too long").optional()
+    ),
+
+    // Common optional fields
+    estimatedExpenses: z.preprocess(
+      (val) => (val === null ? undefined : val),
+      z.string().max(200, "Estimated expenses too long").optional()
+    ),
+    notes: z.preprocess(
+      (val) => (val === null ? undefined : val),
+      z.string().max(500, "Notes too long").optional()
+    ),
   })
-  .refine((data) => data.travelToDate >= data.travelFromDate, {
-    message: "Travel end date cannot be before start date",
-    path: ["travelToDate"],
+  .superRefine((data, ctx) => {
+    // Travel type requires destination and dates
+    if (data.advanceType === "travel") {
+      if (!data.destination?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Destination is required for travel advances",
+          path: ["destination"],
+        });
+      }
+      if (!data.travelFromDate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Travel start date is required",
+          path: ["travelFromDate"],
+        });
+      }
+      if (!data.travelToDate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Travel end date is required",
+          path: ["travelToDate"],
+        });
+      }
+      // Date validation
+      if (data.travelFromDate && data.travelToDate) {
+        const fromDate = new Date(data.travelFromDate);
+        const toDate = new Date(data.travelToDate);
+        if (toDate < fromDate) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Travel end date cannot be before start date",
+            path: ["travelToDate"],
+          });
+        }
+      }
+    }
+
+    // Project type requires project code
+    if (data.advanceType === "project") {
+      if (!data.projectCode?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Project code is required for project advances",
+          path: ["projectCode"],
+        });
+      }
+    }
   });
 
 export const deliveryNoteZodSchema = z.object({
@@ -132,7 +194,10 @@ export const deliveryNoteZodSchema = z.object({
 });
 
 export const cartItemForm = z.object({
-  quantity: z.string().min(1).max(5),
+  quantity: z.string().min(1).max(5).refine(
+    (val) => Number.isInteger(Number(val)) && Number(val) > 0,
+    { message: "Quantity must be a positive whole number" }
+  ),
 });
 
 export const invoiceItemForm = z.object({
@@ -140,8 +205,10 @@ export const invoiceItemForm = z.object({
   unit: z.string(),
   unitPrice: z.string().optional(),
   type: z.enum(["Stock", "Service"]),
-
-  quantity: z.string(),
+  quantity: z.string().min(1).refine(
+    (val) => Number.isInteger(Number(val)) && Number(val) > 0,
+    { message: "Quantity must be a positive whole number" }
+  ),
   serialNo: z.string().optional(),
 });
 
@@ -149,8 +216,10 @@ export const dnoteItemForm = z.object({
   description: z.string().min(8).max(300),
   unit: z.string(),
   unitPrice: z.string().optional(),
-
-  quantity: z.string(),
+  quantity: z.string().min(1).refine(
+    (val) => Number.isInteger(Number(val)) && Number(val) > 0,
+    { message: "Quantity must be a positive whole number" }
+  ),
 });
 
 export const updateAccountForm = z.object({
@@ -175,10 +244,12 @@ export const stockForm = z.object({
       /^[A-Z0-9-]+$/,
       "SKU must contain only uppercase letters, numbers, and dashes"
     ),
-
   price: z.string(),
   category: z.string(),
-  stock: z.string(),
+  stock: z.string().refine(
+    (val) => Number.isInteger(Number(val)) && Number(val) >= 0,
+    { message: "Stock must be a non-negative whole number" }
+  ),
   unit: z.enum(units),
   description: z.string(),
 });

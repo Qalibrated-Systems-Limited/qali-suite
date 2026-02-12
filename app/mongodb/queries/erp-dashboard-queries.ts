@@ -8,19 +8,35 @@ import Invoice from "../../models/invoice";
 import Bill from "../../models/bill";
 import JournalEntry from "../../models/JournalEntry";
 import Account from "../../models/account";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
+import mongoose from "mongoose";
+
+const ObjectId = mongoose.Types.ObjectId;
 
 dbConnect();
 
 // ============================================
+// HELPER: Build tenant filter for queries
+// ============================================
+function buildTenantFilter(companyId: string | null, isSuperAdmin: boolean) {
+  if (isSuperAdmin) return {};
+  if (!companyId) throw new Error("companyId required for non-SuperAdmin user");
+  return { companyId: new ObjectId(companyId) };
+}
+
+// ============================================
 // FINANCIAL OVERVIEW (Admin Dashboard)
 // ============================================
-export const getFinancialOvervieww = async () => {
+export const getFinancialOverview = async () => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
 
-  // Get key accounts
+  // Get key accounts (scoped to company)
   const [
     cashAccount,
     bankAccount,
@@ -29,19 +45,22 @@ export const getFinancialOvervieww = async () => {
     revenueAccounts,
     expenseAccounts,
   ] = await Promise.all([
-    Account.findOne({ systemAccount: "cash" }),
-    Account.findOne({ systemAccount: "bank" }),
-    Account.findOne({ systemAccount: "accounts_receivable" }),
-    Account.findOne({ systemAccount: "accounts_payable" }),
-    Account.find({ accountType: "revenue", isActive: true }),
-    Account.find({ accountType: "expense", isActive: true }),
+    Account.findOne({ ...tenantMatch, systemAccount: "cash" }),
+    Account.findOne({ ...tenantMatch, systemAccount: "bank" }),
+    Account.findOne({ ...tenantMatch, systemAccount: "accounts_receivable" }),
+    Account.findOne({ ...tenantMatch, systemAccount: "accounts_payable" }),
+    Account.find({ ...tenantMatch, accountType: "revenue", isActive: true }),
+    Account.find({ ...tenantMatch, accountType: "expense", isActive: true }),
   ]);
 
   // Get revenue and expense aggregates (CORRECTED)
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const [currentMonthData, lastMonthData] = await Promise.all([
     JournalEntry.aggregate([
       {
         $match: {
+          ...baseMatch,
           status: "posted",
           entryDate: { $gte: startOfMonth, $lte: now },
         },
@@ -80,6 +99,7 @@ export const getFinancialOvervieww = async () => {
     JournalEntry.aggregate([
       {
         $match: {
+          ...baseMatch,
           status: "posted",
           entryDate: { $gte: startOfLastMonth, $lte: endOfLastMonth },
         },
@@ -160,7 +180,8 @@ export const getFinancialOvervieww = async () => {
 // KEY METRICS (Admin Dashboard)
 // ============================================
 export const getKeyMetrics = async () => {
-  const now = new Date();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
   const [
     stockValue,
@@ -172,6 +193,7 @@ export const getKeyMetrics = async () => {
   ] = await Promise.all([
     // Stock Value
     Product.aggregate([
+      { $match: { ...tenantMatch, status: "active" } },
       {
         $group: {
           _id: null,
@@ -183,23 +205,23 @@ export const getKeyMetrics = async () => {
     ]).then((result) => result[0]?.totalValue || 0),
 
     // Pending Orders (Stock Requests)
-    StockRequest.countDocuments({ status: "pending" }),
+    StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
 
     // A/R Outstanding
-    Account.findOne({ systemAccount: "accounts_receivable" }).then(
+    Account.findOne({ ...tenantMatch, systemAccount: "accounts_receivable" }).then(
       (acc) => acc?.actualBalance || 0
     ),
 
     // A/P Outstanding
-    Account.findOne({ systemAccount: "accounts_payable" }).then(
+    Account.findOne({ ...tenantMatch, systemAccount: "accounts_payable" }).then(
       (acc) => acc?.actualBalance || 0
     ),
 
     // Claims Pending
-    EmployeeClaim.countDocuments({ status: "submitted" }),
+    EmployeeClaim.countDocuments({ ...tenantMatch, status: "submitted" }),
 
     // Low Stock Items
-    Product.countDocuments({ stock: { $gte: 1, $lte: 9 } }),
+    Product.countDocuments({ ...tenantMatch, stock: { $gte: 1, $lte: 9 } }),
   ]);
 
   return {
@@ -213,20 +235,16 @@ export const getKeyMetrics = async () => {
 };
 
 // ============================================
-// REVENUE VS EXPENSES TREND (Last 6 Months)
-// ============================================
-
-// ============================================
-// EXPENSE BREAKDOWN BY CATEGORY (Current Month)
-// ============================================
-
-// ============================================
 // TOP 5 PRODUCTS (Most Sold/Moved)
 // ============================================
 export const getTopProducts = async (limit = 5) => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const data = await StockMovement.aggregate([
     {
       $match: {
+        ...baseMatch,
         direction: "out",
       },
     },
@@ -253,6 +271,9 @@ export const getTopProducts = async (limit = 5) => {
 // STOCK MOVEMENT TREND (Last 7 Days)
 // ============================================
 export const getStockMovementTrend = async (days = 7) => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days + 1);
   startDate.setHours(0, 0, 0, 0);
@@ -260,6 +281,7 @@ export const getStockMovementTrend = async (days = 7) => {
   const movements = await StockMovement.aggregate([
     {
       $match: {
+        ...baseMatch,
         createdAt: { $gte: startDate },
       },
     },
@@ -277,13 +299,13 @@ export const getStockMovementTrend = async (days = 7) => {
   ]);
 
   // Format for Recharts
-  const trendData = {};
+  const trendData: Record<string, { date: string; in: number; out: number }> = {};
   movements.forEach((item) => {
     const date = item._id.date;
     if (!trendData[date]) {
       trendData[date] = { date, in: 0, out: 0 };
     }
-    trendData[date][item._id.direction] = item.quantity;
+    trendData[date][item._id.direction as "in" | "out"] = item.quantity;
   });
 
   return Object.values(trendData);
@@ -293,9 +315,13 @@ export const getStockMovementTrend = async (days = 7) => {
 // SALES BY CUSTOMER (Top 5)
 // ============================================
 export const getSalesByCustomer = async (limit = 5) => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const data = await Invoice.aggregate([
     {
       $match: {
+        ...baseMatch,
         status: { $in: ["approved", "paid", "partial"] },
       },
     },
@@ -322,18 +348,21 @@ export const getSalesByCustomer = async (limit = 5) => {
 // RECENT TRANSACTIONS (Last 5)
 // ============================================
 export const getRecentTransactions = async (limit = 5) => {
-  const entries = await JournalEntry.find({ status: "posted" })
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
+  const entries = await JournalEntry.find({ ...tenantMatch, status: "posted" })
     .sort({ entryDate: -1, createdAt: -1 })
     .limit(limit)
     .lean();
 
-  return entries.map((entry) => ({
+  return entries.map((entry: any) => ({
     _id: entry._id.toString(),
     entryNumber: entry.entryNumber,
     entryDate: entry.entryDate.toISOString(),
     entryType: entry.entryType,
     description: entry.description,
-    amount: entry.lines.reduce((sum, line) => sum + (line.debit || 0), 0),
+    amount: entry.lines.reduce((sum: number, line: any) => sum + (line.debit || 0), 0),
     party: entry.party?.name || null,
   }));
 };
@@ -341,7 +370,10 @@ export const getRecentTransactions = async (limit = 5) => {
 // ============================================
 // PENDING APPROVALS (By Role)
 // ============================================
-export const getPendingApprovals = async (role) => {
+export const getPendingApprovals = async (role: string) => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
   const results = {
     stockRequests: 0,
     claims: 0,
@@ -351,15 +383,15 @@ export const getPendingApprovals = async (role) => {
 
   if (role === "Manager" || role === "Admin") {
     [results.stockRequests, results.claims] = await Promise.all([
-      StockRequest.countDocuments({ status: "pending" }),
-      EmployeeClaim.countDocuments({ status: "submitted" }),
+      StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
+      EmployeeClaim.countDocuments({ ...tenantMatch, status: "submitted" }),
     ]);
   }
 
   if (role === "Accountant" || role === "Admin") {
     [results.invoices, results.bills] = await Promise.all([
-      Invoice.countDocuments({ status: "draft" }),
-      Bill.countDocuments({ status: "draft" }),
+      Invoice.countDocuments({ ...tenantMatch, status: "draft" }),
+      Bill.countDocuments({ ...tenantMatch, status: "draft" }),
     ]);
   }
 
@@ -367,105 +399,52 @@ export const getPendingApprovals = async (role) => {
 };
 
 // ============================================
-// ALERTS (All Critical Issues)
-// ============================================
-// export const getDashboardAlerts = async () => {
-//   const now = new Date();
-
-//   const [overdueInvoices, lowStock, overdueClaims, overdueCheckouts] =
-//     await Promise.all([
-//       Invoice.countDocuments({
-//         paymentStatus: { $in: ["unpaid", "partial"] },
-//         dueDate: { $lt: now },
-//       }),
-//       Product.countDocuments({ stock: { $gte: 1, $lte: 9 } }),
-//       EmployeeClaim.countDocuments({
-//         status: "approved",
-//         paidAt: null,
-//       }),
-//       ItemCheckout.countDocuments({
-//         status: "checked_out",
-//         expectedReturnDate: { $lt: now },
-//       }),
-//     ]);
-
-//   return {
-//     overdueInvoices,
-//     lowStock,
-//     overdueClaims,
-//     overdueCheckouts,
-//     total: overdueInvoices + lowStock + overdueClaims + overdueCheckouts,
-//   };
-// };
-
-// ============================================
-// A/R AGING SUMMARY
-// ============================================
-
-// ============================================
-// A/P AGING SUMMARY
-// ============================================
-// export const getAPAgingSummary = async () => {
-//   const report = await JournalEntry.getAPAgingReport();
-
-//   const summary = {
-//     current: 0,
-//     days0_30: 0,
-//     days31_60: 0,
-//     days61_90: 0,
-//     days90plus: 0,
-//     total: 0,
-//     supplierCount: report.length,
-//   };
-
-//   report.forEach((supplier) => {
-//     summary.current += supplier.current;
-//     summary.days0_30 += supplier.days0_30;
-//     summary.days31_60 += supplier.days31_60;
-//     summary.days61_90 += supplier.days61_90;
-//     summary.days90plus += supplier.days90plus;
-//     summary.total += supplier.total;
-//   });
-
-//   return summary;
-// };
-
-// ============================================
 // MANAGER WORKLOAD
 // ============================================
 export const getManagerWorkload = async () => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const [pendingApprovals, approvedToday, rejectedToday, teamMembers] =
-    await Promise.all([
-      StockRequest.countDocuments({ status: "pending" }),
-      EmployeeClaim.countDocuments({ status: "submitted" }),
-      StockRequest.countDocuments({
-        status: "approved",
-        updatedAt: { $gte: today },
-      }),
-      EmployeeClaim.countDocuments({
-        status: "approved",
-        approvedAt: { $gte: today },
-      }),
-      StockRequest.countDocuments({
-        status: "rejected",
-        updatedAt: { $gte: today },
-      }),
-      EmployeeClaim.countDocuments({
-        status: "rejected",
-        rejectedAt: { $gte: today },
-      }),
-      // Team members count would come from User model
-      12, // Placeholder
-    ]);
+  const [
+    pendingRequests,
+    pendingClaims,
+    approvedRequestsToday,
+    approvedClaimsToday,
+    rejectedRequestsToday,
+    rejectedClaimsToday,
+  ] = await Promise.all([
+    StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
+    EmployeeClaim.countDocuments({ ...tenantMatch, status: "submitted" }),
+    StockRequest.countDocuments({
+      ...tenantMatch,
+      status: "approved",
+      updatedAt: { $gte: today },
+    }),
+    EmployeeClaim.countDocuments({
+      ...tenantMatch,
+      status: "approved",
+      approvedAt: { $gte: today },
+    }),
+    StockRequest.countDocuments({
+      ...tenantMatch,
+      status: "rejected",
+      updatedAt: { $gte: today },
+    }),
+    EmployeeClaim.countDocuments({
+      ...tenantMatch,
+      status: "rejected",
+      rejectedAt: { $gte: today },
+    }),
+  ]);
 
   return {
-    pendingApprovals,
-    approvedToday,
-    rejectedToday,
-    teamMembers,
+    pendingApprovals: pendingRequests + pendingClaims,
+    approvedToday: approvedRequestsToday + approvedClaimsToday,
+    rejectedToday: rejectedRequestsToday + rejectedClaimsToday,
+    teamMembers: 12, // Placeholder - would come from User model
   };
 };
 
@@ -473,42 +452,52 @@ export const getManagerWorkload = async () => {
 // ACCOUNTANT WORKLOAD
 // ============================================
 export const getAccountantWorkload = async () => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
   const now = new Date();
   const weekAhead = new Date(now);
   weekAhead.setDate(weekAhead.getDate() + 7);
 
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+
   const [overdueInvoices, dueThisWeek, claimsToPay, paidToday] =
     await Promise.all([
       Invoice.find({
+        ...tenantMatch,
         paymentStatus: { $in: ["unpaid", "partial"] },
         dueDate: { $lt: now },
       })
         .lean()
         .then((invoices) => ({
           count: invoices.length,
-          total: invoices.reduce((sum, inv) => sum + inv.amountDue, 0),
+          total: invoices.reduce((sum, inv: any) => sum + inv.amountDue, 0),
         })),
       Invoice.find({
+        ...tenantMatch,
         paymentStatus: { $in: ["unpaid", "partial"] },
         dueDate: { $gte: now, $lte: weekAhead },
       })
         .lean()
         .then((invoices) => ({
           count: invoices.length,
-          total: invoices.reduce((sum, inv) => sum + inv.amountDue, 0),
+          total: invoices.reduce((sum, inv: any) => sum + inv.amountDue, 0),
         })),
       EmployeeClaim.find({
+        ...tenantMatch,
         status: "approved",
         paidAt: null,
       })
         .lean()
         .then((claims) => ({
           count: claims.length,
-          total: claims.reduce((sum, claim) => sum + claim.totalAmount, 0),
+          total: claims.reduce((sum, claim: any) => sum + claim.totalAmount, 0),
         })),
       EmployeeClaim.countDocuments({
+        ...tenantMatch,
         status: "paid",
-        paidAt: { $gte: new Date(now.setHours(0, 0, 0, 0)) },
+        paidAt: { $gte: todayStart },
       }),
     ]);
 
@@ -521,13 +510,12 @@ export const getAccountantWorkload = async () => {
 };
 
 // ============================================
-// EMPLOYEE SUMMARY (For Employee Dashboard)
-// ============================================
-
-// ============================================
 // EMPLOYEE FINANCIAL SUMMARY
 // ============================================
-export const getEmployeeFinancialSummary = async (userId) => {
+export const getEmployeeFinancialSummary = async (userId: string) => {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
@@ -535,6 +523,7 @@ export const getEmployeeFinancialSummary = async (userId) => {
     EmployeeClaim.aggregate([
       {
         $match: {
+          ...baseMatch,
           "employee.userId": userId,
           claimType: "advance_request",
           status: "paid",
@@ -551,6 +540,7 @@ export const getEmployeeFinancialSummary = async (userId) => {
     EmployeeClaim.aggregate([
       {
         $match: {
+          ...baseMatch,
           "employee.userId": userId,
           claimType: "reimbursement",
           status: "paid",
@@ -581,6 +571,10 @@ export const getEmployeeFinancialSummary = async (userId) => {
  * Handles both legacy 'stock' field and new 'inventory.quantityOnHand'
  */
 export async function getStockStats() {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const [
     valueResult,
     lowStockCount,
@@ -590,7 +584,7 @@ export async function getStockStats() {
   ] = await Promise.all([
     // Total inventory value
     Product.aggregate([
-      { $match: { status: "active" } },
+      { $match: { ...baseMatch, status: "active" } },
       {
         $group: {
           _id: null,
@@ -623,6 +617,7 @@ export async function getStockStats() {
 
     // Low stock count - products AT or BELOW reorder level
     Product.countDocuments({
+      ...tenantMatch,
       status: "active",
       $or: [
         // New inventory structure
@@ -642,6 +637,7 @@ export async function getStockStats() {
 
     // Out of stock count
     Product.countDocuments({
+      ...tenantMatch,
       status: "active",
       $or: [
         { stock: { $lte: 0 } },
@@ -651,10 +647,11 @@ export async function getStockStats() {
     }),
 
     // Pending stock requests
-    StockRequest.countDocuments({ status: "pending" }),
+    StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
 
     // Overdue checkouts
     ItemCheckout.countDocuments({
+      ...tenantMatch,
       status: { $in: ["checked_out", "overdue"] },
       expectedReturnDate: { $lt: new Date() },
     }),
@@ -676,9 +673,12 @@ export async function getStockStats() {
  * Returns products where current stock <= reorder level
  */
 export async function getLowStockProducts(limit = 10) {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   // Use aggregation for complex comparison
   const products = await Product.aggregate([
-    { $match: { status: "active" } },
+    { $match: { ...baseMatch, status: "active" } },
     {
       $addFields: {
         // Normalize quantity - prefer inventory.quantityOnHand, fallback to stock
@@ -718,7 +718,11 @@ export async function getLowStockProducts(limit = 10) {
  * Get out of stock products
  */
 export async function getOutOfStockProducts(limit = 10) {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
   return Product.find({
+    ...tenantMatch,
     status: "active",
     $or: [{ stock: { $lte: 0 } }, { "inventory.quantityOnHand": { $lte: 0 } }],
   })
@@ -733,6 +737,9 @@ export async function getOutOfStockProducts(limit = 10) {
  * Groups by date and direction
  */
 export async function getMovementTrend(days = 7) {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
   startDate.setHours(0, 0, 0, 0);
@@ -740,6 +747,7 @@ export async function getMovementTrend(days = 7) {
   const movements = await StockMovement.aggregate([
     {
       $match: {
+        ...baseMatch,
         createdAt: { $gte: startDate },
         status: { $ne: "reversed" }, // Exclude reversed movements
       },
@@ -787,12 +795,16 @@ export async function getMovementTrend(days = 7) {
  * Get top moved products (most activity)
  */
 export async function getTopMovedProducts(limit = 5) {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   const result = await StockMovement.aggregate([
     {
       $match: {
+        ...baseMatch,
         createdAt: { $gte: thirtyDaysAgo },
         status: { $ne: "reversed" },
       },
@@ -836,8 +848,11 @@ export async function getTopMovedProducts(limit = 5) {
  * Get category distribution
  */
 export async function getCategoryDistribution() {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   return Product.aggregate([
-    { $match: { status: "active" } },
+    { $match: { ...baseMatch, status: "active" } },
     {
       $group: {
         _id: { $ifNull: ["$category", "Uncategorized"] },
@@ -880,7 +895,10 @@ export async function getCategoryDistribution() {
  * Get recent stock movements
  */
 export async function getRecentMovements(limit = 5) {
-  return StockMovement.find({ status: { $ne: "reversed" } })
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
+  return StockMovement.find({ ...tenantMatch, status: { $ne: "reversed" } })
     .sort({ createdAt: -1 })
     .limit(7)
     .select(
@@ -893,7 +911,10 @@ export async function getRecentMovements(limit = 5) {
  * Get recent stock requests
  */
 export async function getRecentRequests(limit = 5) {
-  return StockRequest.find({})
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
+  return StockRequest.find(tenantMatch)
     .sort({ createdAt: -1 })
     .limit(limit)
     .select("requestNumber requester status priority items createdAt")
@@ -908,9 +929,13 @@ export async function getRecentRequests(limit = 5) {
  * Get overdue checkouts with full details
  */
 export async function getOverdueCheckouts(limit = 10) {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
   const now = new Date();
 
   return ItemCheckout.find({
+    ...tenantMatch,
     status: { $in: ["checked_out", "overdue"] },
     expectedReturnDate: { $lt: now },
   })
@@ -926,6 +951,10 @@ export async function getOverdueCheckouts(limit = 10) {
  * Get checkout summary stats
  */
 export async function getCheckoutStats() {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const now = new Date();
   const sevenDaysFromNow = new Date();
   sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
@@ -934,24 +963,27 @@ export async function getCheckoutStats() {
     await Promise.all([
       // Active checkouts
       ItemCheckout.countDocuments({
+        ...tenantMatch,
         status: { $in: ["checked_out", "overdue"] },
       }),
 
       // Overdue
       ItemCheckout.countDocuments({
+        ...tenantMatch,
         status: { $in: ["checked_out", "overdue"] },
         expectedReturnDate: { $lt: now },
       }),
 
       // Due within 7 days
       ItemCheckout.countDocuments({
+        ...tenantMatch,
         status: "checked_out",
         expectedReturnDate: { $gte: now, $lte: sevenDaysFromNow },
       }),
 
       // Total value of items checked out
       ItemCheckout.aggregate([
-        { $match: { status: { $in: ["checked_out", "overdue"] } } },
+        { $match: { ...baseMatch, status: { $in: ["checked_out", "overdue"] } } },
         {
           $lookup: {
             from: "products",
@@ -986,10 +1018,13 @@ export async function getCheckoutStats() {
 }
 
 /**
- * Get user's checkouts
+ * Get user's checkouts (scoped to company + user)
  */
 export async function getUserCheckouts(userId: string, activeOnly = true) {
-  const query: any = { "checkedOutTo.id": userId };
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
+  const query: any = { ...tenantMatch, "checkedOutTo.id": userId };
 
   if (activeOnly) {
     query.status = { $in: ["checked_out", "overdue"] };
@@ -1003,100 +1038,13 @@ export async function getUserCheckouts(userId: string, activeOnly = true) {
     .lean();
 }
 
-// ============================================
-// FINANCIAL QUERIES
-// ============================================
-
-/**
- * Get financial overview with month-over-month trends
- */
-export async function getFinancialOverview() {
-  const now = new Date();
-  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-
-  // Revenue from invoices
-  const [thisMonthRevenue, lastMonthRevenue] = await Promise.all([
-    Invoice.aggregate([
-      {
-        $match: {
-          invoiceDate: { $gte: thisMonthStart },
-          status: { $ne: "cancelled" },
-        },
-      },
-      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
-    ]),
-    Invoice.aggregate([
-      {
-        $match: {
-          invoiceDate: { $gte: lastMonthStart, $lte: lastMonthEnd },
-          status: { $ne: "cancelled" },
-        },
-      },
-      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
-    ]),
-  ]);
-
-  // Expenses from bills + journal entries (expense accounts)
-  const [thisMonthExpenses, lastMonthExpenses] = await Promise.all([
-    Bill.aggregate([
-      {
-        $match: {
-          billDate: { $gte: thisMonthStart },
-          status: { $ne: "cancelled" },
-        },
-      },
-      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
-    ]),
-    Bill.aggregate([
-      {
-        $match: {
-          billDate: { $gte: lastMonthStart, $lte: lastMonthEnd },
-          status: { $ne: "cancelled" },
-        },
-      },
-      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
-    ]),
-  ]);
-
-  const currentRevenue = thisMonthRevenue[0]?.total || 0;
-  const previousRevenue = lastMonthRevenue[0]?.total || 0;
-  const currentExpenses = thisMonthExpenses[0]?.total || 0;
-  const previousExpenses = lastMonthExpenses[0]?.total || 0;
-
-  const currentProfit = currentRevenue - currentExpenses;
-  const previousProfit = previousRevenue - previousExpenses;
-
-  // Calculate trends (percentage change)
-  const calcTrend = (current: number, previous: number) => {
-    if (previous === 0) return current > 0 ? 100 : 0;
-    return ((current - previous) / previous) * 100;
-  };
-
-  return {
-    revenue: {
-      current: currentRevenue,
-      previous: previousRevenue,
-      trend: calcTrend(currentRevenue, previousRevenue),
-    },
-    expenses: {
-      current: currentExpenses,
-      previous: previousExpenses,
-      trend: calcTrend(currentExpenses, previousExpenses),
-    },
-    profit: {
-      current: currentProfit,
-      previous: previousProfit,
-      trend: calcTrend(currentProfit, previousProfit),
-    },
-  };
-}
-
 /**
  * Get revenue trend (last N months)
  */
 export async function getRevenueTrend(months = 6) {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const startDate = new Date();
   startDate.setMonth(startDate.getMonth() - months + 1);
   startDate.setDate(1);
@@ -1105,6 +1053,7 @@ export async function getRevenueTrend(months = 6) {
   const data = await JournalEntry.aggregate([
     {
       $match: {
+        ...baseMatch,
         status: "posted",
         entryDate: { $gte: startDate },
       },
@@ -1158,13 +1107,13 @@ export async function getRevenueTrend(months = 6) {
 }
 
 /**
- * Get expense breakdown by category
- */
-/**
  * Get expense breakdown by account
  * SOURCE: Journal Entries (Expense accounts)
  */
 export async function getExpenseBreakdown() {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const thisMonthStart = new Date();
   thisMonthStart.setDate(1);
   thisMonthStart.setHours(0, 0, 0, 0);
@@ -1172,6 +1121,7 @@ export async function getExpenseBreakdown() {
   const expenses = await JournalEntry.aggregate([
     {
       $match: {
+        ...baseMatch,
         status: "posted",
         entryDate: { $gte: thisMonthStart },
       },
@@ -1216,6 +1166,10 @@ export async function getExpenseBreakdown() {
  * Get dashboard alerts
  */
 export async function getDashboardAlerts() {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const now = new Date();
 
   const [
@@ -1227,6 +1181,7 @@ export async function getDashboardAlerts() {
   ] = await Promise.all([
     // Overdue invoices
     Invoice.countDocuments({
+      ...tenantMatch,
       paymentStatus: { $in: ["unpaid", "partial"] },
       dueDate: { $lt: now },
       status: { $ne: "cancelled" },
@@ -1234,7 +1189,7 @@ export async function getDashboardAlerts() {
 
     // Low stock (using aggregation for proper comparison)
     Product.aggregate([
-      { $match: { status: "active" } },
+      { $match: { ...baseMatch, status: "active" } },
       {
         $addFields: {
           currentQty: {
@@ -1253,16 +1208,17 @@ export async function getDashboardAlerts() {
     ]),
 
     // Pending claims
-    EmployeeClaim.countDocuments({ status: "submitted" }),
+    EmployeeClaim.countDocuments({ ...tenantMatch, status: "submitted" }),
 
     // Overdue checkouts
     ItemCheckout.countDocuments({
+      ...tenantMatch,
       status: { $in: ["checked_out", "overdue"] },
       expectedReturnDate: { $lt: now },
     }),
 
     // Pending stock requests
-    StockRequest.countDocuments({ status: "pending" }),
+    StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
   ]);
 
   return {
@@ -1289,16 +1245,20 @@ export async function getDashboardAlerts() {
  * Accounts Receivable Aging
  */
 export async function getARAgingSummary() {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
   const now = new Date();
 
   const invoices = await Invoice.find({
+    ...tenantMatch,
     paymentStatus: { $in: ["unpaid", "partial"] },
     status: { $ne: "cancelled" },
   })
     .select("invoiceNumber customer dueDate amountDue totalAmount")
     .lean();
 
-  const buckets = {
+  const buckets: Record<string, number> = {
     current: 0,
     "1-30": 0,
     "31-60": 0,
@@ -1336,16 +1296,20 @@ export async function getARAgingSummary() {
  * Accounts Payable Aging
  */
 export async function getAPAgingSummary() {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
   const now = new Date();
 
   const bills = await Bill.find({
+    ...tenantMatch,
     paymentStatus: { $in: ["unpaid", "partial"] },
     status: { $ne: "cancelled" },
   })
     .select("billNumber vendor dueDate amountDue totalAmount")
     .lean();
 
-  const buckets = {
+  const buckets: Record<string, number> = {
     current: 0,
     "1-30": 0,
     "31-60": 0,
@@ -1384,26 +1348,34 @@ export async function getAPAgingSummary() {
 // ============================================
 
 /**
- * Get employee's financial summary
+ * Get employee's financial summary (scoped to company + user)
  */
 export async function getEmployeeSummary(userId: string) {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+
   const [pendingClaims, approvedClaims, paidClaims, totalAdvances] =
     await Promise.all([
       EmployeeClaim.countDocuments({
+        ...tenantMatch,
         "employee.userId": userId,
         status: "submitted",
       }),
       EmployeeClaim.countDocuments({
+        ...tenantMatch,
         "employee.userId": userId,
         status: "approved",
       }),
       EmployeeClaim.countDocuments({
+        ...tenantMatch,
         "employee.userId": userId,
         status: "paid",
       }),
       EmployeeClaim.aggregate([
         {
           $match: {
+            ...baseMatch,
             "employee.userId": userId,
             claimType: "advance_request",
             status: { $in: ["approved", "paid"] },
@@ -1422,10 +1394,14 @@ export async function getEmployeeSummary(userId: string) {
 }
 
 /**
- * Get employee's borrowed items
+ * Get employee's borrowed items (scoped to company + user)
  */
 export async function getEmployeeBorrowedItems(userId: string) {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
+
   return ItemCheckout.find({
+    ...tenantMatch,
     "checkedOutTo.id": userId,
     status: { $in: ["checked_out", "overdue"] },
   })

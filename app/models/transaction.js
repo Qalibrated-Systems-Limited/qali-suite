@@ -4,6 +4,13 @@ const Schema = mongoose.Schema;
 
 const tranSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
     invoiceWeight: Number,
     containerNumber: String,
 
@@ -85,6 +92,13 @@ const tranSchema = new Schema(
   },
   { timestamps: true }
 );
+
+// Indexes
+// Query indexes - prefixed with companyId for tenant isolation
+tranSchema.index({ companyId: 1, createdAt: -1 });
+tranSchema.index({ companyId: 1, vehRegNo: 1 });
+tranSchema.index({ companyId: 1, "customer.id": 1 });
+tranSchema.index({ companyId: 1, isComplete: 1, status: 1 });
 
 const models = mongoose.models;
 let Transaction = models ? models.Transaction : null;

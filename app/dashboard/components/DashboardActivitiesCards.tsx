@@ -122,10 +122,10 @@ export async function AlertsCard() {
     },
     {
       label: "Low Stock Items",
-      value: alerts.lowStock,
+      value: alerts.lowStockCount,
       href: "/dashboard/stocks?filter=low",
       icon: Package,
-      show: alerts.lowStock > 0,
+      show: alerts.lowStockCount > 0,
     },
     {
       label: "Claims to Pay",

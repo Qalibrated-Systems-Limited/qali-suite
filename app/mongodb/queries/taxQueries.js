@@ -1,6 +1,11 @@
 import TaxTransaction from "../../models/taxTransactions";
 import TaxService from "../services/taxService";
 import dbConnect from "../../config/dbConnect";
+import {ObjectId} from 'mongodb'
+import {
+  getTenantContext,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -15,9 +20,10 @@ const ITEMS_PER_PAGE = 20;
  */
 export async function getTaxTransactions(page = 1, filters = {}) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
   const skip = (page - 1) * ITEMS_PER_PAGE;
-  const query = {};
+  let query = isSuperAdmin ? {} : { companyId  : new ObjectId(companyId)};
 
   // Tax type filter (vat_input, vat_output, wht)
   if (filters.taxType) {
@@ -54,11 +60,20 @@ export async function getTaxTransactions(page = 1, filters = {}) {
 
   // Search filter
   if (filters.search) {
-    query.$or = [
-      { transactionNumber: { $regex: filters.search, $options: "i" } },
-      { "party.name": { $regex: filters.search, $options: "i" } },
-      { description: { $regex: filters.search, $options: "i" } },
-    ];
+    query.$and = query.$and || [];
+    query.$and.push({
+      $or: [
+        { transactionNumber: { $regex: filters.search, $options: "i" } },
+        { "party.name": { $regex: filters.search, $options: "i" } },
+        { "party.taxPin": { $regex: filters.search, $options: "i" } },
+        { description: { $regex: filters.search, $options: "i" } },
+      ],
+    });
+  }
+
+  // Source document type filter (invoice, bill, journal_entry)
+  if (filters.sourceType) {
+    query["sourceDocument.type"] = filters.sourceType;
   }
 
   // Parallel queries for performance
@@ -71,8 +86,46 @@ export async function getTaxTransactions(page = 1, filters = {}) {
     TaxTransaction.countDocuments(query),
   ]);
 
+  // Serialize for client components
+  const serializedTransactions = transactions.map((txn) => ({
+    _id: txn._id.toString(),
+    companyId: txn.companyId?.toString(),
+    transactionNumber: txn.transactionNumber,
+    transactionDate: txn.transactionDate?.toISOString(),
+    taxType: txn.taxType,
+    taxCode: txn.taxCode,
+    taxRate: txn.taxRate,
+    baseAmount: txn.baseAmount,
+    taxAmount: txn.taxAmount,
+    totalAmount: txn.totalAmount,
+    currency: txn.currency,
+    party: txn.party
+      ? {
+          type: txn.party.type,
+          id: txn.party.id,
+          name: txn.party.name,
+          taxPin: txn.party.taxPin,
+        }
+      : null,
+    sourceDocument: txn.sourceDocument
+      ? {
+          type: txn.sourceDocument.type,
+          id: txn.sourceDocument.id?.toString(),
+          number: txn.sourceDocument.number,
+        }
+      : null,
+    kraTracking: {
+      filingPeriod: txn.kraTracking?.filingPeriod,
+      filed: txn.kraTracking?.filed || false,
+      remitted: txn.kraTracking?.remitted || false,
+    },
+    accountCode: txn.accountCode,
+    accountName: txn.accountName,
+    description: txn.description,
+  }));
+
   return {
-    transactions,
+    transactions: serializedTransactions,
     pagination: {
       page,
       totalPages: Math.ceil(total / ITEMS_PER_PAGE),
@@ -87,7 +140,10 @@ export async function getTaxTransactions(page = 1, filters = {}) {
  */
 export async function getTaxTransactionById(transactionId) {
   await dbConnect();
-  return await TaxTransaction.findById(transactionId).lean();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const query = withTenantScope({ _id: transactionId }, companyId , isSuperAdmin);
+  return await TaxTransaction.findOne(query).lean();
 }
 
 /**
@@ -96,6 +152,8 @@ export async function getTaxTransactionById(transactionId) {
  */
 export async function getVATDashboard(filingPeriod = null) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
 
   // Use current month if no period specified
   if (!filingPeriod) {
@@ -106,10 +164,32 @@ export async function getVATDashboard(filingPeriod = null) {
     )}`;
   }
 
-  // Use service method if available
-  if (typeof TaxTransaction.getVATReturn === "function") {
-    const vatReturn = await TaxTransaction.getVATReturn(filingPeriod);
-    return { filingPeriod, ...vatReturn };
+  // Use model static method if available (now requires companyId)
+  if (typeof TaxTransaction.getVATReturn === "function" && companyId) {
+    const vatReturn = await TaxTransaction.getVATReturn(companyId, filingPeriod);
+
+    // Transform the static method result to match expected structure
+    const vatPayable = vatReturn.vatPayable || 0;
+    return {
+      filingPeriod,
+      input: {
+        totalPurchases: vatReturn.input?.totalBase || 0,
+        totalVAT: vatReturn.input?.totalTax || 0,
+        transactionCount: vatReturn.input?.count || 0,
+        unfiledCount: 0, // Static method doesn't track this
+      },
+      output: {
+        totalSales: vatReturn.output?.totalBase || 0,
+        totalVAT: vatReturn.output?.totalTax || 0,
+        transactionCount: vatReturn.output?.count || 0,
+        unfiledCount: 0, // Static method doesn't track this
+      },
+      summary: {
+        vatPayable: vatPayable > 0 ? vatPayable : 0,
+        vatRefundable: vatPayable < 0 ? Math.abs(vatPayable) : 0,
+        netPosition: vatPayable,
+      },
+    };
   }
 
   // Fallback aggregation
@@ -117,6 +197,7 @@ export async function getVATDashboard(filingPeriod = null) {
     TaxTransaction.aggregate([
       {
         $match: {
+          ...tenantMatch,
           taxType: "vat_input",
           "kraTracking.filingPeriod": filingPeriod,
         },
@@ -134,6 +215,7 @@ export async function getVATDashboard(filingPeriod = null) {
     TaxTransaction.aggregate([
       {
         $match: {
+          ...tenantMatch,
           taxType: "vat_output",
           "kraTracking.filingPeriod": filingPeriod,
         },
@@ -149,12 +231,14 @@ export async function getVATDashboard(filingPeriod = null) {
     ]),
 
     TaxTransaction.countDocuments({
+      ...tenantMatch,
       taxType: "vat_input",
       "kraTracking.filingPeriod": filingPeriod,
       "kraTracking.filed": false,
     }),
 
     TaxTransaction.countDocuments({
+      ...tenantMatch,
       taxType: "vat_output",
       "kraTracking.filingPeriod": filingPeriod,
       "kraTracking.filed": false,
@@ -193,6 +277,8 @@ export async function getVATDashboard(filingPeriod = null) {
  */
 export async function getWHTDashboard(startDate = null, endDate = null) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
 
   // Default to current month if no dates
   if (!startDate || !endDate) {
@@ -212,7 +298,7 @@ export async function getWHTDashboard(startDate = null, endDate = null) {
   const [byRate, bySupplier, unremitted, total] = await Promise.all([
     // WHT by rate
     TaxTransaction.aggregate([
-      { $match: { taxType: "wht", ...dateQuery } },
+      { $match: { ...tenantMatch, taxType: "wht", ...dateQuery } },
       {
         $group: {
           _id: { taxCode: "$taxCode", taxRate: "$taxRate" },
@@ -236,7 +322,7 @@ export async function getWHTDashboard(startDate = null, endDate = null) {
 
     // WHT by supplier
     TaxTransaction.aggregate([
-      { $match: { taxType: "wht", ...dateQuery } },
+      { $match: { ...tenantMatch, taxType: "wht", ...dateQuery } },
       {
         $group: {
           _id: {
@@ -268,6 +354,7 @@ export async function getWHTDashboard(startDate = null, endDate = null) {
     TaxTransaction.aggregate([
       {
         $match: {
+          ...tenantMatch,
           taxType: "wht",
           "kraTracking.remitted": false,
         },
@@ -283,7 +370,7 @@ export async function getWHTDashboard(startDate = null, endDate = null) {
 
     // Total WHT for period
     TaxTransaction.aggregate([
-      { $match: { taxType: "wht", ...dateQuery } },
+      { $match: { ...tenantMatch, taxType: "wht", ...dateQuery } },
       {
         $group: {
           _id: null,
@@ -303,7 +390,10 @@ export async function getWHTDashboard(startDate = null, endDate = null) {
   const totalData = total[0] || { totalWHT: 0, remitted: 0, count: 0 };
 
   return {
-    period: { startDate, endDate },
+    period: {
+      startDate: new Date(startDate).toISOString(),
+      endDate: new Date(endDate).toISOString(),
+    },
     byRate,
     bySupplier,
     summary: {
@@ -322,9 +412,11 @@ export async function getWHTDashboard(startDate = null, endDate = null) {
  */
 export async function getUnfiledTransactions(taxType = null) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  const query = { "kraTracking.filed": false };
+  let query = { "kraTracking.filed": false };
   if (taxType) query.taxType = taxType;
+  query = withTenantScope(query, companyId, isSuperAdmin);
 
   return await TaxTransaction.find(query).sort({ transactionDate: 1 }).lean();
 }
@@ -335,13 +427,18 @@ export async function getUnfiledTransactions(taxType = null) {
  */
 export async function getUnremittedWHT() {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  return await TaxTransaction.find({
-    taxType: "wht",
-    "kraTracking.remitted": false,
-  })
-    .sort({ transactionDate: 1 })
-    .lean();
+  const query = withTenantScope(
+    {
+      taxType: "wht",
+      "kraTracking.remitted": false,
+    },
+    companyId,
+    isSuperAdmin
+  );
+
+  return await TaxTransaction.find(query).sort({ transactionDate: 1 }).lean();
 }
 
 /**
@@ -366,8 +463,13 @@ export async function getTaxSummary(startDate = null, endDate = null) {
  */
 export async function getFilingPeriods(limit = 12) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  const periods = await TaxTransaction.distinct("kraTracking.filingPeriod");
+  const query = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const periods = await TaxTransaction.distinct(
+    "kraTracking.filingPeriod",
+    query
+  );
 
   // Sort descending (most recent first)
   return periods.sort().reverse().slice(0, limit);
@@ -378,19 +480,26 @@ export async function getFilingPeriods(limit = 12) {
  */
 export async function searchTaxTransactions(searchTerm, limit = 50) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
   if (!searchTerm || searchTerm.trim().length === 0) {
     return [];
   }
 
-  return await TaxTransaction.find({
-    $or: [
-      { transactionNumber: { $regex: searchTerm, $options: "i" } },
-      { "party.name": { $regex: searchTerm, $options: "i" } },
-      { "party.taxPin": { $regex: searchTerm, $options: "i" } },
-      { description: { $regex: searchTerm, $options: "i" } },
-    ],
-  })
+  const query = withTenantScope(
+    {
+      $or: [
+        { transactionNumber: { $regex: searchTerm, $options: "i" } },
+        { "party.name": { $regex: searchTerm, $options: "i" } },
+        { "party.taxPin": { $regex: searchTerm, $options: "i" } },
+        { description: { $regex: searchTerm, $options: "i" } },
+      ],
+    },
+    companyId,
+    isSuperAdmin
+  );
+
+  return await TaxTransaction.find(query)
     .sort({ transactionDate: -1 })
     .limit(limit)
     .select("transactionNumber transactionDate taxType taxAmount party.name")

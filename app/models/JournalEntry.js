@@ -7,12 +7,18 @@ const Schema = mongoose.Schema;
 // ============================================
 const journalEntrySchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // Entry Identification
     entryNumber: {
       type: String,
       required: [true, "Entry number is required"],
-      unique: true,
-      index: true,
     },
 
     entryDate: {
@@ -214,12 +220,15 @@ const journalEntrySchema = new Schema(
 // ============================================
 // COMPOUND INDEXES FOR QUERY EFFICIENCY
 // ============================================
-journalEntrySchema.index({ entryDate: -1, status: 1 });
-journalEntrySchema.index({ "party.type": 1, "party.id": 1 });
-journalEntrySchema.index({ dueDate: 1, isFullyPaid: 1 });
-journalEntrySchema.index({ "lines.accountId": 1 });
-journalEntrySchema.index({ fiscalYear: 1, fiscalMonth: 1 });
-journalEntrySchema.index({ entryType: 1, status: 1 });
+// Unique entry number per company
+journalEntrySchema.index({ companyId: 1, entryNumber: 1 }, { unique: true });
+// Query indexes - all prefixed with companyId for tenant isolation
+journalEntrySchema.index({ companyId: 1, entryDate: -1, status: 1 });
+journalEntrySchema.index({ companyId: 1, "party.type": 1, "party.id": 1 });
+journalEntrySchema.index({ companyId: 1, dueDate: 1, isFullyPaid: 1 });
+journalEntrySchema.index({ companyId: 1, "lines.accountId": 1 });
+journalEntrySchema.index({ companyId: 1, fiscalYear: 1, fiscalMonth: 1 });
+journalEntrySchema.index({ companyId: 1, entryType: 1, status: 1 });
 
 // ============================================
 // VIRTUALS
@@ -287,11 +296,14 @@ journalEntrySchema.methods.validateLines = function () {
 };
 
 // Validate all accounts exist and can post
-journalEntrySchema.methods.validateAccounts = async function () {
+journalEntrySchema.methods.validateAccounts = async function (session = null) {
   const Account = mongoose.model("Account");
 
   for (const line of this.lines) {
-    const account = await Account.findById(line.accountId);
+    // Use session if provided (for transaction support)
+    const account = session
+      ? await Account.findById(line.accountId).session(session)
+      : await Account.findById(line.accountId);
 
     if (!account) {
       throw new Error(`Account ${line.accountId} not found`);
@@ -312,11 +324,14 @@ journalEntrySchema.methods.validateAccounts = async function () {
 };
 
 // Validate fiscal period is open
-journalEntrySchema.methods.validateFiscalPeriod = async function () {
+journalEntrySchema.methods.validateFiscalPeriod = async function (session = null) {
   if (!this.fiscalPeriodId) return true;
 
   const FiscalPeriod = mongoose.model("FiscalPeriod");
-  const period = await FiscalPeriod.findById(this.fiscalPeriodId);
+  // Use session if provided (for transaction support)
+  const period = session
+    ? await FiscalPeriod.findById(this.fiscalPeriodId).session(session)
+    : await FiscalPeriod.findById(this.fiscalPeriodId);
 
   if (!period) {
     throw new Error("Fiscal period not found");
@@ -334,11 +349,11 @@ journalEntrySchema.methods.validateFiscalPeriod = async function () {
 };
 
 // Complete validation before posting
-journalEntrySchema.methods.validateBeforePosting = async function () {
+journalEntrySchema.methods.validateBeforePosting = async function (session = null) {
   this.validateBalance();
   this.validateLines();
-  await this.validateAccounts();
-  await this.validateFiscalPeriod();
+  await this.validateAccounts(session);
+  await this.validateFiscalPeriod(session);
   return true;
 };
 
@@ -354,8 +369,8 @@ journalEntrySchema.methods.post = async function (postedBy, session = null) {
     throw new Error("Cannot post a reversed journal entry");
   }
 
-  // Run all validations
-  await this.validateBeforePosting();
+  // Run all validations (pass session for transaction support)
+  await this.validateBeforePosting(session);
 
   // Update status
   this.status = "posted";

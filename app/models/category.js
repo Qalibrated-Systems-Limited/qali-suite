@@ -4,6 +4,14 @@ const { Schema } = mongoose;
 
 const categorySchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     name: {
       type: String,
       required: [true, "Category name is required"],
@@ -97,9 +105,12 @@ const categorySchema = new Schema(
 );
 
 // Indexes
-
-categorySchema.index({ parent: 1, sortOrder: 1 });
-categorySchema.index({ isActive: 1, isDeleted: 1 });
+// Unique category name per company (at same level/parent)
+categorySchema.index({ companyId: 1, name: 1, parent: 1 }, { unique: true });
+// Query indexes - prefixed with companyId for tenant isolation
+categorySchema.index({ companyId: 1, parent: 1, sortOrder: 1 });
+categorySchema.index({ companyId: 1, isActive: 1, isDeleted: 1 });
+categorySchema.index({ companyId: 1, slug: 1 });
 categorySchema.index({ name: "text", description: "text" }); // Text search
 
 // Pre-save: Generate slug and update path

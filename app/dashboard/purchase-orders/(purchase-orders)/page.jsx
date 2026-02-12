@@ -1,6 +1,5 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import {
   searchPurchaseOrders,
   fetchPurchaseOrderPages,
@@ -9,7 +8,6 @@ import {
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import {
   POStatusTabs,
   PODateFilter,
@@ -21,7 +19,6 @@ import {
 import { POTable } from "../components/POTable";
 import {
   FileText,
-  Plus,
   CheckCircle,
   Send,
   AlertTriangle,
@@ -86,22 +83,11 @@ async function PurchaseOrdersPage(props) {
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Purchase Orders</h1>
-          <p className="text-muted-foreground">
-            Create and manage supplier purchase orders
-          </p>
-        </div>
-        <Button
-          asChild
-          className="bg-primary hover:bg-primary/90"
-        >
-          <Link href="/dashboard/purchase-orders/create">
-            <Plus className="mr-2 h-4 w-4" />
-            New PO
-          </Link>
-        </Button>
+      <div>
+        <h1 className="text-3xl font-bold text-foreground">Purchase Orders</h1>
+        <p className="text-muted-foreground">
+          Create and manage supplier purchase orders
+        </p>
       </div>
 
       {/* Stats Cards */}

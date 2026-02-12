@@ -1,6 +1,4 @@
 import mongoose from "mongoose";
-import { units } from "../utils/units";
-
 const Schema = mongoose.Schema;
 
 // ============================================
@@ -10,6 +8,14 @@ const productSchema =
   Schema &&
   new Schema(
     {
+      // Company (Tenant)
+      companyId: {
+        type: Schema.Types.ObjectId,
+        ref: "Company",
+        required: [true, "Company ID is required"],
+        index: true,
+      },
+
       // ============================================
       // BASIC INFORMATION
       // ============================================
@@ -27,10 +33,8 @@ const productSchema =
       SKU: {
         type: String,
         required: [true, "SKU is required"],
-        unique: true,
         trim: true,
         uppercase: true,
-        index: true,
       },
 
       description: {
@@ -387,20 +391,19 @@ const productSchema =
       timestamps: true,
       toJSON: { virtuals: true },
       toObject: { virtuals: true },
-    }
+    },
   );
 
 // ============================================
 // INDEXES
 // ============================================
-// productSchema.index({ name: 1 });
-// productSchema.index({ SKU: 1 });
-// productSchema.index({ category: 1, status: 1 });
-// productSchema.index({ status: 1, isActive: 1 });
-// productSchema.index({ "inventory.quantityOnHand": 1 });
-// productSchema.index({ "inventory.reorderLevel": 1 });
-// productSchema.index({ "costing.costPrice": 1 });
-// productSchema.index({ "pricing.sellingPrice": 1 });
+// Unique SKU per company
+productSchema.index({ companyId: 1, SKU: 1 }, { unique: true });
+// Query indexes - all prefixed with companyId for tenant isolation
+productSchema.index({ companyId: 1, name: 1 });
+productSchema.index({ companyId: 1, category: 1, status: 1 });
+productSchema.index({ companyId: 1, status: 1, isActive: 1 });
+productSchema.index({ companyId: 1, barcode: 1 }, { sparse: true });
 
 // ============================================
 // VIRTUALS
@@ -582,7 +585,7 @@ productSchema.methods.updateAverageCost = function (newQuantity, newCost) {
 productSchema.methods.increaseInventory = async function (
   quantity,
   cost,
-  reason
+  reason,
 ) {
   if (quantity <= 0) {
     throw new Error("Quantity must be greater than zero");
@@ -641,7 +644,7 @@ productSchema.methods.decreaseInventory = async function (quantity, reason) {
   if (quantity > available) {
     throw new Error(
       `Insufficient inventory for ${this.name}. ` +
-        `Available: ${available}, Requested: ${quantity}`
+        `Available: ${available}, Requested: ${quantity}`,
     );
   }
 
@@ -712,7 +715,7 @@ productSchema.methods.commitInventory = async function (quantity) {
 
   if (quantity > available) {
     throw new Error(
-      `Cannot commit ${quantity} units of ${this.name}. Only ${available} available.`
+      `Cannot commit ${quantity} units of ${this.name}. Only ${available} available.`,
     );
   }
 
@@ -745,7 +748,7 @@ productSchema.methods.releaseInventory = async function (quantity) {
 
   if (quantity > committed) {
     throw new Error(
-      `Cannot release ${quantity} units. Only ${committed} committed.`
+      `Cannot release ${quantity} units. Only ${committed} committed.`,
     );
   }
 
@@ -955,7 +958,7 @@ productSchema.statics.bulkSetupAccountingAccounts = async function () {
     } catch (error) {
       console.error(
         `Failed to setup accounts for ${product.SKU}:`,
-        error.message
+        error.message,
       );
     }
   }
@@ -976,3 +979,5 @@ if (Product) {
 }
 
 export default Product;
+
+export { Product };

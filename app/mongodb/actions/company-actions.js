@@ -46,6 +46,12 @@ const optionalNumber = (min, max) =>
 const CreateCompanySchema = z.object({
   // Basic Info
   name: z.string().min(1, "Company name is required").max(100),
+  code: z
+    .string()
+    .min(2, "Company code must be at least 2 characters")
+    .max(6, "Company code cannot exceed 6 characters")
+    .regex(/^[A-Za-z0-9]+$/, "Company code must be alphanumeric")
+    .transform((val) => val.toUpperCase()),
   tagline: optionalString.pipe(z.string().max(200).optional()),
   logo: optionalString,
 
@@ -96,6 +102,12 @@ const UpdateCompanySchema = CreateCompanySchema.partial();
 const SUPER_ADMIN_ROLES = ["SuperAdmin"];
 const COMPANY_ADMIN_ROLES = ["SuperAdmin", "Admin"];
 
+// Helper to safely compare companyIds (handles ObjectId vs string mismatches)
+const isSameCompany = (id1, id2) => {
+  if (!id1 || !id2) return false;
+  return String(id1) === String(id2);
+};
+
 // ============================================
 // COMPANY ACTIONS
 // ============================================
@@ -109,6 +121,7 @@ export async function createCompany(prevState, formData) {
   // Extract form values to preserve on error
   const formValues = {
     name: formData.get("name"),
+    code: formData.get("code"),
     tagline: formData.get("tagline"),
     logo: formData.get("logo"),
     email: formData.get("email"),
@@ -157,18 +170,25 @@ export async function createCompany(prevState, formData) {
   try {
     await connectDB();
 
-    // Check for duplicate name
+    // Check for duplicate name or code
     const existingCompany = await Company.findOne({
-      name: { $regex: new RegExp(`^${data.name}$`, "i") },
+      $or: [
+        { name: { $regex: new RegExp(`^${data.name}$`, "i") } },
+        { code: data.code },
+      ],
     });
 
     if (existingCompany) {
+      if (existingCompany.code === data.code) {
+        return { errors: { code: ["This company code is already in use"] }, values: formValues };
+      }
       return { errors: { name: ["A company with this name already exists"] }, values: formValues };
     }
 
     // Create the company
     const company = await Company.create({
       name: data.name,
+      code: data.code,
       tagline: data.tagline,
       logo: data.logo,
       email: data.email,
@@ -228,6 +248,7 @@ export async function updateCompany(prevState, formData) {
   // Extract form values to preserve on error
   const formValues = {
     name: formData.get("name"),
+    code: formData.get("code"),
     tagline: formData.get("tagline"),
     logo: formData.get("logo"),
     email: formData.get("email"),
@@ -286,13 +307,55 @@ export async function updateCompany(prevState, formData) {
     // If not SuperAdmin, check if user belongs to this company
     if (
       session.user.role !== "SuperAdmin" &&
-      session.user.companyId !== companyId
+      !isSameCompany(session.user.companyId, companyId)
     ) {
       return { errors: { _form: ["You can only update your own company"] }, values: formValues };
     }
 
     // Update fields
     if (data.name) company.name = data.name;
+
+    // Handle company code:
+    // - SuperAdmin can always update the code
+    // - Admin can set the code only if company doesn't have one yet (initial setup)
+    // - If company has no code and none provided, auto-generate from name
+    if (data.code) {
+      const canUpdateCode = session.user.role === "SuperAdmin" || !company.code;
+      if (canUpdateCode) {
+        // Check if new code is already in use by another company
+        const codeInUse = await Company.findOne({
+          code: data.code.toUpperCase(),
+          _id: { $ne: companyId }
+        });
+        if (codeInUse) {
+          return { errors: { code: ["This company code is already in use"] }, values: formValues };
+        }
+        company.code = data.code.toUpperCase();
+      }
+    } else if (!company.code) {
+      // Auto-generate code from company name if not provided and company has no code
+      const nameToUse = data.name || company.name;
+      let generatedCode = nameToUse
+        .split(/\s+/)
+        .map(word => word[0])
+        .join("")
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "")
+        .slice(0, 6);
+
+      if (generatedCode.length < 2) {
+        generatedCode = nameToUse.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+      }
+
+      // Ensure uniqueness
+      let finalCode = generatedCode;
+      let suffix = 1;
+      while (await Company.findOne({ code: finalCode, _id: { $ne: companyId } })) {
+        finalCode = `${generatedCode.slice(0, 4)}${suffix}`;
+        suffix++;
+      }
+      company.code = finalCode;
+    }
     if (data.tagline !== undefined) company.tagline = data.tagline;
     if (data.logo !== undefined) company.logo = data.logo;
     if (data.email) company.email = data.email;
@@ -548,5 +611,356 @@ export async function deleteCompany(companyId) {
   } catch (error) {
     console.error("Delete company error:", error);
     return { errors: { _form: [error.message] } };
+  }
+}
+
+// ============================================
+// COMPANY ONBOARDING ACTIONS
+// ============================================
+
+import { CompanyOnboardingService } from "../services/companyOnboardingService";
+
+// Onboarding form schema
+const OnboardingSchema = z.object({
+  name: z.string().min(1, "Company name is required").max(100),
+  legalName: optionalString.pipe(z.string().max(150).optional()),
+  industry: z.enum([
+    "retail",
+    "manufacturing",
+    "services",
+    "technology",
+    "healthcare",
+    "education",
+    "hospitality",
+    "construction",
+    "agriculture",
+    "transport",
+    "general",
+  ]).optional(),
+
+  // Contact
+  contactEmail: z.string().email("Invalid email address"),
+  contactPhone: optionalString,
+  website: optionalUrl,
+
+  // Address
+  street: optionalString,
+  city: optionalString,
+  county: optionalString,
+  postalCode: optionalString,
+  country: z.string().default("Kenya"),
+
+  // Tax & Legal (Kenya)
+  taxPin: optionalString.pipe(
+    z.string().regex(/^[AP]\d{9}[A-Z]$/, "Invalid KRA PIN format").optional().or(z.literal(""))
+  ),
+  vatNumber: optionalString,
+  registrationNumber: optionalString,
+
+  // Settings
+  currency: z.enum(["KES", "USD", "EUR", "GBP", "TZS", "UGX"]).default("KES"),
+  timezone: z.string().default("Africa/Nairobi"),
+  fiscalYearStart: z.coerce.date().optional(),
+  vatRate: optionalNumber(0, 100),
+
+  // Document Prefixes
+  invoicePrefix: optionalString.pipe(z.string().max(10).optional()),
+  billPrefix: optionalString.pipe(z.string().max(10).optional()),
+  paymentPrefix: optionalString.pipe(z.string().max(10).optional()),
+  quotePrefix: optionalString.pipe(z.string().max(10).optional()),
+
+  // Subscription
+  subscriptionPlan: z.enum(["free", "starter", "professional", "enterprise"]).default("free"),
+
+  // Setup Options
+  seedAccounts: z.coerce.boolean().default(true),
+  initFiscalPeriods: z.coerce.boolean().default(true),
+});
+
+/**
+ * Create company with full onboarding (SuperAdmin only)
+ * This creates the company AND seeds initial data
+ */
+export async function createCompanyWithOnboarding(prevState, formData) {
+  const session = await auth();
+
+  const formValues = Object.fromEntries(formData.entries());
+
+  if (!session?.user) {
+    return { errors: { _form: ["You must be logged in"] }, values: formValues };
+  }
+
+  if (!SUPER_ADMIN_ROLES.includes(session.user.role)) {
+    return { errors: { _form: ["Unauthorized: SuperAdmin role required"] }, values: formValues };
+  }
+
+  const validatedFields = OnboardingSchema.safeParse(formValues);
+
+  if (!validatedFields.success) {
+    console.log("Validation errors:", validatedFields.error.flatten().fieldErrors);
+    return { errors: validatedFields.error.flatten().fieldErrors, values: formValues };
+  }
+
+  const data = validatedFields.data;
+
+  try {
+    await connectDB();
+
+    // Check for duplicate name
+    const existingCompany = await Company.findOne({
+      name: { $regex: new RegExp(`^${data.name}$`, "i") },
+    });
+
+    if (existingCompany) {
+      return { errors: { name: ["A company with this name already exists"] }, values: formValues };
+    }
+
+    // Create company with full setup
+    const result = await CompanyOnboardingService.createCompanyWithSetup(
+      {
+        name: data.name,
+        legalName: data.legalName,
+        industry: data.industry || "general",
+        contactEmail: data.contactEmail,
+        contactPhone: data.contactPhone,
+        website: data.website,
+        address: {
+          street: data.street,
+          city: data.city,
+          county: data.county,
+          postalCode: data.postalCode,
+          country: data.country || "Kenya",
+        },
+        taxPin: data.taxPin,
+        vatNumber: data.vatNumber,
+        registrationNumber: data.registrationNumber,
+        currency: data.currency || "KES",
+        timezone: data.timezone || "Africa/Nairobi",
+        fiscalYearStart: data.fiscalYearStart || new Date(new Date().getFullYear(), 0, 1),
+        vatRate: data.vatRate ?? 16,
+        invoicePrefix: data.invoicePrefix || "INV",
+        billPrefix: data.billPrefix || "BILL",
+        paymentPrefix: data.paymentPrefix || "PAY",
+        quotePrefix: data.quotePrefix || "QT",
+        subscriptionPlan: data.subscriptionPlan || "free",
+      },
+      session.user,
+      {
+        seedAccounts: data.seedAccounts !== false,
+        initFiscalPeriods: data.initFiscalPeriods !== false,
+      }
+    );
+
+    revalidatePath("/dashboard/admin/companies");
+
+    return {
+      success: true,
+      message: "Company created and setup completed",
+      companyId: result.company.id,
+      setup: result.setup,
+    };
+  } catch (error) {
+    console.error("Create company with onboarding error:", error);
+    return { errors: { _form: [error.message || "Failed to create company"] }, values: formValues };
+  }
+}
+
+/**
+ * Complete onboarding for existing company (seed data)
+ */
+export async function completeCompanyOnboarding(companyId, options = {}) {
+  const session = await auth();
+
+  if (!session?.user) {
+    return { success: false, error: "You must be logged in" };
+  }
+
+  // SuperAdmin can onboard any company, Admin can only onboard their own
+  if (!COMPANY_ADMIN_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Unauthorized: Admin role required" };
+  }
+
+  try {
+    await connectDB();
+
+    const company = await Company.findById(companyId);
+    if (!company) {
+      return { success: false, error: "Company not found" };
+    }
+
+    // If not SuperAdmin, check if user belongs to this company
+    if (
+      session.user.role !== "SuperAdmin" &&
+      !isSameCompany(session.user.companyId, companyId)
+    ) {
+      return { success: false, error: "You can only onboard your own company" };
+    }
+
+    // Check if already onboarded
+    if (company.settings?.setupCompleted) {
+      return { success: false, error: "Company has already been onboarded" };
+    }
+
+    const result = await CompanyOnboardingService.completeOnboarding(
+      companyId,
+      options,
+      session.user
+    );
+
+    revalidatePath("/dashboard/admin/companies");
+    revalidatePath(`/dashboard/admin/companies/${companyId}`);
+
+    return result;
+  } catch (error) {
+    console.error("Complete onboarding error:", error);
+    return { success: false, error: error.message || "Failed to complete onboarding" };
+  }
+}
+
+/**
+ * Get onboarding status for a company
+ */
+export async function getCompanyOnboardingStatus(companyId) {
+  const session = await auth();
+
+  if (!session?.user) {
+    return { success: false, error: "You must be logged in" };
+  }
+
+  try {
+    await connectDB();
+
+    // SuperAdmin can check any company, others only their own
+    if (
+      session.user.role !== "SuperAdmin" &&
+      !isSameCompany(session.user.companyId, companyId)
+    ) {
+      return { success: false, error: "Access denied" };
+    }
+
+    const status = await CompanyOnboardingService.getOnboardingStatus(companyId);
+
+    return { success: true, ...status };
+  } catch (error) {
+    console.error("Get onboarding status error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Verify company setup completeness
+ */
+export async function verifyCompanySetup(companyId) {
+  const session = await auth();
+
+  if (!session?.user) {
+    return { success: false, error: "You must be logged in" };
+  }
+
+  try {
+    await connectDB();
+
+    // SuperAdmin can verify any company, others only their own
+    if (
+      session.user.role !== "SuperAdmin" &&
+      !isSameCompany(session.user.companyId, companyId)
+    ) {
+      return { success: false, error: "Access denied" };
+    }
+
+    const verification = await CompanyOnboardingService.verifySetup(companyId);
+
+    return { success: true, ...verification };
+  } catch (error) {
+    console.error("Verify setup error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Seed chart of accounts only (for companies that skipped during onboarding)
+ */
+export async function seedCompanyChartOfAccounts(companyId) {
+  const session = await auth();
+
+  if (!session?.user) {
+    return { success: false, error: "You must be logged in" };
+  }
+
+  if (!COMPANY_ADMIN_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Unauthorized: Admin role required" };
+  }
+
+  try {
+    await connectDB();
+
+    // Verify access
+    if (
+      session.user.role !== "SuperAdmin" &&
+      !isSameCompany(session.user.companyId, companyId)
+    ) {
+      return { success: false, error: "Access denied" };
+    }
+
+    const result = await CompanyOnboardingService.seedChartOfAccounts(
+      companyId,
+      session.user
+    );
+
+    revalidatePath("/dashboard/accounts");
+    revalidatePath("/dashboard/settings/accounts");
+
+    return {
+      success: true,
+      message: `Created ${result.count} accounts`,
+      ...result,
+    };
+  } catch (error) {
+    console.error("Seed accounts error:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Initialize fiscal periods only
+ */
+export async function initializeFiscalPeriods(companyId, fiscalYearStart) {
+  const session = await auth();
+
+  if (!session?.user) {
+    return { success: false, error: "You must be logged in" };
+  }
+
+  if (!COMPANY_ADMIN_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Unauthorized: Admin role required" };
+  }
+
+  try {
+    await connectDB();
+
+    // Verify access
+    if (
+      session.user.role !== "SuperAdmin" &&
+      !isSameCompany(session.user.companyId, companyId)
+    ) {
+      return { success: false, error: "Access denied" };
+    }
+
+    const result = await CompanyOnboardingService.initializeFiscalPeriods(
+      companyId,
+      fiscalYearStart || new Date(new Date().getFullYear(), 0, 1),
+      session.user
+    );
+
+    revalidatePath("/dashboard/settings/fiscal-periods");
+
+    return {
+      success: true,
+      message: `Created fiscal periods for ${result.fiscalYear}`,
+      ...result,
+    };
+  } catch (error) {
+    console.error("Initialize fiscal periods error:", error);
+    return { success: false, error: error.message };
   }
 }

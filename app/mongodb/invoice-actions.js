@@ -12,6 +12,12 @@ import { redirect } from "next/navigation";
 import { generateInvoiceNumber } from "./queries/invoice-queries";
 import { generateMovementNumber } from "./queries/movement-queries";
 import mongoose from "mongoose";
+import {
+  getTenantContext,
+  validateTenantAccess,
+} from "@/lib/utils/tenant-utils";
+
+const ObjectId = mongoose.Types.ObjectId;
 
 // ============================================
 // UPDATE INVOICE ACTION
@@ -33,6 +39,15 @@ export async function updateInvoice(invoiceId, prevState, formData) {
     return {
       success: false,
       error: "Only Admins and Accountants can update invoices.",
+    };
+  }
+
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  if (!companyId && !isSuperAdmin) {
+    return {
+      success: false,
+      error: "Company context required",
     };
   }
 
@@ -83,6 +98,15 @@ export async function updateInvoice(invoiceId, prevState, formData) {
         };
       }
 
+      // Validate tenant access
+      if (!validateTenantAccess(existingInvoice, companyId, isSuperAdmin)) {
+        await mongoSession.abortTransaction();
+        return {
+          success: false,
+          error: "Access denied to this invoice.",
+        };
+      }
+
       // Check if invoice can be edited
       if (existingInvoice.paymentStatus === "paid") {
         await mongoSession.abortTransaction();
@@ -119,17 +143,38 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       // STEP 2: BUILD A MAP OF NEW ITEMS
       // ============================================
       const newStockItemsMap = new Map();
+      const technicianStockItems = []; // Items from technician checkouts (separate handling)
+
       if (invoiceData.stockItems && invoiceData.stockItems.length > 0) {
         invoiceData.stockItems.forEach((item) => {
-          newStockItemsMap.set(item.productId, {
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            SKU: item.SKU,
-            name: item.name,
-            description: item.description || "",
-            unit: item.unit,
-            total: item.total,
-          });
+          // Check if this is from technician stock
+          const isFromTechnicianStock = item.stockSource === "technician" && item.relatedCheckout?.checkoutId;
+
+          if (isFromTechnicianStock) {
+            // Technician stock items don't affect main inventory
+            technicianStockItems.push({
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              SKU: item.SKU,
+              name: item.name,
+              description: item.description || "",
+              unit: item.unit,
+              total: item.total,
+              relatedCheckout: item.relatedCheckout,
+            });
+          } else {
+            // Store inventory items - track for stock adjustments
+            newStockItemsMap.set(item.productId, {
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              SKU: item.SKU,
+              name: item.name,
+              description: item.description || "",
+              unit: item.unit,
+              total: item.total,
+            });
+          }
         });
       }
 
@@ -156,16 +201,24 @@ export async function updateInvoice(invoiceId, prevState, formData) {
         // If no change in quantity, skip
         if (difference === 0 && newItem) {
           // Just add to line items, no stock movement needed
+          // Get taxRate from submitted data
+          const itemTaxRate = invoiceData.stockItems?.find(
+            (si) => si.productId === productId
+          )?.taxRate ?? 16;
+          const itemTaxAmount = (newItem.total * itemTaxRate) / 100;
+
           newLineItems.push({
-            type: "stock",
+            itemType: "product",
             productId: productId,
-            SKU: newItem.SKU,
-            name: newItem.name,
-            description: newItem.description,
+            productSKU: newItem.SKU,
+            productName: newItem.name,
+            description: newItem.description || newItem.name,
             unit: newItem.unit,
             quantity: newItem.quantity,
             unitPrice: newItem.unitPrice,
-            total: newItem.total,
+            amount: newItem.total,
+            taxRate: itemTaxRate,
+            taxAmount: itemTaxAmount,
             stockDeducted: true,
           });
           continue;
@@ -178,18 +231,34 @@ export async function updateInvoice(invoiceId, prevState, formData) {
           throw new Error(`Product not found: ${productId}`);
         }
 
-        const previousStock = product.stock;
+        const previousStock = product.inventory?.quantityOnHand ?? product.stock ?? 0;
+
+        // Helper to update inventory consistently (both legacy and new fields)
+        const updateProductInventory = async (qty, direction) => {
+          const currentOnHand = product.inventory?.quantityOnHand ?? product.stock ?? 0;
+          const newOnHand = direction === "in"
+            ? currentOnHand + qty
+            : currentOnHand - qty;
+
+          // Update both fields for consistency
+          product.stock = newOnHand;
+          if (!product.inventory) product.inventory = {};
+          product.inventory.quantityOnHand = newOnHand;
+          product.inventory.quantityAvailable = newOnHand - (product.inventory.quantityCommitted || 0);
+
+          await product.save({ session: mongoSession });
+        };
 
         // Case 1: Item removed from invoice (old exists, new doesn't)
         if (oldItem && !newItem) {
           // Restore full quantity
-          product.stock += oldQuantity;
-          await product.save({ session: mongoSession });
+          await updateProductInventory(oldQuantity, "in");
 
           const stockMovementNo = await generateMovementNumber(mongoSession);
           await StockMovement.create(
             [
               {
+                companyId: existingInvoice.companyId,
                 productId: product._id,
                 movementNumber: stockMovementNo,
                 productSnapshot: {
@@ -201,10 +270,14 @@ export async function updateInvoice(invoiceId, prevState, formData) {
                 movementType: "adjustment",
                 direction: "in",
                 quantity: oldQuantity,
-                previousStock: previousStock,
-                newStock: product.stock,
-                unitPrice: oldItem.unitPrice,
-                totalValue: oldItem.unitPrice * oldQuantity,
+                previousStock,
+                newStock: product.inventory?.quantityOnHand ?? product.stock,
+                costing: {
+                  unitCost: product.costing?.costPrice || 0,
+                  totalCost: oldQuantity * (product.costing?.costPrice || 0),
+                  unitPrice: oldItem.unitPrice,
+                  totalValue: oldItem.unitPrice * oldQuantity,
+                },
                 reason: `Item removed - Invoice ${existingInvoice.invoiceNumber} edited`,
                 performedBy: {
                   id: user.id,
@@ -226,20 +299,21 @@ export async function updateInvoice(invoiceId, prevState, formData) {
         // Case 2: New item added (new exists, old doesn't)
         if (!oldItem && newItem) {
           // Check stock availability
-          if (product.stock < newQuantity) {
+          const available = product.inventory?.quantityAvailable ?? product.stock ?? 0;
+          if (available < newQuantity) {
             throw new Error(
-              `Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${newQuantity}`,
+              `Insufficient stock for ${product.name}. Available: ${available}, Requested: ${newQuantity}`,
             );
           }
 
           // Deduct full quantity
-          product.stock -= newQuantity;
-          await product.save({ session: mongoSession });
+          await updateProductInventory(newQuantity, "out");
 
           const stockMovementNo = await generateMovementNumber(mongoSession);
           const movement = await StockMovement.create(
             [
               {
+                companyId: existingInvoice.companyId,
                 productId: product._id,
                 movementNumber: stockMovementNo,
                 productSnapshot: {
@@ -251,10 +325,14 @@ export async function updateInvoice(invoiceId, prevState, formData) {
                 movementType: "sale",
                 direction: "out",
                 quantity: newQuantity,
-                previousStock: previousStock,
-                newStock: product.stock,
-                unitPrice: newItem.unitPrice,
-                totalValue: newItem.total,
+                previousStock,
+                newStock: product.inventory?.quantityOnHand ?? product.stock,
+                costing: {
+                  unitCost: product.costing?.costPrice || 0,
+                  totalCost: newQuantity * (product.costing?.costPrice || 0),
+                  unitPrice: newItem.unitPrice,
+                  totalValue: newItem.total,
+                },
                 reason: `New item - Invoice ${existingInvoice.invoiceNumber} updated`,
                 performedBy: {
                   id: user.id,
@@ -272,16 +350,24 @@ export async function updateInvoice(invoiceId, prevState, formData) {
 
           newMovementIds.push(movement[0]._id);
 
+          // Get taxRate from submitted data
+          const itemTaxRate = invoiceData.stockItems?.find(
+            (si) => si.productId === productId
+          )?.taxRate ?? 16;
+          const itemTaxAmount = (newItem.total * itemTaxRate) / 100;
+
           newLineItems.push({
-            type: "stock",
+            itemType: "product",
             productId: product._id,
-            SKU: newItem.SKU,
-            name: newItem.name,
-            description: newItem.description,
+            productSKU: newItem.SKU,
+            productName: newItem.name,
+            description: newItem.description || newItem.name,
             unit: newItem.unit,
             quantity: newItem.quantity,
             unitPrice: newItem.unitPrice,
-            total: newItem.total,
+            amount: newItem.total,
+            taxRate: itemTaxRate,
+            taxAmount: itemTaxAmount,
             stockDeducted: true,
           });
           continue;
@@ -292,19 +378,20 @@ export async function updateInvoice(invoiceId, prevState, formData) {
           if (difference > 0) {
             // Increased quantity - need to deduct MORE stock
             // Check if enough stock available
-            if (product.stock < difference) {
+            const available = product.inventory?.quantityAvailable ?? product.stock ?? 0;
+            if (available < difference) {
               throw new Error(
-                `Insufficient stock for ${product.name}. Available: ${product.stock}, Additional needed: ${difference}`,
+                `Insufficient stock for ${product.name}. Available: ${available}, Additional needed: ${difference}`,
               );
             }
 
-            product.stock -= difference;
-            await product.save({ session: mongoSession });
+            await updateProductInventory(difference, "out");
 
             const stockMovementNo = await generateMovementNumber(mongoSession);
             const movement = await StockMovement.create(
               [
                 {
+                  companyId: existingInvoice.companyId,
                   productId: product._id,
                   movementNumber: stockMovementNo,
                   productSnapshot: {
@@ -316,10 +403,14 @@ export async function updateInvoice(invoiceId, prevState, formData) {
                   movementType: "sale",
                   direction: "out",
                   quantity: difference,
-                  previousStock: previousStock,
-                  newStock: product.stock,
-                  unitPrice: newItem.unitPrice,
-                  totalValue: newItem.unitPrice * difference,
+                  previousStock,
+                  newStock: product.inventory?.quantityOnHand ?? product.stock,
+                  costing: {
+                    unitCost: product.costing?.costPrice || 0,
+                    totalCost: difference * (product.costing?.costPrice || 0),
+                    unitPrice: newItem.unitPrice,
+                    totalValue: newItem.unitPrice * difference,
+                  },
                   reason: `Quantity increased - Invoice ${existingInvoice.invoiceNumber} updated`,
                   performedBy: {
                     id: user.id,
@@ -339,13 +430,13 @@ export async function updateInvoice(invoiceId, prevState, formData) {
           } else {
             // Decreased quantity - need to RESTORE stock (difference is negative)
             const restoreQuantity = Math.abs(difference);
-            product.stock += restoreQuantity;
-            await product.save({ session: mongoSession });
+            await updateProductInventory(restoreQuantity, "in");
 
             const stockMovementNo = await generateMovementNumber(mongoSession);
             await StockMovement.create(
               [
                 {
+                  companyId: existingInvoice.companyId,
                   productId: product._id,
                   movementNumber: stockMovementNo,
                   productSnapshot: {
@@ -357,10 +448,14 @@ export async function updateInvoice(invoiceId, prevState, formData) {
                   movementType: "adjustment",
                   direction: "in",
                   quantity: restoreQuantity,
-                  previousStock: previousStock,
-                  newStock: product.stock,
-                  unitPrice: oldItem.unitPrice,
-                  totalValue: oldItem.unitPrice * restoreQuantity,
+                  previousStock,
+                  newStock: product.inventory?.quantityOnHand ?? product.stock,
+                  costing: {
+                    unitCost: product.costing?.costPrice || 0,
+                    totalCost: restoreQuantity * (product.costing?.costPrice || 0),
+                    unitPrice: oldItem.unitPrice,
+                    totalValue: oldItem.unitPrice * restoreQuantity,
+                  },
                   reason: `Quantity decreased - Invoice ${existingInvoice.invoiceNumber} updated`,
                   performedBy: {
                     id: user.id,
@@ -378,19 +473,64 @@ export async function updateInvoice(invoiceId, prevState, formData) {
           }
 
           // Add to line items with new quantity
+          // Get taxRate from submitted data
+          const itemTaxRateChanged = invoiceData.stockItems?.find(
+            (si) => si.productId === productId
+          )?.taxRate ?? 16;
+          const itemTaxAmountChanged = (newItem.total * itemTaxRateChanged) / 100;
+
           newLineItems.push({
-            type: "stock",
+            itemType: "product",
             productId: product._id,
-            SKU: newItem.SKU,
-            name: newItem.name,
-            description: newItem.description,
+            productSKU: newItem.SKU,
+            productName: newItem.name,
+            description: newItem.description || newItem.name,
             unit: newItem.unit,
             quantity: newItem.quantity,
             unitPrice: newItem.unitPrice,
-            total: newItem.total,
+            amount: newItem.total,
+            taxRate: itemTaxRateChanged,
+            taxAmount: itemTaxAmountChanged,
             stockDeducted: true,
           });
         }
+      }
+
+      // ============================================
+      // STEP 3.5: ADD TECHNICIAN STOCK ITEMS
+      // ============================================
+      // Technician stock items don't affect main inventory - they were already
+      // checked out from inventory during the fulfillment process
+      for (const item of technicianStockItems) {
+        // Get taxRate from submitted stockItems
+        const techItemTaxRate = invoiceData.stockItems?.find(
+          (si) => si.productId === item.productId && si.stockSource === "technician"
+        )?.taxRate ?? 16;
+        const techItemTaxAmount = (item.total * techItemTaxRate) / 100;
+
+        newLineItems.push({
+          itemType: "product",
+          productId: item.productId,
+          productSKU: item.SKU,
+          productName: item.name,
+          description: item.description || item.name,
+          unit: item.unit,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          amount: item.total,
+          taxRate: techItemTaxRate,
+          taxAmount: techItemTaxAmount,
+          stockDeducted: false, // No deduction needed - already checked out
+          relatedCheckout: {
+            checkoutId: item.relatedCheckout.checkoutId,
+            checkoutNumber: item.relatedCheckout.checkoutNumber,
+          },
+          // relatedRequest for COGS routing to Technician Stock account
+          relatedRequest: {
+            technicianId: item.relatedCheckout.technicianId,
+            technicianName: item.relatedCheckout.technicianName,
+          },
+        });
       }
 
       // ============================================
@@ -398,28 +538,41 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       // ============================================
       if (invoiceData.serviceItems && invoiceData.serviceItems.length > 0) {
         for (const item of invoiceData.serviceItems) {
+          // Use per-item taxRate from submitted data
+          const serviceTaxRate = item.taxRate ?? 16;
+          const serviceTaxAmount = (item.total * serviceTaxRate) / 100;
+
           newLineItems.push({
-            type: "service",
-            name: item.name,
-            description: item.description || "",
+            itemType: "service",
+            serviceCategory: item.category || item.serviceCategory || "other",
+            description: item.name || item.description,
             unit: item.unit,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
-            total: item.total,
+            amount: item.total,
+            taxRate: serviceTaxRate,
+            taxAmount: serviceTaxAmount,
             stockDeducted: false,
           });
         }
       }
 
       // ============================================
-      // STEP 5: CALCULATE TOTALS
+      // STEP 5: CALCULATE TOTALS (using per-item tax rates)
       // ============================================
-      const subtotal = newLineItems.reduce((sum, item) => sum + item.total, 0);
-      const discountAmount =
-        (subtotal * (invoiceData.discountPercentage || 0)) / 100;
+      const subtotal = newLineItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+      const discountPercentage = invoiceData.discountPercentage || 0;
+      const discountAmount = (subtotal * discountPercentage) / 100;
       const subtotalAfterDiscount = subtotal - discountAmount;
-      const taxAmount =
-        (subtotalAfterDiscount * (invoiceData.vatPercentage || 0)) / 100;
+
+      // Calculate tax from per-item taxAmounts (adjusted for discount)
+      // Discount factor to proportionally reduce tax when discount is applied
+      const discountFactor = subtotal > 0 ? subtotalAfterDiscount / subtotal : 1;
+      const taxAmount = newLineItems.reduce((sum, item) => {
+        // Apply discount factor to each item's tax contribution
+        return sum + ((item.taxAmount || 0) * discountFactor);
+      }, 0);
+
       const total = subtotalAfterDiscount + taxAmount;
 
       // ============================================
@@ -432,12 +585,15 @@ export async function updateInvoice(invoiceId, prevState, formData) {
         : null;
       existingInvoice.items = newLineItems;
       existingInvoice.subtotal = subtotal;
-      existingInvoice.discountPercentage = invoiceData.discountPercentage || 0;
-      existingInvoice.discountAmount = discountAmount;
-      existingInvoice.taxRate = invoiceData.vatPercentage || 0;
+      existingInvoice.discountPercentage = discountPercentage; // For validation
+      existingInvoice.totalDiscount = discountAmount; // Calculated discount amount
       existingInvoice.taxAmount = taxAmount;
       existingInvoice.total = total;
       existingInvoice.notes = invoiceData.notes || "";
+      // Initialize relatedDocuments if it doesn't exist
+      if (!existingInvoice.relatedDocuments) {
+        existingInvoice.relatedDocuments = {};
+      }
       existingInvoice.relatedDocuments.movementIds = newMovementIds;
 
       // Update payment status if amount changed
@@ -509,6 +665,15 @@ export async function createInvoice(prevState, formData) {
       };
     }
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    if (!companyId && !isSuperAdmin) {
+      return {
+        message: "Company context required",
+        success: false,
+      };
+    }
+
     // Parse form data
     const data = JSON.parse(formData.get("invoiceData"));
 
@@ -540,8 +705,8 @@ export async function createInvoice(prevState, formData) {
       };
     }
 
-    // Generate invoice number
-    const invoiceNumber = await generateInvoiceNumber();
+    // Generate invoice number (with company code prefix)
+    const invoiceNumber = await generateInvoiceNumber(companyId);
 
     // Prepare invoice items in new Invoice model format
     const items = [];
@@ -557,14 +722,24 @@ export async function createInvoice(prevState, formData) {
         };
       }
 
-      if (product.stock < item.quantity) {
-        return {
-          message: `Insufficient stock for ${product.name}. Available: ${product.stock}, Required: ${item.quantity}`,
-          success: false,
-        };
+      // Check stock availability ONLY for store inventory items
+      // Technician stock items were already checked out from inventory
+      const isFromTechnicianStock = item.stockSource === "technician" && item.relatedCheckout?.checkoutId;
+
+      if (!isFromTechnicianStock) {
+        const available = product.inventory?.quantityAvailable ?? product.stock ?? 0;
+        if (available < item.quantity) {
+          return {
+            message: `Insufficient stock for ${product.name}. Available: ${available}, Required: ${item.quantity}`,
+            success: false,
+          };
+        }
       }
 
-      items.push({
+      // Use per-item tax rate, fallback to global vatPercentage, then default 16%
+      const itemTaxRate = item.taxRate ?? data.vatPercentage ?? 16;
+
+      const invoiceItem = {
         itemType: "product",
         productId: product._id,
         productSKU: product.SKU,
@@ -574,24 +749,45 @@ export async function createInvoice(prevState, formData) {
         quantity: item.quantity,
         unitPrice: item.sellingPrice,
         amount: item.total,
-        taxRate: data.vatPercentage || 16,
-        taxAmount: (item.total * (data.vatPercentage || 16)) / 100,
+        taxRate: itemTaxRate,
+        taxAmount: (item.total * itemTaxRate) / 100,
         discountPercentage: 0,
         discountAmount: 0,
-      });
+      };
+
+      // Add technician stock tracking if from checkout
+      if (isFromTechnicianStock) {
+        invoiceItem.relatedCheckout = {
+          checkoutId: item.relatedCheckout.checkoutId,
+          checkoutNumber: item.relatedCheckout.checkoutNumber,
+        };
+        // Also populate relatedRequest for COGS routing
+        if (item.relatedCheckout.technicianId) {
+          invoiceItem.relatedRequest = {
+            technicianId: item.relatedCheckout.technicianId,
+            technicianName: item.relatedCheckout.technicianName,
+          };
+        }
+      }
+
+      items.push(invoiceItem);
     }
 
     // Process service items
     for (const item of data.serviceItems) {
+      // Use per-item tax rate, fallback to global vatPercentage, then default 16%
+      const itemTaxRate = item.taxRate ?? data.vatPercentage ?? 16;
+
       items.push({
         itemType: "service",
+        serviceCategory: item.category || "other",
         description: item.name,
         unit: item.unit,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         amount: item.total,
-        taxRate: data.vatPercentage || 16,
-        taxAmount: (item.total * (data.vatPercentage || 16)) / 100,
+        taxRate: itemTaxRate,
+        taxAmount: (item.total * itemTaxRate) / 100,
         discountPercentage: 0,
         discountAmount: 0,
       });
@@ -600,7 +796,15 @@ export async function createInvoice(prevState, formData) {
     // Calculate totals
     const subtotal = items.reduce((sum, item) => sum + item.amount, 0);
     const totalDiscount = (subtotal * (data.discountPercentage || 0)) / 100;
-    const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
+
+    // Item taxAmount is stored as pre-discount (for model validation and audit clarity)
+    // Invoice-level taxAmount applies discount proportionally
+    const discountFactor = subtotal > 0 ? (subtotal - totalDiscount) / subtotal : 1;
+    const taxAmount = items.reduce((sum, item) => {
+      // Apply discount factor to each item's tax contribution
+      return sum + item.taxAmount * discountFactor;
+    }, 0);
+
     const total = subtotal - totalDiscount + taxAmount;
 
     // Format customer address from Party model
@@ -683,9 +887,12 @@ export async function createInvoice(prevState, formData) {
       },
       items,
       subtotal,
+      discountPercentage: data.discountPercentage || 0,
       totalDiscount,
       taxAmount,
       total,
+      amountPaid: 0,
+      amountDue: total, // New invoice - full amount is due
       currency: "KES",
       paymentStatus: "unpaid",
       notes: data.notes || "",
@@ -694,6 +901,7 @@ export async function createInvoice(prevState, formData) {
         id: user.id,
       },
       status: "draft",
+      companyId: new ObjectId(companyId), // Tenant isolation
     });
 
     // Note: Invoice stays as draft - user must explicitly post/complete it
@@ -755,6 +963,12 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
       };
     }
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    if (!companyId && !isSuperAdmin) {
+      return { success: false, error: "Company context required" };
+    }
+
     const dbConnect = (await import("@/app/config/dbConnect")).default;
     await dbConnect();
 
@@ -798,6 +1012,12 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
     if (!invoice) {
       await mongoSession.abortTransaction();
       return { success: false, error: "Invoice not found" };
+    }
+
+    // Validate tenant access
+    if (!validateTenantAccess(invoice, companyId, isSuperAdmin)) {
+      await mongoSession.abortTransaction();
+      return { success: false, error: "Access denied to this invoice" };
     }
 
     if (invoice.paymentStatus === "paid") {
@@ -902,6 +1122,7 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
         name: user.name || user.email,
         email: user.email,
       },
+      companyId, // Tenant isolation
     });
 
     await payment.save({ session: mongoSession });
@@ -949,6 +1170,12 @@ export async function cancelInvoice(invoiceId, reason = "") {
     };
   }
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  if (!companyId && !isSuperAdmin) {
+    return { message: "Company context required" };
+  }
+
   const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
@@ -958,6 +1185,11 @@ export async function cancelInvoice(invoiceId, reason = "") {
     return {
       message: "Invoice not found",
     };
+  }
+
+  // Validate tenant access
+  if (!validateTenantAccess(invoice, companyId, isSuperAdmin)) {
+    return { message: "Access denied to this invoice" };
   }
 
   try {
@@ -1005,6 +1237,12 @@ export async function completeInvoice(invoiceId) {
     };
   }
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  if (!companyId && !isSuperAdmin) {
+    return { message: "Company context required" };
+  }
+
   const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
@@ -1016,27 +1254,90 @@ export async function completeInvoice(invoiceId) {
     };
   }
 
+  // Validate tenant access
+  if (!validateTenantAccess(invoice, companyId, isSuperAdmin)) {
+    return { message: "Access denied to this invoice" };
+  }
+
   if (invoice.status !== "draft" && invoice.status !== "sent") {
     return {
       message: `Can only complete draft or sent invoices. Current status: ${invoice.status}`,
     };
   }
 
+  // ============================================
+  // USE TRANSACTION FOR DATA CONSISTENCY
+  // ============================================
+  // Strategy:
+  // 1. Start transaction for checkout updates
+  // 2. Update checkouts first (within transaction, not committed yet)
+  // 3. Call invoice.complete() (commits immediately - model limitation)
+  // 4. If invoice.complete() succeeds, commit checkout transaction
+  // 5. If invoice.complete() fails, abort transaction (checkouts roll back)
+  const mongoSession = await mongoose.startSession();
+  mongoSession.startTransaction();
+
   try {
-    // Use the model's complete method which handles:
-    // - Journal entries (AR, Revenue, VAT Output)
-    // - COGS journal entry (if products)
-    // - Stock movements (deducts inventory)
-    // - Tax transactions (VAT Output)
+    const { ItemCheckout } = await import("@/app/models/checkouts");
+
+    // ============================================
+    // STEP 1: UPDATE CHECKOUTS FIRST (within transaction)
+    // ============================================
+    // This ensures checkouts are validated and updated atomically
+    // If this fails, we haven't touched the invoice yet
+    const checkoutsToUpdate = [];
+
+    for (const item of invoice.items) {
+      if (item.relatedCheckout?.checkoutId) {
+        const checkout = await ItemCheckout.findById(item.relatedCheckout.checkoutId).session(mongoSession);
+
+        if (checkout && checkout.status === "checked_out") {
+          checkout.status = "converted_to_sale";
+          checkout.saleConversion = {
+            converted: true,
+            convertedAt: new Date(),
+            convertedBy: {
+              name: user.name,
+              id: user.id,
+            },
+            invoiceId: invoice._id,
+            invoiceNumber: invoice.invoiceNumber,
+            quantitySold: item.quantity,
+          };
+          // Clear overdue flag since item is now sold (expectedReturnDate kept for history)
+          checkout.isOverdue = false;
+
+          await checkout.save({ session: mongoSession });
+          checkoutsToUpdate.push(checkout._id);
+        }
+      }
+    }
+
+    // ============================================
+    // STEP 2: COMPLETE INVOICE
+    // ============================================
+    // Note: invoice.complete() doesn't use session (model limitation)
+    // but if it fails, we abort the checkout transaction
     await invoice.complete({
       name: user.name,
       id: user.id,
     });
+
+    // ============================================
+    // STEP 3: COMMIT CHECKOUT TRANSACTION
+    // ============================================
+    // Invoice completed successfully, now commit checkout updates
+    await mongoSession.commitTransaction();
+
   } catch (error) {
+    // Abort checkout transaction - checkouts roll back to original state
+    await mongoSession.abortTransaction();
     console.error("Complete invoice error:", error);
     return {
       message: error.message || "Failed to post invoice",
     };
+  } finally {
+    mongoSession.endSession();
   }
 
   // Revalidate and redirect on success
@@ -1045,5 +1346,254 @@ export async function completeInvoice(invoiceId) {
   revalidatePath("/dashboard/stocks");
   revalidatePath("/dashboard/movements");
   revalidatePath("/dashboard/accounts");
+  revalidatePath("/dashboard/checkouts");
   redirect(`/dashboard/invoices/${invoiceId}`);
+}
+
+// ============================================
+// CONVERT CHECKOUT(S) TO INVOICE
+// ============================================
+// Used when demo/installation checkouts are converted to sale
+// Allows accountant to add service charges (labor, mileage, etc.)
+// ============================================
+export async function convertCheckoutToInvoice(prevState, formData) {
+  const mongoSession = await mongoose.startSession();
+
+  try {
+    const authSession = await auth();
+    const user = authSession?.user;
+
+    if (!user) {
+      return { success: false, error: "Unauthorized. Please log in." };
+    }
+
+    // Only Accountant or Admin can convert checkouts to invoices
+    if (user.role !== "Admin" && user.role !== "Accountant") {
+      return {
+        success: false,
+        error: "Only Accountants and Admins can convert checkouts to invoices.",
+      };
+    }
+
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    if (!companyId && !isSuperAdmin) {
+      return { success: false, error: "Company context required" };
+    }
+
+    // Parse form data
+    const data = JSON.parse(formData.get("conversionData"));
+
+    // Validate required fields
+    if (!data.checkoutIds || data.checkoutIds.length === 0) {
+      return { success: false, error: "At least one checkout is required" };
+    }
+
+    mongoSession.startTransaction();
+
+    // Import ItemCheckout model
+    const { ItemCheckout } = await import("@/app/models/checkouts");
+    const { StockRequest } = await import("@/app/models/requests");
+
+    // Fetch checkouts
+    const checkouts = await ItemCheckout.find({
+      _id: { $in: data.checkoutIds },
+      status: "checked_out", // Only active checkouts can be converted
+    }).session(mongoSession);
+
+    if (checkouts.length === 0) {
+      await mongoSession.abortTransaction();
+      return { success: false, error: "No valid active checkouts found" };
+    }
+
+    // Validate all checkouts belong to same tenant
+    for (const checkout of checkouts) {
+      if (!validateTenantAccess(checkout, companyId, isSuperAdmin)) {
+        await mongoSession.abortTransaction();
+        return { success: false, error: "Access denied to one or more checkouts" };
+      }
+    }
+
+    // Get parent request to fetch customer info
+    const requestId = checkouts[0].relatedDocuments?.requestId;
+    if (!requestId) {
+      await mongoSession.abortTransaction();
+      return { success: false, error: "Checkout has no linked request" };
+    }
+
+    const request = await StockRequest.findById(requestId).session(mongoSession);
+    if (!request) {
+      await mongoSession.abortTransaction();
+      return { success: false, error: "Parent request not found" };
+    }
+
+    // Customer info from request
+    const customer = {
+      id: request.customer?.id || "",
+      name: request.customer?.name || "Unknown",
+      email: request.customer?.email || "",
+      phone: request.customer?.phone || "",
+      address: request.customer?.address || "",
+      taxPin: request.customer?.taxPin || "",
+    };
+
+    // Build invoice items from checkouts (products)
+    const invoiceItems = [];
+
+    for (const checkout of checkouts) {
+      const product = await Product.findById(checkout.productId).session(mongoSession);
+      const unitPrice = product?.pricing?.sellingPrice || 0;
+      const unitCost = product?.costing?.costPrice || 0;
+      const quantity = data.quantitiesToSell?.[checkout._id.toString()] || checkout.quantity;
+      const amount = quantity * unitPrice;
+      const totalCost = quantity * unitCost;
+      const taxRate = 16; // Kenya VAT
+
+      invoiceItems.push({
+        itemType: "product",
+        productId: checkout.productId,
+        productSKU: checkout.productSnapshot?.SKU,
+        productName: checkout.productSnapshot?.name,
+        description: checkout.productSnapshot?.name,
+        unit: product?.unit || "pcs",
+        quantity,
+        unitPrice,
+        amount,
+        costing: {
+          unitCost,
+          totalCost,
+          grossProfit: amount - totalCost,
+          marginPercentage: amount > 0 ? ((amount - totalCost) / amount) * 100 : 0,
+        },
+        taxRate,
+        taxAmount: (amount * taxRate) / 100,
+        relatedRequest: {
+          requestId: request._id,
+          requestNumber: request.requestNumber,
+          technicianId: checkout.checkedOutTo?.id,
+          technicianName: checkout.checkedOutTo?.name,
+        },
+        relatedCheckout: {
+          checkoutId: checkout._id,
+          checkoutNumber: checkout.checkoutNumber,
+        },
+      });
+    }
+
+    // Add service items (labor, mileage, accommodation, etc.)
+    if (data.serviceItems && data.serviceItems.length > 0) {
+      for (const service of data.serviceItems) {
+        const amount = service.quantity * service.unitPrice;
+        const taxRate = service.taxRate ?? 16;
+
+        invoiceItems.push({
+          itemType: "service",
+          serviceCategory: service.category || "other",
+          description: service.description,
+          unit: service.unit || "hrs",
+          quantity: service.quantity,
+          unitPrice: service.unitPrice,
+          amount,
+          costing: {
+            unitCost: 0,
+            totalCost: 0,
+            grossProfit: amount,
+            marginPercentage: 100,
+          },
+          taxRate,
+          taxAmount: (amount * taxRate) / 100,
+        });
+      }
+    }
+
+    // Calculate totals
+    const subtotal = invoiceItems.reduce((sum, item) => sum + item.amount, 0);
+    const totalTax = invoiceItems.reduce((sum, item) => sum + item.taxAmount, 0);
+    const totalCOGS = invoiceItems.reduce((sum, item) => sum + (item.costing?.totalCost || 0), 0);
+    const total = subtotal + totalTax;
+
+    // Generate invoice number
+    const invoiceNumber = await generateInvoiceNumber(companyId);
+
+    // Create invoice
+    const invoice = await Invoice.create(
+      [
+        {
+          companyId,
+          invoiceNumber,
+          invoiceDate: new Date(),
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+          customer,
+          items: invoiceItems,
+          subtotal,
+          totalDiscount: 0,
+          taxAmount: totalTax,
+          total,
+          totalCOGS,
+          grossProfit: subtotal - totalCOGS,
+          grossMarginPercentage: subtotal > 0 ? ((subtotal - totalCOGS) / subtotal) * 100 : 0,
+          status: "draft",
+          paymentStatus: "unpaid",
+          amountPaid: 0,
+          amountDue: total,
+          source: {
+            type: "checkout_conversion",
+            requestId: request._id,
+            requestNumber: request.requestNumber,
+            checkoutIds: checkouts.map((c) => c._id),
+          },
+          notes: data.notes || `Converted from checkout(s): ${checkouts.map((c) => c.checkoutNumber).join(", ")}`,
+          createdBy: {
+            name: user.name,
+            id: user.id,
+          },
+        },
+      ],
+      { session: mongoSession }
+    );
+
+    // Update checkouts to mark as converted
+    for (const checkout of checkouts) {
+      const quantitySold = data.quantitiesToSell?.[checkout._id.toString()] || checkout.quantity;
+      const quantityReturned = checkout.quantity - quantitySold;
+
+      checkout.status = "converted_to_sale";
+      checkout.saleConversion = {
+        converted: true,
+        convertedAt: new Date(),
+        convertedBy: {
+          name: user.name,
+          id: user.id,
+        },
+        invoiceId: invoice[0]._id,
+        invoiceNumber: invoice[0].invoiceNumber,
+        quantitySold,
+        quantityReturned,
+      };
+
+      await checkout.save({ session: mongoSession });
+    }
+
+    await mongoSession.commitTransaction();
+
+    revalidatePath("/dashboard/invoices");
+    revalidatePath("/dashboard/checkouts");
+    revalidatePath("/dashboard/requests");
+
+    return {
+      success: true,
+      message: `Invoice ${invoice[0].invoiceNumber} created from ${checkouts.length} checkout(s)`,
+      invoiceId: invoice[0]._id.toString(),
+      invoiceNumber: invoice[0].invoiceNumber,
+    };
+  } catch (error) {
+    await mongoSession.abortTransaction();
+    console.error("Convert checkout to invoice error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to convert checkout to invoice",
+    };
+  } finally {
+    mongoSession.endSession();
+  }
 }

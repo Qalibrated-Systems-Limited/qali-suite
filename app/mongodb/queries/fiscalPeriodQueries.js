@@ -2,6 +2,10 @@ import FiscalPeriod from "../../models/fiscalPeriod";
 import JournalEntry from "../../models/JournalEntry";
 
 import dbConnect from "../../config/dbConnect";
+import {
+  getTenantContext,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // FISCAL PERIOD QUERIES - READ OPERATIONS
@@ -15,7 +19,10 @@ import dbConnect from "../../config/dbConnect";
 export async function getFiscalPeriods(filters = {}) {
   await dbConnect();
 
-  const query = {};
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  let query = {};
 
   if (filters.status) {
     query.status = filters.status;
@@ -29,6 +36,9 @@ export async function getFiscalPeriods(filters = {}) {
     query.periodType = filters.periodType;
   }
 
+  // Apply tenant scoping
+  query = withTenantScope(query, companyId, isSuperAdmin);
+
   const periods = await FiscalPeriod.find(query).sort({ startDate: -1 }).lean();
 
   return periods;
@@ -40,7 +50,12 @@ export async function getFiscalPeriods(filters = {}) {
 export async function getFiscalPeriodById(periodId) {
   await dbConnect();
 
-  const period = await FiscalPeriod.findById(periodId).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const period = await FiscalPeriod.findOne(
+    withTenantScope({ _id: periodId }, companyId, isSuperAdmin)
+  ).lean();
 
   if (!period) {
     return null;
@@ -56,17 +71,22 @@ export async function getFiscalPeriodById(periodId) {
 export async function getCurrentFiscalPeriod() {
   await dbConnect();
 
-  if (typeof FiscalPeriod.getCurrentPeriod === "function") {
-    return await FiscalPeriod.getCurrentPeriod();
-  }
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  // Fallback
+  // Fallback - use tenant-scoped query
   const now = new Date();
-  return await FiscalPeriod.findOne({
-    startDate: { $lte: now },
-    endDate: { $gte: now },
-    status: "open",
-  }).lean();
+  return await FiscalPeriod.findOne(
+    withTenantScope(
+      {
+        startDate: { $lte: now },
+        endDate: { $gte: now },
+        status: "open",
+      },
+      companyId,
+      isSuperAdmin
+    )
+  ).lean();
 }
 
 /**
@@ -76,12 +96,13 @@ export async function getCurrentFiscalPeriod() {
 export async function getOpenFiscalPeriods() {
   await dbConnect();
 
-  if (typeof FiscalPeriod.getOpenPeriods === "function") {
-    return await FiscalPeriod.getOpenPeriods();
-  }
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  // Fallback
-  return await FiscalPeriod.find({ status: "open" })
+  // Fallback - use tenant-scoped query
+  return await FiscalPeriod.find(
+    withTenantScope({ status: "open" }, companyId, isSuperAdmin)
+  )
     .sort({ startDate: 1 })
     .lean();
 }
@@ -93,15 +114,20 @@ export async function getOpenFiscalPeriods() {
 export async function getPeriodByDate(date) {
   await dbConnect();
 
-  if (typeof FiscalPeriod.getPeriodByDate === "function") {
-    return await FiscalPeriod.getPeriodByDate(date);
-  }
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  // Fallback
-  return await FiscalPeriod.findOne({
-    startDate: { $lte: new Date(date) },
-    endDate: { $gte: new Date(date) },
-  }).lean();
+  // Fallback - use tenant-scoped query
+  return await FiscalPeriod.findOne(
+    withTenantScope(
+      {
+        startDate: { $lte: new Date(date) },
+        endDate: { $gte: new Date(date) },
+      },
+      companyId,
+      isSuperAdmin
+    )
+  ).lean();
 }
 
 /**
@@ -111,7 +137,13 @@ export async function getPeriodByDate(date) {
 export async function getPeriodSummary(periodId) {
   await dbConnect();
 
-  const period = await FiscalPeriod.findById(periodId).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
+  const period = await FiscalPeriod.findOne(
+    withTenantScope({ _id: periodId }, companyId, isSuperAdmin)
+  ).lean();
 
   if (!period) {
     return null;
@@ -120,7 +152,7 @@ export async function getPeriodSummary(periodId) {
   // Get journal entry statistics
   const [entryStats, revenue, expenses] = await Promise.all([
     JournalEntry.aggregate([
-      { $match: { fiscalPeriodId: period._id } },
+      { $match: { ...tenantMatch, fiscalPeriodId: period._id } },
       {
         $group: {
           _id: "$status",
@@ -131,7 +163,7 @@ export async function getPeriodSummary(periodId) {
 
     // Calculate revenue
     JournalEntry.aggregate([
-      { $match: { fiscalPeriodId: period._id, status: "posted" } },
+      { $match: { ...tenantMatch, fiscalPeriodId: period._id, status: "posted" } },
       { $unwind: "$lines" },
       {
         $lookup: {
@@ -153,7 +185,7 @@ export async function getPeriodSummary(periodId) {
 
     // Calculate expenses
     JournalEntry.aggregate([
-      { $match: { fiscalPeriodId: period._id, status: "posted" } },
+      { $match: { ...tenantMatch, fiscalPeriodId: period._id, status: "posted" } },
       { $unwind: "$lines" },
       {
         $lookup: {
@@ -199,7 +231,13 @@ export async function getPeriodSummary(periodId) {
 export async function getPeriodClosingChecklist(periodId) {
   await dbConnect();
 
-  const period = await FiscalPeriod.findById(periodId).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
+  const period = await FiscalPeriod.findOne(
+    withTenantScope({ _id: periodId }, companyId, isSuperAdmin)
+  ).lean();
 
   if (!period) {
     return null;
@@ -207,6 +245,7 @@ export async function getPeriodClosingChecklist(periodId) {
 
   // Check for draft entries
   const draftCount = await JournalEntry.countDocuments({
+    ...tenantMatch,
     fiscalPeriodId: period._id,
     status: "draft",
   });
@@ -241,7 +280,14 @@ export async function getPeriodClosingChecklist(periodId) {
 export async function getPeriodsByYear(year) {
   await dbConnect();
 
-  return await FiscalPeriod.find({ year }).sort({ startDate: 1 }).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  return await FiscalPeriod.find(
+    withTenantScope({ year }, companyId, isSuperAdmin)
+  )
+    .sort({ startDate: 1 })
+    .lean();
 }
 
 /**
@@ -251,11 +297,15 @@ export async function getPeriodsByYear(year) {
 export async function getFiscalPeriodStats() {
   await dbConnect();
 
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId };
+
   const [total, open, closed, locked, current] = await Promise.all([
-    FiscalPeriod.countDocuments(),
-    FiscalPeriod.countDocuments({ status: "open" }),
-    FiscalPeriod.countDocuments({ status: "closed" }),
-    FiscalPeriod.countDocuments({ status: "locked" }),
+    FiscalPeriod.countDocuments(tenantMatch),
+    FiscalPeriod.countDocuments({ ...tenantMatch, status: "open" }),
+    FiscalPeriod.countDocuments({ ...tenantMatch, status: "closed" }),
+    FiscalPeriod.countDocuments({ ...tenantMatch, status: "locked" }),
     getCurrentFiscalPeriod(),
   ]);
 

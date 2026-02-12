@@ -5,6 +5,8 @@ import Product from "../../models/product";
 import Invoice from "../../models/invoice";
 import Counter from "../../models/counter";
 import { serializeBsonType } from "@/lib/utils";
+import { ObjectId } from "mongodb";
+import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 
 dbConnect();
 
@@ -12,10 +14,19 @@ dbConnect();
 // FETCH ACTIVE CUSTOMERS
 // ============================================
 export const fetchActiveCustomers = async () => {
-  const customers = await Party.find({
-    type: { $in: ["customer", "both"] },
-    isActive: true,
-  })
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const customers = await Party.find(
+    withTenantScope(
+      {
+        type: { $in: ["customer", "both"] },
+        isActive: true,
+      },
+      companyId,
+      isSuperAdmin,
+    ),
+  )
     .sort({ name: 1 })
     .lean();
 
@@ -46,13 +57,22 @@ export const fetchActiveCustomers = async () => {
 // FETCH AVAILABLE PRODUCTS
 // ============================================
 export const fetchAvailableProducts = async () => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
   // ERP: Use inventory.quantityAvailable (on hand - committed)
-  const products = await Product.find({
-    $or: [
-      { "inventory.quantityAvailable": { $gt: 0 } },
-      { stock: { $gt: 0 } }, // Fallback for legacy products
-    ],
-  })
+  const products = await Product.find(
+    withTenantScope(
+      {
+        $or: [
+          { "inventory.quantityAvailable": { $gt: 0 } },
+          { stock: { $gt: 0 } }, // Fallback for legacy products
+        ],
+      },
+      companyId,
+      isSuperAdmin,
+    ),
+  )
     .sort({ name: 1 })
     .lean();
 
@@ -71,32 +91,56 @@ export const fetchAvailableProducts = async () => {
 };
 
 // ============================================
-// GENERATE INVOICE NUMBER
+// GENERATE INVOICE NUMBER (tenant-scoped with company code prefix)
 // ============================================
-export const generateInvoiceNumber = async (session = null) => {
+export const generateInvoiceNumber = async (
+  tenantCompanyId,
+  session = null,
+) => {
   const { format } = await import("date-fns");
+  const Company = (await import("../../models/Company")).default;
+
+  // Fetch company code for prefix
+  let companyCode = null;
+  if (tenantCompanyId) {
+    const company = await Company.findById(tenantCompanyId).select("code").lean();
+    companyCode = company?.code || null;
+  }
 
   const today = format(new Date(), "ddMMyy");
-  const counterId = `INV-${today}`;
+
+  // Include company code in the counter name for tenant isolation
+  const counterId = companyCode
+    ? `inv-${companyCode.toLowerCase()}-${today}`
+    : tenantCompanyId
+      ? `inv-${tenantCompanyId}-${today}`
+      : `inv-${today}`;
 
   const counter = await Counter.findOneAndUpdate(
     { name: counterId },
     { $inc: { seq: 1 } },
-    { upsert: true, new: true, session }
+    { upsert: true, new: true, session },
   );
 
   if (!counter) {
     throw new Error("Failed to generate invoice number");
   }
 
-  return `${counterId}-${String(counter.seq).padStart(3, "0")}`;
+  // Format: INV-{CODE}-{DDMMYY}-{NNN} or INV-{DDMMYY}-{NNN}
+  const prefix = companyCode ? `INV-${companyCode}` : "INV";
+  return `${prefix}-${today}-${String(counter.seq).padStart(3, "0")}`;
 };
 
 // ============================================
 // GET CUSTOMER BY ID
 // ============================================
 export const getCustomerById = async (customerId) => {
-  const customer = await Party.findById(customerId).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const customer = await Party.findOne(
+    withTenantScope({ _id: customerId }, companyId, isSuperAdmin),
+  ).lean();
 
   if (!customer) {
     return null;
@@ -136,15 +180,21 @@ export const getCustomerById = async (customerId) => {
 export const searchInvoices = async (
   searchTerm = "",
   page = 1,
-  filters = {}
+  filters = {},
 ) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const ITEMS_PER_PAGE = 20;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
   const { paymentStatus, status, startDate, endDate } = filters;
 
   // Build filter conditions
-  let additionalFilters = {};
+  let additionalFilters = { ...tenantMatch };
 
   if (paymentStatus && paymentStatus !== "all") {
     additionalFilters.paymentStatus = paymentStatus;
@@ -227,10 +277,16 @@ export const searchInvoices = async (
 // FETCH INVOICE PAGES
 // ============================================
 export const fetchInvoicePages = async (searchTerm = "", filters = {}) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const ITEMS_PER_PAGE = 20;
   const { paymentStatus, status, startDate, endDate } = filters;
 
-  let additionalFilters = {};
+  let additionalFilters = { ...tenantMatch };
 
   if (paymentStatus && paymentStatus !== "all") {
     additionalFilters.paymentStatus = paymentStatus;
@@ -297,7 +353,12 @@ export const fetchInvoicePages = async (searchTerm = "", filters = {}) => {
 // GET INVOICE BY ID
 // ============================================
 export const getInvoiceById = async (invoiceId) => {
-  const invoice = await Invoice.findById(invoiceId).lean();
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const invoice = await Invoice.findOne(
+    withTenantScope({ _id: invoiceId }, companyId, isSuperAdmin),
+  ).lean();
 
   if (!invoice) {
     return null;
@@ -331,9 +392,15 @@ export const getInvoiceById = async (invoiceId) => {
 // GET INVOICE STATS
 // ============================================
 export const getInvoiceStats = async (filters = {}) => {
+  // Get tenant context
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
+
   const { startDate, endDate } = filters;
 
-  let matchConditions = {};
+  let matchConditions = { ...tenantMatch };
 
   if (startDate || endDate) {
     matchConditions.invoiceDate = {};

@@ -134,12 +134,37 @@ export function ViewRequestDialog({ request, open, onOpenChange }) {
             </CardContent>
           </Card>
 
+          {/* Request Type */}
+          {request.requestType && (
+            <Card>
+              <CardContent className="p-4">
+                <h4 className="font-semibold mb-2">Request Type</h4>
+                <p className="text-sm capitalize">
+                  {request.requestType.replace(/_/g, " ")}
+                </p>
+                {request.requestDetails && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {request.requestDetails}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Customer */}
-          {request.customer && (
+          {request.customer?.id && (
             <Card>
               <CardContent className="p-4">
                 <h4 className="font-semibold mb-2">Customer</h4>
-                <p className="text-sm">{request.customer}</p>
+                <div className="space-y-1 text-sm">
+                  <p className="font-medium">{request.customer.name}</p>
+                  {request.customer.email && (
+                    <p className="text-muted-foreground">{request.customer.email}</p>
+                  )}
+                  {request.customer.phone && (
+                    <p className="text-muted-foreground">{request.customer.phone}</p>
+                  )}
+                </div>
               </CardContent>
             </Card>
           )}
@@ -157,21 +182,10 @@ export function ViewRequestDialog({ request, open, onOpenChange }) {
                         <p className="text-xs text-muted-foreground">
                           SKU: {item.SKU}
                         </p>
-                        <p className="text-xs text-muted-foreground">
-                          Purpose:{" "}
-                          <span className="capitalize">
-                            {item.purpose.replace(/_/g, " ")}
-                          </span>
-                        </p>
-                        {item.purposeDetails && (
+                        {item.notes && (
                           <p className="text-xs text-muted-foreground">
-                            Details: {item.purposeDetails}
+                            Notes: {item.notes}
                           </p>
-                        )}
-                        {item.requiresReturn && (
-                          <Badge variant="outline" className="text-xs mt-1">
-                            Must be returned
-                          </Badge>
                         )}
                       </div>
                       <div className="text-right space-y-1">

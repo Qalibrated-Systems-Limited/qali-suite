@@ -3,6 +3,7 @@ import {
   fetchCheckoutPages,
   getCheckoutStats,
 } from "@/app/mongodb/queries/checkout-queries";
+import { getExpenseAccountsForDialog } from "@/app/mongodb/queries/accountQueries";
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";
 import { auth } from "@/auth";
@@ -43,10 +44,11 @@ async function CheckoutsPage(props) {
     dueStatus: dueStatus !== "all" ? dueStatus : "",
   };
 
-  const [totalPages, checkouts, stats] = await Promise.all([
+  const [totalPages, checkouts, stats, expenseAccounts] = await Promise.all([
     fetchCheckoutPages(query, filters),
     searchCheckouts(query, currentPage, filters),
     getCheckoutStats(),
+    getExpenseAccountsForDialog(),
   ]);
 
   // Check if any filters are active
@@ -180,6 +182,7 @@ async function CheckoutsPage(props) {
         checkouts={checkouts}
         canManageCheckouts={canManageCheckouts}
         userId={userId}
+        expenseAccounts={expenseAccounts}
       />
 
       {/* Pagination */}

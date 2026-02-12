@@ -2,6 +2,18 @@ import TaxTransaction from "../../models/taxTransactions";
 
 import Account from "../../models/account";
 import dbConnect from "../../config/dbConnect";
+import {
+  getTenantContext,
+  withTenantScope,
+  validateTenantAccess,
+  getCompanyIdForCreate,
+  withTenantPipeline,
+} from "@/lib/utils/tenant-utils";
+
+// ============================================
+// TAX SERVICE - TAX TRANSACTION MANAGEMENT
+// Multi-tenant: All operations scoped by companyId
+// ============================================
 
 export class TaxService {
   static calculateVAT(amount, rate = 16) {
@@ -14,6 +26,12 @@ export class TaxService {
 
   static async createTaxTransactionFromInvoice(invoice, user) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const targetCompanyId = invoice.companyId || companyId;
+
+    if (!targetCompanyId && !isSuperAdmin) {
+      throw new Error("Company context required");
+    }
 
     if (typeof TaxTransaction.createFromInvoice === "function") {
       return await TaxTransaction.createFromInvoice(invoice, user);
@@ -26,10 +44,13 @@ export class TaxService {
       invoiceDate.getMonth() + 1
     ).padStart(2, "0")}`;
 
-    const vatAccount = await Account.findOne({ systemAccount: "vat_output" });
+    const vatAccount = await Account.findOne(
+      withTenantScope({ systemAccount: "vat_output" }, targetCompanyId, false)
+    );
     if (!vatAccount) throw new Error("VAT Output account not configured");
 
     return await TaxTransaction.create({
+      companyId: targetCompanyId,
       transactionNumber: `VAT-OUT-${invoice.invoiceNumber}`,
       transactionDate: invoice.invoiceDate,
       taxType: "vat_output",
@@ -65,6 +86,12 @@ export class TaxService {
 
   static async createTaxTransactionsFromBill(bill, user) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const targetCompanyId = bill.companyId || companyId;
+
+    if (!targetCompanyId && !isSuperAdmin) {
+      throw new Error("Company context required");
+    }
 
     if (typeof TaxTransaction.createFromBill === "function") {
       return await TaxTransaction.createFromBill(bill, user);
@@ -77,10 +104,13 @@ export class TaxService {
     ).padStart(2, "0")}`;
 
     if (bill.taxAmount > 0) {
-      const vatAccount = await Account.findOne({ systemAccount: "vat_input" });
+      const vatAccount = await Account.findOne(
+        withTenantScope({ systemAccount: "vat_input" }, targetCompanyId, false)
+      );
       if (!vatAccount) throw new Error("VAT Input account not configured");
 
       const vatTransaction = await TaxTransaction.create({
+        companyId: targetCompanyId,
         transactionNumber: `VAT-IN-${bill.billNumber}`,
         transactionDate: bill.billDate,
         taxType: "vat_input",
@@ -117,9 +147,9 @@ export class TaxService {
     }
 
     if (bill.withholdingTaxAmount > 0) {
-      const whtAccount = await Account.findOne({
-        systemAccount: "wht_payable",
-      });
+      const whtAccount = await Account.findOne(
+        withTenantScope({ systemAccount: "wht_payable" }, targetCompanyId, false)
+      );
       if (!whtAccount) throw new Error("WHT Payable account not configured");
 
       const whtLine = bill.lines.find(
@@ -128,6 +158,7 @@ export class TaxService {
       const whtRate = whtLine?.whtRate || 5;
 
       const whtTransaction = await TaxTransaction.create({
+        companyId: targetCompanyId,
         transactionNumber: `WHT-${bill.billNumber}`,
         transactionDate: bill.billDate,
         taxType: "wht",
@@ -168,44 +199,58 @@ export class TaxService {
 
   static async generateVATReturn(filingPeriod) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    if (typeof TaxTransaction.getVATReturn === "function") {
-      return await TaxTransaction.getVATReturn(filingPeriod);
+    // Model static method now requires companyId for tenant isolation
+    if (typeof TaxTransaction.getVATReturn === "function" && companyId) {
+      return await TaxTransaction.getVATReturn(companyId, filingPeriod);
     }
 
     const [inputResult, outputResult] = await Promise.all([
-      TaxTransaction.aggregate([
-        {
-          $match: {
-            taxType: "vat_input",
-            "kraTracking.filingPeriod": filingPeriod,
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalBase: { $sum: "$baseAmount" },
-            totalTax: { $sum: "$taxAmount" },
-            count: { $sum: 1 },
-          },
-        },
-      ]),
-      TaxTransaction.aggregate([
-        {
-          $match: {
-            taxType: "vat_output",
-            "kraTracking.filingPeriod": filingPeriod,
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalBase: { $sum: "$baseAmount" },
-            totalTax: { $sum: "$taxAmount" },
-            count: { $sum: 1 },
-          },
-        },
-      ]),
+      TaxTransaction.aggregate(
+        withTenantPipeline(
+          [
+            {
+              $match: {
+                taxType: "vat_input",
+                "kraTracking.filingPeriod": filingPeriod,
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                totalBase: { $sum: "$baseAmount" },
+                totalTax: { $sum: "$taxAmount" },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          companyId,
+          isSuperAdmin
+        )
+      ),
+      TaxTransaction.aggregate(
+        withTenantPipeline(
+          [
+            {
+              $match: {
+                taxType: "vat_output",
+                "kraTracking.filingPeriod": filingPeriod,
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                totalBase: { $sum: "$baseAmount" },
+                totalTax: { $sum: "$taxAmount" },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          companyId,
+          isSuperAdmin
+        )
+      ),
     ]);
 
     const vatInput = inputResult[0] || { totalBase: 0, totalTax: 0, count: 0 };
@@ -238,41 +283,49 @@ export class TaxService {
 
   static async generateWHTReportByRate(startDate, endDate) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    if (typeof TaxTransaction.getWHTReportByRate === "function") {
-      return await TaxTransaction.getWHTReportByRate(startDate, endDate);
+    // Model static method now requires companyId for tenant isolation
+    if (typeof TaxTransaction.getWHTReportByRate === "function" && companyId) {
+      return await TaxTransaction.getWHTReportByRate(companyId, startDate, endDate);
     }
 
-    const result = await TaxTransaction.aggregate([
-      {
-        $match: {
-          taxType: "wht",
-          transactionDate: {
-            $gte: new Date(startDate),
-            $lte: new Date(endDate),
+    const result = await TaxTransaction.aggregate(
+      withTenantPipeline(
+        [
+          {
+            $match: {
+              taxType: "wht",
+              transactionDate: {
+                $gte: new Date(startDate),
+                $lte: new Date(endDate),
+              },
+            },
           },
-        },
-      },
-      {
-        $group: {
-          _id: { taxCode: "$taxCode", taxRate: "$taxRate" },
-          totalBase: { $sum: "$baseAmount" },
-          totalWHT: { $sum: "$taxAmount" },
-          count: { $sum: 1 },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          taxCode: "$_id.taxCode",
-          taxRate: "$_id.taxRate",
-          totalBase: 1,
-          totalWHT: 1,
-          count: 1,
-        },
-      },
-      { $sort: { taxRate: 1 } },
-    ]);
+          {
+            $group: {
+              _id: { taxCode: "$taxCode", taxRate: "$taxRate" },
+              totalBase: { $sum: "$baseAmount" },
+              totalWHT: { $sum: "$taxAmount" },
+              count: { $sum: 1 },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              taxCode: "$_id.taxCode",
+              taxRate: "$_id.taxRate",
+              totalBase: 1,
+              totalWHT: 1,
+              count: 1,
+            },
+          },
+          { $sort: { taxRate: 1 } },
+        ],
+        companyId,
+        isSuperAdmin
+      )
+    );
 
     return {
       period: { startDate, endDate },
@@ -285,46 +338,54 @@ export class TaxService {
 
   static async generateWHTReportBySupplier(startDate, endDate) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    if (typeof TaxTransaction.getWHTReportByParty === "function") {
-      return await TaxTransaction.getWHTReportByParty(startDate, endDate);
+    // Model static method now requires companyId for tenant isolation
+    if (typeof TaxTransaction.getWHTReportByParty === "function" && companyId) {
+      return await TaxTransaction.getWHTReportByParty(companyId, startDate, endDate);
     }
 
-    const result = await TaxTransaction.aggregate([
-      {
-        $match: {
-          taxType: "wht",
-          transactionDate: {
-            $gte: new Date(startDate),
-            $lte: new Date(endDate),
+    const result = await TaxTransaction.aggregate(
+      withTenantPipeline(
+        [
+          {
+            $match: {
+              taxType: "wht",
+              transactionDate: {
+                $gte: new Date(startDate),
+                $lte: new Date(endDate),
+              },
+            },
           },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            supplierId: "$party.id",
-            supplierName: "$party.name",
-            taxPin: "$party.taxPin",
+          {
+            $group: {
+              _id: {
+                supplierId: "$party.id",
+                supplierName: "$party.name",
+                taxPin: "$party.taxPin",
+              },
+              totalBase: { $sum: "$baseAmount" },
+              totalWHT: { $sum: "$taxAmount" },
+              transactions: { $sum: 1 },
+            },
           },
-          totalBase: { $sum: "$baseAmount" },
-          totalWHT: { $sum: "$taxAmount" },
-          transactions: { $sum: 1 },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          supplierId: "$_id.supplierId",
-          supplierName: "$_id.supplierName",
-          taxPin: "$_id.taxPin",
-          totalBase: 1,
-          totalWHT: 1,
-          transactions: 1,
-        },
-      },
-      { $sort: { totalWHT: -1 } },
-    ]);
+          {
+            $project: {
+              _id: 0,
+              supplierId: "$_id.supplierId",
+              supplierName: "$_id.supplierName",
+              taxPin: "$_id.taxPin",
+              totalBase: 1,
+              totalWHT: 1,
+              transactions: 1,
+            },
+          },
+          { $sort: { totalWHT: -1 } },
+        ],
+        companyId,
+        isSuperAdmin
+      )
+    );
 
     return {
       period: { startDate, endDate },
@@ -340,6 +401,7 @@ export class TaxService {
 
   static async getTaxTransactions(filters = {}) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const query = {};
     if (filters.taxType) query.taxType = filters.taxType;
@@ -357,44 +419,59 @@ export class TaxService {
         query.transactionDate.$lte = new Date(filters.endDate);
     }
 
-    return await TaxTransaction.find(query)
+    return await TaxTransaction.find(
+      withTenantScope(query, companyId, isSuperAdmin)
+    )
       .sort({ transactionDate: -1 })
       .lean();
   }
 
   static async getUnfiledTransactions(taxType = null) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    if (typeof TaxTransaction.getUnfiled === "function") {
-      return await TaxTransaction.getUnfiled(taxType);
+    // Model static method now requires companyId for tenant isolation
+    if (typeof TaxTransaction.getUnfiled === "function" && companyId) {
+      return await TaxTransaction.getUnfiled(companyId, taxType);
     }
 
     const query = { "kraTracking.filed": false };
     if (taxType) query.taxType = taxType;
 
-    return await TaxTransaction.find(query).sort({ transactionDate: 1 }).lean();
+    return await TaxTransaction.find(
+      withTenantScope(query, companyId, isSuperAdmin)
+    )
+      .sort({ transactionDate: 1 })
+      .lean();
   }
 
   static async getUnremittedWHT() {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    if (typeof TaxTransaction.getUnremittedWHT === "function") {
-      return await TaxTransaction.getUnremittedWHT();
+    // Model static method now requires companyId for tenant isolation
+    if (typeof TaxTransaction.getUnremittedWHT === "function" && companyId) {
+      return await TaxTransaction.getUnremittedWHT(companyId);
     }
 
-    return await TaxTransaction.find({
-      taxType: "wht",
-      "kraTracking.remitted": false,
-    })
+    return await TaxTransaction.find(
+      withTenantScope(
+        { taxType: "wht", "kraTracking.remitted": false },
+        companyId,
+        isSuperAdmin
+      )
+    )
       .sort({ transactionDate: 1 })
       .lean();
   }
 
   static async markAsFiled(transactionIds, filingReference, user) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
+    // Add tenant scoping to ensure we only update our own transactions
     return await TaxTransaction.updateMany(
-      { _id: { $in: transactionIds } },
+      withTenantScope({ _id: { $in: transactionIds } }, companyId, isSuperAdmin),
       {
         $set: {
           "kraTracking.filed": true,
@@ -409,9 +486,15 @@ export class TaxService {
 
   static async markWHTAsRemitted(transactionIds, remittanceReference, user) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
+    // Add tenant scoping to ensure we only update our own transactions
     return await TaxTransaction.updateMany(
-      { _id: { $in: transactionIds }, taxType: "wht" },
+      withTenantScope(
+        { _id: { $in: transactionIds }, taxType: "wht" },
+        companyId,
+        isSuperAdmin
+      ),
       {
         $set: {
           "kraTracking.remitted": true,
@@ -426,52 +509,65 @@ export class TaxService {
 
   static async getTaxSummary(startDate, endDate) {
     await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const [vatSummary, whtSummary] = await Promise.all([
-      TaxTransaction.aggregate([
-        {
-          $match: {
-            taxType: { $in: ["vat_input", "vat_output"] },
-            transactionDate: {
-              $gte: new Date(startDate),
-              $lte: new Date(endDate),
-            },
-          },
-        },
-        {
-          $group: {
-            _id: "$taxType",
-            totalTax: { $sum: "$taxAmount" },
-            count: { $sum: 1 },
-          },
-        },
-      ]),
-      TaxTransaction.aggregate([
-        {
-          $match: {
-            taxType: "wht",
-            transactionDate: {
-              $gte: new Date(startDate),
-              $lte: new Date(endDate),
-            },
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalWHT: { $sum: "$taxAmount" },
-            remitted: {
-              $sum: { $cond: ["$kraTracking.remitted", "$taxAmount", 0] },
-            },
-            unremitted: {
-              $sum: {
-                $cond: [{ $not: "$kraTracking.remitted" }, "$taxAmount", 0],
+      TaxTransaction.aggregate(
+        withTenantPipeline(
+          [
+            {
+              $match: {
+                taxType: { $in: ["vat_input", "vat_output"] },
+                transactionDate: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
               },
             },
-            count: { $sum: 1 },
-          },
-        },
-      ]),
+            {
+              $group: {
+                _id: "$taxType",
+                totalTax: { $sum: "$taxAmount" },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          companyId,
+          isSuperAdmin
+        )
+      ),
+      TaxTransaction.aggregate(
+        withTenantPipeline(
+          [
+            {
+              $match: {
+                taxType: "wht",
+                transactionDate: {
+                  $gte: new Date(startDate),
+                  $lte: new Date(endDate),
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                totalWHT: { $sum: "$taxAmount" },
+                remitted: {
+                  $sum: { $cond: ["$kraTracking.remitted", "$taxAmount", 0] },
+                },
+                unremitted: {
+                  $sum: {
+                    $cond: [{ $not: "$kraTracking.remitted" }, "$taxAmount", 0],
+                  },
+                },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          companyId,
+          isSuperAdmin
+        )
+      ),
     ]);
 
     const vatInput =

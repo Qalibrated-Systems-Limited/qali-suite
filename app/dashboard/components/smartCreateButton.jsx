@@ -57,8 +57,18 @@ export function CreateButton({ user }) {
       label: "Delivery Note",
       roles: ["Admin", "Store Manager", "Sales"],
     },
+    "/dashboard/quotes": {
+      href: "/dashboard/quotes/create",
+      label: "Quote",
+      roles: ["Admin", "Accountant", "Sales"],
+    },
 
     // Purchases
+    "/dashboard/purchase-orders": {
+      href: "/dashboard/purchase-orders/create",
+      label: "Purchase Order",
+      roles: ["Admin", "Manager", "Accountant"],
+    },
     "/dashboard/bills": {
       href: "/dashboard/bills/create",
       label: "Bill",
@@ -95,9 +105,9 @@ export function CreateButton({ user }) {
       label: "Account",
       roles: ["Admin", "Accountant"],
     },
-    "/dashboard/journal-entries": {
-      href: "/dashboard/journal-entries/create",
-      label: "Entry",
+    "/dashboard/journal": {
+      href: "/dashboard/journal/create",
+      label: "Journal Entry",
       roles: ["Admin", "Accountant"],
     },
 
@@ -106,6 +116,11 @@ export function CreateButton({ user }) {
       href: "/dashboard/users/create",
       label: "User",
       roles: ["SuperAdmin", "Admin"],
+    },
+    "/dashboard/admin/companies": {
+      href: "/dashboard/admin/companies/create",
+      label: "Company",
+      roles: ["SuperAdmin"],
     },
 
     "/dashboard/my-claims": {

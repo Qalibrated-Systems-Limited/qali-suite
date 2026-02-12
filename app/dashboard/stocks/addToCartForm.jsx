@@ -92,6 +92,7 @@ export function AddToCartButton({ id, disabled = false }) {
                         {...field}
                         type="number"
                         min="1"
+                        step="1"
                         placeholder="1"
                         className="h-9 text-sm"
                         autoFocus
@@ -263,6 +264,7 @@ export function InlineAddToCart({ id }) {
         name="quantity"
         defaultValue="1"
         min="1"
+        step="1"
         className="h-8 w-16 text-sm"
       />
       <Button

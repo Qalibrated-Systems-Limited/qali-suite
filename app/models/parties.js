@@ -7,6 +7,14 @@ const Schema = mongoose.Schema;
 // ============================================
 const partySchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // Party Type
     type: {
       type: String,
@@ -177,12 +185,12 @@ const partySchema = new Schema(
 // ============================================
 // INDEXES FOR QUERY EFFICIENCY
 // ============================================
-partySchema.index({ name: 1 });
-partySchema.index({ type: 1, isActive: 1 });
-partySchema.index({ email: 1 }, { sparse: true });
-partySchema.index({ taxPin: 1 }, { sparse: true });
-partySchema.index({ userId: 1 }, { sparse: true });
-partySchema.index({ employeeNumber: 1 }, { sparse: true });
+partySchema.index({ companyId: 1, name: 1 });
+partySchema.index({ companyId: 1, type: 1, isActive: 1 });
+partySchema.index({ companyId: 1, email: 1 }, { sparse: true });
+partySchema.index({ companyId: 1, taxPin: 1 }, { sparse: true });
+partySchema.index({ companyId: 1, userId: 1 }, { sparse: true });
+partySchema.index({ companyId: 1, employeeNumber: 1 }, { sparse: true, unique: true });
 
 // ============================================
 // VIRTUALS

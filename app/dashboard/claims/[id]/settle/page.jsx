@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import { getClaimById } from "@/app/mongodb/queries/claimQueries";
 import { AdvanceSettlementForm } from "../../components/AdvanceSettleForm";
+import { serializeBsonType } from "@/lib/utils";
 
 export const metadata = {
   title: "Settle Advance | ERP System",
@@ -19,7 +20,8 @@ export default async function SettleAdvancePage({ params }) {
   const { user } = session;
 
   // Fetch the advance claim
-  const claim = await getClaimById(id);
+  const result = await getClaimById(id);
+  const claim = serializeBsonType(result);
 
   if (!claim) {
     notFound();

@@ -11,6 +11,11 @@ import Account from "@/app/models/account";
 import { auth } from "@/auth";
 import dbConnect from "@/app/config/dbConnect";
 import { serializeBsonType } from "@/lib/utils";
+import {
+  getTenantContext,
+  withTenantScope,
+  getCompanyIdForCreate,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // VALIDATION SCHEMAS
@@ -182,6 +187,10 @@ export async function createPayment(prevState, formData) {
     const user = await getCurrentUser();
     checkRole(user, ["admin", "manager", "accountant"]);
 
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+
     // Validate
     const validated = CreatePaymentSchema.safeParse(rawData);
     if (!validated.success) {
@@ -259,8 +268,8 @@ export async function createPayment(prevState, formData) {
       };
     }
 
-    // Generate payment number
-    const paymentNumber = await Payment.generatePaymentNumber(data.paymentType);
+    // Generate payment number (tenant-scoped)
+    const paymentNumber = await Payment.generatePaymentNumber(data.paymentType, tenantCompanyId);
 
     // Calculate fiscal period from payment date (YYYY-MM)
     const paymentDateObj = new Date(data.paymentDate);
@@ -271,6 +280,7 @@ export async function createPayment(prevState, formData) {
     // Build payment document
     const paymentData = {
       paymentNumber,
+      companyId: tenantCompanyId,
       paymentType: data.paymentType,
       paymentDate: new Date(data.paymentDate),
       fiscalPeriod,
@@ -368,8 +378,16 @@ export async function updatePayment(id, prevState, formData) {
     const user = await getCurrentUser();
     checkRole(user, ["admin", "manager", "accountant"]);
 
+    // Get tenant context for access validation
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const payment = await Payment.findById(id);
     if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    // Validate tenant access
+    if (!isSuperAdmin && payment.companyId?.toString() !== companyId) {
       return { success: false, error: "Payment not found" };
     }
 
@@ -506,8 +524,16 @@ export async function deletePayment(id) {
     const user = await getCurrentUser();
     checkRole(user, ["admin", "manager"]);
 
+    // Get tenant context for access validation
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const payment = await Payment.findById(id);
     if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    // Validate tenant access
+    if (!isSuperAdmin && payment.companyId?.toString() !== companyId) {
       return { success: false, error: "Payment not found" };
     }
 
@@ -535,8 +561,16 @@ export async function confirmPayment(id) {
     const user = await getCurrentUser();
     checkRole(user, ["admin", "manager", "accountant"]);
 
+    // Get tenant context for access validation
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const payment = await Payment.findById(id);
     if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    // Validate tenant access
+    if (!isSuperAdmin && payment.companyId?.toString() !== companyId) {
       return { success: false, error: "Payment not found" };
     }
 
@@ -575,8 +609,16 @@ export async function cancelPayment(id, prevState, formData) {
       return { success: false, error: "Cancellation reason is required" };
     }
 
+    // Get tenant context for access validation
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const payment = await Payment.findById(id);
     if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    // Validate tenant access
+    if (!isSuperAdmin && payment.companyId?.toString() !== companyId) {
       return { success: false, error: "Payment not found" };
     }
 
@@ -605,8 +647,16 @@ export async function reconcilePayment(id, prevState, formData) {
 
     const statementRef = formData.get("statementReference");
 
+    // Get tenant context for access validation
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const payment = await Payment.findById(id);
     if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    // Validate tenant access
+    if (!isSuperAdmin && payment.companyId?.toString() !== companyId) {
       return { success: false, error: "Payment not found" };
     }
 
@@ -629,6 +679,9 @@ export async function getPayments(filters = {}) {
   try {
     await dbConnect();
 
+    // Get tenant context for scoping
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const {
       paymentType,
       status,
@@ -643,7 +696,8 @@ export async function getPayments(filters = {}) {
       limit = 20,
     } = filters;
 
-    const query = {};
+    // Start with tenant filter
+    const query = withTenantScope({}, companyId, isSuperAdmin);
 
     if (paymentType) query.paymentType = paymentType;
     if (status) query.status = status;
@@ -704,8 +758,16 @@ export async function getPayment(id) {
   try {
     await dbConnect();
 
+    // Get tenant context for access validation
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const payment = await Payment.findById(id);
     if (!payment) {
+      return { success: false, error: "Payment not found" };
+    }
+
+    // Validate tenant access - prevent cross-company access
+    if (!isSuperAdmin && payment.companyId?.toString() !== companyId) {
       return { success: false, error: "Payment not found" };
     }
 
@@ -722,6 +784,10 @@ export async function getPayment(id) {
 export async function getPaymentStats() {
   try {
     await dbConnect();
+
+    // Get tenant context for scoping
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const tenantMatch = isSuperAdmin ? {} : { companyId };
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -742,12 +808,16 @@ export async function getPaymentStats() {
       byMethod,
     ] = await Promise.all([
       // Count by status
-      Payment.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
+      Payment.aggregate([
+        { $match: tenantMatch },
+        { $group: { _id: "$status", count: { $sum: 1 } } },
+      ]),
 
       // This month received
       Payment.aggregate([
         {
           $match: {
+            ...tenantMatch,
             paymentType: "received",
             status: "confirmed",
             paymentDate: { $gte: startOfMonth, $lte: endOfMonth },
@@ -762,6 +832,7 @@ export async function getPaymentStats() {
       Payment.aggregate([
         {
           $match: {
+            ...tenantMatch,
             paymentType: "made",
             status: "confirmed",
             paymentDate: { $gte: startOfMonth, $lte: endOfMonth },
@@ -773,14 +844,17 @@ export async function getPaymentStats() {
       ]),
 
       // Unreconciled count
-      Payment.countDocuments({
-        status: "confirmed",
-        "reconciliation.isReconciled": false,
-      }),
+      Payment.countDocuments(
+        withTenantScope(
+          { status: "confirmed", "reconciliation.isReconciled": false },
+          companyId,
+          isSuperAdmin
+        )
+      ),
 
       // By payment method
       Payment.aggregate([
-        { $match: { status: "confirmed" } },
+        { $match: { ...tenantMatch, status: "confirmed" } },
         {
           $group: {
             _id: "$paymentMethod",
@@ -822,10 +896,15 @@ export async function getUnpaidDocuments(partyId, documentType) {
   try {
     await dbConnect();
 
+    // Get tenant context for scoping
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const tenantFilter = isSuperAdmin ? {} : { companyId };
+
     let documents = [];
 
     if (documentType === "bill") {
       documents = await Bill.find({
+        ...tenantFilter,
         "supplier.partyId": partyId,
         status: "approved",
         paymentStatus: { $in: ["unpaid", "partial"] },
@@ -844,7 +923,8 @@ export async function getUnpaidDocuments(partyId, documentType) {
       }));
     } else if (documentType === "invoice") {
       documents = await Invoice.find({
-        "customer.id": partyId,  // Invoice uses customer.id, not customer.partyId
+        ...tenantFilter,
+        "customer.id": partyId,
         status: "completed",
         paymentStatus: { $in: ["unpaid", "partial"] },
       })
@@ -857,7 +937,7 @@ export async function getUnpaidDocuments(partyId, documentType) {
         documentNumber: d.invoiceNumber,
         documentDate: d.invoiceDate?.toISOString(),
         originalAmount: d.total || 0,
-        balance: d.amountDue || 0,  // Invoice uses amountDue, not balance
+        balance: d.amountDue || 0,
         dueDate: d.dueDate?.toISOString(),
       }));
     }
@@ -876,11 +956,20 @@ export async function getPaymentAccounts() {
   try {
     await dbConnect();
 
-    const accounts = await Account.find({
-      subType: { $in: ["cash", "bank", "mpesa"] },
-      isActive: true,
-      canPost: true,
-    })
+    // Get tenant context for scoping
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const accounts = await Account.find(
+      withTenantScope(
+        {
+          subType: { $in: ["cash", "bank", "mpesa"] },
+          isActive: true,
+          canPost: true,
+        },
+        companyId,
+        isSuperAdmin
+      )
+    )
       .select("accountCode accountName subType balance")
       .sort({ subType: 1, accountName: 1 })
       .lean();

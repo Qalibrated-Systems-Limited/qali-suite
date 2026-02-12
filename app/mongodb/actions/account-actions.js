@@ -1,11 +1,15 @@
 "use server";
 
 import { z } from "zod";
-import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import Account from "../../models/account";
 import connectDB from "../../config/dbConnect";
 import { accountSubType, accountTypes } from "@/lib/utils";
+import {
+  getTenantContext,
+  getCompanyIdForCreate,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // ZOD SCHEMAS
@@ -52,48 +56,44 @@ const UpdateAccountSchema = z.object({
  * Create a new account
  */
 export async function createAccount(prevState, formData) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
-    return {
-      errors: { _form: ["You must be logged in"] },
-    };
-  }
-
-  if (!["Admin", "Accountant"].includes(session.user.role)) {
-    return {
-      errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
-    };
-  }
-
-  // Validate
-  const validatedFields = CreateAccountSchema.safeParse({
-    accountCode: formData.get("accountCode"),
-    accountName: formData.get("accountName"),
-    accountType: formData.get("accountType"),
-    subType: formData.get("subType"),
-    parentId: formData.get("parentId") || undefined,
-    systemAccount: formData.get("systemAccount") || undefined,
-    normalBalance: formData.get("normalBalance") || undefined,
-    description: formData.get("description") || undefined,
-    canPost: formData.get("canPost") === "true",
-  });
-
-  if (!validatedFields.success) {
-    return {
-      errors: validatedFields.error.flatten().fieldErrors,
-    };
-  }
-
-  const data = validatedFields.data;
-
   try {
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+
+    if (!["Admin", "Accountant"].includes(user.role)) {
+      return {
+        errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+      };
+    }
+
+    // Validate
+    const validatedFields = CreateAccountSchema.safeParse({
+      accountCode: formData.get("accountCode"),
+      accountName: formData.get("accountName"),
+      accountType: formData.get("accountType"),
+      subType: formData.get("subType"),
+      parentId: formData.get("parentId") || undefined,
+      systemAccount: formData.get("systemAccount") || undefined,
+      normalBalance: formData.get("normalBalance") || undefined,
+      description: formData.get("description") || undefined,
+      canPost: formData.get("canPost") === "true",
+    });
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+      };
+    }
+
+    const data = validatedFields.data;
+
     await connectDB();
 
-    // Check for duplicate account code
-    const existingCode = await Account.findOne({
-      accountCode: data.accountCode,
-    });
+    // Check for duplicate account code (tenant-scoped)
+    const existingCode = await Account.findOne(
+      withTenantScope({ accountCode: data.accountCode }, tenantCompanyId, isSuperAdmin)
+    );
     if (existingCode) {
       return {
         errors: {
@@ -102,10 +102,10 @@ export async function createAccount(prevState, formData) {
       };
     }
 
-    // Check for duplicate account name
-    const existingName = await Account.findOne({
-      accountName: data.accountName,
-    });
+    // Check for duplicate account name (tenant-scoped)
+    const existingName = await Account.findOne(
+      withTenantScope({ accountName: data.accountName }, tenantCompanyId, isSuperAdmin)
+    );
     if (existingName) {
       return {
         errors: {
@@ -114,9 +114,11 @@ export async function createAccount(prevState, formData) {
       };
     }
 
-    // Validate parent account if provided
+    // Validate parent account if provided (tenant-scoped)
     if (data.parentId) {
-      const parentAccount = await Account.findById(data.parentId);
+      const parentAccount = await Account.findOne(
+        withTenantScope({ _id: data.parentId }, tenantCompanyId, isSuperAdmin)
+      );
       if (!parentAccount) {
         return {
           errors: {
@@ -148,11 +150,11 @@ export async function createAccount(prevState, formData) {
       }
     }
 
-    // Validate systemAccount uniqueness
+    // Validate systemAccount uniqueness (tenant-scoped)
     if (data.systemAccount) {
-      const existingSystem = await Account.findOne({
-        systemAccount: data.systemAccount,
-      });
+      const existingSystem = await Account.findOne(
+        withTenantScope({ systemAccount: data.systemAccount }, tenantCompanyId, isSuperAdmin)
+      );
       if (existingSystem) {
         return {
           errors: {
@@ -167,18 +169,19 @@ export async function createAccount(prevState, formData) {
     // Set canPost based on subType
     const canPost = data.subType !== "header";
 
-    // Create account
+    // Create account (with tenant companyId)
     await Account.create({
+      companyId: tenantCompanyId,
       ...data,
       canPost,
       isActive: true,
       createdBy: {
-        name: session.user.name,
-        id: session.user.id,
+        name: user.name,
+        id: user.id,
       },
       lastModifiedBy: {
-        name: session.user.name,
-        id: session.user.id,
+        name: user.name,
+        id: user.id,
       },
     });
 
@@ -205,39 +208,37 @@ export async function createAccount(prevState, formData) {
  * Uses bind() to pass accountId
  */
 export async function updateAccount(accountId, prevState, formData) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
-    return {
-      errors: { _form: ["You must be logged in"] },
-    };
-  }
-
-  if (!["Admin", "Accountant"].includes(session.user.role)) {
-    return {
-      errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
-    };
-  }
-
-  // Validate
-  const validatedFields = UpdateAccountSchema.safeParse({
-    accountName: formData.get("accountName"),
-    description: formData.get("description"),
-    isActive: formData.get("isActive") === "true",
-  });
-
-  if (!validatedFields.success) {
-    return {
-      errors: validatedFields.error.flatten().fieldErrors,
-    };
-  }
-
-  const data = validatedFields.data;
-
   try {
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!["Admin", "Accountant"].includes(user.role)) {
+      return {
+        errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+      };
+    }
+
+    // Validate
+    const validatedFields = UpdateAccountSchema.safeParse({
+      accountName: formData.get("accountName"),
+      description: formData.get("description"),
+      isActive: formData.get("isActive") === "true",
+    });
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+      };
+    }
+
+    const data = validatedFields.data;
+
     await connectDB();
 
-    const account = await Account.findById(accountId);
+    // Get account (tenant-scoped)
+    const account = await Account.findOne(
+      withTenantScope({ _id: accountId }, companyId, isSuperAdmin)
+    );
     if (!account) {
       return {
         errors: { _form: ["Account not found"] },
@@ -270,12 +271,11 @@ export async function updateAccount(accountId, prevState, formData) {
       }
     }
 
-    // Check for duplicate account name (excluding current account)
+    // Check for duplicate account name (excluding current account, tenant-scoped)
     if (data.accountName && data.accountName !== account.accountName) {
-      const existingName = await Account.findOne({
-        accountName: data.accountName,
-        _id: { $ne: accountId },
-      });
+      const existingName = await Account.findOne(
+        withTenantScope({ accountName: data.accountName, _id: { $ne: accountId } }, account.companyId, isSuperAdmin)
+      );
       if (existingName) {
         return {
           errors: {
@@ -291,8 +291,8 @@ export async function updateAccount(accountId, prevState, formData) {
     if (data.isActive !== undefined) account.isActive = data.isActive;
 
     account.lastModifiedBy = {
-      name: session.user.name,
-      id: session.user.id,
+      name: user.name,
+      id: user.id,
     };
 
     await account.save();
@@ -319,24 +319,22 @@ export async function updateAccount(accountId, prevState, formData) {
  * Uses bind() to pass accountId
  */
 export async function deactivateAccount(accountId) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
-    return {
-      errors: { _form: ["You must be logged in"] },
-    };
-  }
-
-  if (session.user.role !== "Admin") {
-    return {
-      errors: { _form: ["Unauthorized: Admin role required"] },
-    };
-  }
-
   try {
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (user.role !== "Admin") {
+      return {
+        errors: { _form: ["Unauthorized: Admin role required"] },
+      };
+    }
+
     await connectDB();
 
-    const account = await Account.findById(accountId);
+    // Get account (tenant-scoped)
+    const account = await Account.findOne(
+      withTenantScope({ _id: accountId }, companyId, isSuperAdmin)
+    );
     if (!account) {
       return {
         errors: { _form: ["Account not found"] },
@@ -354,12 +352,11 @@ export async function deactivateAccount(accountId) {
       };
     }
 
-    // Check if account has transactions
+    // Check if account has transactions (tenant-scoped)
     const JournalEntry = (await import("../../models/JournalEntry")).default;
-    const transactionCount = await JournalEntry.countDocuments({
-      "lines.accountId": accountId,
-      status: "posted",
-    });
+    const transactionCount = await JournalEntry.countDocuments(
+      withTenantScope({ "lines.accountId": accountId, status: "posted" }, account.companyId, isSuperAdmin)
+    );
 
     if (transactionCount > 0) {
       return {
@@ -371,11 +368,10 @@ export async function deactivateAccount(accountId) {
       };
     }
 
-    // Check if account has child accounts
-    const childCount = await Account.countDocuments({
-      parentId: accountId,
-      isActive: true,
-    });
+    // Check if account has child accounts (tenant-scoped)
+    const childCount = await Account.countDocuments(
+      withTenantScope({ parentId: accountId, isActive: true }, account.companyId, isSuperAdmin)
+    );
 
     if (childCount > 0) {
       return {
@@ -390,8 +386,8 @@ export async function deactivateAccount(accountId) {
     // Soft delete
     account.isActive = false;
     account.lastModifiedBy = {
-      name: session.user.name,
-      id: session.user.id,
+      name: user.name,
+      id: user.id,
     };
 
     await account.save();
@@ -417,33 +413,33 @@ export async function deactivateAccount(accountId) {
  * Uses bind() to pass accountId
  */
 export async function activateAccount(accountId) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
-    return {
-      errors: { _form: ["You must be logged in"] },
-    };
-  }
-
-  if (!["Admin", "Accountant"].includes(session.user.role)) {
-    return {
-      errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
-    };
-  }
-
   try {
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!["Admin", "Accountant"].includes(user.role)) {
+      return {
+        errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+      };
+    }
+
     await connectDB();
 
-    const account = await Account.findById(accountId);
+    // Get account (tenant-scoped)
+    const account = await Account.findOne(
+      withTenantScope({ _id: accountId }, companyId, isSuperAdmin)
+    );
     if (!account) {
       return {
         errors: { _form: ["Account not found"] },
       };
     }
 
-    // Check if parent account is active
+    // Check if parent account is active (tenant-scoped)
     if (account.parentId) {
-      const parent = await Account.findById(account.parentId);
+      const parent = await Account.findOne(
+        withTenantScope({ _id: account.parentId }, account.companyId, isSuperAdmin)
+      );
       if (parent && !parent.isActive) {
         return {
           errors: {
@@ -455,8 +451,8 @@ export async function activateAccount(accountId) {
 
     account.isActive = true;
     account.lastModifiedBy = {
-      name: session.user.name,
-      id: session.user.id,
+      name: user.name,
+      id: user.id,
     };
 
     await account.save();
@@ -483,24 +479,22 @@ export async function activateAccount(accountId) {
  * Uses bind() to pass accountId
  */
 export async function calculateAccountBalance(accountId) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
-    return {
-      errors: { _form: ["You must be logged in"] },
-    };
-  }
-
-  if (!["Admin", "Accountant"].includes(session.user.role)) {
-    return {
-      errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
-    };
-  }
-
   try {
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!["Admin", "Accountant"].includes(user.role)) {
+      return {
+        errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+      };
+    }
+
     await connectDB();
 
-    const account = await Account.findById(accountId);
+    // Get account (tenant-scoped)
+    const account = await Account.findOne(
+      withTenantScope({ _id: accountId }, companyId, isSuperAdmin)
+    );
     if (!account) {
       return {
         errors: { _form: ["Account not found"] },
@@ -534,28 +528,22 @@ export async function calculateAccountBalance(accountId) {
  * Recalculate all account balances
  */
 export async function recalculateAllBalances() {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
-    return {
-      errors: { _form: ["You must be logged in"] },
-    };
-  }
-
-  if (session.user.role !== "Admin") {
-    return {
-      errors: { _form: ["Unauthorized: Admin role required"] },
-    };
-  }
-
   try {
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (user.role !== "Admin") {
+      return {
+        errors: { _form: ["Unauthorized: Admin role required"] },
+      };
+    }
+
     await connectDB();
 
-    // Get all postable accounts
-    const accounts = await Account.find({
-      canPost: true,
-      isActive: true,
-    });
+    // Get all postable accounts (tenant-scoped)
+    const accounts = await Account.find(
+      withTenantScope({ canPost: true, isActive: true }, companyId, isSuperAdmin)
+    );
 
     let successCount = 0;
     let errorCount = 0;
@@ -600,21 +588,16 @@ export async function recalculateAllBalances() {
  * Uses complex data via JSON in FormData
  */
 export async function reorderAccounts(prevState, formData) {
-  // Auth check
-  const session = await auth();
-  if (!session?.user) {
-    return {
-      errors: { _form: ["You must be logged in"] },
-    };
-  }
-
-  if (!["Admin", "Accountant"].includes(session.user.role)) {
-    return {
-      errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
-    };
-  }
-
   try {
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!["Admin", "Accountant"].includes(user.role)) {
+      return {
+        errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+      };
+    }
+
     await connectDB();
 
     // Parse order data from FormData
@@ -634,7 +617,7 @@ export async function reorderAccounts(prevState, formData) {
       };
     }
 
-    // Update display order for each account
+    // Update display order for each account (tenant-scoped)
     let successCount = 0;
     let errorCount = 0;
 
@@ -642,13 +625,17 @@ export async function reorderAccounts(prevState, formData) {
       try {
         const { accountId, displayOrder } = item;
 
-        await Account.findByIdAndUpdate(accountId, {
-          displayOrder,
-          lastModifiedBy: {
-            name: session.user.name,
-            id: session.user.id,
-          },
-        });
+        // Only update if account belongs to tenant
+        await Account.findOneAndUpdate(
+          withTenantScope({ _id: accountId }, companyId, isSuperAdmin),
+          {
+            displayOrder,
+            lastModifiedBy: {
+              name: user.name,
+              id: user.id,
+            },
+          }
+        );
 
         successCount++;
       } catch (error) {
@@ -681,9 +668,15 @@ export async function reorderAccounts(prevState, formData) {
  */
 export async function getAccountHierarchy() {
   try {
-    connectDB();
+    // Auth & tenant check
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    const accounts = await Account.find({ isActive: true })
+    await connectDB();
+
+    // Get accounts (tenant-scoped)
+    const accounts = await Account.find(
+      withTenantScope({ isActive: true }, companyId, isSuperAdmin)
+    )
       .sort({ accountCode: 1 })
       .select(
         "_id accountCode accountName accountType subType parentId canPost"
@@ -726,6 +719,109 @@ export async function getAccountHierarchy() {
     return {
       success: false,
       error: error.message || "Failed to get account hierarchy",
+    };
+  }
+}
+
+/**
+ * Create missing advance system accounts
+ * This function ensures supplier_advance and customer_advance accounts exist
+ * Call this if you get errors about missing advance accounts during bank allocation
+ */
+export async function ensureAdvanceAccountsExist() {
+  try {
+    // Auth & tenant check
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!["Admin", "Accountant"].includes(user.role)) {
+      return {
+        success: false,
+        error: "Unauthorized: Admin or Accountant role required",
+      };
+    }
+
+    await connectDB();
+
+    const results = [];
+
+    // Check/create Supplier Advance (Asset)
+    const supplierAdvance = await Account.findOne(
+      withTenantScope({ systemAccount: "supplier_advance" }, companyId, isSuperAdmin)
+    );
+
+    if (!supplierAdvance) {
+      // Find Current Assets parent for proper hierarchy
+      const currentAssets = await Account.findOne(
+        withTenantScope({ accountCode: "1100" }, companyId, isSuperAdmin)
+      );
+
+      const newSupplierAdvance = await Account.create({
+        companyId,
+        accountCode: "1360",
+        accountName: "Supplier Advance",
+        accountType: "asset",
+        subType: "prepaid_expense",
+        systemAccount: "supplier_advance",
+        parentAccount: currentAssets?._id || null,
+        ancestors: currentAssets ? [currentAssets.parentAccount, currentAssets._id].filter(Boolean) : [],
+        path: currentAssets ? `${currentAssets.path}/1360` : "1360",
+        level: 2,
+        canPost: true,
+        isActive: true,
+        description: "Prepayments to suppliers (overpayments on bills)",
+        createdBy: { name: user.name, id: user.id },
+      });
+      results.push({ account: "Supplier Advance", action: "created", code: "1360" });
+    } else {
+      results.push({ account: "Supplier Advance", action: "exists", code: supplierAdvance.accountCode });
+    }
+
+    // Check/create Customer Advance (Liability)
+    const customerAdvance = await Account.findOne(
+      withTenantScope({ systemAccount: "customer_advance" }, companyId, isSuperAdmin)
+    );
+
+    if (!customerAdvance) {
+      // Find Current Liabilities parent for proper hierarchy
+      const currentLiabilities = await Account.findOne(
+        withTenantScope({ accountCode: "2100" }, companyId, isSuperAdmin)
+      );
+
+      const newCustomerAdvance = await Account.create({
+        companyId,
+        accountCode: "2140",
+        accountName: "Customer Advance",
+        accountType: "liability",
+        subType: "customer_deposit",
+        systemAccount: "customer_advance",
+        parentAccount: currentLiabilities?._id || null,
+        ancestors: currentLiabilities ? [currentLiabilities.parentAccount, currentLiabilities._id].filter(Boolean) : [],
+        path: currentLiabilities ? `${currentLiabilities.path}/2140` : "2140",
+        level: 2,
+        canPost: true,
+        isActive: true,
+        description: "Customer deposits and overpayments",
+        createdBy: { name: user.name, id: user.id },
+      });
+      results.push({ account: "Customer Advance", action: "created", code: "2140" });
+    } else {
+      results.push({ account: "Customer Advance", action: "exists", code: customerAdvance.accountCode });
+    }
+
+    // Revalidate
+    revalidatePath("/dashboard/accounts");
+    revalidatePath("/dashboard/banking");
+
+    return {
+      success: true,
+      message: "Advance accounts checked/created successfully",
+      results,
+    };
+  } catch (error) {
+    console.error("Ensure advance accounts error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to ensure advance accounts exist",
     };
   }
 }

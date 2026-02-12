@@ -67,11 +67,18 @@ export function ViewMovementDialog({ movement, open, onOpenChange }) {
   };
 
   const formatCurrency = (amount) => {
+    // Handle undefined, null, or NaN values
+    const safeAmount = typeof amount === "number" && !isNaN(amount) ? amount : 0;
     return new Intl.NumberFormat("en-KE", {
       style: "currency",
       currency: "KES",
       minimumFractionDigits: 0,
-    }).format(amount);
+    }).format(safeAmount);
+  };
+
+  // Get movement value from costing fields (schema-defined)
+  const getMovementValue = () => {
+    return movement.costing?.totalValue || movement.costing?.totalCost || 0;
   };
 
   const typeStyle = typeConfig[movement.movementType]?.color;
@@ -187,7 +194,7 @@ export function ViewMovementDialog({ movement, open, onOpenChange }) {
               <div className="col-span-2">
                 <p className="text-xs text-gray-400">Total Value</p>
                 <p className="text-2xl font-bold text-yellow-500">
-                  {formatCurrency(movement.totalValue)}
+                  {formatCurrency(getMovementValue())}
                 </p>
               </div>
             </div>

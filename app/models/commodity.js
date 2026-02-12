@@ -4,6 +4,13 @@ const Schema = mongoose.Schema;
 
 const commoditySchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
     creator: {
       name: { required: true, type: String },
       id: { required: true, type: String },
@@ -12,7 +19,6 @@ const commoditySchema = new Schema(
     name: {
       type: String,
       required: true,
-      unique: true,
     },
     code: String,
   },
@@ -23,6 +29,10 @@ const commoditySchema = new Schema(
 
 // Compare vehicle password
 // Generate password reset token
+
+// Indexes
+// Unique commodity name per company
+commoditySchema.index({ companyId: 1, name: 1 }, { unique: true });
 
 const models = mongoose.models;
 let Commodity = models ? models.Commodity : null;

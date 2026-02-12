@@ -1,5 +1,8 @@
 import mongoose from "mongoose";
 
+// Import FiscalPeriod model for fiscal period validation
+import "@/app/models/fiscalPeriod";
+
 const Schema = mongoose.Schema;
 
 // ============================================
@@ -20,11 +23,18 @@ function formatUserForAudit(user) {
 // ============================================
 const invoiceSchema = new Schema(
   {
+    // Company (Tenant)
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: [true, "Company ID is required"],
+      index: true,
+    },
+
     // Invoice Identification
     invoiceNumber: {
       type: String,
       required: [true, "Invoice number is required"],
-      unique: true,
       index: true,
     },
 
@@ -44,6 +54,13 @@ const invoiceSchema = new Schema(
         },
         message: "Due date cannot be before invoice date",
       },
+    },
+
+    // Fiscal period for accounting (YYYY-MM format)
+    fiscalPeriod: {
+      type: String,
+      match: [/^\d{4}-\d{2}$/, "Fiscal period must be YYYY-MM format"],
+      index: true,
     },
 
     // Customer Information
@@ -86,6 +103,22 @@ const invoiceSchema = new Schema(
             type: String,
             enum: ["product", "service"],
             required: [true, "Item type is required"],
+          },
+
+          // Service category (for services only)
+          serviceCategory: {
+            type: String,
+            enum: [
+              "labor",           // Labor/hourly rate
+              "mileage",         // Transport/km
+              "accommodation",   // Nightouts/hotels
+              "installation",    // Installation fee
+              "consultation",    // Consultation/advisory
+              "maintenance",     // Maintenance fee
+              "repair",          // Repair fee
+              "other",           // Other services
+            ],
+            // Required if itemType is "service"
           },
 
           // Product reference (for products only)
@@ -194,6 +227,15 @@ const invoiceSchema = new Schema(
             technicianName: String,
             // If this exists, COGS will credit Technician Stock instead of Inventory
           },
+
+          // Related checkout (for demo/installation conversions)
+          relatedCheckout: {
+            checkoutId: {
+              type: Schema.Types.ObjectId,
+              ref: "ItemCheckout",
+            },
+            checkoutNumber: String,
+          },
         },
       ],
       validate: {
@@ -211,6 +253,13 @@ const invoiceSchema = new Schema(
       type: Number,
       required: [true, "Subtotal is required"],
       min: [0, "Subtotal cannot be negative"],
+    },
+
+    discountPercentage: {
+      type: Number,
+      default: 0,
+      min: [0, "Discount percentage cannot be negative"],
+      max: [100, "Discount percentage cannot exceed 100"],
     },
 
     totalDiscount: {
@@ -387,6 +436,34 @@ const invoiceSchema = new Schema(
       quoteNumber: String,
     },
 
+    // ============================================
+    // SOURCE TRACKING (how this invoice was created)
+    // ============================================
+    source: {
+      type: {
+        type: String,
+        enum: [
+          "direct",           // Direct sale
+          "stock_request",    // From stock request fulfillment
+          "checkout_conversion", // From checkout conversion (demo/installation)
+          "quote",            // Converted from quote
+          "recurring",        // Recurring invoice
+        ],
+        default: "direct",
+      },
+      // For stock_request source
+      requestId: {
+        type: Schema.Types.ObjectId,
+        ref: "StockRequest",
+      },
+      requestNumber: String,
+      // For checkout_conversion source
+      checkoutIds: [{
+        type: Schema.Types.ObjectId,
+        ref: "ItemCheckout",
+      }],
+    },
+
     notes: String,
     termsAndConditions: String,
 
@@ -426,6 +503,24 @@ const invoiceSchema = new Schema(
     },
 
     // ============================================
+    // CREDIT NOTES
+    // ============================================
+    creditNotes: [
+      {
+        creditNoteId: {
+          type: Schema.Types.ObjectId,
+          ref: "CreditNote",
+        },
+        creditNoteNumber: String,
+        amount: {
+          type: Number,
+          min: 0,
+        },
+        date: Date,
+      },
+    ],
+
+    // ============================================
     // AUDIT TRAIL
     // ============================================
     createdBy: {
@@ -448,18 +543,33 @@ const invoiceSchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  }
+  },
 );
 
 // ============================================
 // INDEXES
 // ============================================
-invoiceSchema.index({ invoiceDate: -1, status: 1 });
-invoiceSchema.index({ dueDate: 1, paymentStatus: 1 });
-invoiceSchema.index({ "customer.id": 1, status: 1 });
-invoiceSchema.index({ paymentStatus: 1, dueDate: 1 });
-invoiceSchema.index({ status: 1, invoiceDate: -1 });
-invoiceSchema.index({ "accounting.accountingComplete": 1 });
+// Unique invoice number per company
+invoiceSchema.index({ companyId: 1, invoiceNumber: 1 }, { unique: true });
+// Query indexes
+invoiceSchema.index({ companyId: 1, invoiceDate: -1, status: 1 });
+invoiceSchema.index({ companyId: 1, dueDate: 1, paymentStatus: 1 });
+invoiceSchema.index({ companyId: 1, "customer.id": 1, status: 1 });
+invoiceSchema.index({ companyId: 1, paymentStatus: 1, dueDate: 1 });
+invoiceSchema.index({ companyId: 1, status: 1, invoiceDate: -1 });
+invoiceSchema.index({ companyId: 1, "accounting.accountingComplete": 1 });
+invoiceSchema.index({ companyId: 1, fiscalPeriod: 1, status: 1 });
+
+// ============================================
+// PRE-SAVE: Auto-assign fiscal period from invoiceDate
+// ============================================
+invoiceSchema.pre("save", function (next) {
+  // Set fiscal period from invoice date if not set
+  if (!this.fiscalPeriod && this.invoiceDate) {
+    const d = new Date(this.invoiceDate);
+    this.fiscalPeriod = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+});
 
 // ============================================
 // VIRTUALS
@@ -509,7 +619,7 @@ invoiceSchema.methods.validateItems = function () {
     if (Math.abs(expectedAmount - item.amount) > 0.01) {
       throw new Error(
         `Amount mismatch for "${item.description}". ` +
-          `Expected: ${expectedAmount.toFixed(2)}, Got: ${item.amount}`
+          `Expected: ${expectedAmount.toFixed(2)}, Got: ${item.amount}`,
       );
     }
 
@@ -519,7 +629,7 @@ invoiceSchema.methods.validateItems = function () {
       if (Math.abs(expectedTax - item.taxAmount) > 0.01) {
         throw new Error(
           `Tax calculation incorrect for "${item.description}". ` +
-            `Expected: ${expectedTax.toFixed(2)}, Got: ${item.taxAmount}`
+            `Expected: ${expectedTax.toFixed(2)}, Got: ${item.taxAmount}`,
         );
       }
     }
@@ -527,7 +637,7 @@ invoiceSchema.methods.validateItems = function () {
     // Validate product items have productId
     if (item.itemType === "product" && !item.productId) {
       throw new Error(
-        `Product item "${item.description}" must have a productId`
+        `Product item "${item.description}" must have a productId`,
       );
     }
   }
@@ -542,42 +652,57 @@ invoiceSchema.methods.validateAmounts = function () {
   // Calculate subtotal from items
   const calculatedSubtotal = this.items.reduce(
     (sum, item) => sum + (item.amount || 0),
-    0
+    0,
   );
 
   if (Math.abs(calculatedSubtotal - this.subtotal) > 0.01) {
     throw new Error(
       `Subtotal mismatch. Expected: ${calculatedSubtotal.toFixed(2)}, Got: ${
         this.subtotal
-      }`
+      }`,
     );
   }
 
-  // Calculate total discount
-  const calculatedDiscount = this.items.reduce(
-    (sum, item) => sum + (item.discountAmount || 0),
-    0
-  );
+  // Calculate total discount - supports two approaches:
+  // 1. Invoice-level discountPercentage (preferred) - discount = subtotal * percentage
+  // 2. Per-item discounts (legacy) - discount = sum of item.discountAmount
+  let calculatedDiscount;
+  if (this.discountPercentage && this.discountPercentage > 0) {
+    // Invoice-level percentage discount
+    calculatedDiscount = (calculatedSubtotal * this.discountPercentage) / 100;
+  } else {
+    // Sum of per-item discounts (legacy approach)
+    calculatedDiscount = this.items.reduce(
+      (sum, item) => sum + (item.discountAmount || 0),
+      0,
+    );
+  }
 
-  if (Math.abs(calculatedDiscount - this.totalDiscount) > 0.01) {
+  if (Math.abs(calculatedDiscount - (this.totalDiscount || 0)) > 0.01) {
     throw new Error(
       `Discount mismatch. Expected: ${calculatedDiscount.toFixed(2)}, Got: ${
-        this.totalDiscount
-      }`
+        this.totalDiscount || 0
+      }`,
     );
   }
 
-  // Calculate total tax
-  const calculatedTax = this.items.reduce(
+  // Calculate total tax - apply discount factor since item.taxAmount is pre-discount
+  // but invoice-level taxAmount has discount proportionally applied
+  const itemTaxSum = this.items.reduce(
     (sum, item) => sum + (item.taxAmount || 0),
-    0
+    0,
   );
+
+  // Calculate discount factor: when discount is applied, tax is reduced proportionally
+  const subtotalAfterDiscount = calculatedSubtotal - (this.totalDiscount || 0);
+  const discountFactor = calculatedSubtotal > 0 ? subtotalAfterDiscount / calculatedSubtotal : 1;
+  const calculatedTax = itemTaxSum * discountFactor;
 
   if (Math.abs(calculatedTax - this.taxAmount) > 0.01) {
     throw new Error(
       `Tax mismatch. Expected: ${calculatedTax.toFixed(2)}, Got: ${
         this.taxAmount
-      }`
+      }`,
     );
   }
 
@@ -587,7 +712,7 @@ invoiceSchema.methods.validateAmounts = function () {
   if (Math.abs(calculatedTotal - this.total) > 0.01) {
     throw new Error(
       `Total mismatch. Subtotal (${this.subtotal}) - Discount (${this.totalDiscount}) + Tax (${this.taxAmount}) = ` +
-        `${calculatedTotal.toFixed(2)}, but total is ${this.total}`
+        `${calculatedTotal.toFixed(2)}, but total is ${this.total}`,
     );
   }
 
@@ -671,7 +796,7 @@ invoiceSchema.methods.validateBeforeCompletion = async function () {
 invoiceSchema.methods.complete = async function (completedBy) {
   if (this.status !== "draft" && this.status !== "sent") {
     throw new Error(
-      `Can only complete draft or sent invoices. Current status: ${this.status}`
+      `Can only complete draft or sent invoices. Current status: ${this.status}`,
     );
   }
 
@@ -679,6 +804,57 @@ invoiceSchema.methods.complete = async function (completedBy) {
 
   // Validate
   await this.validateBeforeCompletion();
+
+  // ==========================================
+  // FISCAL PERIOD VALIDATION
+  // ==========================================
+  const FiscalPeriod = mongoose.model("FiscalPeriod");
+
+  // Ensure fiscal period is set
+  if (!this.fiscalPeriod && this.invoiceDate) {
+    const d = new Date(this.invoiceDate);
+    this.fiscalPeriod = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  // Find or create fiscal period
+  const periodFilter = {
+    periodCode: this.fiscalPeriod,
+  };
+  if (this.companyId) {
+    periodFilter.companyId = this.companyId;
+  }
+
+  let fiscalPeriod = await FiscalPeriod.findOne(periodFilter);
+
+  if (!fiscalPeriod) {
+    // Auto-create the fiscal period from invoice's fiscalPeriod (YYYY-MM)
+    const [year, month] = this.fiscalPeriod.split("-").map(Number);
+
+    try {
+      fiscalPeriod = await FiscalPeriod.createMonthPeriod(
+        year,
+        month,
+        userInfo,
+        this.companyId,
+      );
+    } catch (createError) {
+      // Handle race condition - period may have been created by another request
+      fiscalPeriod = await FiscalPeriod.findOne(periodFilter);
+      if (!fiscalPeriod) {
+        throw new Error(
+          `Failed to create fiscal period: ${createError.message}`,
+        );
+      }
+    }
+  }
+
+  if (fiscalPeriod.status === "closed") {
+    throw new Error(`Fiscal period ${this.fiscalPeriod} is closed`);
+  }
+
+  if (fiscalPeriod.status === "locked") {
+    throw new Error(`Fiscal period ${this.fiscalPeriod} is locked`);
+  }
 
   let revenueJE = null;
   let cogsJE = null;
@@ -740,19 +916,24 @@ invoiceSchema.methods.createRevenueJournalEntry = async function (user) {
   const Account = mongoose.model("Account");
   const JournalEntry = mongoose.model("JournalEntry");
 
-  // Get accounts
+  // Get accounts (tenant-scoped)
   const arAccount = await Account.findOne({
+    companyId: this.companyId,
     systemAccount: "accounts_receivable",
   });
   const revenueAccount = await Account.findOne({
+    companyId: this.companyId,
     systemAccount: "sales_revenue",
   });
   const vatOutputAccount = await Account.findOne({
+    companyId: this.companyId,
     systemAccount: "vat_output",
   });
 
   if (!arAccount || !revenueAccount) {
-    throw new Error("AR or Sales Revenue accounts not configured");
+    throw new Error(
+      "AR or Sales Revenue accounts not configured for this company",
+    );
   }
 
   const lines = [];
@@ -768,21 +949,22 @@ invoiceSchema.methods.createRevenueJournalEntry = async function (user) {
     description: `Sale to ${this.customer.name}`,
   });
 
-  // Credit: Revenue (subtotal)
+  // Credit: Revenue (subtotal minus discount = net sales)
+  const netRevenue = this.subtotal - (this.totalDiscount || 0);
   lines.push({
     accountId: revenueAccount._id,
     accountCode: revenueAccount.accountCode,
     accountName: revenueAccount.accountName,
     accountType: revenueAccount.accountType,
     debit: 0,
-    credit: this.subtotal,
-    description: `Sales revenue - ${this.customer.name}`,
+    credit: netRevenue,
+    description: `Sales revenue - ${this.customer.name}${this.totalDiscount > 0 ? ` (${this.discountPercentage || 0}% discount applied)` : ""}`,
   });
 
   // Credit: VAT Output (if applicable)
   if (this.taxAmount > 0) {
     if (!vatOutputAccount) {
-      throw new Error("VAT Output account not configured");
+      throw new Error("VAT Output account not configured for this company");
     }
 
     lines.push({
@@ -802,15 +984,16 @@ invoiceSchema.methods.createRevenueJournalEntry = async function (user) {
 
   if (Math.abs(totalDebits - totalCredits) > 0.01) {
     throw new Error(
-      `Revenue journal entry not balanced! Debits: ${totalDebits}, Credits: ${totalCredits}`
+      `Revenue journal entry not balanced! Debits: ${totalDebits}, Credits: ${totalCredits}`,
     );
   }
 
   // Generate entry number
   const entryNumber = await this.generateUniqueEntryNumber("SALE");
 
-  // Create journal entry
+  // Create journal entry (with tenant scoping)
   const journalEntry = await JournalEntry.create({
+    companyId: this.companyId, // Tenant scoping
     entryNumber,
     entryDate: this.invoiceDate,
     entryType: "sale",
@@ -852,17 +1035,22 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
   const Product = mongoose.model("Product");
   const StockMovement = mongoose.model("StockMovement");
 
-  // Get accounts - need both Inventory and Technician Stock
-  const cogsAccount = await Account.findOne({ systemAccount: "cogs" });
+  // Get accounts - need both Inventory and Technician Stock (tenant-scoped)
+  const cogsAccount = await Account.findOne({
+    companyId: this.companyId,
+    systemAccount: "cogs",
+  });
   const inventoryAccount = await Account.findOne({
+    companyId: this.companyId,
     systemAccount: "inventory",
   });
   const technicianStockAccount = await Account.findOne({
+    companyId: this.companyId,
     systemAccount: "technician_stock",
   });
 
   if (!cogsAccount) {
-    throw new Error("COGS account not configured");
+    throw new Error("COGS account not configured for this company");
   }
 
   // Separate items by source
@@ -881,12 +1069,15 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
       throw new Error(`Product not found: ${item.productId}`);
     }
 
+    // Check if item is from technician stock (either via request or direct checkout)
+    const isFromTechnicianStock = !!(item.relatedRequest?.requestId || item.relatedCheckout?.checkoutId);
+
     // Check sufficient stock (only for direct sales from inventory)
-    if (!item.relatedRequest?.requestId) {
+    if (!isFromTechnicianStock) {
       if (item.quantity > product.inventory?.quantityAvailable) {
         throw new Error(
           `Insufficient stock for ${product.name}. ` +
-            `Available: ${product.inventory?.quantityAvailable}, Requested: ${item.quantity}`
+            `Available: ${product.inventory?.quantityAvailable}, Requested: ${item.quantity}`,
         );
       }
     }
@@ -894,8 +1085,8 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
     const lineCOGS = item.quantity * product.costing.costPrice;
 
     // Categorize by source
-    if (item.relatedRequest?.requestId) {
-      // Item came from technician stock
+    if (isFromTechnicianStock) {
+      // Item came from technician stock (via request fulfillment or direct checkout)
       totalCOGSFromTechStock += lineCOGS;
       itemsFromTechStock.push({ item, product, lineCOGS });
     } else {
@@ -905,13 +1096,13 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
     }
 
     // Only decrease inventory for direct sales (not from technician stock)
-    if (!item.relatedRequest?.requestId) {
+    if (!isFromTechnicianStock) {
       await product.decreaseInventory(
         item.quantity,
-        `Sold on invoice ${this.invoiceNumber}`
+        `Sold on invoice ${this.invoiceNumber}`,
       );
     }
-    // Note: For technician stock items, inventory was already decreased during fulfillment
+    // Note: For technician stock items, inventory was already decreased during checkout
 
     // Update product lifetime totals
     product.lifetimeTotals = product.lifetimeTotals || {};
@@ -930,9 +1121,12 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
   // CREATE STOCK MOVEMENTS (only for direct sales from inventory)
   // ============================================
   for (const { item, product, lineCOGS } of itemsFromInventory) {
-    const movementNumber = await StockMovement.generateMovementNumber();
+    const movementNumber = await StockMovement.generateMovementNumber(
+      this.companyId,
+    );
 
     const movement = await StockMovement.create({
+      companyId: this.companyId, // Tenant scoping
       movementNumber,
       productId: product._id,
       productSnapshot: {
@@ -1002,7 +1196,7 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
   // CREDIT: Inventory (for direct sales)
   if (totalCOGSFromInventory > 0) {
     if (!inventoryAccount) {
-      throw new Error("Inventory account not configured");
+      throw new Error("Inventory account not configured for this company");
     }
     journalLines.push({
       accountId: inventoryAccount._id,
@@ -1015,10 +1209,12 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
     });
   }
 
-  // CREDIT: Technician Stock (for sales from requests)
+  // CREDIT: Technician Stock (for sales from requests or checkouts)
   if (totalCOGSFromTechStock > 0) {
     if (!technicianStockAccount) {
-      throw new Error("Technician Stock account not configured");
+      throw new Error(
+        "Technician Stock account not configured for this company",
+      );
     }
     journalLines.push({
       accountId: technicianStockAccount._id,
@@ -1027,12 +1223,13 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
       accountType: technicianStockAccount.accountType,
       debit: 0,
       credit: totalCOGSFromTechStock,
-      description: `From technician stock (request sales)`,
+      description: `From technician stock (trunk stock sales)`,
     });
   }
 
-  // Create journal entry
+  // Create journal entry (with tenant scoping)
   const journalEntry = await JournalEntry.create({
+    companyId: this.companyId, // Tenant scoping
     entryNumber,
     entryDate: this.invoiceDate,
     entryType: "sale",
@@ -1065,13 +1262,13 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
   for (const { item } of itemsFromTechStock) {
     if (item.relatedRequest?.requestId) {
       const request = await StockRequest.findById(
-        item.relatedRequest.requestId
+        item.relatedRequest.requestId,
       );
 
       if (request) {
         // Find the matching item in the request
         const requestItem = request.items.find(
-          (ri) => ri.productId.toString() === item.productId.toString()
+          (ri) => ri.productId.toString() === item.productId.toString(),
         );
 
         if (requestItem) {
@@ -1088,7 +1285,7 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
 
         // Check if all items are fully invoiced
         const allInvoiced = request.items.every(
-          (ri) => (ri.invoicedQuantity || 0) >= (ri.totalFulfilled || 0)
+          (ri) => (ri.invoicedQuantity || 0) >= (ri.totalFulfilled || 0),
         );
 
         if (allInvoiced) {
@@ -1108,7 +1305,7 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
  */
 invoiceSchema.methods.rollbackCompletion = async function (
   user,
-  { revenueJE, cogsJE, stockMovements }
+  { revenueJE, cogsJE, stockMovements },
 ) {
   const JournalEntry = mongoose.model("JournalEntry");
   const Product = mongoose.model("Product");
@@ -1146,7 +1343,7 @@ invoiceSchema.methods.rollbackCompletion = async function (
         await product.increaseInventory(
           movement.quantity,
           movement.costing.unitCost,
-          "Rollback: Invoice completion failed"
+          "Rollback: Invoice completion failed",
         );
       }
       await StockMovement.findByIdAndDelete(movement._id);
@@ -1161,12 +1358,11 @@ invoiceSchema.methods.rollbackCompletion = async function (
  */
 invoiceSchema.methods.generateUniqueEntryNumber = async function (
   prefix,
-  session = null
+  session = null,
 ) {
-  const { generateUniqueEntryNumber } = await import(
-    "@/lib/utils/server-utils"
-  );
-  return generateUniqueEntryNumber(prefix, session);
+  const { generateUniqueEntryNumber } =
+    await import("@/lib/utils/server-utils");
+  return generateUniqueEntryNumber(prefix, this.companyId, session);
 };
 
 /**
@@ -1183,12 +1379,12 @@ invoiceSchema.methods.recordPayment = async function (
   paymentId,
   amount,
   paymentDetails = null,
-  session = null
+  session = null,
 ) {
   // Only completed invoices can accept payments
   if (this.status !== "completed") {
     throw new Error(
-      `Can only record payments on completed invoices. Current status: ${this.status}`
+      `Can only record payments on completed invoices. Current status: ${this.status}`,
     );
   }
 
@@ -1198,7 +1394,7 @@ invoiceSchema.methods.recordPayment = async function (
 
   if (amount > this.amountDue + 0.01) {
     throw new Error(
-      `Payment amount (${amount}) exceeds amount due (${this.amountDue})`
+      `Payment amount (${amount}) exceeds amount due (${this.amountDue})`,
     );
   }
 
@@ -1256,7 +1452,7 @@ invoiceSchema.methods.recordPayment = async function (
   if (this.accounting?.revenueJournalEntryId) {
     const JournalEntry = mongoose.model("JournalEntry");
     const je = await JournalEntry.findById(
-      this.accounting.revenueJournalEntryId
+      this.accounting.revenueJournalEntryId,
     ).session(session);
 
     if (je) {
@@ -1277,7 +1473,7 @@ invoiceSchema.methods.recordPayment = async function (
 invoiceSchema.methods.cancel = async function (cancelledBy, reason) {
   if (this.paymentStatus === "paid") {
     throw new Error(
-      "Cannot cancel a fully paid invoice. Refund payments first."
+      "Cannot cancel a fully paid invoice. Refund payments first.",
     );
   }
 
@@ -1287,7 +1483,7 @@ invoiceSchema.methods.cancel = async function (cancelledBy, reason) {
 
   if (this.paymentHistory.length > 0) {
     throw new Error(
-      "Cannot cancel an invoice with payment history. Please reverse payments first."
+      "Cannot cancel an invoice with payment history. Please reverse payments first.",
     );
   }
 
@@ -1297,7 +1493,7 @@ invoiceSchema.methods.cancel = async function (cancelledBy, reason) {
   // Reverse revenue journal entry
   if (this.accounting?.revenueJournalEntryId) {
     const je = await JournalEntry.findById(
-      this.accounting.revenueJournalEntryId
+      this.accounting.revenueJournalEntryId,
     );
     if (je && je.status === "posted") {
       await je.reverse(userInfo, reason || "Invoice cancelled");
@@ -1329,7 +1525,7 @@ invoiceSchema.methods.cancel = async function (cancelledBy, reason) {
       await product.increaseInventory(
         movement.quantity,
         movement.costing?.unitCost || 0,
-        `Restored from cancelled invoice ${this.invoiceNumber}`
+        `Restored from cancelled invoice ${this.invoiceNumber}`,
       );
 
       // Reverse lifetime totals

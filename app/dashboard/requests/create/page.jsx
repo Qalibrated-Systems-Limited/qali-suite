@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 
 import Product from "@/app/models/product";
+import Party from "@/app/models/parties";
 
 import { createStockRequest } from "@/app/mongodb/requests-actions";
 import { IconArrowLeft, IconClipboardList } from "@tabler/icons-react";
@@ -9,21 +10,42 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CreateStockRequestForm } from "../components/CreateRequestForm";
 import dbConnect from "@/app/config/dbConnect";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 export const metadata = {
   title: "Create Stock Request",
   description: "Create a new stock request",
 };
 
-async function getProducts() {
+async function getProducts(companyId) {
   await dbConnect();
 
-  const products = await Product.find({})
-    .select("_id name SKU stock unit price category")
+  const filter = companyId ? { companyId } : {};
+  const products = await Product.find(filter)
+    .select("_id name SKU inventory.quantityAvailable inventory.quantityOnHand stock unit pricing.sellingPrice price category")
     .sort({ name: 1 })
     .lean();
 
   return JSON.parse(JSON.stringify(products));
+}
+
+async function getCustomers(companyId) {
+  await dbConnect();
+
+  const filter = {
+    type: { $in: ["customer", "both"] },
+    isActive: true,
+  };
+  if (companyId) {
+    filter.companyId = companyId;
+  }
+
+  const customers = await Party.find(filter)
+    .select("_id name email phone address taxPin")
+    .sort({ name: 1 })
+    .lean();
+
+  return JSON.parse(JSON.stringify(customers));
 }
 
 export default async function CreateRequestPage() {
@@ -33,7 +55,14 @@ export default async function CreateRequestPage() {
     redirect("/login");
   }
 
-  const products = await getProducts();
+  // Get tenant context
+  const { companyId } = await getTenantContext();
+
+  // Fetch products and customers in parallel
+  const [products, customers] = await Promise.all([
+    getProducts(companyId),
+    getCustomers(companyId),
+  ]);
 
   return (
     <div className="container mx-auto px-4 py-6 max-w-7xl">
@@ -66,6 +95,7 @@ export default async function CreateRequestPage() {
       {/* Form */}
       <CreateStockRequestForm
         products={products}
+        customers={customers}
         user={session.user}
         createRequestAction={createStockRequest}
       />

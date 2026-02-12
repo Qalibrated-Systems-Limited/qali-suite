@@ -4,7 +4,11 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import Party from "@/app/models/parties";
 import User from "@/app/models/user";
-import  connectDB  from "@/app/config/dbConnect";
+import connectDB from "@/app/config/dbConnect";
+import {
+  getTenantContext,
+  withTenantScope,
+} from "@/lib/utils/tenant-utils";
 
 // ============================================
 // LINK USER TO EMPLOYEE PARTY
@@ -19,6 +23,9 @@ export async function linkUserToParty(prevState, formData) {
   await connectDB();
 
   try {
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     // Validate input
     const validatedFields = linkUserSchema.safeParse({
       partyId: formData.get("partyId"),
@@ -34,8 +41,10 @@ export async function linkUserToParty(prevState, formData) {
 
     const { partyId, userId } = validatedFields.data;
 
-    // Check if party exists and is employee type
-    const party = await Party.findById(partyId);
+    // Check if party exists and is employee type (tenant-scoped)
+    const party = await Party.findOne(
+      withTenantScope({ _id: partyId }, companyId, isSuperAdmin)
+    );
     if (!party) {
       return {
         success: false,
@@ -50,8 +59,10 @@ export async function linkUserToParty(prevState, formData) {
       };
     }
 
-    // Check if user exists
-    const user = await User.findById(userId);
+    // Check if user exists (tenant-scoped)
+    const user = await User.findOne(
+      withTenantScope({ _id: userId }, companyId, isSuperAdmin)
+    );
     if (!user) {
       return {
         success: false,
@@ -69,12 +80,18 @@ export async function linkUserToParty(prevState, formData) {
       };
     }
 
-    // Check if user already linked to another party
-    const existingLink = await Party.findOne({
-      userId: userId,
-      type: "employee",
-      _id: { $ne: partyId },
-    });
+    // Check if user already linked to another party (tenant-scoped)
+    const existingLink = await Party.findOne(
+      withTenantScope(
+        {
+          userId: userId,
+          type: "employee",
+          _id: { $ne: partyId },
+        },
+        companyId,
+        isSuperAdmin
+      )
+    );
 
     if (existingLink) {
       return {
@@ -115,8 +132,13 @@ export async function unlinkUserFromParty(partyId) {
   await connectDB();
 
   try {
-    const party = await Party.findById(partyId);
-    
+    // Get tenant context
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const party = await Party.findOne(
+      withTenantScope({ _id: partyId }, companyId, isSuperAdmin)
+    );
+
     if (!party) {
       return {
         success: false,

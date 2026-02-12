@@ -3,6 +3,7 @@ import { Poppins } from "next/font/google";
 
 import { cn } from "../lib/utils";
 import { ThemeProvider } from "@/components/Theme-Provider";
+import { Toaster } from "sonner";
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -25,6 +26,7 @@ export default function RootLayout({ children }) {
           disableTransitionOnChange
         >
           {children}
+          <Toaster richColors position="top-right" />
         </ThemeProvider>
       </body>
     </html>
