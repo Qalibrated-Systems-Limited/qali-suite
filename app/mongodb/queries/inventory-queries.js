@@ -20,14 +20,14 @@ export async function getStockValuationReport({ groupBy = "category" } = {}) {
     withTenantScope({ isActive: true }, companyId, isSuperAdmin),
   )
     .select(
-      "name SKU category stock costing.costPrice pricing.sellingPrice unit",
+      "name SKU category inventory.quantityOnHand costing.costPrice pricing.sellingPrice unit",
     )
     .populate("category", "name")
     .lean();
 
   // Calculate inventory value for each product
   const productsWithValue = products.map((p) => {
-    const qty = p.stock || 0;
+    const qty = p.inventory?.quantityOnHand || 0;
     const costPrice = p.costing?.costPrice || 0;
     const sellingPrice = p.pricing?.sellingPrice || 0;
     const inventoryValue = qty * costPrice;
@@ -125,7 +125,10 @@ export async function getLowStockReport() {
       {
         isActive: true,
         $expr: {
-          $lte: ["$stock", { $ifNull: ["$inventory.reorderLevel", 0] }],
+          $lte: [
+            { $ifNull: ["$inventory.quantityOnHand", 0] },
+            { $ifNull: ["$inventory.reorderLevel", 0] },
+          ],
         },
       },
       companyId,
@@ -133,10 +136,10 @@ export async function getLowStockReport() {
     ),
   )
     .select(
-      "name SKU category stock inventory.reorderLevel costing.costPrice unit",
+      "name SKU category inventory.quantityOnHand inventory.reorderLevel costing.costPrice unit",
     )
     .populate("category", "name")
-    .sort({ stock: 1 })
+    .sort({ "inventory.quantityOnHand": 1 })
     .lean();
 
   return {
@@ -145,14 +148,15 @@ export async function getLowStockReport() {
     products: products.map((p) => ({
       ...p,
       category: p.category?.name || "Uncategorized",
+      quantityOnHand: p.inventory?.quantityOnHand || 0,
       reorderLevel: p.inventory?.reorderLevel || 0,
-      shortfall: (p.inventory?.reorderLevel || 0) - (p.stock || 0),
+      shortfall: (p.inventory?.reorderLevel || 0) - (p.inventory?.quantityOnHand || 0),
     })),
     summary: {
       totalItems: products.length,
       totalShortfall: products.reduce(
         (sum, p) =>
-          sum + Math.max(0, (p.inventory?.reorderLevel || 0) - (p.stock || 0)),
+          sum + Math.max(0, (p.inventory?.reorderLevel || 0) - (p.inventory?.quantityOnHand || 0)),
         0,
       ),
     },
@@ -192,10 +196,13 @@ export async function getStockByCategory() {
           $first: { $ifNull: ["$categoryInfo.name", "Uncategorized"] },
         },
         productCount: { $sum: 1 },
-        totalQuantity: { $sum: "$stock" },
+        totalQuantity: { $sum: { $ifNull: ["$inventory.quantityOnHand", 0] } },
         totalValue: {
           $sum: {
-            $multiply: ["$stock", { $ifNull: ["$costing.costPrice", 0] }],
+            $multiply: [
+              { $ifNull: ["$inventory.quantityOnHand", 0] },
+              { $ifNull: ["$costing.costPrice", 0] },
+            ],
           },
         },
       },
@@ -216,12 +223,12 @@ export async function getOutOfStockProducts() {
 
   const products = await Product.find(
     withTenantScope(
-      { isActive: true, stock: { $lte: 0 } },
+      { isActive: true, "inventory.quantityOnHand": { $lte: 0 } },
       companyId,
       isSuperAdmin,
     ),
   )
-    .select("name SKU category costing.costPrice unit createdAt")
+    .select("name SKU category inventory.quantityOnHand costing.costPrice unit createdAt")
     .populate("category", "name")
     .sort({ name: 1 })
     .lean();

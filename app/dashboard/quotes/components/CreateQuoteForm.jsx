@@ -152,7 +152,7 @@ export default function CreateQuoteForm({
   const addStockItem = (product) => {
     // ERP: Use costing.costPrice for COGS, pricing.sellingPrice for default selling price
     const costPrice = Number(product.costing?.costPrice) || 0;
-    const defaultSellingPrice = Number(product.pricing?.sellingPrice) || Number(product.price) || 0;
+    const defaultSellingPrice = Number(product.pricing?.sellingPrice) || 0;
     const minimumPrice = Number(product.pricing?.minimumPrice) || 0;
 
     const newItem = {
@@ -161,7 +161,7 @@ export default function CreateQuoteForm({
       name: product.name,
       SKU: product.SKU,
       unit: product.unit,
-      availableStock: product.stock,
+      availableStock: product.inventory?.quantityAvailable ?? 0,
       quantity: 1,
       costPrice: costPrice,
       sellingPrice: defaultSellingPrice, // Admin can edit this
@@ -554,7 +554,7 @@ export default function CreateQuoteForm({
                         <div className="flex-1">
                           <p className="font-medium">{product.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {product.SKU} • Stock: {product.stock} • KES {product.pricing?.sellingPrice || product.price}
+                            {product.SKU} • Stock: {product.inventory?.quantityAvailable ?? 0} • KES {product.pricing?.sellingPrice || 0}
                           </p>
                         </div>
                         <Plus className="h-4 w-4 text-green-500" />

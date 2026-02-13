@@ -5,8 +5,8 @@ import { auth } from "../../auth";
 import { AppSidebar } from "./components/app-sidebar";
 
 export const metadata = {
-  title: "StockVault Dashboard",
-  description: "Manage your store",
+  title: "QaliSuite Dashboard",
+  description: "Enterprise Resource Planning",
 };
 
 async function DashboardLayout({ children }) {

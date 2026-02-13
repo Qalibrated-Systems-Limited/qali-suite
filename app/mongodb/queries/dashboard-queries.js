@@ -8,8 +8,8 @@ import { getTenantContext } from "@/lib/utils/tenant-utils";
 // ============================================
 // DASHBOARD OVERVIEW STATS
 // ============================================
-dbConnect();
 export const getDashboardStats = async () => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
@@ -30,10 +30,10 @@ export const getDashboardStats = async () => {
     Product.countDocuments(tenantMatch),
 
     // Low stock items (1-9)
-    Product.countDocuments({ ...tenantMatch, stock: { $gte: 1, $lte: 9 } }),
+    Product.countDocuments({ ...tenantMatch, "inventory.quantityOnHand": { $gte: 1, $lte: 9 } }),
 
     // Out of stock
-    Product.countDocuments({ ...tenantMatch, stock: 0 }),
+    Product.countDocuments({ ...tenantMatch, "inventory.quantityOnHand": 0 }),
 
     // Total stock value
     Product.aggregate([
@@ -42,7 +42,12 @@ export const getDashboardStats = async () => {
         $group: {
           _id: null,
           totalValue: {
-            $sum: { $multiply: ["$stock", "$price"] },
+            $sum: {
+              $multiply: [
+                { $ifNull: ["$inventory.quantityOnHand", 0] },
+                { $ifNull: ["$costing.costPrice", 0] },
+              ],
+            },
           },
         },
       },
@@ -141,8 +146,15 @@ export const getStockByCategory = async () => {
       $group: {
         _id: "$category",
         totalItems: { $sum: 1 },
-        totalStock: { $sum: "$stock" },
-        totalValue: { $sum: { $multiply: ["$stock", "$price"] } },
+        totalStock: { $sum: { $ifNull: ["$inventory.quantityOnHand", 0] } },
+        totalValue: {
+          $sum: {
+            $multiply: [
+              { $ifNull: ["$inventory.quantityOnHand", 0] },
+              { $ifNull: ["$costing.costPrice", 0] },
+            ],
+          },
+        },
       },
     },
     {
@@ -227,9 +239,9 @@ export const getLowStockAlerts = async (threshold = 10) => {
     _id: product._id.toString(),
     name: product.name,
     SKU: product.SKU,
-    stock: product.stock,
+    quantityOnHand: product.inventory?.quantityOnHand ?? 0,
     category: product.category,
-    reorderLevel: product.reorderLevel || threshold,
+    reorderLevel: product.inventory?.reorderLevel || threshold,
   }));
 };
 

@@ -7,12 +7,11 @@ const ObjectId = mongoose.Types.ObjectId;
 
 const ITEMS_PER_PAGE = 20;
 
-dbConnect();
-
 // ============================================
 // SEARCH USERS WITH FILTERS
 // ============================================
 export const searchUsers = async (searchTerm, page = 1, filters = {}) => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const { role, status, department } = filters;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;

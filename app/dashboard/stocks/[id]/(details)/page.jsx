@@ -93,7 +93,7 @@ function formatNumber(num) {
 }
 
 function getStockStatus(product) {
-  const qty = product.inventory?.quantityOnHand ?? product.stock ?? 0;
+  const qty = product.inventory?.quantityOnHand ?? 0;
   const reorderLevel = product.inventory?.reorderLevel ?? 0;
 
   if (qty <= 0) {
@@ -213,7 +213,7 @@ function StockAlert({ product }) {
   const status = getStockStatus(product);
   if (status.level === "ok") return null;
 
-  const qty = product.inventory?.quantityOnHand ?? product.stock ?? 0;
+  const qty = product.inventory?.quantityOnHand ?? 0;
   const reorderLevel = product.inventory?.reorderLevel ?? 0;
   const Icon = status.Icon;
 
@@ -451,11 +451,11 @@ export default async function ProductDetailPage({ params, searchParams }) {
     getAProductActiveCheckouts(id),
   ]);
 
-  const qty = product.inventory?.quantityOnHand ?? product.stock ?? 0;
+  const qty = product.inventory?.quantityOnHand ?? 0;
   const committed = product.inventory?.quantityCommitted ?? 0;
   const available = product.inventory?.quantityAvailable ?? qty;
   const costPrice = product.costing?.costPrice ?? 0;
-  const sellPrice = product.pricing?.sellingPrice ?? product.price ?? 0;
+  const sellPrice = product.pricing?.sellingPrice ?? 0;
   const inventoryValue = qty * costPrice;
   const margin = product.pricing?.marginPercentage ?? 0;
 

@@ -102,15 +102,14 @@ export async function createStockAdjustment(prevState, formData) {
         throw new Error(`Product not found: ${item.productId}`);
       }
 
-      const systemQuantity = product.stock || 0;
+      const systemQuantity = product.inventory?.quantityOnHand ?? 0;
       const physicalQuantity =
         item.adjustmentType === "increase"
           ? systemQuantity + item.quantity
           : systemQuantity - item.quantity;
 
       const adjustmentQuantity = physicalQuantity - systemQuantity;
-      // Use costPrice from costing object, or fallback to old price field
-      const unitCost = product.costing?.costPrice || product.price || 0;
+      const unitCost = product.costing?.costPrice ?? 0;
       const adjustmentValue = Math.abs(adjustmentQuantity) * unitCost;
 
       lines.push({

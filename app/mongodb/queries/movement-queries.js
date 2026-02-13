@@ -7,7 +7,6 @@ import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
 
 const ITEMS_PER_PAGE = 20;
-dbConnect();
 
 // ============================================
 // FETCH MOVEMENTS WITH FILTERS (ROLE-BASED)
@@ -18,6 +17,7 @@ export const fetchMovementPages = async (
   userId = null,
   userRole = null,
 ) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin

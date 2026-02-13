@@ -24,7 +24,6 @@ import { stockRequestTypes, stockRequestTypeConfig } from "@/lib/utils";
 // ============================================
 // 1. APPROVE REQUEST (Manager/Admin only)
 // ============================================
-dbConnect();
 
 async function generateRequestNumber(session) {
   const today = format(new Date(), "ddMMyy");
@@ -39,6 +38,7 @@ async function generateRequestNumber(session) {
   return `${counterId}-${String(counter.seq).padStart(3, "0")}`;
 }
 export async function approveRequest(requestId, prevState, formData) {
+  await dbConnect();
   let session;
   let success = false;
 
@@ -121,6 +121,39 @@ export async function approveRequest(requestId, prevState, formData) {
     });
 
     // ========================================
+    // VALIDATE AND COMMIT INVENTORY
+    // ========================================
+    // Reserve stock for each approved item to prevent overselling
+    for (const item of request.items) {
+      const approval = itemApprovals[item._id.toString()];
+      if (!approval || approval.quantity <= 0) continue;
+
+      const product = await Product.findById(item.productId).session(session);
+      if (!product) {
+        throw new Error(`Product ${item.productName} not found`);
+      }
+
+      const available = product.inventory?.quantityAvailable ?? 0;
+      if (approval.quantity > available) {
+        throw new Error(
+          `Insufficient stock for ${product.name}. Available: ${available}, Approved: ${approval.quantity}`
+        );
+      }
+
+      // COMMIT the inventory (reserve for this request)
+      await Product.findByIdAndUpdate(
+        item.productId,
+        {
+          $inc: {
+            "inventory.quantityCommitted": approval.quantity,
+            "inventory.quantityAvailable": -approval.quantity,
+          },
+        },
+        { session }
+      );
+    }
+
+    // ========================================
     // Approve the request with item approvals
     // ========================================
     await request.approve(
@@ -135,6 +168,7 @@ export async function approveRequest(requestId, prevState, formData) {
 
     await session.commitTransaction();
     revalidatePath("/dashboard/requests");
+    revalidatePath("/dashboard/stocks");
     success = true;
   } catch (error) {
     if (session && session.inTransaction()) {
@@ -306,9 +340,10 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
           throw new Error(`Product ${item.productName} not found`);
         }
 
-        if (fulfilledQty > product.stock) {
+        const availableStock = product.inventory?.quantityAvailable ?? 0;
+        if (fulfilledQty > availableStock) {
           throw new Error(
-            `Insufficient stock for ${item.productName}. Available: ${product.stock}, Requested: ${fulfilledQty}`
+            `Insufficient stock for ${item.productName}. Available: ${availableStock}, Requested: ${fulfilledQty}`
           );
         }
 
@@ -338,10 +373,15 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
           serialNo: itemData.serialNo,
         });
 
-        // Update product stock WITHIN transaction
+        // Update product inventory WITHIN transaction
         await Product.findByIdAndUpdate(
           item.productId,
-          { $inc: { stock: -fulfilledQty } },
+          {
+            $inc: {
+              "inventory.quantityOnHand": -fulfilledQty,
+              "inventory.quantityAvailable": -fulfilledQty,
+            },
+          },
           { session }
         );
       }
@@ -378,7 +418,7 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
         id: product.SKU,
         name: product.name,
         quantity: fulfilledQty,
-        unitPrice: item.unitPrice || product.price,
+        unitPrice: item.unitPrice || product.pricing?.sellingPrice || 0,
       }));
 
       // Create Delivery Note
@@ -413,8 +453,9 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
           session
         );
 
-        // Use product's pricing fields (nested enhanced pricing preferred)
-        const effectiveUnitPrice = updatedProduct.pricing?.sellingPrice || updatedProduct.price || 0;
+        // Use product's pricing fields
+        const effectiveUnitPrice = updatedProduct.pricing?.sellingPrice || 0;
+        const currentOnHand = updatedProduct.inventory?.quantityOnHand ?? 0;
 
         await StockMovement.create(
           [
@@ -429,8 +470,8 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
               movementNumber: movementNumber,
               movementType: "sale",
               quantity: fulfilledQty,
-              previousStock: updatedProduct.stock + fulfilledQty,
-              newStock: updatedProduct.stock,
+              previousStock: currentOnHand + fulfilledQty,
+              newStock: currentOnHand,
               costing: {
                 unitCost: updatedProduct.costing?.costPrice || 0,
                 totalCost: fulfilledQty * (updatedProduct.costing?.costPrice || 0),
@@ -473,8 +514,9 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
           session
         );
 
-        // Use product's pricing fields (nested enhanced pricing preferred)
-        const effectiveUnitPrice = updatedProduct.pricing?.sellingPrice || updatedProduct.price || 0;
+        // Use product's pricing fields
+        const effectiveUnitPrice = updatedProduct.pricing?.sellingPrice || 0;
+        const currentOnHand = updatedProduct.inventory?.quantityOnHand ?? 0;
 
         const movement = await StockMovement.create(
           [
@@ -489,8 +531,8 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
               movementNumber: movementNumber,
               movementType: "issue",
               quantity: fulfilledQty,
-              previousStock: updatedProduct.stock + fulfilledQty,
-              newStock: updatedProduct.stock,
+              previousStock: currentOnHand + fulfilledQty,
+              newStock: currentOnHand,
               costing: {
                 unitCost: updatedProduct.costing?.costPrice || 0,
                 totalCost: fulfilledQty * (updatedProduct.costing?.costPrice || 0),
@@ -564,9 +606,15 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
                 movementId: movement[0]._id,
               },
               requestType: request.requestType, // Track request type for conversion flow
+              // Customer info (for filtering checkouts by customer in invoice forms)
+              customer: request.customer ? {
+                id: request.customer.id,
+                name: request.customer.name,
+              } : null,
               checkoutNotes: `Loaned from request ${
                 request.requestNumber
               } for ${getPurposeLabel(request.requestType)}`,
+              companyId, // Tenant isolation
             },
           ],
           { session }
@@ -728,11 +776,35 @@ export async function cancelRequest(requestId, prevState, formData) {
       return { message: "Cannot cancel a fulfilled request" };
     }
 
+    // ========================================
+    // RELEASE COMMITTED INVENTORY (if approved)
+    // ========================================
+    // If the request was approved, stock was committed and needs to be released
+    if (request.status === "approved") {
+      for (const item of request.items) {
+        // Release the approved quantity (not the requested quantity)
+        const approvedQty = item.approvedQuantity || 0;
+        if (approvedQty > 0) {
+          await Product.findByIdAndUpdate(
+            item.productId,
+            {
+              $inc: {
+                "inventory.quantityCommitted": -approvedQty,
+                "inventory.quantityAvailable": approvedQty,
+              },
+            },
+            { session }
+          );
+        }
+      }
+    }
+
     // Cancel the request
     await request.cancel(reason);
 
     await session.commitTransaction();
     revalidatePath("/dashboard/requests");
+    revalidatePath("/dashboard/stocks");
     success = true;
   } catch (error) {
     if (session && session.inTransaction()) {
@@ -880,8 +952,8 @@ export async function createStockRequest(prevState, formData) {
         };
       }
 
-      // Use available stock (quantityAvailable or fallback to stock)
-      const availableStock = product.inventory?.quantityAvailable ?? product.inventory?.quantityOnHand ?? product.stock ?? 0;
+      // Check available stock
+      const availableStock = product.inventory?.quantityAvailable ?? 0;
 
       if (item.requestedQuantity > availableStock) {
         return {
@@ -894,8 +966,8 @@ export async function createStockRequest(prevState, formData) {
         };
       }
 
-      // Use modern pricing fields with fallback
-      const unitPrice = product.pricing?.sellingPrice ?? product.price ?? 0;
+      // Get selling price
+      const unitPrice = product.pricing?.sellingPrice ?? 0;
 
       validatedItems.push({
         productId: product._id,
@@ -1051,16 +1123,26 @@ export async function returnItemCheckout(checkoutId, prevState, formData) {
       throw new Error("Product not found");
     }
 
+    const previousOnHand = product.inventory?.quantityOnHand ?? 0;
+
     // Return stock to inventory
     await Product.findByIdAndUpdate(
       checkout.productId,
-      { $inc: { stock: checkout.quantity } },
+      {
+        $inc: {
+          "inventory.quantityOnHand": checkout.quantity,
+          "inventory.quantityAvailable": checkout.quantity,
+        },
+      },
       { session }
     );
 
     const updatedProduct = await Product.findById(checkout.productId).session(
       session
     );
+    const currentOnHand = updatedProduct.inventory?.quantityOnHand ?? 0;
+    const sellingPrice = updatedProduct.pricing?.sellingPrice ?? 0;
+    const costPrice = updatedProduct.costing?.costPrice ?? 0;
 
     // Create return stock movement
     const movementNumber = await generateMovementNumber(session);
@@ -1077,14 +1159,14 @@ export async function returnItemCheckout(checkoutId, prevState, formData) {
           direction: "in",
           movementType: "return",
           quantity: checkout.quantity,
-          previousStock: updatedProduct.stock - checkout.quantity,
-          newStock: updatedProduct.stock,
+          previousStock: previousOnHand,
+          newStock: currentOnHand,
           costing: {
-            unitCost: updatedProduct.costing?.costPrice || 0,
-            totalCost: checkout.quantity * (updatedProduct.costing?.costPrice || 0),
-            unitPrice: updatedProduct.pricing?.sellingPrice || updatedProduct.price || 0,
-            totalValue: checkout.quantity * (updatedProduct.pricing?.sellingPrice || updatedProduct.price || 0),
-            averageCostAtMovement: updatedProduct.costing?.costPrice || 0,
+            unitCost: costPrice,
+            totalCost: checkout.quantity * costPrice,
+            unitPrice: sellingPrice,
+            totalValue: checkout.quantity * sellingPrice,
+            averageCostAtMovement: costPrice,
           },
           accounting: {
             affectsAccounting: true,
@@ -1438,14 +1520,37 @@ async function generateDeliveryNoteNumber(session) {
   return `${counterId}-${String(counter.seq).padStart(3, "0")}`;
 }
 
+/**
+ * Derive company code from name (consistent with other generators)
+ */
+function deriveCompanyCode(name) {
+  if (!name) return null;
+  const words = name.trim().split(/\s+/);
+  if (words.length >= 2) {
+    return words.slice(0, 4).map((w) => w[0]).join("").toUpperCase();
+  }
+  return name.slice(0, 3).toUpperCase();
+}
+
 async function generateInvoiceNumber(companyId, session) {
   // Get company code for prefix
   const Company = mongoose.model("Company");
-  const company = await Company.findById(companyId).session(session);
-  const companyCode = company?.code || company?.name?.substring(0, 3).toUpperCase() || "INV";
+  const company = await Company.findById(companyId)
+    .select("code name")
+    .session(session);
 
-  const today = format(new Date(), "yyMM");
-  const counterId = `${companyCode}-INV-${today}`;
+  let companyCode = null;
+  if (company) {
+    // Use explicit code if set, otherwise derive from company name
+    companyCode = company.code || deriveCompanyCode(company.name);
+  }
+
+  const today = format(new Date(), "ddMMyy");
+
+  // Counter ID with company code for tenant isolation
+  const counterId = companyCode
+    ? `inv-${companyCode.toLowerCase()}-${today}`
+    : `inv-${today}`;
 
   const counter = await Counter.findOneAndUpdate(
     { name: counterId },
@@ -1453,7 +1558,9 @@ async function generateInvoiceNumber(companyId, session) {
     { upsert: true, new: true, session }
   );
 
-  return `${counterId}-${String(counter.seq).padStart(4, "0")}`;
+  // Format: INV-{CODE}-{DDMMYY}-{NNN} or INV-{DDMMYY}-{NNN}
+  const prefix = companyCode ? `INV-${companyCode}` : "INV";
+  return `${prefix}-${today}-${String(counter.seq).padStart(3, "0")}`;
 }
 
 function getPurposeLabel(purpose) {
@@ -1555,17 +1662,23 @@ export async function fulfillRequest(requestId, prevState, formData) {
         );
       }
 
-      // Check stock availability
+      // Get product and validate stock
       const product = await Product.findById(item.productId).session(session);
 
       if (!product) {
         throw new Error(`Product ${item.productName} not found`);
       }
 
-      if (fulfillQty > product.stock) {
+      // ========================================
+      // VALIDATE STOCK (committed flow)
+      // ========================================
+      // Stock was committed during approval, so check quantityOnHand
+      // (quantityAvailable was already reduced during approval)
+      const onHandStock = product.inventory?.quantityOnHand ?? 0;
+      if (fulfillQty > onHandStock) {
         throw new Error(
-          `Insufficient stock for ${item.productName}. ` +
-            `Available: ${product.stock}, Requested: ${fulfillQty}`
+          `Insufficient physical stock for ${item.productName}. ` +
+            `On-hand: ${onHandStock}, Requested: ${fulfillQty}`
         );
       }
 
@@ -1577,11 +1690,20 @@ export async function fulfillRequest(requestId, prevState, formData) {
           .filter(Boolean) || [];
 
       // ========================================
-      // DEDUCT STOCK
+      // FULFILL COMMITTED INVENTORY
       // ========================================
+      // Decrease quantityOnHand (physical stock goes out)
+      // Decrease quantityCommitted (reservation is fulfilled)
+      // quantityAvailable stays the same (was already reduced during approval)
+      const previousOnHand = product.inventory?.quantityOnHand ?? 0;
       await Product.findByIdAndUpdate(
         item.productId,
-        { $inc: { stock: -fulfillQty } },
+        {
+          $inc: {
+            "inventory.quantityOnHand": -fulfillQty,
+            "inventory.quantityCommitted": -fulfillQty,
+          },
+        },
         { session }
       );
 
@@ -1595,9 +1717,10 @@ export async function fulfillRequest(requestId, prevState, formData) {
       const movementNumber = await generateMovementNumber(session);
       const isSale = request.requestType === "sale";
 
-      // Use product's pricing fields (nested enhanced pricing preferred)
-      const effectiveUnitPrice = updatedProduct.pricing?.sellingPrice || updatedProduct.price || 0;
-      const effectiveUnitCost = updatedProduct.costing?.costPrice || 0;
+      // Use product's pricing fields
+      const effectiveUnitPrice = updatedProduct.pricing?.sellingPrice ?? 0;
+      const effectiveUnitCost = updatedProduct.costing?.costPrice ?? 0;
+      const currentOnHand = updatedProduct.inventory?.quantityOnHand ?? 0;
 
       const movement = await StockMovement.create(
         [
@@ -1612,8 +1735,8 @@ export async function fulfillRequest(requestId, prevState, formData) {
             direction: "out",
             movementType: isSale ? "sale" : "issue",
             quantity: fulfillQty,
-            previousStock: updatedProduct.stock + fulfillQty,
-            newStock: updatedProduct.stock,
+            previousStock: previousOnHand,
+            newStock: currentOnHand,
             costing: {
               unitCost: effectiveUnitCost,
               totalCost: fulfillQty * effectiveUnitCost,
@@ -1696,7 +1819,7 @@ export async function fulfillRequest(requestId, prevState, formData) {
                   id: product.SKU,
                   name: product.name,
                   quantity: fulfillQty,
-                  unitPrice: item.unitPrice || product.pricing?.sellingPrice || product.price,
+                  unitPrice: item.unitPrice || product.pricing?.sellingPrice || 0,
                   unit: product.unit,
                   type: "Stock",
                   serialNo: serialNos,
@@ -1760,6 +1883,11 @@ export async function fulfillRequest(requestId, prevState, formData) {
                 movementId: movement[0]._id,
               },
               requestType: request.requestType, // Track request type for conversion flow
+              // Customer info (for filtering checkouts by customer in invoice forms)
+              customer: request.customer ? {
+                id: request.customer.id,
+                name: request.customer.name,
+              } : null,
               checkoutNotes: `Checkout from request ${request.requestNumber} for ${request.customer?.name || "internal use"}`,
               companyId, // Tenant isolation
             },
@@ -1808,6 +1936,19 @@ export async function fulfillRequest(requestId, prevState, formData) {
           const amount = fulfilledQty * (item.unitPrice || 0);
           const totalCost = fulfilledQty * unitCost;
 
+          // Get checkout info from fulfillment (for cancel/expire tracking)
+          const latestFulfillment = item.fulfillments[item.fulfillments.length - 1];
+          let relatedCheckout = null;
+          if (latestFulfillment?.checkoutId) {
+            const checkout = await ItemCheckout.findById(latestFulfillment.checkoutId).session(session);
+            if (checkout) {
+              relatedCheckout = {
+                checkoutId: checkout._id,
+                checkoutNumber: checkout.checkoutNumber,
+              };
+            }
+          }
+
           invoiceItems.push({
             itemType: "product",
             productId: item.productId,
@@ -1832,6 +1973,7 @@ export async function fulfillRequest(requestId, prevState, formData) {
               technicianId: request.requester.id,
               technicianName: request.requester.name,
             },
+            relatedCheckout, // Link to checkout for cancel/expire handling
           });
         }
       }

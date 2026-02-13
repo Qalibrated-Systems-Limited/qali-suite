@@ -4,6 +4,18 @@ import mongoose from "mongoose";
 const Schema = mongoose.Schema;
 
 // ============================================
+// HELPER: Derive company code from name
+// ============================================
+function deriveCompanyCode(name) {
+  if (!name) return null;
+  const words = name.trim().split(/\s+/);
+  if (words.length >= 2) {
+    return words.slice(0, 4).map((w) => w[0]).join("").toUpperCase();
+  }
+  return name.slice(0, 3).toUpperCase();
+}
+
+// ============================================
 // STOCK MOVEMENT SCHEMA (IMMUTABLE + FINANCE)
 // ============================================
 const stockMovementSchema = new Schema(
@@ -602,11 +614,12 @@ stockMovementSchema.methods.reverse = async function (reversedBy, reason) {
   }
 
   // Check stock availability for reversal
+  const currentStock = product.inventory?.quantityOnHand ?? 0;
   if (this.direction === "in") {
     // Original was IN, reversal is OUT
-    if (product.stock < this.quantity) {
+    if (currentStock < this.quantity) {
       throw new Error(
-        `Insufficient stock to reverse. Need ${this.quantity}, have ${product.stock}`
+        `Insufficient stock to reverse. Need ${this.quantity}, have ${currentStock}`
       );
     }
   }
@@ -622,11 +635,11 @@ stockMovementSchema.methods.reverse = async function (reversedBy, reason) {
     movementType: this.movementType,
     direction: oppositeDirection,
     quantity: this.quantity,
-    previousStock: product.stock,
+    previousStock: currentStock,
     newStock:
       oppositeDirection === "in"
-        ? product.stock + this.quantity
-        : product.stock - this.quantity,
+        ? currentStock + this.quantity
+        : currentStock - this.quantity,
     costing: {
       unitCost: this.costing?.unitCost || 0,
       totalCost: this.costing?.totalCost || 0,
@@ -652,11 +665,11 @@ stockMovementSchema.methods.reverse = async function (reversedBy, reason) {
   // Update product stock
   if (oppositeDirection === "in") {
     await Product.findByIdAndUpdate(this.productId, {
-      $inc: { stock: this.quantity },
+      $inc: { "inventory.quantityOnHand": this.quantity, "inventory.quantityAvailable": this.quantity },
     });
   } else {
     await Product.findByIdAndUpdate(this.productId, {
-      $inc: { stock: -this.quantity },
+      $inc: { "inventory.quantityOnHand": -this.quantity, "inventory.quantityAvailable": -this.quantity },
     });
   }
 
@@ -751,8 +764,11 @@ stockMovementSchema.statics.generateMovementNumber = async function (companyId =
   // Fetch company code for prefix
   let companyCode = null;
   if (companyId) {
-    const company = await Company.findById(companyId).select("code").lean();
-    companyCode = company?.code || null;
+    const company = await Company.findById(companyId).select("code name").lean();
+    if (company) {
+      // Use explicit code if set, otherwise derive from company name
+      companyCode = company.code || deriveCompanyCode(company.name);
+    }
   }
 
   const today = format(new Date(), "ddMMyy");

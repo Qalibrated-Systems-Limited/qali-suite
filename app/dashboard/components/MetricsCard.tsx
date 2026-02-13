@@ -20,9 +20,12 @@ import {
   XSquare,
   ArrowUpRight,
   ArrowDownRight,
+  ArrowUpCircle,
+  ArrowDownCircle,
   Minus,
   Building2,
   Bell,
+  Scale,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -51,6 +54,9 @@ const icons = {
   XSquare,
   Building2,
   Bell,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  Scale,
 };
 
 export type IconName = keyof typeof icons;

@@ -8,12 +8,11 @@ import { serializeBsonType } from "@/lib/utils";
 import { ObjectId } from "mongodb";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 
-dbConnect();
-
 // ============================================
 // FETCH ACTIVE CUSTOMERS
 // ============================================
 export const fetchActiveCustomers = async () => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
 
@@ -80,11 +79,15 @@ export const fetchAvailableProducts = async () => {
     _id: product._id.toString(),
     name: product.name,
     SKU: product.SKU,
-    price: product.price, // Legacy field
-    stock: product.inventory?.quantityAvailable ?? product.stock, // Available stock
     unit: product.unit,
     category: product.category,
-    // ERP costing & pricing
+    // Inventory tracking
+    inventory: {
+      quantityOnHand: product.inventory?.quantityOnHand ?? 0,
+      quantityAvailable: product.inventory?.quantityAvailable ?? 0,
+      quantityCommitted: product.inventory?.quantityCommitted ?? 0,
+    },
+    // Costing & pricing
     costing: product.costing,
     pricing: product.pricing,
   }));
@@ -103,8 +106,14 @@ export const generateInvoiceNumber = async (
   // Fetch company code for prefix
   let companyCode = null;
   if (tenantCompanyId) {
-    const company = await Company.findById(tenantCompanyId).select("code").lean();
-    companyCode = company?.code || null;
+    const company = await Company.findById(tenantCompanyId)
+      .select("code name")
+      .lean();
+
+    if (company) {
+      // Use explicit code if set, otherwise derive from company name
+      companyCode = company.code || deriveCompanyCode(company.name);
+    }
   }
 
   const today = format(new Date(), "ddMMyy");
@@ -130,6 +139,28 @@ export const generateInvoiceNumber = async (
   const prefix = companyCode ? `INV-${companyCode}` : "INV";
   return `${prefix}-${today}-${String(counter.seq).padStart(3, "0")}`;
 };
+
+/**
+ * Derive a company code from company name
+ * Takes first letters of each word (up to 4 chars) or first 3-4 chars if single word
+ */
+function deriveCompanyCode(name) {
+  if (!name) return null;
+
+  const words = name.trim().split(/\s+/);
+
+  if (words.length >= 2) {
+    // Multiple words: take first letter of each (up to 4)
+    return words
+      .slice(0, 4)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase();
+  } else {
+    // Single word: take first 3-4 characters
+    return name.slice(0, 3).toUpperCase();
+  }
+}
 
 // ============================================
 // GET CUSTOMER BY ID

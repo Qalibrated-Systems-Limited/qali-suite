@@ -50,11 +50,11 @@ import { cn, stockRequestTypes, stockRequestTypeConfig } from "@/lib/utils";
 // HELPER: Get available stock from product
 // ============================================
 function getAvailableStock(product) {
-  return product.inventory?.quantityAvailable ?? product.inventory?.quantityOnHand ?? product.stock ?? 0;
+  return product.inventory?.quantityAvailable ?? product.inventory?.quantityOnHand ?? 0;
 }
 
 function getSellingPrice(product) {
-  return product.pricing?.sellingPrice ?? product.price ?? 0;
+  return product.pricing?.sellingPrice ?? 0;
 }
 
 // ============================================

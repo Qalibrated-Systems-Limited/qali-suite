@@ -13,8 +13,6 @@ import mongoose from "mongoose";
 
 const ObjectId = mongoose.Types.ObjectId;
 
-dbConnect();
-
 // ============================================
 // HELPER: Build tenant filter for queries
 // ============================================
@@ -28,6 +26,7 @@ function buildTenantFilter(companyId: string | null, isSuperAdmin: boolean) {
 // FINANCIAL OVERVIEW (Admin Dashboard)
 // ============================================
 export const getFinancialOverview = async () => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -198,7 +197,12 @@ export const getKeyMetrics = async () => {
         $group: {
           _id: null,
           totalValue: {
-            $sum: { $multiply: ["$stock", "$price"] },
+            $sum: {
+              $multiply: [
+                { $ifNull: ["$inventory.quantityOnHand", 0] },
+                { $ifNull: ["$costing.costPrice", 0] },
+              ],
+            },
           },
         },
       },
@@ -220,8 +224,23 @@ export const getKeyMetrics = async () => {
     // Claims Pending
     EmployeeClaim.countDocuments({ ...tenantMatch, status: "submitted" }),
 
-    // Low Stock Items
-    Product.countDocuments({ ...tenantMatch, stock: { $gte: 1, $lte: 9 } }),
+    // Low Stock Items (at or below reorder level)
+    Product.aggregate([
+      { $match: { ...tenantMatch, status: "active" } },
+      {
+        $addFields: {
+          currentQty: { $ifNull: ["$inventory.quantityOnHand", 0] },
+          reorderAt: { $ifNull: ["$inventory.reorderLevel", 0] },
+        },
+      },
+      {
+        $match: {
+          reorderAt: { $gt: 0 },
+          $expr: { $lte: ["$currentQty", "$reorderAt"] },
+        },
+      },
+      { $count: "count" },
+    ]).then((result) => result[0]?.count || 0),
   ]);
 
   return {
@@ -568,7 +587,6 @@ export const getEmployeeFinancialSummary = async (userId: string) => {
 
 /**
  * Get comprehensive stock statistics
- * Handles both legacy 'stock' field and new 'inventory.quantityOnHand'
  */
 export async function getStockStats() {
   const { companyId, isSuperAdmin } = await getTenantContext();
@@ -591,59 +609,42 @@ export async function getStockStats() {
           totalValue: {
             $sum: {
               $multiply: [
-                // Use inventory.quantityOnHand if exists, fallback to stock
-                {
-                  $ifNull: [
-                    "$inventory.quantityOnHand",
-                    { $ifNull: ["$stock", 0] },
-                  ],
-                },
+                { $ifNull: ["$inventory.quantityOnHand", 0] },
                 { $ifNull: ["$costing.costPrice", 0] },
               ],
             },
           },
           totalProducts: { $sum: 1 },
           totalQuantity: {
-            $sum: {
-              $ifNull: [
-                "$inventory.quantityOnHand",
-                { $ifNull: ["$stock", 0] },
-              ],
-            },
+            $sum: { $ifNull: ["$inventory.quantityOnHand", 0] },
           },
         },
       },
     ]),
 
     // Low stock count - products AT or BELOW reorder level
-    Product.countDocuments({
-      ...tenantMatch,
-      status: "active",
-      $or: [
-        // New inventory structure
-        {
-          "inventory.reorderLevel": { $gt: 0 },
-          $expr: {
-            $lte: ["$inventory.quantityOnHand", "$inventory.reorderLevel"],
-          },
+    Product.aggregate([
+      { $match: { ...tenantMatch, status: "active" } },
+      {
+        $addFields: {
+          currentQty: { $ifNull: ["$inventory.quantityOnHand", 0] },
+          reorderAt: { $ifNull: ["$inventory.reorderLevel", 0] },
         },
-        // Legacy - use stock field with reorderLevel
-        {
-          "inventory.reorderLevel": { $gt: 0 },
-          $expr: { $lte: ["$stock", "$inventory.reorderLevel"] },
+      },
+      {
+        $match: {
+          reorderAt: { $gt: 0 },
+          $expr: { $lte: ["$currentQty", "$reorderAt"] },
         },
-      ],
-    }),
+      },
+      { $count: "count" },
+    ]).then((result) => result[0]?.count || 0),
 
     // Out of stock count
     Product.countDocuments({
       ...tenantMatch,
       status: "active",
-      $or: [
-        { stock: { $lte: 0 } },
-        { "inventory.quantityOnHand": { $lte: 0 } },
-        { stock: { $exists: false } },
-      ],
+      "inventory.quantityOnHand": { $lte: 0 },
     }),
 
     // Pending stock requests
@@ -681,10 +682,7 @@ export async function getLowStockProducts(limit = 10) {
     { $match: { ...baseMatch, status: "active" } },
     {
       $addFields: {
-        // Normalize quantity - prefer inventory.quantityOnHand, fallback to stock
-        currentQty: {
-          $ifNull: ["$inventory.quantityOnHand", { $ifNull: ["$stock", 0] }],
-        },
+        currentQty: { $ifNull: ["$inventory.quantityOnHand", 0] },
         reorderAt: { $ifNull: ["$inventory.reorderLevel", 0] },
       },
     },
@@ -724,11 +722,11 @@ export async function getOutOfStockProducts(limit = 10) {
   return Product.find({
     ...tenantMatch,
     status: "active",
-    $or: [{ stock: { $lte: 0 } }, { "inventory.quantityOnHand": { $lte: 0 } }],
+    "inventory.quantityOnHand": { $lte: 0 },
   })
     .sort({ name: 1 })
     .limit(limit)
-    .select("name SKU category stock inventory.quantityOnHand supplier.name")
+    .select("name SKU category inventory.quantityOnHand supplier.name")
     .lean();
 }
 
@@ -858,19 +856,12 @@ export async function getCategoryDistribution() {
         _id: { $ifNull: ["$category", "Uncategorized"] },
         count: { $sum: 1 },
         totalQty: {
-          $sum: {
-            $ifNull: ["$inventory.quantityOnHand", { $ifNull: ["$stock", 0] }],
-          },
+          $sum: { $ifNull: ["$inventory.quantityOnHand", 0] },
         },
         totalValue: {
           $sum: {
             $multiply: [
-              {
-                $ifNull: [
-                  "$inventory.quantityOnHand",
-                  { $ifNull: ["$stock", 0] },
-                ],
-              },
+              { $ifNull: ["$inventory.quantityOnHand", 0] },
               { $ifNull: ["$costing.costPrice", 0] },
             ],
           },
@@ -1192,9 +1183,7 @@ export async function getDashboardAlerts() {
       { $match: { ...baseMatch, status: "active" } },
       {
         $addFields: {
-          currentQty: {
-            $ifNull: ["$inventory.quantityOnHand", { $ifNull: ["$stock", 0] }],
-          },
+          currentQty: { $ifNull: ["$inventory.quantityOnHand", 0] },
           reorderAt: { $ifNull: ["$inventory.reorderLevel", 0] },
         },
       },

@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
 
 // ============================================
 // CHART CARD COMPONENT
@@ -13,6 +14,7 @@ interface ChartCardProps {
   className?: string;
   action?: React.ReactNode;
   noPadding?: boolean;
+  href?: string;
 }
 
 export function ChartCard({
@@ -22,12 +24,14 @@ export function ChartCard({
   className,
   action,
   noPadding = false,
+  href,
 }: ChartCardProps) {
-  return (
+  const card = (
     <Card
       className={cn(
         "bg-card border border-border/40",
         "hover:border-border transition-colors duration-200",
+        href && "cursor-pointer hover:shadow-md",
         className
       )}
     >
@@ -54,6 +58,12 @@ export function ChartCard({
       </CardContent>
     </Card>
   );
+
+  if (href) {
+    return <Link href={href}>{card}</Link>;
+  }
+
+  return card;
 }
 
 // ============================================

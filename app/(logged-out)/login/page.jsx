@@ -61,9 +61,9 @@ export default function LoginPage() {
             <Package className="w-10 h-10 text-black" />
           </div>
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-foreground">StockVault</h1>
+            <h1 className="text-2xl font-bold text-foreground">QaliSuite</h1>
             <p className="text-sm text-muted-foreground">
-              Inventory Management System
+              Enterprise Resource Planning
             </p>
           </div>
         </div>

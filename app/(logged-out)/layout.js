@@ -1,16 +1,8 @@
-import AuthProvider from "../context/auth";
-import "../globals.css";
-import { Poppins } from "next/font/google";
-
 import { LightDarkToggle } from "@/components/theme-toggler";
-const poppins = Poppins({
-  subsets: ["latin"],
-  weight: ["100", "200", "300", "400", "500", "600", "700", "800", "900"],
-});
 
 export const metadata = {
-  title: "Welcome to StockVault",
-  description: "The most comprehensive and efficient store management solution",
+  title: "Welcome to QaliSuite",
+  description: "Complete ERP solution for inventory, finance, and operations",
 };
 
 export default function LogoutLayout({ children }) {

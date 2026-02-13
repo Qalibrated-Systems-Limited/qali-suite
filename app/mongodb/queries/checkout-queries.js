@@ -388,9 +388,10 @@ export const getActiveCheckouts = async () => {
             name: product.name,
             SKU: product.SKU,
             unit: product.unit,
-            sellingPrice: product.pricing?.sellingPrice || 0,
-            costPrice: product.costing?.costPrice || 0,
-            stock: product.stock || 0,
+            sellingPrice: product.pricing?.sellingPrice ?? 0,
+            costPrice: product.costing?.costPrice ?? 0,
+            quantityOnHand: product.inventory?.quantityOnHand ?? 0,
+            quantityAvailable: product.inventory?.quantityAvailable ?? 0,
           }
         : null,
       quantity: checkout.quantity,

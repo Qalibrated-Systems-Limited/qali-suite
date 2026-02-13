@@ -3,6 +3,18 @@ import mongoose from "mongoose";
 const Schema = mongoose.Schema;
 
 // ============================================
+// HELPER: Derive company code from name
+// ============================================
+function deriveCompanyCode(name) {
+  if (!name) return null;
+  const words = name.trim().split(/\s+/);
+  if (words.length >= 2) {
+    return words.slice(0, 4).map((w) => w[0]).join("").toUpperCase();
+  }
+  return name.slice(0, 3).toUpperCase();
+}
+
+// ============================================
 // PAYMENT SCHEMA - MONEY IN/OUT TRACKING
 // ============================================
 // Design Principles:
@@ -757,8 +769,11 @@ paymentSchema.statics.generatePaymentNumber = async function (
   // Fetch company code for prefix
   let companyCode = null;
   if (companyId) {
-    const company = await Company.findById(companyId).select("code").lean();
-    companyCode = company?.code || null;
+    const company = await Company.findById(companyId).select("code name").lean();
+    if (company) {
+      // Use explicit code if set, otherwise derive from company name
+      companyCode = company.code || deriveCompanyCode(company.name);
+    }
   }
 
   const date = new Date();

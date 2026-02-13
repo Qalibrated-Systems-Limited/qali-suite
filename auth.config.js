@@ -1,3 +1,5 @@
+import { NextResponse } from "next/server";
+
 export const authOptions = {
   pages: {
     signIn: "/login",
@@ -6,12 +8,18 @@ export const authOptions = {
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user;
       const isOnDashboard = nextUrl.pathname.startsWith("/dashboard");
+      const isOnLogin = nextUrl.pathname.startsWith("/login");
+
       if (isOnDashboard) {
         if (isLoggedIn) return true;
         return false; // Redirect unauthenticated users to login page
-      } else if (isLoggedIn) {
-        return Response.redirect(new URL("/dashboard", nextUrl));
       }
+
+      // Redirect logged-in users away from login page to dashboard
+      if (isLoggedIn) {
+        return NextResponse.redirect(new URL("/dashboard", nextUrl));
+      }
+
       return true;
     },
     async jwt({ token, user }) {

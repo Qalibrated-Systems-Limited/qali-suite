@@ -122,7 +122,7 @@ export default function CreateInvoiceFormClient({
   const addStockItem = (product) => {
     // ERP: Use costing.costPrice for COGS, pricing.sellingPrice for default selling price
     const costPrice = Number(product.costing?.costPrice) || 0;
-    const defaultSellingPrice = Number(product.pricing?.sellingPrice) || Number(product.price) || 0;
+    const defaultSellingPrice = Number(product.pricing?.sellingPrice) || 0;
     const minimumPrice = Number(product.pricing?.minimumPrice) || 0;
     const defaultTaxRate = product.taxRate ?? 16; // Use product's tax rate or default 16%
 
@@ -132,7 +132,7 @@ export default function CreateInvoiceFormClient({
       name: product.name,
       SKU: product.SKU,
       unit: product.unit,
-      availableStock: product.stock,
+      availableStock: product.inventory?.quantityAvailable ?? 0,
       quantity: 1,
       costPrice: costPrice,
       catalogPrice: defaultSellingPrice, // Original catalog price (read-only reference)
@@ -140,6 +140,7 @@ export default function CreateInvoiceFormClient({
       minimumPrice: minimumPrice,
       taxRate: defaultTaxRate, // Per-item tax rate
       total: defaultSellingPrice * 1,
+      stockSource: "store", // From store inventory
     };
 
     setStockItems([...stockItems, newItem]);
@@ -202,6 +203,7 @@ export default function CreateInvoiceFormClient({
       checkoutId: checkout._id,
       checkoutNumber: checkout.checkoutNumber,
       stockSource: "technician", // Mark as from technician stock
+      technicianId: checkout.checkedOutTo?.id,
       technicianName: checkout.checkedOutTo?.name,
     };
 
@@ -346,7 +348,12 @@ export default function CreateInvoiceFormClient({
       stockItems: stockItems.map((item) => ({
         ...item,
         relatedCheckout: item.checkoutId
-          ? { checkoutId: item.checkoutId, checkoutNumber: item.checkoutNumber }
+          ? {
+              checkoutId: item.checkoutId,
+              checkoutNumber: item.checkoutNumber,
+              technicianId: item.technicianId || "",
+              technicianName: item.technicianName || "",
+            }
           : undefined,
       })),
       serviceItems: serviceItems.map((item) => ({
@@ -581,8 +588,8 @@ export default function CreateInvoiceFormClient({
                           <div className="flex-1">
                             <p className="font-medium">{product.name}</p>
                             <p className="text-xs text-muted-foreground">
-                              {product.SKU} • Stock: {product.stock} • KES{" "}
-                              {product.pricing?.sellingPrice || product.price}
+                              {product.SKU} • Available: {product.inventory?.quantityAvailable ?? 0} • KES{" "}
+                              {product.pricing?.sellingPrice || 0}
                             </p>
                           </div>
                           <Plus className="h-4 w-4 text-green-500" />

@@ -236,6 +236,19 @@ const invoiceSchema = new Schema(
             },
             checkoutNumber: String,
           },
+
+          // ============================================
+          // INVENTORY TRACKING
+          // ============================================
+          // stockCommitted: true = inventory was reserved during draft creation
+          // This field indicates the item follows the commitment-based flow:
+          // - Draft: quantityCommitted increased, quantityAvailable decreased
+          // - Complete: quantityOnHand decreased, quantityCommitted decreased
+          // - Cancel: quantityCommitted decreased, quantityAvailable increased
+          stockCommitted: {
+            type: Boolean,
+            default: false,
+          },
         },
       ],
       validate: {
@@ -387,7 +400,7 @@ const invoiceSchema = new Schema(
     status: {
       type: String,
       enum: {
-        values: ["draft", "sent", "completed", "cancelled", "void"],
+        values: ["draft", "sent", "completed", "cancelled", "void", "expired"],
         message: "{VALUE} is not a valid status",
       },
       default: "draft",
@@ -412,6 +425,22 @@ const invoiceSchema = new Schema(
       id: String,
     },
     cancellationReason: String,
+
+    // ============================================
+    // DRAFT EXPIRY (for invoices holding committed stock)
+    // ============================================
+    // Only set for invoices with stockCommitted items
+    // When this date passes, committed stock is auto-released
+    draftExpiresAt: {
+      type: Date,
+      index: true,
+    },
+
+    expiredAt: Date,
+    expiredBy: {
+      name: String,
+      id: String,
+    },
 
     // ============================================
     // ADDITIONAL INFO
@@ -559,6 +588,8 @@ invoiceSchema.index({ companyId: 1, paymentStatus: 1, dueDate: 1 });
 invoiceSchema.index({ companyId: 1, status: 1, invoiceDate: -1 });
 invoiceSchema.index({ companyId: 1, "accounting.accountingComplete": 1 });
 invoiceSchema.index({ companyId: 1, fiscalPeriod: 1, status: 1 });
+// Draft expiry index - for finding stale drafts with committed stock
+invoiceSchema.index({ companyId: 1, status: 1, draftExpiresAt: 1 });
 
 // ============================================
 // PRE-SAVE: Auto-assign fiscal period from invoiceDate
@@ -601,6 +632,17 @@ invoiceSchema.virtual("hasServices").get(function () {
 
 invoiceSchema.virtual("needsCOGSEntry").get(function () {
   return this.hasProducts && !this.accounting?.cogsJournalEntryId;
+});
+
+invoiceSchema.virtual("isDraftExpired").get(function () {
+  // Only drafts with expiry dates can expire
+  if (this.status !== "draft" && this.status !== "sent") return false;
+  if (!this.draftExpiresAt) return false;
+  return new Date() > this.draftExpiresAt;
+});
+
+invoiceSchema.virtual("hasCommittedStock").get(function () {
+  return this.items.some((item) => item.stockCommitted === true);
 });
 
 // ============================================
@@ -1072,17 +1114,10 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
     // Check if item is from technician stock (either via request or direct checkout)
     const isFromTechnicianStock = !!(item.relatedRequest?.requestId || item.relatedCheckout?.checkoutId);
 
-    // Check sufficient stock (only for direct sales from inventory)
-    if (!isFromTechnicianStock) {
-      if (item.quantity > product.inventory?.quantityAvailable) {
-        throw new Error(
-          `Insufficient stock for ${product.name}. ` +
-            `Available: ${product.inventory?.quantityAvailable}, Requested: ${item.quantity}`,
-        );
-      }
-    }
+    // Check if stock was pre-committed (new commitment-based flow)
+    const isStockCommitted = item.stockCommitted === true;
 
-    const lineCOGS = item.quantity * product.costing.costPrice;
+    const lineCOGS = item.quantity * (product.costing?.costPrice || 0);
 
     // Categorize by source
     if (isFromTechnicianStock) {
@@ -1095,12 +1130,45 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
       itemsFromInventory.push({ item, product, lineCOGS });
     }
 
-    // Only decrease inventory for direct sales (not from technician stock)
+    // ============================================
+    // FULFILL INVENTORY (only for store inventory items)
+    // ============================================
     if (!isFromTechnicianStock) {
-      await product.decreaseInventory(
-        item.quantity,
-        `Sold on invoice ${this.invoiceNumber}`,
-      );
+      const previousOnHand = product.inventory?.quantityOnHand || 0;
+
+      if (isStockCommitted) {
+        // COMMITTED FLOW: Stock was reserved during draft creation
+        // - Decrease quantityOnHand (physical stock goes out)
+        // - Decrease quantityCommitted (reservation is fulfilled)
+        // - quantityAvailable stays the same (was already reduced during commit)
+        if (item.quantity > (product.inventory?.quantityOnHand || 0)) {
+          throw new Error(
+            `Insufficient physical stock for ${product.name}. ` +
+              `On-hand: ${product.inventory?.quantityOnHand || 0}, Committed: ${item.quantity}`,
+          );
+        }
+
+        product.inventory = product.inventory || {};
+        product.inventory.quantityOnHand = previousOnHand - item.quantity;
+        product.inventory.quantityCommitted =
+          (product.inventory.quantityCommitted || 0) - item.quantity;
+        // quantityAvailable stays unchanged (pre-save hook will recalculate)
+        await product.save();
+      } else {
+        // LEGACY FLOW: Stock not pre-committed, check availability now
+        const available = product.inventory?.quantityAvailable || 0;
+        if (item.quantity > available) {
+          throw new Error(
+            `Insufficient stock for ${product.name}. ` +
+              `Available: ${available}, Requested: ${item.quantity}`,
+          );
+        }
+
+        await product.decreaseInventory(
+          item.quantity,
+          `Sold on invoice ${this.invoiceNumber}`,
+        );
+      }
     }
     // Note: For technician stock items, inventory was already decreased during checkout
 
@@ -1489,69 +1557,127 @@ invoiceSchema.methods.cancel = async function (cancelledBy, reason) {
 
   const userInfo = formatUserForAudit(cancelledBy);
   const JournalEntry = mongoose.model("JournalEntry");
-
-  // Reverse revenue journal entry
-  if (this.accounting?.revenueJournalEntryId) {
-    const je = await JournalEntry.findById(
-      this.accounting.revenueJournalEntryId,
-    );
-    if (je && je.status === "posted") {
-      await je.reverse(userInfo, reason || "Invoice cancelled");
-    }
-  }
-
-  // Reverse COGS journal entry
-  if (this.accounting?.cogsJournalEntryId) {
-    const je = await JournalEntry.findById(this.accounting.cogsJournalEntryId);
-    if (je && je.status === "posted") {
-      await je.reverse(userInfo, reason || "Invoice cancelled");
-    }
-  }
-
-  // Restore inventory (reverse stock movements for direct sales)
-  const StockMovement = mongoose.model("StockMovement");
   const Product = mongoose.model("Product");
+  const StockMovement = mongoose.model("StockMovement");
 
-  const stockMovements = await StockMovement.find({
-    "relatedDocuments.invoiceId": this._id,
-    movementType: "sale",
-    direction: "out",
-  });
+  // ============================================
+  // HANDLE BASED ON INVOICE STATUS
+  // ============================================
+  const ItemCheckout = mongoose.model("ItemCheckout");
 
-  for (const movement of stockMovements) {
-    const product = await Product.findById(movement.productId);
-    if (product) {
-      // Restore the inventory
-      await product.increaseInventory(
-        movement.quantity,
-        movement.costing?.unitCost || 0,
-        `Restored from cancelled invoice ${this.invoiceNumber}`,
+  // Default return deadline: 7 days from cancellation
+  const returnDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  if (this.status === "draft" || this.status === "sent") {
+    // ============================================
+    // DRAFT/SENT INVOICE: Release committed inventory
+    // ============================================
+    // For draft invoices, stock was only COMMITTED (reserved), not deducted
+    // Release the commitment to make stock available again
+    for (const item of this.items) {
+      if (item.itemType !== "product" || !item.productId) continue;
+
+      // Only release if stock was committed (store items, not technician stock)
+      if (item.stockCommitted) {
+        await Product.findByIdAndUpdate(item.productId, {
+          $inc: {
+            "inventory.quantityCommitted": -item.quantity,
+            "inventory.quantityAvailable": item.quantity,
+          },
+        });
+      }
+
+      // Flag technician stock items for return
+      if (item.relatedCheckout?.checkoutId) {
+        await ItemCheckout.findByIdAndUpdate(item.relatedCheckout.checkoutId, {
+          "returnRequired.required": true,
+          "returnRequired.reason": "invoice_cancelled",
+          "returnRequired.requiredAt": new Date(),
+          "returnRequired.requiredBy": userInfo,
+          "returnRequired.failedInvoice": {
+            invoiceId: this._id,
+            invoiceNumber: this.invoiceNumber,
+          },
+          "returnRequired.returnDeadline": returnDeadline,
+          // Reset status back to checked_out (was pending sale)
+          status: "checked_out",
+          // Clear sale conversion since it didn't complete
+          "saleConversion.converted": false,
+          "saleConversion.invoiceId": null,
+          "saleConversion.invoiceNumber": null,
+        });
+      }
+    }
+  } else if (this.status === "expired") {
+    // ============================================
+    // EXPIRED INVOICE: Stock already released during expiry
+    // ============================================
+    // No inventory action needed - just update status to cancelled
+  } else if (this.status === "completed") {
+    // ============================================
+    // COMPLETED INVOICE: Full reversal with journal entries
+    // ============================================
+
+    // Reverse revenue journal entry
+    if (this.accounting?.revenueJournalEntryId) {
+      const je = await JournalEntry.findById(
+        this.accounting.revenueJournalEntryId,
       );
-
-      // Reverse lifetime totals
-      if (product.lifetimeTotals) {
-        product.lifetimeTotals.totalQuantitySold =
-          (product.lifetimeTotals.totalQuantitySold || 0) - movement.quantity;
-        product.lifetimeTotals.totalRevenue =
-          (product.lifetimeTotals.totalRevenue || 0) -
-          (movement.costing?.totalValue || 0);
-        product.lifetimeTotals.totalCOGS =
-          (product.lifetimeTotals.totalCOGS || 0) -
-          (movement.costing?.totalCost || 0);
-        product.lifetimeTotals.totalGrossProfit =
-          (product.lifetimeTotals.totalGrossProfit || 0) -
-          ((movement.costing?.totalValue || 0) -
-            (movement.costing?.totalCost || 0));
-        await product.save();
+      if (je && je.status === "posted") {
+        await je.reverse(userInfo, reason || "Invoice cancelled");
       }
     }
 
-    // Mark movement as reversed
-    movement.status = "reversed";
-    movement.reversedAt = new Date();
-    movement.reversedBy = userInfo;
-    movement.reversalReason = reason || "Invoice cancelled";
-    await movement.save();
+    // Reverse COGS journal entry
+    if (this.accounting?.cogsJournalEntryId) {
+      const je = await JournalEntry.findById(this.accounting.cogsJournalEntryId);
+      if (je && je.status === "posted") {
+        await je.reverse(userInfo, reason || "Invoice cancelled");
+      }
+    }
+
+    // Restore inventory (reverse stock movements for direct sales)
+    const stockMovements = await StockMovement.find({
+      "relatedDocuments.invoiceId": this._id,
+      movementType: "sale",
+      direction: "out",
+    });
+
+    for (const movement of stockMovements) {
+      const product = await Product.findById(movement.productId);
+      if (product) {
+        // Restore the inventory
+        await product.increaseInventory(
+          movement.quantity,
+          movement.costing?.unitCost || 0,
+          `Restored from cancelled invoice ${this.invoiceNumber}`,
+        );
+
+        // Reverse lifetime totals
+        if (product.lifetimeTotals) {
+          product.lifetimeTotals.totalQuantitySold =
+            (product.lifetimeTotals.totalQuantitySold || 0) - movement.quantity;
+          product.lifetimeTotals.totalRevenue =
+            (product.lifetimeTotals.totalRevenue || 0) -
+            (movement.costing?.totalValue || 0);
+          product.lifetimeTotals.totalCOGS =
+            (product.lifetimeTotals.totalCOGS || 0) -
+            (movement.costing?.totalCost || 0);
+          product.lifetimeTotals.totalGrossProfit =
+            (product.lifetimeTotals.totalGrossProfit || 0) -
+            ((movement.costing?.totalValue || 0) -
+              (movement.costing?.totalCost || 0));
+          await product.save();
+        }
+      }
+
+      // Mark movement as reversed
+      movement.status = "reversed";
+      movement.reversedAt = new Date();
+      movement.reversedBy = userInfo;
+      movement.reversalReason = reason || "Invoice cancelled";
+      await movement.save();
+    }
   }
 
   // Update invoice status
@@ -1563,6 +1689,77 @@ invoiceSchema.methods.cancel = async function (cancelledBy, reason) {
 
   await this.save();
 
+  return this;
+};
+
+// ============================================
+// EXPIRE DRAFT INVOICE (Release committed stock)
+// ============================================
+invoiceSchema.methods.expire = async function (expiredBy = null) {
+  if (this.status !== "draft" && this.status !== "sent") {
+    throw new Error(
+      `Can only expire draft or sent invoices. Current status: ${this.status}`,
+    );
+  }
+
+  // Only expire if there's committed stock
+  const hasCommittedStock = this.items.some((item) => item.stockCommitted === true);
+  if (!hasCommittedStock) {
+    throw new Error("Invoice has no committed stock to release");
+  }
+
+  const Product = mongoose.model("Product");
+  const ItemCheckout = mongoose.model("ItemCheckout");
+  const userInfo = expiredBy || { name: "System", id: "system" };
+
+  // Default return deadline: 7 days from expiry
+  const returnDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  // Release committed inventory for each product item
+  for (const item of this.items) {
+    if (item.itemType !== "product" || !item.productId) continue;
+
+    if (item.stockCommitted) {
+      // Store inventory item - release commitment
+      await Product.findByIdAndUpdate(item.productId, {
+        $inc: {
+          "inventory.quantityCommitted": -item.quantity,
+          "inventory.quantityAvailable": item.quantity,
+        },
+      });
+
+      // Mark as no longer committed
+      item.stockCommitted = false;
+    }
+
+    // Flag technician stock items for return
+    if (item.relatedCheckout?.checkoutId) {
+      await ItemCheckout.findByIdAndUpdate(item.relatedCheckout.checkoutId, {
+        "returnRequired.required": true,
+        "returnRequired.reason": "invoice_expired",
+        "returnRequired.requiredAt": new Date(),
+        "returnRequired.requiredBy": userInfo,
+        "returnRequired.failedInvoice": {
+          invoiceId: this._id,
+          invoiceNumber: this.invoiceNumber,
+        },
+        "returnRequired.returnDeadline": returnDeadline,
+        // Clear sale conversion since it didn't complete
+        "saleConversion.converted": false,
+        "saleConversion.invoiceId": null,
+        "saleConversion.invoiceNumber": null,
+      });
+    }
+  }
+
+  // Update invoice status
+  this.status = "expired";
+  this.expiredAt = new Date();
+  this.expiredBy = userInfo;
+  this.draftExpiresAt = null; // Clear expiry so it doesn't trigger again
+  this.lastModifiedBy = userInfo;
+
+  await this.save();
   return this;
 };
 

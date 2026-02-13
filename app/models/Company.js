@@ -272,6 +272,16 @@ const companySchema = new Schema(
         type: Number,
         default: 30,
       },
+
+      // Draft Invoice Expiry
+      // Number of days a draft invoice can hold committed stock
+      // After expiry, stock is auto-released back to available
+      draftInvoiceExpiryDays: {
+        type: Number,
+        default: 14, // Industry standard: 14 days
+        min: [1, "Draft expiry must be at least 1 day"],
+        max: [90, "Draft expiry cannot exceed 90 days"],
+      },
     },
 
     // ============================================

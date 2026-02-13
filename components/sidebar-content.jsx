@@ -108,10 +108,10 @@ export const SidebarContent = ({ onItemClick, user }) => {
           </div>
           <div className="flex flex-col">
             <span className="text-lg font-bold text-foreground">
-              StockVault
+              QaliSuite
             </span>
             <span className="text-xs text-muted-foreground">
-              Inventory System
+              ERP System
             </span>
           </div>
         </Link>

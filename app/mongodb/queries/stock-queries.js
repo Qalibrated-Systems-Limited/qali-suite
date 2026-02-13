@@ -9,9 +9,8 @@ import {
 
 const { default: dbConnect } = require("@/app/config/dbConnect");
 
-dbConnect();
-
 export async function getProduct(id) {
+  await dbConnect();
   try {
     const { companyId, isSuperAdmin } = await getTenantContext();
 

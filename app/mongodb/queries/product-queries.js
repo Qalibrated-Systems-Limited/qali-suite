@@ -4,11 +4,11 @@ import Product from "@/app/models/product";
 import { sanitizeSearchTerm } from "@/lib/utils/sanitize";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 
-dbConnect();
 const { ObjectId } = mongoose.Types;
 const ITEMS_PER_PAGE = 20;
 
 export const searchStock = async (searchTerm, page = 1, filters = {}) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
@@ -31,13 +31,13 @@ export const searchStock = async (searchTerm, page = 1, filters = {}) => {
   if (quantity) {
     switch (quantity) {
       case "in-stock":
-        additionalFilters.stock = { $gte: 10 };
+        additionalFilters["inventory.quantityOnHand"] = { $gte: 10 };
         break;
       case "low-stock":
-        additionalFilters.stock = { $gte: 1, $lte: 9 };
+        additionalFilters["inventory.quantityOnHand"] = { $gte: 1, $lte: 9 };
         break;
       case "out-of-stock":
-        additionalFilters.stock = 0;
+        additionalFilters["inventory.quantityOnHand"] = { $lte: 0 };
         break;
     }
   }
@@ -80,18 +80,19 @@ export const searchStock = async (searchTerm, page = 1, filters = {}) => {
 };
 
 export const fetchStockData = async () => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
 
   const projectStage = {
     $project: {
-      stock: 1,
       SKU: 1,
       name: 1,
-      price: 1,
       unit: 1,
       category: { $toUpper: "$category" },
+      quantityOnHand: { $ifNull: ["$inventory.quantityOnHand", 0] },
+      sellingPrice: { $ifNull: ["$pricing.sellingPrice", 0] },
     },
   };
   const sortStage = { $sort: { category: 1 } };
@@ -108,9 +109,9 @@ export const fetchStockData = async () => {
     if (!acc[dept]) acc[dept] = [];
     acc[dept].push({
       name: item.name,
-      quantity: item.stock.$numberInt || item.stock,
+      quantity: item.quantityOnHand,
       SKU: item.SKU,
-      price: item.price,
+      price: item.sellingPrice,
       unit: item.unit,
     });
     return acc;
@@ -120,6 +121,7 @@ export const fetchStockData = async () => {
 //Products or stock queries
 
 export const fetchStockPages = async (searchTerm, filters = {}) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
 
@@ -142,13 +144,13 @@ export const fetchStockPages = async (searchTerm, filters = {}) => {
   if (quantity) {
     switch (quantity) {
       case "in-stock":
-        additionalFilters.stock = { $gte: 10 };
+        additionalFilters["inventory.quantityOnHand"] = { $gte: 10 };
         break;
       case "low-stock":
-        additionalFilters.stock = { $gte: 1, $lte: 9 };
+        additionalFilters["inventory.quantityOnHand"] = { $gte: 1, $lte: 9 };
         break;
       case "out-of-stock":
-        additionalFilters.stock = 0;
+        additionalFilters["inventory.quantityOnHand"] = { $lte: 0 };
         break;
     }
   }

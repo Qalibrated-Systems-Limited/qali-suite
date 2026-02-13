@@ -7,8 +7,6 @@ import { startOfMonth, endOfMonth } from "date-fns";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 
-dbConnect();
-
 // ============================================
 // SEARCH DELIVERY NOTES (WITH PAGINATION)
 // ============================================
@@ -18,6 +16,7 @@ export async function searchDeliveryNotes(
   page = 1,
   filters = {}
 ) {
+  await dbConnect();
   try {
     // Get tenant context
     const { companyId, isSuperAdmin } = await getTenantContext();

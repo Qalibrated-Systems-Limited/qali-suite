@@ -98,12 +98,14 @@ export async function PUT(req) {
       return clientSideErrorResponse("Some required fields missing");
     }
     const product = await Product.findById(id);
-    const oldStock = product.stock;
+    const oldStock = product.inventory?.quantityOnHand ?? 0;
     if (product) {
       product.name = toTitle(validatedFields.data.name);
       product.SKU = validatedFields.data.SKU;
-      product.price = validatedFields.data.price;
-      product.stock = validatedFields.data.stock;
+      product.pricing = product.pricing || {};
+      product.pricing.sellingPrice = validatedFields.data.price;
+      product.inventory = product.inventory || {};
+      product.inventory.quantityOnHand = validatedFields.data.stock;
       product.category = validatedFields.data.category;
       product.description = validatedFields.data.description;
       const result = await product.save();

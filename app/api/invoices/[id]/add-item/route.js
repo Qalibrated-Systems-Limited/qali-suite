@@ -190,7 +190,7 @@ export async function DELETE(req, { params }) {
         console.log(result);
         const res2 = await Product.updateOne(
           { SKU: deletedItem.name },
-          { $inc: { stock: deletedItem.quantity } }
+          { $inc: { "inventory.quantityOnHand": deletedItem.quantity, "inventory.quantityAvailable": deletedItem.quantity } }
         );
 
         console.log(res2);

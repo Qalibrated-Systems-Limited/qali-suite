@@ -38,14 +38,13 @@ import mongoose from "mongoose";
 import { format } from "date-fns";
 import dbConnect from "../config/dbConnect";
 import { StockMovement } from "../models/stockmovement";
-dbConnect();
 
 export async function logout(params) {
-  return await signOut();
+  return await signOut({ redirectTo: "/" });
 }
 export async function authenticate(prevState, formData) {
   try {
-    await signIn("credentials", formData);
+    await signIn("credentials", formData, { redirectTo: "/dashboard" });
   } catch (error) {
     if (error instanceof AuthError) {
       switch (error.type) {
@@ -118,7 +117,7 @@ export async function increaseQTY(productId) {
       },
       {
         arrayFilters: [
-          { "item.id": productId, "item.quantity": { $lt: product.stock } },
+          { "item.id": productId, "item.quantity": { $lt: product.inventory?.quantityAvailable ?? 0 } },
         ],
       }
     );
@@ -153,8 +152,8 @@ export async function addToCart(productId, state, formData) {
         message: "Could not find product",
       };
     }
-    console.log(data.quantity, product.stock);
-    if (Number(data.quantity) > product.stock) {
+    console.log(data.quantity, product.inventory?.quantityAvailable ?? 0);
+    if (Number(data.quantity) > (product.inventory?.quantityAvailable ?? 0)) {
       return { message: "Insufficient stock" };
     }
 
@@ -166,7 +165,7 @@ export async function addToCart(productId, state, formData) {
             name: product.name,
             id: product.SKU,
             quantity: data.quantity,
-            unitPrice: product.price * 1.35,
+            unitPrice: (product.pricing?.sellingPrice ?? 0) * 1.35,
           },
         },
       }
@@ -930,7 +929,7 @@ export const deleteInvoiceItem = async (itemId, invoiceId) => {
         console.log(result);
         const res2 = await Product.updateOne(
           { SKU: deletedItem.name },
-          { $inc: { stock: deletedItem.quantity } }
+          { $inc: { "inventory.quantityOnHand": deletedItem.quantity, "inventory.quantityAvailable": deletedItem.quantity } }
         );
 
         console.log(res2);
@@ -1017,13 +1016,13 @@ export async function addDNote(state, formData) {
         return { message: `No product with sku ${item.id}` };
       }
 
-      if (item.quantity > product.stock) {
+      if (item.quantity > (product.inventory?.quantityAvailable ?? 0)) {
         return { message: `Insufficient stock` };
       }
 
       await Product.updateOne(
         { SKU: item.id },
-        { $inc: { stock: -item.quantity } }
+        { $inc: { "inventory.quantityOnHand": -item.quantity, "inventory.quantityAvailable": -item.quantity } }
       ).session(mongodbSession);
     }
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // e.g., 20241031
@@ -1121,7 +1120,7 @@ export async function returnDNoteItems(id) {
     for (const item of items) {
       await Product.findOneAndUpdate(
         { SKU: item.id },
-        { $inc: { stock: item.quantity } },
+        { $inc: { "inventory.quantityOnHand": item.quantity, "inventory.quantityAvailable": item.quantity } },
         { session: mongodbSession }
       );
     }
@@ -1306,15 +1305,16 @@ export async function createRequestFromCart(prevState, formData) {
       }
 
       // Check if sufficient stock
-      if (cartItem.quantity > product.stock) {
+      const availableStock = product.inventory?.quantityAvailable ?? 0;
+      if (cartItem.quantity > availableStock) {
         await session.abortTransaction();
         return {
-          message: `Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${cartItem.quantity}`,
+          message: `Insufficient stock for ${product.name}. Available: ${availableStock}, Requested: ${cartItem.quantity}`,
         };
       }
 
       // Calculate value
-      const itemValue = product.price * cartItem.quantity;
+      const itemValue = (product.pricing?.sellingPrice ?? 0) * cartItem.quantity;
       totalValue += itemValue;
 
       // Add to request items (purpose now at request level)
@@ -1322,9 +1322,9 @@ export async function createRequestFromCart(prevState, formData) {
         productId: product._id,
         productName: product.name,
         SKU: product.SKU,
-        currentStock: product.stock,
+        currentStock: availableStock,
         requestedQuantity: cartItem.quantity,
-        unitPrice: product.price,
+        unitPrice: product.pricing?.sellingPrice ?? 0,
         unit: product.unit || "pcs",
         notes: "",
       });

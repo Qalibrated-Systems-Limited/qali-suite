@@ -3,6 +3,18 @@ import mongoose from "mongoose";
 const Schema = mongoose.Schema;
 
 // ============================================
+// HELPER: Derive company code from name
+// ============================================
+function deriveCompanyCode(name) {
+  if (!name) return null;
+  const words = name.trim().split(/\s+/);
+  if (words.length >= 2) {
+    return words.slice(0, 4).map((w) => w[0]).join("").toUpperCase();
+  }
+  return name.slice(0, 3).toUpperCase();
+}
+
+// ============================================
 // QUOTE/QUOTATION SCHEMA
 // ============================================
 // Design Principles:
@@ -794,10 +806,13 @@ quoteSchema.statics.generateQuoteNumber = async function (companyId = null, sess
   // Fetch company code for prefix
   let companyCode = null;
   if (companyId) {
-    let companyQuery = Company.findById(companyId).select("code").lean();
+    let companyQuery = Company.findById(companyId).select("code name").lean();
     if (session) companyQuery = companyQuery.session(session);
     const company = await companyQuery;
-    companyCode = company?.code || null;
+    if (company) {
+      // Use explicit code if set, otherwise derive from company name
+      companyCode = company.code || deriveCompanyCode(company.name);
+    }
   }
 
   // Build prefix: QT-{CODE}-{YYYYMM} or QT-{YYYYMM}

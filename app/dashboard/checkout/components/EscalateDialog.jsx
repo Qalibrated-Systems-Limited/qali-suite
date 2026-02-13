@@ -26,13 +26,13 @@ export function EscalateDialog({ checkout, open, onOpenChange }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-[#161b22] border-[#30363d] text-gray-100 max-w-md">
+      <DialogContent className="bg-background border-border text-foreground max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-white flex items-center gap-2">
+          <DialogTitle className="text-foreground flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-red-500" />
             Escalate Checkout
           </DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-muted-foreground">
             Escalate this overdue checkout to a manager
           </DialogDescription>
         </DialogHeader>
@@ -42,19 +42,19 @@ export function EscalateDialog({ checkout, open, onOpenChange }) {
             {/* Checkout Info */}
             <div className="space-y-2 p-3 bg-red-500/5 rounded-lg border border-red-500/20">
               <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Product:</span>
-                <span className="font-medium text-white">
+                <span className="text-muted-foreground">Product:</span>
+                <span className="font-medium text-foreground">
                   {checkout.productSnapshot.name}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Checked Out To:</span>
-                <span className="text-gray-100">
+                <span className="text-muted-foreground">Checked Out To:</span>
+                <span className="text-foreground">
                   {checkout.checkedOutTo.name}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Days Overdue:</span>
+                <span className="text-muted-foreground">Days Overdue:</span>
                 <span className="text-red-500 font-medium">
                   {checkout.daysOverdue} days
                 </span>
@@ -63,7 +63,7 @@ export function EscalateDialog({ checkout, open, onOpenChange }) {
 
             {/* Escalate To Name */}
             <div className="space-y-2">
-              <Label htmlFor="escalatedToName" className="text-gray-300">
+              <Label htmlFor="escalatedToName" className="text-muted-foreground">
                 Escalate To (Name) <span className="text-red-500">*</span>
               </Label>
               <Input
@@ -71,13 +71,13 @@ export function EscalateDialog({ checkout, open, onOpenChange }) {
                 name="escalatedToName"
                 placeholder="Manager name..."
                 required
-                className="bg-[#0d1117] border-[#30363d] text-gray-100 placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
+                className="bg-muted/50 border-border text-foreground placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
               />
             </div>
 
             {/* Escalate To ID */}
             <div className="space-y-2">
-              <Label htmlFor="escalatedToId" className="text-gray-300">
+              <Label htmlFor="escalatedToId" className="text-muted-foreground">
                 Escalate To (ID) <span className="text-red-500">*</span>
               </Label>
               <Input
@@ -85,13 +85,13 @@ export function EscalateDialog({ checkout, open, onOpenChange }) {
                 name="escalatedToId"
                 placeholder="Manager ID..."
                 required
-                className="bg-[#0d1117] border-[#30363d] text-gray-100 placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
+                className="bg-muted/50 border-border text-foreground placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
               />
             </div>
 
             {/* Reason */}
             <div className="space-y-2">
-              <Label htmlFor="reason" className="text-gray-300">
+              <Label htmlFor="reason" className="text-muted-foreground">
                 Escalation Reason
               </Label>
               <Textarea
@@ -99,7 +99,7 @@ export function EscalateDialog({ checkout, open, onOpenChange }) {
                 name="reason"
                 placeholder="Reason for escalation..."
                 defaultValue={`Item is ${checkout.daysOverdue} days overdue`}
-                className="bg-[#0d1117] border-[#30363d] text-gray-100 placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
+                className="bg-muted/50 border-border text-foreground placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
                 rows={3}
               />
             </div>
@@ -118,14 +118,14 @@ export function EscalateDialog({ checkout, open, onOpenChange }) {
               variant="outline"
               onClick={() => onOpenChange(false)}
               disabled={isPending}
-              className="border-[#30363d] text-gray-300 hover:bg-[#1f2937] hover:text-white"
+              className="border-border text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={isPending}
-              className="bg-red-500 text-white hover:bg-red-600"
+              className="bg-red-500 text-foreground hover:bg-red-600"
             >
               {isPending ? (
                 <>

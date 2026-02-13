@@ -20,10 +20,16 @@ export async function getStockStats() {
     // Total products count
     Product.countDocuments({ isActive: true }),
 
-    // Low stock count
+    // Low stock count (at or below reorder level)
     Product.countDocuments({
       isActive: true,
-      $expr: { $lte: ["$quantity", "$reorderLevel"] },
+      "inventory.reorderLevel": { $gt: 0 },
+      $expr: {
+        $lte: [
+          { $ifNull: ["$inventory.quantityOnHand", 0] },
+          "$inventory.reorderLevel",
+        ],
+      },
     }),
 
     // Total stock value
@@ -32,7 +38,14 @@ export async function getStockStats() {
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ["$quantity", "$unitPrice"] } },
+          total: {
+            $sum: {
+              $multiply: [
+                { $ifNull: ["$inventory.quantityOnHand", 0] },
+                { $ifNull: ["$costing.costPrice", 0] },
+              ],
+            },
+          },
         },
       },
     ]),
@@ -123,7 +136,14 @@ export async function getCategoryDistribution() {
       $group: {
         _id: "$category",
         count: { $sum: 1 },
-        value: { $sum: { $multiply: ["$quantity", "$unitPrice"] } },
+        value: {
+          $sum: {
+            $multiply: [
+              { $ifNull: ["$inventory.quantityOnHand", 0] },
+              { $ifNull: ["$costing.costPrice", 0] },
+            ],
+          },
+        },
       },
     },
     { $sort: { count: -1 } },
@@ -175,11 +195,17 @@ export async function getLowStockProducts(limit = 10) {
 
   const products = await Product.find({
     isActive: true,
-    $expr: { $lte: ["$quantity", "$reorderLevel"] },
+    "inventory.reorderLevel": { $gt: 0 },
+    $expr: {
+      $lte: [
+        { $ifNull: ["$inventory.quantityOnHand", 0] },
+        "$inventory.reorderLevel",
+      ],
+    },
   })
-    .sort({ quantity: 1 })
+    .sort({ "inventory.quantityOnHand": 1 })
     .limit(limit)
-    .select("name sku quantity reorderLevel category")
+    .select("name SKU inventory.quantityOnHand inventory.reorderLevel category")
     .lean();
 
   return products;

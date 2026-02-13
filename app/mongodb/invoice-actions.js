@@ -3,6 +3,7 @@
 import { auth } from "@/auth";
 import Invoice from "../models/invoice";
 import Product from "../models/product";
+import Company from "../models/Company";
 import { StockMovement } from "../models/stockmovement";
 import Account from "../models/account";
 import Party from "../models/parties";
@@ -21,6 +22,9 @@ const ObjectId = mongoose.Types.ObjectId;
 
 // ============================================
 // UPDATE INVOICE ACTION
+// ============================================
+// For DRAFT invoices: Only adjusts quantityCommitted (no stock movements)
+// For COMPLETED invoices: Not allowed to edit stock items
 // ============================================
 export async function updateInvoice(invoiceId, prevState, formData) {
   const session = await auth();
@@ -124,34 +128,41 @@ export async function updateInvoice(invoiceId, prevState, formData) {
         };
       }
 
+      // Completed invoices cannot have stock items changed
+      if (existingInvoice.status === "completed") {
+        await mongoSession.abortTransaction();
+        return {
+          success: false,
+          error: "Cannot edit completed invoices. Create a credit note instead.",
+        };
+      }
+
       // ============================================
-      // STEP 1: BUILD A MAP OF OLD ITEMS
+      // STEP 1: BUILD MAP OF OLD COMMITTED ITEMS
       // ============================================
-      const oldStockItemsMap = new Map();
+      const oldCommittedItemsMap = new Map();
       existingInvoice.items
-        .filter((item) => item.type === "stock" && item.stockDeducted)
+        .filter((item) => item.itemType === "product" && item.stockCommitted)
         .forEach((item) => {
-          oldStockItemsMap.set(item.productId.toString(), {
+          oldCommittedItemsMap.set(item.productId.toString(), {
             quantity: item.quantity,
             unitPrice: item.unitPrice,
-            SKU: item.SKU,
-            name: item.name,
+            SKU: item.productSKU,
+            name: item.productName,
           });
         });
 
       // ============================================
-      // STEP 2: BUILD A MAP OF NEW ITEMS
+      // STEP 2: BUILD MAP OF NEW ITEMS
       // ============================================
       const newStockItemsMap = new Map();
-      const technicianStockItems = []; // Items from technician checkouts (separate handling)
+      const technicianStockItems = [];
 
       if (invoiceData.stockItems && invoiceData.stockItems.length > 0) {
         invoiceData.stockItems.forEach((item) => {
-          // Check if this is from technician stock
           const isFromTechnicianStock = item.stockSource === "technician" && item.relatedCheckout?.checkoutId;
 
           if (isFromTechnicianStock) {
-            // Technician stock items don't affect main inventory
             technicianStockItems.push({
               productId: item.productId,
               quantity: item.quantity,
@@ -161,10 +172,10 @@ export async function updateInvoice(invoiceId, prevState, formData) {
               description: item.description || "",
               unit: item.unit,
               total: item.total,
+              taxRate: item.taxRate ?? 16,
               relatedCheckout: item.relatedCheckout,
             });
           } else {
-            // Store inventory items - track for stock adjustments
             newStockItemsMap.set(item.productId, {
               quantity: item.quantity,
               unitPrice: item.unitPrice,
@@ -173,38 +184,32 @@ export async function updateInvoice(invoiceId, prevState, formData) {
               description: item.description || "",
               unit: item.unit,
               total: item.total,
+              taxRate: item.taxRate ?? 16,
             });
           }
         });
       }
 
       // ============================================
-      // STEP 3: PROCESS STOCK ADJUSTMENTS
+      // STEP 3: ADJUST COMMITMENTS (Draft invoices only)
       // ============================================
       const newLineItems = [];
-      const newMovementIds = [];
-
-      // Track all products that need adjustment
       const allProductIds = new Set([
-        ...oldStockItemsMap.keys(),
+        ...oldCommittedItemsMap.keys(),
         ...newStockItemsMap.keys(),
       ]);
 
       for (const productId of allProductIds) {
-        const oldItem = oldStockItemsMap.get(productId);
+        const oldItem = oldCommittedItemsMap.get(productId);
         const newItem = newStockItemsMap.get(productId);
 
         const oldQuantity = oldItem ? oldItem.quantity : 0;
         const newQuantity = newItem ? newItem.quantity : 0;
         const difference = newQuantity - oldQuantity;
 
-        // If no change in quantity, skip
+        // If no change in quantity, just add to line items
         if (difference === 0 && newItem) {
-          // Just add to line items, no stock movement needed
-          // Get taxRate from submitted data
-          const itemTaxRate = invoiceData.stockItems?.find(
-            (si) => si.productId === productId
-          )?.taxRate ?? 16;
+          const itemTaxRate = newItem.taxRate ?? 16;
           const itemTaxAmount = (newItem.total * itemTaxRate) / 100;
 
           newLineItems.push({
@@ -219,141 +224,54 @@ export async function updateInvoice(invoiceId, prevState, formData) {
             amount: newItem.total,
             taxRate: itemTaxRate,
             taxAmount: itemTaxAmount,
-            stockDeducted: true,
+            stockCommitted: true,
           });
           continue;
         }
 
-        // Fetch product
+        // Fetch product for validation
         const product = await Product.findById(productId).session(mongoSession);
 
-        if (!product) {
+        if (!product && newItem) {
           throw new Error(`Product not found: ${productId}`);
         }
 
-        const previousStock = product.inventory?.quantityOnHand ?? product.stock ?? 0;
-
-        // Helper to update inventory consistently (both legacy and new fields)
-        const updateProductInventory = async (qty, direction) => {
-          const currentOnHand = product.inventory?.quantityOnHand ?? product.stock ?? 0;
-          const newOnHand = direction === "in"
-            ? currentOnHand + qty
-            : currentOnHand - qty;
-
-          // Update both fields for consistency
-          product.stock = newOnHand;
-          if (!product.inventory) product.inventory = {};
-          product.inventory.quantityOnHand = newOnHand;
-          product.inventory.quantityAvailable = newOnHand - (product.inventory.quantityCommitted || 0);
-
-          await product.save({ session: mongoSession });
-        };
-
-        // Case 1: Item removed from invoice (old exists, new doesn't)
+        // Case 1: Item removed from invoice - RELEASE commitment
         if (oldItem && !newItem) {
-          // Restore full quantity
-          await updateProductInventory(oldQuantity, "in");
-
-          const stockMovementNo = await generateMovementNumber(mongoSession);
-          await StockMovement.create(
-            [
-              {
-                companyId: existingInvoice.companyId,
-                productId: product._id,
-                movementNumber: stockMovementNo,
-                productSnapshot: {
-                  name: product.name,
-                  SKU: product.SKU,
-                  category: product.category,
-                  unit: product.unit,
-                },
-                movementType: "adjustment",
-                direction: "in",
-                quantity: oldQuantity,
-                previousStock,
-                newStock: product.inventory?.quantityOnHand ?? product.stock,
-                costing: {
-                  unitCost: product.costing?.costPrice || 0,
-                  totalCost: oldQuantity * (product.costing?.costPrice || 0),
-                  unitPrice: oldItem.unitPrice,
-                  totalValue: oldItem.unitPrice * oldQuantity,
-                },
-                reason: `Item removed - Invoice ${existingInvoice.invoiceNumber} edited`,
-                performedBy: {
-                  id: user.id,
-                  name: user.name,
-                  role: user.role,
-                },
-                relatedDocuments: {
-                  invoiceId: existingInvoice._id,
-                },
-                notes: `Stock restored - item removed from invoice`,
+          await Product.findByIdAndUpdate(
+            productId,
+            {
+              $inc: {
+                "inventory.quantityCommitted": -oldQuantity,
+                "inventory.quantityAvailable": oldQuantity,
               },
-            ],
-            { session: mongoSession },
+            },
+            { session: mongoSession }
           );
-          // Don't add to newLineItems (item removed)
           continue;
         }
 
-        // Case 2: New item added (new exists, old doesn't)
+        // Case 2: New item added - COMMIT inventory
         if (!oldItem && newItem) {
-          // Check stock availability
-          const available = product.inventory?.quantityAvailable ?? product.stock ?? 0;
+          const available = product.inventory?.quantityAvailable ?? 0;
           if (available < newQuantity) {
             throw new Error(
-              `Insufficient stock for ${product.name}. Available: ${available}, Requested: ${newQuantity}`,
+              `Insufficient stock for ${product.name}. Available: ${available}, Requested: ${newQuantity}`
             );
           }
 
-          // Deduct full quantity
-          await updateProductInventory(newQuantity, "out");
-
-          const stockMovementNo = await generateMovementNumber(mongoSession);
-          const movement = await StockMovement.create(
-            [
-              {
-                companyId: existingInvoice.companyId,
-                productId: product._id,
-                movementNumber: stockMovementNo,
-                productSnapshot: {
-                  name: product.name,
-                  SKU: product.SKU,
-                  category: product.category,
-                  unit: product.unit,
-                },
-                movementType: "sale",
-                direction: "out",
-                quantity: newQuantity,
-                previousStock,
-                newStock: product.inventory?.quantityOnHand ?? product.stock,
-                costing: {
-                  unitCost: product.costing?.costPrice || 0,
-                  totalCost: newQuantity * (product.costing?.costPrice || 0),
-                  unitPrice: newItem.unitPrice,
-                  totalValue: newItem.total,
-                },
-                reason: `New item - Invoice ${existingInvoice.invoiceNumber} updated`,
-                performedBy: {
-                  id: user.id,
-                  name: user.name,
-                  role: user.role,
-                },
-                relatedDocuments: {
-                  invoiceId: existingInvoice._id,
-                },
-                notes: `Stock deducted - new item added to invoice`,
+          await Product.findByIdAndUpdate(
+            productId,
+            {
+              $inc: {
+                "inventory.quantityCommitted": newQuantity,
+                "inventory.quantityAvailable": -newQuantity,
               },
-            ],
-            { session: mongoSession },
+            },
+            { session: mongoSession }
           );
 
-          newMovementIds.push(movement[0]._id);
-
-          // Get taxRate from submitted data
-          const itemTaxRate = invoiceData.stockItems?.find(
-            (si) => si.productId === productId
-          )?.taxRate ?? 16;
+          const itemTaxRate = newItem.taxRate ?? 16;
           const itemTaxAmount = (newItem.total * itemTaxRate) / 100;
 
           newLineItems.push({
@@ -368,116 +286,49 @@ export async function updateInvoice(invoiceId, prevState, formData) {
             amount: newItem.total,
             taxRate: itemTaxRate,
             taxAmount: itemTaxAmount,
-            stockDeducted: true,
+            stockCommitted: true,
           });
           continue;
         }
 
-        // Case 3: Quantity changed (both exist, difference != 0)
+        // Case 3: Quantity changed - adjust commitment
         if (oldItem && newItem && difference !== 0) {
           if (difference > 0) {
-            // Increased quantity - need to deduct MORE stock
-            // Check if enough stock available
-            const available = product.inventory?.quantityAvailable ?? product.stock ?? 0;
+            // Need to commit MORE
+            const available = product.inventory?.quantityAvailable ?? 0;
             if (available < difference) {
               throw new Error(
-                `Insufficient stock for ${product.name}. Available: ${available}, Additional needed: ${difference}`,
+                `Insufficient stock for ${product.name}. Available: ${available}, Additional needed: ${difference}`
               );
             }
 
-            await updateProductInventory(difference, "out");
-
-            const stockMovementNo = await generateMovementNumber(mongoSession);
-            const movement = await StockMovement.create(
-              [
-                {
-                  companyId: existingInvoice.companyId,
-                  productId: product._id,
-                  movementNumber: stockMovementNo,
-                  productSnapshot: {
-                    name: product.name,
-                    SKU: product.SKU,
-                    category: product.category,
-                    unit: product.unit,
-                  },
-                  movementType: "sale",
-                  direction: "out",
-                  quantity: difference,
-                  previousStock,
-                  newStock: product.inventory?.quantityOnHand ?? product.stock,
-                  costing: {
-                    unitCost: product.costing?.costPrice || 0,
-                    totalCost: difference * (product.costing?.costPrice || 0),
-                    unitPrice: newItem.unitPrice,
-                    totalValue: newItem.unitPrice * difference,
-                  },
-                  reason: `Quantity increased - Invoice ${existingInvoice.invoiceNumber} updated`,
-                  performedBy: {
-                    id: user.id,
-                    name: user.name,
-                    role: user.role,
-                  },
-                  relatedDocuments: {
-                    invoiceId: existingInvoice._id,
-                  },
-                  notes: `Quantity increased from ${oldQuantity} to ${newQuantity} (difference: ${difference})`,
+            await Product.findByIdAndUpdate(
+              productId,
+              {
+                $inc: {
+                  "inventory.quantityCommitted": difference,
+                  "inventory.quantityAvailable": -difference,
                 },
-              ],
-              { session: mongoSession },
+              },
+              { session: mongoSession }
             );
-
-            newMovementIds.push(movement[0]._id);
           } else {
-            // Decreased quantity - need to RESTORE stock (difference is negative)
-            const restoreQuantity = Math.abs(difference);
-            await updateProductInventory(restoreQuantity, "in");
-
-            const stockMovementNo = await generateMovementNumber(mongoSession);
-            await StockMovement.create(
-              [
-                {
-                  companyId: existingInvoice.companyId,
-                  productId: product._id,
-                  movementNumber: stockMovementNo,
-                  productSnapshot: {
-                    name: product.name,
-                    SKU: product.SKU,
-                    category: product.category,
-                    unit: product.unit,
-                  },
-                  movementType: "adjustment",
-                  direction: "in",
-                  quantity: restoreQuantity,
-                  previousStock,
-                  newStock: product.inventory?.quantityOnHand ?? product.stock,
-                  costing: {
-                    unitCost: product.costing?.costPrice || 0,
-                    totalCost: restoreQuantity * (product.costing?.costPrice || 0),
-                    unitPrice: oldItem.unitPrice,
-                    totalValue: oldItem.unitPrice * restoreQuantity,
-                  },
-                  reason: `Quantity decreased - Invoice ${existingInvoice.invoiceNumber} updated`,
-                  performedBy: {
-                    id: user.id,
-                    name: user.name,
-                    role: user.role,
-                  },
-                  relatedDocuments: {
-                    invoiceId: existingInvoice._id,
-                  },
-                  notes: `Quantity decreased from ${oldQuantity} to ${newQuantity} (difference: ${restoreQuantity} restored)`,
+            // Need to RELEASE some commitment
+            const releaseQty = Math.abs(difference);
+            await Product.findByIdAndUpdate(
+              productId,
+              {
+                $inc: {
+                  "inventory.quantityCommitted": -releaseQty,
+                  "inventory.quantityAvailable": releaseQty,
                 },
-              ],
-              { session: mongoSession },
+              },
+              { session: mongoSession }
             );
           }
 
-          // Add to line items with new quantity
-          // Get taxRate from submitted data
-          const itemTaxRateChanged = invoiceData.stockItems?.find(
-            (si) => si.productId === productId
-          )?.taxRate ?? 16;
-          const itemTaxAmountChanged = (newItem.total * itemTaxRateChanged) / 100;
+          const itemTaxRate = newItem.taxRate ?? 16;
+          const itemTaxAmount = (newItem.total * itemTaxRate) / 100;
 
           newLineItems.push({
             itemType: "product",
@@ -489,9 +340,9 @@ export async function updateInvoice(invoiceId, prevState, formData) {
             quantity: newItem.quantity,
             unitPrice: newItem.unitPrice,
             amount: newItem.total,
-            taxRate: itemTaxRateChanged,
-            taxAmount: itemTaxAmountChanged,
-            stockDeducted: true,
+            taxRate: itemTaxRate,
+            taxAmount: itemTaxAmount,
+            stockCommitted: true,
           });
         }
       }
@@ -499,13 +350,8 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       // ============================================
       // STEP 3.5: ADD TECHNICIAN STOCK ITEMS
       // ============================================
-      // Technician stock items don't affect main inventory - they were already
-      // checked out from inventory during the fulfillment process
       for (const item of technicianStockItems) {
-        // Get taxRate from submitted stockItems
-        const techItemTaxRate = invoiceData.stockItems?.find(
-          (si) => si.productId === item.productId && si.stockSource === "technician"
-        )?.taxRate ?? 16;
+        const techItemTaxRate = item.taxRate ?? 16;
         const techItemTaxAmount = (item.total * techItemTaxRate) / 100;
 
         newLineItems.push({
@@ -520,12 +366,11 @@ export async function updateInvoice(invoiceId, prevState, formData) {
           amount: item.total,
           taxRate: techItemTaxRate,
           taxAmount: techItemTaxAmount,
-          stockDeducted: false, // No deduction needed - already checked out
+          stockCommitted: false,
           relatedCheckout: {
             checkoutId: item.relatedCheckout.checkoutId,
             checkoutNumber: item.relatedCheckout.checkoutNumber,
           },
-          // relatedRequest for COGS routing to Technician Stock account
           relatedRequest: {
             technicianId: item.relatedCheckout.technicianId,
             technicianName: item.relatedCheckout.technicianName,
@@ -538,7 +383,6 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       // ============================================
       if (invoiceData.serviceItems && invoiceData.serviceItems.length > 0) {
         for (const item of invoiceData.serviceItems) {
-          // Use per-item taxRate from submitted data
           const serviceTaxRate = item.taxRate ?? 16;
           const serviceTaxAmount = (item.total * serviceTaxRate) / 100;
 
@@ -552,24 +396,20 @@ export async function updateInvoice(invoiceId, prevState, formData) {
             amount: item.total,
             taxRate: serviceTaxRate,
             taxAmount: serviceTaxAmount,
-            stockDeducted: false,
           });
         }
       }
 
       // ============================================
-      // STEP 5: CALCULATE TOTALS (using per-item tax rates)
+      // STEP 5: CALCULATE TOTALS
       // ============================================
       const subtotal = newLineItems.reduce((sum, item) => sum + (item.amount || 0), 0);
       const discountPercentage = invoiceData.discountPercentage || 0;
       const discountAmount = (subtotal * discountPercentage) / 100;
       const subtotalAfterDiscount = subtotal - discountAmount;
 
-      // Calculate tax from per-item taxAmounts (adjusted for discount)
-      // Discount factor to proportionally reduce tax when discount is applied
       const discountFactor = subtotal > 0 ? subtotalAfterDiscount / subtotal : 1;
       const taxAmount = newLineItems.reduce((sum, item) => {
-        // Apply discount factor to each item's tax contribution
         return sum + ((item.taxAmount || 0) * discountFactor);
       }, 0);
 
@@ -585,29 +425,41 @@ export async function updateInvoice(invoiceId, prevState, formData) {
         : null;
       existingInvoice.items = newLineItems;
       existingInvoice.subtotal = subtotal;
-      existingInvoice.discountPercentage = discountPercentage; // For validation
-      existingInvoice.totalDiscount = discountAmount; // Calculated discount amount
+      existingInvoice.discountPercentage = discountPercentage;
+      existingInvoice.totalDiscount = discountAmount;
       existingInvoice.taxAmount = taxAmount;
       existingInvoice.total = total;
       existingInvoice.notes = invoiceData.notes || "";
-      // Initialize relatedDocuments if it doesn't exist
-      if (!existingInvoice.relatedDocuments) {
-        existingInvoice.relatedDocuments = {};
-      }
-      existingInvoice.relatedDocuments.movementIds = newMovementIds;
 
-      // Update payment status if amount changed
-      // Recalculate amountDue based on new total
       existingInvoice.amountDue = total - existingInvoice.amountPaid;
 
       if (existingInvoice.amountPaid > 0) {
         if (existingInvoice.amountDue <= 0.01) {
           existingInvoice.paymentStatus = "paid";
-          // Note: status stays "completed" - we use paymentStatus to track payment state
         } else {
           existingInvoice.paymentStatus = "partial";
         }
       }
+
+      // ============================================
+      // UPDATE DRAFT EXPIRY BASED ON STOCK ITEMS
+      // ============================================
+      const hasCommittedStockNow = newLineItems.some(
+        (item) => item.stockCommitted === true
+      );
+
+      if (hasCommittedStockNow && !existingInvoice.draftExpiresAt) {
+        // Invoice now has committed stock but no expiry - set one
+        const companyDoc = await Company.findById(companyId).session(mongoSession);
+        const expiryDays = companyDoc?.settings?.draftInvoiceExpiryDays ?? 14;
+        existingInvoice.draftExpiresAt = new Date(
+          Date.now() + expiryDays * 24 * 60 * 60 * 1000
+        );
+      } else if (!hasCommittedStockNow && existingInvoice.draftExpiresAt) {
+        // No more committed stock - clear expiry
+        existingInvoice.draftExpiresAt = null;
+      }
+      // If already has both committed stock and expiry, keep existing expiry
 
       await existingInvoice.save({ session: mongoSession });
 
@@ -619,7 +471,6 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       revalidatePath(`/dashboard/invoices/${invoiceId}`);
       revalidatePath(`/dashboard/invoices/${invoiceId}/edit`);
       revalidatePath("/dashboard/stocks");
-      revalidatePath("/dashboard/movements");
 
       return {
         success: true,
@@ -646,6 +497,8 @@ export async function updateInvoice(invoiceId, prevState, formData) {
 // CREATE INVOICE (WITH ACCOUNTING INTEGRATION)
 // ============================================
 export async function createInvoice(prevState, formData) {
+  const mongoSession = await mongoose.startSession();
+
   try {
     const authSession = await auth();
     const user = authSession?.user;
@@ -705,6 +558,9 @@ export async function createInvoice(prevState, formData) {
       };
     }
 
+    // Start transaction for inventory commitment
+    mongoSession.startTransaction();
+
     // Generate invoice number (with company code prefix)
     const invoiceNumber = await generateInvoiceNumber(companyId);
 
@@ -713,9 +569,10 @@ export async function createInvoice(prevState, formData) {
 
     // Process stock items (products)
     for (const item of data.stockItems) {
-      const product = await Product.findById(item.productId);
+      const product = await Product.findById(item.productId).session(mongoSession);
 
       if (!product) {
+        await mongoSession.abortTransaction();
         return {
           message: `Product ${item.name} not found`,
           success: false,
@@ -727,13 +584,30 @@ export async function createInvoice(prevState, formData) {
       const isFromTechnicianStock = item.stockSource === "technician" && item.relatedCheckout?.checkoutId;
 
       if (!isFromTechnicianStock) {
-        const available = product.inventory?.quantityAvailable ?? product.stock ?? 0;
+        const available = product.inventory?.quantityAvailable ?? 0;
         if (available < item.quantity) {
+          await mongoSession.abortTransaction();
           return {
             message: `Insufficient stock for ${product.name}. Available: ${available}, Required: ${item.quantity}`,
             success: false,
           };
         }
+
+        // ============================================
+        // COMMIT INVENTORY - Reserve stock for this invoice
+        // ============================================
+        // This prevents race conditions where multiple invoices
+        // could be created for the same limited stock
+        await Product.findByIdAndUpdate(
+          item.productId,
+          {
+            $inc: {
+              "inventory.quantityCommitted": item.quantity,
+              "inventory.quantityAvailable": -item.quantity,
+            },
+          },
+          { session: mongoSession }
+        );
       }
 
       // Use per-item tax rate, fallback to global vatPercentage, then default 16%
@@ -753,6 +627,8 @@ export async function createInvoice(prevState, formData) {
         taxAmount: (item.total * itemTaxRate) / 100,
         discountPercentage: 0,
         discountAmount: 0,
+        // Track stock commitment status
+        stockCommitted: !isFromTechnicianStock, // true for store items, false for technician stock
       };
 
       // Add technician stock tracking if from checkout
@@ -806,6 +682,21 @@ export async function createInvoice(prevState, formData) {
     }, 0);
 
     const total = subtotal - totalDiscount + taxAmount;
+
+    // ============================================
+    // SET DRAFT EXPIRY FOR INVOICES WITH COMMITTED STOCK
+    // ============================================
+    // Only invoices holding committed stock should expire
+    // Service-only invoices don't need expiry since they don't hold inventory
+    const hasCommittedStock = items.some((item) => item.stockCommitted === true);
+    let draftExpiresAt = null;
+
+    if (hasCommittedStock) {
+      // Fetch company settings for expiry days
+      const company = await Company.findById(companyId).session(mongoSession);
+      const expiryDays = company?.settings?.draftInvoiceExpiryDays ?? 14;
+      draftExpiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
+    }
 
     // Format customer address from Party model
     const formatAddress = (address) => {
@@ -871,57 +762,71 @@ export async function createInvoice(prevState, formData) {
     };
 
     // Create invoice using new Invoice model
-    const invoice = await Invoice.create({
-      invoiceNumber,
-      invoiceDate: new Date(data.invoiceDate),
-      dueDate: data.dueDate
-        ? new Date(data.dueDate)
-        : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Default 30 days
-      customer: {
-        id: customer._id.toString(),
-        name: customer.displayName || customer.name,
-        email: customer.email || "",
-        phone: customer.phone || "",
-        address: formatAddress(customer.address),
-        taxPin: customer.taxPin || "",
-      },
-      items,
-      subtotal,
-      discountPercentage: data.discountPercentage || 0,
-      totalDiscount,
-      taxAmount,
-      total,
-      amountPaid: 0,
-      amountDue: total, // New invoice - full amount is due
-      currency: "KES",
-      paymentStatus: "unpaid",
-      notes: data.notes || "",
-      createdBy: {
-        name: user.name,
-        id: user.id,
-      },
-      status: "draft",
-      companyId: new ObjectId(companyId), // Tenant isolation
-    });
+    const invoice = await Invoice.create(
+      [
+        {
+          invoiceNumber,
+          invoiceDate: new Date(data.invoiceDate),
+          dueDate: data.dueDate
+            ? new Date(data.dueDate)
+            : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Default 30 days
+          customer: {
+            id: customer._id.toString(),
+            name: customer.displayName || customer.name,
+            email: customer.email || "",
+            phone: customer.phone || "",
+            address: formatAddress(customer.address),
+            taxPin: customer.taxPin || "",
+          },
+          items,
+          subtotal,
+          discountPercentage: data.discountPercentage || 0,
+          totalDiscount,
+          taxAmount,
+          total,
+          amountPaid: 0,
+          amountDue: total, // New invoice - full amount is due
+          currency: "KES",
+          paymentStatus: "unpaid",
+          notes: data.notes || "",
+          createdBy: {
+            name: user.name,
+            id: user.id,
+          },
+          status: "draft",
+          companyId: new ObjectId(companyId), // Tenant isolation
+          // Set expiry only for invoices with committed stock
+          ...(draftExpiresAt && { draftExpiresAt }),
+        },
+      ],
+      { session: mongoSession }
+    );
+
+    // Commit the transaction
+    await mongoSession.commitTransaction();
 
     // Note: Invoice stays as draft - user must explicitly post/complete it
-    // This follows standard ERP practice where drafts can be reviewed before posting
+    // Stock is COMMITTED (reserved) but not yet DEDUCTED from quantityOnHand
 
     revalidatePath("/dashboard/invoices");
+    revalidatePath("/dashboard/stocks");
 
     return {
-      message: `Invoice ${invoiceNumber} created as draft. Post it to finalize.`,
+      message: `Invoice ${invoiceNumber} created as draft. Stock reserved. Post it to finalize.`,
       success: true,
-      invoiceId: invoice._id.toString(),
-      invoiceNumber: invoice.invoiceNumber,
+      invoiceId: invoice[0]._id.toString(),
+      invoiceNumber: invoice[0].invoiceNumber,
       status: "draft",
     };
   } catch (error) {
+    await mongoSession.abortTransaction();
     console.error("Create invoice error:", error);
     return {
       message: error.message || "Database error: failed to create invoice",
       success: false,
     };
+  } finally {
+    mongoSession.endSession();
   }
 }
 
@@ -1348,6 +1253,153 @@ export async function completeInvoice(invoiceId) {
   revalidatePath("/dashboard/accounts");
   revalidatePath("/dashboard/checkouts");
   redirect(`/dashboard/invoices/${invoiceId}`);
+}
+
+// ============================================
+// EXPIRE STALE INVOICES (Release committed stock)
+// ============================================
+// Finds draft invoices with committed stock that have passed their expiry date
+// Releases the committed inventory and marks them as expired
+// Can be run as a cron job or triggered manually by admin
+// ============================================
+export async function expireStaleInvoices(companyIdFilter = null) {
+  const authSession = await auth();
+  const user = authSession?.user;
+
+  // Get tenant context (optional for super admin batch processing)
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  // Determine which company to process
+  const targetCompanyId = companyIdFilter || companyId;
+
+  // Build query
+  const query = {
+    status: { $in: ["draft", "sent"] },
+    draftExpiresAt: { $lt: new Date() },
+    "items.stockCommitted": true, // Only invoices with committed stock
+  };
+
+  // Apply tenant scope unless super admin processing all
+  if (targetCompanyId) {
+    query.companyId = new ObjectId(targetCompanyId);
+  } else if (!isSuperAdmin) {
+    return {
+      success: false,
+      error: "Company context required",
+    };
+  }
+
+  const dbConnect = (await import("@/app/config/dbConnect")).default;
+  await dbConnect();
+
+  try {
+    // Find all stale invoices
+    const staleInvoices = await Invoice.find(query);
+
+    if (staleInvoices.length === 0) {
+      return {
+        success: true,
+        message: "No stale invoices found",
+        expired: 0,
+      };
+    }
+
+    const userInfo = user
+      ? { name: user.name, id: user.id }
+      : { name: "System (Auto-Expiry)", id: "system" };
+
+    const results = {
+      expired: 0,
+      failed: 0,
+      errors: [],
+    };
+
+    // Process each stale invoice
+    for (const invoice of staleInvoices) {
+      try {
+        await invoice.expire(userInfo);
+        results.expired++;
+      } catch (error) {
+        results.failed++;
+        results.errors.push({
+          invoiceNumber: invoice.invoiceNumber,
+          error: error.message,
+        });
+      }
+    }
+
+    // Revalidate paths if any were processed
+    if (results.expired > 0) {
+      revalidatePath("/dashboard/invoices");
+      revalidatePath("/dashboard/stocks");
+    }
+
+    return {
+      success: true,
+      message: `Expired ${results.expired} invoice(s), ${results.failed} failed`,
+      ...results,
+    };
+  } catch (error) {
+    console.error("Expire stale invoices error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to expire stale invoices",
+    };
+  }
+}
+
+// ============================================
+// GET EXPIRING INVOICES (for warnings)
+// ============================================
+// Returns invoices that will expire within the specified days
+// Useful for showing warnings to users
+// ============================================
+export async function getExpiringInvoices(daysWarning = 3) {
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  if (!companyId && !isSuperAdmin) {
+    return { success: false, error: "Company context required" };
+  }
+
+  const dbConnect = (await import("@/app/config/dbConnect")).default;
+  await dbConnect();
+
+  const now = new Date();
+  const warningDate = new Date(Date.now() + daysWarning * 24 * 60 * 60 * 1000);
+
+  const query = {
+    status: { $in: ["draft", "sent"] },
+    draftExpiresAt: {
+      $gt: now, // Not yet expired
+      $lte: warningDate, // But will expire within warning period
+    },
+    "items.stockCommitted": true,
+  };
+
+  if (companyId) {
+    query.companyId = new ObjectId(companyId);
+  }
+
+  try {
+    const expiringInvoices = await Invoice.find(query)
+      .select("invoiceNumber customer.name total draftExpiresAt createdAt")
+      .sort({ draftExpiresAt: 1 })
+      .lean();
+
+    return {
+      success: true,
+      invoices: expiringInvoices.map((inv) => ({
+        ...inv,
+        _id: inv._id.toString(),
+        daysUntilExpiry: Math.ceil(
+          (new Date(inv.draftExpiresAt) - now) / (24 * 60 * 60 * 1000)
+        ),
+      })),
+    };
+  } catch (error) {
+    console.error("Get expiring invoices error:", error);
+    return { success: false, error: error.message };
+  }
 }
 
 // ============================================

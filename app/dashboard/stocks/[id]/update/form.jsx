@@ -24,6 +24,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
 
 import {
   ProductNameField,
@@ -103,7 +104,7 @@ function FormSection({
 // ============================================
 
 function StockStatusCard({ product }) {
-  const onHand = product.inventory?.quantityOnHand ?? product.stock ?? 0;
+  const onHand = product.inventory?.quantityOnHand ?? 0;
   const committed = product.inventory?.quantityCommitted ?? 0;
   const available = onHand - committed;
   const costPrice = product.costPrice || 0;
@@ -526,7 +527,7 @@ export default function UpdateProductForm({
         {/* Submit Button */}
         <div className="flex justify-end gap-3 pt-4">
           <Button type="button" variant="outline" asChild>
-            <a href="/dashboard/products">Cancel</a>
+            <Link href="/dashboard/stocks">Cancel</Link>
           </Button>
           <Button
             type="submit"

@@ -56,16 +56,8 @@ const productSchema =
       },
 
       // ============================================
-      // INVENTORY (Keep existing stock field for backward compatibility)
+      // INVENTORY
       // ============================================
-      stock: {
-        type: Number,
-        required: true,
-        default: 0,
-        min: [0, "Stock cannot be negative"],
-      },
-
-      // NEW: Enhanced inventory tracking
       inventory: {
         quantityOnHand: {
           type: Number,
@@ -179,16 +171,8 @@ const productSchema =
       },
 
       // ============================================
-      // PRICING (Keep existing price field + enhancements)
+      // PRICING
       // ============================================
-      price: {
-        type: Number,
-        required: [true, "Price is required"],
-        default: 0,
-        min: [0, "Price cannot be negative"],
-      },
-
-      // NEW: Enhanced pricing
       pricing: {
         sellingPrice: {
           type: Number,
@@ -413,7 +397,7 @@ productSchema.index({ companyId: 1, barcode: 1 }, { sparse: true });
  * Inventory value (quantity × cost)
  */
 productSchema.virtual("inventoryValue").get(function () {
-  const qty = this.inventory?.quantityOnHand || this.stock || 0;
+  const qty = this.inventory?.quantityOnHand || 0;
   const cost = this.costing?.costPrice || 0;
   return qty * cost;
 });
@@ -422,7 +406,7 @@ productSchema.virtual("inventoryValue").get(function () {
  * Gross profit per unit
  */
 productSchema.virtual("grossProfitPerUnit").get(function () {
-  const selling = this.pricing?.sellingPrice || this.price || 0;
+  const selling = this.pricing?.sellingPrice || 0;
   const cost = this.costing?.costPrice || 0;
   return selling - cost;
 });
@@ -431,7 +415,7 @@ productSchema.virtual("grossProfitPerUnit").get(function () {
  * Check if below reorder level
  */
 productSchema.virtual("needsReorder").get(function () {
-  const qty = this.inventory?.quantityOnHand || this.stock || 0;
+  const qty = this.inventory?.quantityOnHand || 0;
   const reorderLevel = this.inventory?.reorderLevel || 0;
   return reorderLevel > 0 && qty <= reorderLevel;
 });
@@ -440,15 +424,8 @@ productSchema.virtual("needsReorder").get(function () {
  * Check if out of stock
  */
 productSchema.virtual("isOutOfStock").get(function () {
-  const qty = this.inventory?.quantityOnHand || this.stock || 0;
+  const qty = this.inventory?.quantityOnHand || 0;
   return qty <= 0;
-});
-
-/**
- * Sync stock with inventory.quantityOnHand (for backward compatibility)
- */
-productSchema.virtual("syncedStock").get(function () {
-  return this.inventory?.quantityOnHand || this.stock || 0;
 });
 
 // ============================================
@@ -456,27 +433,12 @@ productSchema.virtual("syncedStock").get(function () {
 // ============================================
 
 /**
- * Before save: Sync stock field with inventory.quantityOnHand
- * FIX: Always keep both fields in sync for backward compatibility
+ * Before save: Calculate derived fields
  */
-productSchema.pre("save", function (next) {
+productSchema.pre("save", function () {
   // Initialize inventory if missing
   if (!this.inventory) {
     this.inventory = {};
-  }
-
-  // CRITICAL: Keep stock and inventory.quantityOnHand in sync
-  // If stock changed, sync to inventory
-  if (this.isModified("stock")) {
-    this.inventory.quantityOnHand = this.stock;
-  }
-  // If inventory changed, sync to stock
-  else if (this.isModified("inventory.quantityOnHand")) {
-    this.stock = this.inventory.quantityOnHand || 0;
-  }
-  // Fallback: ensure they match
-  else if (this.stock !== this.inventory.quantityOnHand) {
-    this.inventory.quantityOnHand = this.stock;
   }
 
   // Calculate available quantity
@@ -484,30 +446,19 @@ productSchema.pre("save", function (next) {
     (this.inventory.quantityOnHand || 0) -
     (this.inventory.quantityCommitted || 0);
 
-  // Sync pricing
-  if (this.isModified("price") && !this.isModified("pricing.sellingPrice")) {
-    this.pricing = this.pricing || {};
-    this.pricing.sellingPrice = this.price;
-  }
-
-  if (this.isModified("pricing.sellingPrice") && !this.isModified("price")) {
-    this.price = this.pricing.sellingPrice;
-  }
-
-  // Initialize costing with price as default cost if not set (for old products)
-  if (!this.costing?.costPrice && this.price) {
+  // Initialize costing with sellingPrice as default if not set
+  if (!this.costing?.costPrice && this.pricing?.sellingPrice) {
     this.costing = this.costing || {};
     if (!this.costing.costPrice) {
-      this.costing.costPrice = this.price * 0.7; // Default: 70% of selling price as cost
+      this.costing.costPrice = this.pricing.sellingPrice * 0.7; // Default: 70% of selling price as cost
       this.costing.costingMethod = "average";
     }
   }
 
-  // Calculate margins
+  // Calculate margins when pricing or costing changes
   if (
     this.isModified("costing.costPrice") ||
-    this.isModified("pricing.sellingPrice") ||
-    this.isModified("price")
+    this.isModified("pricing.sellingPrice")
   ) {
     this.calculateMargins();
   }
@@ -521,7 +472,7 @@ productSchema.pre("save", function (next) {
  * Calculate margin and markup percentages
  */
 productSchema.methods.calculateMargins = function () {
-  const selling = this.pricing?.sellingPrice || this.price || 0;
+  const selling = this.pricing?.sellingPrice || 0;
   const cost = this.costing?.costPrice || 0;
 
   if (!this.pricing) {
@@ -557,7 +508,7 @@ productSchema.methods.updateAverageCost = function (newQuantity, newCost) {
     throw new Error("Invalid quantity or cost for average cost calculation");
   }
 
-  const currentQty = this.inventory?.quantityOnHand || this.stock || 0;
+  const currentQty = this.inventory?.quantityOnHand || 0;
   const currentCost = this.costing?.costPrice || 0;
 
   // Weighted average: (CurrentQty × CurrentCost + NewQty × NewCost) / TotalQty
@@ -613,9 +564,6 @@ productSchema.methods.increaseInventory = async function (
   this.inventory.quantityAvailable =
     this.inventory.quantityOnHand - (this.inventory.quantityCommitted || 0);
 
-  // Sync backward compatible stock field
-  this.stock = this.inventory.quantityOnHand;
-
   // Update lifetime totals
   if (!this.lifetimeTotals) {
     this.lifetimeTotals = {};
@@ -634,12 +582,12 @@ productSchema.methods.increaseInventory = async function (
 /**
  * Decrease inventory (sale, issue, adjustment out)
  */
-productSchema.methods.decreaseInventory = async function (quantity, reason) {
+productSchema.methods.decreaseInventory = async function (quantity) {
   if (quantity <= 0) {
     throw new Error("Quantity must be greater than zero");
   }
 
-  const available = this.inventory?.quantityAvailable || this.stock || 0;
+  const available = this.inventory?.quantityAvailable || 0;
 
   if (quantity > available) {
     throw new Error(
@@ -657,9 +605,6 @@ productSchema.methods.decreaseInventory = async function (quantity, reason) {
     (this.inventory.quantityOnHand || 0) - quantity;
   this.inventory.quantityAvailable =
     this.inventory.quantityOnHand - (this.inventory.quantityCommitted || 0);
-
-  // Sync backward compatible stock field
-  this.stock = this.inventory.quantityOnHand;
 
   await this.save();
 
@@ -826,7 +771,7 @@ productSchema.statics.getLowStockProducts = function () {
 productSchema.statics.getOutOfStockProducts = function () {
   return this.find({
     status: "active",
-    $or: [{ stock: { $lte: 0 } }, { "inventory.quantityOnHand": { $lte: 0 } }],
+    "inventory.quantityOnHand": { $lte: 0 },
   }).sort({ name: 1 });
 };
 
@@ -845,14 +790,14 @@ productSchema.statics.getTotalInventoryValue = async function () {
         name: 1,
         SKU: 1,
         quantity: {
-          $ifNull: ["$inventory.quantityOnHand", "$stock"],
+          $ifNull: ["$inventory.quantityOnHand", 0],
         },
         costPrice: {
           $ifNull: ["$costing.costPrice", 0],
         },
         value: {
           $multiply: [
-            { $ifNull: ["$inventory.quantityOnHand", "$stock"] },
+            { $ifNull: ["$inventory.quantityOnHand", 0] },
             { $ifNull: ["$costing.costPrice", 0] },
           ],
         },
@@ -885,11 +830,11 @@ productSchema.statics.getInventoryByCategory = async function () {
       $project: {
         category: { $ifNull: ["$category", "Uncategorized"] },
         quantity: {
-          $ifNull: ["$inventory.quantityOnHand", "$stock"],
+          $ifNull: ["$inventory.quantityOnHand", 0],
         },
         value: {
           $multiply: [
-            { $ifNull: ["$inventory.quantityOnHand", "$stock"] },
+            { $ifNull: ["$inventory.quantityOnHand", 0] },
             { $ifNull: ["$costing.costPrice", 0] },
           ],
         },
@@ -964,6 +909,128 @@ productSchema.statics.bulkSetupAccountingAccounts = async function () {
   }
 
   return { total: products.length, updated };
+};
+
+// ============================================
+// ATOMIC UPDATE HELPERS (for transactions)
+// ============================================
+
+/**
+ * Atomically decrease inventory (for use in transactions)
+ * Returns the update operation for findByIdAndUpdate
+ */
+productSchema.statics.getDecreaseInventoryUpdate = function (quantity) {
+  return {
+    $inc: {
+      "inventory.quantityOnHand": -quantity,
+      "inventory.quantityAvailable": -quantity,
+    },
+  };
+};
+
+/**
+ * Atomically increase inventory (for use in transactions)
+ * Returns the update operation for findByIdAndUpdate
+ */
+productSchema.statics.getIncreaseInventoryUpdate = function (quantity) {
+  return {
+    $inc: {
+      "inventory.quantityOnHand": quantity,
+      "inventory.quantityAvailable": quantity,
+    },
+  };
+};
+
+/**
+ * Atomically commit inventory (allocate to order)
+ * Returns the update operation for findByIdAndUpdate
+ */
+productSchema.statics.getCommitInventoryUpdate = function (quantity) {
+  return {
+    $inc: {
+      "inventory.quantityCommitted": quantity,
+      "inventory.quantityAvailable": -quantity,
+    },
+  };
+};
+
+/**
+ * Atomically release committed inventory (cancel order)
+ * Returns the update operation for findByIdAndUpdate
+ */
+productSchema.statics.getReleaseInventoryUpdate = function (quantity) {
+  return {
+    $inc: {
+      "inventory.quantityCommitted": -quantity,
+      "inventory.quantityAvailable": quantity,
+    },
+  };
+};
+
+/**
+ * Decrease inventory atomically with validation
+ * Use this in transactions for stock deductions
+ */
+productSchema.statics.decreaseInventoryAtomic = async function (
+  productId,
+  quantity,
+  session = null
+) {
+  if (quantity <= 0) {
+    throw new Error("Quantity must be greater than zero");
+  }
+
+  const options = session ? { session, new: true } : { new: true };
+
+  // First check availability
+  const product = await this.findById(productId).session(session);
+  if (!product) {
+    throw new Error(`Product not found: ${productId}`);
+  }
+
+  const available = product.inventory?.quantityAvailable || 0;
+  if (quantity > available) {
+    throw new Error(
+      `Insufficient inventory for ${product.name}. Available: ${available}, Requested: ${quantity}`
+    );
+  }
+
+  // Perform atomic update
+  const updated = await this.findByIdAndUpdate(
+    productId,
+    this.getDecreaseInventoryUpdate(quantity),
+    options
+  );
+
+  return updated;
+};
+
+/**
+ * Increase inventory atomically
+ * Use this in transactions for stock additions
+ */
+productSchema.statics.increaseInventoryAtomic = async function (
+  productId,
+  quantity,
+  session = null
+) {
+  if (quantity <= 0) {
+    throw new Error("Quantity must be greater than zero");
+  }
+
+  const options = session ? { session, new: true } : { new: true };
+
+  const updated = await this.findByIdAndUpdate(
+    productId,
+    this.getIncreaseInventoryUpdate(quantity),
+    options
+  );
+
+  if (!updated) {
+    throw new Error(`Product not found: ${productId}`);
+  }
+
+  return updated;
 };
 
 // ============================================

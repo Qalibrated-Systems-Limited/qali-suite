@@ -7,12 +7,13 @@ import { Toaster } from "sonner";
 
 const poppins = Poppins({
   subsets: ["latin"],
-  weight: ["100", "200", "300", "400", "500", "600", "700", "800", "900"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
 });
 
 export const metadata = {
-  title: "Kilosahihi weighing app",
-  description: "The most comprehensive weighing solution",
+  title: "QaliSuite",
+  description: "Complete ERP solution for inventory, finance, and operations",
 };
 
 export default function RootLayout({ children }) {

@@ -112,7 +112,7 @@ export function CreateAdjustmentForm({ user, products }) {
     }
 
     const qty = parsedQty;
-    const currentStock = selectedProduct.stock || 0;
+    const currentStock = selectedProduct.inventory?.quantityOnHand ?? 0;
     const newStock =
       itemType === "increase" ? currentStock + qty : currentStock - qty;
 
@@ -329,7 +329,7 @@ export function CreateAdjustmentForm({ user, products }) {
                               {product.name}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {product.SKU} • Stock: {product.stock || 0} {product.unit}
+                              {product.SKU} • Stock: {product.inventory?.quantityOnHand ?? 0} {product.unit}
                             </p>
                           </div>
                           <Package className="h-4 w-4 text-muted-foreground" />

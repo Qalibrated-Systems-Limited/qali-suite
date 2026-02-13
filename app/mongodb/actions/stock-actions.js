@@ -55,8 +55,8 @@ const addProductSchema = z.object({
   reorderLevel: z.coerce.number().int("Reorder level must be a whole number").min(0).default(10),
   reorderQuantity: z.coerce.number().int("Reorder quantity must be a whole number").min(0).default(20),
   costingMethod: z
-    .enum(["weighted_average", "fifo", "lifo"])
-    .default("weighted_average"),
+    .enum(["average", "weighted_average", "fifo", "lifo", "specific"])
+    .default("average"),
   location: z.string().optional(),
   binNumber: z.string().optional(),
   trackInventory: z.coerce.boolean().default(true),
@@ -79,8 +79,8 @@ const updateProductSchema = z.object({
   reorderLevel: z.coerce.number().int("Reorder level must be a whole number").min(0).default(10),
   reorderQuantity: z.coerce.number().int("Reorder quantity must be a whole number").min(0).default(20),
   costingMethod: z
-    .enum(["weighted_average", "fifo", "lifo"])
-    .default("weighted_average"),
+    .enum(["average", "weighted_average", "fifo", "lifo", "specific"])
+    .default("average"),
   location: z.string().optional(),
   binNumber: z.string().optional(),
   trackInventory: z.coerce.boolean().default(true),
@@ -218,32 +218,25 @@ export async function addProduct(prevState, formData) {
       companyId: tenantCompanyId,
       name: data.name,
       SKU: data.sku,
-      costing,
-      pricing,
-      storeInfo,
-      inventory,
-
       description: data.description || "",
       category: category.name,
       type: data.type,
       unit: data.unit,
-      costPrice: data.costPrice || 0,
-      sellingPrice: data.sellingPrice || 0,
       taxRate: data.taxRate,
-      reorderLevel: data.reorderLevel,
-      reorderQuantity: data.reorderQuantity,
-      costingMethod: data.costingMethod,
-      location: data.location || "",
-      binNumber: data.binNumber || "",
-      trackInventory: data.trackInventory,
-      allowNegativeStock: data.allowNegativeStock,
       isActive: data.isActive,
-      // Initialize inventory
+      // Costing & Pricing
+      costing,
+      pricing,
+      // Inventory with reorder settings
       inventory: {
         quantityOnHand: data.initialStock || 0,
+        quantityAvailable: data.initialStock || 0,
         quantityCommitted: 0,
-        quantityOnOrder: 0,
+        reorderLevel: data.reorderLevel || 0,
+        reorderQuantity: data.reorderQuantity || 0,
       },
+      // Store info
+      storeInfo,
       // Audit
       createdBy: {
         id: user.id,
@@ -575,7 +568,7 @@ export async function deleteProduct(productId) {
   }
 
   // Check if product has stock
-  const onHand = product.inventory?.quantityOnHand ?? product.stock ?? 0;
+  const onHand = product.inventory?.quantityOnHand ?? 0;
   if (onHand > 0) {
     return {
       error: {

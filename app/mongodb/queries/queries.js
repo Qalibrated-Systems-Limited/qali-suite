@@ -22,10 +22,10 @@ import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
 import { serializeBsonType } from "@/lib/utils";
 
-dbConnect();
 const ITEMS_PER_PAGE = 20;
 
 export const fetchTodaySummary = async () => {
+  await dbConnect();
   noStore();
   // Get tenant context for multi-tenant isolation
   const { companyId, isSuperAdmin } = await getTenantContext();
@@ -1177,12 +1177,19 @@ export const getStockAggregate = async () => {
     ? {}
     : { companyId: new ObjectId(companyId) };
 
-  const matchStage = { $match: { ...tenantMatch, stock: { $gt: 0 } } };
+  const matchStage = { $match: { ...tenantMatch, "inventory.quantityOnHand": { $gt: 0 } } };
   const groupStage = {
     $group: {
       _id: null,
-      totalCount: { $sum: "$stock" },
-      totalValue: { $sum: { $multiply: ["$stock", "$price"] } },
+      totalCount: { $sum: { $ifNull: ["$inventory.quantityOnHand", 0] } },
+      totalValue: {
+        $sum: {
+          $multiply: [
+            { $ifNull: ["$inventory.quantityOnHand", 0] },
+            { $ifNull: ["$costing.costPrice", 0] },
+          ],
+        },
+      },
     },
   };
 

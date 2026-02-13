@@ -16,13 +16,13 @@ import {
   getTenantContext,
   validateTenantAccess,
 } from "@/lib/utils/tenant-utils";
-
-dbConnect();
+import Invoice from "../models/invoice";
 
 // ============================================
 // RETURN CHECKOUT
 // ============================================
 export async function returnCheckout(checkoutId, prevState, formData) {
+  await dbConnect();
   let session;
   let success = false;
 
@@ -103,7 +103,7 @@ export async function returnCheckout(checkoutId, prevState, formData) {
     // Update product stock (return the item)
     await Product.findByIdAndUpdate(
       checkout.productId,
-      { $inc: { stock: checkout.quantity } },
+      { $inc: { "inventory.quantityOnHand": checkout.quantity, "inventory.quantityAvailable": checkout.quantity } },
       { session },
     );
 
@@ -154,8 +154,8 @@ export async function returnCheckout(checkoutId, prevState, formData) {
           movementNumber: movementNumber,
           movementType: "return",
           quantity: checkout.quantity,
-          previousStock: updatedProduct.stock - checkout.quantity,
-          newStock: updatedProduct.stock,
+          previousStock: (updatedProduct.inventory?.quantityOnHand || 0) - checkout.quantity,
+          newStock: updatedProduct.inventory?.quantityOnHand || 0,
           costing: {
             unitCost,
             totalCost,
@@ -236,12 +236,51 @@ export async function returnCheckout(checkoutId, prevState, formData) {
 
     await checkout.save({ session });
 
+    // ============================================
+    // CANCEL LINKED DRAFT INVOICES (for sale-type checkouts)
+    // ============================================
+    // If items are returned, any active draft invoice must be cancelled
+    // since there's nothing to sell anymore
+    // Note: We update directly since the checkout return already handles
+    // inventory restoration - the invoice cancel logic would try to flag
+    // the checkout for return (but it's already being returned)
+    if (checkout.requestType === "sale") {
+      const linkedInvoices = await Invoice.find({
+        companyId,
+        status: { $in: ["draft", "sent"] },
+        "items.relatedCheckout.checkoutId": checkout._id,
+      }).session(session);
+
+      for (const invoice of linkedInvoices) {
+        // Directly update invoice status (inventory already handled by checkout return)
+        invoice.status = "cancelled";
+        invoice.cancelledAt = new Date();
+        invoice.cancelledBy = {
+          name: user.name,
+          id: user.id,
+        };
+        invoice.cancellationReason = `Auto-cancelled: Items returned via checkout ${checkout.checkoutNumber}`;
+        invoice.lastModifiedBy = {
+          name: user.name,
+          id: user.id,
+        };
+
+        // Mark items as no longer committed (for sale requests, stock was deducted not committed)
+        for (const item of invoice.items) {
+          item.stockCommitted = false;
+        }
+
+        await invoice.save({ session });
+      }
+    }
+
     // Commit transaction
     await session.commitTransaction();
 
     // Revalidate paths
     revalidatePath("/dashboard/checkout");
     revalidatePath("/dashboard/stocks");
+    revalidatePath("/dashboard/invoices");
 
     success = true;
   } catch (error) {
@@ -814,6 +853,7 @@ export async function expenseInternalCheckout(checkoutId, prevState, formData) {
     // UPDATE CHECKOUT RECORD
     // ============================================
     checkout.status = "expensed";
+    checkout.actualReturnDate = new Date(); // Mark as resolved (removes from active list)
     checkout.expenseConversion = {
       expensed: true,
       expensedAt: new Date(),
@@ -831,9 +871,15 @@ export async function expenseInternalCheckout(checkoutId, prevState, formData) {
       quantityExpensed: quantityToExpense,
       totalCost,
     };
-    // Clear return-related fields
+    // Clear return-related fields (no longer pending)
     checkout.expectedReturnDate = null;
-    checkout.isOverdue = false;
+    checkout.returnRequired = {
+      required: false,
+      reason: null,
+      requiredAt: null,
+      requiredBy: null,
+      returnDeadline: null,
+    };
 
     // Add internal note
     const expenseNote = `Expensed by ${user.name} to ${expenseAccount.accountName} - Qty: ${quantityToExpense}, Cost: ${totalCost.toFixed(2)} - ${reason}`;

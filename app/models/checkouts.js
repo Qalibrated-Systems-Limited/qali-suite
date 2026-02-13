@@ -107,7 +107,7 @@ const itemCheckoutSchema = new Schema(
     // Request type from parent request (for tracking flow)
     requestType: {
       type: String,
-      enum: ["demo", "installation", "repair", "internal"],
+      enum: ["sale", "demo", "installation", "repair", "internal"],
       index: true,
     },
     // Conversion to sale tracking (customer info fetched from parent request)
@@ -171,6 +171,50 @@ const itemCheckoutSchema = new Schema(
     },
     checkoutNotes: String,
     internalNotes: String,
+
+    // ============================================
+    // RETURN REQUIRED TRACKING
+    // ============================================
+    // Set when an invoice with this checkout item expires/cancels
+    // Technician must return items since sale didn't complete
+    returnRequired: {
+      required: {
+        type: Boolean,
+        default: false,
+      },
+      reason: {
+        type: String,
+        enum: ["invoice_expired", "invoice_cancelled", "sale_failed", "other"],
+      },
+      requiredAt: Date,
+      requiredBy: {
+        name: String,
+        id: String,
+      },
+      // Reference to the failed invoice
+      failedInvoice: {
+        invoiceId: {
+          type: Schema.Types.ObjectId,
+          ref: "Invoice",
+        },
+        invoiceNumber: String,
+      },
+      // Deadline for return (uses company setting or default 7 days)
+      returnDeadline: Date,
+      // Notification tracking
+      notificationsSent: {
+        type: Number,
+        default: 0,
+      },
+      lastNotificationAt: Date,
+    },
+
+    // Customer info (denormalized from parent request for quick access)
+    customer: {
+      id: String,
+      name: String,
+    },
+
     isEscalated: {
       type: Boolean,
       default: false,
@@ -201,6 +245,8 @@ itemCheckoutSchema.index({ companyId: 1, expectedReturnDate: 1, status: 1 });
 itemCheckoutSchema.index({ companyId: 1, productId: 1 });
 itemCheckoutSchema.index({ companyId: 1, requestType: 1, status: 1 });
 itemCheckoutSchema.index({ companyId: 1, "saleConversion.converted": 1 });
+// Index for finding checkouts requiring return
+itemCheckoutSchema.index({ companyId: 1, "returnRequired.required": 1, status: 1 });
 
 // ============================================
 // VIRTUALS
@@ -227,6 +273,22 @@ itemCheckoutSchema.virtual("daysUntilDue").get(function () {
 
 itemCheckoutSchema.virtual("isOverdue").get(function () {
   return this.daysOverdue > 0;
+});
+
+itemCheckoutSchema.virtual("needsReturn").get(function () {
+  // Items that are still checked out AND flagged for return
+  return (
+    this.status === "checked_out" &&
+    this.returnRequired?.required === true
+  );
+});
+
+itemCheckoutSchema.virtual("returnOverdue").get(function () {
+  // Return deadline has passed
+  if (!this.returnRequired?.required || !this.returnRequired?.returnDeadline) {
+    return false;
+  }
+  return new Date() > this.returnRequired.returnDeadline;
 });
 
 // ============================================
@@ -268,6 +330,35 @@ itemCheckoutSchema.statics.getDueSoon = function (days = 3) {
     status: "checked_out",
     expectedReturnDate: { $lte: futureDate, $gte: new Date() },
   }).sort({ expectedReturnDate: 1 });
+};
+
+/**
+ * Get checkouts that require return (sale didn't complete)
+ */
+itemCheckoutSchema.statics.getRequiringReturn = function (companyId = null) {
+  const query = {
+    status: "checked_out",
+    "returnRequired.required": true,
+  };
+  if (companyId) {
+    query.companyId = companyId;
+  }
+  return this.find(query).sort({ "returnRequired.returnDeadline": 1 });
+};
+
+/**
+ * Get checkouts with overdue returns (deadline passed)
+ */
+itemCheckoutSchema.statics.getOverdueReturns = function (companyId = null) {
+  const query = {
+    status: "checked_out",
+    "returnRequired.required": true,
+    "returnRequired.returnDeadline": { $lt: new Date() },
+  };
+  if (companyId) {
+    query.companyId = companyId;
+  }
+  return this.find(query).sort({ "returnRequired.returnDeadline": 1 });
 };
 
 // ============================================

@@ -4,14 +4,13 @@ import dbConnect from "../../config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
 
-dbConnect();
-
 const ITEMS_PER_PAGE = 20;
 
 // ============================================
 // FETCH CLAIM PAGES (for pagination)
 // ============================================
 export const fetchClaimPages = async (searchTerm = "", filters = {}) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin

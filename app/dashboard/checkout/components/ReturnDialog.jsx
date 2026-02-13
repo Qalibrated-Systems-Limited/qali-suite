@@ -53,13 +53,13 @@ export function ReturnDialog({ checkout, open, onOpenChange }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-[#161b22] border-[#30363d] text-gray-100 max-w-md">
+      <DialogContent className="bg-background border-border text-foreground max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-white flex items-center gap-2">
+          <DialogTitle className="text-foreground flex items-center gap-2">
             <RotateCcw className="w-5 h-5 text-green-500" />
             Process Return
           </DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-muted-foreground">
             Process the return of this checked out item
           </DialogDescription>
         </DialogHeader>
@@ -67,32 +67,32 @@ export function ReturnDialog({ checkout, open, onOpenChange }) {
         <form action={handleSubmit}>
           <div className="space-y-4 py-4">
             {/* Item Info */}
-            <div className="space-y-2 p-3 bg-[#0d1117] rounded-lg border border-[#30363d]">
+            <div className="space-y-2 p-3 bg-muted/50 rounded-lg border border-border">
               <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Product:</span>
-                <span className="font-medium text-white">
+                <span className="text-muted-foreground">Product:</span>
+                <span className="font-medium text-foreground">
                   {checkout.productSnapshot.name}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Quantity:</span>
-                <span className="text-gray-100">{checkout.quantity}</span>
+                <span className="text-muted-foreground">Quantity:</span>
+                <span className="text-foreground">{checkout.quantity}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Checked Out To:</span>
-                <span className="text-gray-100">
+                <span className="text-muted-foreground">Checked Out To:</span>
+                <span className="text-foreground">
                   {checkout.checkedOutTo.name}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Expected Return:</span>
-                <span className="text-gray-100">
+                <span className="text-muted-foreground">Expected Return:</span>
+                <span className="text-foreground">
                   {formatDate(checkout.expectedReturnDate)}
                 </span>
               </div>
               {checkout.isOverdue && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Days Overdue:</span>
+                  <span className="text-muted-foreground">Days Overdue:</span>
                   <span className="text-red-500 font-medium">
                     {checkout.daysOverdue} days
                   </span>
@@ -111,43 +111,43 @@ export function ReturnDialog({ checkout, open, onOpenChange }) {
                 onValueChange={setReturnCondition}
                 required
               >
-                <SelectTrigger className="bg-[#0d1117] border-[#30363d] text-gray-100">
+                <SelectTrigger className="bg-muted/50 border-border text-foreground">
                   <SelectValue placeholder="Select condition" />
                 </SelectTrigger>
-                <SelectContent className="bg-[#161b22] border-[#30363d]">
+                <SelectContent className="bg-background border-border">
                   <SelectItem
                     value="excellent"
-                    className="text-gray-100 focus:bg-[#1f2937]"
+                    className="text-foreground focus:bg-[#1f2937]"
                   >
                     Excellent - Like new
                   </SelectItem>
                   <SelectItem
                     value="good"
-                    className="text-gray-100 focus:bg-[#1f2937]"
+                    className="text-foreground focus:bg-[#1f2937]"
                   >
                     Good - Normal wear
                   </SelectItem>
                   <SelectItem
                     value="fair"
-                    className="text-gray-100 focus:bg-[#1f2937]"
+                    className="text-foreground focus:bg-[#1f2937]"
                   >
                     Fair - Some wear
                   </SelectItem>
                   <SelectItem
                     value="poor"
-                    className="text-gray-100 focus:bg-[#1f2937]"
+                    className="text-foreground focus:bg-[#1f2937]"
                   >
                     Poor - Heavy wear
                   </SelectItem>
                   <SelectItem
                     value="damaged"
-                    className="text-gray-100 focus:bg-[#1f2937]"
+                    className="text-foreground focus:bg-[#1f2937]"
                   >
                     Damaged - Needs repair
                   </SelectItem>
                   <SelectItem
                     value="lost"
-                    className="text-gray-100 focus:bg-[#1f2937]"
+                    className="text-foreground focus:bg-[#1f2937]"
                   >
                     Lost - Not returned
                   </SelectItem>
@@ -164,7 +164,7 @@ export function ReturnDialog({ checkout, open, onOpenChange }) {
                 id="returnNotes"
                 name="returnNotes"
                 placeholder="Any notes about the return..."
-                className="bg-[#0d1117] border-[#30363d] text-gray-100 placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
+                className="bg-muted/50 border-border text-foreground placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
                 rows={3}
               />
             </div>
@@ -184,7 +184,7 @@ export function ReturnDialog({ checkout, open, onOpenChange }) {
                   placeholder={`Describe the ${
                     returnCondition === "lost" ? "circumstances" : "damage"
                   }...`}
-                  className="bg-[#0d1117] border-[#30363d] text-gray-100 placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
+                  className="bg-muted/50 border-border text-foreground placeholder:text-gray-500 focus:border-yellow-500 focus:ring-yellow-500"
                   rows={3}
                   required
                 />
@@ -205,14 +205,14 @@ export function ReturnDialog({ checkout, open, onOpenChange }) {
               variant="outline"
               onClick={() => onOpenChange(false)}
               disabled={isSubmitting}
-              className="border-[#30363d] text-gray-300 hover:bg-[#1f2937] hover:text-white"
+              className="border-border text-gray-300 hover:bg-[#1f2937] hover:text-foreground"
             >
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={isSubmitting || !returnCondition}
-              className="bg-green-500 text-white hover:bg-green-600"
+              className="bg-green-500 text-foreground hover:bg-green-600"
             >
               {isSubmitting ? (
                 <>

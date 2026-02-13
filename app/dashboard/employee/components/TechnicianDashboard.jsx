@@ -39,7 +39,7 @@ export async function TechnicianDashboard() {
           Welcome back, {user?.name?.split(" ")[0] || "User"}! 👋
         </h1>
         <p className="text-muted-foreground">
-          {user?.role} • {user?.department || "StockVault"}
+          {user?.role} • {user?.department || "QaliSuite"}
         </p>
       </div>
 

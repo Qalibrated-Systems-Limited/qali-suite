@@ -80,13 +80,13 @@ export const fetchAllProducts = async () => {
     SKU: product.SKU,
     unit: product.unit,
     category: product.category,
-    // ERP costing & pricing
-    costPrice: product.costing?.costPrice || product.price || 0,
-    lastPurchaseCost: product.costing?.lastPurchaseCost || 0,
-    sellingPrice: product.pricing?.sellingPrice || product.price || 0,
-    // Current stock (for reference)
-    stock: product.inventory?.quantityOnHand ?? product.stock ?? 0,
-    reorderLevel: product.inventory?.reorderLevel || 0,
+    // Costing & pricing
+    costPrice: product.costing?.costPrice ?? 0,
+    lastPurchaseCost: product.costing?.lastPurchaseCost ?? 0,
+    sellingPrice: product.pricing?.sellingPrice ?? 0,
+    // Current inventory (for reference)
+    quantityOnHand: product.inventory?.quantityOnHand ?? 0,
+    reorderLevel: product.inventory?.reorderLevel ?? 0,
   }));
 };
 

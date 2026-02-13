@@ -23,15 +23,14 @@ function AuthProvider({ children }) {
 
   useEffect(() => {
     const tokenn = localStorage.getItem("token");
-    console.log(tokenn);
     const userName = localStorage.getItem("userName");
     const userId = localStorage.getItem("userId");
     const role = localStorage.getItem("role");
     const email = localStorage.getItem("email");
     setToken(tokenn);
-    setIsLoggedIn((val) => tokenn && tokenn.length > 5);
+    setIsLoggedIn(tokenn && tokenn.length > 5);
     setUser({ name: userName, id: userId, role: role, email: email });
-  }, [setIsLoggedIn, token, isLoggedIn]);
+  }, []); // Only run once on mount
 
   const logout = () => {
     localStorage.clear();

@@ -91,17 +91,17 @@ export default function EditInvoiceFormClient({
 
   // Form State
   const [selectedCustomer, setSelectedCustomer] = useState(
-    invoice.customer?.id || ""
+    invoice.customer?.id || "",
   );
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [stockSearchOpen, setStockSearchOpen] = useState(false);
   const [checkoutSearchOpen, setCheckoutSearchOpen] = useState(false);
 
   const [invoiceDate, setInvoiceDate] = useState(
-    invoice.invoiceDate.split("T")[0]
+    invoice.invoiceDate.split("T")[0],
   );
   const [dueDate, setDueDate] = useState(
-    invoice.dueDate ? invoice.dueDate.split("T")[0] : ""
+    invoice.dueDate ? invoice.dueDate.split("T")[0] : "",
   );
 
   // Cart State
@@ -110,11 +110,23 @@ export default function EditInvoiceFormClient({
     return invoice.items
       .filter((item) => item.type === "stock" || item.itemType === "product")
       .map((item) => {
-        const product = products.find((p) => p._id === item.productId?.toString());
-        const currentStock = product ? product.stock : 0;
+        const product = products.find(
+          (p) => p._id === item.productId?.toString(),
+        );
+        // Use inventory.quantityAvailable from the product
+        const currentAvailable = product?.inventory?.quantityAvailable ?? 0;
 
-        // ✅ Correct from the start!
-        const availableStock = currentStock + item.quantity;
+        // Determine if this is a technician stock item
+        const isFromCheckout = !!item.relatedCheckout?.checkoutId;
+        const isFromRequest = !!item.relatedRequest?.requestId;
+        const isTechnicianStock = isFromCheckout || isFromRequest;
+
+        // Calculate available stock:
+        // - Store items: current available + quantity already on this invoice (if stock was deducted)
+        // - Technician stock: limited to the quantity on the invoice (from checkout)
+        const availableStock = isTechnicianStock
+          ? item.quantity // Checkout items: can't exceed original checkout quantity
+          : currentAvailable + (item.stockDeducted ? item.quantity : 0);
 
         return {
           id: Date.now() + Math.random(),
@@ -123,13 +135,22 @@ export default function EditInvoiceFormClient({
           name: item.name || item.productName,
           description: item.description || "",
           unit: item.unit,
-          costPrice: item.unitPrice / (1 + (item.markup || 0) / 100), // Reverse calculate
+          costPrice: item.costing?.unitCost || item.unitPrice,
           catalogPrice: product?.pricing?.sellingPrice || item.unitPrice,
           sellingPrice: item.unitPrice,
           quantity: item.quantity,
           taxRate: item.taxRate ?? 16, // Per-item tax rate
           total: item.total || item.amount,
-          availableStock: availableStock, // ✅ Accurate immediately
+          availableStock: availableStock,
+          // Preserve checkout tracking for technician stock items
+          checkoutId: item.relatedCheckout?.checkoutId?.toString(),
+          checkoutNumber: item.relatedCheckout?.checkoutNumber,
+          stockSource: isTechnicianStock ? "technician" : "store",
+          technicianId: item.relatedRequest?.technicianId || "",
+          technicianName: item.relatedRequest?.technicianName || "",
+          // Also preserve request tracking
+          requestId: item.relatedRequest?.requestId?.toString(),
+          requestNumber: item.relatedRequest?.requestNumber,
         };
       });
   });
@@ -146,12 +167,12 @@ export default function EditInvoiceFormClient({
         unitPrice: item.unitPrice,
         taxRate: item.taxRate ?? 16, // Per-item tax rate
         total: item.total || item.amount,
-      }))
+      })),
   );
 
   const [markupPercentage, setMarkupPercentage] = useState(0);
   const [discountPercentage, setDiscountPercentage] = useState(
-    invoice.discountPercentage || 0
+    invoice.discountPercentage || 0,
   );
   const [notes, setNotes] = useState(invoice.notes || "");
 
@@ -163,10 +184,12 @@ export default function EditInvoiceFormClient({
     setStockItems((prev) =>
       prev.map((item) => {
         const product = products.find((p) => p._id === item.productId);
-        return product
-          ? { ...item, availableStock: product.stock + item.quantity }
-          : item;
-      })
+        if (!product) return item;
+        // Only recalculate for store items, not technician stock
+        if (item.stockSource === "technician") return item;
+        const available = product.inventory?.quantityAvailable ?? 0;
+        return { ...item, availableStock: available + item.quantity };
+      }),
     );
   }, [products]);
 
@@ -186,7 +209,7 @@ export default function EditInvoiceFormClient({
   const addStockItem = (product) => {
     // Check if already in cart
     const existingItem = stockItems.find(
-      (item) => item.productId === product._id
+      (item) => item.productId === product._id,
     );
 
     if (existingItem) {
@@ -196,11 +219,13 @@ export default function EditInvoiceFormClient({
       }
     } else {
       // Add new item
-      const costPrice = product.costing?.costPrice || product.price;
-      const defaultSellingPrice = product.pricing?.sellingPrice || product.price;
-      const sellingPrice = markupPercentage > 0
-        ? costPrice + (costPrice * markupPercentage) / 100
-        : defaultSellingPrice;
+      const costPrice = product.costing?.costPrice || 0;
+      const defaultSellingPrice =
+        product.pricing?.sellingPrice || 0;
+      const sellingPrice =
+        markupPercentage > 0
+          ? costPrice + (costPrice * markupPercentage) / 100
+          : defaultSellingPrice;
 
       const newItem = {
         id: Date.now() + Math.random(),
@@ -214,8 +239,9 @@ export default function EditInvoiceFormClient({
         sellingPrice: sellingPrice,
         quantity: 1,
         taxRate: product.taxRate ?? 16, // Per-item tax rate
-        availableStock: product.stock,
+        availableStock: product.inventory?.quantityAvailable ?? 0,
         total: sellingPrice * 1,
+        stockSource: "store", // From store inventory
       };
 
       setStockItems([...stockItems, newItem]);
@@ -254,6 +280,7 @@ export default function EditInvoiceFormClient({
       checkoutId: checkout._id,
       checkoutNumber: checkout.checkoutNumber,
       stockSource: "technician",
+      technicianId: checkout.checkedOutTo?.id,
       technicianName: checkout.checkedOutTo?.name,
     };
 
@@ -273,7 +300,7 @@ export default function EditInvoiceFormClient({
           return updatedItem;
         }
         return item;
-      })
+      }),
     );
   };
 
@@ -291,7 +318,7 @@ export default function EditInvoiceFormClient({
           sellingPrice: newSellingPrice,
           total: item.quantity * newSellingPrice,
         };
-      })
+      }),
     );
   };
 
@@ -336,7 +363,7 @@ export default function EditInvoiceFormClient({
           return updatedItem;
         }
         return item;
-      })
+      }),
     );
   };
 
@@ -357,7 +384,8 @@ export default function EditInvoiceFormClient({
   const subtotalAfterDiscount = subtotal - discountAmount;
 
   // Calculate tax per item (proportionally adjusted for discount)
-  const discountFactor = subtotal > 0 ? (subtotal - discountAmount) / subtotal : 1;
+  const discountFactor =
+    subtotal > 0 ? (subtotal - discountAmount) / subtotal : 1;
 
   const stockTax = stockItems.reduce((sum, item) => {
     const adjustedAmount = item.total * discountFactor;
@@ -375,7 +403,8 @@ export default function EditInvoiceFormClient({
   // Calculate price deviation percentage
   const getPriceDeviation = (item) => {
     if (!item.catalogPrice || item.catalogPrice === 0) return null;
-    const deviation = ((item.sellingPrice - item.catalogPrice) / item.catalogPrice) * 100;
+    const deviation =
+      ((item.sellingPrice - item.catalogPrice) / item.catalogPrice) * 100;
     return deviation;
   };
 
@@ -401,7 +430,7 @@ export default function EditInvoiceFormClient({
 
     // Validate service items
     const invalidServices = serviceItems.filter(
-      (item) => !item.name.trim() || !item.unit.trim()
+      (item) => !item.name.trim() || !item.unit.trim(),
     );
     if (invalidServices.length > 0) {
       setError("Please fill in name and unit for all service items");
@@ -410,7 +439,7 @@ export default function EditInvoiceFormClient({
 
     // Validate stock quantities
     const invalidStock = stockItems.filter(
-      (item) => item.quantity > item.availableStock
+      (item) => item.quantity > item.availableStock,
     );
     if (invalidStock.length > 0) {
       setError("Some items exceed available stock");
@@ -443,8 +472,21 @@ export default function EditInvoiceFormClient({
         total: item.total,
         stockSource: item.stockSource || "store",
         relatedCheckout: item.checkoutId
-          ? { checkoutId: item.checkoutId, checkoutNumber: item.checkoutNumber }
-          : undefined,
+          ? {
+              checkoutId: item.checkoutId,
+              checkoutNumber: item.checkoutNumber,
+              technicianId: item.technicianId || "",
+              technicianName: item.technicianName || "",
+            }
+          : item.requestId
+            ? {
+                // For items from stock requests
+                requestId: item.requestId,
+                requestNumber: item.requestNumber,
+                technicianId: item.technicianId || "",
+                technicianName: item.technicianName || "",
+              }
+            : undefined,
       })),
       serviceItems: serviceItems.map((item) => ({
         name: item.name,
@@ -488,7 +530,7 @@ export default function EditInvoiceFormClient({
   };
 
   const selectedCustomerData = customers.find(
-    (c) => c._id === selectedCustomer
+    (c) => c._id === selectedCustomer,
   );
 
   return (
@@ -604,7 +646,7 @@ export default function EditInvoiceFormClient({
                   <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-[500px] p-0">
+              <PopoverContent className="w-125 p-0">
                 <Command>
                   <CommandInput placeholder="Search customers..." />
                   <CommandList>
@@ -745,8 +787,9 @@ export default function EditInvoiceFormClient({
                           <div className="flex-1">
                             <p className="font-medium">{product.name}</p>
                             <p className="text-xs text-muted-foreground">
-                              {product.SKU} • Stock: {product.stock} • KES{" "}
-                              {product.pricing?.sellingPrice || product.price}
+                              {product.SKU} • Available:{" "}
+                              {product.inventory?.quantityAvailable ?? 0} • KES{" "}
+                              {product.pricing?.sellingPrice || 0}
                             </p>
                           </div>
                           <Plus className="h-4 w-4 text-green-500" />
@@ -763,9 +806,10 @@ export default function EditInvoiceFormClient({
             {(() => {
               // Filter checkouts by selected customer
               const customerCheckouts = selectedCustomer
-                ? checkouts.filter((co) =>
-                    co.customer?.id === selectedCustomer &&
-                    !stockItems.some((si) => si.checkoutId === co._id)
+                ? checkouts.filter(
+                    (co) =>
+                      co.customer?.id === selectedCustomer &&
+                      !stockItems.some((si) => si.checkoutId === co._id),
                   )
                 : [];
 
@@ -791,7 +835,10 @@ export default function EditInvoiceFormClient({
               }
 
               return (
-                <Popover open={checkoutSearchOpen} onOpenChange={setCheckoutSearchOpen}>
+                <Popover
+                  open={checkoutSearchOpen}
+                  onOpenChange={setCheckoutSearchOpen}
+                >
                   <PopoverTrigger asChild>
                     <Button
                       type="button"
@@ -809,8 +856,12 @@ export default function EditInvoiceFormClient({
                     <Command>
                       <CommandInput placeholder="Search checked-out items..." />
                       <CommandList>
-                        <CommandEmpty>No checkout items found for this customer.</CommandEmpty>
-                        <CommandGroup heading={`Items for ${selectedCustomerData?.name || "Customer"}`}>
+                        <CommandEmpty>
+                          No checkout items found for this customer.
+                        </CommandEmpty>
+                        <CommandGroup
+                          heading={`Items for ${selectedCustomerData?.name || "Customer"}`}
+                        >
                           {customerCheckouts.map((checkout) => (
                             <CommandItem
                               key={checkout._id}
@@ -818,10 +869,13 @@ export default function EditInvoiceFormClient({
                               onSelect={() => addCheckoutItem(checkout)}
                             >
                               <div className="flex-1">
-                                <p className="font-medium">{checkout.productSnapshot?.name}</p>
+                                <p className="font-medium">
+                                  {checkout.productSnapshot?.name}
+                                </p>
                                 <p className="text-xs text-muted-foreground">
-                                  {checkout.checkoutNumber} • Qty: {checkout.quantity} •{" "}
-                                  With: {checkout.checkedOutTo?.name}
+                                  {checkout.checkoutNumber} • Qty:{" "}
+                                  {checkout.quantity} • With:{" "}
+                                  {checkout.checkedOutTo?.name}
                                 </p>
                               </div>
                               <Plus className="h-4 w-4 text-orange-500" />
@@ -846,7 +900,8 @@ export default function EditInvoiceFormClient({
             <div className="space-y-3">
               {stockItems.map((item, index) => {
                 const deviation = getPriceDeviation(item);
-                const hasDeviation = deviation !== null && Math.abs(deviation) > 0.01;
+                const hasDeviation =
+                  deviation !== null && Math.abs(deviation) > 0.01;
 
                 return (
                   <div
@@ -855,14 +910,22 @@ export default function EditInvoiceFormClient({
                   >
                     <div className="flex justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <div className={cn(
-                          "w-8 h-8 rounded-full flex items-center justify-center",
-                          item.stockSource === "technician" ? "bg-orange-500/10" : "bg-blue-500/10"
-                        )}>
-                          <span className={cn(
-                            "text-sm font-semibold",
-                            item.stockSource === "technician" ? "text-orange-600 dark:text-orange-400" : "text-blue-600 dark:text-blue-400"
-                          )}>
+                        <div
+                          className={cn(
+                            "w-8 h-8 rounded-full flex items-center justify-center",
+                            item.stockSource === "technician"
+                              ? "bg-orange-500/10"
+                              : "bg-blue-500/10",
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "text-sm font-semibold",
+                              item.stockSource === "technician"
+                                ? "text-orange-600 dark:text-orange-400"
+                                : "text-blue-600 dark:text-blue-400",
+                            )}
+                          >
                             {index + 1}
                           </span>
                         </div>
@@ -870,7 +933,10 @@ export default function EditInvoiceFormClient({
                           <div className="flex items-center gap-2">
                             <p className="font-medium">{item.name}</p>
                             {item.stockSource === "technician" && (
-                              <Badge variant="outline" className="bg-orange-500/10 text-orange-600 border-orange-500/20 text-xs">
+                              <Badge
+                                variant="outline"
+                                className="bg-orange-500/10 text-orange-600 border-orange-500/20 text-xs"
+                              >
                                 <Truck className="w-3 h-3 mr-1" />
                                 {item.technicianName}
                               </Badge>
@@ -884,7 +950,9 @@ export default function EditInvoiceFormClient({
                               </span>
                             )}
                             {item.checkoutNumber && (
-                              <span className="ml-2">• {item.checkoutNumber}</span>
+                              <span className="ml-2">
+                                • {item.checkoutNumber}
+                              </span>
                             )}
                           </p>
                         </div>
@@ -932,14 +1000,18 @@ export default function EditInvoiceFormClient({
                               updateStockItem(
                                 item.id,
                                 "sellingPrice",
-                                e.target.value
+                                e.target.value,
                               )
                             }
                             min="0"
                             className={cn(
                               "h-8",
-                              hasDeviation && deviation < 0 && "border-orange-500 bg-orange-500/5",
-                              hasDeviation && deviation > 0 && "border-green-500 bg-green-500/5"
+                              hasDeviation &&
+                                deviation < 0 &&
+                                "border-orange-500 bg-orange-500/5",
+                              hasDeviation &&
+                                deviation > 0 &&
+                                "border-green-500 bg-green-500/5",
                             )}
                           />
                           {hasDeviation && (
@@ -948,10 +1020,11 @@ export default function EditInvoiceFormClient({
                                 "absolute -top-5 right-0 text-[10px] font-medium px-1 rounded",
                                 deviation < 0
                                   ? "text-orange-600 bg-orange-500/10"
-                                  : "text-green-600 bg-green-500/10"
+                                  : "text-green-600 bg-green-500/10",
                               )}
                             >
-                              {deviation > 0 ? "+" : ""}{deviation.toFixed(0)}%
+                              {deviation > 0 ? "+" : ""}
+                              {deviation.toFixed(0)}%
                             </span>
                           )}
                         </div>
@@ -969,7 +1042,10 @@ export default function EditInvoiceFormClient({
                           </SelectTrigger>
                           <SelectContent>
                             {TAX_RATE_OPTIONS.map((opt) => (
-                              <SelectItem key={opt.value} value={String(opt.value)}>
+                              <SelectItem
+                                key={opt.value}
+                                value={String(opt.value)}
+                              >
                                 {opt.label}
                               </SelectItem>
                             ))}
@@ -1088,7 +1164,7 @@ export default function EditInvoiceFormClient({
                         updateServiceItem(
                           item.id,
                           "description",
-                          e.target.value
+                          e.target.value,
                         )
                       }
                       placeholder="Brief description"
@@ -1136,7 +1212,7 @@ export default function EditInvoiceFormClient({
                           updateServiceItem(
                             item.id,
                             "unitPrice",
-                            e.target.value
+                            e.target.value,
                           )
                         }
                         min="0"
@@ -1159,7 +1235,10 @@ export default function EditInvoiceFormClient({
                         </SelectTrigger>
                         <SelectContent>
                           {TAX_RATE_OPTIONS.map((opt) => (
-                            <SelectItem key={opt.value} value={String(opt.value)}>
+                            <SelectItem
+                              key={opt.value}
+                              value={String(opt.value)}
+                            >
                               {opt.label}
                             </SelectItem>
                           ))}

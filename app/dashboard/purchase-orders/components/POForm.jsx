@@ -246,7 +246,7 @@ function ProductCombobox({ products, index, defaultValue, onProductChange }) {
                           {product.name}
                         </span>
                         <span className="text-xs text-muted-foreground">
-                          Cost: {product.costPrice?.toLocaleString() || 0} | Stock: {product.stock}
+                          Cost: {product.costing?.costPrice?.toLocaleString() || 0} | Stock: {product.inventory?.quantityOnHand ?? 0}
                         </span>
                       </div>
                     </CommandItem>

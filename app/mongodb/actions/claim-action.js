@@ -23,8 +23,6 @@ import {
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
 
-dbConnect();
-
 const settleAdvanceSchema = z.object({
   items: z
     .array(expenseItemSchema)
@@ -47,6 +45,27 @@ function formatUserForAudit(user) {
 }
 
 // ============================================
+// HELPER: Derive company code from name
+// ============================================
+function deriveCompanyCode(name) {
+  if (!name) return null;
+
+  const words = name.trim().split(/\s+/);
+
+  if (words.length >= 2) {
+    // Multiple words: take first letter of each (up to 4)
+    return words
+      .slice(0, 4)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase();
+  } else {
+    // Single word: take first 3-4 characters
+    return name.slice(0, 3).toUpperCase();
+  }
+}
+
+// ============================================
 // HELPER: Generate claim number (tenant-scoped)
 // ============================================
 async function generateClaimNumber(tenantCompanyId, session) {
@@ -56,9 +75,13 @@ async function generateClaimNumber(tenantCompanyId, session) {
   let companyCode = null;
   if (tenantCompanyId) {
     const company = await Company.findById(tenantCompanyId)
-      .select("code")
+      .select("code name")
       .lean();
-    companyCode = company?.code || null;
+
+    if (company) {
+      // Use explicit code if set, otherwise derive from company name
+      companyCode = company.code || deriveCompanyCode(company.name);
+    }
   }
 
   // Build tenant-scoped counter name
