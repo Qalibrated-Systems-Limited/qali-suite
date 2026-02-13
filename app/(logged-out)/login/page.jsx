@@ -21,7 +21,6 @@ import { Input } from "../../../components/ui/input";
 import { Alert, AlertDescription } from "../../../components/ui/alert";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  Package,
   TriangleAlert,
   Loader2,
   Mail,
@@ -57,8 +56,8 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-6">
         {/* Logo & Branding */}
         <div className="flex flex-col items-center space-y-3">
-          <div className="w-16 h-16 bg-yellow-500 rounded-lg flex items-center justify-center">
-            <Package className="w-10 h-10 text-black" />
+          <div className="w-16 h-16 bg-yellow-500 rounded-xl flex items-center justify-center shadow-lg shadow-yellow-500/20">
+            <span className="text-3xl font-bold text-black">Q</span>
           </div>
           <div className="text-center">
             <h1 className="text-2xl font-bold text-foreground">QaliSuite</h1>

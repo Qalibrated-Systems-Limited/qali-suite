@@ -8,10 +8,8 @@ export const metadata = {
 export default function LogoutLayout({ children }) {
   return (
     <>
-      <div className=" flex flex-col min-h-screen p-24 items-center justify-center gap-4">
-        {children}
-      </div>
-      <LightDarkToggle className="fixed top-1/2 -mt-4 right-2" />
+      {children}
+      <LightDarkToggle className="fixed top-6 right-6 z-50" />
     </>
   );
 }
