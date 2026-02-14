@@ -16,7 +16,7 @@ type UserType = {
 };
 async function getUser(email: string) {
   try {
-    dbConnect();
+    await dbConnect();
     const user = await User.findOne({ email }).select("+password");
 
     return user;
