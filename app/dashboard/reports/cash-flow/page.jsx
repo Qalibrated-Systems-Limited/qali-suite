@@ -50,7 +50,6 @@ function getDateRange(preset) {
 export default async function CashFlowPage({ searchParams }) {
   const params = await searchParams;
   const preset = params?.period || "this-month";
-
   const { startDate, endDate } = getDateRange(preset);
 
   let reportData = null;

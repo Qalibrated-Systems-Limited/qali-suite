@@ -1,9 +1,13 @@
-import { auth } from "@/auth";
+import { Suspense } from "react";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import AccountsListClient from "../components/accountsList";
-import { getAccountsGrouped } from "@/app/mongodb/queries/accountQueries";
+import {
+  AccountStatsCards,
+  AccountStatsSkeleton,
+  AccountsListServer,
+  AccountsListSkeleton,
+} from "../components/AccountServerComponents";
 
 export const metadata = {
   title: "Chart of Accounts | ERP System",
@@ -11,12 +15,6 @@ export const metadata = {
 };
 
 export default async function AccountsPage() {
-  const session = await auth();
-  const { user } = session;
-
-  // Fetch accounts grouped by type
-  const accountsGrouped = await getAccountsGrouped();
-
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Header */}
@@ -27,10 +25,23 @@ export default async function AccountsPage() {
             Manage your accounting structure
           </p>
         </div>
+        <Button asChild className="sm:w-auto">
+          <Link href="/dashboard/accounts/create">
+            <Plus className="w-4 h-4 mr-2" />
+            New Account
+          </Link>
+        </Button>
       </div>
 
-      {/* Accounts List */}
-      <AccountsListClient accountsGrouped={accountsGrouped} />
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<AccountStatsSkeleton />}>
+        <AccountStatsCards />
+      </Suspense>
+
+      {/* Accounts List - Stream independently */}
+      <Suspense fallback={<AccountsListSkeleton />}>
+        <AccountsListServer />
+      </Suspense>
     </div>
   );
 }

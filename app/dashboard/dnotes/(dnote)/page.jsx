@@ -1,13 +1,10 @@
+import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import {
-  searchDeliveryNotes,
-  fetchDeliveryNotePages,
-  getDeliveryNotesStats,
   getUniqueReasons,
   getUniqueTechnicians,
 } from "@/app/mongodb/queries/dnote-queries";
-import Pagination from "@/components/pagination";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -18,15 +15,14 @@ import {
   ClearDNoteFiltersButton,
   DNoteFilterBadge,
 } from "../components/DeliveryNoteFilters";
-import { DeliveryNotesTable } from "../components/DeliveryNoteTable";
 import {
-  FileText,
-  PackageCheck,
-  TruckIcon,
-  Calendar,
-  DollarSign,
-} from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+  DnoteStatsCards,
+  DnoteStatsSkeleton,
+  DnotesTableServer,
+  DnotesTableSkeleton,
+  DnotesPaginationServer,
+  PaginationSkeleton,
+} from "../components/DnoteServerComponents";
 
 async function DeliveryNotesPage(props) {
   const searchParams = await props.searchParams;
@@ -35,8 +31,6 @@ async function DeliveryNotesPage(props) {
   if (!session?.user) {
     redirect("/login");
   }
-
-  const { user } = session;
 
   // Get URL parameters
   const query = searchParams.query || "";
@@ -56,15 +50,11 @@ async function DeliveryNotesPage(props) {
     endDate,
   };
 
-  // Fetch data in parallel
-  const [totalPages, deliveryNotes, stats, reasons, technicians] =
-    await Promise.all([
-      fetchDeliveryNotePages(query, filters),
-      searchDeliveryNotes(query, currentPage, filters),
-      getDeliveryNotesStats(),
-      getUniqueReasons(),
-      getUniqueTechnicians(),
-    ]);
+  // Fetch filter options (needed for dropdowns)
+  const [reasons, technicians] = await Promise.all([
+    getUniqueReasons(),
+    getUniqueTechnicians(),
+  ]);
 
   // Check if any filters are active
   const hasActiveFilters =
@@ -86,115 +76,10 @@ async function DeliveryNotesPage(props) {
         </div>
       </div>
 
-      {/* Stats Cards
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Total DNotes</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {stats.total}
-                </p>
-              </div>
-              <FileText className="w-8 h-8 text-yellow-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Total Value</p>
-              <p className="text-sm font-semibold text-yellow-400">
-                {formatCurrency(stats.salesValue + stats.returnableValue)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Sales</p>
-                <p className="text-2xl font-bold text-green-500">
-                  {stats.sales}
-                </p>
-              </div>
-              <PackageCheck className="w-8 h-8 text-green-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Sales Value</p>
-              <p className="text-sm font-semibold text-green-400">
-                {formatCurrency(stats.salesValue)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Returnable</p>
-                <p className="text-2xl font-bold text-orange-500">
-                  {stats.returnable}
-                </p>
-              </div>
-              <TruckIcon className="w-8 h-8 text-orange-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Returnable Value</p>
-              <p className="text-sm font-semibold text-orange-400">
-                {formatCurrency(stats.returnableValue)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">This Month</p>
-                <p className="text-2xl font-bold text-blue-500">
-                  {stats.thisMonth}
-                </p>
-              </div>
-              <Calendar className="w-8 h-8 text-blue-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Month Value</p>
-              <p className="text-sm font-semibold text-blue-400">
-                {formatCurrency(stats.thisMonthValue)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Avg. Value</p>
-                <p className="text-2xl font-bold text-purple-500">
-                  {stats.total > 0
-                    ? formatCurrency(
-                        (stats.salesValue + stats.returnableValue) / stats.total
-                      )
-                    : "KES 0"}
-                </p>
-              </div>
-              <DollarSign className="w-8 h-8 text-purple-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Sales Ratio</p>
-              <p className="text-sm font-semibold text-purple-400">
-                {stats.total > 0
-                  ? Math.round((stats.sales / stats.total) * 100)
-                  : 0}
-                %
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div> */}
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<DnoteStatsSkeleton />}>
+        <DnoteStatsCards />
+      </Suspense>
 
       {/* Search and Filters */}
       <Card className="bg-card border-border">
@@ -268,15 +153,15 @@ async function DeliveryNotesPage(props) {
         </CardContent>
       </Card>
 
-      {/* Delivery Notes Table */}
-      <DeliveryNotesTable deliveryNotes={deliveryNotes} />
+      {/* Delivery Notes Table - Stream independently */}
+      <Suspense fallback={<DnotesTableSkeleton />}>
+        <DnotesTableServer query={query} page={currentPage} filters={filters} />
+      </Suspense>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center">
-          <Pagination totalPages={totalPages} />
-        </div>
-      )}
+      {/* Pagination - Stream independently */}
+      <Suspense fallback={<PaginationSkeleton />}>
+        <DnotesPaginationServer query={query} filters={filters} />
+      </Suspense>
     </div>
   );
 }

@@ -179,6 +179,7 @@ export const getFinancialOverview = async () => {
 // KEY METRICS (Admin Dashboard)
 // ============================================
 export const getKeyMetrics = async () => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -257,6 +258,7 @@ export const getKeyMetrics = async () => {
 // TOP 5 PRODUCTS (Most Sold/Moved)
 // ============================================
 export const getTopProducts = async (limit = 5) => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
@@ -290,6 +292,7 @@ export const getTopProducts = async (limit = 5) => {
 // STOCK MOVEMENT TREND (Last 7 Days)
 // ============================================
 export const getStockMovementTrend = async (days = 7) => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
@@ -334,6 +337,7 @@ export const getStockMovementTrend = async (days = 7) => {
 // SALES BY CUSTOMER (Top 5)
 // ============================================
 export const getSalesByCustomer = async (limit = 5) => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
@@ -367,6 +371,7 @@ export const getSalesByCustomer = async (limit = 5) => {
 // RECENT TRANSACTIONS (Last 5)
 // ============================================
 export const getRecentTransactions = async (limit = 5) => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -390,6 +395,7 @@ export const getRecentTransactions = async (limit = 5) => {
 // PENDING APPROVALS (By Role)
 // ============================================
 export const getPendingApprovals = async (role: string) => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -421,6 +427,7 @@ export const getPendingApprovals = async (role: string) => {
 // MANAGER WORKLOAD
 // ============================================
 export const getManagerWorkload = async () => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -471,6 +478,7 @@ export const getManagerWorkload = async () => {
 // ACCOUNTANT WORKLOAD
 // ============================================
 export const getAccountantWorkload = async () => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -532,6 +540,7 @@ export const getAccountantWorkload = async () => {
 // EMPLOYEE FINANCIAL SUMMARY
 // ============================================
 export const getEmployeeFinancialSummary = async (userId: string) => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
@@ -589,6 +598,7 @@ export const getEmployeeFinancialSummary = async (userId: string) => {
  * Get comprehensive stock statistics
  */
 export async function getStockStats() {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
@@ -674,6 +684,7 @@ export async function getStockStats() {
  * Returns products where current stock <= reorder level
  */
 export async function getLowStockProducts(limit = 10) {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
@@ -716,6 +727,7 @@ export async function getLowStockProducts(limit = 10) {
  * Get out of stock products
  */
 export async function getOutOfStockProducts(limit = 10) {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -735,6 +747,7 @@ export async function getOutOfStockProducts(limit = 10) {
  * Groups by date and direction
  */
 export async function getMovementTrend(days = 7) {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
@@ -793,6 +806,7 @@ export async function getMovementTrend(days = 7) {
  * Get top moved products (most activity)
  */
 export async function getTopMovedProducts(limit = 5) {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
@@ -846,6 +860,7 @@ export async function getTopMovedProducts(limit = 5) {
  * Get category distribution
  */
 export async function getCategoryDistribution() {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
@@ -886,6 +901,7 @@ export async function getCategoryDistribution() {
  * Get recent stock movements
  */
 export async function getRecentMovements(limit = 5) {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -902,6 +918,7 @@ export async function getRecentMovements(limit = 5) {
  * Get recent stock requests
  */
 export async function getRecentRequests(limit = 5) {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -920,6 +937,7 @@ export async function getRecentRequests(limit = 5) {
  * Get overdue checkouts with full details
  */
 export async function getOverdueCheckouts(limit = 10) {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -942,6 +960,7 @@ export async function getOverdueCheckouts(limit = 10) {
  * Get checkout summary stats
  */
 export async function getCheckoutStats() {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
@@ -1012,6 +1031,7 @@ export async function getCheckoutStats() {
  * Get user's checkouts (scoped to company + user)
  */
 export async function getUserCheckouts(userId: string, activeOnly = true) {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -1033,6 +1053,7 @@ export async function getUserCheckouts(userId: string, activeOnly = true) {
  * Get revenue trend (last N months)
  */
 export async function getRevenueTrend(months = 6) {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
@@ -1102,6 +1123,7 @@ export async function getRevenueTrend(months = 6) {
  * SOURCE: Journal Entries (Expense accounts)
  */
 export async function getExpenseBreakdown() {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
@@ -1157,6 +1179,7 @@ export async function getExpenseBreakdown() {
  * Get dashboard alerts
  */
 export async function getDashboardAlerts() {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
@@ -1234,6 +1257,7 @@ export async function getDashboardAlerts() {
  * Accounts Receivable Aging
  */
 export async function getARAgingSummary() {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -1285,6 +1309,7 @@ export async function getARAgingSummary() {
  * Accounts Payable Aging
  */
 export async function getAPAgingSummary() {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 
@@ -1340,6 +1365,7 @@ export async function getAPAgingSummary() {
  * Get employee's financial summary (scoped to company + user)
  */
 export async function getEmployeeSummary(userId: string) {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
   const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
@@ -1386,6 +1412,7 @@ export async function getEmployeeSummary(userId: string) {
  * Get employee's borrowed items (scoped to company + user)
  */
 export async function getEmployeeBorrowedItems(userId: string) {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
 

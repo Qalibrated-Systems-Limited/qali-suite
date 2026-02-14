@@ -1,22 +1,23 @@
-import React from "react";
-import { RequestsListWithActions } from "../components/request";
-
-import {
-  fetchRequestPages,
-  searchRequests,
-} from "@/app/mongodb/queries/queries";
-import Pagination from "@/components/pagination";
+import { Suspense } from "react";
 import { auth } from "@/auth";
+import { redirect } from "next/navigation";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   StatusFilter,
   PriorityFilter,
+  RequestTypeFilter,
   ClearFiltersButton,
   FilterBadge,
 } from "../components/filters";
 import { SiteHeader } from "@/components/site-header";
-import { redirect } from "next/navigation";
+import {
+  RequestStatsCards,
+  RequestStatsSkeleton,
+  RequestsTableServer,
+  RequestsTableSkeleton,
+  RequestsPaginationServer,
+} from "../components/RequestServerComponents";
 
 const RequestsPage = async (props) => {
   const searchParams = await props.searchParams;
@@ -24,6 +25,7 @@ const RequestsPage = async (props) => {
   const query = searchParams.query || "";
   const status = searchParams.status || "all";
   const priority = searchParams.priority || "all";
+  const requestType = searchParams.type || "all";
   const customer = searchParams.customer || "";
   const startDate = searchParams.startDate || "";
   const endDate = searchParams.endDate || "";
@@ -53,34 +55,31 @@ const RequestsPage = async (props) => {
   const filters = {
     status: status !== "all" ? status : "",
     priority: priority !== "all" ? priority : "",
+    requestType: requestType !== "all" ? requestType : "",
     customer,
     startDate,
     endDate,
   };
 
-  const totalPages = await fetchRequestPages(query, userId, userRole, filters);
-  const requests = await searchRequests(
-    query,
-    currentPage,
-    userId,
-    userRole,
-    filters
-  );
-
   // Check if any filters are active
-  const hasActiveFilters = status !== "all" || priority !== "all";
+  const hasActiveFilters = status !== "all" || priority !== "all" || requestType !== "all";
 
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <SiteHeader 
+      <SiteHeader
         title={canOnlyViewOwn ? "My Requests" : "Manage Requests"}
         description={
-          canOnlyViewOwn 
-            ? "View and track your submitted requests" 
+          canOnlyViewOwn
+            ? "View and track your submitted requests"
             : "Review and manage all stock requests"
         }
       />
+
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<RequestStatsSkeleton />}>
+        <RequestStatsCards userId={userId} userRole={userRole} />
+      </Suspense>
 
       {/* Search and Filters */}
       <Card className="bg-card border-border">
@@ -95,6 +94,7 @@ const RequestsPage = async (props) => {
             <div className="flex flex-col sm:flex-row gap-3">
               <StatusFilter currentStatus={status} />
               <PriorityFilter currentPriority={priority} />
+              <RequestTypeFilter currentType={requestType} />
 
               {/* Clear Filters Button */}
               {hasActiveFilters && <ClearFiltersButton />}
@@ -116,25 +116,39 @@ const RequestsPage = async (props) => {
                     param="priority"
                   />
                 )}
+                {requestType !== "all" && (
+                  <FilterBadge
+                    label="Type"
+                    value={requestType}
+                    param="type"
+                  />
+                )}
               </div>
             )}
           </div>
         </CardContent>
       </Card>
 
-      {/* Requests List */}
-      <RequestsListWithActions
-        requests={requests}
-        userId={user.id}
-        userRole={userRole}
-      />
+      {/* Requests Table - Stream independently */}
+      <Suspense fallback={<RequestsTableSkeleton />}>
+        <RequestsTableServer
+          query={query}
+          page={currentPage}
+          filters={filters}
+          userId={userId}
+          userRole={userRole}
+        />
+      </Suspense>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center">
-          <Pagination totalPages={totalPages} />
-        </div>
-      )}
+      {/* Pagination - Stream after table */}
+      <Suspense fallback={null}>
+        <RequestsPaginationServer
+          query={query}
+          filters={filters}
+          userId={userId}
+          userRole={userRole}
+        />
+      </Suspense>
     </div>
   );
 };

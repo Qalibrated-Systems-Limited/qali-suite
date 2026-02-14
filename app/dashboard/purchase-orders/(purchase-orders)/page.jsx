@@ -1,30 +1,23 @@
+import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import {
-  searchPurchaseOrders,
-  fetchPurchaseOrderPages,
-  getPurchaseOrderStats,
-} from "@/app/mongodb/queries/purchase-order-queries";
-import Pagination from "@/components/pagination";
+import { getPurchaseOrderStats } from "@/app/mongodb/queries/purchase-order-queries";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   POStatusTabs,
   PODateFilter,
-  POQuickFilters,
   ClearPOFiltersButton,
   POFilterBadge,
   MobileFilterSheet,
 } from "../components/po-filters";
-import { POTable } from "../components/POTable";
 import {
-  FileText,
-  CheckCircle,
-  Send,
-  AlertTriangle,
-  Clock,
-} from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+  POStatsCards,
+  POStatsSkeleton,
+  POTableServer,
+  POTableSkeleton,
+  POPaginationServer,
+} from "../components/POServerComponents";
 
 export const metadata = {
   title: "Purchase Orders | ERP",
@@ -70,12 +63,8 @@ async function PurchaseOrdersPage(props) {
     endDate,
   };
 
-  // Fetch data in parallel
-  const [totalPages, purchaseOrders, stats] = await Promise.all([
-    fetchPurchaseOrderPages(query, filters),
-    searchPurchaseOrders(query, currentPage, filters),
-    getPurchaseOrderStats(filters),
-  ]);
+  // Fetch stats for filter tabs (needed synchronously for tabs)
+  const stats = await getPurchaseOrderStats(filters);
 
   // Check if any filters are active
   const hasActiveFilters = status !== "all" || startDate || endDate;
@@ -90,88 +79,10 @@ async function PurchaseOrdersPage(props) {
         </p>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Total POs</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {stats.total}
-                </p>
-              </div>
-              <FileText className="w-8 h-8 text-blue-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Total Value</p>
-              <p className="text-sm font-semibold text-blue-400">
-                {formatCurrency(stats.totalValue, true)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Open Orders</p>
-                <p className="text-2xl font-bold text-orange-500">
-                  {stats.open}
-                </p>
-              </div>
-              <Send className="w-8 h-8 text-orange-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Open Value</p>
-              <p className="text-sm font-semibold text-orange-400">
-                {formatCurrency(stats.openValue, true)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Received</p>
-                <p className="text-2xl font-bold text-green-500">
-                  {stats.received}
-                </p>
-              </div>
-              <CheckCircle className="w-8 h-8 text-green-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Received Value</p>
-              <p className="text-sm font-semibold text-green-400">
-                {formatCurrency(stats.receivedValue, true)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Partial</p>
-                <p className="text-2xl font-bold text-amber-500">
-                  {stats.partial}
-                </p>
-              </div>
-              <Clock className="w-8 h-8 text-amber-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Partial Value</p>
-              <p className="text-sm font-semibold text-amber-400">
-                {formatCurrency(stats.partialValue, true)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<POStatsSkeleton />}>
+        <POStatsCards filters={filters} />
+      </Suspense>
 
       {/* Search and Filters */}
       <Card className="bg-card border-border">
@@ -239,15 +150,15 @@ async function PurchaseOrdersPage(props) {
         </CardContent>
       </Card>
 
-      {/* Purchase Orders Table */}
-      <POTable purchaseOrders={purchaseOrders} />
+      {/* Purchase Orders Table - Stream independently */}
+      <Suspense fallback={<POTableSkeleton />}>
+        <POTableServer query={query} page={currentPage} filters={filters} />
+      </Suspense>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center">
-          <Pagination totalPages={totalPages} />
-        </div>
-      )}
+      {/* Pagination - Stream after table */}
+      <Suspense fallback={null}>
+        <POPaginationServer query={query} filters={filters} />
+      </Suspense>
     </div>
   );
 }

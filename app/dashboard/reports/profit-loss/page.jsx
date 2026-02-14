@@ -51,7 +51,6 @@ export default async function ProfitLossPage({ searchParams }) {
   const params = await searchParams;
   const preset = params?.period || "this-month";
   const comparison = params?.compare || null;
-
   const { startDate, endDate } = getDateRange(preset);
 
   let reportData = null;

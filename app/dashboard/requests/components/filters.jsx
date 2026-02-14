@@ -1,5 +1,6 @@
 "use client";
 
+import { useTransition } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -18,6 +19,7 @@ import {
   Clock,
   XCircle,
   AlertCircle,
+  Loader2,
 } from "lucide-react";
 
 // ============================================
@@ -27,20 +29,28 @@ export function StatusFilter({ currentStatus }) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleStatusChange = (value) => {
     const params = new URLSearchParams(searchParams);
     params.set("status", value);
     params.set("page", "1");
-    router.push(`${pathname}?${params.toString()}`);
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
     <div className="flex flex-col gap-2">
       <Label className="text-xs text-muted-foreground">Status</Label>
-      <Select value={currentStatus} onValueChange={handleStatusChange}>
+      <Select value={currentStatus} onValueChange={handleStatusChange} disabled={isPending}>
         <SelectTrigger className="w-full md:w-45 bg-background border-border text-foreground">
-          <Filter className="w-4 h-4 mr-2" />
+          {isPending ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <Filter className="w-4 h-4 mr-2" />
+          )}
           <SelectValue placeholder="All Status" />
         </SelectTrigger>
         <SelectContent className="bg-card border-border">
@@ -82,20 +92,28 @@ export function PriorityFilter({ currentPriority }) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handlePriorityChange = (value) => {
     const params = new URLSearchParams(searchParams);
     params.set("priority", value);
     params.set("page", "1");
-    router.push(`${pathname}?${params.toString()}`);
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
     <div className="flex flex-col gap-2">
       <Label className="text-xs text-muted-foreground">Priority</Label>
-      <Select value={currentPriority} onValueChange={handlePriorityChange}>
+      <Select value={currentPriority} onValueChange={handlePriorityChange} disabled={isPending}>
         <SelectTrigger className="w-full md:w-45 bg-background border-border text-foreground">
-          <Filter className="w-4 h-4 mr-2" />
+          {isPending ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <Filter className="w-4 h-4 mr-2" />
+          )}
           <SelectValue placeholder="All Priorities" />
         </SelectTrigger>
         <SelectContent className="bg-card border-border">
@@ -125,14 +143,61 @@ export function PriorityFilter({ currentPriority }) {
 }
 
 // ============================================
+// REQUEST TYPE FILTER
+// ============================================
+export function RequestTypeFilter({ currentType }) {
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  const handleTypeChange = (value) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("type", value);
+    params.set("page", "1");
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label className="text-xs text-muted-foreground">Type</Label>
+      <Select value={currentType} onValueChange={handleTypeChange} disabled={isPending}>
+        <SelectTrigger className="w-full md:w-45 bg-background border-border text-foreground">
+          {isPending ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <Filter className="w-4 h-4 mr-2" />
+          )}
+          <SelectValue placeholder="All Types" />
+        </SelectTrigger>
+        <SelectContent className="bg-card border-border">
+          <SelectItem value="all">All Types</SelectItem>
+          <SelectItem value="sale">Sale</SelectItem>
+          <SelectItem value="demo">Demo/Loan</SelectItem>
+          <SelectItem value="installation">Installation</SelectItem>
+          <SelectItem value="internal">Internal Use</SelectItem>
+          <SelectItem value="repair">Repair/Service</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// ============================================
 // CLEAR FILTERS BUTTON
 // ============================================
 export function ClearFiltersButton() {
   const pathname = usePathname();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleClearFilters = () => {
-    router.push(pathname);
+    startTransition(() => {
+      router.replace(pathname);
+    });
   };
 
   return (
@@ -140,9 +205,14 @@ export function ClearFiltersButton() {
       variant="outline"
       size="sm"
       onClick={handleClearFilters}
+      disabled={isPending}
       className="border-border text-foreground hover:bg-accent self-end"
     >
-      <X className="w-4 h-4 mr-1" />
+      {isPending ? (
+        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+      ) : (
+        <X className="w-4 h-4 mr-1" />
+      )}
       Clear All
     </Button>
   );
@@ -155,12 +225,16 @@ export function FilterBadge({ label, value, param }) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleRemove = () => {
     const params = new URLSearchParams(searchParams);
     params.delete(param);
     params.set("page", "1");
-    router.push(`${pathname}?${params.toString()}`);
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   const displayValue =
@@ -174,8 +248,9 @@ export function FilterBadge({ label, value, param }) {
       className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20 cursor-pointer"
       onClick={handleRemove}
     >
+      {isPending && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
       {label}: {displayValue}
-      <X className="w-3 h-3 ml-1" />
+      {!isPending && <X className="w-3 h-3 ml-1" />}
     </Badge>
   );
 }

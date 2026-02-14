@@ -1,17 +1,8 @@
+import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import {
-  searchInvoices,
-  fetchInvoicePages,
-  getInvoiceStats,
-} from "@/app/mongodb/queries/invoice-queries";
-import Account from "@/app/models/account";
-import dbConnect from "@/app/config/dbConnect";
-import Pagination from "@/components/pagination";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import {
   PaymentStatusFilter,
   InvoiceStatusFilter,
@@ -19,9 +10,14 @@ import {
   ClearInvoiceFiltersButton,
   InvoiceFilterBadge,
 } from "../components/invoice-filters";
-import { InvoicesTable } from "../components/Invoicetable";
-import { FileText, Plus, CheckCircle, XCircle, Clock } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import {
+  InvoiceStatsCards,
+  InvoiceStatsSkeleton,
+  InvoicesTableServer,
+  InvoicesTableSkeleton,
+  InvoicesPaginationServer,
+  PaginationSkeleton,
+} from "../components/InvoiceServerComponents";
 
 async function InvoicesPage(props) {
   const searchParams = await props.searchParams;
@@ -64,36 +60,9 @@ async function InvoicesPage(props) {
     endDate,
   };
 
-  // Connect to DB for Account query
-  await dbConnect();
-
-  // Fetch data in parallel
-  const [totalPages, invoices, stats, paymentAccounts] = await Promise.all([
-    fetchInvoicePages(query, filters),
-    searchInvoices(query, currentPage, filters),
-    getInvoiceStats(filters),
-    Account.find({
-      accountType: "asset",
-      subType: { $in: ["cash", "bank", "mpesa"] },
-      isActive: true,
-    })
-      .select("_id accountName accountCode subType")
-      .sort({ accountName: 1 })
-      .lean(),
-  ]);
-
-  // Serialize payment accounts for client component
-  const serializedPaymentAccounts = paymentAccounts.map((acc) => ({
-    _id: acc._id.toString(),
-    name: acc.accountName,
-    code: acc.accountCode,
-    subType: acc.subType,
-  }));
-
   // Check if any filters are active
   const hasActiveFilters =
     paymentStatus !== "all" || status !== "all" || startDate || endDate;
-
 
   return (
     <div className="flex flex-col gap-6">
@@ -107,93 +76,10 @@ async function InvoicesPage(props) {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Total Invoices</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {stats.totalInvoices}
-                </p>
-              </div>
-              <FileText className="w-8 h-8 text-blue-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Total Revenue</p>
-              <p className="text-sm font-semibold text-blue-400">
-                {formatCurrency(stats.totalRevenue)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Paid</p>
-                <p className="text-2xl font-bold text-green-500">
-                  {stats.totalPaid}
-                </p>
-              </div>
-              <CheckCircle className="w-8 h-8 text-green-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Amount Paid</p>
-              <p className="text-sm font-semibold text-green-400">
-                {formatCurrency(stats.totalAmountPaid)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Unpaid</p>
-                <p className="text-2xl font-bold text-red-500">
-                  {stats.totalUnpaid}
-                </p>
-              </div>
-              <XCircle className="w-8 h-8 text-red-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Balance Due</p>
-              <p className="text-sm font-semibold text-red-400">
-                {formatCurrency(stats.balanceDue)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Partial</p>
-                <p className="text-2xl font-bold text-orange-500">
-                  {stats.totalPartial}
-                </p>
-              </div>
-              <Clock className="w-8 h-8 text-orange-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Collection Rate</p>
-              <p className="text-sm font-semibold text-orange-400">
-                {stats.totalRevenue > 0
-                  ? Math.round(
-                      (stats.totalAmountPaid / stats.totalRevenue) * 100
-                    )
-                  : 0}
-                %
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<InvoiceStatsSkeleton />}>
+        <InvoiceStatsCards filters={filters} />
+      </Suspense>
 
       {/* Search and Filters */}
       <Card className="bg-card border-border">
@@ -256,15 +142,15 @@ async function InvoicesPage(props) {
         </CardContent>
       </Card>
 
-      {/* Invoices Table */}
-      <InvoicesTable invoices={invoices} paymentAccounts={serializedPaymentAccounts} />
+      {/* Invoices Table - Stream independently */}
+      <Suspense fallback={<InvoicesTableSkeleton />}>
+        <InvoicesTableServer query={query} page={currentPage} filters={filters} />
+      </Suspense>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center">
-          <Pagination totalPages={totalPages} />
-        </div>
-      )}
+      {/* Pagination - Stream independently */}
+      <Suspense fallback={<PaginationSkeleton />}>
+        <InvoicesPaginationServer query={query} filters={filters} />
+      </Suspense>
     </div>
   );
 }

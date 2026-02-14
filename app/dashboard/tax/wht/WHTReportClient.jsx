@@ -96,142 +96,55 @@ export default function WHTReportClient({
   const { summary, byRate, bySupplier } = whtData || {};
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground">
-            WHT Reports
-          </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            Withholding Tax on supplier payments
-          </p>
-        </div>
-
-        {/* Date Filter */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          <div className="flex items-center gap-2">
-            <div className="flex-1">
-              <Label htmlFor="startDate" className="sr-only">
-                Start Date
-              </Label>
-              <Input
-                id="startDate"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="h-9 text-sm"
-              />
-            </div>
-            <span className="text-muted-foreground">to</span>
-            <div className="flex-1">
-              <Label htmlFor="endDate" className="sr-only">
-                End Date
-              </Label>
-              <Input
-                id="endDate"
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="h-9 text-sm"
-              />
-            </div>
+    <div className="space-y-4">
+      {/* Date Filter & Export */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
+        <div className="flex items-center gap-2">
+          <div className="flex-1">
+            <Label htmlFor="startDate" className="sr-only">
+              Start Date
+            </Label>
+            <Input
+              id="startDate"
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="h-9 text-sm"
+            />
           </div>
-          <Button
-            onClick={handleDateChange}
-            variant="outline"
-            size="sm"
-            className="h-9"
-          >
-            <Calendar className="w-4 h-4 mr-2" />
-            Apply
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExportCSV}
-            disabled={isExporting}
-            className="h-9 gap-2"
-          >
-            <Download className="w-4 h-4" />
-            <span className="hidden sm:inline">Export</span>
-          </Button>
+          <span className="text-muted-foreground">to</span>
+          <div className="flex-1">
+            <Label htmlFor="endDate" className="sr-only">
+              End Date
+            </Label>
+            <Input
+              id="endDate"
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="h-9 text-sm"
+            />
+          </div>
         </div>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* Total WHT */}
-        <Card className="border-l-4 border-l-purple-500">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Receipt className="w-4 h-4 sm:w-5 sm:h-5 text-purple-500" />
-              <span className="text-xs sm:text-sm text-muted-foreground">
-                Total WHT
-              </span>
-            </div>
-            <p className="text-lg sm:text-2xl font-bold text-foreground tabular-nums">
-              {formatCurrency(summary?.totalWHT)}
-            </p>
-            <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">
-              {summary?.transactionCount || 0} transactions
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Remitted */}
-        <Card className="border-l-4 border-l-green-500">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-500" />
-              <span className="text-xs sm:text-sm text-muted-foreground">
-                Remitted
-              </span>
-            </div>
-            <p className="text-lg sm:text-2xl font-bold text-green-600 tabular-nums">
-              {formatCurrency(summary?.remitted)}
-            </p>
-            <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">
-              Paid to KRA
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Unremitted */}
-        <Card className="border-l-4 border-l-orange-500">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500" />
-              <span className="text-xs sm:text-sm text-muted-foreground">
-                Pending
-              </span>
-            </div>
-            <p className="text-lg sm:text-2xl font-bold text-orange-600 tabular-nums">
-              {formatCurrency(summary?.unremitted)}
-            </p>
-            <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">
-              {summary?.unremittedCount || 0} pending
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Certificates */}
-        <Card className="border-l-4 border-l-blue-500">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500" />
-              <span className="text-xs sm:text-sm text-muted-foreground">
-                Certificates
-              </span>
-            </div>
-            <p className="text-lg sm:text-2xl font-bold text-foreground">
-              {summary?.transactionCount || 0}
-            </p>
-            <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">
-              To be issued
-            </p>
-          </CardContent>
-        </Card>
+        <Button
+          onClick={handleDateChange}
+          variant="outline"
+          size="sm"
+          className="h-9"
+        >
+          <Calendar className="w-4 h-4 mr-2" />
+          Apply
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExportCSV}
+          disabled={isExporting}
+          className="h-9 gap-2"
+        >
+          <Download className="w-4 h-4" />
+          <span className="hidden sm:inline">Export</span>
+        </Button>
       </div>
 
       {/* Pending Alert */}

@@ -1,11 +1,13 @@
-import {
-  getPartiesPaginated,
-  fetchPartyPages,
-} from "@/app/mongodb/queries/partyQueries";
-import Pagination from "@/components/pagination";
+import { Suspense } from "react";
 import Search from "@/components/search";
-import PartyListClient from "../components/partylistClient";
-import { auth } from "@/auth";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  PartyStatsCards,
+  PartyStatsSkeleton,
+  PartiesTableServer,
+  PartiesTableSkeleton,
+  PartiesPaginationServer,
+} from "../components/PartyServerComponents";
 
 export const metadata = {
   title: "Parties | ERP System",
@@ -14,25 +16,14 @@ export const metadata = {
 
 export default async function PartiesPage({ searchParams }) {
   const params = await searchParams;
-  const session = await auth();
 
   const query = params?.query || "";
-  const type = params?.type || "all"; // all, customer, supplier, employee
+  const type = params?.type || "all";
   const currentPage = Number(params?.page) || 1;
-
-  const { user } = session;
-
-  // Fetch data
-  const totalPages = await fetchPartyPages(query, type === "all" ? null : type);
-  const parties = await getPartiesPaginated(
-    query,
-    currentPage,
-    type === "all" ? null : type
-  );
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
-      {/* Header - Responsive */}
+      {/* Header */}
       <div className="space-y-1 sm:space-y-2">
         <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
           Parties
@@ -42,15 +33,27 @@ export default async function PartiesPage({ searchParams }) {
         </p>
       </div>
 
-      {/* Parties List with responsive tabs */}
-      <PartyListClient parties={parties} currentType={type} />
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<PartyStatsSkeleton />}>
+        <PartyStatsCards />
+      </Suspense>
 
-      {/* Pagination - Centered */}
-      {totalPages > 1 && (
-        <div className="flex justify-center mt-4">
-          <Pagination totalPages={totalPages} />
-        </div>
-      )}
+      {/* Search */}
+      <Card className="bg-card border-border">
+        <CardContent className="p-4">
+          <Search placeholder="Search parties by name, email, or tax PIN..." />
+        </CardContent>
+      </Card>
+
+      {/* Parties Table - Stream independently */}
+      <Suspense fallback={<PartiesTableSkeleton />}>
+        <PartiesTableServer query={query} page={currentPage} type={type} />
+      </Suspense>
+
+      {/* Pagination - Stream after table */}
+      <Suspense fallback={null}>
+        <PartiesPaginationServer query={query} type={type} />
+      </Suspense>
     </div>
   );
 }

@@ -506,6 +506,86 @@ export async function searchTaxTransactions(searchTerm, limit = 50) {
     .lean();
 }
 
+/**
+ * Get tax transaction stats (for server component)
+ * Returns total count, tax amount totals, filed/unfiled counts
+ */
+export async function getTaxTransactionStats(filters = {}) {
+  await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+
+  let matchQuery = { ...tenantMatch };
+
+  // Apply filters
+  if (filters.taxType) matchQuery.taxType = filters.taxType;
+  if (filters.filingPeriod) matchQuery["kraTracking.filingPeriod"] = filters.filingPeriod;
+  if (filters.startDate || filters.endDate) {
+    matchQuery.transactionDate = {};
+    if (filters.startDate) matchQuery.transactionDate.$gte = new Date(filters.startDate);
+    if (filters.endDate) matchQuery.transactionDate.$lte = new Date(filters.endDate);
+  }
+
+  const stats = await TaxTransaction.aggregate([
+    { $match: matchQuery },
+    {
+      $group: {
+        _id: null,
+        totalTransactions: { $sum: 1 },
+        totalTaxAmount: { $sum: "$taxAmount" },
+        totalBaseAmount: { $sum: "$baseAmount" },
+        filedCount: {
+          $sum: { $cond: ["$kraTracking.filed", 1, 0] },
+        },
+        unfiledCount: {
+          $sum: { $cond: ["$kraTracking.filed", 0, 1] },
+        },
+      },
+    },
+  ]);
+
+  return stats[0] || {
+    totalTransactions: 0,
+    totalTaxAmount: 0,
+    totalBaseAmount: 0,
+    filedCount: 0,
+    unfiledCount: 0,
+  };
+}
+
+/**
+ * Get VAT stats only (for server component)
+ */
+export async function getVATStats(filingPeriod = null) {
+  const dashboard = await getVATDashboard(filingPeriod);
+  return {
+    filingPeriod: dashboard.filingPeriod,
+    outputVAT: dashboard.output?.totalVAT || 0,
+    inputVAT: dashboard.input?.totalVAT || 0,
+    outputCount: dashboard.output?.transactionCount || 0,
+    inputCount: dashboard.input?.transactionCount || 0,
+    unfiledCount: (dashboard.output?.unfiledCount || 0) + (dashboard.input?.unfiledCount || 0),
+    vatPayable: dashboard.summary?.vatPayable || 0,
+    vatRefundable: dashboard.summary?.vatRefundable || 0,
+    netPosition: dashboard.summary?.netPosition || 0,
+  };
+}
+
+/**
+ * Get WHT stats only (for server component)
+ */
+export async function getWHTStats(startDate = null, endDate = null) {
+  const dashboard = await getWHTDashboard(startDate, endDate);
+  return {
+    period: dashboard.period,
+    totalWHT: dashboard.summary?.totalWHT || 0,
+    remitted: dashboard.summary?.remitted || 0,
+    unremitted: dashboard.summary?.unremitted || 0,
+    transactionCount: dashboard.summary?.transactionCount || 0,
+    unremittedCount: dashboard.summary?.unremittedCount || 0,
+  };
+}
+
 export default {
   getTaxTransactions,
   getTaxTransactionById,
@@ -516,4 +596,7 @@ export default {
   getTaxSummary,
   getFilingPeriods,
   searchTaxTransactions,
+  getTaxTransactionStats,
+  getVATStats,
+  getWHTStats,
 };

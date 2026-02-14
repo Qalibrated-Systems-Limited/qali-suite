@@ -1,9 +1,14 @@
+import { Suspense } from "react";
+import Search from "@/components/search";
+import { Card, CardContent } from "@/components/ui/card";
 import {
-  getPartiesPaginated,
-  fetchPartyPages,
-} from "@/app/mongodb/queries/partyQueries";
-import Pagination from "@/components/pagination";
-import CustomerListClient from "../components/CustomerListClient";
+  CustomerStatsCards,
+  CustomerStatsSkeleton,
+  CustomersTableServer,
+  CustomersTableSkeleton,
+  CustomersPaginationServer,
+  PaginationSkeleton,
+} from "../components/CustomerServerComponents";
 
 export const metadata = {
   title: "Customers | ERP System",
@@ -16,27 +21,37 @@ export default async function CustomersPage({ searchParams }) {
   const query = params?.query || "";
   const currentPage = Number(params?.page) || 1;
 
-  const totalPages = await fetchPartyPages(query, "customer");
-  const customers = await getPartiesPaginated(query, currentPage, "customer");
-
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Customers</h1>
         <p className="text-muted-foreground">
-          {customers.length > 0
-            ? `${customers.length} customer${customers.length !== 1 ? "s" : ""} found`
-            : "No customers yet"}
+          Manage your customer relationships
         </p>
       </div>
 
-      <CustomerListClient customers={customers} />
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<CustomerStatsSkeleton />}>
+        <CustomerStatsCards />
+      </Suspense>
 
-      {totalPages > 1 && (
-        <div className="flex justify-center">
-          <Pagination totalPages={totalPages} />
-        </div>
-      )}
+      {/* Search */}
+      <Card className="bg-card border-border">
+        <CardContent className="p-4">
+          <Search placeholder="Search customers by name, email, or tax PIN..." />
+        </CardContent>
+      </Card>
+
+      {/* Customers Table - Stream independently */}
+      <Suspense fallback={<CustomersTableSkeleton />}>
+        <CustomersTableServer query={query} page={currentPage} />
+      </Suspense>
+
+      {/* Pagination - Stream independently */}
+      <Suspense fallback={<PaginationSkeleton />}>
+        <CustomersPaginationServer query={query} />
+      </Suspense>
     </div>
   );
 }

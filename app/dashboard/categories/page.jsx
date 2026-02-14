@@ -1,30 +1,76 @@
 // /app/dashboard/categories/page.jsx
-// SERVER COMPONENT - No "use client"
+// SERVER COMPONENT
 
+import { Suspense } from "react";
 import { auth } from "@/auth";
 import {
   AlertCircle,
   CheckCircle2,
   Plus,
   Sparkles,
-  Search,
   FolderTree,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import Link from "next/link";
+import { seedDefaultCategories, getCategories } from "../../mongodb/actions/category-actions";
 import {
-  getCategoryTree,
-  getCategories,
-  seedDefaultCategories,
-} from "../../mongodb/actions/category-actions";
-import CategoryTree from "./components/CategoryTree";
+  CategoryStatsCards,
+  CategoryStatsSkeleton,
+  CategoryTreeServer,
+  CategoryTreeSkeleton,
+} from "./components/CategoryServerComponents";
+import CategorySearch from "./components/CategorySearch";
 
 export const metadata = {
   title: "Categories | ERP",
   description: "Manage product categories",
 };
+
+// ============================================
+// ACTION BUTTONS (Async - checks if categories exist)
+// ============================================
+
+async function ActionButtons() {
+  const { categories = [] } = await getCategories(true);
+  const hasCategories = categories.length > 0;
+
+  return (
+    <div className="flex items-center gap-2">
+      {/* Seed Button - Only show if no categories */}
+      {!hasCategories && (
+        <form action={seedDefaultCategories}>
+          <Button type="submit" variant="outline">
+            <Sparkles className="mr-2 h-4 w-4" />
+            Seed Defaults
+          </Button>
+        </form>
+      )}
+
+      {/* Create Category Button */}
+      <Button asChild>
+        <Link href="/dashboard/categories/create">
+          <Plus className="mr-2 h-4 w-4" />
+          New Category
+        </Link>
+      </Button>
+    </div>
+  );
+}
+
+function ActionButtonsSkeleton() {
+  return (
+    <div className="flex items-center gap-2">
+      <Skeleton className="h-10 w-36" />
+    </div>
+  );
+}
+
+// ============================================
+// MAIN PAGE COMPONENT
+// ============================================
 
 export default async function CategoriesPage({ searchParams }) {
   const { success, error, search } = await searchParams;
@@ -54,35 +100,9 @@ export default async function CategoriesPage({ searchParams }) {
     );
   }
 
-  // Fetch data on server
-  const [treeResult, listResult] = await Promise.all([
-    getCategoryTree(true),
-    getCategories(true),
-  ]);
-
-  const tree = treeResult.tree || [];
-  const flatList = listResult.categories || [];
-
-  // Filter tree by search (server-side)
-  const filterTree = (nodes, query) => {
-    if (!query) return nodes;
-    return nodes
-      .map((node) => {
-        const matches = node.name.toLowerCase().includes(query.toLowerCase());
-        const filteredChildren = filterTree(node.children || [], query);
-        if (matches || filteredChildren.length > 0) {
-          return { ...node, children: filteredChildren };
-        }
-        return null;
-      })
-      .filter(Boolean);
-  };
-
-  const filteredTree = filterTree(tree, search || "");
-
   return (
     <div className="container py-6 space-y-6">
-      {/* Success message from searchParams */}
+      {/* Success message */}
       {success && (
         <Alert className="bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800">
           <CheckCircle2 className="h-4 w-4 text-green-600" />
@@ -92,7 +112,7 @@ export default async function CategoriesPage({ searchParams }) {
         </Alert>
       )}
 
-      {/* Error message from searchParams */}
+      {/* Error message */}
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
@@ -114,58 +134,25 @@ export default async function CategoriesPage({ searchParams }) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Seed Button - Form action */}
-          {tree.length === 0 && (
-            <form action={seedDefaultCategories}>
-              <Button type="submit" variant="outline">
-                <Sparkles className="mr-2 h-4 w-4" />
-                Seed Defaults
-              </Button>
-            </form>
-          )}
-        </div>
+        <Suspense fallback={<ActionButtonsSkeleton />}>
+          <ActionButtons />
+        </Suspense>
       </div>
 
-      {/* Search - Form that updates URL (no JS needed) */}
-      <form action="/dashboard/categories" method="GET">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            name="search"
-            placeholder="Search categories..."
-            defaultValue={search || ""}
-            className="pl-10"
-          />
-        </div>
-      </form>
+      {/* Stats Cards - Stream in independently */}
+      <Suspense fallback={<CategoryStatsSkeleton />}>
+        <CategoryStatsCards />
+      </Suspense>
 
-      {/* Category Tree */}
-      <div className="border rounded-lg bg-card">
-        {filteredTree.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground">
-            {search
-              ? "No categories match your search"
-              : "No categories yet. Create your first category or seed defaults."}
-          </div>
-        ) : (
-          <div className="p-2">
-            {/* CategoryTree is client component ONLY for expand/collapse */}
-            <CategoryTree categories={filteredTree} />
-          </div>
-        )}
-      </div>
+      {/* Search - Client component with useTransition (no page refresh) */}
+      <CategorySearch defaultValue={search || ""} />
 
-      {/* Stats */}
-      {tree.length > 0 && (
-        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          <span>{flatList.length} total categories</span>
-          <span>•</span>
-          <span>
-            {flatList.filter((c) => c.level === 0).length} root categories
-          </span>
-        </div>
-      )}
+      {/* Category Tree - Stream in independently */}
+      <Card className="border rounded-lg bg-card">
+        <Suspense fallback={<CategoryTreeSkeleton />}>
+          <CategoryTreeServer search={search} />
+        </Suspense>
+      </Card>
     </div>
   );
 }

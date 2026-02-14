@@ -1,5 +1,6 @@
 "use client";
 
+import { useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,7 @@ import {
   CheckCheck,
   XCircle,
   Clock,
+  Loader2,
 } from "lucide-react";
 
 // ============================================
@@ -33,6 +35,7 @@ export function POStatusTabs({ currentStatus, stats }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
 
   const handleStatusChange = (status) => {
     const params = new URLSearchParams(searchParams);
@@ -42,7 +45,9 @@ export function POStatusTabs({ currentStatus, stats }) {
       params.set("status", status);
     }
     params.delete("page");
-    router.push(`${pathname}?${params.toString()}`);
+    startTransition(() => {
+      router.push(`${pathname}?${params.toString()}`);
+    });
   };
 
   const tabs = [
@@ -67,13 +72,18 @@ export function POStatusTabs({ currentStatus, stats }) {
           <button
             key={tab.value}
             onClick={() => handleStatusChange(tab.value)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+            disabled={isPending}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors disabled:opacity-50 ${
               isActive
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted hover:bg-muted/80 text-muted-foreground"
             }`}
           >
-            <Icon className="h-3.5 w-3.5" />
+            {isPending && isActive ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Icon className="h-3.5 w-3.5" />
+            )}
             {tab.label}
             {tab.count > 0 && (
               <span
@@ -100,6 +110,7 @@ export function PODateFilter({ startDate, endDate }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
 
   const handleDateChange = (field, value) => {
     const params = new URLSearchParams(searchParams);
@@ -109,11 +120,14 @@ export function PODateFilter({ startDate, endDate }) {
       params.delete(field);
     }
     params.delete("page");
-    router.push(`${pathname}?${params.toString()}`);
+    startTransition(() => {
+      router.push(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
     <div className="flex items-center gap-3 flex-wrap">
+      {isPending && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       <div className="flex items-center gap-2">
         <Label htmlFor="startDate" className="text-sm text-muted-foreground whitespace-nowrap">
           From:
@@ -123,6 +137,7 @@ export function PODateFilter({ startDate, endDate }) {
           type="date"
           value={startDate || ""}
           onChange={(e) => handleDateChange("startDate", e.target.value)}
+          disabled={isPending}
           className="h-8 w-auto"
         />
       </div>
@@ -135,6 +150,7 @@ export function PODateFilter({ startDate, endDate }) {
           type="date"
           value={endDate || ""}
           onChange={(e) => handleDateChange("endDate", e.target.value)}
+          disabled={isPending}
           className="h-8 w-auto"
         />
       </div>
@@ -195,6 +211,7 @@ export function ClearPOFiltersButton() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
 
   // Check if any filters are active (excluding 'query')
   const hasFilters =
@@ -211,7 +228,9 @@ export function ClearPOFiltersButton() {
     // Keep only query param if present
     const query = searchParams.get("query");
     if (query) params.set("query", query);
-    router.push(`${pathname}?${params.toString()}`);
+    startTransition(() => {
+      router.push(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
@@ -219,9 +238,14 @@ export function ClearPOFiltersButton() {
       variant="ghost"
       size="sm"
       onClick={clearFilters}
+      disabled={isPending}
       className="h-8 text-muted-foreground hover:text-foreground"
     >
-      <X className="h-4 w-4 mr-1" />
+      {isPending ? (
+        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+      ) : (
+        <X className="h-4 w-4 mr-1" />
+      )}
       Clear Filters
     </Button>
   );
@@ -234,12 +258,15 @@ export function POFilterBadge({ label, value, param }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
 
   const removeFilter = () => {
     const params = new URLSearchParams(searchParams);
     params.delete(param);
     params.delete("page");
-    router.push(`${pathname}?${params.toString()}`);
+    startTransition(() => {
+      router.push(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
@@ -248,9 +275,10 @@ export function POFilterBadge({ label, value, param }) {
       className="flex items-center gap-1 pr-1 cursor-pointer hover:bg-muted"
       onClick={removeFilter}
     >
+      {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
       <span className="text-muted-foreground">{label}:</span>
       <span className="font-medium">{value}</span>
-      <X className="h-3 w-3 ml-1 hover:text-destructive" />
+      {!isPending && <X className="h-3 w-3 ml-1 hover:text-destructive" />}
     </Badge>
   );
 }

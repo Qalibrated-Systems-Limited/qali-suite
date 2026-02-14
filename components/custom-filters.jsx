@@ -1,5 +1,6 @@
 "use client";
 
+import { useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Select,
@@ -10,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Filter, X, Package, AlertTriangle } from "lucide-react";
+import { Filter, X, AlertTriangle, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export const CATEGORIES = [
@@ -38,7 +39,10 @@ const QUANTITY_OPTIONS = [
 // ============================================
 // CATEGORY FILTER COMPONENT
 // ============================================
-export function StockCategoryFilter({ currentCategory }) {
+export function StockCategoryFilter({ currentCategory, categories }) {
+  // Use passed categories or fall back to hardcoded
+  const options = categories || CATEGORIES;
+
   return (
     <div className="flex flex-col gap-2">
       <Label className="text-xs text-muted-foreground">Category</Label>
@@ -46,7 +50,7 @@ export function StockCategoryFilter({ currentCategory }) {
         value={currentCategory}
         param="category"
         placeholder="All Categories"
-        options={CATEGORIES}
+        options={options}
       />
     </div>
   );
@@ -83,6 +87,7 @@ function StockFilterSelect({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleChange = (newValue) => {
     const params = new URLSearchParams(searchParams);
@@ -94,14 +99,21 @@ function StockFilterSelect({
       params.set(param, newValue);
     }
 
-    router.replace(`${pathname}?${params.toString()}`);
+    // Use startTransition to prevent Suspense fallback from showing
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
-    <Select value={value} onValueChange={handleChange}>
-      <SelectTrigger className="w-full md:w-[180px] bg-background border-border text-foreground focus-visible:ring-yellow-500 focus-visible:border-yellow-500">
+    <Select value={value} onValueChange={handleChange} disabled={isPending}>
+      <SelectTrigger className="w-full md:w-45 bg-background border-border text-foreground focus-visible:ring-yellow-500 focus-visible:border-yellow-500">
         <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-muted-foreground" />
+          {isPending ? (
+            <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
+          ) : (
+            <Filter className="w-4 h-4 text-muted-foreground" />
+          )}
           <SelectValue placeholder={placeholder} />
         </div>
       </SelectTrigger>
@@ -127,11 +139,7 @@ function StockFilterSelect({
               {showIcons && option.value === "low-stock" && (
                 <AlertTriangle className="w-3 h-3 text-orange-500" />
               )}
-              {!showIcons || !option.icon ? (
-                <span>{option.label}</span>
-              ) : (
-                <span>{option.label}</span>
-              )}
+              <span>{option.label}</span>
             </div>
           </SelectItem>
         ))}
@@ -147,13 +155,17 @@ export function ClearStockFiltersButton() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleClear = () => {
     const params = new URLSearchParams(searchParams);
     params.delete("category");
     params.delete("quantity");
     params.set("page", "1");
-    router.replace(`${pathname}?${params.toString()}`);
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
@@ -161,9 +173,14 @@ export function ClearStockFiltersButton() {
       variant="outline"
       size="sm"
       onClick={handleClear}
+      disabled={isPending}
       className="border-border text-foreground hover:bg-accent self-end"
     >
-      <X className="w-4 h-4 mr-1" />
+      {isPending ? (
+        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+      ) : (
+        <X className="w-4 h-4 mr-1" />
+      )}
       Clear All
     </Button>
   );
@@ -176,12 +193,16 @@ export function StockFilterBadge({ label, value, param }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleRemove = () => {
     const params = new URLSearchParams(searchParams);
     params.delete(param);
     params.set("page", "1");
-    router.replace(`${pathname}?${params.toString()}`);
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   // Format the display value
@@ -197,9 +218,12 @@ export function StockFilterBadge({ label, value, param }) {
       className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20 cursor-pointer"
       onClick={handleRemove}
     >
+      {isPending ? (
+        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+      ) : null}
       <span className="text-muted-foreground">{label}:</span>
       <span className="ml-1 font-medium">{displayValue}</span>
-      <X className="w-3 h-3 ml-1" />
+      {!isPending && <X className="w-3 h-3 ml-1" />}
     </Badge>
   );
 }
@@ -211,12 +235,16 @@ export function StockFilterBadgeInline({ label, value, param }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleRemove = () => {
     const params = new URLSearchParams(searchParams);
     params.delete(param);
     params.set("page", "1");
-    router.replace(`${pathname}?${params.toString()}`);
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   const displayValue = value.replace(/-/g, " ");
@@ -229,10 +257,15 @@ export function StockFilterBadgeInline({ label, value, param }) {
       </span>
       <button
         onClick={handleRemove}
-        className="ml-1 text-muted-foreground hover:text-yellow-500 transition-colors"
+        disabled={isPending}
+        className="ml-1 text-muted-foreground hover:text-yellow-500 transition-colors disabled:opacity-50"
         aria-label={`Remove ${label} filter`}
       >
-        <X className="w-3 h-3" />
+        {isPending ? (
+          <Loader2 className="w-3 h-3 animate-spin" />
+        ) : (
+          <X className="w-3 h-3" />
+        )}
       </button>
     </div>
   );

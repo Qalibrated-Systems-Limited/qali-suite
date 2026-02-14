@@ -1,12 +1,6 @@
-import {
-  searchCheckouts,
-  fetchCheckoutPages,
-  getCheckoutStats,
-} from "@/app/mongodb/queries/checkout-queries";
-import { getExpenseAccountsForDialog } from "@/app/mongodb/queries/accountQueries";
-import Pagination from "@/components/pagination";
-import Search from "@/components/search";
+import { Suspense } from "react";
 import { auth } from "@/auth";
+import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
 import { SiteHeader } from "@/components/site-header";
 import {
@@ -15,8 +9,13 @@ import {
   ClearCheckoutFiltersButton,
   CheckoutFilterBadge,
 } from "../components/checkoutFilter";
-import { CheckoutsTable } from "../components/checkoutsTable";
-import { Package, Clock, AlertTriangle, CheckCircle } from "lucide-react";
+import {
+  CheckoutStatsCards,
+  CheckoutStatsSkeleton,
+  CheckoutsTableServer,
+  CheckoutsTableSkeleton,
+  CheckoutsPaginationServer,
+} from "../components/CheckoutServerComponents";
 
 async function CheckoutsPage(props) {
   const searchParams = await props.searchParams;
@@ -44,13 +43,6 @@ async function CheckoutsPage(props) {
     dueStatus: dueStatus !== "all" ? dueStatus : "",
   };
 
-  const [totalPages, checkouts, stats, expenseAccounts] = await Promise.all([
-    fetchCheckoutPages(query, filters),
-    searchCheckouts(query, currentPage, filters),
-    getCheckoutStats(),
-    getExpenseAccountsForDialog(),
-  ]);
-
   // Check if any filters are active
   const hasActiveFilters = status !== "all" || dueStatus !== "all";
 
@@ -62,76 +54,10 @@ async function CheckoutsPage(props) {
         description="Track and manage checked out inventory items"
       />
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="bg-card border-border hover:shadow-md transition-shadow">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Active</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {stats.active}
-                </p>
-              </div>
-              <Package className="w-8 h-8 text-blue-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Currently out</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border hover:shadow-md transition-shadow">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Due Soon</p>
-                <p className="text-2xl font-bold text-orange-500">
-                  {stats.dueSoon}
-                </p>
-              </div>
-              <Clock className="w-8 h-8 text-orange-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Within 3 days</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border hover:shadow-md transition-shadow">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Overdue</p>
-                <p className="text-2xl font-bold text-red-500">
-                  {stats.overdue}
-                </p>
-              </div>
-              <AlertTriangle className="w-8 h-8 text-red-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Requires action</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border hover:shadow-md transition-shadow">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Returned</p>
-                <p className="text-2xl font-bold text-green-500">
-                  {stats.returned}
-                </p>
-              </div>
-              <CheckCircle className="w-8 h-8 text-green-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Completed</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<CheckoutStatsSkeleton />}>
+        <CheckoutStatsCards />
+      </Suspense>
 
       {/* Search and Filters */}
       <Card className="bg-card border-border">
@@ -177,20 +103,21 @@ async function CheckoutsPage(props) {
         </CardContent>
       </Card>
 
-      {/* Checkouts Table */}
-      <CheckoutsTable
-        checkouts={checkouts}
-        canManageCheckouts={canManageCheckouts}
-        userId={userId}
-        expenseAccounts={expenseAccounts}
-      />
+      {/* Checkouts Table - Stream independently */}
+      <Suspense fallback={<CheckoutsTableSkeleton />}>
+        <CheckoutsTableServer
+          query={query}
+          page={currentPage}
+          filters={filters}
+          canManageCheckouts={canManageCheckouts}
+          userId={userId}
+        />
+      </Suspense>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center">
-          <Pagination totalPages={totalPages} />
-        </div>
-      )}
+      {/* Pagination - Stream after table */}
+      <Suspense fallback={null}>
+        <CheckoutsPaginationServer query={query} filters={filters} />
+      </Suspense>
     </div>
   );
 }

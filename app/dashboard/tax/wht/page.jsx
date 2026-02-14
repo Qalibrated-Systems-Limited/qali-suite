@@ -1,5 +1,10 @@
 import { Suspense } from "react";
 import WHTReportClient from "./WHTReportClient";
+import {
+  WHTStatsCards,
+  WHTStatsSkeleton,
+  WHTContentSkeleton,
+} from "./WHTServerComponents";
 import { getWHTDashboard, getTaxTransactions } from "@/app/mongodb/queries/taxQueries";
 
 export const metadata = {
@@ -19,38 +24,62 @@ export default async function WHTReportPage({ searchParams }) {
     ? new Date(params.endDate)
     : new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
+  const startDateStr = startDate.toISOString().split("T")[0];
+  const endDateStr = endDate.toISOString().split("T")[0];
+
+  return (
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground">
+            WHT Reports
+          </h1>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+            Withholding Tax on supplier payments
+          </p>
+        </div>
+      </div>
+
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<WHTStatsSkeleton />}>
+        <WHTStatsCards startDate={startDate} endDate={endDate} />
+      </Suspense>
+
+      {/* WHT Content - Stream independently */}
+      <Suspense fallback={<WHTContentSkeleton />}>
+        <WHTContentServer
+          startDate={startDate}
+          endDate={endDate}
+          startDateStr={startDateStr}
+          endDateStr={endDateStr}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+// ============================================
+// WHT CONTENT SERVER (Async Server Component)
+// ============================================
+
+async function WHTContentServer({ startDate, endDate, startDateStr, endDateStr }) {
   // Fetch WHT dashboard and transactions in parallel
   const [whtData, txnData] = await Promise.all([
     getWHTDashboard(startDate, endDate),
     getTaxTransactions(1, {
       taxType: "wht",
-      startDate: startDate.toISOString().split("T")[0],
-      endDate: endDate.toISOString().split("T")[0],
+      startDate: startDateStr,
+      endDate: endDateStr,
     }),
   ]);
 
   return (
-    <Suspense fallback={<WHTSkeleton />}>
-      <WHTReportClient
-        whtData={whtData}
-        initialStartDate={startDate.toISOString().split("T")[0]}
-        initialEndDate={endDate.toISOString().split("T")[0]}
-        transactions={txnData.transactions || []}
-      />
-    </Suspense>
-  );
-}
-
-function WHTSkeleton() {
-  return (
-    <div className="p-4 sm:p-6 space-y-6 animate-pulse">
-      <div className="h-8 w-48 bg-muted rounded" />
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="h-24 bg-muted rounded-lg" />
-        ))}
-      </div>
-      <div className="h-64 bg-muted rounded-lg" />
-    </div>
+    <WHTReportClient
+      whtData={whtData}
+      initialStartDate={startDateStr}
+      initialEndDate={endDateStr}
+      transactions={txnData.transactions || []}
+    />
   );
 }

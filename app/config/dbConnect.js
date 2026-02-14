@@ -1,9 +1,19 @@
 import mongoose from "mongoose";
 
+// Global cache for serverless environments (Vercel)
+// This prevents multiple connections during hot reloads and across invocations
+const globalWithMongo = global;
+
+if (!globalWithMongo.mongoose) {
+  globalWithMongo.mongoose = { conn: null, promise: null };
+}
+
+const cached = globalWithMongo.mongoose;
+
 const dbConnect = async () => {
-  // Check if already connected
-  if (mongoose.connection.readyState >= 1) {
-    return;
+  // Return cached connection if available
+  if (cached.conn && mongoose.connection.readyState >= 1) {
+    return cached.conn;
   }
 
   // Validate environment variable
@@ -15,21 +25,35 @@ const dbConnect = async () => {
     );
   }
 
-  try {
-    await mongoose.connect(uri, {
-      // Connection pool configuration for production
-      maxPoolSize: 10,
-      minPoolSize: 2,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
+  // If connection is in progress, wait for it
+  if (!cached.promise) {
+    const opts = {
+      // Optimized for serverless (Vercel Hobby plan - 10s timeout)
+      maxPoolSize: 5,
+      minPoolSize: 1,
+      serverSelectionTimeoutMS: 3000, // Faster failure on cold start
+      socketTimeoutMS: 20000,
+      connectTimeoutMS: 3000,
       family: 4, // Use IPv4
-    });
+      bufferCommands: false, // Fail fast instead of buffering
+    };
 
-    console.log("MongoDB connected successfully");
+    cached.promise = mongoose.connect(uri, opts).then((mongoose) => {
+      console.log("MongoDB connected successfully");
+      return mongoose;
+    });
+  }
+
+  try {
+    cached.conn = await cached.promise;
   } catch (error) {
+    // Reset promise on failure so next call can retry
+    cached.promise = null;
     console.error("MongoDB connection error:", error.message);
     throw error;
   }
+
+  return cached.conn;
 };
 
 export default dbConnect;

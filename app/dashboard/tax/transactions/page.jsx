@@ -1,5 +1,10 @@
 import { Suspense } from "react";
 import TaxTransactionsClient from "./TaxTransactionsClient";
+import {
+  TaxTransactionsStatsCards,
+  TaxTransactionsStatsSkeleton,
+  TaxTransactionsTableSkeleton,
+} from "./TaxTransactionsServerComponents";
 import { getTaxTransactions, getFilingPeriods } from "@/app/mongodb/queries/taxQueries";
 
 export const metadata = {
@@ -32,60 +37,64 @@ export default async function TaxTransactionsPage({ searchParams }) {
   if (endDate) filters.endDate = endDate;
   if (search) filters.search = search;
 
+  const initialFilters = {
+    taxType,
+    filed,
+    period,
+    remitted,
+    source,
+    startDate,
+    endDate,
+    search,
+  };
+
+  return (
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground">
+            Tax Transactions
+          </h1>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+            VAT, WHT, PAYE, and all tax transactions for KRA compliance
+          </p>
+        </div>
+      </div>
+
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<TaxTransactionsStatsSkeleton />}>
+        <TaxTransactionsStatsCards filters={filters} />
+      </Suspense>
+
+      {/* Transactions Table - Stream independently */}
+      <Suspense fallback={<TaxTransactionsTableSkeleton />}>
+        <TaxTransactionsTableServer
+          page={page}
+          filters={filters}
+          initialFilters={initialFilters}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+// ============================================
+// TAX TRANSACTIONS TABLE SERVER (Async Server Component)
+// ============================================
+
+async function TaxTransactionsTableServer({ page, filters, initialFilters }) {
   const [data, periods] = await Promise.all([
     getTaxTransactions(page, filters),
     getFilingPeriods(24),
   ]);
 
   return (
-    <Suspense fallback={<TransactionsSkeleton />}>
-      <TaxTransactionsClient
-        transactions={data.transactions}
-        pagination={data.pagination}
-        periods={periods}
-        initialFilters={{
-          taxType,
-          filed,
-          period,
-          remitted,
-          source,
-          startDate,
-          endDate,
-          search,
-        }}
-      />
-    </Suspense>
-  );
-}
-
-function TransactionsSkeleton() {
-  return (
-    <div className="p-4 sm:p-6 space-y-6 animate-pulse">
-      {/* Header */}
-      <div className="flex justify-between">
-        <div>
-          <div className="h-7 w-48 bg-muted rounded" />
-          <div className="h-4 w-64 bg-muted rounded mt-2" />
-        </div>
-        <div className="h-9 w-24 bg-muted rounded" />
-      </div>
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="h-16 bg-muted rounded-lg" />
-        ))}
-      </div>
-
-      {/* Filters */}
-      <div className="h-14 bg-muted rounded-lg" />
-
-      {/* Table */}
-      <div className="space-y-2">
-        {[1, 2, 3, 4, 5, 6].map((i) => (
-          <div key={i} className="h-14 bg-muted rounded-lg" />
-        ))}
-      </div>
-    </div>
+    <TaxTransactionsClient
+      transactions={data.transactions}
+      pagination={data.pagination}
+      periods={periods}
+      initialFilters={initialFilters}
+    />
   );
 }

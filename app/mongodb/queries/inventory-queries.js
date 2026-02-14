@@ -245,3 +245,71 @@ export async function getOutOfStockProducts() {
     },
   };
 }
+
+/**
+ * Get Stock Valuation Stats (optimized for stats cards)
+ */
+export async function getStockValuationStats() {
+  await dbConnect();
+
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const [result] = await Product.aggregate([
+    {
+      $match: withTenantScope({ isActive: true }, companyId, isSuperAdmin),
+    },
+    {
+      $group: {
+        _id: null,
+        totalProducts: { $sum: 1 },
+        productsWithStock: {
+          $sum: {
+            $cond: [{ $gt: [{ $ifNull: ["$inventory.quantityOnHand", 0] }, 0] }, 1, 0],
+          },
+        },
+        totalQuantity: { $sum: { $ifNull: ["$inventory.quantityOnHand", 0] } },
+        totalInventoryValue: {
+          $sum: {
+            $multiply: [
+              { $ifNull: ["$inventory.quantityOnHand", 0] },
+              { $ifNull: ["$costing.costPrice", 0] },
+            ],
+          },
+        },
+        totalRetailValue: {
+          $sum: {
+            $multiply: [
+              { $ifNull: ["$inventory.quantityOnHand", 0] },
+              { $ifNull: ["$pricing.sellingPrice", 0] },
+            ],
+          },
+        },
+        categories: { $addToSet: "$category" },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        totalProducts: 1,
+        productsWithStock: 1,
+        productsOutOfStock: { $subtract: ["$totalProducts", "$productsWithStock"] },
+        totalQuantity: 1,
+        totalInventoryValue: 1,
+        totalRetailValue: 1,
+        totalPotentialProfit: { $subtract: ["$totalRetailValue", "$totalInventoryValue"] },
+        categoryCount: { $size: "$categories" },
+      },
+    },
+  ]);
+
+  return result || {
+    totalProducts: 0,
+    productsWithStock: 0,
+    productsOutOfStock: 0,
+    totalQuantity: 0,
+    totalInventoryValue: 0,
+    totalRetailValue: 0,
+    totalPotentialProfit: 0,
+    categoryCount: 0,
+  };
+}

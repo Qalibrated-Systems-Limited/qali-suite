@@ -14,6 +14,19 @@ export const metadata = {
   description: "View and manage all employee claims",
 };
 
+// Async pagination component - streams in after data loads
+async function ClaimsPagination({ query, filters }) {
+  const totalPages = await fetchClaimPages(query, filters);
+
+  if (totalPages <= 1) return null;
+
+  return (
+    <div className="flex justify-center mt-4">
+      <Pagination totalPages={totalPages} />
+    </div>
+  );
+}
+
 export default async function AllClaimsPage({ searchParams }) {
   const params = await searchParams;
   const session = await auth();
@@ -33,10 +46,7 @@ export default async function AllClaimsPage({ searchParams }) {
   const query = params?.query || "";
   const status = params?.status || "all";
   const claimType = params?.type || "all";
-
-  // Fetch all claims with filters
   const filters = { status, claimType };
-  const totalPages = await fetchClaimPages(query, filters);
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
@@ -60,12 +70,10 @@ export default async function AllClaimsPage({ searchParams }) {
         <ClaimListWithFiltersServerComp AreMyclaims={false} params={params} />
       </Suspense>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center mt-4">
-          <Pagination totalPages={totalPages} />
-        </div>
-      )}
+      {/* Pagination - Streams in after data loads */}
+      <Suspense fallback={null}>
+        <ClaimsPagination query={query} filters={filters} />
+      </Suspense>
     </div>
   );
 }

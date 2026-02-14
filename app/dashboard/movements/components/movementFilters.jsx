@@ -1,5 +1,6 @@
 "use client";
 
+import { useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Select,
@@ -18,6 +19,7 @@ import {
   Calendar,
   ArrowDownCircle,
   ArrowUpCircle,
+  Loader2,
 } from "lucide-react";
 
 // ============================================
@@ -54,6 +56,7 @@ export function MovementDirectionFilter({ currentDirection }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleChange = (newValue) => {
     const params = new URLSearchParams(searchParams);
@@ -65,15 +68,21 @@ export function MovementDirectionFilter({ currentDirection }) {
       params.set("direction", newValue);
     }
 
-    router.replace(`${pathname}?${params.toString()}`);
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
     <div className="flex flex-col gap-2">
       <Label className="text-xs text-muted-foreground">Direction</Label>
-      <Select value={currentDirection} onValueChange={handleChange}>
+      <Select value={currentDirection} onValueChange={handleChange} disabled={isPending}>
         <SelectTrigger className="w-full bg-background border-border text-foreground">
-          <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
+          {isPending ? (
+            <Loader2 className="w-4 h-4 mr-2 text-muted-foreground animate-spin" />
+          ) : (
+            <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
+          )}
           <SelectValue placeholder="All Directions" />
         </SelectTrigger>
         <SelectContent className="bg-card border-border">
@@ -103,6 +112,7 @@ export function MovementDateFilter({ startDate, endDate }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleDateChange = (field, value) => {
     const params = new URLSearchParams(searchParams);
@@ -114,7 +124,9 @@ export function MovementDateFilter({ startDate, endDate }) {
       params.delete(field);
     }
 
-    router.replace(`${pathname}?${params.toString()}`);
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
@@ -162,6 +174,7 @@ function MovementFilterSelect({ value, param, placeholder, options }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleChange = (newValue) => {
     const params = new URLSearchParams(searchParams);
@@ -173,14 +186,20 @@ function MovementFilterSelect({ value, param, placeholder, options }) {
       params.set(param, newValue);
     }
 
-    router.replace(`${pathname}?${params.toString()}`);
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
-    <Select value={value} onValueChange={handleChange}>
+    <Select value={value} onValueChange={handleChange} disabled={isPending}>
       <SelectTrigger className="w-full bg-background border-border text-foreground focus-visible:ring-yellow-500 focus-visible:border-yellow-500">
         <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-muted-foreground" />
+          {isPending ? (
+            <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
+          ) : (
+            <Filter className="w-4 h-4 text-muted-foreground" />
+          )}
           <SelectValue placeholder={placeholder} />
         </div>
       </SelectTrigger>
@@ -206,6 +225,7 @@ export function ClearMovementFiltersButton() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleClear = () => {
     const params = new URLSearchParams(searchParams);
@@ -214,7 +234,10 @@ export function ClearMovementFiltersButton() {
     params.delete("startDate");
     params.delete("endDate");
     params.set("page", "1");
-    router.replace(`${pathname}?${params.toString()}`);
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
@@ -222,9 +245,14 @@ export function ClearMovementFiltersButton() {
       variant="outline"
       size="sm"
       onClick={handleClear}
+      disabled={isPending}
       className="border-border text-foreground hover:bg-accent self-end"
     >
-      <X className="w-4 h-4 mr-1" />
+      {isPending ? (
+        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+      ) : (
+        <X className="w-4 h-4 mr-1" />
+      )}
       Clear All
     </Button>
   );
@@ -237,12 +265,16 @@ export function MovementFilterBadge({ label, value, param }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleRemove = () => {
     const params = new URLSearchParams(searchParams);
     params.delete(param);
     params.set("page", "1");
-    router.replace(`${pathname}?${params.toString()}`);
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   // Format the display value
@@ -259,9 +291,10 @@ export function MovementFilterBadge({ label, value, param }) {
       className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20 cursor-pointer"
       onClick={handleRemove}
     >
+      {isPending && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
       <span className="text-muted-foreground">{label}:</span>
       <span className="ml-1 font-medium">{displayValue}</span>
-      <X className="w-3 h-3 ml-1" />
+      {!isPending && <X className="w-3 h-3 ml-1" />}
     </Badge>
   );
 }

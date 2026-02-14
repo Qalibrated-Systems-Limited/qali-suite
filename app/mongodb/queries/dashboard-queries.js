@@ -89,6 +89,7 @@ export const getDashboardStats = async () => {
 // STOCK MOVEMENT TREND (Last 7 days)
 // ============================================
 export const getMovementTrend = async (days = 7) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
@@ -136,6 +137,7 @@ export const getMovementTrend = async (days = 7) => {
 // STOCK BY CATEGORY
 // ============================================
 export const getStockByCategory = async () => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
@@ -174,6 +176,7 @@ export const getStockByCategory = async () => {
 // RECENT REQUESTS (Latest 5)
 // ============================================
 export const getRecentRequests = async (limit = 5) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
@@ -198,6 +201,7 @@ export const getRecentRequests = async (limit = 5) => {
 // RECENT MOVEMENTS (Latest 10)
 // ============================================
 export const getRecentMovements = async (limit = 10) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
@@ -223,6 +227,7 @@ export const getRecentMovements = async (limit = 10) => {
 // LOW STOCK ALERTS
 // ============================================
 export const getLowStockAlerts = async (threshold = 10) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
@@ -249,6 +254,7 @@ export const getLowStockAlerts = async (threshold = 10) => {
 // OVERDUE CHECKOUTS
 // ============================================
 export const getOverdueCheckouts = async () => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
@@ -284,6 +290,7 @@ export const getOverdueCheckouts = async () => {
 // TOP PRODUCTS (Most Moved)
 // ============================================
 export const getTopProducts = async (limit = 5) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
@@ -320,6 +327,7 @@ export const getTopProducts = async (limit = 5) => {
 // REQUEST STATUS BREAKDOWN
 // ============================================
 export const getRequestStatusBreakdown = async () => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };

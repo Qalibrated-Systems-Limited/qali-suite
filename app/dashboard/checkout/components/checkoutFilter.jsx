@@ -1,5 +1,6 @@
 "use client";
 
+import { useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Select,
@@ -19,6 +20,7 @@ import {
   AlertTriangle,
   XCircle,
   Clock,
+  Loader2,
 } from "lucide-react";
 
 // ============================================
@@ -28,6 +30,7 @@ export function CheckoutStatusFilter({ currentStatus }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleChange = (newValue) => {
     const params = new URLSearchParams(searchParams);
@@ -39,15 +42,21 @@ export function CheckoutStatusFilter({ currentStatus }) {
       params.set("status", newValue);
     }
 
-    router.replace(`${pathname}?${params.toString()}`);
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
     <div className="flex flex-col gap-2">
       <Label className="text-xs text-muted-foreground">Status</Label>
-      <Select value={currentStatus} onValueChange={handleChange}>
+      <Select value={currentStatus} onValueChange={handleChange} disabled={isPending}>
         <SelectTrigger className="w-full md:w-[200px] bg-background border-border text-foreground">
-          <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
+          {isPending ? (
+            <Loader2 className="w-4 h-4 mr-2 text-muted-foreground animate-spin" />
+          ) : (
+            <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
+          )}
           <SelectValue placeholder="All Statuses" />
         </SelectTrigger>
         <SelectContent className="bg-card border-border">
@@ -95,6 +104,7 @@ export function CheckoutDueFilter({ currentDueStatus }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleChange = (newValue) => {
     const params = new URLSearchParams(searchParams);
@@ -106,15 +116,21 @@ export function CheckoutDueFilter({ currentDueStatus }) {
       params.set("dueStatus", newValue);
     }
 
-    router.replace(`${pathname}?${params.toString()}`);
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
     <div className="flex flex-col gap-2">
       <Label className="text-xs text-muted-foreground">Due Status</Label>
-      <Select value={currentDueStatus} onValueChange={handleChange}>
+      <Select value={currentDueStatus} onValueChange={handleChange} disabled={isPending}>
         <SelectTrigger className="w-full md:w-[200px] bg-background border-border text-foreground">
-          <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
+          {isPending ? (
+            <Loader2 className="w-4 h-4 mr-2 text-muted-foreground animate-spin" />
+          ) : (
+            <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
+          )}
           <SelectValue placeholder="All Items" />
         </SelectTrigger>
         <SelectContent className="bg-card border-border">
@@ -144,13 +160,17 @@ export function ClearCheckoutFiltersButton() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleClear = () => {
     const params = new URLSearchParams(searchParams);
     params.delete("status");
     params.delete("dueStatus");
     params.set("page", "1");
-    router.replace(`${pathname}?${params.toString()}`);
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   return (
@@ -158,9 +178,14 @@ export function ClearCheckoutFiltersButton() {
       variant="outline"
       size="sm"
       onClick={handleClear}
+      disabled={isPending}
       className="border-border text-foreground hover:bg-accent self-end"
     >
-      <X className="w-4 h-4 mr-1" />
+      {isPending ? (
+        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+      ) : (
+        <X className="w-4 h-4 mr-1" />
+      )}
       Clear All
     </Button>
   );
@@ -173,12 +198,16 @@ export function CheckoutFilterBadge({ label, value, param }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   const handleRemove = () => {
     const params = new URLSearchParams(searchParams);
     params.delete(param);
     params.set("page", "1");
-    router.replace(`${pathname}?${params.toString()}`);
+
+    startTransition(() => {
+      router.replace(`${pathname}?${params.toString()}`);
+    });
   };
 
   // Format the display value
@@ -195,9 +224,10 @@ export function CheckoutFilterBadge({ label, value, param }) {
       className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20 cursor-pointer"
       onClick={handleRemove}
     >
+      {isPending && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
       <span className="text-muted-foreground">{label}:</span>
       <span className="ml-1 font-medium">{displayValue}</span>
-      <X className="w-3 h-3 ml-1" />
+      {!isPending && <X className="w-3 h-3 ml-1" />}
     </Badge>
   );
 }

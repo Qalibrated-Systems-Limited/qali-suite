@@ -4,12 +4,14 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  getJournalStatsForDashboard,
-  getJournalEntriesForTimeline,
-} from "@/app/mongodb/queries/journalQueries";
+import { getJournalEntriesForTimeline } from "@/app/mongodb/queries/journalQueries";
 import { serializeBsonType } from "@/lib/utils";
 import { JournalPageClient } from "./JournalPageClient";
+import {
+  JournalStatsServer,
+  JournalStatsSkeleton,
+  JournalEntriesSkeleton,
+} from "./components/JournalServerComponents";
 
 export const metadata = {
   title: "Journal Entries | ERP System",
@@ -21,6 +23,30 @@ interface SearchParams {
   status?: string;
   entryType?: string;
   period?: string;
+}
+
+// Async server component for entries data
+async function JournalEntriesServer({
+  filters,
+}: {
+  filters: {
+    search: string;
+    status: string;
+    entryType: string;
+    period: string;
+  };
+}) {
+  const entriesResult = await getJournalEntriesForTimeline(filters, 20);
+  const { entries, hasMore, nextCursor } = serializeBsonType(entriesResult);
+
+  return (
+    <JournalPageClient
+      initialEntries={entries}
+      initialHasMore={hasMore}
+      initialCursor={nextCursor}
+      initialFilters={filters}
+    />
+  );
 }
 
 export default async function JournalPage({
@@ -44,16 +70,6 @@ export default async function JournalPage({
     period: params.period || "all",
   };
 
-  // Fetch data in parallel
-  const [statsResult, entriesResult] = await Promise.all([
-    getJournalStatsForDashboard(),
-    getJournalEntriesForTimeline(filters, 20),
-  ]);
-
-  // Serialize for client
-  const stats = serializeBsonType(statsResult);
-  const { entries, hasMore, nextCursor } = serializeBsonType(entriesResult);
-
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
@@ -74,45 +90,15 @@ export default async function JournalPage({
         )}
       </div>
 
-      {/* Client-side interactive content */}
-      <Suspense fallback={<JournalPageSkeleton />}>
-        <JournalPageClient
-          initialStats={stats}
-          initialEntries={entries}
-          initialHasMore={hasMore}
-          initialCursor={nextCursor}
-          initialFilters={filters}
-        />
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<JournalStatsSkeleton />}>
+        <JournalStatsServer />
       </Suspense>
-    </div>
-  );
-}
 
-function JournalPageSkeleton() {
-  return (
-    <div className="space-y-6">
-      {/* Stats skeleton */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <div
-            key={i}
-            className="h-24 rounded-lg border bg-card animate-pulse"
-          />
-        ))}
-      </div>
-
-      {/* Filter bar skeleton */}
-      <div className="h-10 rounded-lg bg-muted animate-pulse" />
-
-      {/* Timeline skeleton */}
-      <div className="space-y-4">
-        {[1, 2, 3].map((i) => (
-          <div
-            key={i}
-            className="h-32 rounded-lg border bg-card animate-pulse"
-          />
-        ))}
-      </div>
+      {/* Journal Entries - Stream independently */}
+      <Suspense fallback={<JournalEntriesSkeleton />}>
+        <JournalEntriesServer filters={filters} />
+      </Suspense>
     </div>
   );
 }

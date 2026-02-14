@@ -458,7 +458,8 @@ export const fetchRequestPages = async (
   userRole,
   filters = {},
 ) => {
-  const { status, priority, customer, startDate, endDate } = filters;
+  await dbConnect();
+  const { status, priority, requestType, customer, startDate, endDate } = filters;
 
   // Get tenant context for multi-tenant isolation
   const { companyId, isSuperAdmin } = await getTenantContext();
@@ -501,9 +502,14 @@ export const fetchRequestPages = async (
     additionalFilters.priority = priority;
   }
 
+  // Request type filter
+  if (requestType && requestType !== "all") {
+    additionalFilters.requestType = requestType;
+  }
+
   // Customer filter
   if (customer && customer !== "all") {
-    additionalFilters.customer = { $regex: customer, $options: "i" };
+    additionalFilters["customer.name"] = { $regex: customer, $options: "i" };
   }
 
   // Date range filter
@@ -539,7 +545,7 @@ export const fetchRequestPages = async (
               "requester.department": { $regex: safeSearchTerm, $options: "i" },
             },
             { requestNumber: { $regex: safeSearchTerm, $options: "i" } },
-            { customer: { $regex: safeSearchTerm, $options: "i" } },
+            { "customer.name": { $regex: safeSearchTerm, $options: "i" } },
           ],
         },
       ],
@@ -582,7 +588,8 @@ export const searchRequests = async (
   userRole,
   filters = {},
 ) => {
-  const { status, priority, customer, startDate, endDate } = filters;
+  await dbConnect();
+  const { status, priority, requestType, customer, startDate, endDate } = filters;
 
   // Get tenant context for multi-tenant isolation
   const { companyId, isSuperAdmin } = await getTenantContext();
@@ -627,9 +634,14 @@ export const searchRequests = async (
     additionalFilters.priority = priority;
   }
 
+  // Request type filter
+  if (requestType && requestType !== "all") {
+    additionalFilters.requestType = requestType;
+  }
+
   // Customer filter
   if (customer && customer !== "all") {
-    additionalFilters.customer = { $regex: customer, $options: "i" };
+    additionalFilters["customer.name"] = { $regex: customer, $options: "i" };
   }
 
   // Date range filter
@@ -667,7 +679,7 @@ export const searchRequests = async (
               "requester.department": { $regex: safeSearchTerm, $options: "i" },
             },
             { requestNumber: { $regex: safeSearchTerm, $options: "i" } },
-            { customer: { $regex: safeSearchTerm, $options: "i" } },
+            { "customer.name": { $regex: safeSearchTerm, $options: "i" } },
           ],
         },
       ],
@@ -702,7 +714,6 @@ export const searchRequests = async (
         _id: entry._id.toString(),
       };
     });
-    console.log(approvalHistory);
     const items = res.items.map((item) => {
       let fulfillments = [];
       if (item.fulfillments && item.fulfillments.length > 0) {

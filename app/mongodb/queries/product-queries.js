@@ -3,80 +3,137 @@ import dbConnect from "@/app/config/dbConnect";
 import Product from "@/app/models/product";
 import { sanitizeSearchTerm } from "@/lib/utils/sanitize";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { serializeBsonType } from "@/lib/utils";
 
 const { ObjectId } = mongoose.Types;
 const ITEMS_PER_PAGE = 20;
 
-export const searchStock = async (searchTerm, page = 1, filters = {}) => {
-  await dbConnect();
-  // Get tenant context
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+// ============================================
+// SHARED FILTER BUILDERS
+// ============================================
 
+function buildQuantityFilter(quantity) {
+  if (!quantity) return {};
+
+  switch (quantity) {
+    case "in-stock":
+      return { "inventory.quantityOnHand": { $gte: 10 } };
+    case "low-stock":
+      return { "inventory.quantityOnHand": { $gte: 1, $lte: 9 } };
+    case "out-of-stock":
+      return { "inventory.quantityOnHand": { $lte: 0 } };
+    default:
+      return {};
+  }
+}
+
+function buildProductFilters(filters = {}) {
   const { category, quantity } = filters;
-  const skipRecords = (page - 1) * ITEMS_PER_PAGE;
+  const additionalFilters = {};
 
-  // Sanitize search term to prevent NoSQL injection
-  const safeSearchTerm = sanitizeSearchTerm(searchTerm);
-
-  // Build filter conditions
-  let additionalFilters = {};
-
-  // Category filter
   if (category) {
     additionalFilters.category = category;
   }
 
-  // Quantity/Stock level filter
-  if (quantity) {
-    switch (quantity) {
-      case "in-stock":
-        additionalFilters["inventory.quantityOnHand"] = { $gte: 10 };
-        break;
-      case "low-stock":
-        additionalFilters["inventory.quantityOnHand"] = { $gte: 1, $lte: 9 };
-        break;
-      case "out-of-stock":
-        additionalFilters["inventory.quantityOnHand"] = { $lte: 0 };
-        break;
-    }
-  }
+  Object.assign(additionalFilters, buildQuantityFilter(quantity));
 
-  const searchStage = {
-    $match: {
-      $and: [
-        tenantMatch,
-        additionalFilters,
-        {
-          $or: [
-            { name: { $regex: safeSearchTerm, $options: "i" } },
-            { SKU: { $regex: safeSearchTerm, $options: "i" } },
+  return additionalFilters;
+}
+
+// ============================================
+// STOCK STATS (Fast parallel counts)
+// ============================================
+
+export async function getStockStats() {
+  await dbConnect();
+
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+
+  const [totalItems, lowStock, outOfStock, inStock] = await Promise.all([
+    Product.countDocuments(tenantMatch),
+    Product.countDocuments({
+      ...tenantMatch,
+      "inventory.quantityOnHand": { $gte: 1, $lte: 9 },
+    }),
+    Product.countDocuments({
+      ...tenantMatch,
+      "inventory.quantityOnHand": { $lte: 0 },
+    }),
+    Product.countDocuments({
+      ...tenantMatch,
+      "inventory.quantityOnHand": { $gte: 10 },
+    }),
+  ]);
+
+  return { totalItems, lowStock, outOfStock, inStock };
+}
+
+// ============================================
+// CATEGORIES (For filter dropdown)
+// Fetches from Category model for consistency with /dashboard/categories
+// ============================================
+
+export async function getProductCategories() {
+  await dbConnect();
+
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+
+  // Import Category model dynamically to avoid circular dependency
+  const Category = (await import("@/app/models/category")).default;
+
+  const categories = await Category.find({
+    ...tenantMatch,
+    isDeleted: false,
+    isActive: true,
+  })
+    .select("name")
+    .sort({ sortOrder: 1, name: 1 })
+    .lean();
+
+  return categories.map((cat) => cat.name);
+}
+
+// ============================================
+// SEARCH STOCK (Paginated list)
+// ============================================
+
+export const searchStock = async (searchTerm, page = 1, filters = {}) => {
+  await dbConnect();
+
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+
+  const skipRecords = (page - 1) * ITEMS_PER_PAGE;
+  const safeSearchTerm = sanitizeSearchTerm(searchTerm);
+  const additionalFilters = buildProductFilters(filters);
+
+  const matchStage = safeSearchTerm
+    ? {
+        $match: {
+          $and: [
+            tenantMatch,
+            additionalFilters,
+            {
+              $or: [
+                { name: { $regex: safeSearchTerm, $options: "i" } },
+                { SKU: { $regex: safeSearchTerm, $options: "i" } },
+              ],
+            },
           ],
         },
-      ],
-    },
-  };
+      }
+    : { $match: { ...tenantMatch, ...additionalFilters } };
 
-  const baseFilterStage = {
-    $match: { ...tenantMatch, ...additionalFilters },
-  };
+  const result = await Product.aggregate([
+    matchStage,
+    { $sort: { createdAt: -1 } },
+    { $skip: skipRecords },
+    { $limit: ITEMS_PER_PAGE },
+  ]);
 
-  const paginationStage = [{ $skip: skipRecords }, { $limit: ITEMS_PER_PAGE }];
-
-  const sortStage = { $sort: { createdAt: -1 } };
-
-  let pipeline = [baseFilterStage, sortStage, ...paginationStage];
-
-  if (safeSearchTerm && safeSearchTerm.length > 0) {
-    pipeline = [searchStage, sortStage, ...paginationStage];
-  }
-
-  let result = await Product.aggregate(pipeline);
-  result = result.map((res) => {
-    return { ...res, _id: res._id.toString() };
-  });
-
-  return result;
+  return serializeBsonType(result);
 };
 
 export const fetchStockData = async () => {
@@ -118,80 +175,38 @@ export const fetchStockData = async () => {
   }, {});
 };
 
-//Products or stock queries
+// ============================================
+// PAGINATION COUNT
+// ============================================
 
 export const fetchStockPages = async (searchTerm, filters = {}) => {
   await dbConnect();
-  // Get tenant context
-  const { companyId, isSuperAdmin } = await getTenantContext();
 
+  const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
 
-  const { category, quantity } = filters;
-
-  // Sanitize search term to prevent NoSQL injection
   const safeSearchTerm = sanitizeSearchTerm(searchTerm);
+  const additionalFilters = buildProductFilters(filters);
 
-  // Build filter conditions
-  let additionalFilters = {};
-
-  // Category filter
-  if (category) {
-    additionalFilters.category = category;
-  }
-
-  // Quantity/Stock level filter
-  if (quantity) {
-    switch (quantity) {
-      case "in-stock":
-        additionalFilters["inventory.quantityOnHand"] = { $gte: 10 };
-        break;
-      case "low-stock":
-        additionalFilters["inventory.quantityOnHand"] = { $gte: 1, $lte: 9 };
-        break;
-      case "out-of-stock":
-        additionalFilters["inventory.quantityOnHand"] = { $lte: 0 };
-        break;
-    }
-  }
-
-  const transactionSearchStage = {
-    $match: {
-      $and: [
-      tenantMatch,
-        additionalFilters,
-        {
-          $or: [
-            { name: { $regex: safeSearchTerm, $options: "i" } },
-            { SKU: { $regex: safeSearchTerm, $options: "i" } },
+  const matchStage = safeSearchTerm
+    ? {
+        $match: {
+          $and: [
+            tenantMatch,
+            additionalFilters,
+            {
+              $or: [
+                { name: { $regex: safeSearchTerm, $options: "i" } },
+                { SKU: { $regex: safeSearchTerm, $options: "i" } },
+              ],
+            },
           ],
         },
-      ],
-    },
-  };
+      }
+    : { $match: { ...tenantMatch, ...additionalFilters } };
 
-  const baseFilterStage = {
-    $match: { ...tenantMatch, ...additionalFilters },
-  };
+  const result = await Product.aggregate([matchStage, { $count: "totalRecords" }]);
 
-  const countStage = {
-    $count: "totalRecords",
-  };
-
-  let pipeline = [baseFilterStage, countStage];
-
-  if (safeSearchTerm && safeSearchTerm.length > 0) {
-    pipeline = [transactionSearchStage, countStage];
-  }
-
-  const result = await Product.aggregate(pipeline);
-
-  let count = 0;
-  if (result && result.length > 0) {
-    count = result[0].totalRecords;
-  }
-
-  const noOfPages = Math.ceil(Number(count) / ITEMS_PER_PAGE);
-
-  return noOfPages;
+  const count = result[0]?.totalRecords || 0;
+  return Math.ceil(count / ITEMS_PER_PAGE);
 };

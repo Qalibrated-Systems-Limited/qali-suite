@@ -248,7 +248,7 @@ export function ARAgingClient({ initialData, initialAsOfDate, error }) {
               <div className="md:hidden divide-y divide-border">
                 {data.customers.map((customer, idx) => (
                   <div
-                    key={customer.customerId || idx}
+                    key={`${customer.customerId}-${idx}`}
                     className="p-3 hover:bg-muted/30 active:bg-muted/50"
                   >
                     <div className="flex items-center justify-between mb-2">
@@ -365,7 +365,7 @@ export function ARAgingClient({ initialData, initialAsOfDate, error }) {
                   <tbody>
                     {data.customers.map((customer, idx) => (
                       <tr
-                        key={customer.customerId || idx}
+                        key={`${customer.customerId}-${idx}`}
                         className="border-b border-border hover:bg-muted/30"
                       >
                         <td className="p-4">

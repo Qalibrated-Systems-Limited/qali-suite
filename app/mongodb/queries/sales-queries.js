@@ -291,3 +291,55 @@ export async function getTopProducts(limit = 10, startDate = null, endDate = nul
 
   return result;
 }
+
+/**
+ * Get Sales Stats (optimized for stats cards)
+ */
+export async function getSalesStats(startDate, endDate) {
+  await dbConnect();
+
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const [result] = await Invoice.aggregate([
+    {
+      $match: withTenantScope(
+        {
+          status: "completed",
+          invoiceDate: {
+            $gte: new Date(startDate),
+            $lte: new Date(endDate),
+          },
+        },
+        companyId,
+        isSuperAdmin
+      ),
+    },
+    {
+      $group: {
+        _id: null,
+        totalSales: { $sum: "$total" },
+        totalPaid: { $sum: "$amountPaid" },
+        invoiceCount: { $sum: 1 },
+        customerIds: { $addToSet: "$customer.id" },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        totalSales: 1,
+        totalPaid: 1,
+        totalOutstanding: { $subtract: ["$totalSales", "$totalPaid"] },
+        invoiceCount: 1,
+        customerCount: { $size: "$customerIds" },
+      },
+    },
+  ]);
+
+  return result || {
+    totalSales: 0,
+    totalPaid: 0,
+    totalOutstanding: 0,
+    invoiceCount: 0,
+    customerCount: 0,
+  };
+}

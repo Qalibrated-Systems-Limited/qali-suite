@@ -126,136 +126,32 @@ export default function VATReturnClient({ vatData, periods, initialPeriod, trans
   const inputTransactions = transactions?.input || [];
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground">
-            VAT Returns
-          </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            Kenya VAT compliance - 16% standard rate
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Select value={selectedPeriod} onValueChange={handlePeriodChange}>
-            <SelectTrigger className="w-full sm:w-45 h-9 text-sm">
-              <Calendar className="w-4 h-4 mr-2 text-muted-foreground" />
-              <SelectValue placeholder="Select period" />
-            </SelectTrigger>
-            <SelectContent>
-              {periods?.map((period) => (
-                <SelectItem key={period} value={period}>
-                  {formatPeriodLabel(period)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExportCSV}
-            disabled={isExporting}
-            className="gap-2"
-          >
-            <Download className="w-4 h-4" />
-            <span className="hidden sm:inline">Export CSV</span>
-          </Button>
-        </div>
-      </div>
-
-      {/* Summary Cards - Mobile: 2x2 grid, Desktop: 4 columns */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {/* VAT Output (Sales) */}
-        <Card className="border-l-4 border-l-red-500">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <ArrowUpCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-500" />
-              <span className="text-xs sm:text-sm text-muted-foreground">
-                VAT Output
-              </span>
-            </div>
-            <p className="text-lg sm:text-2xl font-bold text-foreground tabular-nums">
-              {formatCurrency(output?.totalVAT)}
-            </p>
-            <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">
-              {output?.transactionCount || 0} invoices
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* VAT Input (Purchases) */}
-        <Card className="border-l-4 border-l-green-500">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <ArrowDownCircle className="w-4 h-4 sm:w-5 sm:h-5 text-green-500" />
-              <span className="text-xs sm:text-sm text-muted-foreground">
-                VAT Input
-              </span>
-            </div>
-            <p className="text-lg sm:text-2xl font-bold text-foreground tabular-nums">
-              {formatCurrency(input?.totalVAT)}
-            </p>
-            <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">
-              {input?.transactionCount || 0} bills
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Net VAT Position */}
-        <Card
-          className={`border-l-4 ${isPayable ? "border-l-orange-500" : "border-l-blue-500"}`}
+    <div className="space-y-4">
+      {/* Period Selector & Export */}
+      <div className="flex items-center justify-end gap-2">
+        <Select value={selectedPeriod} onValueChange={handlePeriodChange}>
+          <SelectTrigger className="w-full sm:w-45 h-9 text-sm">
+            <Calendar className="w-4 h-4 mr-2 text-muted-foreground" />
+            <SelectValue placeholder="Select period" />
+          </SelectTrigger>
+          <SelectContent>
+            {periods?.map((period) => (
+              <SelectItem key={period} value={period}>
+                {formatPeriodLabel(period)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExportCSV}
+          disabled={isExporting}
+          className="gap-2"
         >
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Calculator className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" />
-              <span className="text-xs sm:text-sm text-muted-foreground">
-                {isPayable ? "VAT Payable" : "VAT Refundable"}
-              </span>
-            </div>
-            <p
-              className={`text-lg sm:text-2xl font-bold tabular-nums ${isPayable ? "text-orange-600" : "text-blue-600"}`}
-            >
-              {formatCurrency(Math.abs(netPosition))}
-            </p>
-            <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">
-              {isPayable ? "Due to KRA" : "Claimable from KRA"}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Filing Status */}
-        <Card className="border-l-4 border-l-yellow-500">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-500" />
-              <span className="text-xs sm:text-sm text-muted-foreground">
-                Filing Status
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {(input?.unfiledCount || 0) + (output?.unfiledCount || 0) > 0 ? (
-                <>
-                  <Clock className="w-4 h-4 text-yellow-500" />
-                  <span className="text-sm font-medium text-yellow-600">
-                    Pending
-                  </span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4 text-green-500" />
-                  <span className="text-sm font-medium text-green-600">
-                    Filed
-                  </span>
-                </>
-              )}
-            </div>
-            <p className="text-[10px] sm:text-xs text-muted-foreground mt-1">
-              {(input?.unfiledCount || 0) + (output?.unfiledCount || 0)} unfiled
-            </p>
-          </CardContent>
-        </Card>
+          <Download className="w-4 h-4" />
+          <span className="hidden sm:inline">Export CSV</span>
+        </Button>
       </div>
 
       {/* VAT Breakdown */}

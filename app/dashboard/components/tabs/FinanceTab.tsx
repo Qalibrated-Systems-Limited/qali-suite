@@ -253,6 +253,10 @@ async function FinanceAlertsBar() {
 // PENDING PAYMENTS CARD - Actionable List
 // ============================================
 async function PendingPaymentsCard() {
+  // Ensure DB connection (critical for serverless cold starts)
+  const dbConnect = (await import("@/app/config/dbConnect")).default;
+  await dbConnect();
+
   // Tenant scoping - only show company's invoices
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
@@ -336,6 +340,10 @@ async function PendingPaymentsCard() {
 // PENDING CLAIMS CARD - Actionable List
 // ============================================
 async function PendingClaimsCard() {
+  // Ensure DB connection (critical for serverless cold starts)
+  const dbConnect = (await import("@/app/config/dbConnect")).default;
+  await dbConnect();
+
   // Tenant scoping - only show company's claims
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };

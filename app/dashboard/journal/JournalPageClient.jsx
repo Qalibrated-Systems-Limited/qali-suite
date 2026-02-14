@@ -4,7 +4,6 @@ import { useState, useCallback, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  JournalStatsCards,
   JournalFilterBar,
   JournalTimeline,
   JournalTableView,
@@ -13,7 +12,6 @@ import {
 } from "./components";
 
 export function JournalPageClient({
-  initialStats,
   initialEntries,
   initialHasMore,
   initialCursor,
@@ -22,7 +20,6 @@ export function JournalPageClient({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  const [stats, setStats] = useState(initialStats);
   const [entries, setEntries] = useState(initialEntries);
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [cursor, setCursor] = useState(initialCursor);
@@ -35,12 +32,11 @@ export function JournalPageClient({
 
   // Sync state with props when server returns new data (e.g., after filter change)
   useEffect(() => {
-    setStats(initialStats);
     setEntries(initialEntries);
     setHasMore(initialHasMore);
     setCursor(initialCursor);
     setFilters(initialFilters);
-  }, [initialStats, initialEntries, initialHasMore, initialCursor, initialFilters]);
+  }, [initialEntries, initialHasMore, initialCursor, initialFilters]);
 
   // Update URL when filters change
   const handleFiltersChange = useCallback(
@@ -173,9 +169,6 @@ export function JournalPageClient({
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Stats Cards */}
-      <JournalStatsCards stats={stats} isLoading={isPending} />
-
       {/* Filter Bar + View Toggle */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-4">
         <div className="flex-1">

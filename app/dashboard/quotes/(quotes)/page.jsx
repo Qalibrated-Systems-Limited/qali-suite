@@ -1,11 +1,7 @@
+import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import {
-  searchQuotes,
-  fetchQuotePages,
-  getQuoteStats,
-} from "@/app/mongodb/queries/quote-queries";
-import Pagination from "@/components/pagination";
+import { getQuoteStats } from "@/app/mongodb/queries/quote-queries";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -16,14 +12,14 @@ import {
   QuoteFilterBadge,
   MobileFilterSheet,
 } from "../components/quote-filters";
-import { QuotesTable } from "../components/QuotesTable";
 import {
-  FileText,
-  CheckCircle,
-  Send,
-  AlertTriangle,
-} from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+  QuoteStatsCards,
+  QuoteStatsSkeleton,
+  QuotesTableServer,
+  QuotesTableSkeleton,
+  QuotesPaginationServer,
+  PaginationSkeleton,
+} from "../components/QuoteServerComponents";
 
 async function QuotesPage(props) {
   const searchParams = await props.searchParams;
@@ -64,12 +60,8 @@ async function QuotesPage(props) {
     endDate,
   };
 
-  // Fetch data in parallel
-  const [totalPages, quotes, stats] = await Promise.all([
-    fetchQuotePages(query, filters),
-    searchQuotes(query, currentPage, filters),
-    getQuoteStats(filters),
-  ]);
+  // Fetch stats for filter components (needed for tabs and mobile sheet)
+  const stats = await getQuoteStats(filters);
 
   // Check if any filters are active
   const hasActiveFilters = status !== "all" || startDate || endDate;
@@ -84,88 +76,10 @@ async function QuotesPage(props) {
         </p>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Total Quotes</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {stats.total}
-                </p>
-              </div>
-              <FileText className="w-8 h-8 text-blue-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Total Value</p>
-              <p className="text-sm font-semibold text-blue-400">
-                {formatCurrency(stats.totalValue)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Open Quotes</p>
-                <p className="text-2xl font-bold text-orange-500">
-                  {stats.draft + stats.sent}
-                </p>
-              </div>
-              <Send className="w-8 h-8 text-orange-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Open Value</p>
-              <p className="text-sm font-semibold text-orange-400">
-                {formatCurrency(stats.openValue)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Converted</p>
-                <p className="text-2xl font-bold text-green-500">
-                  {stats.converted + stats.accepted}
-                </p>
-              </div>
-              <CheckCircle className="w-8 h-8 text-green-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Converted Value</p>
-              <p className="text-sm font-semibold text-green-400">
-                {formatCurrency(stats.convertedValue)}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Expiring Soon</p>
-                <p className="text-2xl font-bold text-red-500">
-                  {stats.expiringCount}
-                </p>
-              </div>
-              <AlertTriangle className="w-8 h-8 text-red-500" />
-            </div>
-            <div className="mt-2 pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground">Conversion Rate</p>
-              <p className="text-sm font-semibold text-purple-400">
-                {stats.conversionRate}%
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Stats Cards - Stream independently */}
+      <Suspense fallback={<QuoteStatsSkeleton />}>
+        <QuoteStatsCards filters={filters} />
+      </Suspense>
 
       {/* Search and Filters */}
       <Card className="bg-card border-border">
@@ -233,15 +147,15 @@ async function QuotesPage(props) {
         </CardContent>
       </Card>
 
-      {/* Quotes Table */}
-      <QuotesTable quotes={quotes} />
+      {/* Quotes Table - Stream independently */}
+      <Suspense fallback={<QuotesTableSkeleton />}>
+        <QuotesTableServer query={query} page={currentPage} filters={filters} />
+      </Suspense>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center">
-          <Pagination totalPages={totalPages} />
-        </div>
-      )}
+      {/* Pagination - Stream independently */}
+      <Suspense fallback={<PaginationSkeleton />}>
+        <QuotesPaginationServer query={query} filters={filters} />
+      </Suspense>
     </div>
   );
 }

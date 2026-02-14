@@ -178,46 +178,6 @@ const taxTypeGroups = [
 ];
 
 // ============================================
-// SUMMARY STATS COMPONENT
-// ============================================
-function SummaryStats({ transactions, pagination }) {
-  const stats = transactions?.reduce(
-    (acc, txn) => {
-      acc.totalTax += txn.taxAmount || 0;
-      acc.totalBase += txn.baseAmount || 0;
-      if (txn.kraTracking?.filed) {
-        acc.filed += 1;
-      } else {
-        acc.unfiled += 1;
-      }
-      return acc;
-    },
-    { totalTax: 0, totalBase: 0, filed: 0, unfiled: 0 }
-  ) || { totalTax: 0, totalBase: 0, filed: 0, unfiled: 0 };
-
-  return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <div className="bg-muted/30 rounded-lg p-3">
-        <p className="text-xs text-muted-foreground">Total Transactions</p>
-        <p className="text-lg font-bold">{pagination?.total || 0}</p>
-      </div>
-      <div className="bg-muted/30 rounded-lg p-3">
-        <p className="text-xs text-muted-foreground">Tax Amount (Page)</p>
-        <p className="text-lg font-bold text-purple-600">{formatCurrency(stats.totalTax)}</p>
-      </div>
-      <div className="bg-muted/30 rounded-lg p-3">
-        <p className="text-xs text-muted-foreground">Filed</p>
-        <p className="text-lg font-bold text-green-600">{stats.filed}</p>
-      </div>
-      <div className="bg-muted/30 rounded-lg p-3">
-        <p className="text-xs text-muted-foreground">Pending Filing</p>
-        <p className="text-lg font-bold text-amber-600">{stats.unfiled}</p>
-      </div>
-    </div>
-  );
-}
-
-// ============================================
 // MAIN COMPONENT
 // ============================================
 export default function TaxTransactionsClient({
@@ -302,25 +262,14 @@ export default function TaxTransactionsClient({
   ).length;
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground">
-            Tax Transactions
-          </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-            VAT, WHT, PAYE, and all tax transactions for KRA compliance
-          </p>
-        </div>
+    <div className="space-y-4">
+      {/* Export Button */}
+      <div className="flex justify-end">
         <Button variant="outline" size="sm" onClick={handleExport}>
           <Download className="w-4 h-4 mr-2" />
           Export
         </Button>
       </div>
-
-      {/* Summary Stats */}
-      <SummaryStats transactions={transactions} pagination={pagination} />
 
       {/* Filters Card */}
       <Card>
