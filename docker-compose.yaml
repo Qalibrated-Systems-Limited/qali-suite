@@ -1,0 +1,51 @@
+services:
+  qalisuite:
+    image: ghcr.io/geoffrey-oongo/qalisuite:latest
+    container_name: qalisuite-prod
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - JWT_KEY=${JWT_KEY}
+      - AUTH_SECRET=${AUTH_SECRET}
+      - DB_LOCAL_URI=${DB_LOCAL_URI}
+      - MONGODB_URI=${MONGODB_URI}
+      - AUTH_URL=${AUTH_URL}
+      - NEXT_TELEMETRY_DISABLED=1
+    networks:
+      - proxy-network
+      - website_prod_qs_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.qalisuite-secure.rule=Host(`qalisuite.com`) || Host(`www.qalisuite.com`)"
+      - "traefik.http.routers.qalisuite-secure.entrypoints=websecure"
+      - "traefik.http.routers.qalisuite-secure.tls=true"
+      - "traefik.http.routers.qalisuite-secure.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.qalisuite-secure.service=qalisuite"
+      - "traefik.http.services.qalisuite.loadbalancer.server.port=3000"
+      - "traefik.http.routers.qalisuite-http.rule=Host(`qalisuite.com`) || Host(`www.qalisuite.com`)"
+      - "traefik.http.routers.qalisuite-http.entrypoints=web"
+      - "traefik.http.routers.qalisuite-http.middlewares=qalisuite-https-redirect"
+      - "traefik.http.middlewares.qalisuite-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.qalisuite-https-redirect.redirectscheme.permanent=true"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3000",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  proxy-network:
+    external: true
+    name: proxy-network
+  website_prod_qs_network:
+    external: true
+    name: website_prod_qs_network

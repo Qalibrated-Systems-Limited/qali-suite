@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "standalone",
   images: {
     remotePatterns: [
       {
@@ -8,13 +9,6 @@ const nextConfig = {
         port: "",
       },
     ],
-  },
-  env: {
-    JWT_KEY: "geoffrey_ajenda_788$$%%hhhhdhjj",
-    AUTH_SECRET: "cU4MLQChH0IoakjEcH9FBHtQUr8Mnkn2elIZdlgmnwg=",
-
-    DB_LOCAL_URI:
-      "mongodb+srv://george_01:george_7_08_@calibrated.be4r7.mongodb.net/stockVault?retryWrites=true&w=majority&appName=Calibrated",
   },
 };
 

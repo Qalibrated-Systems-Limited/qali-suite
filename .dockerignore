@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.gitignore
+*.md
+docs
+.env*
+ecosystem.config.js
+deploy.sh
+*.xls
+*.pdf
+.DS_Store
