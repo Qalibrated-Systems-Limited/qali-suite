@@ -161,10 +161,13 @@ const accountSchema = new Schema(
 // ============================================
 // Unique account code per company
 accountSchema.index({ companyId: 1, accountCode: 1 }, { unique: true });
-// Unique system account per company
+// Unique system account per company (only when systemAccount is set)
 accountSchema.index(
   { companyId: 1, systemAccount: 1 },
-  { unique: true, sparse: true },
+  {
+    unique: true,
+    partialFilterExpression: { systemAccount: { $type: "string" } },
+  },
 );
 // Query indexes
 accountSchema.index({ companyId: 1, accountType: 1, isActive: 1 });
