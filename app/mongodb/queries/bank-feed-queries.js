@@ -2,6 +2,7 @@ import { BankStatement, BankFeedLine } from "../../models/bankFeed";
 import Account from "../../models/account";
 import dbConnect from "../../config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { serializeBsonType } from "@/lib/utils";
 
 // ============================================
 // BANK FEED QUERIES
@@ -127,30 +128,7 @@ export async function getBankFeedLines(
   ]);
 
   return {
-    lines: lines.map((l) => ({
-      ...l,
-      _id: l._id.toString(),
-      statementId: l.statementId.toString(),
-      companyId: l.companyId.toString(),
-      bankAccountId: l.bankAccountId.toString(),
-      journalEntryId: l.journalEntryId?.toString(),
-      matchedDocument: l.matchedDocument
-        ? {
-            ...l.matchedDocument,
-            documentId: l.matchedDocument.documentId?.toString(),
-            partyId: l.matchedDocument.partyId?.toString(),
-          }
-        : null,
-      allocations: l.allocations?.map((a) => ({
-        ...a,
-        accountId: a.accountId?.toString(),
-        taxAccountId: a.taxAccountId?.toString(),
-      })),
-      suggestions: l.suggestions?.map((s) => ({
-        ...s,
-        documentId: s.documentId?.toString(),
-      })),
-    })),
+    lines: serializeBsonType(lines),
     pagination: {
       page,
       totalPages: Math.ceil(total / limit),

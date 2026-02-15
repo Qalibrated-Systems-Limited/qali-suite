@@ -228,6 +228,27 @@ export async function createCompany(prevState, formData) {
       },
     });
 
+    // Seed Chart of Accounts and Fiscal Periods for the new company
+    const { CompanyOnboardingService } = await import("../services/companyOnboardingService");
+
+    const fiscalYearStart = new Date(
+      new Date().getFullYear(),
+      (data.fiscalYearStart || 1) - 1, // Convert month number to 0-indexed
+      1
+    );
+
+    await CompanyOnboardingService.seedChartOfAccounts(company._id, session.user);
+    await CompanyOnboardingService.initializeFiscalPeriods(
+      company._id,
+      fiscalYearStart,
+      session.user
+    );
+
+    // Mark setup as completed
+    company.settings.setupCompleted = true;
+    company.settings.setupCompletedAt = new Date();
+    await company.save();
+
     revalidatePath("/dashboard/admin/companies");
   } catch (error) {
     console.error("Create company error:", error);

@@ -790,7 +790,8 @@ export class BankFeedService {
       }
 
       // Create journal entry
-      const journalEntry = await JournalService.createEntry(
+      const user = { name: userName, id: userId };
+      const journalEntry = await JournalService.createJournalEntry(
         {
           companyId: line.companyId,
           entryType: "expense",
@@ -804,7 +805,9 @@ export class BankFeedService {
             id: line._id,
           },
         },
-        session
+        user,
+        session,
+        line.companyId
       );
 
       // Update bank feed line
@@ -893,7 +896,8 @@ export class BankFeedService {
       }
 
       // Create journal entry
-      const journalEntry = await JournalService.createEntry(
+      const user = { name: userName, id: userId };
+      const journalEntry = await JournalService.createJournalEntry(
         {
           companyId: line.companyId,
           entryType: "income",
@@ -907,7 +911,9 @@ export class BankFeedService {
             id: line._id,
           },
         },
-        session
+        user,
+        session,
+        line.companyId
       );
 
       // Update bank feed line
@@ -928,6 +934,98 @@ export class BankFeedService {
             },
           ],
           party: partyId ? { type: "customer", id: partyId, name: partyName } : null,
+          journalEntryId: journalEntry._id,
+          allocatedBy: { id: userId, name: userName },
+          allocatedAt: new Date(),
+        },
+        { session }
+      );
+
+      // Update statement stats
+      await this.updateStatementStats(line.statementId, session);
+
+      await session.commitTransaction();
+      return { success: true, journalEntryId: journalEntry._id };
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * Allocate a bank line to a liability account (statutory payments like HELB, PAYE, loans)
+   * Journal entry: Dr Liability, Cr Bank
+   */
+  static async allocateToLiability(lineId, allocationData, userId, userName) {
+    await connectDB();
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const line = await BankFeedLine.findById(lineId).session(session);
+      if (!line) throw new Error("Bank feed line not found");
+      if (line.status !== "unallocated") throw new Error("Line already allocated");
+
+      const { accountId, description, reference } = allocationData;
+
+      // Get account details
+      const account = await Account.findById(accountId);
+      if (!account) throw new Error("Liability account not found");
+
+      // Build journal entry lines: Dr Liability, Cr Bank
+      const journalLines = [
+        {
+          accountId: accountId,
+          debit: line.debitAmount,
+          credit: 0,
+          description: description || line.description,
+        },
+        {
+          accountId: line.bankAccountId,
+          debit: 0,
+          credit: line.debitAmount,
+          description: description || line.description,
+        },
+      ];
+
+      // Create journal entry
+      const user = { name: userName, id: userId };
+      const journalEntry = await JournalService.createJournalEntry(
+        {
+          companyId: line.companyId,
+          entryType: "liability_payment",
+          entryDate: line.transactionDate,
+          description: description || `Liability payment - ${account.accountName}`,
+          reference: reference || line.reference,
+          lines: journalLines,
+          sourceDocument: {
+            type: "bank_feed",
+            id: line._id,
+          },
+        },
+        user,
+        session,
+        line.companyId
+      );
+
+      // Update bank feed line
+      await BankFeedLine.findByIdAndUpdate(
+        lineId,
+        {
+          status: "allocated",
+          allocationType: "liability_payment",
+          allocations: [
+            {
+              accountId,
+              accountCode: account.accountCode,
+              accountName: account.accountName,
+              amount: line.debitAmount,
+              description: description || line.description,
+            },
+          ],
           journalEntryId: journalEntry._id,
           allocatedBy: { id: userId, name: userName },
           allocatedAt: new Date(),
@@ -1036,7 +1134,8 @@ export class BankFeedService {
       }
 
       // Create journal entry
-      const journalEntry = await JournalService.createEntry(
+      const user = { name: userName, id: userId };
+      const journalEntry = await JournalService.createJournalEntry(
         {
           companyId: line.companyId,
           entryType: "payment_received",
@@ -1049,7 +1148,9 @@ export class BankFeedService {
             id: line._id,
           },
         },
-        session
+        user,
+        session,
+        line.companyId
       );
 
       // Update bank feed line
@@ -1149,7 +1250,8 @@ export class BankFeedService {
         });
       }
 
-      const journalEntry = await JournalService.createEntry(
+      const user = { name: userName, id: userId };
+      const journalEntry = await JournalService.createJournalEntry(
         {
           companyId: line.companyId,
           entryType: "payment_made",
@@ -1159,7 +1261,9 @@ export class BankFeedService {
           lines: journalLines,
           sourceDocument: { type: "bank_feed", id: line._id },
         },
-        session
+        user,
+        session,
+        line.companyId
       );
 
       await BankFeedLine.findByIdAndUpdate(
@@ -1217,7 +1321,8 @@ export class BankFeedService {
             { accountId: targetAccountId, debit: 0, credit: amount, description },
           ];
 
-      const journalEntry = await JournalService.createEntry(
+      const user = { name: userName, id: userId };
+      const journalEntry = await JournalService.createJournalEntry(
         {
           companyId: line.companyId,
           entryType: "transfer",
@@ -1227,7 +1332,9 @@ export class BankFeedService {
           lines: journalLines,
           sourceDocument: { type: "bank_feed", id: line._id },
         },
-        session
+        user,
+        session,
+        line.companyId
       );
 
       await BankFeedLine.findByIdAndUpdate(
@@ -1318,7 +1425,8 @@ export class BankFeedService {
         });
       }
 
-      const journalEntry = await JournalService.createEntry(
+      const user = { name: userName, id: userId };
+      const journalEntry = await JournalService.createJournalEntry(
         {
           companyId: line.companyId,
           entryType: isDebit ? "expense" : "income",
@@ -1328,7 +1436,9 @@ export class BankFeedService {
           lines: journalLines,
           sourceDocument: { type: "bank_feed", id: line._id },
         },
-        session
+        user,
+        session,
+        line.companyId
       );
 
       await BankFeedLine.findByIdAndUpdate(

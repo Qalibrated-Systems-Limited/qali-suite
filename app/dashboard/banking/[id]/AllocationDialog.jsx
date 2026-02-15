@@ -17,14 +17,31 @@ import {
   Trash2,
   Split,
   ArrowLeftRight,
+  ChevronsUpDown,
+  Landmark,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import {
   allocateToInvoice,
   allocateToBill,
   allocateToExpense,
   allocateToIncome,
+  allocateToLiability,
   allocateAsTransfer,
   allocateWithSplit,
   allocateToMultipleInvoices,
@@ -32,6 +49,7 @@ import {
   excludeBankLine,
   getExpenseAccounts,
   getIncomeAccounts,
+  getLiabilityAccounts,
   getTransferAccounts,
   getAllPostableAccounts,
   searchMatchingInvoices,
@@ -57,6 +75,7 @@ const ALLOCATION_TYPES = {
   debit: [
     { key: "bill", label: "Match to Bill", icon: Receipt, description: "Payment to supplier" },
     { key: "expense", label: "Record as Expense", icon: Wallet, description: "Direct expense (no bill)" },
+    { key: "liability", label: "Pay Liability", icon: Landmark, description: "HELB, PAYE, loans, statutory payments" },
     { key: "transfer", label: "Bank Transfer", icon: ArrowLeftRight, description: "Transfer to another account" },
     { key: "split", label: "Split Transaction", icon: Split, description: "Split across multiple accounts" },
     { key: "exclude", label: "Exclude", icon: Ban, description: "Skip this transaction" },
@@ -324,11 +343,12 @@ function ExpenseIncomeForm({ line, type, onBack, onComplete }) {
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState([]);
   const [parties, setParties] = useState([]);
-  const [partySearch, setPartySearch] = useState("");
   const [partySearchLoading, setPartySearchLoading] = useState(false);
-  const [showPartyDropdown, setShowPartyDropdown] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [partyOpen, setPartyOpen] = useState(false);
   const [formData, setFormData] = useState({
     accountId: "",
+    accountName: "",
     description: line.description,
     partyId: "",
     partyName: "",
@@ -355,28 +375,30 @@ function ExpenseIncomeForm({ line, type, onBack, onComplete }) {
     loadAccounts();
   }, [type]);
 
-  // Search parties when typing
+  // Load parties for combobox
   useEffect(() => {
-    const searchTimeout = setTimeout(async () => {
-      if (partySearch.length >= 2) {
-        setPartySearchLoading(true);
-        try {
-          const results = await searchPartiesForAllocation(type, partySearch);
-          setParties(results);
-          setShowPartyDropdown(true);
-        } catch (err) {
-          console.error("Error searching parties:", err);
-        } finally {
-          setPartySearchLoading(false);
-        }
-      } else if (partySearch.length === 0) {
-        setParties([]);
-        setShowPartyDropdown(false);
+    async function loadParties() {
+      setPartySearchLoading(true);
+      try {
+        const results = await searchPartiesForAllocation(type, "");
+        setParties(results);
+      } catch (err) {
+        console.error("Error loading parties:", err);
+      } finally {
+        setPartySearchLoading(false);
       }
-    }, 300);
+    }
+    loadParties();
+  }, [type]);
 
-    return () => clearTimeout(searchTimeout);
-  }, [partySearch, type]);
+  const selectAccount = (account) => {
+    setFormData((prev) => ({
+      ...prev,
+      accountId: account._id,
+      accountName: `${account.accountCode} - ${account.accountName}`,
+    }));
+    setAccountOpen(false);
+  };
 
   const selectParty = (party) => {
     setFormData((prev) => ({
@@ -384,18 +406,7 @@ function ExpenseIncomeForm({ line, type, onBack, onComplete }) {
       partyId: party._id,
       partyName: party.name,
     }));
-    setPartySearch(party.name);
-    setShowPartyDropdown(false);
-  };
-
-  const clearParty = () => {
-    setFormData((prev) => ({
-      ...prev,
-      partyId: "",
-      partyName: "",
-    }));
-    setPartySearch("");
-    setParties([]);
+    setPartyOpen(false);
   };
 
   const handleSubmit = async () => {
@@ -413,7 +424,7 @@ function ExpenseIncomeForm({ line, type, onBack, onComplete }) {
         accountId: formData.accountId,
         description: formData.description,
         partyId: formData.partyId || null,
-        partyName: formData.partyName || partySearch || null,
+        partyName: formData.partyName || null,
       });
 
       if (result.success) {
@@ -455,26 +466,56 @@ function ExpenseIncomeForm({ line, type, onBack, onComplete }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Account Selection */}
+          {/* Account Selection - Combobox */}
           <div>
             <label className="block text-sm font-medium mb-2">
               {type === "expense" ? "Expense" : "Income"} Account{" "}
               <span className="text-red-500">*</span>
             </label>
-            <select
-              value={formData.accountId}
-              onChange={(e) =>
-                setFormData((prev) => ({ ...prev, accountId: e.target.value }))
-              }
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">Select account...</option>
-              {accounts.map((account) => (
-                <option key={account._id} value={account._id}>
-                  {account.accountCode} - {account.accountName}
-                </option>
-              ))}
-            </select>
+            <Popover open={accountOpen} onOpenChange={setAccountOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={accountOpen}
+                  className="w-full justify-between font-normal"
+                >
+                  {formData.accountId ? (
+                    <span className="truncate">{formData.accountName}</span>
+                  ) : (
+                    <span className="text-muted-foreground">Select account...</span>
+                  )}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search accounts..." />
+                  <CommandList>
+                    <CommandEmpty>No accounts found.</CommandEmpty>
+                    <CommandGroup heading={type === "expense" ? "Expense Accounts" : "Income Accounts"}>
+                      {accounts.map((account) => (
+                        <CommandItem
+                          key={account._id}
+                          value={`${account.accountCode} ${account.accountName}`}
+                          onSelect={() => selectAccount(account)}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              formData.accountId === account._id ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          <span className="font-mono text-sm mr-2">{account.accountCode}</span>
+                          <span>{account.accountName}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
             {accounts.length === 0 && (
               <p className="text-xs text-amber-600 mt-1">
                 No {type} accounts found. Please create accounts in Chart of Accounts.
@@ -482,68 +523,88 @@ function ExpenseIncomeForm({ line, type, onBack, onComplete }) {
             )}
           </div>
 
-          {/* Party Selection with Search */}
-          <div className="relative">
+          {/* Party Selection - Combobox */}
+          <div>
             <label className="block text-sm font-medium mb-2">
               {type === "expense" ? "Vendor/Payee" : "Customer"}{" "}
               <span className="text-muted-foreground text-xs">(Optional)</span>
             </label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                value={partySearch}
-                onChange={(e) => {
-                  setPartySearch(e.target.value);
-                  if (formData.partyId && e.target.value !== formData.partyName) {
-                    // User is typing something different, clear selected party
-                    setFormData((prev) => ({ ...prev, partyId: "", partyName: "" }));
-                  }
-                }}
-                onFocus={() => {
-                  if (parties.length > 0) setShowPartyDropdown(true);
-                }}
-                placeholder={`Search ${type === "expense" ? "suppliers" : "customers"}...`}
-                className="w-full pl-9 pr-8 py-2 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              {(partySearch || formData.partyId) && (
+            <Popover open={partyOpen} onOpenChange={setPartyOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={partyOpen}
+                  className="w-full justify-between font-normal"
+                >
+                  {formData.partyId ? (
+                    <span className="flex items-center gap-2 truncate">
+                      <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                      {formData.partyName}
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2 text-muted-foreground">
+                      <Building2 className="h-4 w-4" />
+                      Select {type === "expense" ? "vendor" : "customer"}...
+                    </span>
+                  )}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder={`Search ${type === "expense" ? "vendors" : "customers"}...`} />
+                  <CommandList>
+                    {partySearchLoading ? (
+                      <div className="flex items-center justify-center py-6">
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : (
+                      <>
+                        <CommandEmpty>No {type === "expense" ? "vendors" : "customers"} found.</CommandEmpty>
+                        <CommandGroup heading={type === "expense" ? "Vendors" : "Customers"}>
+                          {parties.map((party) => (
+                            <CommandItem
+                              key={party._id}
+                              value={`${party.name} ${party.email || ""}`}
+                              onSelect={() => selectParty(party)}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  formData.partyId === party._id ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              <div className="flex-1">
+                                <p className="font-medium">{party.name}</p>
+                                {party.email && (
+                                  <p className="text-xs text-muted-foreground">{party.email}</p>
+                                )}
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </>
+                    )}
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            {formData.partyId && (
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-xs text-emerald-600 flex items-center gap-1">
+                  <Check className="h-3 w-3" />
+                  Selected: {formData.partyName}
+                </p>
                 <button
                   type="button"
-                  onClick={clearParty}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setFormData((prev) => ({ ...prev, partyId: "", partyName: "" }))}
+                  className="text-xs text-muted-foreground hover:text-foreground"
                 >
-                  <X className="h-4 w-4" />
+                  Clear
                 </button>
-              )}
-              {partySearchLoading && (
-                <Loader2 className="absolute right-8 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
-              )}
-            </div>
-
-            {/* Party Dropdown */}
-            {showPartyDropdown && parties.length > 0 && (
-              <div className="absolute z-10 w-full mt-1 bg-background border border-input rounded-md shadow-lg max-h-48 overflow-y-auto">
-                {parties.map((party) => (
-                  <button
-                    key={party._id}
-                    type="button"
-                    onClick={() => selectParty(party)}
-                    className="w-full px-3 py-2 text-left hover:bg-muted text-sm"
-                  >
-                    <p className="font-medium">{party.name}</p>
-                    {party.email && (
-                      <p className="text-xs text-muted-foreground">{party.email}</p>
-                    )}
-                  </button>
-                ))}
               </div>
-            )}
-
-            {formData.partyId && (
-              <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
-                <Check className="h-3 w-3" />
-                {type === "expense" ? "Supplier" : "Customer"} selected: {formData.partyName}
-              </p>
             )}
           </div>
 
@@ -594,7 +655,9 @@ function ExpenseIncomeForm({ line, type, onBack, onComplete }) {
 function TransferForm({ line, onBack, onComplete }) {
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState([]);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [targetAccountId, setTargetAccountId] = useState("");
+  const [targetAccountName, setTargetAccountName] = useState("");
   const [description, setDescription] = useState(line.description);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -616,6 +679,12 @@ function TransferForm({ line, onBack, onComplete }) {
     }
     loadAccounts();
   }, [line.bankAccountId]);
+
+  const selectAccount = (account) => {
+    setTargetAccountId(account._id);
+    setTargetAccountName(`${account.accountCode} - ${account.accountName}`);
+    setAccountOpen(false);
+  };
 
   const handleSubmit = async () => {
     if (!targetAccountId) {
@@ -667,18 +736,55 @@ function TransferForm({ line, onBack, onComplete }) {
               {isOutgoing ? "To Account" : "From Account"}{" "}
               <span className="text-red-500">*</span>
             </label>
-            <select
-              value={targetAccountId}
-              onChange={(e) => setTargetAccountId(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">Select account...</option>
-              {accounts.map((account) => (
-                <option key={account._id} value={account._id}>
-                  {account.accountCode} - {account.accountName} ({account.subType})
-                </option>
-              ))}
-            </select>
+            <Popover open={accountOpen} onOpenChange={setAccountOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={accountOpen}
+                  className="w-full justify-between font-normal"
+                >
+                  {targetAccountId ? (
+                    <span className="truncate">{targetAccountName}</span>
+                  ) : (
+                    <span className="text-muted-foreground">Select account...</span>
+                  )}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search accounts..." />
+                  <CommandList>
+                    <CommandEmpty>No accounts found.</CommandEmpty>
+                    <CommandGroup heading="Bank & Cash Accounts">
+                      {accounts.map((account) => (
+                        <CommandItem
+                          key={account._id}
+                          value={`${account.accountCode} ${account.accountName} ${account.subType}`}
+                          onSelect={() => selectAccount(account)}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              targetAccountId === account._id ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          <div className="flex-1">
+                            <p className="font-medium">
+                              <span className="font-mono text-sm mr-2">{account.accountCode}</span>
+                              {account.accountName}
+                            </p>
+                            <p className="text-xs text-muted-foreground capitalize">{account.subType}</p>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div>
@@ -718,12 +824,227 @@ function TransferForm({ line, onBack, onComplete }) {
 }
 
 // ============================================
+// LIABILITY PAYMENT FORM
+// ============================================
+function LiabilityPaymentForm({ line, onBack, onComplete }) {
+  const [loading, setLoading] = useState(true);
+  const [accounts, setAccounts] = useState([]);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [formData, setFormData] = useState({
+    accountId: "",
+    accountName: "",
+    description: line.description,
+    reference: line.reference || "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const amount = line.debitAmount;
+
+  // Load liability accounts
+  useEffect(() => {
+    async function loadAccounts() {
+      setLoading(true);
+      try {
+        const data = await getLiabilityAccounts();
+        setAccounts(data);
+      } catch (err) {
+        console.error("Error loading liability accounts:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadAccounts();
+  }, []);
+
+  const selectAccount = (account) => {
+    setFormData((prev) => ({
+      ...prev,
+      accountId: account._id,
+      accountName: `${account.accountCode} - ${account.accountName}`,
+    }));
+    setAccountOpen(false);
+  };
+
+  const handleSubmit = async () => {
+    if (!formData.accountId) {
+      setError("Please select a liability account");
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+
+    try {
+      const result = await allocateToLiability(line._id, {
+        accountId: formData.accountId,
+        description: formData.description,
+        reference: formData.reference,
+      });
+
+      if (result.success) {
+        onComplete();
+      } else {
+        setError(result.error || "Failed to allocate");
+      }
+    } catch (err) {
+      setError(err.message || "An error occurred");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header with Amount */}
+      <div className="rounded-lg bg-muted/50 p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold flex items-center gap-2">
+            <Landmark className="h-5 w-5" />
+            Pay Liability
+          </h3>
+          <span className="font-mono font-semibold text-lg text-red-600">
+            {formatCurrency(amount)}
+          </span>
+        </div>
+        <p className="text-sm text-muted-foreground truncate">
+          {line.description}
+        </p>
+      </div>
+
+      <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3 text-sm">
+        <p className="text-blue-800 dark:text-blue-200">
+          Use this for statutory payments (HELB, PAYE, NSSF, NHIF), loan repayments,
+          or other liability settlements.
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Account Selection - Combobox */}
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Liability Account <span className="text-red-500">*</span>
+            </label>
+            <Popover open={accountOpen} onOpenChange={setAccountOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={accountOpen}
+                  className="w-full justify-between font-normal"
+                >
+                  {formData.accountId ? (
+                    <span className="truncate">{formData.accountName}</span>
+                  ) : (
+                    <span className="text-muted-foreground">Select liability account...</span>
+                  )}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search accounts..." />
+                  <CommandList>
+                    <CommandEmpty>No liability accounts found.</CommandEmpty>
+                    <CommandGroup heading="Liability Accounts">
+                      {accounts.map((account) => (
+                        <CommandItem
+                          key={account._id}
+                          value={`${account.accountCode} ${account.accountName}`}
+                          onSelect={() => selectAccount(account)}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              formData.accountId === account._id ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          <span className="font-mono text-sm mr-2">{account.accountCode}</span>
+                          <span>{account.accountName}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            {accounts.length === 0 && (
+              <p className="text-xs text-amber-600 mt-1">
+                No liability accounts found. Please create accounts in Chart of Accounts.
+              </p>
+            )}
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Description</label>
+            <input
+              type="text"
+              value={formData.description}
+              onChange={(e) =>
+                setFormData((prev) => ({ ...prev, description: e.target.value }))
+              }
+              placeholder="e.g., HELB Jan 2026"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+
+          {/* Reference */}
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Reference <span className="text-muted-foreground text-xs">(Optional)</span>
+            </label>
+            <input
+              type="text"
+              value={formData.reference}
+              onChange={(e) =>
+                setFormData((prev) => ({ ...prev, reference: e.target.value }))
+              }
+              placeholder="e.g., HL69843FF2"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+        </div>
+      )}
+
+      {error && <p className="text-sm text-red-500">{error}</p>}
+
+      {/* Actions */}
+      <div className="flex justify-between pt-4 border-t">
+        <Button variant="outline" onClick={onBack}>
+          Back
+        </Button>
+        <Button onClick={handleSubmit} disabled={submitting || !formData.accountId}>
+          {submitting ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Allocating...
+            </>
+          ) : (
+            <>
+              <Check className="h-4 w-4 mr-2" />
+              Pay {formatCurrency(amount)}
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
 // SPLIT FORM
 // ============================================
 function SplitForm({ line, onBack, onComplete }) {
   const [loading, setLoading] = useState(true);
   const [accountsByType, setAccountsByType] = useState({});
-  const [splits, setSplits] = useState([{ accountId: "", amount: 0, description: "" }]);
+  const [splits, setSplits] = useState([{ accountId: "", accountName: "", amount: 0, description: "", open: false }]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -747,7 +1068,7 @@ function SplitForm({ line, onBack, onComplete }) {
   }, []);
 
   const addSplit = () => {
-    setSplits([...splits, { accountId: "", amount: remaining > 0 ? remaining : 0, description: "" }]);
+    setSplits([...splits, { accountId: "", accountName: "", amount: remaining > 0 ? remaining : 0, description: "", open: false }]);
   };
 
   const removeSplit = (index) => {
@@ -759,6 +1080,22 @@ function SplitForm({ line, onBack, onComplete }) {
   const updateSplit = (index, field, value) => {
     setSplits(
       splits.map((s, i) => (i === index ? { ...s, [field]: value } : s))
+    );
+  };
+
+  const selectSplitAccount = (index, account) => {
+    setSplits(
+      splits.map((s, i) =>
+        i === index
+          ? { ...s, accountId: account._id, accountName: `${account.accountCode} - ${account.accountName}`, open: false }
+          : s
+      )
+    );
+  };
+
+  const toggleSplitOpen = (index, open) => {
+    setSplits(
+      splits.map((s, i) => (i === index ? { ...s, open } : s))
     );
   };
 
@@ -792,11 +1129,6 @@ function SplitForm({ line, onBack, onComplete }) {
       setSubmitting(false);
     }
   };
-
-  // Flatten accounts for select
-  const allAccounts = Object.entries(accountsByType).flatMap(([type, accounts]) =>
-    accounts.map((a) => ({ ...a, type }))
-  );
 
   return (
     <div className="space-y-4">
@@ -849,22 +1181,52 @@ function SplitForm({ line, onBack, onComplete }) {
                 )}
               </div>
 
-              <select
-                value={split.accountId}
-                onChange={(e) => updateSplit(index, "accountId", e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="">Select account...</option>
-                {Object.entries(accountsByType).map(([type, accounts]) => (
-                  <optgroup key={type} label={type}>
-                    {accounts.map((account) => (
-                      <option key={account._id} value={account._id}>
-                        {account.accountCode} - {account.accountName}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              {/* Account Combobox */}
+              <Popover open={split.open} onOpenChange={(open) => toggleSplitOpen(index, open)}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    className="w-full justify-between font-normal h-9"
+                  >
+                    {split.accountId ? (
+                      <span className="truncate text-sm">{split.accountName}</span>
+                    ) : (
+                      <span className="text-muted-foreground text-sm">Select account...</span>
+                    )}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search accounts..." />
+                    <CommandList>
+                      <CommandEmpty>No accounts found.</CommandEmpty>
+                      {Object.entries(accountsByType).map(([type, accounts]) => (
+                        <CommandGroup key={type} heading={type}>
+                          {accounts.map((account) => (
+                            <CommandItem
+                              key={account._id}
+                              value={`${account.accountCode} ${account.accountName}`}
+                              onSelect={() => selectSplitAccount(index, account)}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  split.accountId === account._id ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              <span className="font-mono text-xs mr-2">{account.accountCode}</span>
+                              <span className="text-sm">{account.accountName}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      ))}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
 
               <div className="flex gap-2">
                 <input
@@ -1150,6 +1512,9 @@ export default function AllocationDialog({ line, onClose, onComplete }) {
           )}
           {step === "transfer" && (
             <TransferForm line={line} onBack={handleBack} onComplete={onComplete} />
+          )}
+          {step === "liability" && (
+            <LiabilityPaymentForm line={line} onBack={handleBack} onComplete={onComplete} />
           )}
           {step === "split" && (
             <SplitForm line={line} onBack={handleBack} onComplete={onComplete} />

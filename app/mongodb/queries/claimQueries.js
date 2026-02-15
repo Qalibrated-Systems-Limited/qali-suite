@@ -86,6 +86,7 @@ export const fetchClaimPages = async (searchTerm = "", filters = {}) => {
 // SEARCH CLAIMS WITH PAGINATION
 // ============================================
 export const searchClaims = async (searchTerm = "", page = 1, filters = {}) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin

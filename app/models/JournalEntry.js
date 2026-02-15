@@ -58,7 +58,10 @@ const journalEntrySchema = new Schema(
         "revaluation",
         "tax",
         "inventory_adjustment",
+
         "other",
+        //Other
+        "liability_payment",
       ],
       index: true,
     },
@@ -324,7 +327,9 @@ journalEntrySchema.methods.validateAccounts = async function (session = null) {
 };
 
 // Validate fiscal period is open
-journalEntrySchema.methods.validateFiscalPeriod = async function (session = null) {
+journalEntrySchema.methods.validateFiscalPeriod = async function (
+  session = null,
+) {
   if (!this.fiscalPeriodId) return true;
 
   const FiscalPeriod = mongoose.model("FiscalPeriod");
@@ -349,7 +354,9 @@ journalEntrySchema.methods.validateFiscalPeriod = async function (session = null
 };
 
 // Complete validation before posting
-journalEntrySchema.methods.validateBeforePosting = async function (session = null) {
+journalEntrySchema.methods.validateBeforePosting = async function (
+  session = null,
+) {
   this.validateBalance();
   this.validateLines();
   await this.validateAccounts(session);

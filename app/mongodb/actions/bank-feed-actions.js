@@ -202,6 +202,34 @@ export async function allocateToIncome(lineId, allocationData) {
 }
 
 /**
+ * Allocate a bank line to a liability account (HELB, PAYE, loans, statutory payments)
+ */
+export async function allocateToLiability(lineId, allocationData) {
+  try {
+    await dbConnect();
+
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    const result = await BankFeedService.allocateToLiability(
+      lineId,
+      allocationData,
+      session.user.id,
+      session.user.name,
+    );
+
+    revalidatePath("/dashboard/banking");
+
+    return serializeBsonType(result);
+  } catch (error) {
+    console.error("Error allocating to liability:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Exclude a bank line from allocation
  */
 export async function excludeBankLine(lineId, reason, note = "") {
@@ -577,7 +605,7 @@ export async function getExpenseAccounts() {
 
   const accounts = await Account.find(
     withTenantScope(
-      { accountType: "Expense", isActive: true, canPost: true },
+      { accountType: "expense", isActive: true, canPost: true },
       companyId,
       isSuperAdmin,
     ),
@@ -598,7 +626,28 @@ export async function getIncomeAccounts() {
 
   const accounts = await Account.find(
     withTenantScope(
-      { accountType: "Revenue", isActive: true, canPost: true },
+      { accountType: "revenue", isActive: true, canPost: true },
+      companyId,
+      isSuperAdmin,
+    ),
+  )
+    .sort({ accountCode: 1 })
+    .select("accountCode accountName subType")
+    .lean();
+
+  return accounts.map((a) => ({ ...a, _id: a._id.toString() }));
+}
+
+/**
+ * Get liability accounts (for statutory payments like HELB, PAYE, NSSF, loans)
+ */
+export async function getLiabilityAccounts() {
+  await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const accounts = await Account.find(
+    withTenantScope(
+      { accountType: "liability", isActive: true, canPost: true },
       companyId,
       isSuperAdmin,
     ),
@@ -761,12 +810,17 @@ export async function searchPartiesForAllocation(type, searchTerm = "") {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
 
-  const partyType = type === "expense" ? "supplier" : "customer";
+  // For expenses: suppliers, employees, or "both" party types
+  // For income: customers or "both" party types
+  const partyTypes =
+    type === "expense"
+      ? ["supplier", "employee", "both"]
+      : ["customer", "both"];
 
   const query = withTenantScope(
     {
       isActive: true,
-      type: { $in: [partyType, "both"] },
+      type: { $in: partyTypes },
     },
     companyId,
     isSuperAdmin
