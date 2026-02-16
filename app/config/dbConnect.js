@@ -17,8 +17,7 @@ const dbConnect = async () => {
   }
 
   // Validate environment variable
-  const uri =
-    "mongodb+srv://qalisuite_user_1:Qali_pass_2044@kilos.6ilx3u2.mongodb.net/qalisuite?appName=kilos";
+  const uri = process.env.MONGODB_URI;
   if (!uri) {
     throw new Error(
       "MONGODB_URI environment variable is not defined. " +
