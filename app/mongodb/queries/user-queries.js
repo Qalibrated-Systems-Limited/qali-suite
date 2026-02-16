@@ -89,6 +89,7 @@ export const searchUsers = async (searchTerm, page = 1, filters = {}) => {
 // FETCH USER PAGES
 // ============================================
 export const fetchUserPages = async (searchTerm, filters = {}) => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const { role, status, department } = filters;
 
@@ -153,6 +154,7 @@ export const fetchUserPages = async (searchTerm, filters = {}) => {
 // GET USER STATS
 // ============================================
 export const getUserStats = async (filters = {}) => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const { role, status, department } = filters;
 
@@ -222,6 +224,7 @@ export const getUserStats = async (filters = {}) => {
 // GET USER BY ID
 // ============================================
 export const getUserById = async (userId) => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
 
   const query = withTenantScope({ _id: userId }, companyId, isSuperAdmin);
@@ -248,6 +251,7 @@ export const getUserById = async (userId) => {
 // GET DEPARTMENTS LIST
 // ============================================
 export const getDepartments = async () => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
 
   const query = isSuperAdmin ? {} : { companyId };

@@ -73,7 +73,7 @@ export default async function UserDetailsPage({ params, searchParams }) {
         <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
           <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
           <p className="text-sm text-green-600 dark:text-green-400 font-medium">
-            User created successfully! They can now log in with their credentials.
+            User created successfully! An invite email has been sent to set up their account.
           </p>
         </div>
       )}
@@ -99,9 +99,18 @@ export default async function UserDetailsPage({ params, searchParams }) {
 
         <div className="relative flex flex-col sm:flex-row items-center gap-6">
           {/* Avatar */}
-          <div className="h-24 w-24 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white text-3xl font-bold shadow-xl ring-4 ring-white/30">
-            {initials}
-          </div>
+          {user.avatar ? (
+            <img
+              src={user.avatar}
+              alt={user.name}
+              className="h-24 w-24 rounded-full object-cover shadow-xl ring-4 ring-white/30"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="h-24 w-24 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white text-3xl font-bold shadow-xl ring-4 ring-white/30">
+              {initials}
+            </div>
+          )}
 
           {/* Info */}
           <div className="text-center sm:text-left flex-1">

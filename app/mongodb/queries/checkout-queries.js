@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
 import { serializeBsonType } from "@/lib/utils";
+import dbConnect from "../../config/dbConnect";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -10,6 +11,7 @@ const ITEMS_PER_PAGE = 20;
 // FETCH CHECKOUTS WITH FILTERS
 // ============================================
 export const fetchCheckoutPages = async (searchTerm, filters = {}) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
@@ -98,6 +100,7 @@ export const fetchCheckoutPages = async (searchTerm, filters = {}) => {
 // SEARCH CHECKOUTS WITH PAGINATION
 // ============================================
 export const searchCheckouts = async (searchTerm, page = 1, filters = {}) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
@@ -218,6 +221,7 @@ export const searchCheckouts = async (searchTerm, page = 1, filters = {}) => {
 // GET CHECKOUT STATS
 // ============================================
 export const getCheckoutStats = async () => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
@@ -254,6 +258,7 @@ export const getCheckoutStats = async () => {
 // GET SINGLE CHECKOUT BY ID
 // ============================================
 export const getCheckoutById = async (checkoutId) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
@@ -300,6 +305,7 @@ export const getCheckoutById = async (checkoutId) => {
 // GET USER CHECKOUTS
 // ============================================
 export const getUserCheckouts = async (userId, activeOnly = false) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
@@ -336,6 +342,7 @@ export const getUserCheckouts = async (userId, activeOnly = false) => {
 // 5. Checkouts with saleConversion.invoiceId already exist → EXCLUDE
 // ============================================
 export const getActiveCheckouts = async () => {
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
 
@@ -418,6 +425,7 @@ export const getActiveCheckouts = async () => {
 // GENERATE CHECKOUT NUMBER
 // ============================================
 export const generateCheckoutNumber = async (session = null) => {
+  await dbConnect();
   const { format } = await import("date-fns");
   const { Counter } = await import("../../models/counter");
 

@@ -1,10 +1,12 @@
 import { StockRequest } from "../../models/requests";
 import { ItemCheckout } from "../../models/checkouts";
+import dbConnect from "../../config/dbConnect";
 
 // ============================================
 // TECHNICIAN DASHBOARD STATS
 // ============================================
 export const getTechnicianStats = async (userId) => {
+  await dbConnect();
   const now = new Date();
   const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
 
@@ -66,6 +68,7 @@ export const getTechnicianStats = async (userId) => {
 // MY BORROWED ITEMS
 // ============================================
 export const getMyBorrowedItems = async (userId) => {
+  await dbConnect();
   const now = new Date();
 
   const items = await ItemCheckout.find({
@@ -105,6 +108,7 @@ export const getMyBorrowedItems = async (userId) => {
 // MY OVERDUE ITEMS
 // ============================================
 export const getMyOverdueItems = async (userId) => {
+  await dbConnect();
   const now = new Date();
 
   const items = await ItemCheckout.find({
@@ -135,6 +139,7 @@ export const getMyOverdueItems = async (userId) => {
 // MY REQUESTS
 // ============================================
 export const getMyRequests = async (userId, limit = 10) => {
+  await dbConnect();
   const requests = await StockRequest.find({ "requester.id": userId })
     .sort({ createdAt: -1 })
     .limit(limit)
@@ -157,6 +162,7 @@ export const getMyRequests = async (userId, limit = 10) => {
 // MY RECENT ACTIVITY
 // ============================================
 export const getMyRecentActivity = async (userId, limit = 10) => {
+  await dbConnect();
   // Get recent checkouts
   const checkouts = await ItemCheckout.find({
     "checkedOutTo.id": userId,
