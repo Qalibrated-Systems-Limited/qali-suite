@@ -1,5 +1,5 @@
 "use client";
-import { Suspense, useActionState, useState } from "react";
+import { Suspense, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import {
   Card,
@@ -23,15 +23,12 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   TriangleAlert,
   Loader2,
-  Mail,
-  Phone,
   User,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
-import { authenticate } from "../../mongodb/actions";
 import { cn } from "../../../lib/utils";
 
 const formSchema = z.object({
@@ -50,11 +47,8 @@ export default function LoginPage() {
 function LoginContent() {
   const searchParams = useSearchParams();
   const oauthError = searchParams.get("error");
-
-  const [errorMessage, dispatch, isPending] = useActionState(
-    authenticate,
-    undefined
-  );
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isPending, setIsPending] = useState(false);
 
   const form = useForm({
     resolver: zodResolver(formSchema),
@@ -63,6 +57,25 @@ function LoginContent() {
       password: "",
     },
   });
+
+  const handleCredentialsLogin = async (data) => {
+    setIsPending(true);
+    setErrorMessage("");
+
+    const result = await signIn("credentials", {
+      email: data.email,
+      password: data.password,
+      callbackUrl: "/dashboard",
+      redirect: false,
+    });
+
+    if (result?.error) {
+      setErrorMessage("Invalid credentials.");
+      setIsPending(false);
+    } else if (result?.url) {
+      window.location.href = result.url;
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -91,7 +104,7 @@ function LoginContent() {
 
           <CardContent>
             <Form {...form}>
-              <form action={dispatch} className="space-y-4">
+              <form onSubmit={form.handleSubmit(handleCredentialsLogin)} className="space-y-4">
                 {/* OAuth Error (e.g. uninvited Google sign-in) */}
                 {oauthError && (
                   <Alert className="bg-amber-500/10 border-amber-500/20">
