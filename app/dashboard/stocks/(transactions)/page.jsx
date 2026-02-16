@@ -3,7 +3,6 @@ import { auth } from "@/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import User from "@/app/models/user";
 import { SiteHeader } from "@/components/site-header";
-import { AddButton } from "@/components/buttons";
 import {
   StockQuantityFilter,
   ClearStockFiltersButton,
@@ -28,14 +27,11 @@ import {
 // ACTION BUTTONS (with lazy PDF export)
 // ============================================
 
-function ActionButtons({ canCreateStock }) {
+function ActionButtons() {
   return (
-    <div className="flex gap-2 items-center">
-      <Suspense fallback={<PDFExportSkeleton />}>
-        <StockPDFExportServer />
-      </Suspense>
-      {canCreateStock && <AddButton url="/dashboard/stocks/create" />}
-    </div>
+    <Suspense fallback={<PDFExportSkeleton />}>
+      <StockPDFExportServer />
+    </Suspense>
   );
 }
 
@@ -68,8 +64,6 @@ async function StockPage(props) {
       productId: item.productId?.toString(),
     })) ?? [];
 
-  const canCreateStock = user.role === "Store Manager" || user.role === "Admin";
-
   // Build filters object
   const filters = {
     category: category !== "all" ? category : "",
@@ -85,15 +79,15 @@ async function StockPage(props) {
       <SiteHeader
         title={
           action === "request"
-            ? "Add Items you are requesting to cart"
-            : "Stock Inventory"
+            ? "Select Items"
+            : "Stock"
         }
         description={
           action === "request"
-            ? "Select items to add to your request"
-            : "Manage your inventory and stock levels"
+            ? "Add items to your request cart"
+            : "Manage inventory and stock levels"
         }
-        Action={canCreateStock ? () => <ActionButtons canCreateStock={canCreateStock} /> : undefined}
+        Action={() => <ActionButtons />}
       />
 
       {/* Success/Error Banner */}

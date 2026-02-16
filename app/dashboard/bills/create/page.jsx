@@ -9,6 +9,7 @@ import Party from "@/app/models/parties";
 import Account from "@/app/models/account";
 import Product from "@/app/models/product";
 import dbConnect from "@/app/config/dbConnect";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 // ============================================
 // METADATA
@@ -23,9 +24,11 @@ export const metadata = {
 // ============================================
 async function getBillFormData() {
   await dbConnect();
+  const { companyId } = await getTenantContext();
 
-  // Fetch suppliers (parties that are suppliers or both)
+  // Fetch suppliers (parties that are suppliers or both) - tenant-scoped
   const suppliers = await Party.find({
+    companyId,
     type: { $in: ["supplier", "both"] },
     isActive: { $ne: false },
   })
@@ -33,10 +36,9 @@ async function getBillFormData() {
     .sort({ name: 1 })
     .lean();
 
-  // Fetch expense accounts and inventory asset accounts for bill lines
-  // - Expense accounts: for services, utilities, consumables
-  // - Inventory asset accounts: for stock/goods purchases (not bank, receivables, etc.)
+  // Fetch expense accounts and inventory asset accounts for bill lines - tenant-scoped
   const accounts = await Account.find({
+    companyId,
     $or: [
       { accountType: "expense" },
       { accountType: "asset", subType: "inventory" },
@@ -48,8 +50,9 @@ async function getBillFormData() {
     .sort({ accountType: -1, accountCode: 1 }) // expense first, then asset
     .lean();
 
-  // Fetch products (optional - for inventory purchases)
+  // Fetch products (optional - for inventory purchases) - tenant-scoped
   const products = await Product.find({
+    companyId,
     isActive: { $ne: false },
   })
     .select("_id SKU name unit costing.costPrice costPrice")

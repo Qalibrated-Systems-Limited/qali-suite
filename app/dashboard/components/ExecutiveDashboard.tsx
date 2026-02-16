@@ -538,13 +538,13 @@ async function FinancialRatiosCard() {
     Account.find({
       ...tenantMatch,
       accountType: "Asset",
-      subType: { $in: ["cash", "bank", "mpesa", "accounts_receivable", "inventory"] },
+      subType: { $in: ["cash", "bank", "mpesa", "receivable", "inventory", "prepaid", "tax"] },
       isActive: true,
     }),
     Account.find({
       ...tenantMatch,
       accountType: "Liability",
-      subType: { $in: ["accounts_payable", "current_liability"] },
+      subType: { $in: ["payable", "tax", "payroll", "accrual", "deferred", "customer_deposit"] },
       isActive: true,
     }),
   ]);

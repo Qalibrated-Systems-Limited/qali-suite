@@ -500,7 +500,7 @@ expenseSchema.methods.createJournalEntry = async function (user) {
 
   // Add tax lines if applicable
   if (this.taxAmount > 0) {
-    const vatAccount = await Account.findOne({ systemAccount: "vat_payable" });
+    const vatAccount = await Account.findOne({ companyId: this.companyId, systemAccount: "vat_output" });
     if (vatAccount) {
       // Adjust expense line
       lines[0].debit = this.amount;

@@ -4,12 +4,14 @@ import { Info } from "lucide-react";
 import { CreateAdjustmentForm } from "../components/CreateAdjustmentForm";
 import Product from "@/app/models/product";
 import dbConnect from "@/app/config/dbConnect";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
-// Fetch products for adjustment
+// Fetch products for adjustment (tenant-scoped)
 async function getProducts() {
   await dbConnect();
+  const { companyId } = await getTenantContext();
 
-  const products = await Product.find({})
+  const products = await Product.find({ companyId })
     .select("_id name SKU stock unit costing.costPrice")
     .sort({ name: 1 })
     .lean();

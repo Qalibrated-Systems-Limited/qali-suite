@@ -3,12 +3,14 @@
 import { auth } from "@/auth";
 import User from "../models/user";
 import Company from "../models/Company";
+import Invite from "../models/invite";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import dbConnect from "../config/dbConnect";
 import { userRoles } from "@/lib/utils";
 import mongoose from "mongoose";
+import { sendInviteEmail } from "@/lib/email";
 
 // ============================================
 // AUTHORIZATION HELPERS
@@ -39,7 +41,6 @@ const optionalObjectId = z
 const userCreateSchema = z.object({
   name: z.string().min(1, "Name is required").max(50),
   email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
   role: z.enum(userRoles),
   department: optionalString,
   companyId: optionalObjectId,
@@ -79,7 +80,6 @@ export async function createUser(prevState, formData) {
   const formValues = {
     name: formData.get("name"),
     email: formData.get("email"),
-    password: formData.get("password"),
     role: formData.get("role"),
     department: formData.get("department"),
     companyId: formData.get("companyId"),
@@ -103,7 +103,7 @@ export async function createUser(prevState, formData) {
     };
   }
 
-  const { name, email, password, role, department, companyId } = validatedFields.data;
+  const { name, email, role, department, companyId } = validatedFields.data;
 
   // Determine which company to assign
   let assignedCompanyId = companyId;
@@ -134,6 +134,8 @@ export async function createUser(prevState, formData) {
     }
   }
 
+  let newUserId = null;
+
   try {
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -145,11 +147,10 @@ export async function createUser(prevState, formData) {
       };
     }
 
-    // Create user
-    await User.create({
+    // Create user (no password — user sets it themselves via invite link)
+    const newUser = await User.create({
       name,
       email,
-      password,
       role,
       department,
       companyId: assignedCompanyId,
@@ -159,9 +160,35 @@ export async function createUser(prevState, formData) {
       },
     });
 
+    newUserId = newUser._id.toString();
+
+    // Send invite email so user can set up their account
+    try {
+      const company = await Company.findById(assignedCompanyId).select("name").lean();
+      const { rawToken, hashedToken } = Invite.generateToken();
+
+      await Invite.create({
+        email,
+        role,
+        companyId: assignedCompanyId,
+        invitedBy: { name: currentUser.name, id: currentUser.id },
+        token: hashedToken,
+      });
+
+      await sendInviteEmail({
+        to: email,
+        inviterName: currentUser.name,
+        companyName: company?.name || "Your Company",
+        role,
+        rawToken,
+      });
+    } catch (emailError) {
+      console.error("Failed to send invite email:", emailError);
+      // User was created — don't fail the whole operation
+    }
+
     revalidatePath("/dashboard/users");
     revalidatePath("/dashboard/admin/users");
-    return { message: "User created successfully", errors: {}, success: true };
   } catch (error) {
     console.error("Create user error:", error);
     return {
@@ -170,6 +197,9 @@ export async function createUser(prevState, formData) {
       values: formValues,
     };
   }
+
+  // Redirect outside try-catch to avoid catching the redirect error
+  redirect(`/dashboard/users/${newUserId}?created=true`);
 }
 
 // ============================================

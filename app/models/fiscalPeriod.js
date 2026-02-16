@@ -94,7 +94,7 @@ const fiscalPeriodSchema = new Schema(
     status: {
       type: String,
       enum: {
-        values: ["open", "closed", "locked"],
+        values: ["future", "open", "closed", "locked"],
         message: "{VALUE} is not a valid status",
       },
       default: "open",
@@ -278,14 +278,17 @@ const fiscalPeriodSchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  }
+  },
 );
 
 // ============================================
 // COMPOUND INDEXES
 // ============================================
 // Unique period per company
-fiscalPeriodSchema.index({ companyId: 1, year: -1, month: -1 }, { unique: true });
+fiscalPeriodSchema.index(
+  { companyId: 1, year: -1, month: -1 },
+  { unique: true },
+);
 fiscalPeriodSchema.index({ companyId: 1, periodCode: 1 }, { unique: true });
 // Query indexes
 fiscalPeriodSchema.index({ companyId: 1, status: 1, endDate: -1 });
@@ -352,16 +355,15 @@ fiscalPeriodSchema.methods.calculateStatistics = async function () {
     status: "confirmed",
   });
 
-  // Revenue & Expenses
+  // Revenue & Expenses (tenant-scoped)
   const Account = mongoose.model("Account");
+  const companyId = this.companyId;
   const revenueAccounts = await Account.find({
-    accountType: "revenue",
-    isActive: true,
+    companyId, accountType: "revenue", isActive: true,
   }).distinct("_id");
 
   const expenseAccounts = await Account.find({
-    accountType: "expense",
-    isActive: true,
+    companyId, accountType: "expense", isActive: true,
   }).distinct("_id");
 
   // Calculate revenue
@@ -446,8 +448,7 @@ fiscalPeriodSchema.methods.calculateClosingBalances = async function () {
 
   for (const accountType of accountTypes) {
     const accounts = await Account.find({
-      accountType,
-      isActive: true,
+      companyId: this.companyId, accountType, isActive: true,
     }).distinct("_id");
 
     const result = await JournalEntry.aggregate([
@@ -519,7 +520,7 @@ fiscalPeriodSchema.methods.close = async function (closedBy) {
 
   if (draftCount > 0) {
     throw new Error(
-      `Cannot close period. ${draftCount} draft journal entries exist. Please post or delete them first.`
+      `Cannot close period. ${draftCount} draft journal entries exist. Please post or delete them first.`,
     );
   }
 
@@ -554,9 +555,10 @@ fiscalPeriodSchema.methods.createClosingJournalEntry = async function (user) {
   const Account = mongoose.model("Account");
   const JournalEntry = mongoose.model("JournalEntry");
 
-  // Get retained earnings account
+  // Get retained earnings account (tenant-scoped)
+  const companyId = this.companyId;
   const retainedEarningsAccount = await Account.findOne({
-    systemAccount: "retained_earnings",
+    companyId, systemAccount: "retained_earnings",
   });
 
   if (!retainedEarningsAccount) {
@@ -570,8 +572,7 @@ fiscalPeriodSchema.methods.createClosingJournalEntry = async function (user) {
   // Revenue has normal CREDIT balance, so DEBIT to close
   // ============================================
   const revenueAccounts = await Account.find({
-    accountType: "revenue",
-    isActive: true,
+    companyId, accountType: "revenue", isActive: true,
   });
 
   for (const account of revenueAccounts) {
@@ -617,8 +618,7 @@ fiscalPeriodSchema.methods.createClosingJournalEntry = async function (user) {
   // Expense has normal DEBIT balance, so CREDIT to close
   // ============================================
   const expenseAccounts = await Account.find({
-    accountType: "expense",
-    isActive: true,
+    companyId, accountType: "expense", isActive: true,
   });
 
   for (const account of expenseAccounts) {
@@ -692,14 +692,15 @@ fiscalPeriodSchema.methods.createClosingJournalEntry = async function (user) {
 
   if (Math.abs(finalDebits - finalCredits) > 0.01) {
     throw new Error(
-      `Closing entry unbalanced: Debits ${finalDebits.toFixed(2)} ≠ Credits ${finalCredits.toFixed(2)}`
+      `Closing entry unbalanced: Debits ${finalDebits.toFixed(2)} ≠ Credits ${finalCredits.toFixed(2)}`,
     );
   }
 
   // ============================================
   // 5. CREATE AND POST JOURNAL ENTRY
   // ============================================
-  const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
+  const { generateUniqueEntryNumber } =
+    await import("@/lib/utils/server-utils");
   const entryNumber = await generateUniqueEntryNumber("CLOSE", this.companyId);
 
   const journalEntry = await JournalEntry.create({
@@ -816,7 +817,7 @@ fiscalPeriodSchema.statics.createMonthPeriod = async function (
   year,
   month,
   createdBy,
-  companyId = null
+  companyId = null,
 ) {
   // Build query filter with companyId for tenant isolation
   const filter = { year, month };
@@ -878,13 +879,18 @@ fiscalPeriodSchema.statics.createMonthPeriod = async function (
 fiscalPeriodSchema.statics.createYearPeriods = async function (
   year,
   createdBy,
-  companyId = null
+  companyId = null,
 ) {
   const periods = [];
 
   for (let month = 1; month <= 12; month++) {
     try {
-      const period = await this.createMonthPeriod(year, month, createdBy, companyId);
+      const period = await this.createMonthPeriod(
+        year,
+        month,
+        createdBy,
+        companyId,
+      );
       periods.push(period);
     } catch (error) {
       console.error(`Failed to create period ${year}-${month}:`, error.message);

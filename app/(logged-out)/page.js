@@ -1,451 +1,470 @@
 import { Button } from "../../components/ui/button";
 import Link from "next/link";
+import Image from "next/image";
 import {
   ArrowRight,
   BarChart3,
   Receipt,
   Users,
   Wallet,
-  ClipboardList,
-  TrendingUp,
-  Shield,
-  Zap,
-  Globe,
-  CheckCircle2,
-  Sparkles,
-  LineChart,
   Package,
-  ArrowUpRight,
-  Play,
-  Layers,
-  Clock,
-  PieChart,
+  Sparkles,
+  Zap,
+  Shield,
+  Globe,
+  ChevronRight,
+  BookOpen,
+  ClipboardCheck,
+  FileText,
+  CreditCard,
+  Briefcase,
+  FolderKanban,
+  MapPin,
+  Mail,
+  Phone,
+  ExternalLink,
 } from "lucide-react";
 
 export default function LandingPage() {
-  const features = [
-    {
-      icon: Package,
-      title: "Inventory Management",
-      description: "Track stock levels, movements, and reorder points in real-time with smart alerts",
-      color: "from-blue-500 to-cyan-500",
-    },
-    {
-      icon: Receipt,
-      title: "Invoicing & Billing",
-      description: "Create professional invoices, quotes, and delivery notes in seconds",
-      color: "from-green-500 to-emerald-500",
-    },
-    {
-      icon: Wallet,
-      title: "Financial Accounting",
-      description: "Manage accounts payable, receivable, and general ledger effortlessly",
-      color: "from-purple-500 to-violet-500",
-    },
-    {
-      icon: Users,
-      title: "Customer Management",
-      description: "Build stronger relationships with complete customer history and insights",
-      color: "from-orange-500 to-amber-500",
-    },
-    {
-      icon: ClipboardList,
-      title: "Purchase Orders",
-      description: "Streamline procurement with automated purchase workflows and approvals",
-      color: "from-pink-500 to-rose-500",
-    },
-    {
-      icon: BarChart3,
-      title: "Analytics & Reports",
-      description: "Make data-driven decisions with comprehensive dashboards and reports",
-      color: "from-indigo-500 to-blue-500",
-    },
-  ];
-
-  const highlights = [
-    { icon: Zap, label: "Lightning Fast" },
-    { icon: Shield, label: "Bank-grade Security" },
-    { icon: Globe, label: "Access Anywhere" },
-    { icon: Clock, label: "Real-time Sync" },
-  ];
-
-  const benefits = [
-    { text: "Reduce manual data entry by 80%", icon: TrendingUp },
-    { text: "Real-time visibility into operations", icon: PieChart },
-    { text: "Automate repetitive business tasks", icon: Layers },
-    { text: "Generate reports in one click", icon: BarChart3 },
-    { text: "Access from anywhere, anytime", icon: Globe },
-    { text: "Scale as your business grows", icon: ArrowUpRight },
-  ];
-
-  const stats = [
-    { value: "99.9%", label: "Uptime", suffix: "" },
-    { value: "10", label: "Faster Operations", suffix: "x" },
-    { value: "50", label: "Hours Saved/Month", suffix: "+" },
-    { value: "24/7", label: "Support", suffix: "" },
-  ];
-
   return (
     <div className="min-h-screen bg-background overflow-hidden">
-      {/* Hero Section */}
-      <div className="relative min-h-screen flex items-center">
-        {/* Animated Background */}
-        <div className="absolute inset-0 overflow-hidden">
-          {/* Main gradient orbs */}
-          <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-yellow-500/30 rounded-full blur-[120px] animate-pulse" />
-          <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-yellow-600/20 rounded-full blur-[100px] animate-pulse delay-700" />
-          <div className="absolute top-1/2 left-0 w-[300px] h-[300px] bg-orange-500/10 rounded-full blur-[80px] animate-pulse delay-1000" />
-
-        </div>
-
-        {/* Grid Pattern */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#8881_1px,transparent_1px),linear-gradient(to_bottom,#8881_1px,transparent_1px)] bg-[size:60px_60px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_50%,#000_40%,transparent_100%)]" />
-
-        <div className="relative w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-          <div className="text-center space-y-8">
-            {/* Announcement Badge */}
-            <div className="flex justify-center">
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 dark:text-yellow-500 text-sm font-medium backdrop-blur-sm">
-                <Sparkles className="w-4 h-4" />
-                <span>Complete ERP Solution for Growing Businesses</span>
-                <ArrowRight className="w-4 h-4" />
-              </div>
-            </div>
-
-            {/* Logo */}
-            <div className="flex justify-center">
-              <div className="relative group">
-                <div className="absolute -inset-2 bg-gradient-to-r from-yellow-400 via-yellow-500 to-orange-500 rounded-3xl blur-lg opacity-40 group-hover:opacity-60 transition duration-500 animate-pulse" />
-                <div className="relative w-24 h-24 bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-2xl flex items-center justify-center shadow-2xl transform group-hover:scale-105 transition duration-300">
-                  <span className="text-5xl font-bold text-black">Q</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Main Heading */}
-            <div className="space-y-4">
-              <h1 className="text-6xl sm:text-7xl lg:text-8xl font-bold tracking-tight">
-                <span className="text-foreground">Qali</span>
-                <span className="bg-gradient-to-r from-yellow-400 via-yellow-500 to-orange-500 bg-clip-text text-transparent">Suite</span>
-              </h1>
-              <p className="text-2xl sm:text-3xl font-medium text-muted-foreground">
-                Enterprise Resource Planning
-              </p>
-            </div>
-
-            {/* Tagline */}
-            <div className="max-w-4xl mx-auto">
-              <p className="text-xl sm:text-2xl lg:text-3xl text-muted-foreground leading-relaxed">
-                Manage your{" "}
-                <span className="text-foreground font-semibold relative">
-                  inventory
-                  <span className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-yellow-400 to-yellow-600 rounded-full" />
-                </span>
-                ,{" "}
-                <span className="text-foreground font-semibold relative">
-                  finances
-                  <span className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-yellow-400 to-yellow-600 rounded-full" />
-                </span>
-                , and{" "}
-                <span className="text-foreground font-semibold relative">
-                  operations
-                  <span className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-yellow-400 to-yellow-600 rounded-full" />
-                </span>
-                {" "}in one powerful platform
-              </p>
-            </div>
-
-            {/* CTA Buttons */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-8">
-              <Button
-                size="lg"
-                className="group bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 hover:from-yellow-500 hover:via-yellow-600 hover:to-orange-500 text-black font-bold px-10 text-lg h-16 rounded-2xl shadow-2xl shadow-yellow-500/30 transform hover:scale-105 hover:-translate-y-1 transition-all duration-300"
-                asChild
-              >
-                <Link href="/login">
-                  Get Started Free
-                  <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
-                </Link>
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="group px-8 text-lg h-16 rounded-2xl border-2 border-border/50 hover:border-yellow-500/50 hover:bg-yellow-500/5 backdrop-blur-sm transition-all duration-300"
-                asChild
-              >
-                <Link href="/login">
-                  <Play className="mr-2 h-5 w-5 group-hover:scale-110 transition-transform" />
-                  Watch Demo
-                </Link>
-              </Button>
-            </div>
-
-            {/* Highlights */}
-            <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-6 pt-12">
-              {highlights.map((item, index) => (
-                <div
-                  key={index}
-                  className="flex items-center gap-2 px-5 py-3 rounded-full bg-card/50 border border-border/50 backdrop-blur-sm hover:border-yellow-500/30 hover:bg-yellow-500/5 transition-all duration-300"
-                >
-                  <div className="w-8 h-8 rounded-full bg-yellow-500/10 flex items-center justify-center">
-                    <item.icon className="w-4 h-4 text-yellow-500" />
-                  </div>
-                  <span className="text-sm font-medium text-foreground">{item.label}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Scroll indicator */}
-            <div className="pt-16 animate-bounce">
-              <div className="w-6 h-10 rounded-full border-2 border-muted-foreground/30 mx-auto flex justify-center pt-2">
-                <div className="w-1.5 h-3 bg-muted-foreground/50 rounded-full" />
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* Floating Particles */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[10%] left-[15%] w-2 h-2 bg-yellow-500/60 rounded-full animate-ping animation-duration-[3s]" />
+        <div className="absolute top-[20%] right-[20%] w-1.5 h-1.5 bg-yellow-400/50 rounded-full animate-ping animation-duration-[4s] [animation-delay:1s]" />
+        <div className="absolute top-[60%] left-[10%] w-1 h-1 bg-orange-500/40 rounded-full animate-ping animation-duration-[5s] [animation-delay:2s]" />
+        <div className="absolute top-[80%] right-[15%] w-2 h-2 bg-yellow-500/30 rounded-full animate-ping animation-duration-[4s] [animation-delay:0.5s]" />
       </div>
 
-      {/* Features Section */}
-      <div className="relative py-24 sm:py-32">
-        <div className="absolute inset-0 bg-gradient-to-b from-background via-muted/30 to-background" />
+      {/* ========== HERO ========== */}
+      <section className="relative pt-10 sm:pt-20 pb-0 px-3 sm:px-6">
+        {/* Gradient Orbs */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[min(800px,100vw)] h-[500px] bg-linear-to-br from-yellow-500/15 via-orange-500/8 to-transparent rounded-full blur-3xl animate-pulse" />
 
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-20">
-            <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-500/10 text-yellow-600 dark:text-yellow-500 text-sm font-medium mb-6">
-              <Layers className="w-4 h-4" />
-              Powerful Features
-            </span>
-            <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-foreground mb-6">
-              Everything You Need to{" "}
-              <span className="bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">Succeed</span>
-            </h2>
-            <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-              A comprehensive suite of tools designed to streamline your operations and accelerate business growth
-            </p>
+        {/* Grid */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(234,179,8,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(234,179,8,0.03)_1px,transparent_1px)] bg-size-[clamp(20px,4vw,60px)_clamp(20px,4vw,60px)] mask-[radial-gradient(ellipse_60%_40%_at_50%_20%,black,transparent)]" />
+
+        <div className="relative z-10 max-w-6xl mx-auto text-center">
+          {/* Logo */}
+          <div className="mb-3 sm:mb-6 inline-flex animate-[fadeInUp_0.6s_ease-out_forwards] opacity-0 [animation-delay:0.05s]">
+            <div className="relative group">
+              <div className="absolute -inset-3 bg-linear-to-r from-yellow-400 to-orange-500 rounded-2xl blur-xl opacity-30 group-hover:opacity-50 transition-opacity duration-700 animate-pulse" />
+              <div className="relative w-10 h-10 sm:w-16 sm:h-16 bg-linear-to-br from-yellow-400 via-yellow-500 to-orange-500 rounded-lg sm:rounded-2xl flex items-center justify-center shadow-2xl shadow-yellow-500/25">
+                <span className="text-lg sm:text-3xl font-black text-black">Q</span>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
-            {features.map((feature, index) => (
-              <div
-                key={index}
-                className="group relative p-8 rounded-3xl bg-card border border-border/50 hover:border-yellow-500/30 transition-all duration-500 hover:shadow-2xl hover:shadow-yellow-500/10 hover:-translate-y-2"
-              >
-                {/* Gradient overlay on hover */}
-                <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-yellow-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+          {/* Title */}
+          <h1 className="text-[clamp(1.85rem,7vw,5rem)] font-black tracking-tighter leading-[0.9] mb-2 sm:mb-4 animate-[fadeInUp_0.6s_ease-out_forwards] opacity-0 [animation-delay:0.15s]">
+            <span className="text-foreground">Qali</span>
+            <span className="bg-linear-to-r from-yellow-400 via-yellow-500 to-orange-500 bg-clip-text text-transparent">Suite</span>
+          </h1>
 
-                <div className="relative">
-                  <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${feature.color} flex items-center justify-center mb-6 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300 shadow-lg`}>
-                    <feature.icon className="w-8 h-8 text-white" />
+          {/* Tagline */}
+          <p className="text-[clamp(0.8rem,2.5vw,1.35rem)] text-muted-foreground font-medium mb-4 sm:mb-6 max-w-2xl mx-auto px-2 sm:px-0 animate-[fadeInUp_0.6s_ease-out_forwards] opacity-0 [animation-delay:0.3s]">
+            Inventory, invoicing, accounting, and operations — all in one modern platform built for growing businesses
+          </p>
+
+          {/* CTA */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 mb-6 sm:mb-14 animate-[fadeInUp_0.6s_ease-out_forwards] opacity-0 [animation-delay:0.45s]">
+            <Button
+              size="lg"
+              className="group w-full sm:w-auto bg-linear-to-r from-yellow-400 via-yellow-500 to-orange-500 hover:from-yellow-500 hover:to-orange-600 text-black font-bold px-6 sm:px-8 h-10 sm:h-13 rounded-xl sm:rounded-2xl shadow-xl shadow-yellow-500/20 hover:shadow-yellow-500/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-sm sm:text-base"
+              asChild
+            >
+              <Link href="/login">
+                Get Started Free
+                <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
+              </Link>
+            </Button>
+            <Button
+              variant="ghost"
+              size="lg"
+              className="w-full sm:w-auto h-10 sm:h-13 px-6 rounded-xl sm:rounded-2xl text-muted-foreground hover:text-foreground hover:bg-card/50 transition-all duration-300 text-sm sm:text-base"
+              asChild
+            >
+              <Link href="/login">
+                <Sparkles className="mr-2 h-4 w-4 text-yellow-500" />
+                See Demo
+              </Link>
+            </Button>
+          </div>
+
+          {/* ===== Hero Screenshot ===== */}
+          <div className="relative animate-[fadeInUp_0.8s_ease-out_forwards] opacity-0 [animation-delay:0.6s]">
+            {/* Glow */}
+            <div className="absolute inset-x-4 -bottom-8 h-32 bg-linear-to-t from-yellow-500/20 via-yellow-500/5 to-transparent blur-2xl rounded-full" />
+
+            {/* ---- MOBILE: Phone mockup ---- */}
+            <div className="sm:hidden flex justify-center">
+              <div className="relative mx-auto w-65">
+                {/* Phone body */}
+                <div className="relative rounded-[2.5rem] border-[6px] border-gray-800 dark:border-gray-600 bg-black shadow-2xl shadow-black/40 overflow-hidden">
+                  {/* Notch / Dynamic Island */}
+                  <div className="absolute top-2 left-1/2 -translate-x-1/2 w-20 h-5 bg-black rounded-full z-20" />
+                  {/* Screen content */}
+                  <div className="relative">
+                    {/* Dark mode */}
+                    <div className="hidden dark:block">
+                      <Image
+                        src="/screenshots/mobile-dark.jpeg"
+                        alt="QaliSuite Dashboard - Mobile"
+                        width={750}
+                        height={1334}
+                        className="w-full h-auto"
+                        priority
+                      />
+                    </div>
+                    {/* Light mode */}
+                    <div className="block dark:hidden">
+                      <Image
+                        src="/screenshots/mobile-light.jpeg"
+                        alt="QaliSuite Dashboard - Mobile"
+                        width={750}
+                        height={1334}
+                        className="w-full h-auto"
+                        priority
+                      />
+                    </div>
                   </div>
-                  <h3 className="text-xl font-bold text-foreground mb-3 group-hover:text-yellow-500 transition-colors">
-                    {feature.title}
-                  </h3>
-                  <p className="text-muted-foreground leading-relaxed">
-                    {feature.description}
-                  </p>
+                  {/* Home indicator */}
+                  <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 w-24 h-1 bg-white/30 rounded-full z-20" />
                 </div>
+              </div>
+            </div>
+
+            {/* ---- DESKTOP: MacBook mockup ---- */}
+            <div className="hidden sm:block relative mx-auto max-w-5xl">
+              {/* Laptop screen */}
+              <div className="relative rounded-t-xl border-[8px] border-gray-800 dark:border-gray-700 bg-gray-800 dark:bg-gray-700 shadow-2xl shadow-black/30 overflow-hidden">
+                {/* Camera notch */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3 h-3 -mt-[8px] z-20 flex items-center justify-center">
+                  <div className="w-1.5 h-1.5 rounded-full bg-gray-600 dark:bg-gray-500 ring-1 ring-gray-700 dark:ring-gray-600" />
+                </div>
+                {/* Screen content */}
+                <div className="hidden dark:block">
+                  <Image
+                    src="/screenshots/dark-mode-cropped.png"
+                    alt="QaliSuite Dashboard"
+                    width={1920}
+                    height={1080}
+                    className="w-full h-auto"
+                    priority
+                  />
+                </div>
+                <div className="block dark:hidden">
+                  <Image
+                    src="/screenshots/light-mode-cropped.png"
+                    alt="QaliSuite Dashboard"
+                    width={1920}
+                    height={1080}
+                    className="w-full h-auto"
+                    priority
+                  />
+                </div>
+              </div>
+              {/* Laptop base / hinge */}
+              <div className="relative mx-auto">
+                {/* Hinge strip */}
+                <div className="h-3 bg-gradient-to-b from-gray-700 to-gray-800 dark:from-gray-600 dark:to-gray-700 rounded-b-sm" />
+                {/* Base / keyboard deck */}
+                <div className="mx-auto w-[70%] h-4 bg-gradient-to-b from-gray-800 to-gray-900 dark:from-gray-700 dark:to-gray-800 rounded-b-2xl shadow-lg shadow-black/20" />
+              </div>
+            </div>
+
+            {/* Bottom fade into page */}
+            <div className="absolute bottom-0 left-0 right-0 h-24 bg-linear-to-t from-background to-transparent" />
+          </div>
+        </div>
+      </section>
+
+      {/* ========== TRUST STRIP ========== */}
+      <section className="relative z-10 py-5 sm:py-10 px-3 sm:px-6">
+        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-muted-foreground">
+          {[
+            { icon: Zap, label: "Lightning Fast" },
+            { icon: Shield, label: "Bank-grade Security" },
+            { icon: Globe, label: "Access Anywhere" },
+          ].map((item, i) => (
+            <div key={i} className="flex items-center gap-2 text-xs sm:text-sm">
+              <item.icon className="w-4 h-4 text-yellow-500/70" />
+              <span>{item.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ========== FEATURES OVERVIEW ========== */}
+      <section className="relative py-8 sm:py-24 px-3 sm:px-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-6 sm:mb-14">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-yellow-500/10 text-yellow-600 dark:text-yellow-500 text-xs sm:text-sm font-medium mb-3 sm:mb-4">
+              <Sparkles className="w-3.5 h-3.5" />
+              Everything You Need
+            </span>
+            <h2 className="text-[clamp(1.5rem,4.5vw,2.75rem)] font-bold text-foreground leading-tight">
+              One platform for your <span className="text-yellow-500">entire business</span>
+            </h2>
+          </div>
+
+          {/* Feature Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
+            {[
+              { icon: Package, title: "Inventory", desc: "Real-time stock tracking & reorder alerts" },
+              { icon: Receipt, title: "Invoicing", desc: "Professional invoices, quotes & delivery notes" },
+              { icon: Wallet, title: "Accounting", desc: "Double-entry ledger & chart of accounts" },
+              { icon: BookOpen, title: "Journal Entries", desc: "Full audit trail with auto-posting" },
+              { icon: Users, title: "Customers & Suppliers", desc: "Complete party management & history" },
+              { icon: CreditCard, title: "Employee Advances", desc: "Petty cash & salary advance tracking" },
+              { icon: ClipboardCheck, title: "Reimbursements", desc: "Expense claims with receipt uploads" },
+              { icon: FileText, title: "Stock Requests", desc: "Request & approval workflows" },
+              { icon: BarChart3, title: "Reports", desc: "P&L, balance sheet & sales analytics" },
+              { icon: Briefcase, title: "Purchases", desc: "Purchase orders & supplier management" },
+              { icon: Shield, title: "Tax Management", desc: "VAT, WHT & compliance ready" },
+              { icon: FolderKanban, title: "Projects", desc: "Project management (coming soon)", coming: true },
+            ].map((item, i) => (
+              <div
+                key={i}
+                className={`group relative p-3 sm:p-5 rounded-lg sm:rounded-2xl bg-card border border-border/50 hover:border-yellow-500/30 hover:bg-yellow-500/5 transition-all duration-300 ${item.coming ? "opacity-60" : ""}`}
+              >
+                <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-md sm:rounded-lg bg-yellow-500/10 flex items-center justify-center mb-1.5 sm:mb-3 group-hover:bg-yellow-500/20 group-hover:scale-110 transition-all duration-300">
+                  <item.icon className="w-3.5 h-3.5 sm:w-4.5 sm:h-4.5 text-yellow-500" />
+                </div>
+                <h3 className="text-xs sm:text-base font-semibold text-foreground mb-0.5 group-hover:text-yellow-500 transition-colors">
+                  {item.title}
+                </h3>
+                <p className="text-[10px] sm:text-xs text-muted-foreground leading-snug sm:leading-relaxed">
+                  {item.desc}
+                </p>
+                {item.coming && (
+                  <span className="absolute top-2 right-2 sm:top-3 sm:right-3 text-[8px] sm:text-[10px] font-medium px-1 sm:px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-500">
+                    Soon
+                  </span>
+                )}
               </div>
             ))}
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Stats Section */}
-      <div className="py-20 sm:py-24">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="relative rounded-[2.5rem] overflow-hidden">
-            {/* Background */}
-            <div className="absolute inset-0 bg-gradient-to-r from-yellow-400 via-yellow-500 to-orange-500" />
-            <div className="absolute inset-0 bg-[linear-gradient(to_right,#00000010_1px,transparent_1px),linear-gradient(to_bottom,#00000010_1px,transparent_1px)] bg-[size:40px_40px]" />
+      {/* ========== HR & OPERATIONS ========== */}
+      <section className="py-8 sm:py-24 px-3 sm:px-6 bg-muted/20">
+        <div className="max-w-6xl mx-auto text-center">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-yellow-500/10 text-yellow-600 dark:text-yellow-500 text-xs sm:text-sm font-medium mb-3 sm:mb-4">
+            <Briefcase className="w-3.5 h-3.5" />
+            Beyond ERP
+          </span>
+          <h2 className="text-[clamp(1.25rem,4.5vw,2.75rem)] font-bold text-foreground mb-2 sm:mb-3 leading-tight">
+            Manage your <span className="text-yellow-500">people</span> too
+          </h2>
+          <p className="text-xs sm:text-base text-muted-foreground mb-5 sm:mb-10 max-w-2xl mx-auto px-2 sm:px-0">
+            From employee advances to expense reimbursements with receipt attachments — QaliSuite keeps your operations running smooth.
+          </p>
 
-            <div className="relative px-8 py-16 sm:px-16 sm:py-20">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
-                {stats.map((stat, index) => (
-                  <div key={index} className="text-center">
-                    <div className="text-4xl sm:text-5xl lg:text-6xl font-bold text-black mb-2">
-                      {stat.value}
-                      <span className="text-black/70">{stat.suffix}</span>
-                    </div>
-                    <div className="text-black/70 font-medium">{stat.label}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Benefits Section */}
-      <div className="py-24 sm:py-32">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-2 gap-16 lg:gap-24 items-center">
-            <div>
-              <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-500/10 text-yellow-600 dark:text-yellow-500 text-sm font-medium mb-6">
-                <TrendingUp className="w-4 h-4" />
-                Why Choose QaliSuite
-              </span>
-              <h2 className="text-4xl sm:text-5xl font-bold text-foreground mb-6 leading-tight">
-                Transform How You{" "}
-                <span className="bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
-                  Run Your Business
-                </span>
-              </h2>
-              <p className="text-xl text-muted-foreground mb-10 leading-relaxed">
-                QaliSuite helps businesses of all sizes streamline operations,
-                reduce costs, and make better decisions with real-time data and intelligent automation.
-              </p>
-
-              <div className="grid gap-4">
-                {benefits.map((benefit, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-4 p-4 rounded-xl bg-card border border-border/50 hover:border-yellow-500/30 hover:bg-yellow-500/5 transition-all duration-300"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center shrink-0">
-                      <benefit.icon className="w-5 h-5 text-yellow-500" />
-                    </div>
-                    <span className="font-medium text-foreground">{benefit.text}</span>
-                    <CheckCircle2 className="w-5 h-5 text-green-500 ml-auto shrink-0" />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Visual Element */}
-            <div className="relative">
-              <div className="absolute -inset-4 bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-[2rem] blur-2xl" />
-              <div className="relative bg-card border border-border rounded-[2rem] p-8 sm:p-12 shadow-2xl">
-                {/* Mock Dashboard Preview */}
-                <div className="space-y-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-yellow-400 to-yellow-600 flex items-center justify-center">
-                      <span className="text-xl font-bold text-black">Q</span>
-                    </div>
-                    <div>
-                      <div className="h-3 w-24 bg-foreground/20 rounded-full" />
-                      <div className="h-2 w-16 bg-foreground/10 rounded-full mt-2" />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4">
-                    {[...Array(3)].map((_, i) => (
-                      <div key={i} className="p-4 rounded-xl bg-muted/50">
-                        <div className="h-2 w-12 bg-foreground/20 rounded-full mb-2" />
-                        <div className="h-6 w-16 bg-yellow-500/30 rounded" />
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-muted/50">
-                    <div className="flex gap-2 mb-4">
-                      {[...Array(7)].map((_, i) => (
-                        <div
-                          key={i}
-                          className="flex-1 bg-gradient-to-t from-yellow-500/30 to-yellow-500/10 rounded"
-                          style={{ height: `${40 + Math.random() * 60}px` }}
-                        />
-                      ))}
-                    </div>
-                    <div className="h-2 w-32 bg-foreground/10 rounded-full" />
-                  </div>
-
-                  <div className="flex gap-4">
-                    <div className="flex-1 p-4 rounded-xl bg-green-500/10">
-                      <div className="h-2 w-16 bg-green-500/30 rounded-full mb-2" />
-                      <div className="h-4 w-20 bg-green-500/20 rounded" />
-                    </div>
-                    <div className="flex-1 p-4 rounded-xl bg-blue-500/10">
-                      <div className="h-2 w-16 bg-blue-500/30 rounded-full mb-2" />
-                      <div className="h-4 w-20 bg-blue-500/20 rounded" />
-                    </div>
-                  </div>
+          <div className="grid sm:grid-cols-3 gap-2.5 sm:gap-4 max-w-3xl mx-auto">
+            {[
+              {
+                icon: CreditCard,
+                title: "Employee Advances",
+                desc: "Issue and track petty cash & salary advances. Full settlement workflow with ledger integration.",
+              },
+              {
+                icon: ClipboardCheck,
+                title: "Reimbursements",
+                desc: "Employees submit claims with receipt photos. Approve, settle, and auto-post to accounts.",
+              },
+              {
+                icon: FileText,
+                title: "Stock Requests",
+                desc: "Request stock from warehouse. Multi-level approvals with inventory commitment on approval.",
+              },
+            ].map((item, i) => (
+              <div
+                key={i}
+                className="group p-3.5 sm:p-6 rounded-lg sm:rounded-2xl bg-card border border-border/50 hover:border-yellow-500/30 text-left transition-all duration-300"
+              >
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-yellow-500/10 flex items-center justify-center mb-2.5 sm:mb-4 group-hover:bg-yellow-500/20 group-hover:scale-110 transition-all duration-300">
+                  <item.icon className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-500" />
                 </div>
+                <h3 className="text-xs sm:text-base font-semibold text-foreground mb-1 sm:mb-1.5 group-hover:text-yellow-500 transition-colors">
+                  {item.title}
+                </h3>
+                <p className="text-[11px] sm:text-sm text-muted-foreground leading-snug sm:leading-relaxed">
+                  {item.desc}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ========== STATS ========== */}
+      <section className="py-8 sm:py-20 px-3 sm:px-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="relative rounded-xl sm:rounded-3xl overflow-hidden">
+            <div className="absolute inset-0 bg-linear-to-r from-yellow-400 via-yellow-500 to-orange-500" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,rgba(0,0,0,0)_0%,rgba(0,0,0,0.15)_100%)]" />
+
+            <div className="relative px-4 py-6 sm:px-12 sm:py-14">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-8">
+                {[
+                  { value: "99.9%", label: "Uptime" },
+                  { value: "10x", label: "Faster Ops" },
+                  { value: "50+", label: "Hours Saved/Mo" },
+                  { value: "24/7", label: "Support" },
+                ].map((stat, i) => (
+                  <div key={i} className="text-center">
+                    <div className="text-xl sm:text-3xl lg:text-4xl font-bold text-black">{stat.value}</div>
+                    <div className="text-[10px] sm:text-sm text-black/60 font-medium">{stat.label}</div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* CTA Section */}
-      <div className="py-24 sm:py-32">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="relative rounded-[2.5rem] overflow-hidden">
-            {/* Background */}
-            <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-gray-900 to-black" />
-            <div className="absolute inset-0">
-              <div className="absolute top-0 right-0 w-96 h-96 bg-yellow-500/20 rounded-full blur-3xl" />
-              <div className="absolute bottom-0 left-0 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl" />
-            </div>
+      {/* ========== CTA ========== */}
+      <section className="py-8 sm:py-24 px-3 sm:px-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="relative rounded-xl sm:rounded-3xl overflow-hidden">
+            <div className="absolute inset-0 bg-linear-to-br from-gray-900 via-gray-900 to-black" />
+            <div className="absolute top-0 right-0 w-48 sm:w-72 h-48 sm:h-72 bg-yellow-500/15 rounded-full blur-3xl" />
+            <div className="absolute bottom-0 left-0 w-48 sm:w-72 h-48 sm:h-72 bg-orange-500/10 rounded-full blur-3xl" />
 
-            <div className="relative px-8 py-20 sm:px-16 sm:py-28 text-center">
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-500/20 text-yellow-400 text-sm font-medium mb-8">
-                <Sparkles className="w-4 h-4" />
-                Start Your Free Trial Today
-              </div>
-
-              <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6 leading-tight">
-                Ready to Transform
-                <br />
-                <span className="bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
-                  Your Business?
+            <div className="relative px-5 py-10 sm:px-12 sm:py-20 text-center">
+              <h2 className="text-[clamp(1.25rem,4vw,2.5rem)] font-bold text-white mb-2 sm:mb-3 leading-tight">
+                Ready to streamline<br className="hidden sm:block" />
+                <span className="bg-linear-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
+                  your business?
                 </span>
               </h2>
-
-              <p className="text-xl text-gray-400 max-w-2xl mx-auto mb-10">
-                Join businesses that trust QaliSuite for their daily operations.
-                Get started in minutes, no credit card required.
+              <p className="text-gray-400 mb-5 sm:mb-8 text-xs sm:text-base max-w-md mx-auto">
+                Start free. No credit card required. Set up in minutes.
               </p>
-
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                <Button
-                  size="lg"
-                  className="group bg-gradient-to-r from-yellow-400 to-yellow-600 hover:from-yellow-500 hover:to-orange-500 text-black font-bold px-12 text-lg h-16 rounded-2xl shadow-2xl shadow-yellow-500/30 transform hover:scale-105 transition-all duration-300"
-                  asChild
-                >
-                  <Link href="/login">
-                    Start Free Trial
-                    <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
-                  </Link>
-                </Button>
-              </div>
-
-              <p className="text-gray-500 text-sm mt-6">
+              <Button
+                size="lg"
+                className="group bg-linear-to-r from-yellow-400 to-yellow-600 hover:from-yellow-500 hover:to-orange-500 text-black font-bold px-6 sm:px-10 h-10 sm:h-14 rounded-xl sm:rounded-2xl shadow-2xl shadow-yellow-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-sm sm:text-base"
+                asChild
+              >
+                <Link href="/login">
+                  Start Free Trial
+                  <ChevronRight className="ml-2 h-4 w-4 sm:h-5 sm:w-5 group-hover:translate-x-1 transition-transform" />
+                </Link>
+              </Button>
+              <p className="text-gray-600 text-[10px] sm:text-xs mt-3 sm:mt-5">
                 No credit card required. Cancel anytime.
               </p>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Footer */}
-      <footer className="border-t border-border">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-8">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-xl flex items-center justify-center shadow-lg">
-                <span className="text-2xl font-bold text-black">Q</span>
+      {/* ========== FOOTER ========== */}
+      <footer className="border-t border-border/30">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6">
+          {/* Top section */}
+          <div className="py-6 sm:py-14 grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-8 lg:gap-12">
+            {/* Brand */}
+            <div className="col-span-2 lg:col-span-1">
+              <div className="flex items-center gap-2.5 mb-3 sm:mb-4">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 bg-linear-to-br from-yellow-400 to-orange-500 rounded-lg flex items-center justify-center">
+                  <span className="text-xs sm:text-sm font-black text-black">Q</span>
+                </div>
+                <div>
+                  <span className="font-bold text-foreground text-base sm:text-lg">QaliSuite</span>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground -mt-0.5">by Qalibrated Systems</p>
+                </div>
               </div>
-              <div>
-                <span className="font-bold text-foreground text-xl">QaliSuite</span>
-                <p className="text-sm text-muted-foreground">Enterprise Resource Planning</p>
-              </div>
+              <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-xs">
+                Modern ERP platform for inventory, invoicing, accounting, and business operations.
+              </p>
             </div>
 
-            <div className="flex items-center gap-8">
-              <Link href="/login" className="text-muted-foreground hover:text-foreground transition-colors">
-                Login
-              </Link>
-              <Link href="/login" className="text-muted-foreground hover:text-foreground transition-colors">
-                Contact
-              </Link>
-              <Link href="/login" className="text-muted-foreground hover:text-foreground transition-colors">
-                Support
-              </Link>
+            {/* Quick Links */}
+            <div>
+              <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2.5 sm:mb-4">Product</h4>
+              <ul className="space-y-1.5 sm:space-y-2.5">
+                <li>
+                  <Link href="/login" className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors">
+                    Login
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/login" className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors">
+                    Get Started
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/policy" className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors">
+                    Privacy Policy
+                  </Link>
+                </li>
+              </ul>
             </div>
 
-            <p className="text-sm text-muted-foreground">
-              © {new Date().getFullYear()} Qalibrated Systems. All rights reserved.
+            {/* Company */}
+            <div>
+              <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2.5 sm:mb-4">Company</h4>
+              <ul className="space-y-1.5 sm:space-y-2.5">
+                <li>
+                  <a
+                    href="https://www.qalibrated.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
+                  >
+                    www.qalibrated.com
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </li>
+                <li>
+                  <span className="text-xs sm:text-sm text-muted-foreground">Qalibrated Systems Ltd</span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Contact */}
+            <div>
+              <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2.5 sm:mb-4">Contact</h4>
+              <ul className="space-y-1.5 sm:space-y-2.5">
+                <li className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-muted-foreground">
+                  <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-yellow-500 shrink-0" />
+                  Nairobi, Kenya
+                </li>
+                <li>
+                  <a
+                    href="mailto:info@qalibrated.com"
+                    className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <Mail className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-yellow-500 shrink-0" />
+                    info@qalibrated.com
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="tel:+254714999996"
+                    className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <Phone className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-yellow-500 shrink-0" />
+                    +254 714 999 996
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Bottom bar */}
+          <div className="py-4 sm:py-5 border-t border-border/30 flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-3">
+            <p className="text-[10px] sm:text-xs text-muted-foreground">
+              &copy; {new Date().getFullYear()} Qalibrated Systems Ltd. All rights reserved.
             </p>
+            <div className="flex items-center gap-4 text-[10px] sm:text-xs text-muted-foreground">
+              <Link href="/policy" className="hover:text-foreground transition-colors">Privacy</Link>
+              <span className="text-border">|</span>
+              <a href="mailto:info@qalibrated.com" className="hover:text-foreground transition-colors">Support</a>
+            </div>
           </div>
         </div>
       </footer>

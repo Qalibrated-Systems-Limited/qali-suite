@@ -143,7 +143,7 @@ export async function CategoryTreeServer({ search }) {
       <div className="text-center py-12 text-muted-foreground">
         {search
           ? "No categories match your search"
-          : "No categories yet. Create your first category or seed defaults."}
+          : "No categories yet. Create your first category to get started."}
       </div>
     );
   }

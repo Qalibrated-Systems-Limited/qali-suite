@@ -9,18 +9,23 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import dbConnect from "@/app/config/dbConnect";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 import { CreateDNoteForm } from "./AddDnoteForm";
 
 export async function DialogDnote() {
-  let accounts = await Account.find({}).lean();
+  await dbConnect();
+  const { companyId } = await getTenantContext();
+
+  let accounts = await Account.find({ companyId }).lean();
 
   if (accounts) {
     accounts = accounts.map((account) => {
       return { name: account.name, _id: account._id.toString() };
     });
   }
-  let technicians = await User.find({}).lean();
+  let technicians = await User.find({ companyId }).lean();
 
   if (technicians) {
     technicians = technicians.map((account) => {

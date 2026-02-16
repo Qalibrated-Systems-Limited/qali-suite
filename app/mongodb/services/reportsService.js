@@ -137,7 +137,7 @@ export class ReportService {
         accountCode: "CYE",
         accountName: "Current Year Earnings",
         accountType: "equity",
-        subType: "current_year_earnings",
+        subType: "earnings",
         balance: currentYearEarnings,
       });
     }

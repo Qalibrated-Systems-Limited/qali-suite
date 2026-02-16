@@ -744,10 +744,18 @@ export async function ensureAdvanceAccountsExist() {
 
     const results = [];
 
-    // Check/create Supplier Advance (Asset)
-    const supplierAdvance = await Account.findOne(
+    // Check/create Supplier Advance (Asset - code 1170)
+    // Check by systemAccount OR accountCode to avoid duplicates
+    let supplierAdvance = await Account.findOne(
       withTenantScope({ systemAccount: "supplier_advance" }, companyId, isSuperAdmin)
     );
+
+    if (!supplierAdvance) {
+      // Also check by accountCode in case it exists without systemAccount
+      supplierAdvance = await Account.findOne(
+        withTenantScope({ accountCode: "1170" }, companyId, isSuperAdmin)
+      );
+    }
 
     if (!supplierAdvance) {
       // Find Current Assets parent for proper hierarchy
@@ -757,29 +765,43 @@ export async function ensureAdvanceAccountsExist() {
 
       const newSupplierAdvance = await Account.create({
         companyId,
-        accountCode: "1360",
+        accountCode: "1170",
         accountName: "Supplier Advance",
         accountType: "asset",
         subType: "prepaid_expense",
         systemAccount: "supplier_advance",
         parentAccount: currentAssets?._id || null,
         ancestors: currentAssets ? [currentAssets.parentAccount, currentAssets._id].filter(Boolean) : [],
-        path: currentAssets ? `${currentAssets.path}/1360` : "1360",
+        path: currentAssets ? `${currentAssets.path}/1170` : "1170",
         level: 2,
         canPost: true,
         isActive: true,
         description: "Prepayments to suppliers (overpayments on bills)",
         createdBy: { name: user.name, id: user.id },
       });
-      results.push({ account: "Supplier Advance", action: "created", code: "1360" });
+      results.push({ account: "Supplier Advance", action: "created", code: "1170" });
+    } else if (!supplierAdvance.systemAccount) {
+      // Account exists but without systemAccount - update it
+      await Account.findByIdAndUpdate(supplierAdvance._id, {
+        $set: { systemAccount: "supplier_advance" },
+      });
+      results.push({ account: "Supplier Advance", action: "updated", code: supplierAdvance.accountCode });
     } else {
       results.push({ account: "Supplier Advance", action: "exists", code: supplierAdvance.accountCode });
     }
 
-    // Check/create Customer Advance (Liability)
-    const customerAdvance = await Account.findOne(
+    // Check/create Customer Advance (Liability - code 2190)
+    // Check by systemAccount OR accountCode to avoid duplicates
+    let customerAdvance = await Account.findOne(
       withTenantScope({ systemAccount: "customer_advance" }, companyId, isSuperAdmin)
     );
+
+    if (!customerAdvance) {
+      // Also check by accountCode in case it exists without systemAccount
+      customerAdvance = await Account.findOne(
+        withTenantScope({ accountCode: "2190" }, companyId, isSuperAdmin)
+      );
+    }
 
     if (!customerAdvance) {
       // Find Current Liabilities parent for proper hierarchy
@@ -789,21 +811,27 @@ export async function ensureAdvanceAccountsExist() {
 
       const newCustomerAdvance = await Account.create({
         companyId,
-        accountCode: "2140",
+        accountCode: "2190",
         accountName: "Customer Advance",
         accountType: "liability",
         subType: "customer_deposit",
         systemAccount: "customer_advance",
         parentAccount: currentLiabilities?._id || null,
         ancestors: currentLiabilities ? [currentLiabilities.parentAccount, currentLiabilities._id].filter(Boolean) : [],
-        path: currentLiabilities ? `${currentLiabilities.path}/2140` : "2140",
+        path: currentLiabilities ? `${currentLiabilities.path}/2190` : "2190",
         level: 2,
         canPost: true,
         isActive: true,
         description: "Customer deposits and overpayments",
         createdBy: { name: user.name, id: user.id },
       });
-      results.push({ account: "Customer Advance", action: "created", code: "2140" });
+      results.push({ account: "Customer Advance", action: "created", code: "2190" });
+    } else if (!customerAdvance.systemAccount) {
+      // Account exists but without systemAccount - update it
+      await Account.findByIdAndUpdate(customerAdvance._id, {
+        $set: { systemAccount: "customer_advance" },
+      });
+      results.push({ account: "Customer Advance", action: "updated", code: customerAdvance.accountCode });
     } else {
       results.push({ account: "Customer Advance", action: "exists", code: customerAdvance.accountCode });
     }

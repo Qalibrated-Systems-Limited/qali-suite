@@ -9,14 +9,8 @@ import {
   StyleSheet,
   PDFDownloadLink,
 } from "@react-pdf/renderer";
-import {
-  Download,
-  DownloadIcon,
-  FileDownIcon,
-  PrinterIcon,
-} from "lucide-react";
+import { Download } from "lucide-react";
 import { Button } from "../../../components/ui/button";
-import { IconFileDownload } from "@tabler/icons-react";
 
 const styles = StyleSheet.create({
   page: {
@@ -102,7 +96,12 @@ export function GenerateStockPDF({ stockData }) {
       document={<StockPDF stockData={stockData} />}
       fileName="Stock_Report.pdf"
     >
-      {({ loading }) => (loading ? "Generating PDF..." : <IconFileDownload />)}
+      {({ loading }) => (
+        <Button variant="outline" size="icon" disabled={loading}>
+          <Download className="h-4 w-4" />
+          <span className="sr-only">Download Stock PDF</span>
+        </Button>
+      )}
     </PDFDownloadLink>
   );
 }

@@ -190,7 +190,16 @@ partySchema.index({ companyId: 1, type: 1, isActive: 1 });
 partySchema.index({ companyId: 1, email: 1 }, { sparse: true });
 partySchema.index({ companyId: 1, taxPin: 1 }, { sparse: true });
 partySchema.index({ companyId: 1, userId: 1 }, { sparse: true });
-partySchema.index({ companyId: 1, employeeNumber: 1 }, { sparse: true, unique: true });
+// Only enforce uniqueness when employeeNumber is a non-empty string
+partySchema.index(
+  { companyId: 1, employeeNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      employeeNumber: { $type: "string", $gt: "" }
+    }
+  }
+);
 
 // ============================================
 // VIRTUALS
@@ -216,13 +225,15 @@ partySchema.methods.calculateActualBalance = async function () {
   const JournalEntry = mongoose.model("JournalEntry");
   const Account = mongoose.model("Account");
 
+  const companyId = this.companyId;
+
   if (this.type === "employee") {
-    // For employees, check Employee Advances and Employee Payables
+    // For employees, check Employee Advances and Employee Payables (tenant-scoped)
     const advancesAccount = await Account.findOne({
-      systemAccount: "employee_advances",
+      companyId, systemAccount: "employee_advance",
     });
     const payablesAccount = await Account.findOne({
-      systemAccount: "employee_payables",
+      companyId, systemAccount: "employee_payables",
     });
 
     let balance = 0;
@@ -293,12 +304,12 @@ partySchema.methods.calculateActualBalance = async function () {
 
     return balance;
   } else {
-    // For customers/suppliers - existing logic
+    // For customers/suppliers - existing logic (tenant-scoped)
     const arAccount = await Account.findOne({
-      systemAccount: "accounts_receivable",
+      companyId, systemAccount: "accounts_receivable",
     });
     const apAccount = await Account.findOne({
-      systemAccount: "accounts_payable",
+      companyId, systemAccount: "accounts_payable",
     });
 
     if (!arAccount || !apAccount) {

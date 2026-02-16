@@ -225,14 +225,19 @@ export const getUserById = async (userId) => {
   const { companyId, isSuperAdmin } = await getTenantContext();
 
   const query = withTenantScope({ _id: userId }, companyId, isSuperAdmin);
-  const user = await User.findOne(query).select("-password").lean();
+  // Include +password only to check existence, not to expose the hash
+  const user = await User.findOne(query).select("+password").lean();
 
   if (!user) {
     return null;
   }
 
+  const hasPassword = !!user.password;
+
   return {
     ...user,
+    password: undefined, // never leak the hash
+    hasPassword,
     _id: user._id.toString(),
     createdAt: user.createdAt?.toISOString() || null,
     updatedAt: user.updatedAt?.toISOString() || null,

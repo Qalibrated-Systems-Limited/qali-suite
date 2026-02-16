@@ -19,6 +19,7 @@ import {
   ClearUserFiltersButton,
   UserFilterBadge,
 } from "../components/UserFilters";
+import InviteUserDialog from "../components/InviteUserDialog";
 import { UsersTable } from "../components/UserTable";
 import { UsersTableSkeleton } from "../components/UserSkeleton";
 
@@ -85,6 +86,7 @@ async function UsersPage(props) {
             Manage user accounts and permissions
           </p>
         </div>
+        <InviteUserDialog isSuperAdmin={user?.role === "SuperAdmin"} />
       </div>
 
       {/* Stats Cards */}

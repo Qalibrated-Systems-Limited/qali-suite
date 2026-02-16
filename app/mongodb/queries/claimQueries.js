@@ -278,6 +278,11 @@ export const getClaimStats = async (userId = null, userRole = null) => {
 // GET SINGLE CLAIM BY ID
 // ============================================
 export const getClaimById = async (claimId) => {
+  // Validate ObjectId
+  if (!claimId || !mongoose.Types.ObjectId.isValid(claimId)) {
+    return null;
+  }
+
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };

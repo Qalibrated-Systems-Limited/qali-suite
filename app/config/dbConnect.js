@@ -17,11 +17,12 @@ const dbConnect = async () => {
   }
 
   // Validate environment variable
-  const uri = process.env.MONGODB_URI;
+  const uri =
+    "mongodb+srv://qalisuite_user_1:Qali_pass_2044@kilos.6ilx3u2.mongodb.net/qalisuite?appName=kilos";
   if (!uri) {
     throw new Error(
       "MONGODB_URI environment variable is not defined. " +
-        "Please add it to your .env.local file."
+        "Please add it to your .env.local file.",
     );
   }
 
@@ -31,11 +32,11 @@ const dbConnect = async () => {
       // Optimized for serverless (Vercel Hobby plan - 10s timeout)
       maxPoolSize: 5,
       minPoolSize: 1,
-      serverSelectionTimeoutMS: 3000, // Faster failure on cold start
-      socketTimeoutMS: 20000,
-      connectTimeoutMS: 3000,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 30000,
+      connectTimeoutMS: 5000,
       family: 4, // Use IPv4
-      bufferCommands: false, // Fail fast instead of buffering
+      bufferCommands: true, // Buffer commands until connection is ready
     };
 
     cached.promise = mongoose.connect(uri, opts).then((mongoose) => {

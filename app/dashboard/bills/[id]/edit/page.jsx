@@ -13,6 +13,7 @@ import Product from "@/app/models/product";
 import dbConnect from "@/app/config/dbConnect";
 import { auth } from "@/auth";
 import { serializeBsonType } from "@/lib/utils";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 // ============================================
 // METADATA
@@ -36,9 +37,11 @@ export async function generateMetadata({ params }) {
 // ============================================
 async function getBillFormData() {
   await dbConnect();
+  const { companyId } = await getTenantContext();
 
-  // Fetch suppliers (parties that are suppliers or both)
+  // Fetch suppliers (parties that are suppliers or both) - tenant-scoped
   const suppliers = await Party.find({
+    companyId,
     type: { $in: ["supplier", "both"] },
     isActive: { $ne: false },
   })
@@ -46,8 +49,9 @@ async function getBillFormData() {
     .sort({ name: 1 })
     .lean();
 
-  // Fetch expense and asset accounts for bill lines (only detail accounts that can receive postings)
+  // Fetch expense and asset accounts for bill lines - tenant-scoped
   const accounts = await Account.find({
+    companyId,
     accountType: { $in: ["expense", "asset"] },
     isActive: { $ne: false },
     canPost: true, // Filter out header accounts
@@ -56,8 +60,9 @@ async function getBillFormData() {
     .sort({ accountCode: 1 })
     .lean();
 
-  // Fetch products (optional - for inventory purchases)
+  // Fetch products (optional - for inventory purchases) - tenant-scoped
   const products = await Product.find({
+    companyId,
     isActive: { $ne: false },
   })
     .select("_id SKU name unit costing.costPrice costPrice")

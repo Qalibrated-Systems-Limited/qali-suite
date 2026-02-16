@@ -75,9 +75,10 @@ export default async function BillDetailsPage({ params }) {
     notFound();
   }
 
-  // Fetch payment accounts (cash, bank, mpesa) for payment dialog
+  // Fetch payment accounts (cash, bank, mpesa) for payment dialog (tenant-scoped)
   await dbConnect();
   const paymentAccounts = await Account.find({
+    companyId: user.companyId,
     accountType: "asset",
     subType: { $in: ["cash", "bank", "mpesa"] },
     isActive: { $ne: false },

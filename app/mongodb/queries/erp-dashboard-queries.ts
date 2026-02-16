@@ -44,8 +44,8 @@ export const getFinancialOverview = async () => {
     revenueAccounts,
     expenseAccounts,
   ] = await Promise.all([
-    Account.findOne({ ...tenantMatch, systemAccount: "cash" }),
-    Account.findOne({ ...tenantMatch, systemAccount: "bank" }),
+    Account.findOne({ ...tenantMatch, systemAccount: "petty_cash" }),
+    Account.findOne({ ...tenantMatch, systemAccount: "cash_at_bank" }),
     Account.findOne({ ...tenantMatch, systemAccount: "accounts_receivable" }),
     Account.findOne({ ...tenantMatch, systemAccount: "accounts_payable" }),
     Account.find({ ...tenantMatch, accountType: "revenue", isActive: true }),

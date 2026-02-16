@@ -1,4 +1,8 @@
-import { accountSubType, accountSystemTypes, accountTypes } from "@/lib/utils";
+import {
+  accountSubType,
+  accountSystemTypes,
+  accountTypes,
+} from "../../lib/utils";
 import mongoose from "mongoose";
 
 const Schema = mongoose.Schema;
@@ -261,6 +265,7 @@ accountSchema.methods.getBalanceWithChildren = async function () {
   const JournalEntry = mongoose.model("JournalEntry");
 
   const descendants = await Account.find({
+    companyId: this.companyId,
     ancestors: this._id,
     canPost: true,
     isActive: true,

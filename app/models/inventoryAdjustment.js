@@ -530,13 +530,10 @@ inventoryAdjustmentSchema.methods.createJournalEntry = async function (user) {
     companyId: this.companyId,
     systemAccount: "inventory",
   });
-  console.log(inventoryAccount, "inventory");
   const adjustmentAccount = await Account.findOne({
     companyId: this.companyId,
-    subType: "inventory_adjustment",
+    systemAccount: "inventory_adjustments",
   });
-
-  console.log(adjustmentAccount);
 
   if (!inventoryAccount) {
     throw new Error("Inventory account not configured");
@@ -544,16 +541,14 @@ inventoryAdjustmentSchema.methods.createJournalEntry = async function (user) {
 
   if (!adjustmentAccount) {
     throw new Error(
-      "Inventory Adjustment account not configured. Please create an expense account with subType 'inventory_adjustment'"
+      "Inventory Adjustment account not configured. Please ensure chart of accounts is seeded."
     );
   }
 
   const lines = [];
 
   // Calculate net adjustment (increases - decreases)
-  console.log(this.totalIncreaseValue, "totalIncreaseValue");
   const netValue = this.totalIncreaseValue - this.totalDecreaseValue;
-  console.log(netValue);
 
   if (netValue > 0) {
     // Net increase: Debit Inventory, Credit Adjustment Income/Contra

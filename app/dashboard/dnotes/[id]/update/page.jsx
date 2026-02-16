@@ -2,12 +2,18 @@ import { UpdateDNoteForm } from "./form";
 import Breadcrumbs from "../../../../../components/breadcrumbs";
 import Account from "../../../../models/account";
 import DeliveryNote from "../../../../models/dnote";
+import dbConnect from "@/app/config/dbConnect";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 async function page(props) {
   const params = await props.params;
   const id = params.id;
+
+  await dbConnect();
+  const { companyId } = await getTenantContext();
+
   let deliveryNote = await DeliveryNote.findOne(
-    { _id: id },
+    { _id: id, companyId },
     {
       customer: 1,
       notes: 1,
@@ -21,8 +27,7 @@ async function page(props) {
       _id: deliveryNote._id.toString(),
     };
   }
-  console.log(deliveryNote);
-  let accounts = await Account.find({}).lean();
+  let accounts = await Account.find({ companyId }).lean();
 
   if (accounts) {
     accounts = accounts.map((account) => {

@@ -74,8 +74,10 @@ export function InventoryTable({ cart = [], stock, action }) {
                 const cartItem = cart.find(
                   (cartItem) => cartItem.id === item.SKU
                 );
-                const isLowStock = item.stock > 0 && item.stock < 10;
-                const isOutOfStock = item.stock === 0;
+                const stock = item.inventory?.quantityOnHand ?? 0;
+                const price = item.pricing?.sellingPrice ?? 0;
+                const isLowStock = stock > 0 && stock < 10;
+                const isOutOfStock = stock === 0;
 
                 return (
                   <TableRow
@@ -111,7 +113,7 @@ export function InventoryTable({ cart = [], stock, action }) {
 
                     {/* Price */}
                     <TableCell className="font-medium text-foreground">
-                      {formatCurrency(item.price)}
+                      {formatCurrency(price)}
                     </TableCell>
 
                     {/* Stock with Status Badge */}
@@ -126,7 +128,7 @@ export function InventoryTable({ cart = [], stock, action }) {
                               : "text-green-500"
                           }`}
                         >
-                          {item.stock}
+                          {stock}
                         </span>
                         {isOutOfStock && (
                           <Badge
@@ -243,8 +245,10 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
       ) : (
         stock.map((item) => {
           const cartItem = cart.find((cartItem) => cartItem.id === item.SKU);
-          const isLowStock = item.stock > 0 && item.stock < 10;
-          const isOutOfStock = item.stock === 0;
+          const stock = item.inventory?.quantityOnHand ?? 0;
+          const price = item.pricing?.sellingPrice ?? 0;
+          const isLowStock = stock > 0 && stock < 10;
+          const isOutOfStock = stock === 0;
 
           return (
             <Card key={item._id} className="bg-card border-border">
@@ -253,7 +257,7 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
                   {/* Header - Clickable to view details */}
                   <div className="flex items-start justify-between gap-2">
                     <Link
-                      href={`/products/${item._id}`}
+                      href={`/dashboard/stocks/${item._id}`}
                       className="flex-1 min-w-0"
                     >
                       <h3 className="font-semibold text-foreground hover:underline underline-offset-2">
@@ -307,7 +311,7 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
                     <div>
                       <p className="text-muted-foreground text-xs">Price</p>
                       <p className="font-medium text-foreground">
-                        {formatCurrency(item.price)}
+                        {formatCurrency(price)}
                       </p>
                     </div>
                     <div>
@@ -321,7 +325,7 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
                             : "text-green-500"
                         }`}
                       >
-                        {item.stock}
+                        {stock}
                       </p>
                     </div>
                   </div>

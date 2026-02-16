@@ -97,11 +97,12 @@ export async function createCategory(prevState, formData) {
 
   await dbConnect();
 
-  // Parse form data
+  // Parse form data ("None" from Select means root category)
+  const parentValue = formData.get("parent");
   const rawData = {
     name: formData.get("name"),
     description: formData.get("description") || undefined,
-    parent: formData.get("parent") || null,
+    parent: parentValue && parentValue !== "None" ? parentValue : null,
     sortOrder: formData.get("sortOrder") || 0,
     isActive: formData.get("isActive") === "true",
   };
@@ -229,11 +230,12 @@ export async function updateCategory(categoryId, prevState, formData) {
     };
   }
 
-  // Parse form data
+  // Parse form data ("None" from Select means root category)
+  const parentValue = formData.get("parent");
   const rawData = {
     name: formData.get("name"),
     description: formData.get("description") || undefined,
-    parent: formData.get("parent") || null,
+    parent: parentValue && parentValue !== "None" ? parentValue : null,
     sortOrder: formData.get("sortOrder") || 0,
     isActive: formData.get("isActive") === "true",
   };
@@ -617,146 +619,4 @@ export async function getCategoryTree(activeOnly = false) {
     console.error("Get category tree error:", error);
     return { error: "Failed to fetch category tree", tree: [] };
   }
-}
-// ============================================
-// SEED DEFAULT CATEGORIES
-// ============================================
-
-export async function seedDefaultCategories() {
-  // Auth check with tenant context
-  let companyId, isSuperAdmin, user;
-  try {
-    ({ companyId, isSuperAdmin, user } = await getTenantContext());
-  } catch (error) {
-    return {
-      error: { _form: [error.message] },
-    };
-  }
-
-  // Check permissions
-  const permError = checkAdminPermission(user);
-  if (permError) return permError;
-
-  // Get tenant companyId for create
-  let tenantCompanyId;
-  try {
-    tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
-  } catch (error) {
-    return {
-      error: { _form: [error.message] },
-    };
-  }
-
-  await dbConnect();
-
-  // Check if categories already exist (tenant-scoped)
-  const existingCount = await Category.countDocuments(
-    withTenantScope({ isDeleted: false }, tenantCompanyId, isSuperAdmin)
-  );
-  if (existingCount > 0) {
-    return {
-      error: {
-        _form: ["Categories already exist. Delete existing categories first."],
-      },
-    };
-  }
-
-  const defaultCategories = [
-    {
-      name: "Loadcells",
-      description: "Force measurement sensors and load cells",
-      sortOrder: 1,
-      attributes: [
-        { name: "Capacity", type: "number", unit: "kg", required: true },
-        { name: "Output", type: "text" },
-        {
-          name: "Material",
-          type: "select",
-          options: ["Aluminum", "Steel", "Stainless Steel"],
-        },
-      ],
-    },
-    {
-      name: "Indicators",
-      description: "Digital weighing indicators and controllers",
-      sortOrder: 2,
-      attributes: [
-        {
-          name: "Display Type",
-          type: "select",
-          options: ["LCD", "LED", "OLED"],
-        },
-        {
-          name: "Communication",
-          type: "select",
-          options: ["RS232", "RS485", "USB", "Ethernet"],
-        },
-      ],
-    },
-    {
-      name: "Platforms",
-      description: "Weighing platforms and floor scales",
-      sortOrder: 3,
-      attributes: [
-        { name: "Platform Size", type: "text" },
-        { name: "Capacity", type: "number", unit: "kg", required: true },
-      ],
-    },
-    {
-      name: "Scales",
-      description: "Complete weighing scale systems",
-      sortOrder: 4,
-    },
-    {
-      name: "Spare Parts",
-      description: "Replacement parts and components",
-      sortOrder: 5,
-    },
-    {
-      name: "Cables",
-      description: "Cables and connectors",
-      sortOrder: 6,
-      attributes: [
-        { name: "Length", type: "number", unit: "m" },
-        { name: "Connector Type", type: "text" },
-      ],
-    },
-    {
-      name: "Accessories",
-      description: "Weighing accessories and add-ons",
-      sortOrder: 7,
-    },
-    {
-      name: "Software",
-      description: "Software licenses and subscriptions",
-      sortOrder: 8,
-    },
-    {
-      name: "Services",
-      description: "Service items and labor",
-      sortOrder: 9,
-    },
-  ];
-
-  try {
-    for (const catData of defaultCategories) {
-      await Category.create({
-        companyId: tenantCompanyId,
-        ...catData,
-        createdBy: { id: user.id, name: user.name },
-        lastModifiedBy: { id: user.id, name: user.name },
-      });
-    }
-  } catch (error) {
-    console.error("Seed categories error:", error);
-    return {
-      error: {
-        _form: ["Failed to seed categories. Please try again."],
-      },
-    };
-  }
-
-  // Success - revalidate and redirect
-  revalidatePath("/dashboard/categories");
-  redirect("/dashboard/categories");
 }

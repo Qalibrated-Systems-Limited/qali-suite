@@ -5,6 +5,7 @@ import AccountForm from "../components/accountForm";
 
 import connectDB from "@/app/config/dbConnect";
 import Account from "@/app/models/account";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 export const metadata = {
   title: "Create Account | ERP System",
@@ -12,9 +13,11 @@ export const metadata = {
 
 export default async function CreateAccountPage() {
   await connectDB();
+  const { companyId } = await getTenantContext();
 
-  // Fetch ONLY header accounts (can't post, used as parents)
+  // Fetch ONLY header accounts (can't post, used as parents) - tenant-scoped
   const headerAccounts = await Account.find({
+    companyId,
     subType: "header",
     isActive: true,
   })

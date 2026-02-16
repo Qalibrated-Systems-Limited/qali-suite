@@ -63,7 +63,7 @@ export class CompanyOnboardingService {
         accountCode: "1113",
         accountName: "M-Pesa",
         accountType: "asset",
-        subType: "mobile_money",
+        subType: "mpesa",
         canPost: true,
         parentCode: "1110",
         systemAccount: "mpesa",
@@ -112,6 +112,26 @@ export class CompanyOnboardingService {
         canPost: true,
         parentCode: "1100",
         systemAccount: "vat_input",
+      },
+      {
+        accountCode: "1160",
+        accountName: "Employee Advances",
+        accountType: "asset",
+        subType: "receivable",
+        canPost: true,
+        parentCode: "1100",
+        systemAccount: "employee_advance",
+        description: "Cash advances issued to employees (petty cash, salary advances)",
+      },
+      {
+        accountCode: "1170",
+        accountName: "Supplier Advance",
+        accountType: "asset",
+        subType: "prepaid_expense",
+        canPost: true,
+        parentCode: "1100",
+        systemAccount: "supplier_advance",
+        description: "Prepayments and overpayments to suppliers",
       },
       {
         accountCode: "1200",
@@ -249,6 +269,26 @@ export class CompanyOnboardingService {
         canPost: true,
         parentCode: "2100",
         systemAccount: "unearned_revenue",
+      },
+      {
+        accountCode: "2190",
+        accountName: "Customer Advance",
+        accountType: "liability",
+        subType: "customer_deposit",
+        canPost: true,
+        parentCode: "2100",
+        systemAccount: "customer_advance",
+        description: "Customer deposits and overpayments",
+      },
+      {
+        accountCode: "2195",
+        accountName: "Employee Payables",
+        accountType: "liability",
+        subType: "payable",
+        canPost: true,
+        parentCode: "2100",
+        systemAccount: "employee_payables",
+        description: "Amounts owed to employees (reimbursements, settlements)",
       },
       {
         accountCode: "2200",
@@ -397,7 +437,7 @@ export class CompanyOnboardingService {
         subType: "cogs",
         canPost: true,
         parentCode: "5000",
-        systemAccount: "cost_of_sales",
+        systemAccount: "cogs",
       },
       {
         accountCode: "5200",
@@ -676,25 +716,31 @@ export class CompanyOnboardingService {
     const year = startDate.getFullYear();
     const periods = [];
 
-    // Create 12 monthly periods
-    for (let month = 0; month < 12; month++) {
-      const periodStart = new Date(year, startDate.getMonth() + month, 1);
-      const periodEnd = new Date(year, startDate.getMonth() + month + 1, 0);
+    // Month names for periodName
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
 
-      const periodNumber = month + 1;
-      const periodCode = `${periodStart.getFullYear()}-${String(
-        periodStart.getMonth() + 1
-      ).padStart(2, "0")}`;
+    // Create 12 monthly periods
+    for (let i = 0; i < 12; i++) {
+      const periodStart = new Date(year, startDate.getMonth() + i, 1);
+      const periodEnd = new Date(year, startDate.getMonth() + i + 1, 0);
+
+      const periodYear = periodStart.getFullYear();
+      const periodMonth = periodStart.getMonth() + 1; // 1-12
+      const periodCode = `${periodYear}-${String(periodMonth).padStart(2, "0")}`;
+      const periodName = `${monthNames[periodStart.getMonth()]} ${periodYear}`;
 
       const periodData = {
         companyId,
         periodCode,
-        periodNumber,
-        fiscalYear: periodStart.getFullYear(),
+        periodName,
+        year: periodYear,
+        month: periodMonth,
         startDate: periodStart,
         endDate: periodEnd,
-        status: periodNumber === 1 ? "open" : "future",
-        isCurrent: periodNumber === 1,
+        status: i === 0 ? "open" : "future",
         createdBy: { name: user.name, id: user.id },
       };
 
@@ -1018,7 +1064,7 @@ export class CompanyOnboardingService {
       "inventory",
       "technician_stock",
       "sales_revenue",
-      "cost_of_sales",
+      "cogs",
       "vat_input",
       "vat_output",
       "cash_at_bank",

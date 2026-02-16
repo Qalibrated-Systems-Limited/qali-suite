@@ -66,13 +66,13 @@ export default async function InvoiceDetailsPage({ params }) {
     company = await getCompanyById(user.companyId);
     if (company) {
       company = serializeBsonType(company);
-      console.log(company.tagline);
     }
   }
 
-  // Fetch payment accounts for the payment dialog
+  // Fetch payment accounts for the payment dialog (tenant-scoped)
   await dbConnect();
   const paymentAccounts = await Account.find({
+    companyId: user.companyId,
     accountType: "asset",
     subType: { $in: ["cash", "bank", "mpesa"] },
     isActive: true,

@@ -396,10 +396,11 @@ stockMovementSchema.methods.createJournalEntry = async function (user) {
 
   const Account = mongoose.model("Account");
   const JournalEntry = mongoose.model("JournalEntry");
+  const companyId = this.companyId;
 
-  // Get inventory account
+  // Get inventory account (tenant-scoped)
   const inventoryAccount = await Account.findOne({
-    systemAccount: "inventory",
+    companyId, systemAccount: "inventory",
   });
   if (!inventoryAccount) {
     throw new Error("Inventory account not configured");
@@ -422,7 +423,7 @@ stockMovementSchema.methods.createJournalEntry = async function (user) {
   // SALE: Debit COGS, Credit Inventory
   // ============================================
   if (this.movementType === "sale") {
-    const cogsAccount = await Account.findOne({ systemAccount: "cogs" });
+    const cogsAccount = await Account.findOne({ companyId, systemAccount: "cogs" });
     if (!cogsAccount) {
       throw new Error("COGS account not configured");
     }
@@ -460,7 +461,7 @@ stockMovementSchema.methods.createJournalEntry = async function (user) {
   // ============================================
   if (this.movementType === "adjustment") {
     const adjustmentAccount = await Account.findOne({
-      accountName: { $regex: /inventory.*adjustment/i },
+      companyId, systemAccount: "inventory_adjustments",
     });
 
     if (!adjustmentAccount) {
@@ -524,7 +525,7 @@ stockMovementSchema.methods.createJournalEntry = async function (user) {
   // ============================================
   if (this.movementType === "damage") {
     const damageAccount = await Account.findOne({
-      accountName: { $regex: /damage|loss|write.*off/i },
+      companyId, systemAccount: "inventory_adjustments",
     });
 
     if (!damageAccount) {

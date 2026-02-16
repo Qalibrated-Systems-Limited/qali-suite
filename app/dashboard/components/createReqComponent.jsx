@@ -1,13 +1,17 @@
 import Account from "@/app/models/account";
 import User from "@/app/models/user";
 import { auth } from "@/auth";
+import dbConnect from "@/app/config/dbConnect";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 import React from "react";
 import { CreateRequestFromCartForm } from "./createRequestForm";
 
 async function CreateReqComponent() {
+  await dbConnect();
   const sesssion = await auth();
   const user = sesssion && sesssion.user;
+  const { companyId } = await getTenantContext();
 
   const userWithCart = await User.findById(user.id).lean();
 
@@ -19,7 +23,7 @@ async function CreateReqComponent() {
     }));
   }
 
-  let customers = await Account.find({}).lean();
+  let customers = await Account.find({ companyId }).lean();
   if (customers) {
     customers = customers.map((account) => ({
       name: account.name,

@@ -45,22 +45,13 @@ import {
 } from "@/components/ui/command";
 import { useState } from "react";
 
-const userCreateSchema = z
-  .object({
-    name: z.string().min(1, "Name is required").max(50),
-    email: z.string().email("Invalid email address"),
-    password: z.string().min(6, "Password must be at least 6 characters"),
-    confirmPassword: z
-      .string()
-      .min(6, "Password must be at least 6 characters"),
-    role: z.enum(userRoles),
-    department: z.string().optional(),
-    companyId: z.string().optional(),
-  })
-  .refine((data) => data.password === data.confirmPassword, {
-    message: "Passwords don't match",
-    path: ["confirmPassword"],
-  });
+const userCreateSchema = z.object({
+  name: z.string().min(1, "Name is required").max(50),
+  email: z.string().email("Invalid email address"),
+  role: z.enum(userRoles),
+  department: z.string().optional(),
+  companyId: z.string().optional(),
+});
 
 const DEPARTMENTS = userDepartments;
 
@@ -88,8 +79,6 @@ export function CreateUserForm({ companies = [], isSuperAdmin = false }) {
     defaultValues: {
       name: "",
       email: "",
-      password: "",
-      confirmPassword: "",
       role: "User",
       department: "",
       companyId: "",
@@ -196,73 +185,6 @@ export function CreateUserForm({ companies = [], isSuperAdmin = false }) {
                           {state.errors?.email && (
                             <p className="text-sm text-red-600 dark:text-red-400 mt-1">
                               {state.errors.email[0]}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </div>
-
-                {/* Password Section */}
-                <div>
-                  <h3 className="text-lg font-semibold text-foreground mb-4">
-                    Account Security
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Password */}
-                    <FormField
-                      control={form.control}
-                      name="password"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-foreground font-medium">
-                            Password <span className="text-red-500">*</span>
-                          </FormLabel>
-                          <FormControl>
-                            <Input
-                              type="password"
-                              placeholder="••••••••"
-                              className="bg-background border-border text-foreground"
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormDescription className="text-xs text-muted-foreground">
-                            Minimum 6 characters
-                          </FormDescription>
-                          {state.errors?.password && (
-                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                              {state.errors.password[0]}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
-
-                    {/* Confirm Password */}
-                    <FormField
-                      control={form.control}
-                      name="confirmPassword"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-foreground font-medium">
-                            Confirm Password{" "}
-                            <span className="text-red-500">*</span>
-                          </FormLabel>
-                          <FormControl>
-                            <Input
-                              type="password"
-                              placeholder="••••••••"
-                              className="bg-background border-border text-foreground"
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormDescription className="text-xs text-muted-foreground">
-                            Must match password
-                          </FormDescription>
-                          {state.errors?.confirmPassword && (
-                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                              {state.errors.confirmPassword[0]}
                             </p>
                           )}
                         </FormItem>
@@ -447,9 +369,10 @@ export function CreateUserForm({ companies = [], isSuperAdmin = false }) {
                 {/* Info Box */}
                 <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
                   <p className="text-sm text-blue-600 dark:text-blue-400">
-                    <strong>Note:</strong> The new user will receive an email
-                    notification with their login credentials. Make sure to
-                    inform them to change their password upon first login.
+                    <strong>Note:</strong> The user will need to sign in with
+                    Google or set a password from their profile on first login.
+                    Consider using <strong>Invite User</strong> to send them a
+                    setup link instead.
                   </p>
                 </div>
               </div>

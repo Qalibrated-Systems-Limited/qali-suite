@@ -522,10 +522,11 @@ paymentSchema.methods.createJournalEntry = async function (user, session = null)
 
   const queryOptions = session ? { session } : {};
 
-  // Get system accounts
+  // Get system accounts (tenant-scoped)
+  const companyId = this.companyId;
   const [arAccount, apAccount] = await Promise.all([
-    Account.findOne({ systemAccount: "accounts_receivable" }, null, queryOptions),
-    Account.findOne({ systemAccount: "accounts_payable" }, null, queryOptions),
+    Account.findOne({ companyId, systemAccount: "accounts_receivable" }, null, queryOptions),
+    Account.findOne({ companyId, systemAccount: "accounts_payable" }, null, queryOptions),
   ]);
 
   if (!arAccount || !apAccount) {

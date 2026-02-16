@@ -7,15 +7,17 @@ const { Product } = require("./app/models/product.js");
 const { default: Category } = require("./app/models/category");
 const { default: Company } = require("./app/models/Company");
 
+//69928a1d3ed64708a0c34da5
+
 async function deleteNonCompanyVehicles() {
   try {
     await dbConnect();
     console.log("Connected to MongoDB");
 
     // Find all non-company vehicles
-    const nonCompanyVehicles = await Category.updateMany(
+    const nonCompanyVehicles = await Product.updateMany(
       {},
-      { companyId: "69758d159bada2b1f804edef" },
+      { companyId: "6992ed1723d69e99fb45b5ba" },
     );
 
     console.log(nonCompanyVehicles);
@@ -40,14 +42,16 @@ async function generateCompanyCodes() {
 
     const usedCodes = new Set();
     // Get existing codes
-    const existingCodes = await Company.find({ code: { $exists: true } }).select("code");
-    existingCodes.forEach(c => usedCodes.add(c.code));
+    const existingCodes = await Company.find({
+      code: { $exists: true },
+    }).select("code");
+    existingCodes.forEach((c) => usedCodes.add(c.code));
 
     for (const company of companies) {
       // Generate code from company name initials
       let code = company.name
         .split(/\s+/)
-        .map(word => word[0])
+        .map((word) => word[0])
         .join("")
         .toUpperCase()
         .replace(/[^A-Z0-9]/g, "")
@@ -55,7 +59,10 @@ async function generateCompanyCodes() {
 
       // Ensure minimum 2 chars
       if (code.length < 2) {
-        code = company.name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+        code = company.name
+          .toUpperCase()
+          .replace(/[^A-Z0-9]/g, "")
+          .slice(0, 4);
       }
 
       // Ensure uniqueness
@@ -72,7 +79,7 @@ async function generateCompanyCodes() {
       // Update company with new code (bypass validation temporarily)
       await Company.updateOne(
         { _id: company._id },
-        { $set: { code: finalCode } }
+        { $set: { code: finalCode } },
       );
     }
 
@@ -86,4 +93,4 @@ async function generateCompanyCodes() {
 
 // Run the function you need:
 // deleteNonCompanyVehicles();
-generateCompanyCodes();
+//deleteNonCompanyVehicles();

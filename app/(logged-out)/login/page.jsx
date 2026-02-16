@@ -1,5 +1,5 @@
 "use client";
-import { useActionState } from "react";
+import { Suspense, useActionState, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import {
   Card,
@@ -29,6 +29,8 @@ import {
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
+import { signIn } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { authenticate } from "../../mongodb/actions";
 import { cn } from "../../../lib/utils";
 
@@ -38,6 +40,17 @@ const formSchema = z.object({
 });
 
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
+function LoginContent() {
+  const searchParams = useSearchParams();
+  const oauthError = searchParams.get("error");
+
   const [errorMessage, dispatch, isPending] = useActionState(
     authenticate,
     undefined
@@ -79,7 +92,18 @@ export default function LoginPage() {
           <CardContent>
             <Form {...form}>
               <form action={dispatch} className="space-y-4">
-                {/* Error Message Alert */}
+                {/* OAuth Error (e.g. uninvited Google sign-in) */}
+                {oauthError && (
+                  <Alert className="bg-amber-500/10 border-amber-500/20">
+                    <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                    <AlertDescription className="text-amber-600 dark:text-amber-400">
+                      No account found for this email. Ask your administrator to
+                      send you an invite first.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {/* Credentials Error */}
                 {errorMessage && (
                   <Alert
                     variant="destructive"
@@ -142,46 +166,30 @@ export default function LoginPage() {
                 <LoginButton isPending={isPending} />
               </form>
             </Form>
-          </CardContent>
 
-          {/* Footer - Not Registered */}
-          <CardFooter className="flex flex-col space-y-4 border-t border-border pt-6">
-            <div className="w-full space-y-3">
-              <p className="text-sm text-muted-foreground text-center">
-                Don't have an account?
-              </p>
-
-              <Alert className="bg-blue-500/10 border-blue-500/20">
-                <User className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                <AlertDescription className="text-sm text-blue-600 dark:text-blue-400">
-                  <strong>New users:</strong> Contact your system administrator
-                  to create an account for you.
-                </AlertDescription>
-              </Alert>
-
-              {/* Admin Contact Info */}
-              <div className="space-y-2 p-4 rounded-lg bg-muted/50 border border-border">
-                <p className="text-xs font-semibold text-foreground mb-2">
-                  Administrator Contact:
-                </p>
-                <div className="space-y-1.5">
-                  <a
-                    href="mailto:admin@stockvault.com"
-                    className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Mail className="h-3.5 w-3.5" />
-                    <span>admin@stockvault.com</span>
-                  </a>
-                  <a
-                    href="tel:+254700000000"
-                    className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Phone className="h-3.5 w-3.5" />
-                    <span>+254 700 000 000</span>
-                  </a>
-                </div>
+            {/* Divider */}
+            <div className="relative my-2">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-card px-2 text-muted-foreground">or</span>
               </div>
             </div>
+
+            {/* Google Sign In */}
+            <GoogleSignInButton />
+          </CardContent>
+
+          {/* Footer */}
+          <CardFooter className="flex flex-col space-y-4 border-t border-border pt-6">
+            <Alert className="bg-blue-500/10 border-blue-500/20">
+              <User className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <AlertDescription className="text-sm text-blue-600 dark:text-blue-400">
+                <strong>New users:</strong> Ask your administrator to send you
+                an invite to get started.
+              </AlertDescription>
+            </Alert>
           </CardFooter>
         </Card>
 
@@ -214,6 +222,47 @@ function LoginButton({ isPending }) {
       ) : (
         "Sign in"
       )}
+    </Button>
+  );
+}
+
+function GoogleSignInButton() {
+  const [loading, setLoading] = useState(false);
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      className="w-full h-11 border-border text-foreground hover:bg-accent gap-3"
+      disabled={loading}
+      onClick={() => {
+        setLoading(true);
+        signIn("google", { callbackUrl: "/dashboard" });
+      }}
+    >
+      {loading ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <svg className="h-5 w-5" viewBox="0 0 24 24">
+          <path
+            d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
+            fill="#4285F4"
+          />
+          <path
+            d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+            fill="#34A853"
+          />
+          <path
+            d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+            fill="#FBBC05"
+          />
+          <path
+            d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+            fill="#EA4335"
+          />
+        </svg>
+      )}
+      Sign in with Google
     </Button>
   );
 }

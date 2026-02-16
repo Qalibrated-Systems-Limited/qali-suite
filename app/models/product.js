@@ -711,13 +711,14 @@ productSchema.methods.releaseInventory = async function (quantity) {
 productSchema.methods.setupAccountingAccounts = async function () {
   const Account = mongoose.model("Account");
 
-  // Get default accounts
+  // Get default accounts (tenant-scoped)
+  const companyId = this.companyId;
   const inventoryAccount = await Account.findOne({
-    systemAccount: "inventory",
+    companyId, systemAccount: "inventory",
   });
-  const cogsAccount = await Account.findOne({ systemAccount: "cogs" });
+  const cogsAccount = await Account.findOne({ companyId, systemAccount: "cogs" });
   const revenueAccount = await Account.findOne({
-    systemAccount: "sales_revenue",
+    companyId, systemAccount: "sales_revenue",
   });
 
   if (!this.accounting) {

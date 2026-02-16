@@ -487,11 +487,12 @@ journalEntrySchema.methods.updateAccountBalances = async function () {
 
 journalEntrySchema.statics.getARAgingReport = async function (
   asOfDate = new Date(),
+  companyId = null,
 ) {
   const Account = mongoose.model("Account");
-  const arAccount = await Account.findOne({
-    systemAccount: "accounts_receivable",
-  });
+  const filter = { systemAccount: "accounts_receivable" };
+  if (companyId) filter.companyId = companyId;
+  const arAccount = await Account.findOne(filter);
 
   if (!arAccount) throw new Error("AR account not found");
 
@@ -589,11 +590,12 @@ journalEntrySchema.statics.getARAgingReport = async function (
 
 journalEntrySchema.statics.getAPAgingReport = async function (
   asOfDate = new Date(),
+  companyId = null,
 ) {
   const Account = mongoose.model("Account");
-  const apAccount = await Account.findOne({
-    systemAccount: "accounts_payable",
-  });
+  const filter = { systemAccount: "accounts_payable" };
+  if (companyId) filter.companyId = companyId;
+  const apAccount = await Account.findOne(filter);
 
   if (!apAccount) throw new Error("AP account not found");
 
@@ -695,11 +697,14 @@ journalEntrySchema.statics.getStatementOfAccount = async function ({
   partyId,
   startDate,
   endDate,
+  companyId = null,
 }) {
   const Account = mongoose.model("Account");
   const accountSystem =
     partyType === "customer" ? "accounts_receivable" : "accounts_payable";
-  const account = await Account.findOne({ systemAccount: accountSystem });
+  const filter = { systemAccount: accountSystem };
+  if (companyId) filter.companyId = companyId;
+  const account = await Account.findOne(filter);
 
   if (!account) throw new Error(`${accountSystem} account not found`);
 

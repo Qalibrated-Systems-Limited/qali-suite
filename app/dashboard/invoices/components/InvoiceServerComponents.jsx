@@ -8,6 +8,7 @@ import {
 } from "@/app/mongodb/queries/invoice-queries";
 import Account from "@/app/models/account";
 import dbConnect from "@/app/config/dbConnect";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { InvoicesTable } from "./Invoicetable";
 import Pagination from "@/components/pagination";
 import { formatCurrency } from "@/lib/utils";
@@ -141,10 +142,12 @@ export function InvoiceStatsSkeleton() {
 
 export async function InvoicesTableServer({ query, page, filters }) {
   await dbConnect();
+  const { companyId } = await getTenantContext();
 
   const [invoices, paymentAccounts] = await Promise.all([
     searchInvoices(query, page, filters),
     Account.find({
+      companyId,
       accountType: "asset",
       subType: { $in: ["cash", "bank", "mpesa"] },
       isActive: true,

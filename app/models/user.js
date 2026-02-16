@@ -49,14 +49,25 @@ const userSchema = new Schema(
     },
     password: {
       type: String,
-      required: [true, "Please enter your password"],
       minLength: [6, "Your password must be longer than 6 characters"],
       select: false,
+      // Not required — Google OAuth users don't have a password
     },
     role: {
       type: String,
       enum: userRoles,
       default: "User",
+    },
+
+    avatar: {
+      type: String, // URL (e.g. Google profile picture)
+      trim: true,
+    },
+
+    authProvider: {
+      type: String,
+      enum: ["credentials", "google"],
+      default: "credentials",
     },
 
     // Multi-tenancy: Link user to a company
@@ -75,7 +86,7 @@ const userSchema = new Schema(
 
 // Encrypting password before saving user
 userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) {
+  if (!this.isModified("password") || !this.password) {
     return;
   }
   this.password = await bcrypt.hash(this.password, 10);

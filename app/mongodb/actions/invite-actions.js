@@ -1,0 +1,349 @@
+"use server";
+
+import { auth } from "@/auth";
+import dbConnect from "@/app/config/dbConnect";
+import Invite from "@/app/models/invite";
+import User from "@/app/models/user";
+import Company from "@/app/models/Company";
+import { userRoles } from "@/lib/utils";
+import { sendInviteEmail } from "@/lib/email";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { revalidatePath } from "next/cache";
+import crypto from "crypto";
+
+const ADMIN_ROLES = ["SuperAdmin", "Admin"];
+
+// ============================================
+// SEND INVITE
+// ============================================
+export async function sendInvite(prevState, formData) {
+  await dbConnect();
+
+  const session = await auth();
+  const currentUser = session?.user;
+
+  const email = formData.get("email")?.toString().trim().toLowerCase();
+  const role = formData.get("role")?.toString();
+
+  if (!currentUser || !ADMIN_ROLES.includes(currentUser.role)) {
+    return { success: false, error: "Unauthorized — Admin role required" };
+  }
+
+  if (!email) {
+    return { success: false, error: "Email is required" };
+  }
+
+  if (!role || !userRoles.includes(role)) {
+    return { success: false, error: "Valid role is required" };
+  }
+
+  // Admin cannot invite Admin or SuperAdmin
+  if (currentUser.role === "Admin" && (role === "Admin" || role === "SuperAdmin")) {
+    return { success: false, error: "Only SuperAdmin can invite Admin users" };
+  }
+
+  const { companyId } = await getTenantContext();
+
+  if (!companyId) {
+    return { success: false, error: "No company context found" };
+  }
+
+  try {
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return { success: false, error: "A user with this email already exists" };
+    }
+
+    // Check for pending invite for same email + company
+    const existingInvite = await Invite.findOne({
+      email,
+      companyId,
+      status: "pending",
+      expiresAt: { $gt: new Date() },
+    });
+    if (existingInvite) {
+      return {
+        success: false,
+        error: "A pending invite already exists for this email",
+      };
+    }
+
+    // Get company name for the email
+    const company = await Company.findById(companyId).select("name").lean();
+    if (!company) {
+      return { success: false, error: "Company not found" };
+    }
+
+    // Generate token
+    const { rawToken, hashedToken } = Invite.generateToken();
+
+    // Create invite
+    await Invite.create({
+      email,
+      role,
+      companyId,
+      invitedBy: { name: currentUser.name, id: currentUser.id },
+      token: hashedToken,
+    });
+
+    // Send email
+    await sendInviteEmail({
+      to: email,
+      inviterName: currentUser.name,
+      companyName: company.name,
+      role,
+      rawToken,
+    });
+
+    revalidatePath("/dashboard/users");
+    return { success: true, message: `Invite sent to ${email}` };
+  } catch (error) {
+    console.error("Send invite error:", error);
+    return { success: false, error: error.message || "Failed to send invite" };
+  }
+}
+
+// ============================================
+// GET INVITE BY TOKEN (public — for accept page)
+// ============================================
+export async function getInviteByToken(rawToken) {
+  await dbConnect();
+
+  try {
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(rawToken)
+      .digest("hex");
+
+    const invite = await Invite.findOne({ token: hashedToken })
+      .populate("companyId", "name")
+      .lean();
+
+    if (!invite) {
+      return { valid: false, error: "Invite not found" };
+    }
+
+    if (invite.status === "accepted") {
+      return { valid: false, error: "This invite has already been used" };
+    }
+
+    if (invite.status === "cancelled") {
+      return { valid: false, error: "This invite has been cancelled" };
+    }
+
+    if (new Date(invite.expiresAt) < new Date()) {
+      return { valid: false, error: "This invite has expired" };
+    }
+
+    return {
+      valid: true,
+      invite: {
+        email: invite.email,
+        role: invite.role,
+        companyName: invite.companyId?.name || "Unknown",
+        invitedBy: invite.invitedBy.name,
+        expiresAt: invite.expiresAt.toISOString(),
+      },
+    };
+  } catch (error) {
+    console.error("Get invite error:", error);
+    return { valid: false, error: "Failed to validate invite" };
+  }
+}
+
+// ============================================
+// ACCEPT INVITE WITH PASSWORD
+// ============================================
+export async function acceptInviteWithPassword(rawToken, formData) {
+  await dbConnect();
+
+  const name = formData.get("name")?.toString().trim();
+  const password = formData.get("password")?.toString();
+  const confirmPassword = formData.get("confirmPassword")?.toString();
+
+  if (!name || name.length < 1) {
+    return { success: false, error: "Name is required" };
+  }
+
+  if (name.length > 50) {
+    return { success: false, error: "Name cannot exceed 50 characters" };
+  }
+
+  if (!password || password.length < 6) {
+    return { success: false, error: "Password must be at least 6 characters" };
+  }
+
+  if (password !== confirmPassword) {
+    return { success: false, error: "Passwords do not match" };
+  }
+
+  try {
+    const invite = await Invite.findByToken(rawToken);
+
+    if (!invite) {
+      return { success: false, error: "Invalid, expired, or already used invite" };
+    }
+
+    // Check if user already exists (e.g., created by admin via Create User)
+    const existingUser = await User.findOne({ email: invite.email }).select("+password");
+    if (existingUser) {
+      if (existingUser.password) {
+        // User already has a password — they should just sign in
+        invite.status = "accepted";
+        invite.acceptedAt = new Date();
+        await invite.save();
+        return { success: false, error: "An account with this email already exists. Please sign in instead." };
+      }
+
+      // User exists but has no password — set their name and password
+      existingUser.name = name;
+      existingUser.password = password;
+      existingUser.authProvider = "credentials";
+      await existingUser.save();
+
+      invite.status = "accepted";
+      invite.acceptedAt = new Date();
+      await invite.save();
+
+      return { success: true, message: "Password set! You can now sign in." };
+    }
+
+    // No existing user — create one
+    await User.create({
+      name,
+      email: invite.email,
+      password,
+      role: invite.role,
+      companyId: invite.companyId,
+      authProvider: "credentials",
+      creator: invite.invitedBy,
+    });
+
+    invite.status = "accepted";
+    invite.acceptedAt = new Date();
+    await invite.save();
+
+    return { success: true, message: "Account created! You can now sign in." };
+  } catch (error) {
+    console.error("Accept invite error:", error);
+    return { success: false, error: error.message || "Failed to create account" };
+  }
+}
+
+// ============================================
+// CANCEL INVITE (Admin)
+// ============================================
+export async function cancelInvite(inviteId) {
+  await dbConnect();
+
+  const session = await auth();
+  const currentUser = session?.user;
+
+  if (!currentUser || !ADMIN_ROLES.includes(currentUser.role)) {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  try {
+    const { companyId } = await getTenantContext();
+
+    const invite = await Invite.findOne({ _id: inviteId, companyId, status: "pending" });
+    if (!invite) {
+      return { success: false, error: "Invite not found or already processed" };
+    }
+
+    invite.status = "cancelled";
+    await invite.save();
+
+    revalidatePath("/dashboard/users");
+    return { success: true, message: "Invite cancelled" };
+  } catch (error) {
+    console.error("Cancel invite error:", error);
+    return { success: false, error: error.message || "Failed to cancel invite" };
+  }
+}
+
+// ============================================
+// RESEND INVITE (Admin)
+// ============================================
+export async function resendInvite(inviteId) {
+  await dbConnect();
+
+  const session = await auth();
+  const currentUser = session?.user;
+
+  if (!currentUser || !ADMIN_ROLES.includes(currentUser.role)) {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  try {
+    const { companyId } = await getTenantContext();
+
+    const invite = await Invite.findOne({ _id: inviteId, companyId, status: "pending" });
+    if (!invite) {
+      return { success: false, error: "Invite not found or already processed" };
+    }
+
+    // Generate new token and extend expiry
+    const { rawToken, hashedToken } = Invite.generateToken();
+    invite.token = hashedToken;
+    invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await invite.save();
+
+    // Get company name
+    const company = await Company.findById(companyId).select("name").lean();
+
+    // Resend email
+    await sendInviteEmail({
+      to: invite.email,
+      inviterName: currentUser.name,
+      companyName: company?.name || "Your Company",
+      role: invite.role,
+      rawToken,
+    });
+
+    revalidatePath("/dashboard/users");
+    return { success: true, message: `Invite resent to ${invite.email}` };
+  } catch (error) {
+    console.error("Resend invite error:", error);
+    return { success: false, error: error.message || "Failed to resend invite" };
+  }
+}
+
+// ============================================
+// GET COMPANY INVITES (Admin)
+// ============================================
+export async function getCompanyInvites() {
+  await dbConnect();
+
+  const session = await auth();
+  const currentUser = session?.user;
+
+  if (!currentUser || !ADMIN_ROLES.includes(currentUser.role)) {
+    return { invites: [], error: "Unauthorized" };
+  }
+
+  try {
+    const { companyId } = await getTenantContext();
+
+    const invites = await Invite.find({ companyId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const serialized = invites.map((inv) => ({
+      _id: inv._id.toString(),
+      email: inv.email,
+      role: inv.role,
+      status: inv.status,
+      invitedBy: inv.invitedBy.name,
+      expiresAt: inv.expiresAt.toISOString(),
+      createdAt: inv.createdAt.toISOString(),
+      isExpired: inv.status === "pending" && new Date(inv.expiresAt) < new Date(),
+    }));
+
+    return { invites: serialized, error: null };
+  } catch (error) {
+    console.error("Get invites error:", error);
+    return { invites: [], error: error.message };
+  }
+}

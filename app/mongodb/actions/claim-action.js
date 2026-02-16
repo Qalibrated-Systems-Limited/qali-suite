@@ -1075,7 +1075,7 @@ export async function closeSettlementt(settlementId, prevState, formData) {
     // Get system accounts (tenant-scoped)
     const employeeAdvancesAccount = await Account.findOne(
       withTenantScope(
-        { systemAccount: "employee_advances" },
+        { systemAccount: "employee_advance" },
         tenantCompanyId,
         isSuperAdmin,
       ),
