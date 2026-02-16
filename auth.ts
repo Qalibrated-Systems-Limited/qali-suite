@@ -5,7 +5,7 @@ import { z } from "zod";
 import User from "./app/models/user";
 import Company from "./app/models/Company";
 import Invite from "./app/models/invite";
-import { authOptions } from "./auth.config";
+import { authConfig } from "./auth.config";
 import dbConnect from "./app/config/dbConnect";
 
 type UserType = {
@@ -30,7 +30,7 @@ async function getUser(email: string) {
 }
 
 export const { auth, signIn, signOut, handlers } = NextAuth({
-  ...authOptions,
+  ...authConfig,
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
@@ -76,7 +76,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
     }),
   ],
   callbacks: {
-    ...authOptions.callbacks,
+    ...authConfig.callbacks,
     async signIn({ user, account }) {
       if (account?.provider === "google") {
         await dbConnect();
@@ -99,7 +99,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           // Mark any pending invites as accepted
           await Invite.updateMany(
             { email, status: "pending" },
-            { $set: { status: "accepted", acceptedAt: new Date() } }
+            { $set: { status: "accepted", acceptedAt: new Date() } },
           );
 
           return true;
@@ -141,7 +141,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
         await dbConnect();
         await Invite.updateMany(
           { email: user.email.toLowerCase(), status: "pending" },
-          { $set: { status: "accepted", acceptedAt: new Date() } }
+          { $set: { status: "accepted", acceptedAt: new Date() } },
         );
       }
 

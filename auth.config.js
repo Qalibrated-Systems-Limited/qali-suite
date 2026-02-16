@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-export const authOptions = {
+export const authConfig = {
   pages: {
     signIn: "/login",
     error: "/login",
@@ -21,7 +21,7 @@ export const authOptions = {
 
       // Redirect logged-in users away from login page to dashboard
       if (isLoggedIn) {
-        return NextResponse.redirect(new URL("/dashboard", nextUrl));
+        return Response.redirect(new URL("/dashboard", nextUrl));
       }
 
       return true;
