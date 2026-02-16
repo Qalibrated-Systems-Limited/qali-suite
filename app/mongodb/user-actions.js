@@ -163,6 +163,8 @@ export async function createUser(prevState, formData) {
     newUserId = newUser._id.toString();
 
     // Send invite email so user can set up their account
+    let emailSent = false;
+    let emailError = null;
     try {
       const company = await Company.findById(assignedCompanyId).select("name").lean();
       const { rawToken, hashedToken } = Invite.generateToken();
@@ -182,9 +184,10 @@ export async function createUser(prevState, formData) {
         role,
         rawToken,
       });
-    } catch (emailError) {
-      console.error("Failed to send invite email:", emailError);
-      // User was created — don't fail the whole operation
+      emailSent = true;
+    } catch (err) {
+      console.error("Failed to send invite email:", err);
+      emailError = err.message;
     }
 
     revalidatePath("/dashboard/users");
@@ -199,7 +202,8 @@ export async function createUser(prevState, formData) {
   }
 
   // Redirect outside try-catch to avoid catching the redirect error
-  redirect(`/dashboard/users/${newUserId}?created=true`);
+  const emailParam = emailSent ? "sent" : "failed";
+  redirect(`/dashboard/users/${newUserId}?created=true&email=${emailParam}${emailError ? `&emailError=${encodeURIComponent(emailError)}` : ""}`);
 }
 
 // ============================================

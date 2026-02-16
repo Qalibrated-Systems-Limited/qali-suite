@@ -20,6 +20,9 @@ import {
   UserFilterBadge,
 } from "../components/UserFilters";
 import InviteUserDialog from "../components/InviteUserDialog";
+import InvitesList from "../components/InvitesList";
+import { getCompanyInvites } from "@/app/mongodb/actions/invite-actions";
+import { getCompaniesForDropdown } from "@/app/mongodb/queries/company-queries";
 import { UsersTable } from "../components/UserTable";
 import { UsersTableSkeleton } from "../components/UserSkeleton";
 
@@ -64,12 +67,16 @@ async function UsersPage(props) {
     department: department !== "all" ? department : "",
   };
 
+  const isSuperAdmin = user?.role === "SuperAdmin";
+
   // Fetch data in parallel
-  const [totalPages, users, stats, departments] = await Promise.all([
+  const [totalPages, users, stats, departments, { invites }, companies] = await Promise.all([
     fetchUserPages(query, filters),
     searchUsers(query, currentPage, filters),
     getUserStats(filters),
     getDepartments(),
+    getCompanyInvites(),
+    isSuperAdmin ? getCompaniesForDropdown() : Promise.resolve([]),
   ]);
 
   // Check if any filters are active
@@ -86,7 +93,7 @@ async function UsersPage(props) {
             Manage user accounts and permissions
           </p>
         </div>
-        <InviteUserDialog isSuperAdmin={user?.role === "SuperAdmin"} />
+        <InviteUserDialog isSuperAdmin={isSuperAdmin} companies={companies} />
       </div>
 
       {/* Stats Cards */}
@@ -198,6 +205,9 @@ async function UsersPage(props) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Pending Invites */}
+      <InvitesList invites={invites} />
 
       {/* Users Table */}
       <Suspense fallback={<UsersTableSkeleton />}>

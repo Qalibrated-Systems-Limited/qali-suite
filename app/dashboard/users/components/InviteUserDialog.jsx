@@ -19,11 +19,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Send, Loader2, AlertCircle, CheckCircle2, Mail } from "lucide-react";
+import { Send, Loader2, AlertCircle, CheckCircle2, Mail, Building2 } from "lucide-react";
 import { sendInvite } from "@/app/mongodb/actions/invite-actions";
 import { userRolesMapping } from "@/lib/utils";
 
-export default function InviteUserDialog({ isSuperAdmin = false }) {
+export default function InviteUserDialog({ isSuperAdmin = false, companies = [] }) {
   const [open, setOpen] = useState(false);
   const [state, dispatch, isPending] = useActionState(sendInvite, {});
 
@@ -50,7 +50,7 @@ export default function InviteUserDialog({ isSuperAdmin = false }) {
         <DialogHeader>
           <DialogTitle className="text-foreground">Invite User</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Send an email invitation to add a new user to your company
+            Send an email invitation to add a new user
           </DialogDescription>
         </DialogHeader>
 
@@ -124,10 +124,38 @@ export default function InviteUserDialog({ isSuperAdmin = false }) {
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">
-                The invited user will be assigned this role
-              </p>
             </div>
+
+            {/* Company — SuperAdmin only */}
+            {isSuperAdmin && companies.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Company
+                </label>
+                <Select name="companyId" required>
+                  <SelectTrigger className="bg-background border-border text-foreground">
+                    <SelectValue placeholder="Select a company" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border">
+                    {companies.map((company) => (
+                      <SelectItem
+                        key={company._id}
+                        value={company._id}
+                        className="text-foreground"
+                      >
+                        <span className="flex items-center gap-2">
+                          <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          {company.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  The invited user will be assigned to this company
+                </p>
+              </div>
+            )}
 
             {/* Info */}
             <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">

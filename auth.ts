@@ -95,6 +95,13 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
             existingUser.avatar = user.image;
             await existingUser.save();
           }
+
+          // Mark any pending invites as accepted
+          await Invite.updateMany(
+            { email, status: "pending" },
+            { $set: { status: "accepted", acceptedAt: new Date() } }
+          );
+
           return true;
         }
 
@@ -129,7 +136,16 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
         return true;
       }
 
-      return true; // Credentials provider is handled by authorize()
+      // Credentials provider — mark any pending invites as accepted
+      if (account?.provider === "credentials" && user?.email) {
+        await dbConnect();
+        await Invite.updateMany(
+          { email: user.email.toLowerCase(), status: "pending" },
+          { $set: { status: "accepted", acceptedAt: new Date() } }
+        );
+      }
+
+      return true;
     },
 
     async jwt({ token, user, account }: any) {

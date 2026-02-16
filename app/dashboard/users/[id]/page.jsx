@@ -23,7 +23,7 @@ export const metadata = {
 
 export default async function UserDetailsPage({ params, searchParams }) {
   const { id } = await params;
-  const { created } = await searchParams;
+  const { created, email: emailStatus, emailError } = await searchParams;
 
   const session = await auth();
 
@@ -70,11 +70,26 @@ export default async function UserDetailsPage({ params, searchParams }) {
     <div className="container max-w-4xl py-6 space-y-6">
       {/* Success Message */}
       {created === "true" && (
-        <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
-          <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-          <p className="text-sm text-green-600 dark:text-green-400 font-medium">
-            User created successfully! An invite email has been sent to set up their account.
-          </p>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+            <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
+            <p className="text-sm text-green-600 dark:text-green-400 font-medium">
+              User created successfully!{" "}
+              {emailStatus === "sent"
+                ? "An invite email has been sent to set up their account."
+                : ""}
+            </p>
+          </div>
+          {emailStatus === "failed" && (
+            <div className="flex items-center gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+              <Mail className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+              <div className="text-sm text-amber-600 dark:text-amber-400">
+                <p className="font-medium">Failed to send invite email.</p>
+                {emailError && <p className="mt-1 text-xs opacity-80">{decodeURIComponent(emailError)}</p>}
+                <p className="mt-1 text-xs">You can resend the invite from the Users page.</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

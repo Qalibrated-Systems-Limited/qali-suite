@@ -24,6 +24,7 @@ export async function sendInvite(prevState, formData) {
 
   const email = formData.get("email")?.toString().trim().toLowerCase();
   const role = formData.get("role")?.toString();
+  const formCompanyId = formData.get("companyId")?.toString() || null;
 
   if (!currentUser || !ADMIN_ROLES.includes(currentUser.role)) {
     return { success: false, error: "Unauthorized — Admin role required" };
@@ -42,10 +43,13 @@ export async function sendInvite(prevState, formData) {
     return { success: false, error: "Only SuperAdmin can invite Admin users" };
   }
 
-  const { companyId } = await getTenantContext();
+  const { companyId: tenantCompanyId, isSuperAdmin } = await getTenantContext();
+
+  // SuperAdmin must select a company; Admin uses their own company
+  const companyId = isSuperAdmin ? formCompanyId : tenantCompanyId;
 
   if (!companyId) {
-    return { success: false, error: "No company context found" };
+    return { success: false, error: isSuperAdmin ? "Please select a company" : "No company context found" };
   }
 
   try {
@@ -324,9 +328,12 @@ export async function getCompanyInvites() {
   }
 
   try {
-    const { companyId } = await getTenantContext();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
-    const invites = await Invite.find({ companyId })
+    // SuperAdmin sees all invites, Admin sees only their company's
+    const query = isSuperAdmin ? {} : { companyId };
+    const invites = await Invite.find(query)
+      .populate("companyId", "name")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -336,6 +343,7 @@ export async function getCompanyInvites() {
       role: inv.role,
       status: inv.status,
       invitedBy: inv.invitedBy.name,
+      companyName: inv.companyId?.name || "Unknown",
       expiresAt: inv.expiresAt.toISOString(),
       createdAt: inv.createdAt.toISOString(),
       isExpired: inv.status === "pending" && new Date(inv.expiresAt) < new Date(),
