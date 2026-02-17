@@ -1,5 +1,6 @@
 import Quote from "@/app/models/quote";
 import dbConnect from "@/app/config/dbConnect";
+import mongoose from "mongoose";
 import { serializeBsonType } from "@/lib/utils";
 import {
   getTenantContext,
@@ -128,7 +129,7 @@ export async function getQuoteStats(filters = {}) {
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new mongoose.Types.ObjectId(companyId) };
 
   const now = new Date();
   const sevenDaysAhead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);

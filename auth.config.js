@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 export const authConfig = {
   pages: {
     signIn: "/login",
+    signOut: "/",
     error: "/login",
   },
   callbacks: {
