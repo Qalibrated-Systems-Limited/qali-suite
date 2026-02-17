@@ -520,7 +520,7 @@ const NavGroup = ({ group, user, onItemClick }) => {
   // Check if any child is active
   const hasActiveChild = group.items?.some((item) => {
     if (item.hidden) return false;
-    return pathname.startsWith(item.href);
+    return pathname === item.href || pathname.startsWith(item.href + "/");
   });
 
   // Auto-open if has active child
@@ -588,7 +588,8 @@ const NavItem = ({ item, onItemClick }) => {
     if (itemId === "dashboard") {
       return pathname === "/dashboard";
     }
-    return pathname.startsWith(itemHref);
+    // Exact match only — prevents sibling routes from both highlighting
+    return pathname === itemHref;
   };
 
   const active = isActive(item.id, item.href);
