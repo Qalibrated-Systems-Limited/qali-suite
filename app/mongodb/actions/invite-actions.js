@@ -43,29 +43,32 @@ export async function sendInvite(prevState, formData) {
     return { success: false, error: "Only SuperAdmin can invite Admin users" };
   }
 
-  const { companyId: tenantCompanyId, isSuperAdmin } = await getTenantContext();
-
-  // SuperAdmin must select a company; Admin uses their own company
-  const companyId = isSuperAdmin ? formCompanyId : tenantCompanyId;
+  // Determine companyId — SuperAdmin picks from form, Admin uses their own
+  const companyId = currentUser.role === "SuperAdmin"
+    ? formCompanyId
+    : currentUser.companyId;
 
   if (!companyId) {
-    return { success: false, error: isSuperAdmin ? "Please select a company" : "No company context found" };
+    return { success: false, error: currentUser.role === "SuperAdmin" ? "Please select a company" : "No company context found" };
   }
 
   try {
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
+    // Parallel: check existing user, pending invite, and fetch company name
+    const [existingUser, existingInvite, company] = await Promise.all([
+      User.findOne({ email }).lean(),
+      Invite.findOne({
+        email,
+        companyId,
+        status: "pending",
+        expiresAt: { $gt: new Date() },
+      }).lean(),
+      Company.findById(companyId).select("name").lean(),
+    ]);
+
     if (existingUser) {
       return { success: false, error: "A user with this email already exists" };
     }
 
-    // Check for pending invite for same email + company
-    const existingInvite = await Invite.findOne({
-      email,
-      companyId,
-      status: "pending",
-      expiresAt: { $gt: new Date() },
-    });
     if (existingInvite) {
       return {
         success: false,
@@ -73,8 +76,6 @@ export async function sendInvite(prevState, formData) {
       };
     }
 
-    // Get company name for the email
-    const company = await Company.findById(companyId).select("name").lean();
     if (!company) {
       return { success: false, error: "Company not found" };
     }
@@ -91,14 +92,14 @@ export async function sendInvite(prevState, formData) {
       token: hashedToken,
     });
 
-    // Send email
-    await sendInviteEmail({
+    // Send email in background — don't block the response
+    sendInviteEmail({
       to: email,
       inviterName: currentUser.name,
       companyName: company.name,
       role,
       rawToken,
-    });
+    }).catch((err) => console.error("Failed to send invite email:", err));
 
     revalidatePath("/dashboard/users");
     return { success: true, message: `Invite sent to ${email}` };
@@ -249,9 +250,13 @@ export async function cancelInvite(inviteId) {
   }
 
   try {
-    const { companyId } = await getTenantContext();
+    // SuperAdmin can cancel any invite; Admin only their company's
+    const query = { _id: inviteId, status: "pending" };
+    if (currentUser.role !== "SuperAdmin" && currentUser.companyId) {
+      query.companyId = currentUser.companyId;
+    }
 
-    const invite = await Invite.findOne({ _id: inviteId, companyId, status: "pending" });
+    const invite = await Invite.findOne(query);
     if (!invite) {
       return { success: false, error: "Invite not found or already processed" };
     }
@@ -281,9 +286,13 @@ export async function resendInvite(inviteId) {
   }
 
   try {
-    const { companyId } = await getTenantContext();
+    // SuperAdmin can resend any invite; Admin only their company's
+    const query = { _id: inviteId, status: "pending" };
+    if (currentUser.role !== "SuperAdmin" && currentUser.companyId) {
+      query.companyId = currentUser.companyId;
+    }
 
-    const invite = await Invite.findOne({ _id: inviteId, companyId, status: "pending" });
+    const invite = await Invite.findOne(query);
     if (!invite) {
       return { success: false, error: "Invite not found or already processed" };
     }
@@ -292,19 +301,21 @@ export async function resendInvite(inviteId) {
     const { rawToken, hashedToken } = Invite.generateToken();
     invite.token = hashedToken;
     invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await invite.save();
 
-    // Get company name
-    const company = await Company.findById(companyId).select("name").lean();
+    // Save invite and fetch company name in parallel
+    const [, company] = await Promise.all([
+      invite.save(),
+      Company.findById(invite.companyId).select("name").lean(),
+    ]);
 
-    // Resend email
-    await sendInviteEmail({
+    // Send email in background — don't block the response
+    sendInviteEmail({
       to: invite.email,
       inviterName: currentUser.name,
       companyName: company?.name || "Your Company",
       role: invite.role,
       rawToken,
-    });
+    }).catch((err) => console.error("Failed to resend invite email:", err));
 
     revalidatePath("/dashboard/users");
     return { success: true, message: `Invite resent to ${invite.email}` };
