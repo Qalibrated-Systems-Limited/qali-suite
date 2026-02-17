@@ -384,6 +384,7 @@ export const fetchInvoicePages = async (searchTerm = "", filters = {}) => {
 // GET INVOICE BY ID
 // ============================================
 export const getInvoiceById = async (invoiceId) => {
+  await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
 

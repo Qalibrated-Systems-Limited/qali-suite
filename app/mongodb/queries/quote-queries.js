@@ -174,13 +174,14 @@ export async function getQuoteStats(filters = {}) {
             $cond: [{ $eq: ["$status", "draft"] }, "$total", 0],
           },
         },
-        openValue: {
+        sentValue: {
           $sum: {
-            $cond: [
-              { $in: ["$status", ["sent", "accepted"]] },
-              "$total",
-              0,
-            ],
+            $cond: [{ $eq: ["$status", "sent"] }, "$total", 0],
+          },
+        },
+        acceptedValue: {
+          $sum: {
+            $cond: [{ $eq: ["$status", "accepted"] }, "$total", 0],
           },
         },
         convertedValue: {
@@ -219,8 +220,12 @@ export async function getQuoteStats(filters = {}) {
     converted: stats?.converted || 0,
     expired: stats?.expired || 0,
     draftValue: stats?.draftValue || 0,
-    openValue: stats?.openValue || 0,
-    convertedValue: stats?.convertedValue || 0,
+    sentValue: stats?.sentValue || 0,
+    acceptedValue: stats?.acceptedValue || 0,
+    // Open = draft + sent (quotes still awaiting response)
+    openValue: (stats?.draftValue || 0) + (stats?.sentValue || 0),
+    // Converted value includes accepted (customer said yes) + fully converted to invoice
+    convertedValue: (stats?.acceptedValue || 0) + (stats?.convertedValue || 0),
     expiringCount,
     conversionRate,
   };
