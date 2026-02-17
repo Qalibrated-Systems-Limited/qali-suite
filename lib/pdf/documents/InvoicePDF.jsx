@@ -464,6 +464,11 @@ export const InvoicePDF = ({ invoice, company }) => {
           <View style={styles.invoiceHeader}>
             <Text style={styles.invoiceTitle}>INVOICE</Text>
             <Text style={styles.invoiceNumber}>{invoice.invoiceNumber}</Text>
+            {invoice.title && (
+              <Text style={{ fontSize: 8, color: colors.gray, fontStyle: "italic", marginTop: 2 }}>
+                {invoice.title}
+              </Text>
+            )}
             <View
               style={[styles.statusBadge, { backgroundColor: statusColor.bg }]}
             >
@@ -661,11 +666,21 @@ export const InvoicePDF = ({ invoice, company }) => {
           </View>
         </View>
 
-        {/* Notes */}
-        {invoice.notes && (
+        {/* Notes & Terms */}
+        {(invoice.notes || invoice.termsAndConditions) && (
           <View style={styles.notes}>
-            <Text style={styles.notesTitle}>Notes</Text>
-            <Text style={styles.notesText}>{invoice.notes}</Text>
+            {invoice.notes && (
+              <View>
+                <Text style={styles.notesTitle}>Notes</Text>
+                <Text style={styles.notesText}>{invoice.notes}</Text>
+              </View>
+            )}
+            {invoice.termsAndConditions && (
+              <View style={{ marginTop: invoice.notes ? 6 : 0 }}>
+                <Text style={styles.notesTitle}>Terms & Conditions</Text>
+                <Text style={styles.notesText}>{invoice.termsAndConditions}</Text>
+              </View>
+            )}
           </View>
         )}
 

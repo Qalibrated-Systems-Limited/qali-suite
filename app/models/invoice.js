@@ -493,6 +493,11 @@ const invoiceSchema = new Schema(
       }],
     },
 
+    title: {
+      type: String,
+      maxlength: 200,
+    },
+
     notes: String,
     termsAndConditions: String,
 

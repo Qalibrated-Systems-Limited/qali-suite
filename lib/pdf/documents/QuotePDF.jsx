@@ -454,6 +454,11 @@ export const QuotePDF = ({ quote, company }) => {
           <View style={styles.quoteHeader}>
             <Text style={styles.quoteTitle}>QUOTATION</Text>
             <Text style={styles.quoteNumber}>{quote.quoteNumber}</Text>
+            {quote.title && (
+              <Text style={{ fontSize: 8, color: colors.gray, fontStyle: "italic", marginTop: 2 }}>
+                {quote.title}
+              </Text>
+            )}
             <View
               style={[styles.statusBadge, { backgroundColor: statusColor.bg }]}
             >
@@ -497,6 +502,12 @@ export const QuotePDF = ({ quote, company }) => {
                 {formatDate(quote.validUntil)}
               </Text>
             </View>
+            {quote.reference && (
+              <View style={styles.detailRow}>
+                <Text style={styles.label}>Reference</Text>
+                <Text style={styles.value}>{quote.reference}</Text>
+              </View>
+            )}
             {quote.salesPerson?.name && (
               <View style={styles.detailRow}>
                 <Text style={styles.label}>Sales Person</Text>

@@ -130,7 +130,6 @@ const getNavigationGroups = (user) => [
         label: "Quotes",
         id: "quotes",
         href: "/dashboard/quotes",
-        hidden: !["Admin", "Accountant", "Sales"].includes(user?.role),
       },
       {
         icon: Receipt,

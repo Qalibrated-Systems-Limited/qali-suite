@@ -1,13 +1,10 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Bell,
   Menu,
-  ShoppingCart,
   User,
   Settings,
   LogOut,
@@ -25,10 +22,10 @@ import {
 import { MobileNav } from "@/components/mobile-nav";
 import { PcNav } from "@/components/pc-nav";
 import { CreateButton } from "@/app/dashboard/components/smartCreateButton";
-import { SmartSearch } from "@/components/search";
+import { MobileSearch, DesktopSearch } from "@/components/search";
 import { useTheme } from "next-themes";
 
-export function AppSidebar({ children, user, cartItemsCount = 0, ...props }) {
+export function AppSidebar({ children, user, ...props }) {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [mounted, setMounted] = React.useState(false);
   const { theme, setTheme } = useTheme();
@@ -47,91 +44,73 @@ export function AppSidebar({ children, user, cartItemsCount = 0, ...props }) {
         user={user}
       />
       <main className="flex-1 overflow-y-auto w-full">
-        <header className="bg-card border-b border-border sticky top-0 z-10 shadow-sm">
-          <div className="px-3 sm:px-4 md:px-6 lg:px-8 py-3 md:py-4">
-            {/* Top Row: Logo/Menu, Search, Actions */}
-            <div className="flex items-center justify-between gap-2 sm:gap-3">
+        <header className="bg-card/80 backdrop-blur-sm border-b border-border sticky top-0 z-10">
+          <div className="px-3 sm:px-4 md:px-6 lg:px-8 py-2 sm:py-2.5">
+            <div className="flex items-center gap-2 sm:gap-3">
               {/* Left: Mobile Menu + Logo */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 lg:hidden shrink-0">
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="lg:hidden text-foreground hover:text-foreground hover:bg-accent h-9 w-9"
+                  className="text-foreground hover:bg-accent h-8 w-8"
                   onClick={() => setMobileMenuOpen(true)}
                 >
                   <Menu className="w-5 h-5" />
                 </Button>
-
-                {/* Logo on mobile */}
-                <div className="lg:hidden">
-                  <span className="text-yellow-500 font-bold text-lg">Q</span>
-                </div>
+                <span className="text-yellow-500 font-bold text-lg">Q</span>
               </div>
 
-              {/* Center: Smart Search - Always visible */}
-              <SmartSearch />
+              {/* Center: Desktop search (hidden on mobile) */}
+              <DesktopSearch />
 
               {/* Right: Action Buttons */}
-              <div className="flex items-center gap-1 sm:gap-2">
-                {/* Theme Toggle - HIDDEN on mobile (in sidebar) */}
-                {mounted && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="hidden sm:flex text-foreground hover:text-foreground hover:bg-accent h-9 w-9"
-                    onClick={() =>
-                      setTheme(theme === "dark" ? "light" : "dark")
-                    }
-                  >
-                    {theme === "dark" ? (
-                      <Sun className="w-5 h-5" />
-                    ) : (
-                      <Moon className="w-5 h-5" />
-                    )}
-                    <span className="sr-only">Toggle theme</span>
-                  </Button>
-                )}
+              <div className="flex items-center gap-0.5 sm:gap-1.5 ml-auto shrink-0">
+                {/* Mobile search icon — grouped with other actions */}
+                <MobileSearch />
 
-                {/* Cart Button - Always visible */}
+                {/* Theme Toggle */}
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="relative text-foreground hover:text-foreground hover:bg-accent h-9 w-9"
-                  asChild
+                  className="hidden sm:inline-flex text-muted-foreground hover:text-foreground hover:bg-accent h-8 w-8"
+                  onClick={() =>
+                    setTheme(theme === "dark" ? "light" : "dark")
+                  }
                 >
-                  <Link href="/dashboard/cart">
-                    <ShoppingCart className="w-5 h-5" />
-                    {cartItemsCount > 0 && (
-                      <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 bg-yellow-500 text-black text-xs font-bold border-2 border-background">
-                        {cartItemsCount > 9 ? "9+" : cartItemsCount}
-                      </Badge>
-                    )}
-                    <span className="sr-only">Shopping cart</span>
-                  </Link>
+                  {mounted ? (
+                    theme === "dark" ? (
+                      <Sun className="w-4 h-4" />
+                    ) : (
+                      <Moon className="w-4 h-4" />
+                    )
+                  ) : (
+                    <Sun className="w-4 h-4 opacity-0" />
+                  )}
+                  <span className="sr-only">Toggle theme</span>
                 </Button>
 
-                {/* Notifications - Hidden on mobile */}
+                {/* Notifications */}
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="relative text-foreground hover:text-foreground hover:bg-accent h-9 w-9 hidden sm:flex"
+                  className="hidden sm:inline-flex text-muted-foreground hover:text-foreground hover:bg-accent h-8 w-8"
                 >
-                  <Bell className="w-5 h-5" />
+                  <Bell className="w-4 h-4" />
                   <span className="sr-only">Notifications</span>
                 </Button>
 
                 {/* Smart Create Button */}
                 <CreateButton user={user} />
 
-                {/* User Menu - HIDDEN on mobile (in sidebar) */}
+                {/* User Menu */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="hidden sm:flex text-foreground hover:text-foreground hover:bg-accent h-9 w-9"
+                      className="hidden sm:inline-flex text-muted-foreground hover:text-foreground hover:bg-accent h-8 w-8"
                     >
-                      <User className="w-5 h-5" />
+                      <User className="w-4 h-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent

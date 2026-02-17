@@ -431,7 +431,11 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       existingInvoice.totalDiscount = discountAmount;
       existingInvoice.taxAmount = taxAmount;
       existingInvoice.total = total;
+      existingInvoice.title = invoiceData.title || "";
+      existingInvoice.referenceNumber = invoiceData.referenceNumber || "";
+      existingInvoice.purchaseOrderNumber = invoiceData.purchaseOrderNumber || "";
       existingInvoice.notes = invoiceData.notes || "";
+      existingInvoice.termsAndConditions = invoiceData.termsAndConditions || "";
 
       existingInvoice.amountDue = total - existingInvoice.amountPaid;
 
@@ -791,7 +795,11 @@ export async function createInvoice(prevState, formData) {
           amountDue: total, // New invoice - full amount is due
           currency: "KES",
           paymentStatus: "unpaid",
+          title: data.title || "",
+          referenceNumber: data.referenceNumber || "",
+          purchaseOrderNumber: data.purchaseOrderNumber || "",
           notes: data.notes || "",
+          termsAndConditions: data.termsAndConditions || "",
           createdBy: {
             name: user.name,
             id: user.id,
@@ -1072,9 +1080,9 @@ export async function cancelInvoice(invoiceId, reason = "") {
   const authSession = await auth();
   const user = authSession?.user;
 
-  if (!user || user.role !== "Admin") {
+  if (!user || !["Admin", "Accountant"].includes(user.role)) {
     return {
-      message: "Unauthorized - Admin only",
+      message: "Unauthorized - Admin or Accountant only",
     };
   }
 
@@ -1094,9 +1102,19 @@ export async function cancelInvoice(invoiceId, reason = "") {
     };
   }
 
+  // Accountants can only cancel their own invoices
+  if (user.role === "Accountant" && invoice.createdBy?.id !== user.id) {
+    return { message: "Accountants can only cancel their own invoices" };
+  }
+
   // Validate tenant access
   if (!validateTenantAccess(invoice, companyId, isSuperAdmin)) {
     return { message: "Access denied to this invoice" };
+  }
+
+  // Only draft/sent invoices can be cancelled — use credit notes for completed invoices
+  if (invoice.status !== "draft" && invoice.status !== "sent") {
+    return { message: "Only draft or sent invoices can be cancelled. Use a credit note for posted invoices." };
   }
 
   try {

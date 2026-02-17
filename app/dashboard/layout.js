@@ -3,6 +3,7 @@ import { auth } from "../../auth";
 // import { SiteHeader } from "@/components/site-header";
 
 import { AppSidebar } from "./components/app-sidebar";
+import { CommandPaletteProvider } from "@/components/command-palette-provider";
 
 export const metadata = {
   title: "QaliSuite Dashboard",
@@ -22,12 +23,12 @@ async function DashboardLayout({ children }) {
   }
 
   return (
-    <>
+    <CommandPaletteProvider>
       <AppSidebar
         user={user}
         children={<div className=" p-4 md:p-6 lg:p-8">{children}</div>}
       />
-    </>
+    </CommandPaletteProvider>
   );
 }
 

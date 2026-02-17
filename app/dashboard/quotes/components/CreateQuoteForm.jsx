@@ -23,6 +23,12 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Plus,
   Search,
   Package,
@@ -40,6 +46,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createQuote } from "@/app/mongodb/actions/quote-actions";
+import QuickCreatePartyDialog from "@/app/dashboard/invoices/components/QuickCreateCustomerDialog";
 
 // Default validity period (30 days)
 const DEFAULT_VALIDITY_DAYS = 30;
@@ -102,7 +109,7 @@ function initCustomer(duplicateFrom, customers) {
 }
 
 export default function CreateQuoteForm({
-  customers = [],
+  customers: initialCustomers = [],
   products = [],
   duplicateFrom = null,
 }) {
@@ -112,15 +119,17 @@ export default function CreateQuoteForm({
   const [state, formAction, isPending] = useActionState(createQuote, null);
 
   // Customer Selection - initialized from duplicate if present
+  const [customerList, setCustomerList] = useState(initialCustomers);
   const [selectedCustomer, setSelectedCustomer] = useState(
-    () => initCustomer(duplicateFrom, customers)
+    () => initCustomer(duplicateFrom, initialCustomers)
   );
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
 
   // Quote Details - initialized from duplicate if present
+  const [title, setTitle] = useState(duplicateFrom?.title || "");
   const [quoteDate, setQuoteDate] = useState(getDateString(0));
   const [validUntil, setValidUntil] = useState(getDateString(DEFAULT_VALIDITY_DAYS));
-  const [reference, setReference] = useState("");
+  const [reference, setReference] = useState(duplicateFrom?.reference || "");
   const [notes, setNotes] = useState(duplicateFrom?.notes || "");
   const [terms, setTerms] = useState(duplicateFrom?.termsAndConditions || "");
 
@@ -199,15 +208,32 @@ export default function CreateQuoteForm({
     setStockItems(stockItems.filter((item) => item.id !== id));
   };
 
-  // Add Service Item
-  const addServiceItem = () => {
+  // Service category presets (matching invoices)
+  const SERVICE_CATEGORIES = [
+    { value: "labor", label: "Labor", defaultUnit: "hrs" },
+    { value: "mileage", label: "Mileage", defaultUnit: "km" },
+    { value: "accommodation", label: "Accommodation", defaultUnit: "nights" },
+    { value: "installation", label: "Installation", defaultUnit: "service" },
+    { value: "consultation", label: "Consultation", defaultUnit: "hrs" },
+    { value: "maintenance", label: "Maintenance", defaultUnit: "service" },
+    { value: "repair", label: "Repair", defaultUnit: "service" },
+    { value: "other", label: "Other Service", defaultUnit: "service" },
+  ];
+
+  // Add Service Item (with optional category preset)
+  const addServiceItem = (category = null) => {
+    const categoryConfig = category
+      ? SERVICE_CATEGORIES.find((c) => c.value === category)
+      : null;
+
     setServiceItems([
       ...serviceItems,
       {
         id: Date.now(),
-        name: "",
+        name: categoryConfig?.label || "",
+        category: category || "other",
         description: "",
-        unit: "service",
+        unit: categoryConfig?.defaultUnit || "service",
         quantity: 1,
         unitPrice: 0,
         discountPercentage: 0,
@@ -340,6 +366,7 @@ export default function CreateQuoteForm({
     serviceItems.forEach((item) => {
       items.push({
         itemType: "service",
+        serviceCategory: item.category || "other",
         description: item.name,
         notes: item.description,
         unit: item.unit,
@@ -356,6 +383,7 @@ export default function CreateQuoteForm({
   // Hidden data for form submission
   const formDataValue = JSON.stringify({
     customerId: selectedCustomer?._id,
+    title,
     quoteDate,
     validUntil,
     reference,
@@ -406,11 +434,24 @@ export default function CreateQuoteForm({
                 <Command>
                   <CommandInput placeholder="Search customer..." className="text-foreground" />
                   <CommandList>
-                    <CommandEmpty className="text-muted-foreground p-4">
-                      No customer found.
+                    <CommandEmpty className="py-4 text-center">
+                      <p className="text-sm text-muted-foreground mb-2">No customer found.</p>
+                      <QuickCreatePartyDialog
+                        partyType="customer"
+                        onPartyCreated={(party) => {
+                          setCustomerList((prev) => [party, ...prev]);
+                          setSelectedCustomer(party);
+                          setCustomerSearchOpen(false);
+                        }}
+                      >
+                        <button type="button" className="inline-flex items-center text-sm text-yellow-500 hover:text-yellow-600 font-medium">
+                          <Plus className="h-3.5 w-3.5 mr-1" />
+                          Create new customer
+                        </button>
+                      </QuickCreatePartyDialog>
                     </CommandEmpty>
                     <CommandGroup>
-                      {customers.map((customer) => (
+                      {customerList.map((customer) => (
                         <CommandItem
                           key={customer._id}
                           value={customer.name}
@@ -458,7 +499,17 @@ export default function CreateQuoteForm({
             </>
           )}
 
-          {/* Dates */}
+          {/* Title & Dates */}
+          <div>
+            <Label className="text-foreground">Title / Subject</Label>
+            <Input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Website Development Services"
+              className="bg-background border-border text-foreground mt-1"
+            />
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
               <Label className="text-foreground flex items-center gap-1">
@@ -657,16 +708,28 @@ export default function CreateQuoteForm({
               <Wrench className="w-5 h-5 text-purple-500" />
               Services
             </CardTitle>
-            <Button
-              type="button"
-              size="sm"
-              onClick={addServiceItem}
-              className="bg-purple-600 hover:bg-purple-700 text-white"
-            >
-              <Plus className="w-4 h-4 mr-1" />
-              <span className="hidden sm:inline">Add Service</span>
-              <span className="sm:hidden">Add</span>
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="bg-purple-600 hover:bg-purple-700 text-white"
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Add Service
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {SERVICE_CATEGORIES.map((cat) => (
+                  <DropdownMenuItem
+                    key={cat.value}
+                    onClick={() => addServiceItem(cat.value)}
+                  >
+                    {cat.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">

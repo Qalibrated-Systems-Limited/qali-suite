@@ -389,8 +389,18 @@ const billSchema = new Schema(
     },
 
     // ==========================================
-    // NOTES
+    // TITLE & NOTES
     // ==========================================
+    title: {
+      type: String,
+      maxlength: 200,
+    },
+
+    reference: {
+      type: String,
+      trim: true,
+    },
+
     description: {
       type: String,
       maxlength: 1000,

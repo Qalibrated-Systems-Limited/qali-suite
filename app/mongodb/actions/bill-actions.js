@@ -80,6 +80,8 @@ const CreateBillSchema = z.object({
     .transform((val) => val === "true")
     .default("false"),
   whtRate: z.coerce.number().min(0).max(30).default(0),
+  title: z.string().optional(),
+  reference: z.string().optional(),
   description: z.string().optional(),
   internalNotes: z.string().optional(),
 });
@@ -391,6 +393,8 @@ export async function createBill(prevState, formData) {
           whtRate: data.whtApplicable ? data.whtRate : 0,
           lines: processedLines,
           amounts,
+          title: data.title || "",
+          reference: data.reference || "",
           description: data.description || "",
           internalNotes: data.internalNotes || "",
           status: "draft",
@@ -677,6 +681,8 @@ export async function updateBill(billId, prevState, formData) {
       paid,
       balance: netPayable - paid,
     };
+    bill.title = data.title || "";
+    bill.reference = data.reference || "";
     bill.description = data.description || "";
     bill.internalNotes = data.internalNotes || "";
     bill.lastModifiedBy = formatUser({ user });
@@ -742,9 +748,10 @@ export async function submitBill(billId) {
       return { success: false, error: "Bill not found" };
     }
 
-    // Authorization: Owner, Manager, or Admin
+    // Authorization: Owner, Manager, Admin, or Accountant
     const canSubmit =
-      isOwner(user, bill.createdBy) || hasRole(user, ["Admin", "Manager"]);
+      isOwner(user, bill.createdBy) ||
+      hasRole(user, ["Admin", "Manager", "Accountant"]);
 
     if (!canSubmit) {
       return {

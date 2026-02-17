@@ -31,22 +31,6 @@ async function QuotesPage(props) {
 
   const { user } = session;
 
-  // Check permissions - Admin, Accountant, and Sales can view quotes
-  if (!["Admin", "Accountant", "Sales"].includes(user.role)) {
-    return (
-      <div className="flex min-h-100 items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-foreground mb-2">
-            Access Denied
-          </h2>
-          <p className="text-muted-foreground">
-            Only Admins, Accountants, and Sales staff can view quotes.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   const query = searchParams.query || "";
   const status = searchParams.status || "all";
   const startDate = searchParams.startDate || "";

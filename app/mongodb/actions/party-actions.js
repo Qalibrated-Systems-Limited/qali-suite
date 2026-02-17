@@ -198,6 +198,81 @@ export async function createParty(prevState, formData) {
 }
 
 /**
+ * Quick-create a party (customer or supplier) from within forms.
+ * Minimal fields — returns the new party for auto-selection.
+ */
+export async function quickCreateParty(formData) {
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+
+  const name = formData.get("name")?.toString().trim();
+  const phone = formData.get("phone")?.toString().trim() || "";
+  const email = formData.get("email")?.toString().trim().toLowerCase() || "";
+  const type = formData.get("type")?.toString() || "customer";
+
+  if (!["customer", "supplier", "both"].includes(type)) {
+    return { success: false, error: "Invalid party type" };
+  }
+
+  if (!name || name.length < 1) {
+    return { success: false, error: "Name is required" };
+  }
+
+  let tenantCompanyId;
+  try {
+    tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+
+  try {
+    await connectDB();
+
+    // Check duplicate email if provided
+    if (email) {
+      const existing = await Party.findOne(
+        withTenantScope({ email }, tenantCompanyId, isSuperAdmin)
+      ).lean();
+      if (existing) {
+        return { success: false, error: "A party with this email already exists" };
+      }
+    }
+
+    const party = await Party.create({
+      companyId: tenantCompanyId,
+      name,
+      type,
+      phone,
+      email: email || undefined,
+      createdBy: { name: user.name, id: user.id },
+      lastModifiedBy: { name: user.name, id: user.id },
+    });
+
+    revalidatePath("/dashboard/parties");
+
+    return {
+      success: true,
+      party: {
+        _id: party._id.toString(),
+        name: party.displayName || party.name,
+        email: party.email || "",
+        phone: party.phone || "",
+        phoneNumber: party.phone || "",
+        address: "",
+        taxPin: "",
+      },
+    };
+  } catch (error) {
+    console.error("Quick create party error:", error);
+    return { success: false, error: error.message || "Failed to create party" };
+  }
+}
+
+/**
  * Update existing party
  * Uses bind() to pass partyId
  */

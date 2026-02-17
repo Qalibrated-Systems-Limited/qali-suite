@@ -109,6 +109,7 @@ export async function createQuote(prevState, formData) {
       const processedItem = {
         lineNumber: lineNumber++,
         itemType: item.itemType || "product",
+        ...(item.serviceCategory && { serviceCategory: item.serviceCategory }),
         description: item.description,
         quantity: parseFloat(item.quantity),
         unit: item.unit || "pcs",
@@ -186,6 +187,8 @@ export async function createQuote(prevState, formData) {
       quoteNumber,
       quoteDate,
       validUntil,
+      title: data.title || "",
+      reference: data.reference || "",
       customer: customerData,
       salesPerson: data.salesPerson || null,
       items: processedItems,
@@ -342,6 +345,8 @@ export async function updateQuote(quoteId, prevState, formData) {
     if (data.quoteDate) quote.quoteDate = new Date(data.quoteDate);
     if (data.validUntil) quote.validUntil = new Date(data.validUntil);
     if (data.salesPerson !== undefined) quote.salesPerson = data.salesPerson;
+    if (data.title !== undefined) quote.title = data.title;
+    if (data.reference !== undefined) quote.reference = data.reference;
     if (data.notes !== undefined) quote.notes = data.notes;
     if (data.termsAndConditions !== undefined) {
       quote.termsAndConditions = data.termsAndConditions;

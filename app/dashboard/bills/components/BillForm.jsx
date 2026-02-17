@@ -59,6 +59,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { createBill, updateBill } from "@/app/mongodb/actions/bill-actions";
+import QuickCreatePartyDialog from "@/app/dashboard/invoices/components/QuickCreateCustomerDialog";
 
 // ============================================
 // INITIAL STATE
@@ -73,11 +74,12 @@ const initialState = {
 // ============================================
 // SUPPLIER COMBOBOX COMPONENT
 // ============================================
-function SupplierCombobox({ suppliers, defaultValue, error }) {
+function SupplierCombobox({ suppliers: initialSuppliers, defaultValue, error }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(defaultValue || "");
+  const [supplierList, setSupplierList] = useState(initialSuppliers);
 
-  const selectedSupplier = suppliers.find((s) => s._id === value);
+  const selectedSupplier = supplierList.find((s) => s._id === value);
 
   return (
     <div className="space-y-2">
@@ -112,9 +114,24 @@ function SupplierCombobox({ suppliers, defaultValue, error }) {
           <Command>
             <CommandInput placeholder="Search suppliers..." />
             <CommandList>
-              <CommandEmpty>No supplier found.</CommandEmpty>
+              <CommandEmpty className="py-4 text-center">
+                <p className="text-sm text-muted-foreground mb-2">No supplier found.</p>
+                <QuickCreatePartyDialog
+                  partyType="supplier"
+                  onPartyCreated={(party) => {
+                    setSupplierList((prev) => [party, ...prev]);
+                    setValue(party._id);
+                    setOpen(false);
+                  }}
+                >
+                  <button type="button" className="inline-flex items-center text-sm text-yellow-500 hover:text-yellow-600 font-medium">
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    Create new supplier
+                  </button>
+                </QuickCreatePartyDialog>
+              </CommandEmpty>
               <CommandGroup>
-                {suppliers.map((supplier) => (
+                {supplierList.map((supplier) => (
                   <CommandItem
                     key={supplier._id}
                     value={`${supplier.name} ${supplier.taxPin || ""}`}
@@ -843,6 +860,34 @@ export default function BillForm({
               <p className="text-xs text-muted-foreground">
                 Reference number from supplier&apos;s invoice
               </p>
+            </div>
+          </div>
+
+          {/* Title & Reference */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="title" className="text-sm font-medium">
+                Title / Subject
+              </Label>
+              <Input
+                id="title"
+                name="title"
+                defaultValue={bill?.title || ""}
+                placeholder="e.g. Office Supplies - January"
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reference" className="text-sm font-medium">
+                Reference
+              </Label>
+              <Input
+                id="reference"
+                name="reference"
+                defaultValue={bill?.reference || ""}
+                placeholder="Your internal reference"
+                className="h-9"
+              />
             </div>
           </div>
 

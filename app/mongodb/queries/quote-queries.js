@@ -14,7 +14,7 @@ export async function searchQuotes(query = "", page = 1, filters = {}) {
   await dbConnect();
 
   // Get tenant context
-  const { companyId, isSuperAdmin } = await getTenantContext();
+  const { companyId, isSuperAdmin, user } = await getTenantContext();
 
   const ITEMS_PER_PAGE = 10;
   const skip = (page - 1) * ITEMS_PER_PAGE;
@@ -64,6 +64,11 @@ export async function searchQuotes(query = "", page = 1, filters = {}) {
   // Apply tenant scoping
   filterQuery = withTenantScope(filterQuery, companyId, isSuperAdmin);
 
+  // Scope visibility: non-admin roles only see their own quotes
+  if (!isSuperAdmin && !["Admin", "Accountant"].includes(user.role)) {
+    filterQuery["createdBy.id"] = user.id;
+  }
+
   const quotes = await Quote.find(filterQuery)
     .sort({ quoteDate: -1, createdAt: -1 })
     .skip(skip)
@@ -81,7 +86,7 @@ export async function fetchQuotePages(query = "", filters = {}) {
   await dbConnect();
 
   // Get tenant context
-  const { companyId, isSuperAdmin } = await getTenantContext();
+  const { companyId, isSuperAdmin, user } = await getTenantContext();
 
   const ITEMS_PER_PAGE = 10;
 
@@ -117,6 +122,11 @@ export async function fetchQuotePages(query = "", filters = {}) {
   // Apply tenant scoping
   filterQuery = withTenantScope(filterQuery, companyId, isSuperAdmin);
 
+  // Scope visibility: non-admin roles only see their own quotes
+  if (!isSuperAdmin && !["Admin", "Accountant"].includes(user.role)) {
+    filterQuery["createdBy.id"] = user.id;
+  }
+
   const count = await Quote.countDocuments(filterQuery);
   return Math.ceil(count / ITEMS_PER_PAGE);
 }
@@ -128,8 +138,13 @@ export async function getQuoteStats(filters = {}) {
   await dbConnect();
 
   // Get tenant context
-  const { companyId, isSuperAdmin } = await getTenantContext();
+  const { companyId, isSuperAdmin, user } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new mongoose.Types.ObjectId(companyId) };
+
+  // Scope visibility: non-admin roles only see their own quotes
+  if (!isSuperAdmin && !["Admin", "Accountant"].includes(user.role)) {
+    tenantMatch["createdBy.id"] = user.id;
+  }
 
   const now = new Date();
   const sevenDaysAhead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);

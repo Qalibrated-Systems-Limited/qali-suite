@@ -17,8 +17,8 @@ export default async function CreateQuotePage({ searchParams }) {
 
   const { user } = session;
 
-  // Check permissions - Admin, Accountant, Sales can create quotes
-  if (!["Admin", "Accountant", "Sales"].includes(user.role)) {
+  // Viewers cannot create quotes
+  if (user.role === "Viewer") {
     return (
       <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">
@@ -26,7 +26,7 @@ export default async function CreateQuotePage({ searchParams }) {
             Access Denied
           </h2>
           <p className="text-muted-foreground">
-            Only Admins, Accountants, and Sales staff can create quotes.
+            Viewers cannot create quotes.
           </p>
         </div>
       </div>

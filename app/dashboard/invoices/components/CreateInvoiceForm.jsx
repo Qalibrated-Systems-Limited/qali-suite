@@ -56,9 +56,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { createInvoice } from "@/app/mongodb/invoice-actions";
+import QuickCreatePartyDialog from "./QuickCreateCustomerDialog";
 
 export default function CreateInvoiceFormClient({
-  customers = [],
+  customers: initialCustomers = [],
   products = [],
   checkouts = [],
 }) {
@@ -68,6 +69,7 @@ export default function CreateInvoiceFormClient({
   const [success, setSuccess] = useState("");
 
   // Customer Selection
+  const [customerList, setCustomerList] = useState(initialCustomers);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
 
@@ -76,7 +78,11 @@ export default function CreateInvoiceFormClient({
     new Date().toISOString().split("T")[0]
   );
   const [dueDate, setDueDate] = useState("");
+  const [title, setTitle] = useState("");
+  const [referenceNumber, setReferenceNumber] = useState("");
+  const [purchaseOrderNumber, setPurchaseOrderNumber] = useState("");
   const [notes, setNotes] = useState("");
+  const [termsAndConditions, setTermsAndConditions] = useState("");
 
   // Line Items
   const [stockItems, setStockItems] = useState([]);
@@ -345,6 +351,9 @@ export default function CreateInvoiceFormClient({
       customerId: selectedCustomer._id,
       invoiceDate,
       dueDate,
+      title,
+      referenceNumber,
+      purchaseOrderNumber,
       stockItems: stockItems.map((item) => ({
         ...item,
         relatedCheckout: item.checkoutId
@@ -363,6 +372,7 @@ export default function CreateInvoiceFormClient({
       discountPercentage,
       vatPercentage,
       notes,
+      termsAndConditions,
     };
 
     const formData = new FormData();
@@ -442,11 +452,24 @@ export default function CreateInvoiceFormClient({
                     className="text-foreground"
                   />
                   <CommandList>
-                    <CommandEmpty className="text-muted-foreground p-4">
-                      No customer found.
+                    <CommandEmpty className="py-4 text-center">
+                      <p className="text-sm text-muted-foreground mb-2">No customer found.</p>
+                      <QuickCreatePartyDialog
+                        partyType="customer"
+                        onPartyCreated={(party) => {
+                          setCustomerList((prev) => [party, ...prev]);
+                          setSelectedCustomer(party);
+                          setCustomerSearchOpen(false);
+                        }}
+                      >
+                        <button type="button" className="inline-flex items-center text-sm text-yellow-500 hover:text-yellow-600 font-medium">
+                          <Plus className="h-3.5 w-3.5 mr-1" />
+                          Create new customer
+                        </button>
+                      </QuickCreatePartyDialog>
                     </CommandEmpty>
                     <CommandGroup>
-                      {customers.map((customer) => (
+                      {customerList.map((customer) => (
                         <CommandItem
                           key={customer._id}
                           value={customer.name}
@@ -504,7 +527,18 @@ export default function CreateInvoiceFormClient({
             </>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label className="text-foreground">Title / Subject</Label>
+            <Input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Website Development Services"
+              className="bg-background border-border text-foreground"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
               <Label className="text-foreground">Invoice Date</Label>
               <Input
@@ -520,6 +554,26 @@ export default function CreateInvoiceFormClient({
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
+                className="bg-background border-border text-foreground"
+              />
+            </div>
+            <div>
+              <Label className="text-foreground">Reference #</Label>
+              <Input
+                type="text"
+                value={referenceNumber}
+                onChange={(e) => setReferenceNumber(e.target.value)}
+                placeholder="REF-001"
+                className="bg-background border-border text-foreground"
+              />
+            </div>
+            <div>
+              <Label className="text-foreground">PO Number</Label>
+              <Input
+                type="text"
+                value={purchaseOrderNumber}
+                onChange={(e) => setPurchaseOrderNumber(e.target.value)}
+                placeholder="PO-001"
                 className="bg-background border-border text-foreground"
               />
             </div>
@@ -1051,14 +1105,25 @@ export default function CreateInvoiceFormClient({
               </span>
             </div>
           </div>
-          <div>
-            <Label>Notes / Terms</Label>
-            <Textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Payment terms, delivery notes..."
-              rows={3}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <Label>Notes</Label>
+              <Textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Additional notes for the customer..."
+                rows={2}
+              />
+            </div>
+            <div>
+              <Label>Terms & Conditions</Label>
+              <Textarea
+                value={termsAndConditions}
+                onChange={(e) => setTermsAndConditions(e.target.value)}
+                placeholder="Payment terms, delivery conditions..."
+                rows={2}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>

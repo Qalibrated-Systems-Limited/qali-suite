@@ -529,6 +529,7 @@ export default async function InvoiceDetailsPage({ params }) {
                 <InvoiceDetailActions
                   invoice={invoice}
                   userRole={user.role}
+                  userId={user.id}
                   paymentAccounts={serializedPaymentAccounts}
                 />
               </CardContent>

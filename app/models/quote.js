@@ -41,6 +41,21 @@ const quoteLineSchema = new Schema(
       required: [true, "Item type is required"],
     },
 
+    // Service category (for services only)
+    serviceCategory: {
+      type: String,
+      enum: [
+        "labor",
+        "mileage",
+        "accommodation",
+        "installation",
+        "consultation",
+        "maintenance",
+        "repair",
+        "other",
+      ],
+    },
+
     // Product Reference (for products only)
     product: {
       id: { type: Schema.Types.ObjectId, ref: "Product" },
@@ -330,6 +345,19 @@ const quoteSchema = new Schema(
         createdBy: { name: String, id: String },
       },
     ],
+
+    // ==========================================
+    // TITLE & REFERENCE
+    // ==========================================
+    title: {
+      type: String,
+      maxlength: 200,
+    },
+
+    reference: {
+      type: String,
+      trim: true,
+    },
 
     // ==========================================
     // NOTES & TERMS

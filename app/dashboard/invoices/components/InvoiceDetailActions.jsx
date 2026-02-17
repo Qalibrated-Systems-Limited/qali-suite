@@ -33,6 +33,7 @@ import { toast } from "sonner";
 export function InvoiceDetailActions({
   invoice,
   userRole,
+  userId,
   paymentAccounts = [],
 }) {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
@@ -80,9 +81,9 @@ export function InvoiceDetailActions({
   const canPay =
     invoice.paymentStatus !== "paid" && invoice.status === "completed";
   const canCancel =
-    invoice.status !== "cancelled" &&
-    invoice.paymentStatus !== "paid" &&
-    userRole?.toLowerCase() === "admin";
+    (invoice.status === "draft" || invoice.status === "sent") &&
+    (userRole === "Admin" ||
+      (userRole === "Accountant" && invoice.createdBy?.id === userId));
   // Calculate total already credited
   const totalCredited = (invoice.creditNotes || []).reduce(
     (sum, cn) => sum + (cn.amount || 0),

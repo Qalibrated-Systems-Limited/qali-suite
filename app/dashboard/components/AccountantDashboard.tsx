@@ -442,12 +442,9 @@ async function BankReconciliationCard() {
             </svg>
           </div>
           <p className="text-sm text-muted-foreground">No bank statements imported</p>
-          <a
-            href="/dashboard/banking/upload"
-            className="text-sm text-primary hover:underline mt-1 inline-block"
-          >
+          <span className="text-sm text-primary mt-1 inline-block">
             Import your first statement
-          </a>
+          </span>
         </div>
       ) : (
         <div className="space-y-4 pt-2">
@@ -631,9 +628,8 @@ async function PeriodEndChecklistCard() {
         {/* Checklist Items */}
         <div className="space-y-1">
           {checklistItems.map((item, index) => (
-            <a
+            <div
               key={index}
-              href={item.href}
               className="flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-muted/50 transition-colors"
             >
               <div
@@ -671,7 +667,7 @@ async function PeriodEndChecklistCard() {
                   {item.count}
                 </span>
               )}
-            </a>
+            </div>
           ))}
         </div>
       </div>
