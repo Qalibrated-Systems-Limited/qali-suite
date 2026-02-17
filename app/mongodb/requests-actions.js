@@ -123,12 +123,25 @@ export async function approveRequest(requestId, prevState, formData) {
     // ========================================
     // VALIDATE AND COMMIT INVENTORY
     // ========================================
+    // Pre-fetch all products in one query
+    const approvedProductIds = request.items
+      .filter((item) => {
+        const approval = itemApprovals[item._id.toString()];
+        return approval && approval.quantity > 0 && item.productId;
+      })
+      .map((item) => item.productId);
+
+    const approveProducts = approvedProductIds.length > 0
+      ? await Product.find({ _id: { $in: approvedProductIds } }).session(session)
+      : [];
+    const approveProductMap = new Map(approveProducts.map((p) => [p._id.toString(), p]));
+
     // Reserve stock for each approved item to prevent overselling
     for (const item of request.items) {
       const approval = itemApprovals[item._id.toString()];
       if (!approval || approval.quantity <= 0) continue;
 
-      const product = await Product.findById(item.productId).session(session);
+      const product = approveProductMap.get(item.productId.toString());
       if (!product) {
         throw new Error(`Product ${item.productName} not found`);
       }
@@ -151,6 +164,11 @@ export async function approveRequest(requestId, prevState, formData) {
         },
         { session }
       );
+
+      // Update local cache for subsequent items of same product
+      product.inventory.quantityAvailable = available - approval.quantity;
+      product.inventory.quantityCommitted =
+        (product.inventory.quantityCommitted || 0) + approval.quantity;
     }
 
     // ========================================
@@ -192,6 +210,7 @@ export async function approveRequest(requestId, prevState, formData) {
 // 2. REJECT REQUEST (Manager/Admin only)
 // ============================================
 export async function rejectRequest(requestId, prevState, formData) {
+  await dbConnect();
   let session;
   let success = false;
 
@@ -708,6 +727,7 @@ export async function generateMovementNo(session) {
 // 4. CANCEL REQUEST
 // ============================================
 export async function cancelRequest(requestId, prevState, formData) {
+  await dbConnect();
   let session;
   let success = false;
 
@@ -841,6 +861,7 @@ async function generateCheckoutNumber(session) {
 }
 
 export async function createStockRequest(prevState, formData) {
+  await dbConnect();
   let session;
 
   // Extract raw form data early to return on error
@@ -1063,6 +1084,7 @@ export async function createStockRequest(prevState, formData) {
 // RETURN ITEM CHECKOUT
 // ============================================
 export async function returnItemCheckout(checkoutId, prevState, formData) {
+  await dbConnect();
   let session;
 
   try {
@@ -1266,16 +1288,11 @@ async function createFulfillmentJournalEntry(
   // Build account query filter (with or without companyId)
   const accountFilter = companyId ? { companyId } : {};
 
-  // Get system accounts
-  let techStockAccount = await Account.findOne({
-    ...accountFilter,
-    systemAccount: "technician_stock",
-  }).session(session);
-
-  const inventoryAccount = await Account.findOne({
-    ...accountFilter,
-    systemAccount: "inventory",
-  }).session(session);
+  // Get system accounts (parallel)
+  let [techStockAccount, inventoryAccount] = await Promise.all([
+    Account.findOne({ ...accountFilter, systemAccount: "technician_stock" }).session(session),
+    Account.findOne({ ...accountFilter, systemAccount: "inventory" }).session(session),
+  ]);
 
   // Auto-create technician_stock account if it doesn't exist
   if (!techStockAccount && inventoryAccount) {
@@ -1383,16 +1400,11 @@ async function createReturnJournalEntry(
   // Build account query filter (with or without companyId)
   const accountFilter = companyId ? { companyId } : {};
 
-  // Get system accounts
-  let techStockAccount = await Account.findOne({
-    ...accountFilter,
-    systemAccount: "technician_stock",
-  }).session(session);
-
-  const inventoryAccount = await Account.findOne({
-    ...accountFilter,
-    systemAccount: "inventory",
-  }).session(session);
+  // Get system accounts (parallel)
+  let [techStockAccount, inventoryAccount] = await Promise.all([
+    Account.findOne({ ...accountFilter, systemAccount: "technician_stock" }).session(session),
+    Account.findOne({ ...accountFilter, systemAccount: "inventory" }).session(session),
+  ]);
 
   // Auto-create technician_stock account if it doesn't exist
   if (!techStockAccount && inventoryAccount) {
@@ -1580,6 +1592,7 @@ function getPurposeLabel(purpose) {
 // FULFILL REQUEST (Transaction-Safe with Fulfillments Array)
 // ============================================
 export async function fulfillRequest(requestId, prevState, formData) {
+  await dbConnect();
   let session;
   let success = false;
 
@@ -1635,6 +1648,17 @@ export async function fulfillRequest(requestId, prevState, formData) {
     let itemsFulfilledCount = 0;
 
     // ========================================
+    // PRE-FETCH ALL PRODUCTS IN ONE QUERY
+    // ========================================
+    const productIds = request.items
+      .filter((item) => item.productId)
+      .map((item) => item.productId);
+    const products = productIds.length > 0
+      ? await Product.find({ _id: { $in: productIds } }).session(session)
+      : [];
+    const productMap = new Map(products.map((p) => [p._id.toString(), p]));
+
+    // ========================================
     // PROCESS EACH ITEM
     // ========================================
     for (const item of request.items) {
@@ -1663,7 +1687,7 @@ export async function fulfillRequest(requestId, prevState, formData) {
       }
 
       // Get product and validate stock
-      const product = await Product.findById(item.productId).session(session);
+      const product = productMap.get(item.productId.toString());
 
       if (!product) {
         throw new Error(`Product ${item.productName} not found`);
@@ -1672,8 +1696,6 @@ export async function fulfillRequest(requestId, prevState, formData) {
       // ========================================
       // VALIDATE STOCK (committed flow)
       // ========================================
-      // Stock was committed during approval, so check quantityOnHand
-      // (quantityAvailable was already reduced during approval)
       const onHandStock = product.inventory?.quantityOnHand ?? 0;
       if (fulfillQty > onHandStock) {
         throw new Error(
@@ -1692,9 +1714,6 @@ export async function fulfillRequest(requestId, prevState, formData) {
       // ========================================
       // FULFILL COMMITTED INVENTORY
       // ========================================
-      // Decrease quantityOnHand (physical stock goes out)
-      // Decrease quantityCommitted (reservation is fulfilled)
-      // quantityAvailable stays the same (was already reduced during approval)
       const previousOnHand = product.inventory?.quantityOnHand ?? 0;
       await Product.findByIdAndUpdate(
         item.productId,
@@ -1707,9 +1726,12 @@ export async function fulfillRequest(requestId, prevState, formData) {
         { session }
       );
 
-      const updatedProduct = await Product.findById(item.productId).session(
-        session
-      );
+      // Calculate new on-hand (no need to re-fetch)
+      const currentOnHand = previousOnHand - fulfillQty;
+      // Update local cache for subsequent items of same product
+      product.inventory.quantityOnHand = currentOnHand;
+      product.inventory.quantityCommitted =
+        (product.inventory.quantityCommitted || 0) - fulfillQty;
 
       // ========================================
       // CREATE STOCK MOVEMENT
@@ -1718,9 +1740,8 @@ export async function fulfillRequest(requestId, prevState, formData) {
       const isSale = request.requestType === "sale";
 
       // Use product's pricing fields
-      const effectiveUnitPrice = updatedProduct.pricing?.sellingPrice ?? 0;
-      const effectiveUnitCost = updatedProduct.costing?.costPrice ?? 0;
-      const currentOnHand = updatedProduct.inventory?.quantityOnHand ?? 0;
+      const effectiveUnitPrice = product.pricing?.sellingPrice ?? 0;
+      const effectiveUnitCost = product.costing?.costPrice ?? 0;
 
       const movement = await StockMovement.create(
         [
@@ -1926,12 +1947,22 @@ export async function fulfillRequest(requestId, prevState, formData) {
     if (request.requestType === "sale" && !request.draftInvoice?.invoiceId) {
       const invoiceNumber = await generateInvoiceNumber(companyId, session);
 
-      // Prepare invoice items from fulfilled items
+      // Prepare invoice items from fulfilled items (reuse pre-fetched products)
+      // Batch-fetch all checkout IDs from fulfillments
+      const checkoutIds = request.items
+        .filter((item) => item.fulfillments?.length > 0)
+        .map((item) => item.fulfillments[item.fulfillments.length - 1]?.checkoutId)
+        .filter(Boolean);
+      const checkouts = checkoutIds.length > 0
+        ? await ItemCheckout.find({ _id: { $in: checkoutIds } }).session(session)
+        : [];
+      const checkoutMap = new Map(checkouts.map((c) => [c._id.toString(), c]));
+
       const invoiceItems = [];
       for (const item of request.items) {
         const fulfilledQty = item.fulfillments.reduce((sum, f) => sum + (f.quantity || 0), 0);
         if (fulfilledQty > 0) {
-          const product = await Product.findById(item.productId).session(session);
+          const product = productMap.get(item.productId.toString());
           const unitCost = product?.costing?.costPrice || 0;
           const amount = fulfilledQty * (item.unitPrice || 0);
           const totalCost = fulfilledQty * unitCost;
@@ -1940,7 +1971,7 @@ export async function fulfillRequest(requestId, prevState, formData) {
           const latestFulfillment = item.fulfillments[item.fulfillments.length - 1];
           let relatedCheckout = null;
           if (latestFulfillment?.checkoutId) {
-            const checkout = await ItemCheckout.findById(latestFulfillment.checkoutId).session(session);
+            const checkout = checkoutMap.get(latestFulfillment.checkoutId.toString());
             if (checkout) {
               relatedCheckout = {
                 checkoutId: checkout._id,
@@ -1973,7 +2004,7 @@ export async function fulfillRequest(requestId, prevState, formData) {
               technicianId: request.requester.id,
               technicianName: request.requester.name,
             },
-            relatedCheckout, // Link to checkout for cancel/expire handling
+            relatedCheckout,
           });
         }
       }

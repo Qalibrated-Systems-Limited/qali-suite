@@ -17,6 +17,7 @@ import {
   getTenantContext,
   validateTenantAccess,
 } from "@/lib/utils/tenant-utils";
+import dbConnect from "@/app/config/dbConnect";
 
 const ObjectId = mongoose.Types.ObjectId;
 
@@ -27,6 +28,7 @@ const ObjectId = mongoose.Types.ObjectId;
 // For COMPLETED invoices: Not allowed to edit stock items
 // ============================================
 export async function updateInvoice(invoiceId, prevState, formData) {
+  await dbConnect();
   const session = await auth();
 
   if (!session?.user) {
@@ -497,6 +499,7 @@ export async function updateInvoice(invoiceId, prevState, formData) {
 // CREATE INVOICE (WITH ACCOUNTING INTEGRATION)
 // ============================================
 export async function createInvoice(prevState, formData) {
+  await dbConnect();
   const mongoSession = await mongoose.startSession();
 
   try {
@@ -850,6 +853,7 @@ export async function updateInvoicePayment(invoiceId, prevState, formData) {
 // Use this for direct payments from the invoice detail page
 // ============================================
 export async function createInvoicePayment(invoiceId, prevState, formData) {
+  await dbConnect();
   const mongoSession = await mongoose.startSession();
 
   try {
@@ -874,7 +878,6 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
       return { success: false, error: "Company context required" };
     }
 
-    const dbConnect = (await import("@/app/config/dbConnect")).default;
     await dbConnect();
 
     // Parse form data
@@ -1081,7 +1084,6 @@ export async function cancelInvoice(invoiceId, reason = "") {
     return { message: "Company context required" };
   }
 
-  const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
   const invoice = await Invoice.findById(invoiceId);
@@ -1148,7 +1150,6 @@ export async function completeInvoice(invoiceId) {
     return { message: "Company context required" };
   }
 
-  const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
   const invoice = await Invoice.findById(invoiceId);
@@ -1188,34 +1189,43 @@ export async function completeInvoice(invoiceId) {
     // ============================================
     // STEP 1: UPDATE CHECKOUTS FIRST (within transaction)
     // ============================================
-    // This ensures checkouts are validated and updated atomically
-    // If this fails, we haven't touched the invoice yet
+    const checkoutIds = invoice.items
+      .filter((item) => item.relatedCheckout?.checkoutId)
+      .map((item) => item.relatedCheckout.checkoutId);
+
     const checkoutsToUpdate = [];
 
-    for (const item of invoice.items) {
-      if (item.relatedCheckout?.checkoutId) {
-        const checkout = await ItemCheckout.findById(item.relatedCheckout.checkoutId).session(mongoSession);
+    if (checkoutIds.length > 0) {
+      // Fetch all checkouts in one query
+      const checkouts = await ItemCheckout.find({
+        _id: { $in: checkoutIds },
+        status: "checked_out",
+      }).session(mongoSession);
 
-        if (checkout && checkout.status === "checked_out") {
-          checkout.status = "converted_to_sale";
-          checkout.saleConversion = {
-            converted: true,
-            convertedAt: new Date(),
-            convertedBy: {
-              name: user.name,
-              id: user.id,
-            },
-            invoiceId: invoice._id,
-            invoiceNumber: invoice.invoiceNumber,
-            quantitySold: item.quantity,
-          };
-          // Clear overdue flag since item is now sold (expectedReturnDate kept for history)
-          checkout.isOverdue = false;
+      // Build lookup for quantity per checkout
+      const itemByCheckoutId = new Map(
+        invoice.items
+          .filter((item) => item.relatedCheckout?.checkoutId)
+          .map((item) => [item.relatedCheckout.checkoutId.toString(), item])
+      );
 
-          await checkout.save({ session: mongoSession });
-          checkoutsToUpdate.push(checkout._id);
-        }
+      for (const checkout of checkouts) {
+        const item = itemByCheckoutId.get(checkout._id.toString());
+        checkout.status = "converted_to_sale";
+        checkout.saleConversion = {
+          converted: true,
+          convertedAt: new Date(),
+          convertedBy: { name: user.name, id: user.id },
+          invoiceId: invoice._id,
+          invoiceNumber: invoice.invoiceNumber,
+          quantitySold: item?.quantity || 0,
+        };
+        checkout.isOverdue = false;
+        checkoutsToUpdate.push(checkout._id);
       }
+
+      // Save all checkouts in parallel (within transaction)
+      await Promise.all(checkouts.map((c) => c.save({ session: mongoSession })));
     }
 
     // ============================================
@@ -1289,7 +1299,6 @@ export async function expireStaleInvoices(companyIdFilter = null) {
     };
   }
 
-  const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
   try {
@@ -1361,7 +1370,6 @@ export async function getExpiringInvoices(daysWarning = 3) {
     return { success: false, error: "Company context required" };
   }
 
-  const dbConnect = (await import("@/app/config/dbConnect")).default;
   await dbConnect();
 
   const now = new Date();
@@ -1409,6 +1417,7 @@ export async function getExpiringInvoices(daysWarning = 3) {
 // Allows accountant to add service charges (labor, mileage, etc.)
 // ============================================
 export async function convertCheckoutToInvoice(prevState, formData) {
+  await dbConnect();
   const mongoSession = await mongoose.startSession();
 
   try {

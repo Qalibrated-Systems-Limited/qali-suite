@@ -59,6 +59,7 @@ export async function authenticate(prevState, formData) {
 }
 //Cart
 export async function decreaseQTY(productId) {
+  await dbConnect();
   const sesssion = await auth();
   const user = sesssion && sesssion.user;
   try {
@@ -86,6 +87,7 @@ export async function decreaseQTY(productId) {
 }
 
 export async function removeCartItem(productId) {
+  await dbConnect();
   const sesssion = await auth();
   const user = sesssion && sesssion.user;
   try {
@@ -104,6 +106,7 @@ export async function removeCartItem(productId) {
 }
 
 export async function increaseQTY(productId) {
+  await dbConnect();
   const sesssion = await auth();
   const user = sesssion && sesssion.user;
   try {
@@ -130,6 +133,7 @@ export async function increaseQTY(productId) {
 }
 
 export async function addToCart(productId, state, formData) {
+  await dbConnect();
   try {
     const rawFormData = Object.fromEntries(formData.entries());
 
@@ -182,6 +186,7 @@ export async function addToCart(productId, state, formData) {
 //ccounts
 
 export async function createAccount(state, formData) {
+  await dbConnect();
   try {
     const sesssion = await auth();
     const user = sesssion && sesssion.user;
@@ -218,6 +223,7 @@ export async function createAccount(state, formData) {
 }
 
 export async function addStock(prevState, formData) {
+  await dbConnect();
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -323,6 +329,7 @@ export async function addStock(prevState, formData) {
 // UPDATE STOCK WITH MOVEMENT TRACKING
 // ============================================
 export async function updateStock(productId, prevState, formData) {
+  await dbConnect();
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -442,6 +449,7 @@ export async function updateStock(productId, prevState, formData) {
 }
 
 export async function updateAccount(id, prevState, formData) {
+  await dbConnect();
   const rawFormData = Object.fromEntries(formData.entries());
   const validatedFields = validateUpdateAccount(rawFormData);
   if (!validatedFields.success) {
@@ -527,6 +535,7 @@ export const deleteAccount = async (id) => {
 //User action
 
 export async function createUser(state, formData) {
+  await dbConnect();
   try {
     const sesssion = await auth();
     const user = sesssion && sesssion.user;
@@ -562,6 +571,7 @@ export async function createUser(state, formData) {
 }
 
 export async function updateUser(id, prevState, formData) {
+  await dbConnect();
   const rawFormData = Object.fromEntries(formData.entries());
   const validatedFields = validateUpdateUser(rawFormData);
   if (!validatedFields.success) {
@@ -591,6 +601,7 @@ export async function updateUser(id, prevState, formData) {
 }
 
 export async function createSettings(state, formData) {
+  await dbConnect();
   try {
     const rawFormData = Object.fromEntries(formData.entries());
 
@@ -621,6 +632,7 @@ export async function createSettings(state, formData) {
 }
 
 export async function updateSettings(id, prevState, formData) {
+  await dbConnect();
   const rawFormData = Object.fromEntries(formData.entries());
   const validatedFields = validateSettings(rawFormData);
   if (!validatedFields.success) {
@@ -653,6 +665,7 @@ export async function updateSettings(id, prevState, formData) {
 //Invoices
 
 export async function createInvoice(state, formData) {
+  await dbConnect();
   try {
     const rawFormData = Object.fromEntries(formData.entries());
 
@@ -727,6 +740,7 @@ export async function createInvoice(state, formData) {
 }
 
 export async function addInvoiceItem(id, state, formData) {
+  await dbConnect();
   try {
     const rawFormData = Object.fromEntries(formData.entries());
 
@@ -840,6 +854,7 @@ export async function addInvoiceItem(id, state, formData) {
 }
 
 export async function updateInvoice(id, prevState, formData) {
+  await dbConnect();
   const rawFormData = Object.fromEntries(formData.entries());
   try {
     const validatedFields = validateInvoiceUpdate(rawFormData);
@@ -962,6 +977,7 @@ export const downloadFile = async (Doc) => {
 };
 
 export async function addDNote(state, formData) {
+  await dbConnect();
   const mongodbSession = await mongoose.startSession();
   mongodbSession.startTransaction();
   try {
@@ -1100,6 +1116,7 @@ export async function addDNote(state, formData) {
 }
 
 export async function returnDNoteItems(id) {
+  await dbConnect();
   const mongodbSession = await mongoose.startSession();
   try {
     const sesssion = await auth();
@@ -1138,6 +1155,7 @@ export async function returnDNoteItems(id) {
 }
 
 export async function updateDnote(id, prevState, formData) {
+  await dbConnect();
   const rawFormData = Object.fromEntries(formData.entries());
   try {
     const validatedFields = validateDNote(rawFormData);
@@ -1187,6 +1205,7 @@ export async function updateDnote(id, prevState, formData) {
 }
 
 export async function addDnoteItem(id, state, formData) {
+  await dbConnect();
   try {
     const rawFormData = Object.fromEntries(formData.entries());
 
@@ -1241,6 +1260,7 @@ export async function addDnoteItem(id, state, formData) {
 }
 
 export async function createRequestFromCart(prevState, formData) {
+  await dbConnect();
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -1395,6 +1415,7 @@ async function sendNotificationToManager(request) {
 }
 
 export async function generateRequestNo() {
+  await dbConnect();
   const today = format(new Date(), "ddMMyy");
   const counterId = `REQ-${today}`;
 

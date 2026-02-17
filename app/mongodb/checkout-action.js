@@ -309,6 +309,7 @@ export async function returnCheckout(checkoutId, prevState, formData) {
 // ESCALATE CHECKOUT
 // ============================================
 export async function escalateCheckout(checkoutId, prevState, formData) {
+  await dbConnect();
   try {
     const rawFormData = Object.fromEntries(formData.entries());
 
@@ -392,6 +393,7 @@ export async function escalateCheckout(checkoutId, prevState, formData) {
 // UPDATE CHECKOUT STATUS (for lost/damaged)
 // ============================================
 export async function updateCheckoutStatus(checkoutId, prevState, formData) {
+  await dbConnect();
   try {
     const rawFormData = Object.fromEntries(formData.entries());
 
@@ -600,6 +602,7 @@ async function createReturnJournalEntry(
 // Creates: DR Expense Account, CR Technician Stock
 // ============================================
 export async function expenseInternalCheckout(checkoutId, prevState, formData) {
+  await dbConnect();
   let session;
   let success = false;
 

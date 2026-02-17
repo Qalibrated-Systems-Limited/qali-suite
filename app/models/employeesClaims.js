@@ -34,8 +34,6 @@ const employeeClaimSchema = new Schema(
       ref: "EmployeeClaim",
       // Links advance_request to its advance_return settlement
       // Prevents double settlement
-      index: true,
-      sparse: true,
     },
 
     // Employee (links to User AND Party)

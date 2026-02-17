@@ -302,11 +302,15 @@ journalEntrySchema.methods.validateLines = function () {
 journalEntrySchema.methods.validateAccounts = async function (session = null) {
   const Account = mongoose.model("Account");
 
+  // Batch fetch all accounts in one query
+  const accountIds = this.lines.map((line) => line.accountId);
+  let query = Account.find({ _id: { $in: accountIds } });
+  if (session) query = query.session(session);
+  const accounts = await query;
+  const accountMap = new Map(accounts.map((a) => [a._id.toString(), a]));
+
   for (const line of this.lines) {
-    // Use session if provided (for transaction support)
-    const account = session
-      ? await Account.findById(line.accountId).session(session)
-      : await Account.findById(line.accountId);
+    const account = accountMap.get(line.accountId.toString());
 
     if (!account) {
       throw new Error(`Account ${line.accountId} not found`);

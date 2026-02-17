@@ -400,7 +400,7 @@ function formatUser(user) {
 // ============================================
 // METHOD: Validate before confirming
 // ============================================
-paymentSchema.methods.validate = async function () {
+paymentSchema.methods.validateBeforeConfirm = async function () {
   const errors = [];
 
   // Check allocations don't exceed amount
@@ -465,7 +465,7 @@ paymentSchema.methods.confirm = async function (user, externalSession = null) {
   }
 
   // Validate before starting transaction
-  await this.validate();
+  await this.validateBeforeConfirm();
 
   const userInfo = formatUser(user);
 

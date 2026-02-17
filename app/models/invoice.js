@@ -774,9 +774,19 @@ invoiceSchema.methods.calculateCOGS = async function () {
   const Product = mongoose.model("Product");
   let totalCOGS = 0;
 
+  // Batch fetch all products in one query
+  const productIds = this.items
+    .filter((item) => item.itemType === "product" && item.productId)
+    .map((item) => item.productId);
+
+  const products = productIds.length > 0
+    ? await Product.find({ _id: { $in: productIds } }).lean()
+    : [];
+  const productMap = new Map(products.map((p) => [p._id.toString(), p]));
+
   for (const item of this.items) {
     if (item.itemType === "product" && item.productId) {
-      const product = await Product.findById(item.productId);
+      const product = productMap.get(item.productId.toString());
 
       if (!product) {
         throw new Error(`Product not found: ${item.productId}`);
@@ -958,19 +968,12 @@ invoiceSchema.methods.createRevenueJournalEntry = async function (user) {
   const Account = mongoose.model("Account");
   const JournalEntry = mongoose.model("JournalEntry");
 
-  // Get accounts (tenant-scoped)
-  const arAccount = await Account.findOne({
-    companyId: this.companyId,
-    systemAccount: "accounts_receivable",
-  });
-  const revenueAccount = await Account.findOne({
-    companyId: this.companyId,
-    systemAccount: "sales_revenue",
-  });
-  const vatOutputAccount = await Account.findOne({
-    companyId: this.companyId,
-    systemAccount: "vat_output",
-  });
+  // Get accounts (tenant-scoped) - fetch in parallel
+  const [arAccount, revenueAccount, vatOutputAccount] = await Promise.all([
+    Account.findOne({ companyId: this.companyId, systemAccount: "accounts_receivable" }),
+    Account.findOne({ companyId: this.companyId, systemAccount: "sales_revenue" }),
+    Account.findOne({ companyId: this.companyId, systemAccount: "vat_output" }),
+  ]);
 
   if (!arAccount || !revenueAccount) {
     throw new Error(
@@ -1077,23 +1080,28 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
   const Product = mongoose.model("Product");
   const StockMovement = mongoose.model("StockMovement");
 
-  // Get accounts - need both Inventory and Technician Stock (tenant-scoped)
-  const cogsAccount = await Account.findOne({
-    companyId: this.companyId,
-    systemAccount: "cogs",
-  });
-  const inventoryAccount = await Account.findOne({
-    companyId: this.companyId,
-    systemAccount: "inventory",
-  });
-  const technicianStockAccount = await Account.findOne({
-    companyId: this.companyId,
-    systemAccount: "technician_stock",
-  });
+  // Get accounts - fetch in parallel (tenant-scoped)
+  const [cogsAccount, inventoryAccount, technicianStockAccount] = await Promise.all([
+    Account.findOne({ companyId: this.companyId, systemAccount: "cogs" }),
+    Account.findOne({ companyId: this.companyId, systemAccount: "inventory" }),
+    Account.findOne({ companyId: this.companyId, systemAccount: "technician_stock" }),
+  ]);
 
   if (!cogsAccount) {
     throw new Error("COGS account not configured for this company");
   }
+
+  // ============================================
+  // PRE-FETCH ALL PRODUCTS IN ONE QUERY
+  // ============================================
+  const productIds = this.items
+    .filter((item) => item.itemType === "product" && item.productId)
+    .map((item) => item.productId);
+
+  const products = productIds.length > 0
+    ? await Product.find({ _id: { $in: productIds } })
+    : [];
+  const productMap = new Map(products.map((p) => [p._id.toString(), p]));
 
   // Separate items by source
   let totalCOGSFromInventory = 0; // Direct sales
@@ -1105,7 +1113,7 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
   for (const item of this.items) {
     if (item.itemType !== "product" || !item.productId) continue;
 
-    const product = await Product.findById(item.productId);
+    const product = productMap.get(item.productId.toString());
 
     if (!product) {
       throw new Error(`Product not found: ${item.productId}`);
@@ -1121,11 +1129,9 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
 
     // Categorize by source
     if (isFromTechnicianStock) {
-      // Item came from technician stock (via request fulfillment or direct checkout)
       totalCOGSFromTechStock += lineCOGS;
       itemsFromTechStock.push({ item, product, lineCOGS });
     } else {
-      // Direct sale from inventory
       totalCOGSFromInventory += lineCOGS;
       itemsFromInventory.push({ item, product, lineCOGS });
     }
@@ -1137,10 +1143,6 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
       const previousOnHand = product.inventory?.quantityOnHand || 0;
 
       if (isStockCommitted) {
-        // COMMITTED FLOW: Stock was reserved during draft creation
-        // - Decrease quantityOnHand (physical stock goes out)
-        // - Decrease quantityCommitted (reservation is fulfilled)
-        // - quantityAvailable stays the same (was already reduced during commit)
         if (item.quantity > (product.inventory?.quantityOnHand || 0)) {
           throw new Error(
             `Insufficient physical stock for ${product.name}. ` +
@@ -1152,8 +1154,6 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
         product.inventory.quantityOnHand = previousOnHand - item.quantity;
         product.inventory.quantityCommitted =
           (product.inventory.quantityCommitted || 0) - item.quantity;
-        // quantityAvailable stays unchanged (pre-save hook will recalculate)
-        await product.save();
       } else {
         // LEGACY FLOW: Stock not pre-committed, check availability now
         const available = product.inventory?.quantityAvailable || 0;
@@ -1164,13 +1164,13 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
           );
         }
 
-        await product.decreaseInventory(
-          item.quantity,
-          `Sold on invoice ${this.invoiceNumber}`,
-        );
+        product.inventory = product.inventory || {};
+        product.inventory.quantityOnHand =
+          (product.inventory.quantityOnHand || 0) - item.quantity;
+        product.inventory.quantityAvailable =
+          product.inventory.quantityOnHand - (product.inventory.quantityCommitted || 0);
       }
     }
-    // Note: For technician stock items, inventory was already decreased during checkout
 
     // Update product lifetime totals
     product.lifetimeTotals = product.lifetimeTotals || {};
@@ -1182,60 +1182,66 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
       (product.lifetimeTotals.totalCOGS || 0) + lineCOGS;
     product.lifetimeTotals.totalGrossProfit =
       (product.lifetimeTotals.totalGrossProfit || 0) + (item.amount - lineCOGS);
-    await product.save();
   }
+
+  // Save all modified products in parallel (one save per product)
+  await Promise.all(products.map((p) => p.save()));
 
   // ============================================
   // CREATE STOCK MOVEMENTS (only for direct sales from inventory)
   // ============================================
-  for (const { item, product, lineCOGS } of itemsFromInventory) {
-    const movementNumber = await StockMovement.generateMovementNumber(
-      this.companyId,
-    );
-
-    const movement = await StockMovement.create({
-      companyId: this.companyId, // Tenant scoping
-      movementNumber,
-      productId: product._id,
-      productSnapshot: {
-        name: product.name,
-        SKU: product.SKU,
-        category: product.category,
-        unit: product.unit,
-      },
-      movementType: "sale",
-      direction: "out",
-      quantity: item.quantity,
-      previousStock: product.inventory.quantityOnHand + item.quantity,
-      newStock: product.inventory.quantityOnHand,
-      costing: {
-        unitCost: product.costing.costPrice,
-        totalCost: lineCOGS,
-        unitPrice: item.unitPrice,
-        totalValue: item.amount,
-        averageCostAtMovement: product.costing.costPrice,
-      },
-      performedBy: {
-        name: user.name,
-        id: user.id,
-        role: "system",
-      },
-      relatedDocuments: {
-        invoiceId: this._id,
-      },
-      notes: `Direct sale to ${this.customer.name} - Invoice ${this.invoiceNumber}`,
-      reason: item.description,
-      status: "posted",
-      postedAt: new Date(),
-      postedBy: user,
-      accounting: {
-        affectsAccounting: true,
-        accountingPosted: false,
-      },
-    });
-
-    stockMovements.push(movement);
+  // Generate all movement numbers first (sequential - atomic counter)
+  const movementNumbers = [];
+  for (let i = 0; i < itemsFromInventory.length; i++) {
+    movementNumbers.push(await StockMovement.generateMovementNumber(this.companyId));
   }
+
+  // Create all movements in parallel
+  const createdMovements = await Promise.all(
+    itemsFromInventory.map(({ item, product, lineCOGS }, idx) =>
+      StockMovement.create({
+        companyId: this.companyId,
+        movementNumber: movementNumbers[idx],
+        productId: product._id,
+        productSnapshot: {
+          name: product.name,
+          SKU: product.SKU,
+          category: product.category,
+          unit: product.unit,
+        },
+        movementType: "sale",
+        direction: "out",
+        quantity: item.quantity,
+        previousStock: product.inventory.quantityOnHand + item.quantity,
+        newStock: product.inventory.quantityOnHand,
+        costing: {
+          unitCost: product.costing.costPrice,
+          totalCost: lineCOGS,
+          unitPrice: item.unitPrice,
+          totalValue: item.amount,
+          averageCostAtMovement: product.costing.costPrice,
+        },
+        performedBy: {
+          name: user.name,
+          id: user.id,
+          role: "system",
+        },
+        relatedDocuments: {
+          invoiceId: this._id,
+        },
+        notes: `Direct sale to ${this.customer.name} - Invoice ${this.invoiceNumber}`,
+        reason: item.description,
+        status: "posted",
+        postedAt: new Date(),
+        postedBy: user,
+        accounting: {
+          affectsAccounting: true,
+          accountingPosted: false,
+        },
+      })
+    )
+  );
+  stockMovements.push(...createdMovements);
 
   // ============================================
   // CREATE COGS JOURNAL ENTRY (Smart Routing)
@@ -1314,33 +1320,45 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
   // Post journal entry
   await journalEntry.post(user);
 
-  // Update stock movements with journal entry ID
-  for (const movement of stockMovements) {
-    movement.accounting.journalEntryId = journalEntry._id;
-    movement.accounting.accountingPosted = true;
-    movement.accounting.accountingPostedAt = new Date();
-    await movement.save();
-  }
+  // Update stock movements with journal entry ID (parallel)
+  await Promise.all(
+    stockMovements.map((movement) => {
+      movement.accounting.journalEntryId = journalEntry._id;
+      movement.accounting.accountingPosted = true;
+      movement.accounting.accountingPostedAt = new Date();
+      return movement.save();
+    })
+  );
 
   // ============================================
   // UPDATE STOCK REQUESTS (mark items as invoiced)
   // ============================================
   const StockRequest = mongoose.model("StockRequest");
 
+  // Group tech stock items by requestId to avoid fetching same request multiple times
+  const requestUpdates = new Map();
   for (const { item } of itemsFromTechStock) {
     if (item.relatedRequest?.requestId) {
-      const request = await StockRequest.findById(
-        item.relatedRequest.requestId,
-      );
+      const reqId = item.relatedRequest.requestId.toString();
+      if (!requestUpdates.has(reqId)) {
+        requestUpdates.set(reqId, []);
+      }
+      requestUpdates.get(reqId).push(item);
+    }
+  }
 
-      if (request) {
-        // Find the matching item in the request
+  // Fetch all requests in parallel, then update and save in parallel
+  const requestIds = Array.from(requestUpdates.keys());
+  if (requestIds.length > 0) {
+    const requests = await StockRequest.find({ _id: { $in: requestIds } });
+
+    for (const request of requests) {
+      const items = requestUpdates.get(request._id.toString()) || [];
+      for (const item of items) {
         const requestItem = request.items.find(
           (ri) => ri.productId.toString() === item.productId.toString(),
         );
-
         if (requestItem) {
-          // Update invoicing tracking
           requestItem.invoicedQuantity =
             (requestItem.invoicedQuantity || 0) + item.quantity;
           requestItem.invoices.push({
@@ -1350,19 +1368,17 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
             invoicedAt: new Date(),
           });
         }
+      }
 
-        // Check if all items are fully invoiced
-        const allInvoiced = request.items.every(
-          (ri) => (ri.invoicedQuantity || 0) >= (ri.totalFulfilled || 0),
-        );
-
-        if (allInvoiced) {
-          request.status = "invoiced";
-        }
-
-        await request.save();
+      const allInvoiced = request.items.every(
+        (ri) => (ri.invoicedQuantity || 0) >= (ri.totalFulfilled || 0),
+      );
+      if (allInvoiced) {
+        request.status = "invoiced";
       }
     }
+
+    await Promise.all(requests.map((r) => r.save()));
   }
 
   return { journalEntry, stockMovements };
