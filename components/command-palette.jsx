@@ -28,6 +28,8 @@ import {
   Package,
   Loader2,
   ArrowRight,
+  ClipboardList,
+  HandCoins,
 } from "lucide-react";
 import { useDebouncedCallback } from "use-debounce";
 import { globalSearch } from "@/app/mongodb/actions/global-search-action";
@@ -46,6 +48,8 @@ const PAGES = [
   { label: "Delivery Notes", href: "/dashboard/dnotes", icon: Package },
   { label: "Purchase Orders", href: "/dashboard/purchase-orders", icon: FileText },
   { label: "Stock Requests", href: "/dashboard/requests", icon: List },
+  { label: "Claims", href: "/dashboard/claims", icon: HandCoins },
+  { label: "My Claims", href: "/dashboard/my-claims", icon: ClipboardList },
   { label: "Expenses", href: "/dashboard/expenses", icon: Wallet },
   { label: "Chart of Accounts", href: "/dashboard/accounts", icon: BookOpen },
   { label: "Journal Entries", href: "/dashboard/journal", icon: FileSpreadsheet },
@@ -61,6 +65,8 @@ const ACTIONS = [
   { label: "Create Product", href: "/dashboard/stocks/create", icon: Plus },
   { label: "Create Expense", href: "/dashboard/expenses/create", icon: Plus },
   { label: "Create Request", href: "/dashboard/requests/create", icon: Plus },
+  { label: "Request Advance", href: "/dashboard/claims/create/advance", icon: Plus },
+  { label: "Submit Reimbursement", href: "/dashboard/claims/create/reimbursement", icon: Plus },
 ];
 
 // ============================================
@@ -87,9 +93,22 @@ function statusBadge(status) {
     pending: "text-yellow-600",
     paid: "text-green-600",
     partial: "text-orange-600",
+    submitted: "text-blue-600",
+    rejected: "text-red-600",
+    fulfilled: "text-green-600",
+    partially_fulfilled: "text-orange-600",
+    pending_return: "text-yellow-600",
+    pending_payment: "text-yellow-600",
+    closed: "text-muted-foreground",
   };
   return colors[status] || "text-muted-foreground";
 }
+
+const CLAIM_TYPE_LABELS = {
+  advance_request: "Advance",
+  advance_return: "Settlement",
+  reimbursement: "Reimbursement",
+};
 
 // ============================================
 // COMMAND PALETTE
@@ -161,7 +180,9 @@ export function CommandPalette({ open, setOpen }) {
       results.quotes?.length > 0 ||
       results.bills?.length > 0 ||
       results.customers?.length > 0 ||
-      results.suppliers?.length > 0);
+      results.suppliers?.length > 0 ||
+      results.claims?.length > 0 ||
+      results.stockRequests?.length > 0);
 
   // Manual filtering for pages & actions (since shouldFilter={false})
   const filteredPages = queryTrimmed
@@ -185,7 +206,7 @@ export function CommandPalette({ open, setOpen }) {
       description="Search anything or navigate quickly"
     >
       <CommandInput
-        placeholder="Search products, invoices, customers..."
+        placeholder="Search products, invoices, claims, requests..."
         value={query}
         onValueChange={handleValueChange}
       />
@@ -385,6 +406,77 @@ export function CommandPalette({ open, setOpen }) {
                           {s.email}
                         </span>
                       )}
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+
+            {/* Claims */}
+            {results.claims?.length > 0 && (
+              <CommandGroup heading="Claims">
+                {results.claims.map((c) => (
+                  <CommandItem
+                    key={`claim-${c._id}`}
+                    value={`claim-${c._id}`}
+                    onSelect={() =>
+                      handleSelect(`/dashboard/claims/${c._id}`)
+                    }
+                  >
+                    <HandCoins className="mr-2 h-4 w-4 text-teal-500" />
+                    <div className="flex flex-1 items-center justify-between min-w-0">
+                      <div className="min-w-0">
+                        <span className="font-medium">{c.claimNumber}</span>
+                        <span className="ml-2 text-xs text-muted-foreground truncate">
+                          {c.employee?.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 ml-2 shrink-0">
+                        <span className="text-xs text-muted-foreground">
+                          {CLAIM_TYPE_LABELS[c.claimType] || c.claimType}
+                        </span>
+                        <span className={`text-xs ${statusBadge(c.status)}`}>
+                          {c.status}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatCurrency(c.totalAmount)}
+                        </span>
+                      </div>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+
+            {/* Stock Requests */}
+            {results.stockRequests?.length > 0 && (
+              <CommandGroup heading="Stock Requests">
+                {results.stockRequests.map((r) => (
+                  <CommandItem
+                    key={`req-${r._id}`}
+                    value={`req-${r._id}`}
+                    onSelect={() =>
+                      handleSelect(`/dashboard/requests/${r._id}`)
+                    }
+                  >
+                    <List className="mr-2 h-4 w-4 text-indigo-500" />
+                    <div className="flex flex-1 items-center justify-between min-w-0">
+                      <div className="min-w-0">
+                        <span className="font-medium">{r.requestNumber}</span>
+                        <span className="ml-2 text-xs text-muted-foreground truncate">
+                          {r.requester?.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 ml-2 shrink-0">
+                        {r.requester?.department && (
+                          <span className="text-xs text-muted-foreground">
+                            {r.requester.department}
+                          </span>
+                        )}
+                        <span className={`text-xs ${statusBadge(r.status)}`}>
+                          {r.status?.replace("_", " ")}
+                        </span>
+                      </div>
                     </div>
                   </CommandItem>
                 ))}

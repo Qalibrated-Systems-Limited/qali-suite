@@ -6,6 +6,8 @@ import Invoice from "@/app/models/invoice";
 import Quote from "@/app/models/quote";
 import Bill from "@/app/models/bill";
 import Party from "@/app/models/parties";
+import EmployeeClaim from "@/app/models/employeesClaims";
+import { StockRequest } from "@/app/models/requests";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import { sanitizeSearchTerm } from "@/lib/utils/sanitize";
 
@@ -20,6 +22,8 @@ export async function globalSearch(searchTerm) {
       bills: [],
       customers: [],
       suppliers: [],
+      claims: [],
+      stockRequests: [],
     };
   }
 
@@ -28,7 +32,7 @@ export async function globalSearch(searchTerm) {
   const safe = sanitizeSearchTerm(searchTerm);
   const regex = { $regex: safe, $options: "i" };
 
-  const [products, invoices, quotes, bills, customers, suppliers] =
+  const [products, invoices, quotes, bills, customers, suppliers, claims, stockRequests] =
     await Promise.all([
       // Products: name + SKU
       Product.find(
@@ -118,9 +122,45 @@ export async function globalSearch(searchTerm) {
         .select("name displayName email phone")
         .limit(LIMIT)
         .lean(),
+
+      // Claims: claimNumber + employee.name
+      EmployeeClaim.find(
+        withTenantScope(
+          {
+            $or: [
+              { claimNumber: regex },
+              { "employee.name": regex },
+            ],
+          },
+          companyId,
+          isSuperAdmin
+        )
+      )
+        .select("claimNumber employee.name claimType totalAmount status")
+        .sort({ createdAt: -1 })
+        .limit(LIMIT)
+        .lean(),
+
+      // Stock Requests: requestNumber + requester.name
+      StockRequest.find(
+        withTenantScope(
+          {
+            $or: [
+              { requestNumber: regex },
+              { "requester.name": regex },
+            ],
+          },
+          companyId,
+          isSuperAdmin
+        )
+      )
+        .select("requestNumber requester.name requester.department status priority totalValue")
+        .sort({ createdAt: -1 })
+        .limit(LIMIT)
+        .lean(),
     ]);
 
   return JSON.parse(
-    JSON.stringify({ products, invoices, quotes, bills, customers, suppliers })
+    JSON.stringify({ products, invoices, quotes, bills, customers, suppliers, claims, stockRequests })
   );
 }

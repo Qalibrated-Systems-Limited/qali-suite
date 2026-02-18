@@ -7,6 +7,10 @@ const nextConfig = {
         hostname: "youtube.com",
         port: "",
       },
+      {
+        protocol: "https",
+        hostname: "res.cloudinary.com",
+      },
     ],
   },
 };

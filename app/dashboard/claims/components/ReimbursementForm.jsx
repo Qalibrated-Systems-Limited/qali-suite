@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useFormState, useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,12 +8,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   ArrowLeft,
   Loader2,
@@ -23,6 +28,9 @@ import {
   Trash2,
   Receipt as ReceiptIcon,
   DollarSign,
+  Upload,
+  ChevronsUpDown,
+  Check,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -31,10 +39,73 @@ import {
 } from "@/app/mongodb/actions/claim-action";
 import { toast } from "sonner";
 import { useActionState } from "react";
+import { FileUpload } from "@/components/file-upload";
+import { cn } from "@/lib/utils";
 
-function SubmitButton({ isEdit }) {
-  const { pending } = useFormStatus();
+// ============================================
+// EXPENSE ACCOUNT COMBOBOX COMPONENT
+// ============================================
+function ExpenseAccountCombobox({ value, onValueChange, expenseAccounts }) {
+  const [open, setOpen] = useState(false);
+  const selected = value
+    ? expenseAccounts.find((a) => a._id === value)
+    : null;
 
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="h-11 w-full justify-between font-normal"
+        >
+          {selected ? (
+            <span className="truncate">
+              {selected.accountCode} - {selected.accountName}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Select expense account...</span>
+          )}
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-75 p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search accounts..." />
+          <CommandList>
+            <CommandEmpty>No account found.</CommandEmpty>
+            <CommandGroup>
+              {expenseAccounts.map((acc) => (
+                <CommandItem
+                  key={acc._id}
+                  value={`${acc.accountCode} ${acc.accountName}`}
+                  onSelect={() => {
+                    onValueChange(acc._id);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4",
+                      value === acc._id ? "opacity-100" : "opacity-0"
+                    )}
+                  />
+                  <span className="font-mono text-xs mr-2 text-muted-foreground">
+                    {acc.accountCode}
+                  </span>
+                  {acc.accountName}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function SubmitButton({ isEdit, pending }) {
   return (
     <Button
       type="submit"
@@ -56,7 +127,7 @@ function SubmitButton({ isEdit }) {
   );
 }
 
-export function ReimbursementForm({ claim = null }) {
+export function ReimbursementForm({ claim = null, expenseAccounts = [] }) {
   const router = useRouter();
   const isEdit = !!claim;
 
@@ -65,20 +136,11 @@ export function ReimbursementForm({ claim = null }) {
     ? updateClaim.bind(null, claim._id)
     : createReimbursement;
 
-  const [state, formAction] = useActionState(action, {
-    errors: {},
-  });
+  // CRITICAL: initial state must be null so state?.values works correctly
+  const [state, formAction, pending] = useActionState(action, null);
 
-  // Expense categories
-  const categories = [
-    { value: "transport", label: "Transport" },
-    { value: "accommodation", label: "Accommodation" },
-    { value: "meals", label: "Meals" },
-    { value: "fuel", label: "Fuel" },
-    { value: "supplies", label: "Supplies" },
-    { value: "telecommunications", label: "Telecommunications" },
-    { value: "other", label: "Other" },
-  ];
+  // Receipts state
+  const [receipts, setReceipts] = useState(claim?.receipts || []);
 
   // Expense items state - initialize with claim data if editing
   const [items, setItems] = useState(
@@ -86,6 +148,7 @@ export function ReimbursementForm({ claim = null }) {
       id: Date.now() + index,
       date: new Date(item.date).toISOString().split("T")[0],
       category: item.category,
+      expenseAccountId: item.expenseAccountId || "",
       description: item.description,
       amount: item.amount.toString(),
       notes: item.notes || "",
@@ -94,6 +157,7 @@ export function ReimbursementForm({ claim = null }) {
         id: Date.now(),
         date: new Date().toISOString().split("T")[0],
         category: "",
+        expenseAccountId: "",
         description: "",
         amount: "",
         notes: "",
@@ -115,6 +179,7 @@ export function ReimbursementForm({ claim = null }) {
         id: Date.now(),
         date: new Date().toISOString().split("T")[0],
         category: "",
+        expenseAccountId: "",
         description: "",
         amount: "",
         notes: "",
@@ -131,8 +196,19 @@ export function ReimbursementForm({ claim = null }) {
     }
   };
 
-  // Update item
+  // Update item — when selecting an account, set both category and expenseAccountId
   const updateItem = (id, field, value) => {
+    if (field === "expenseAccountId") {
+      const account = expenseAccounts.find((a) => a._id === value);
+      setItems(
+        items.map((item) =>
+          item.id === id
+            ? { ...item, expenseAccountId: value, category: account?.accountName || "" }
+            : item
+        )
+      );
+      return;
+    }
     setItems(
       items.map((item) => (item.id === id ? { ...item, [field]: value } : item))
     );
@@ -234,7 +310,8 @@ export function ReimbursementForm({ claim = null }) {
                 required
                 minLength={10}
                 placeholder="e.g., Client meeting expenses in Nairobi"
-                defaultValue={claim?.description || ""}
+                defaultValue={state?.values?.description ?? claim?.description ?? ""}
+                key={`desc-${state?.values?.description ?? "init"}`}
                 className="h-12"
               />
               {state?.errors?.description && (
@@ -260,7 +337,8 @@ export function ReimbursementForm({ claim = null }) {
                 name="notes"
                 rows={3}
                 placeholder="Any additional context for your manager..."
-                defaultValue={claim?.notes || ""}
+                defaultValue={state?.values?.notes ?? claim?.notes ?? ""}
+                key={`notes-${state?.values?.notes ?? "init"}`}
                 className="resize-none"
               />
             </div>
@@ -328,29 +406,18 @@ export function ReimbursementForm({ claim = null }) {
                       />
                     </div>
 
-                    {/* Category */}
+                    {/* Expense Account */}
                     <div className="space-y-2">
                       <Label className="text-sm sm:text-base font-medium">
-                        Category <span className="text-red-500">*</span>
+                        Expense Account <span className="text-red-500">*</span>
                       </Label>
-                      <Select
-                        required
-                        value={item.category}
+                      <ExpenseAccountCombobox
+                        value={item.expenseAccountId}
                         onValueChange={(value) =>
-                          updateItem(item.id, "category", value)
+                          updateItem(item.id, "expenseAccountId", value)
                         }
-                      >
-                        <SelectTrigger className="h-11">
-                          <SelectValue placeholder="Select category" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categories.map((cat) => (
-                            <SelectItem key={cat.value} value={cat.value}>
-                              {cat.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        expenseAccounts={expenseAccounts}
+                      />
                     </div>
 
                     {/* Description */}
@@ -422,15 +489,22 @@ export function ReimbursementForm({ claim = null }) {
             </div>
           </Card>
 
-          {/* Receipt Upload Info */}
-          <Card className="p-5 sm:p-6 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800">
-            <h4 className="font-semibold text-sm sm:text-base mb-3 text-yellow-800 dark:text-yellow-300">
-              📸 Receipt Upload (Coming Soon)
-            </h4>
-            <p className="text-sm sm:text-base text-yellow-700 dark:text-yellow-400">
-              For now, please keep physical or digital copies of all receipts.
-              Upload functionality will be available soon.
+          {/* Receipt Upload */}
+          <Card className="p-5 sm:p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <Upload className="w-5 h-5 text-yellow-600" />
+              <h3 className="font-semibold">Receipts & Attachments</h3>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Upload photos of receipts, invoices, or other supporting documents.
             </p>
+            <input type="hidden" name="receipts" value={JSON.stringify(receipts)} />
+            <FileUpload
+              value={receipts}
+              onChange={setReceipts}
+              folder="claims"
+              maxFiles={10}
+            />
           </Card>
 
           {/* Actions */}
@@ -443,7 +517,7 @@ export function ReimbursementForm({ claim = null }) {
             >
               <Link href="/dashboard/claims/my-claims">Cancel</Link>
             </Button>
-            <SubmitButton isEdit={isEdit} />
+            <SubmitButton isEdit={isEdit} pending={pending} />
           </div>
         </div>
       </form>

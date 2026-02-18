@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import { getClaimById } from "@/app/mongodb/queries/claimQueries";
+import { getSignedUrl } from "@/lib/cloudinary";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +17,9 @@ import {
   CheckCircle2,
   XCircle,
   Receipt,
+  Paperclip,
 } from "lucide-react";
+import { ReceiptViewer } from "@/components/receipt-viewer";
 import {
   ClaimStatusBadge,
   ClaimTypeBadge,
@@ -26,14 +29,38 @@ import { RejectClaimDialog } from "../../components/RejectClaimDialog";
 import { PayClaimDialog } from "../../components/PayClaimDialog";
 import { format } from "date-fns";
 
-// ============================================
-// NEW IMPORTS - Add these
-// ============================================
 import { CloseSettlementDialog } from "../../components/CloseSettlementDialog";
 import { RecordReturnDialog } from "../../components/RecordReturnDialog";
 import { PayBalanceDialog } from "../../components/PayBalanceDialog";
+import { RecallClaimButton } from "../../components/RecallClaimButton";
+import { ResubmitClaimButton } from "../../components/ResubmitClaimButton";
 import { Banknote } from "lucide-react";
+import dbConnect from "@/app/config/dbConnect";
+import Account from "@/app/models/account";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 // ============================================
+
+async function getPaymentAccounts() {
+  await dbConnect();
+  const { companyId } = await getTenantContext();
+
+  const accounts = await Account.find({
+    companyId,
+    subType: { $in: ["cash", "bank", "mpesa"] },
+    isActive: { $ne: false },
+    canPost: true,
+  })
+    .select("_id accountCode accountName subType")
+    .sort({ accountCode: 1 })
+    .lean();
+
+  return accounts.map((a) => ({
+    _id: a._id.toString(),
+    accountCode: a.accountCode,
+    accountName: a.accountName,
+    subType: a.subType,
+  }));
+}
 
 export const metadata = {
   title: "Claim Details | ERP System",
@@ -51,8 +78,11 @@ export default async function ClaimDetailPage({ params }) {
   const { user } = session;
   const userRole = user.role?.toLowerCase();
 
-  // Fetch claim
-  const claim = await getClaimById(id);
+  // Fetch claim and payment accounts in parallel
+  const [claim, paymentAccounts] = await Promise.all([
+    getClaimById(id),
+    getPaymentAccounts(),
+  ]);
 
   if (!claim) {
     notFound();
@@ -110,19 +140,21 @@ export default async function ClaimDetailPage({ params }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <ClaimStatusBadge status={claim.status} />
-        <ClaimTypeBadge claimType={claim.claimType} />
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <ClaimStatusBadge status={claim.status} />
+          <ClaimTypeBadge claimType={claim.claimType} />
+        </div>
 
-        <div className="ml-auto flex flex-wrap gap-2">
-          {/* Owner can edit draft/submitted claims */}
+        <div className="flex flex-wrap gap-2">
+          {/* Owner can edit draft or rejected claims */}
           {isOwner &&
-            (claim.status === "draft" || claim.status === "submitted") && (
+            (claim.status === "draft" || claim.status === "rejected") && (
               <Button
                 size="sm"
                 variant="outline"
                 asChild
-                className="border-yellow-500 text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20"
+                className="flex-1 sm:flex-none border-yellow-500 text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20"
               >
                 <Link href={`/dashboard/claims/${claim._id}/edit`}>
                   <FileText className="w-4 h-4 mr-2" />
@@ -131,6 +163,22 @@ export default async function ClaimDetailPage({ params }) {
               </Button>
             )}
 
+          {/* Owner can recall submitted claims back to draft */}
+          {isOwner && claim.status === "submitted" && (
+            <RecallClaimButton
+              claimId={claim._id}
+              claimNumber={claim.claimNumber}
+            />
+          )}
+
+          {/* Owner can resubmit rejected claims */}
+          {isOwner && claim.status === "rejected" && (
+            <ResubmitClaimButton
+              claimId={claim._id}
+              claimNumber={claim.claimNumber}
+            />
+          )}
+
           {/* Owner can settle paid advances */}
           {isOwner &&
             claim.claimType === "advance_request" &&
@@ -138,7 +186,7 @@ export default async function ClaimDetailPage({ params }) {
             !claim.settlementClaimId && (
               <Button
                 size="sm"
-                className="bg-purple-600 hover:bg-purple-700 text-white"
+                className="flex-1 sm:flex-none bg-purple-600 hover:bg-purple-700 text-white"
                 asChild
               >
                 <Link href={`/dashboard/claims/${claim._id}/settle`}>
@@ -154,7 +202,7 @@ export default async function ClaimDetailPage({ params }) {
               size="sm"
               variant="outline"
               asChild
-              className="border-purple-500 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20"
+              className="flex-1 sm:flex-none border-purple-500 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20"
             >
               <Link href={`/dashboard/claims/${claim.settlementClaimId}`}>
                 <Receipt className="w-4 h-4 mr-2" />
@@ -177,7 +225,7 @@ export default async function ClaimDetailPage({ params }) {
             </>
           )}
 
-          {/* Accountant Actions - Pay approved claims (advance_request or reimbursement) */}
+          {/* Accountant Actions - Pay approved claims */}
           {isAccountant &&
             claim.status === "approved" &&
             (claim.claimType === "advance_request" ||
@@ -188,12 +236,9 @@ export default async function ClaimDetailPage({ params }) {
                 claimType={claim.claimType}
                 amount={claim.totalAmount}
                 employeeName={claim.employee.name}
+                paymentAccounts={paymentAccounts}
               />
             )}
-
-          {/* ============================================
-              NEW: Accountant Actions for Settlements
-              ============================================ */}
 
           {/* Process Settlement - for approved advance_return claims */}
           {isAccountant &&
@@ -218,6 +263,7 @@ export default async function ClaimDetailPage({ params }) {
                 claimNumber={claim.claimNumber}
                 balance={claim.returnDetails?.balance || 0}
                 employeeName={claim.employee.name}
+                paymentAccounts={paymentAccounts}
               />
             )}
 
@@ -230,9 +276,9 @@ export default async function ClaimDetailPage({ params }) {
                 claimNumber={claim.claimNumber}
                 balance={claim.returnDetails?.balance || 0}
                 employeeName={claim.employee.name}
+                paymentAccounts={paymentAccounts}
               />
             )}
-          {/* ============================================ */}
         </div>
       </div>
 
@@ -553,6 +599,29 @@ export default async function ClaimDetailPage({ params }) {
               </div>
             </div>
           )}
+        </Card>
+      )}
+
+      {/* Receipts & Attachments */}
+      {claim.receipts?.length > 0 && (
+        <Card className="p-5 sm:p-6 lg:p-8">
+          <h3 className="text-lg sm:text-xl font-bold text-foreground mb-5 flex items-center gap-2">
+            <Paperclip className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
+            Receipts & Attachments
+            <Badge variant="secondary" className="ml-auto">
+              {claim.receipts.length}
+            </Badge>
+          </h3>
+          <ReceiptViewer
+            receipts={claim.receipts.map((r) => ({
+              ...r,
+              viewUrl:
+                r.mimeType === "application/pdf" ||
+                r.url?.toLowerCase().endsWith(".pdf")
+                  ? getSignedUrl(r)
+                  : r.url,
+            }))}
+          />
         </Card>
       )}
 

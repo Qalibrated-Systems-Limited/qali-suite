@@ -22,7 +22,6 @@ import {
   getCompanyIdForCreate,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
-
 const settleAdvanceSchema = z.object({
   items: z
     .array(expenseItemSchema)
@@ -30,6 +29,68 @@ const settleAdvanceSchema = z.object({
     .max(50, "Maximum 50 expense items allowed"),
   notes: z.string().max(500, "Notes too long").optional().or(z.literal("")),
 });
+
+// ============================================
+// HELPER: Parse receipt uploads from form data
+// ============================================
+function parseReceipts(formData, user) {
+  try {
+    const receiptsJson = formData.get("receipts");
+    if (receiptsJson) {
+      const parsed = JSON.parse(receiptsJson);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((r) => ({
+          filename: r.filename,
+          url: r.url,
+          size: r.size,
+          mimeType: r.mimeType,
+          uploadedBy: {
+            name: user?.name || user?.email || "System",
+            id: user?.id || user?._id?.toString() || "system",
+          },
+        }));
+      }
+    }
+  } catch {}
+  return [];
+}
+
+// ============================================
+// HELPER: Get or auto-create employee party
+// ============================================
+async function getOrCreateEmployeeParty(user, tenantCompanyId, isSuperAdmin, session) {
+  let party = await Party.findOne(
+    withTenantScope(
+      { userId: user.id, type: "employee" },
+      tenantCompanyId,
+      isSuperAdmin,
+    ),
+  ).session(session);
+
+  if (!party) {
+    // Auto-create employee party for this user
+    const created = await Party.create(
+      [
+        {
+          companyId: tenantCompanyId,
+          type: "employee",
+          userId: user.id,
+          name: user.name || user.email,
+          email: user.email,
+          department: user.department || "",
+          createdBy: {
+            name: "System",
+            id: "system",
+          },
+        },
+      ],
+      { session },
+    );
+    party = created[0];
+  }
+
+  return party;
+}
 
 // ============================================
 // HELPER: Format user for audit trail
@@ -63,6 +124,26 @@ function deriveCompanyCode(name) {
     // Single word: take first 3-4 characters
     return name.slice(0, 3).toUpperCase();
   }
+}
+
+// ============================================
+// HELPER: Resolve expense accounts from items by expenseAccountId
+// ============================================
+async function resolveExpenseAccounts(items, session) {
+  const accountMap = {};
+  for (const item of items) {
+    const accountId = item.expenseAccountId;
+    if (accountId && !accountMap[accountId]) {
+      const account = await Account.findById(accountId).session(session);
+      if (!account) {
+        throw new Error(
+          `Expense account not found for "${item.category}". Ask your admin to create it.`,
+        );
+      }
+      accountMap[accountId] = account;
+    }
+  }
+  return accountMap;
 }
 
 // ============================================
@@ -101,9 +182,10 @@ async function generateClaimNumber(tenantCompanyId, session) {
   return `${prefix}-${today}-${String(seq).padStart(4, "0")}`;
 }
 const paymentSchema = z.object({
-  paymentMethod: z.enum(["cash", "bank", "mpesa"], {
-    required_error: "Please select a payment method",
-  }),
+  paymentAccountId: z.string().min(1, "Please select a payment account"),
+  paymentMethod: z
+    .enum(["cash", "bank", "mpesa"])
+    .optional(),
   paymentReference: z
     .string()
     .max(100, "Reference too long")
@@ -151,28 +233,10 @@ export async function createAdvanceRequest(prevState, formData) {
     session = await mongoose.startSession();
     session.startTransaction();
 
-    // Get employee's party record (tenant-scoped)
-    const party = await Party.findOne(
-      withTenantScope(
-        { userId: user.id, type: "employee" },
-        tenantCompanyId,
-        isSuperAdmin,
-      ),
-    ).session(session);
+    // Get or auto-create employee's party record (tenant-scoped)
+    const party = await getOrCreateEmployeeParty(user, tenantCompanyId, isSuperAdmin, session);
 
-    if (!party) {
-      return {
-        errors: {
-          _form: [
-            "Your employee profile is not set up yet. Please contact your administrator to create your employee record before submitting claims.",
-          ],
-        },
-      };
-    }
-
-    // Extract form data (keep raw values for form persistence)
-    console.log("=== createAdvanceRequest called ===");
-    console.log("advanceType from form:", formData.get("advanceType"));
+    // Extract form data early (keep raw values for form persistence on errors)
     const rawValues = {
       advanceType: formData.get("advanceType") || "travel",
       requestedAmount: formData.get("requestedAmount"),
@@ -344,54 +408,44 @@ export async function createReimbursement(prevState, formData) {
     session = await mongoose.startSession();
     session.startTransaction();
 
-    // Get employee's party record (tenant-scoped)
-    const party = await Party.findOne(
-      withTenantScope(
-        { userId: user.id, type: "employee" },
-        tenantCompanyId,
-        isSuperAdmin,
-      ),
-    ).session(session);
+    // Get or auto-create employee's party record (tenant-scoped)
+    const party = await getOrCreateEmployeeParty(user, tenantCompanyId, isSuperAdmin, session);
 
-    if (!party) {
-      return {
-        errors: {
-          _form: [
-            "Your employee profile is not set up yet. Please contact your administrator to create your employee record before submitting claims.",
-          ],
-        },
-      };
-    }
-
-    // Extract form data
+    // Extract form data early (keep raw values for form persistence on errors)
     const description = formData.get("description");
     const notes = formData.get("notes");
     const itemsJson = formData.get("items");
+    const receipts = parseReceipts(formData, user);
+    const rawValues = { description, notes };
 
     // Validation
-    const validatedFields = reimbursementSchema.safeParse({
-      description,
-      notes,
-      items: JSON.parse(itemsJson),
-    });
-
-    if (!validatedFields.success) {
-      return {
-        errors: validatedFields.error.flatten().fieldErrors,
-      };
-    }
-
-    // Parse items
-    let items;
+    let parsedItems;
     try {
-      items = JSON.parse(itemsJson);
+      parsedItems = JSON.parse(itemsJson);
     } catch (error) {
       return {
         errors: {
           _form: ["Invalid items data. Please try again."],
         },
+        values: rawValues,
       };
     }
+
+    const validatedFields = reimbursementSchema.safeParse({
+      description,
+      notes,
+      items: parsedItems,
+    });
+
+    if (!validatedFields.success) {
+      return {
+        errors: validatedFields.error.flatten().fieldErrors,
+        values: rawValues,
+      };
+    }
+
+    // Use already-parsed items
+    const items = parsedItems;
 
     // Validate items
     const validatedItems = items.map((item, index) => {
@@ -421,6 +475,7 @@ export async function createReimbursement(prevState, formData) {
       return {
         date: new Date(item.date),
         category: item.category,
+        expenseAccountId: item.expenseAccountId || null,
         description: item.description.trim(),
         amount: amount,
         receipt: item.receipt || {},
@@ -457,6 +512,7 @@ export async function createReimbursement(prevState, formData) {
           totalAmount,
           description: description.trim(),
           notes: notes?.trim() || "",
+          receipts,
           status: "draft",
           createdBy: formatUserForAudit(user),
         },
@@ -484,6 +540,16 @@ export async function createReimbursement(prevState, formData) {
     }
 
     console.error("Error creating reimbursement:", error);
+
+    // Try to preserve form values even on unexpected errors
+    let values;
+    try {
+      values = {
+        description: formData.get("description"),
+        notes: formData.get("notes"),
+      };
+    } catch {}
+
     return {
       errors: {
         _form: [
@@ -491,6 +557,7 @@ export async function createReimbursement(prevState, formData) {
             "Failed to create reimbursement claim. Please try again.",
         ],
       },
+      values,
     };
   } finally {
     if (session) {
@@ -630,6 +697,118 @@ export async function rejectEmployeeClaim(claimId, prevState, formData) {
     return {
       message: error.message || "Failed to reject claim",
     };
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
+  }
+}
+
+// ============================================
+// RECALL CLAIM (submitted → draft)
+// ============================================
+export async function recallEmployeeClaim(claimId) {
+  let session;
+
+  try {
+    await dbConnect();
+
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
+      throw new Error(error.message);
+    }
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const claim = await EmployeeClaim.findOne(
+      withTenantScope({ _id: claimId }, companyId, isSuperAdmin),
+    ).session(session);
+
+    if (!claim) {
+      throw new Error("Claim not found");
+    }
+
+    // Only the owner can recall their own claim
+    if (claim.employee.userId.toString() !== user.id) {
+      throw new Error("You can only recall your own claims");
+    }
+
+    await claim.recall(formatUserForAudit(user));
+
+    await session.commitTransaction();
+
+    revalidatePath("/dashboard/claims");
+    revalidatePath("/dashboard/claims/my-claims");
+    revalidatePath("/dashboard/claims/pending");
+    revalidatePath(`/dashboard/claims/${claimId}`);
+
+    return { success: true, message: "Claim recalled to draft" };
+  } catch (error) {
+    if (session?.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error recalling claim:", error);
+    return { success: false, message: error.message || "Failed to recall claim" };
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
+  }
+}
+
+// ============================================
+// RESUBMIT CLAIM (rejected → submitted)
+// ============================================
+export async function resubmitEmployeeClaim(claimId) {
+  let session;
+
+  try {
+    await dbConnect();
+
+    let companyId, isSuperAdmin, user;
+    try {
+      ({ companyId, isSuperAdmin, user } = await getTenantContext());
+    } catch (error) {
+      throw new Error(error.message);
+    }
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const claim = await EmployeeClaim.findOne(
+      withTenantScope({ _id: claimId }, companyId, isSuperAdmin),
+    ).session(session);
+
+    if (!claim) {
+      throw new Error("Claim not found");
+    }
+
+    // Only the owner can resubmit their own claim
+    if (claim.employee.userId.toString() !== user.id) {
+      throw new Error("You can only resubmit your own claims");
+    }
+
+    await claim.resubmit(formatUserForAudit(user));
+
+    await session.commitTransaction();
+
+    revalidatePath("/dashboard/claims");
+    revalidatePath("/dashboard/claims/my-claims");
+    revalidatePath("/dashboard/claims/pending");
+    revalidatePath(`/dashboard/claims/${claimId}`);
+
+    return { success: true, message: "Claim resubmitted for approval" };
+  } catch (error) {
+    if (session?.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error resubmitting claim:", error);
+    return { success: false, message: error.message || "Failed to resubmit claim" };
   } finally {
     if (session) {
       await session.endSession();
@@ -904,6 +1083,7 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
           items: data.items.map((item) => ({
             date: item.date,
             category: item.category,
+            expenseAccountId: item.expenseAccountId || null,
             description: item.description,
             amount: item.amount,
             notes: item.notes || "",
@@ -912,6 +1092,7 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
           totalAmount: totalSpent,
           description: `Settlement for advance ${advanceClaim.claimNumber}`,
           notes: data.notes || "",
+          receipts: parseReceipts(formData, user),
           status: "submitted",
           submittedAt: new Date(),
           submittedBy: formatUserForAudit(user),
@@ -1048,29 +1229,8 @@ export async function closeSettlementt(settlementId, prevState, formData) {
       throw new Error("Settlement must be approved first");
     }
 
-    // Get expense accounts (tenant-scoped)
-    const expenseAccounts = {};
-    for (const item of settlement.items) {
-      if (!expenseAccounts[item.category]) {
-        // Find or create expense account for category
-        let account = await Account.findOne(
-          withTenantScope(
-            {
-              accountName: new RegExp(`^${item.category}`, "i"),
-              accountType: "expense",
-            },
-            tenantCompanyId,
-            isSuperAdmin,
-          ),
-        ).session(session);
-
-        if (!account) {
-          throw new Error(`Expense account for ${item.category} not found`);
-        }
-
-        expenseAccounts[item.category] = account;
-      }
-    }
+    // Resolve expense accounts by expenseAccountId
+    const expenseAccountMap = await resolveExpenseAccounts(settlement.items, session);
 
     // Get system accounts (tenant-scoped)
     const employeeAdvancesAccount = await Account.findOne(
@@ -1102,17 +1262,18 @@ export async function closeSettlementt(settlementId, prevState, formData) {
     );
     const journalLines = [];
 
-    // DEBIT: Expense accounts (by category)
-    const expensesByCategory = {};
+    // DEBIT: Expense accounts (grouped by expenseAccountId)
+    const expensesByAccount = {};
     settlement.items.forEach((item) => {
-      if (!expensesByCategory[item.category]) {
-        expensesByCategory[item.category] = 0;
+      const key = item.expenseAccountId?.toString() || item.category;
+      if (!expensesByAccount[key]) {
+        expensesByAccount[key] = { amount: 0, category: item.category };
       }
-      expensesByCategory[item.category] += item.amount;
+      expensesByAccount[key].amount += item.amount;
     });
 
-    for (const [category, amount] of Object.entries(expensesByCategory)) {
-      const account = expenseAccounts[category];
+    for (const [accountId, { amount, category }] of Object.entries(expensesByAccount)) {
+      const account = expenseAccountMap[accountId];
       journalLines.push({
         accountId: account._id,
         accountCode: account.accountCode,
@@ -1288,12 +1449,12 @@ export async function updateClaim(claimId, prevState, formData) {
       };
     }
 
-    // Only draft and submitted claims can be updated
-    if (claim.status !== "draft" && claim.status !== "submitted") {
+    // Only draft and rejected claims can be updated
+    if (claim.status !== "draft" && claim.status !== "rejected") {
       return {
         errors: {
           _form: [
-            `Cannot update ${claim.status} claims. Only draft or submitted claims can be edited.`,
+            `Cannot update ${claim.status} claims. Only draft or rejected claims can be edited.`,
           ],
         },
       };
@@ -1308,6 +1469,13 @@ export async function updateClaim(claimId, prevState, formData) {
       const travelToDate = formData.get("travelToDate");
       const estimatedExpenses = formData.get("estimatedExpenses");
       const notes = formData.get("notes");
+      const rawAdvanceValues = {
+        advanceType: formData.get("advanceType"),
+        requestedAmount: formData.get("requestedAmount"),
+        purpose, destination, travelFromDate, travelToDate,
+        projectCode: formData.get("projectCode"),
+        estimatedExpenses, notes,
+      };
 
       // Validation
       if (!requestedAmount || requestedAmount <= 0) {
@@ -1315,6 +1483,7 @@ export async function updateClaim(claimId, prevState, formData) {
           errors: {
             requestedAmount: ["Please enter a valid amount greater than zero"],
           },
+          values: rawAdvanceValues,
         };
       }
 
@@ -1325,6 +1494,7 @@ export async function updateClaim(claimId, prevState, formData) {
               "Please provide a detailed purpose (minimum 10 characters)",
             ],
           },
+          values: rawAdvanceValues,
         };
       }
 
@@ -1333,6 +1503,7 @@ export async function updateClaim(claimId, prevState, formData) {
           errors: {
             _form: ["Please provide both travel start and end dates"],
           },
+          values: rawAdvanceValues,
         };
       }
 
@@ -1344,6 +1515,7 @@ export async function updateClaim(claimId, prevState, formData) {
           errors: {
             _form: ["Travel end date cannot be before start date"],
           },
+          values: rawAdvanceValues,
         };
       }
 
@@ -1360,6 +1532,7 @@ export async function updateClaim(claimId, prevState, formData) {
       const description = formData.get("description");
       const notes = formData.get("notes");
       const itemsJson = formData.get("items");
+      const rawValues = { description, notes };
 
       // Validation
       if (!description || description.trim().length < 10) {
@@ -1369,6 +1542,7 @@ export async function updateClaim(claimId, prevState, formData) {
               "Please provide a detailed description (minimum 10 characters)",
             ],
           },
+          values: rawValues,
         };
       }
 
@@ -1377,6 +1551,7 @@ export async function updateClaim(claimId, prevState, formData) {
           errors: {
             _form: ["No expense items provided"],
           },
+          values: rawValues,
         };
       }
 
@@ -1389,6 +1564,7 @@ export async function updateClaim(claimId, prevState, formData) {
           errors: {
             _form: ["Invalid items data"],
           },
+          values: rawValues,
         };
       }
 
@@ -1397,6 +1573,7 @@ export async function updateClaim(claimId, prevState, formData) {
           errors: {
             _form: ["Please add at least one expense item"],
           },
+          values: rawValues,
         };
       }
 
@@ -1415,6 +1592,7 @@ export async function updateClaim(claimId, prevState, formData) {
         return {
           date: new Date(item.date),
           category: item.category,
+          expenseAccountId: item.expenseAccountId || null,
           description: item.description.trim(),
           amount: parseFloat(item.amount),
           receipt: item.receipt || {},
@@ -1433,6 +1611,7 @@ export async function updateClaim(claimId, prevState, formData) {
       claim.totalAmount = totalAmount;
       claim.description = description.trim();
       claim.notes = notes?.trim() || "";
+      claim.receipts = parseReceipts(formData, user);
     }
 
     // Update audit trail
@@ -1479,18 +1658,14 @@ const closeSettlementSchema = z.object({
 });
 
 const recordAdvanceReturnSchema = z.object({
-  paymentMethod: z.enum(["cash", "bank", "mpesa"], {
-    required_error: "Please select a payment method",
-  }),
+  paymentAccountId: z.string().min(1, "Please select a payment account"),
   amount: z.coerce.number().positive("Amount must be greater than zero"),
   reference: z.string().max(100).optional().or(z.literal("")),
   notes: z.string().max(500).optional().or(z.literal("")),
 });
 
 const paySettlementBalanceSchema = z.object({
-  paymentMethod: z.enum(["cash", "bank", "mpesa"], {
-    required_error: "Please select a payment method",
-  }),
+  paymentAccountId: z.string().min(1, "Please select a payment account"),
   reference: z.string().max(100).optional().or(z.literal("")),
   notes: z.string().max(500).optional().or(z.literal("")),
 });
@@ -1637,35 +1812,9 @@ export async function closeSettlement(settlementId, prevState, formData) {
     }
 
     // ============================================
-    // GET EXPENSE ACCOUNTS BY CATEGORY (tenant-scoped)
+    // RESOLVE EXPENSE ACCOUNTS BY ID (tenant-scoped)
     // ============================================
-    const expenseAccounts = {};
-    for (const item of settlement.items) {
-      if (!expenseAccounts[item.category]) {
-        const account = await Account.findOne(
-          withTenantScope(
-            {
-              accountName: new RegExp(`^${item.category}`, "i"),
-              accountType: "expense",
-            },
-            tenantCompanyId,
-            isSuperAdmin,
-          ),
-        ).session(session);
-
-        if (!account) {
-          return {
-            errors: {
-              _form: [
-                `Expense account for "${item.category}" not found. Please create it first.`,
-              ],
-            },
-          };
-        }
-
-        expenseAccounts[item.category] = account;
-      }
-    }
+    const expenseAccountMap = await resolveExpenseAccounts(settlement.items, session);
 
     // ============================================
     // GET SYSTEM ACCOUNTS (tenant-scoped)
@@ -1721,17 +1870,18 @@ export async function closeSettlement(settlementId, prevState, formData) {
     // ============================================
     const journalLines = [];
 
-    // 1. DEBIT: Expense accounts (by category)
-    const expensesByCategory = {};
+    // 1. DEBIT: Expense accounts (grouped by expenseAccountId)
+    const expensesByAccount = {};
     settlement.items.forEach((item) => {
-      if (!expensesByCategory[item.category]) {
-        expensesByCategory[item.category] = 0;
+      const key = item.expenseAccountId?.toString() || item.category;
+      if (!expensesByAccount[key]) {
+        expensesByAccount[key] = { amount: 0, category: item.category };
       }
-      expensesByCategory[item.category] += item.amount;
+      expensesByAccount[key].amount += item.amount;
     });
 
-    for (const [category, amount] of Object.entries(expensesByCategory)) {
-      const account = expenseAccounts[category];
+    for (const [accountId, { amount, category }] of Object.entries(expensesByAccount)) {
+      const account = expenseAccountMap[accountId];
       journalLines.push({
         accountId: account._id,
         accountCode: account.accountCode,
@@ -1983,7 +2133,7 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
     // VALIDATE INPUT
     // ============================================
     const validatedFields = recordAdvanceReturnSchema.safeParse({
-      paymentMethod: formData.get("paymentMethod"),
+      paymentAccountId: formData.get("paymentAccountId"),
       amount: formData.get("amount") || maxBalance,
       reference: formData.get("reference"),
       notes: formData.get("notes"),
@@ -2052,19 +2202,12 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
     // ============================================
     // GET ACCOUNTS (tenant-scoped)
     // ============================================
-    const paymentAccount = await getPaymentAccount(
-      data.paymentMethod,
-      session,
-      tenantCompanyId,
-      isSuperAdmin,
-    );
+    const paymentAccount = await Account.findById(data.paymentAccountId).session(session);
 
     if (!paymentAccount) {
       return {
         errors: {
-          paymentMethod: [
-            `Payment account for ${data.paymentMethod} not configured`,
-          ],
+          paymentAccountId: ["Selected payment account not found"],
         },
       };
     }
@@ -2258,7 +2401,7 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
     // VALIDATE INPUT
     // ============================================
     const validatedFields = paySettlementBalanceSchema.safeParse({
-      paymentMethod: formData.get("paymentMethod"),
+      paymentAccountId: formData.get("paymentAccountId"),
       reference: formData.get("reference"),
       notes: formData.get("notes"),
     });
@@ -2325,19 +2468,12 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
     // ============================================
     // GET ACCOUNTS (tenant-scoped)
     // ============================================
-    const paymentAccount = await getPaymentAccount(
-      data.paymentMethod,
-      session,
-      tenantCompanyId,
-      isSuperAdmin,
-    );
+    const paymentAccount = await Account.findById(data.paymentAccountId).session(session);
 
     if (!paymentAccount) {
       return {
         errors: {
-          paymentMethod: [
-            `Payment account for ${data.paymentMethod} not configured`,
-          ],
+          paymentAccountId: ["Selected payment account not found"],
         },
       };
     }
@@ -2523,7 +2659,8 @@ export async function payAdvance(claimId, prevState, formData) {
     // 2. VALIDATE INPUT
     // ============================================
     const validatedFields = paymentSchema.safeParse({
-      paymentMethod: formData.get("paymentMethod"),
+      paymentAccountId: formData.get("paymentAccountId"),
+      paymentMethod: formData.get("paymentMethod") || undefined,
       paymentReference: formData.get("paymentReference"),
       paymentNotes: formData.get("paymentNotes"),
     });
@@ -2601,19 +2738,12 @@ export async function payAdvance(claimId, prevState, formData) {
       };
     }
 
-    const paymentAccount = await getPaymentAccount(
-      data.paymentMethod,
-      session,
-      tenantCompanyId,
-      isSuperAdmin,
-    );
+    const paymentAccount = await Account.findById(data.paymentAccountId).session(session);
 
     if (!paymentAccount) {
       return {
         errors: {
-          paymentMethod: [
-            `Payment account for "${data.paymentMethod}" not configured`,
-          ],
+          paymentAccountId: ["Selected payment account not found"],
         },
       };
     }
@@ -2786,7 +2916,8 @@ export async function payReimbursement(claimId, prevState, formData) {
     // 2. VALIDATE INPUT
     // ============================================
     const validatedFields = paymentSchema.safeParse({
-      paymentMethod: formData.get("paymentMethod"),
+      paymentAccountId: formData.get("paymentAccountId"),
+      paymentMethod: formData.get("paymentMethod") || undefined,
       paymentReference: formData.get("paymentReference"),
       paymentNotes: formData.get("paymentNotes"),
     });
@@ -2844,35 +2975,9 @@ export async function payReimbursement(claimId, prevState, formData) {
     }
 
     // ============================================
-    // 6. GET EXPENSE ACCOUNTS BY CATEGORY (tenant-scoped)
+    // 6. RESOLVE EXPENSE ACCOUNTS BY ID (tenant-scoped)
     // ============================================
-    const expenseAccounts = {};
-    for (const item of claim.items) {
-      if (!expenseAccounts[item.category]) {
-        const account = await Account.findOne(
-          withTenantScope(
-            {
-              accountName: new RegExp(`^${item.category}`, "i"),
-              accountType: "expense",
-            },
-            tenantCompanyId,
-            isSuperAdmin,
-          ),
-        ).session(session);
-
-        if (!account) {
-          return {
-            errors: {
-              _form: [
-                `Expense account for category "${item.category}" not found. Please create it first.`,
-              ],
-            },
-          };
-        }
-
-        expenseAccounts[item.category] = account;
-      }
-    }
+    const expenseAccountMap = await resolveExpenseAccounts(claim.items, session);
 
     // ============================================
     // 7. GET SYSTEM ACCOUNTS (tenant-scoped)
@@ -2895,26 +3000,19 @@ export async function payReimbursement(claimId, prevState, formData) {
       };
     }
 
-    const paymentAccount = await getPaymentAccount(
-      data.paymentMethod,
-      session,
-      tenantCompanyId,
-      isSuperAdmin,
-    );
+    const paymentAccount = await Account.findById(data.paymentAccountId).session(session);
 
     if (!paymentAccount) {
       return {
         errors: {
-          paymentMethod: [
-            `Payment account for "${data.paymentMethod}" not configured`,
-          ],
+          paymentAccountId: ["Selected payment account not found"],
         },
       };
     }
 
     // ============================================
     // 8. CREATE JOURNAL ENTRY #1: RECOGNIZE EXPENSE
-    // DR: Expense Accounts (by category)
+    // DR: Expense Accounts (by expenseAccountId)
     // CR: Employee Payables (we owe employee)
     // ============================================
     const expenseEntryNumber = await generateUniqueEntryNumber(
@@ -2923,18 +3021,19 @@ export async function payReimbursement(claimId, prevState, formData) {
     );
     const expenseLines = [];
 
-    // Group expenses by category
-    const expensesByCategory = {};
+    // Group expenses by expenseAccountId
+    const expensesByAccount = {};
     claim.items.forEach((item) => {
-      if (!expensesByCategory[item.category]) {
-        expensesByCategory[item.category] = 0;
+      const key = item.expenseAccountId?.toString() || item.category;
+      if (!expensesByAccount[key]) {
+        expensesByAccount[key] = { amount: 0, category: item.category };
       }
-      expensesByCategory[item.category] += item.amount;
+      expensesByAccount[key].amount += item.amount;
     });
 
     // DEBIT: Expense accounts
-    for (const [category, amount] of Object.entries(expensesByCategory)) {
-      const account = expenseAccounts[category];
+    for (const [accountId, { amount, category }] of Object.entries(expensesByAccount)) {
+      const account = expenseAccountMap[accountId];
       expenseLines.push({
         accountId: account._id,
         accountCode: account.accountCode,

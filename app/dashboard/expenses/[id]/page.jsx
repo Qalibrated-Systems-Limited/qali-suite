@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { getSignedUrl } from "@/lib/cloudinary";
 import {
   ChevronLeft,
   Receipt,
@@ -17,7 +18,9 @@ import {
   CreditCard,
   User,
   AlertCircle,
+  Paperclip,
 } from "lucide-react";
+import { ReceiptViewer } from "@/components/receipt-viewer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -312,6 +315,33 @@ export default async function ExpenseDetailPage({ params }) {
               </div>
             </CardContent>
           </Card>
+
+          {/* Receipts & Attachments */}
+          {expense.receipts?.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Paperclip className="w-5 h-5" />
+                  Receipts & Attachments
+                  <Badge variant="secondary" className="ml-auto">
+                    {expense.receipts.length}
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ReceiptViewer
+                  receipts={expense.receipts.map((r) => ({
+                    ...r,
+                    viewUrl:
+                      r.mimeType === "application/pdf" ||
+                      r.url?.toLowerCase().endsWith(".pdf")
+                        ? getSignedUrl(r)
+                        : r.url,
+                  }))}
+                />
+              </CardContent>
+            </Card>
+          )}
 
           {/* Reimbursement Info */}
           {expense.isReimbursable && (

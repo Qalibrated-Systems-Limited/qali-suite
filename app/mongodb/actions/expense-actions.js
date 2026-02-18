@@ -64,6 +64,25 @@ const expenseSchema = z.object({
 // ============================================
 // CREATE EXPENSE
 // ============================================
+function parseReceipts(formData, user) {
+  try {
+    const receiptsJson = formData.get("receipts");
+    if (receiptsJson) {
+      const parsed = JSON.parse(receiptsJson);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((r) => ({
+          filename: r.filename,
+          url: r.url,
+          size: r.size,
+          mimeType: r.mimeType,
+          uploadedBy: formatUser(user),
+        }));
+      }
+    }
+  } catch {}
+  return [];
+}
+
 export async function createExpense(prevState, formData) {
   try {
     const { companyId, user } = await getTenantContext();
@@ -77,6 +96,7 @@ export async function createExpense(prevState, formData) {
     // Parse and validate form data
     const rawData = Object.fromEntries(formData.entries());
     const validatedData = expenseSchema.parse(rawData);
+    const receipts = parseReceipts(formData, user);
 
     // Get expense account details
     const expenseAccount = await Account.findById(validatedData.accountId);
@@ -128,6 +148,7 @@ export async function createExpense(prevState, formData) {
       employeeId: validatedData.employeeId,
       employeeName: validatedData.employeeName,
       notes: validatedData.notes,
+      receipts,
       status: "draft",
       createdBy: formatUser(user),
     });
@@ -173,6 +194,7 @@ export async function updateExpense(expenseId, prevState, formData) {
     // Parse and validate form data
     const rawData = Object.fromEntries(formData.entries());
     const validatedData = expenseSchema.parse(rawData);
+    const receipts = parseReceipts(formData, user);
 
     // Get expense account details
     const expenseAccount = await Account.findById(validatedData.accountId);
@@ -185,6 +207,7 @@ export async function updateExpense(expenseId, prevState, formData) {
     const total = subtotal + validatedData.taxAmount - validatedData.withholdingTax;
 
     // Update expense
+    expense.receipts = receipts;
     expense.expenseDate = new Date(validatedData.expenseDate);
     expense.category = validatedData.category;
     expense.accountId = expenseAccount._id;

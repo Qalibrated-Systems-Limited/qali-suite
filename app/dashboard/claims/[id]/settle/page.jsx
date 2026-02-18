@@ -1,6 +1,9 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
-import { getClaimById } from "@/app/mongodb/queries/claimQueries";
+import {
+  getClaimById,
+  getExpenseAccountsForCategories,
+} from "@/app/mongodb/queries/claimQueries";
 import { AdvanceSettlementForm } from "../../components/AdvanceSettleForm";
 import { serializeBsonType } from "@/lib/utils";
 
@@ -48,5 +51,12 @@ export default async function SettleAdvancePage({ params }) {
     redirect(`/dashboard/claims/${claim.settlementClaimId}`);
   }
 
-  return <AdvanceSettlementForm advanceClaim={claim} />;
+  const expenseAccounts = await getExpenseAccountsForCategories();
+
+  return (
+    <AdvanceSettlementForm
+      advanceClaim={claim}
+      expenseAccounts={expenseAccounts}
+    />
+  );
 }

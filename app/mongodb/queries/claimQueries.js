@@ -1,8 +1,10 @@
 import mongoose from "mongoose";
 import EmployeeClaim from "../../models/employeesClaims";
+import Account from "../../models/account";
 import dbConnect from "../../config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
+import { serializeBsonType } from "@/lib/utils";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -148,46 +150,9 @@ export const searchClaims = async (searchTerm = "", page = 1, filters = {}) => {
     pipeline = [searchStage, sortStage, ...paginationStage];
   }
 
-  let result = await EmployeeClaim.aggregate(pipeline);
+  const result = await EmployeeClaim.aggregate(pipeline);
 
-  // Transform result for client consumption
-  result = result.map((claim) => {
-    let items = [];
-    if (claim.items && claim.items.length > 0) {
-      items = claim.items.map((item) => ({
-        ...item,
-        _id: item._id.toString(),
-        receipt: {
-          ...item.receipt,
-          uploadedAt: item.receipt.uploadedAt.toISOString(),
-        },
-        date: item.date.toISOString(),
-      }));
-    }
-
-    return {
-      ...claim,
-      items,
-      _id: claim._id.toString(),
-      employee: {
-        ...claim.employee,
-        userId: claim.employee.userId.toString(),
-        partyId: claim.employee.partyId.toString(),
-      },
-      claimDate: claim.claimDate.toISOString(),
-      submittedAt: claim.submittedAt?.toISOString() || null,
-      approvedAt: claim.approvedAt?.toISOString() || null,
-      rejectedAt: claim.rejectedAt?.toISOString() || null,
-      paidAt: claim.paidAt?.toISOString() || null,
-      createdAt: claim.createdAt?.toISOString() || null,
-      updatedAt: claim.updatedAt?.toISOString() || null,
-      advancePaymentId: claim.advancePaymentId?.toString() || null,
-      settlementPaymentId: claim.settlementPaymentId?.toString() || null,
-      journalEntryIds: claim.journalEntryIds?.map((id) => id.toString()) || [],
-    };
-  });
-
-  return result;
+  return serializeBsonType(result);
 };
 
 // ============================================
@@ -297,25 +262,7 @@ export const getClaimById = async (claimId) => {
     return null;
   }
 
-  return {
-    ...claim,
-    _id: claim._id.toString(),
-    employee: {
-      ...claim.employee,
-      userId: claim.employee.userId.toString(),
-      partyId: claim.employee.partyId.toString(),
-    },
-    claimDate: claim.claimDate.toISOString(),
-    submittedAt: claim.submittedAt?.toISOString() || null,
-    approvedAt: claim.approvedAt?.toISOString() || null,
-    rejectedAt: claim.rejectedAt?.toISOString() || null,
-    paidAt: claim.paidAt?.toISOString() || null,
-    createdAt: claim.createdAt?.toISOString() || null,
-    updatedAt: claim.updatedAt?.toISOString() || null,
-    advancePaymentId: claim.advancePaymentId?.toString() || null,
-    settlementPaymentId: claim.settlementPaymentId?.toString() || null,
-    journalEntryIds: claim.journalEntryIds?.map((id) => id.toString()) || [],
-  };
+  return serializeBsonType(claim);
 };
 
 // ============================================
@@ -366,21 +313,11 @@ export const getAdvancesNeedingSettlement = async (userId) => {
     }).lean();
 
     if (!settlement) {
-      advancesNeedingSettlement.push({
-        ...claim,
-        _id: claim._id.toString(),
-        employee: {
-          ...claim.employee,
-          userId: claim.employee.userId.toString(),
-          partyId: claim.employee.partyId.toString(),
-        },
-        claimDate: claim.claimDate.toISOString(),
-        paidAt: claim.paidAt?.toISOString() || null,
-      });
+      advancesNeedingSettlement.push(claim);
     }
   }
 
-  return advancesNeedingSettlement;
+  return serializeBsonType(advancesNeedingSettlement);
 };
 
 // ============================================
@@ -423,4 +360,24 @@ export const fetchUserClaimPages = async (
 
   // Managers and accountants can see all claims
   return fetchClaimPages(searchTerm, filters);
+};
+
+// ============================================
+// GET EXPENSE ACCOUNTS (for category dropdowns)
+// ============================================
+export const getExpenseAccountsForCategories = async () => {
+  await dbConnect();
+  const { companyId } = await getTenantContext();
+
+  const accounts = await Account.find({
+    companyId,
+    accountType: "expense",
+    canPost: true,
+    isActive: { $ne: false },
+  })
+    .select("_id accountCode accountName")
+    .sort({ accountCode: 1 })
+    .lean();
+
+  return serializeBsonType(accounts);
 };

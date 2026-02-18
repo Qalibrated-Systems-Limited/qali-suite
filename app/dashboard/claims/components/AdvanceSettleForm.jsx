@@ -41,23 +41,18 @@ import {
 import Link from "next/link";
 import { settleAdvance } from "../../../mongodb/actions/claim-action";
 import { toast } from "sonner";
+import { FileUpload } from "@/components/file-upload";
 import { format, isAfter, isBefore, parseISO } from "date-fns";
-import {
-  cn,
-  EXPENSE_CATEGORIES,
-  getGroupedCategories,
-  getSuggestedCategories,
-} from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 // ============================================
-// CATEGORY COMBOBOX COMPONENT
+// EXPENSE ACCOUNT COMBOBOX COMPONENT
 // ============================================
-function CategoryCombobox({ value, onValueChange, advanceType }) {
+function ExpenseAccountCombobox({ value, onValueChange, expenseAccounts }) {
   const [open, setOpen] = useState(false);
-  const groupedCategories = getGroupedCategories();
-  const suggestedCategories = getSuggestedCategories(advanceType);
-
-  const selectedCategory = value ? EXPENSE_CATEGORIES[value] : null;
+  const selected = value
+    ? expenseAccounts.find((a) => a._id === value)
+    : null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -68,74 +63,44 @@ function CategoryCombobox({ value, onValueChange, advanceType }) {
           aria-expanded={open}
           className="h-11 w-full justify-between font-normal"
         >
-          {selectedCategory ? (
-            <span className="flex items-center gap-2">
-              <span>{selectedCategory.icon}</span>
-              <span>{selectedCategory.label}</span>
+          {selected ? (
+            <span className="truncate">
+              {selected.accountCode} - {selected.accountName}
             </span>
           ) : (
-            <span className="text-muted-foreground">Select category...</span>
+            <span className="text-muted-foreground">Select expense account...</span>
           )}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-75 p-0" align="start">
         <Command>
-          <CommandInput placeholder="Search categories..." />
+          <CommandInput placeholder="Search accounts..." />
           <CommandList>
-            <CommandEmpty>No category found.</CommandEmpty>
-            {/* Suggested categories for this advance type */}
-            <CommandGroup heading="Suggested">
-              {suggestedCategories.map((catValue) => {
-                const cat = EXPENSE_CATEGORIES[catValue];
-                if (!cat) return null;
-                return (
-                  <CommandItem
-                    key={catValue}
-                    value={catValue}
-                    onSelect={() => {
-                      onValueChange(catValue);
-                      setOpen(false);
-                    }}
-                  >
-                    <Check
-                      className={cn(
-                        "mr-2 h-4 w-4",
-                        value === catValue ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                    <span className="mr-2">{cat.icon}</span>
-                    {cat.label}
-                  </CommandItem>
-                );
-              })}
+            <CommandEmpty>No account found.</CommandEmpty>
+            <CommandGroup>
+              {expenseAccounts.map((acc) => (
+                <CommandItem
+                  key={acc._id}
+                  value={`${acc.accountCode} ${acc.accountName}`}
+                  onSelect={() => {
+                    onValueChange(acc._id);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4",
+                      value === acc._id ? "opacity-100" : "opacity-0"
+                    )}
+                  />
+                  <span className="font-mono text-xs mr-2 text-muted-foreground">
+                    {acc.accountCode}
+                  </span>
+                  {acc.accountName}
+                </CommandItem>
+              ))}
             </CommandGroup>
-            {/* All categories grouped */}
-            {Object.entries(groupedCategories).map(([group, categories]) => (
-              <CommandGroup key={group} heading={group}>
-                {categories
-                  .filter((cat) => !suggestedCategories.includes(cat.value))
-                  .map((cat) => (
-                    <CommandItem
-                      key={cat.value}
-                      value={cat.value}
-                      onSelect={() => {
-                        onValueChange(cat.value);
-                        setOpen(false);
-                      }}
-                    >
-                      <Check
-                        className={cn(
-                          "mr-2 h-4 w-4",
-                          value === cat.value ? "opacity-100" : "opacity-0"
-                        )}
-                      />
-                      <span className="mr-2">{cat.icon}</span>
-                      {cat.label}
-                    </CommandItem>
-                  ))}
-              </CommandGroup>
-            ))}
           </CommandList>
         </Command>
       </PopoverContent>
@@ -180,6 +145,7 @@ function ExpenseItemCard({
   travelDates,
   advanceType,
   errors,
+  expenseAccounts,
 }) {
   const today = new Date().toISOString().split("T")[0];
   const minDate = travelDates?.from
@@ -209,11 +175,6 @@ function ExpenseItemCard({
           <span className="text-sm sm:text-base font-semibold text-foreground">
             Expense #{index + 1}
           </span>
-          {item.category && EXPENSE_CATEGORIES[item.category] && (
-            <span className="text-lg">
-              {EXPENSE_CATEGORIES[item.category].icon}
-            </span>
-          )}
         </div>
         {canRemove && (
           <Button
@@ -258,15 +219,15 @@ function ExpenseItemCard({
           )}
         </div>
 
-        {/* Category */}
+        {/* Expense Account */}
         <div className="space-y-2">
           <Label className="text-sm sm:text-base font-medium">
-            Category <span className="text-red-500">*</span>
+            Expense Account <span className="text-red-500">*</span>
           </Label>
-          <CategoryCombobox
-            value={item.category}
-            onValueChange={(value) => onUpdate("category", value)}
-            advanceType={advanceType}
+          <ExpenseAccountCombobox
+            value={item.expenseAccountId}
+            onValueChange={(value) => onUpdate("expenseAccountId", value)}
+            expenseAccounts={expenseAccounts}
           />
         </div>
 
@@ -347,7 +308,7 @@ function ExpenseItemCard({
 // ============================================
 // MAIN FORM COMPONENT
 // ============================================
-export function AdvanceSettlementForm({ advanceClaim }) {
+export function AdvanceSettlementForm({ advanceClaim, expenseAccounts = [] }) {
   const router = useRouter();
 
   const action = settleAdvance.bind(null, advanceClaim._id);
@@ -356,12 +317,16 @@ export function AdvanceSettlementForm({ advanceClaim }) {
   // Get the advance type for conditional rendering
   const advanceType = advanceClaim.advanceDetails?.advanceType || "travel";
 
+  // Receipts state
+  const [receipts, setReceipts] = useState([]);
+
   // Expense items state
   const [items, setItems] = useState([
     {
       id: Date.now(),
       date: new Date().toISOString().split("T")[0],
       category: "",
+      expenseAccountId: "",
       description: "",
       amount: "",
       notes: "",
@@ -384,7 +349,7 @@ export function AdvanceSettlementForm({ advanceClaim }) {
   const isFormValid = items.every(
     (item) =>
       item.date &&
-      item.category &&
+      item.expenseAccountId &&
       item.description.trim().length >= 3 &&
       parseFloat(item.amount) > 0
   );
@@ -401,6 +366,7 @@ export function AdvanceSettlementForm({ advanceClaim }) {
         id: Date.now(),
         date: new Date().toISOString().split("T")[0],
         category: "",
+        expenseAccountId: "",
         description: "",
         amount: "",
         notes: "",
@@ -421,11 +387,22 @@ export function AdvanceSettlementForm({ advanceClaim }) {
     }
   };
 
-  // Update item
+  // Update item — when selecting an account, set both category and expenseAccountId
   const updateItem = (id, field, value) => {
-    setItems(
-      items.map((item) => (item.id === id ? { ...item, [field]: value } : item))
-    );
+    if (field === "expenseAccountId") {
+      const account = expenseAccounts.find((a) => a._id === value);
+      setItems(
+        items.map((item) =>
+          item.id === id
+            ? { ...item, expenseAccountId: value, category: account?.accountName || "" }
+            : item
+        )
+      );
+    } else {
+      setItems(
+        items.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+      );
+    }
     // Clear error when user starts fixing
     if (itemErrors[id]) {
       const newErrors = { ...itemErrors };
@@ -447,7 +424,7 @@ export function AdvanceSettlementForm({ advanceClaim }) {
       const errors = [];
 
       if (!item.date) errors.push("Date is required");
-      if (!item.category) errors.push("Category is required");
+      if (!item.expenseAccountId) errors.push("Expense account is required");
       if (!item.description || item.description.trim().length < 3) {
         errors.push("Description must be at least 3 characters");
       }
@@ -704,6 +681,7 @@ export function AdvanceSettlementForm({ advanceClaim }) {
                   travelDates={advanceClaim.advanceDetails?.travelDates}
                   advanceType={advanceType}
                   errors={itemErrors[item.id]}
+                  expenseAccounts={expenseAccounts}
                 />
               ))}
             </div>
@@ -826,6 +804,24 @@ export function AdvanceSettlementForm({ advanceClaim }) {
             <p className="text-xs text-muted-foreground mt-2">
               Maximum 500 characters
             </p>
+          </Card>
+
+          {/* Receipt Upload */}
+          <Card className="p-5 sm:p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <ReceiptIcon className="w-5 h-5 text-yellow-600" />
+              <h3 className="font-semibold">Receipts & Attachments</h3>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Upload photos of receipts to support your settlement expenses.
+            </p>
+            <input type="hidden" name="receipts" value={JSON.stringify(receipts)} />
+            <FileUpload
+              value={receipts}
+              onChange={setReceipts}
+              folder="claims"
+              maxFiles={10}
+            />
           </Card>
 
           {/* Validation Summary */}

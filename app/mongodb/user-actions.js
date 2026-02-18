@@ -3,6 +3,7 @@
 import { auth } from "@/auth";
 import User from "../models/user";
 import Company from "../models/Company";
+import Party from "../models/parties";
 import Invite from "../models/invite";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -161,6 +162,34 @@ export async function createUser(prevState, formData) {
     });
 
     newUserId = newUser._id.toString();
+
+    // Auto-create employee Party record linked to this user
+    if (assignedCompanyId) {
+      try {
+        const existingParty = await Party.findOne({
+          companyId: assignedCompanyId,
+          userId: newUser._id,
+          type: "employee",
+        });
+        if (!existingParty) {
+          await Party.create({
+            companyId: assignedCompanyId,
+            type: "employee",
+            userId: newUser._id,
+            name,
+            email,
+            department: department || "",
+            createdBy: {
+              name: currentUser.name,
+              id: currentUser.id,
+            },
+          });
+        }
+      } catch (partyErr) {
+        console.error("Failed to auto-create employee party:", partyErr);
+        // Non-blocking — user is created, party can be linked later
+      }
+    }
 
     // Send invite email so user can set up their account
     let emailSent = false;

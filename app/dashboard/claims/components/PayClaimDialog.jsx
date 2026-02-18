@@ -37,24 +37,29 @@ import {
 } from "../../../mongodb/actions/claim-action";
 import { toast } from "sonner";
 
-/**
- * Pay Claim Dialog
- * Used by accountant to pay approved advance_request or reimbursement claims
- *
- * Handles two claim types:
- * - advance_request: Creates DR: Employee Advance, CR: Cash/Bank
- * - reimbursement: Creates expense JE + payment JE
- */
+const SUBTYPE_ICONS = {
+  mpesa: Smartphone,
+  bank: Building2,
+  cash: Banknote,
+};
+
+const SUBTYPE_COLORS = {
+  mpesa: "text-green-600",
+  bank: "text-blue-600",
+  cash: "text-emerald-600",
+};
+
 export function PayClaimDialog({
   claimId,
   claimNumber,
   claimType,
   amount,
   employeeName,
+  paymentAccounts = [],
   children,
 }) {
   const [open, setOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState("");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
   const router = useRouter();
 
   // Use appropriate action based on claim type
@@ -62,17 +67,21 @@ export function PayClaimDialog({
     claimType === "advance_request" ? payAdvance : payReimbursement;
   const payWithId = payAction.bind(null, claimId);
 
-  const [state, formAction, isPending] = useActionState(payWithId, {});
+  const [state, formAction, isPending] = useActionState(payWithId, null);
 
   // Handle state changes
   useEffect(() => {
     if (state?.success) {
       toast.success(state.message || "Payment processed successfully");
       setOpen(false);
-      setPaymentMethod(""); // Reset form
+      setPaymentAccountId("");
       router.refresh();
     }
   }, [state, router]);
+
+  const selectedAccount = paymentAccounts.find(
+    (a) => a._id === paymentAccountId,
+  );
 
   const formatCurrency = (amt) => {
     return new Intl.NumberFormat("en-KE", {
@@ -88,17 +97,9 @@ export function PayClaimDialog({
     return "Claim";
   };
 
-  const getPaymentMethodIcon = (method) => {
-    switch (method) {
-      case "mpesa":
-        return <Smartphone className="w-4 h-4" />;
-      case "bank":
-        return <Building2 className="w-4 h-4" />;
-      case "cash":
-        return <Banknote className="w-4 h-4" />;
-      default:
-        return <DollarSign className="w-4 h-4" />;
-    }
+  const getAccountIcon = (subType) => {
+    const Icon = SUBTYPE_ICONS[subType] || DollarSign;
+    return <Icon className="w-4 h-4" />;
   };
 
   return (
@@ -169,41 +170,40 @@ export function PayClaimDialog({
               </div>
             </div>
 
-            {/* Payment Method */}
+            {/* Payment Account */}
             <div className="space-y-2">
-              <Label htmlFor="paymentMethod">
-                Payment Method <span className="text-red-500">*</span>
+              <Label htmlFor="paymentAccountId">
+                Payment Account <span className="text-red-500">*</span>
               </Label>
               <Select
-                name="paymentMethod"
+                name="paymentAccountId"
                 required
-                value={paymentMethod}
-                onValueChange={setPaymentMethod}
+                value={paymentAccountId}
+                onValueChange={setPaymentAccountId}
               >
-                <SelectTrigger id="paymentMethod">
-                  <SelectValue placeholder="Select how to pay" />
+                <SelectTrigger id="paymentAccountId">
+                  <SelectValue placeholder="Select payment account" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="mpesa">
-                    <span className="flex items-center gap-2">
-                      <Smartphone className="w-4 h-4 text-green-600" />
-                      M-Pesa
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="bank">
-                    <span className="flex items-center gap-2">
-                      <Building2 className="w-4 h-4 text-blue-600" />
-                      Bank Transfer
-                    </span>
-                  </SelectItem>
-                  <SelectItem value="cash">
-                    <span className="flex items-center gap-2">
-                      <Banknote className="w-4 h-4 text-emerald-600" />
-                      Cash
-                    </span>
-                  </SelectItem>
+                  {paymentAccounts.map((account) => {
+                    const Icon = SUBTYPE_ICONS[account.subType] || DollarSign;
+                    const color = SUBTYPE_COLORS[account.subType] || "";
+                    return (
+                      <SelectItem key={account._id} value={account._id}>
+                        <span className="flex items-center gap-2">
+                          <Icon className={`w-4 h-4 ${color}`} />
+                          {account.accountCode} - {account.accountName}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
+              {state?.errors?.paymentAccountId && (
+                <p className="text-sm text-red-500">
+                  {state.errors.paymentAccountId[0]}
+                </p>
+              )}
               {state?.errors?.paymentMethod && (
                 <p className="text-sm text-red-500">
                   {state.errors.paymentMethod[0]}
@@ -223,9 +223,9 @@ export function PayClaimDialog({
                 id="paymentReference"
                 name="paymentReference"
                 placeholder={
-                  paymentMethod === "mpesa"
+                  selectedAccount?.subType === "mpesa"
                     ? "e.g., QWE123ABC"
-                    : paymentMethod === "bank"
+                    : selectedAccount?.subType === "bank"
                     ? "e.g., TXN-2025-001234"
                     : "e.g., Receipt #123"
                 }
@@ -271,19 +271,18 @@ export function PayClaimDialog({
                   <>
                     This will create a journal entry recording the advance and
                     deduct from{" "}
-                    {paymentMethod === "mpesa"
-                      ? "M-Pesa"
-                      : paymentMethod === "bank"
-                      ? "Bank"
-                      : paymentMethod === "cash"
-                      ? "Cash"
+                    {selectedAccount
+                      ? selectedAccount.accountName
                       : "your payment account"}
                     .
                   </>
                 ) : (
                   <>
-                    This will create expense entries and record the payment to
-                    the employee.
+                    This will create expense entries and record the payment
+                    {selectedAccount
+                      ? ` from ${selectedAccount.accountName}`
+                      : ""}{" "}
+                    to the employee.
                   </>
                 )}
               </p>
@@ -301,7 +300,7 @@ export function PayClaimDialog({
             </Button>
             <Button
               type="submit"
-              disabled={isPending || !paymentMethod}
+              disabled={isPending || !paymentAccountId}
               className="bg-yellow-500 hover:bg-yellow-600 text-black"
             >
               {isPending ? (
@@ -311,7 +310,9 @@ export function PayClaimDialog({
                 </>
               ) : (
                 <>
-                  {getPaymentMethodIcon(paymentMethod)}
+                  {selectedAccount
+                    ? getAccountIcon(selectedAccount.subType)
+                    : <DollarSign className="w-4 h-4" />}
                   <span className="ml-2">Pay {formatCurrency(amount)}</span>
                 </>
               )}

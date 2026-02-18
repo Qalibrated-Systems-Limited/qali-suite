@@ -156,6 +156,8 @@ const expenseSchema = new Schema(
       {
         filename: String,
         url: String,
+        publicId: String,
+        resourceType: String,
         size: Number,
         mimeType: String,
         uploadedAt: {

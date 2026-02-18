@@ -5,7 +5,6 @@ import {
   departments,
   priority,
   stockRequestTypes,
-  reimbursementCategories,
 } from "@/lib/utils";
 import { de } from "date-fns/locale";
 
@@ -45,7 +44,9 @@ const ruimbursementPaymentSchema = z.object({
 export const expenseItemSchema = z.object({
   date: z.coerce.date(),
 
-  category: z.enum(reimbursementCategories),
+  category: z.string().min(1, "Category is required"),
+
+  expenseAccountId: z.string().min(1, "Expense account is required"),
 
   description: z.string().min(3),
 
@@ -329,9 +330,8 @@ const expenseItemSchemaa = z.object({
     required_error: "Date is required",
     invalid_type_error: "Invalid date",
   }),
-  category: z.enum(reimbursementCategories, {
-    required_error: "Category is required",
-  }),
+  category: z.string().min(1, "Category is required"),
+  expenseAccountId: z.string().min(1, "Expense account is required"),
   description: z
     .string()
     .min(3, "Description must be at least 3 characters")

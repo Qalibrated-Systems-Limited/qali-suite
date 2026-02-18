@@ -23,7 +23,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowDownLeft, Loader2 } from "lucide-react";
+import {
+  ArrowDownLeft,
+  Loader2,
+  Banknote,
+  Smartphone,
+  Building2,
+  DollarSign,
+} from "lucide-react";
+
+const SUBTYPE_ICONS = {
+  mpesa: Smartphone,
+  bank: Building2,
+  cash: Banknote,
+};
+
+const SUBTYPE_COLORS = {
+  mpesa: "text-green-600",
+  bank: "text-blue-600",
+  cash: "text-emerald-600",
+};
 
 /**
  * Record Return Dialog
@@ -35,12 +54,13 @@ export function RecordReturnDialog({
   claimNumber,
   balance,
   employeeName,
+  paymentAccounts = [],
 }) {
   const [open, setOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState("");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
 
   const recordReturnWithId = recordAdvanceReturn.bind(null, settlementId);
-  const [state, formAction, isPending] = useActionState(recordReturnWithId, {});
+  const [state, formAction, isPending] = useActionState(recordReturnWithId, null);
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-KE", {
@@ -86,26 +106,40 @@ export function RecordReturnDialog({
               </p>
             </div>
 
-            {/* Payment Method */}
+            {/* Payment Account */}
             <div className="space-y-2">
-              <Label htmlFor="paymentMethod">
-                Payment Method <span className="text-red-500">*</span>
+              <Label htmlFor="paymentAccountId">
+                Receiving Account <span className="text-red-500">*</span>
               </Label>
               <Select
-                name="paymentMethod"
-                value={paymentMethod}
-                onValueChange={setPaymentMethod}
+                name="paymentAccountId"
+                value={paymentAccountId}
+                onValueChange={setPaymentAccountId}
                 required
               >
-                <SelectTrigger id="paymentMethod">
-                  <SelectValue placeholder="Select method" />
+                <SelectTrigger id="paymentAccountId">
+                  <SelectValue placeholder="Select account" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="bank">Bank Transfer</SelectItem>
-                  <SelectItem value="mpesa">M-Pesa</SelectItem>
+                  {paymentAccounts.map((account) => {
+                    const Icon = SUBTYPE_ICONS[account.subType] || DollarSign;
+                    const color = SUBTYPE_COLORS[account.subType] || "";
+                    return (
+                      <SelectItem key={account._id} value={account._id}>
+                        <span className="flex items-center gap-2">
+                          <Icon className={`w-4 h-4 ${color}`} />
+                          {account.accountCode} - {account.accountName}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
+              {state?.errors?.paymentAccountId && (
+                <p className="text-sm text-red-500">
+                  {state.errors.paymentAccountId[0]}
+                </p>
+              )}
               {state?.errors?.paymentMethod && (
                 <p className="text-sm text-red-500">
                   {state.errors.paymentMethod[0]}
@@ -184,7 +218,7 @@ export function RecordReturnDialog({
             </Button>
             <Button
               type="submit"
-              disabled={isPending || !paymentMethod}
+              disabled={isPending || !paymentAccountId}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
               {isPending ? (

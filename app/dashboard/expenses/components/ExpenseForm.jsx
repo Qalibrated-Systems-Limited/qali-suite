@@ -16,6 +16,7 @@ import {
   ChevronsUpDown,
   Plus,
   PenLine,
+  Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,6 +47,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { createExpense, quickExpense, updateExpense } from "@/app/mongodb/actions/expense-actions";
+import { FileUpload } from "@/components/file-upload";
 
 const formatCurrency = (amount) => {
   return new Intl.NumberFormat("en-KE", {
@@ -419,6 +421,7 @@ export default function ExpenseForm({
   const [paidFrom, setPaidFrom] = useState(expense?.paidFrom || "");
   const [isReimbursable, setIsReimbursable] = useState(expense?.isReimbursable || false);
   const [submitAndApprove, setSubmitAndApprove] = useState(false);
+  const [receipts, setReceipts] = useState(expense?.receipts || []);
 
   // Calculate tax amount when rate or amount changes
   useEffect(() => {
@@ -672,6 +675,28 @@ export default function ExpenseForm({
               />
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Receipts */}
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Upload className="w-5 h-5" />
+            Receipts & Attachments
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <input type="hidden" name="receipts" value={JSON.stringify(receipts)} />
+          <FileUpload
+            value={receipts}
+            onChange={setReceipts}
+            folder="receipts"
+            maxFiles={5}
+          />
+          <p className="text-xs text-muted-foreground mt-2">
+            Attach receipt photos or PDFs for approval and audit trail
+          </p>
         </CardContent>
       </Card>
 

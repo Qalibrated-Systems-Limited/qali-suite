@@ -1,6 +1,9 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
-import { getClaimById } from "@/app/mongodb/queries/claimQueries";
+import {
+  getClaimById,
+  getExpenseAccountsForCategories,
+} from "@/app/mongodb/queries/claimQueries";
 import { AdvanceRequestForm } from "../../components/AdvanceRequestFrom";
 import { ReimbursementForm } from "../../components/ReimbursementForm";
 
@@ -36,16 +39,18 @@ export default async function EditClaimPage({ params }) {
     redirect("/dashboard/claims/my-claims");
   }
 
-  // Can only edit draft or submitted claims
-  if (claim.status !== "draft" && claim.status !== "submitted") {
+  // Can only edit draft or rejected claims
+  if (claim.status !== "draft" && claim.status !== "rejected") {
     redirect(`/dashboard/claims/${id}`);
   }
+
+  const expenseAccounts = await getExpenseAccountsForCategories();
 
   // Render appropriate form based on claim type
   if (claim.claimType === "advance_request") {
     return <AdvanceRequestForm claim={claim} />;
   } else if (claim.claimType === "reimbursement") {
-    return <ReimbursementForm claim={claim} />;
+    return <ReimbursementForm claim={claim} expenseAccounts={expenseAccounts} />;
   } else {
     // Settlement claims cannot be edited
     redirect(`/dashboard/claims/${id}`);

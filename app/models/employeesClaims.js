@@ -1,4 +1,4 @@
-import { reimbursementCategories, advanceTypesList } from "@/lib/utils";
+import { advanceTypesList } from "@/lib/utils";
 import mongoose from "mongoose";
 
 const Schema = mongoose.Schema;
@@ -173,8 +173,11 @@ const employeeClaimSchema = new Schema(
         },
         category: {
           type: String,
-          enum: reimbursementCategories,
           required: true,
+        },
+        expenseAccountId: {
+          type: Schema.Types.ObjectId,
+          ref: "Account",
         },
         description: {
           type: String,
@@ -217,6 +220,26 @@ const employeeClaimSchema = new Schema(
     },
 
     notes: String,
+
+    // Receipts & Attachments
+    receipts: [
+      {
+        filename: String,
+        url: String,
+        publicId: String,
+        resourceType: String,
+        size: Number,
+        mimeType: String,
+        uploadedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        uploadedBy: {
+          name: String,
+          id: String,
+        },
+      },
+    ],
 
     // Approval Workflow
     status: {
@@ -467,6 +490,43 @@ employeeClaimSchema.methods.reject = async function (rejectedBy, reason) {
   this.rejectedAt = new Date();
   this.rejectedBy = rejectedBy;
   this.rejectionReason = reason;
+  await this.save();
+
+  return this;
+};
+
+// ============================================
+// RECALL CLAIM (submitted → draft)
+// ============================================
+employeeClaimSchema.methods.recall = async function (recalledBy) {
+  if (this.status !== "submitted") {
+    throw new Error("Can only recall submitted claims");
+  }
+
+  this.status = "draft";
+  this.submittedAt = null;
+  this.submittedBy = null;
+  await this.save();
+
+  return this;
+};
+
+// ============================================
+// RESUBMIT CLAIM (rejected → submitted)
+// ============================================
+employeeClaimSchema.methods.resubmit = async function (resubmittedBy) {
+  if (this.status !== "rejected") {
+    throw new Error("Can only resubmit rejected claims");
+  }
+
+  this.validateBeforeSubmit();
+
+  this.status = "submitted";
+  this.submittedAt = new Date();
+  this.submittedBy = resubmittedBy;
+  this.rejectedAt = null;
+  this.rejectedBy = null;
+  this.rejectionReason = null;
   await this.save();
 
   return this;
