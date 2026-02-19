@@ -10,6 +10,7 @@ import Account from "@/app/models/account";
 import Product from "@/app/models/product";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
 // ============================================
 // METADATA
@@ -124,7 +125,10 @@ function FormSkeleton() {
 // FORM WRAPPER (Server Component)
 // ============================================
 async function BillFormWrapper() {
-  const { suppliers, accounts, products } = await getBillFormData();
+  const [{ suppliers, accounts, products }, projects] = await Promise.all([
+    getBillFormData(),
+    getActiveProjects(),
+  ]);
 
   // Check if we have required data
   if (suppliers.length === 0) {
@@ -174,6 +178,7 @@ async function BillFormWrapper() {
       suppliers={suppliers}
       accounts={accounts}
       products={products}
+      projects={projects}
     />
   );
 }

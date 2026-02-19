@@ -9,19 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
   ArrowLeft,
   Loader2,
   Send,
@@ -35,78 +22,13 @@ import {
   Calendar,
   MapPin,
   Info,
-  ChevronsUpDown,
-  Check,
 } from "lucide-react";
 import Link from "next/link";
 import { settleAdvance } from "../../../mongodb/actions/claim-action";
 import { toast } from "sonner";
 import { FileUpload } from "@/components/file-upload";
 import { format, isAfter, isBefore, parseISO } from "date-fns";
-import { cn } from "@/lib/utils";
-
-// ============================================
-// EXPENSE ACCOUNT COMBOBOX COMPONENT
-// ============================================
-function ExpenseAccountCombobox({ value, onValueChange, expenseAccounts }) {
-  const [open, setOpen] = useState(false);
-  const selected = value
-    ? expenseAccounts.find((a) => a._id === value)
-    : null;
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="h-11 w-full justify-between font-normal"
-        >
-          {selected ? (
-            <span className="truncate">
-              {selected.accountCode} - {selected.accountName}
-            </span>
-          ) : (
-            <span className="text-muted-foreground">Select expense account...</span>
-          )}
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-75 p-0" align="start">
-        <Command>
-          <CommandInput placeholder="Search accounts..." />
-          <CommandList>
-            <CommandEmpty>No account found.</CommandEmpty>
-            <CommandGroup>
-              {expenseAccounts.map((acc) => (
-                <CommandItem
-                  key={acc._id}
-                  value={`${acc.accountCode} ${acc.accountName}`}
-                  onSelect={() => {
-                    onValueChange(acc._id);
-                    setOpen(false);
-                  }}
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4",
-                      value === acc._id ? "opacity-100" : "opacity-0"
-                    )}
-                  />
-                  <span className="font-mono text-xs mr-2 text-muted-foreground">
-                    {acc.accountCode}
-                  </span>
-                  {acc.accountName}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}
+import ExpenseAccountCombobox from "@/components/expense-account-combobox";
 
 // ============================================
 // SUBMIT BUTTON COMPONENT
@@ -146,6 +68,7 @@ function ExpenseItemCard({
   advanceType,
   errors,
   expenseAccounts,
+  onAccountCreated,
 }) {
   const today = new Date().toISOString().split("T")[0];
   const minDate = travelDates?.from
@@ -226,8 +149,11 @@ function ExpenseItemCard({
           </Label>
           <ExpenseAccountCombobox
             value={item.expenseAccountId}
-            onValueChange={(value) => onUpdate("expenseAccountId", value)}
-            expenseAccounts={expenseAccounts}
+            onValueChange={(id) => onUpdate("expenseAccountId", id)}
+            accounts={expenseAccounts}
+            onAccountCreated={onAccountCreated}
+            placeholder="Select expense account..."
+            className="h-11"
           />
         </div>
 
@@ -310,6 +236,7 @@ function ExpenseItemCard({
 // ============================================
 export function AdvanceSettlementForm({ advanceClaim, expenseAccounts = [] }) {
   const router = useRouter();
+  const [allAccounts, setAllAccounts] = useState(expenseAccounts);
 
   const action = settleAdvance.bind(null, advanceClaim._id);
   const [state, formAction, pending] = useActionState(action, null);
@@ -390,7 +317,7 @@ export function AdvanceSettlementForm({ advanceClaim, expenseAccounts = [] }) {
   // Update item — when selecting an account, set both category and expenseAccountId
   const updateItem = (id, field, value) => {
     if (field === "expenseAccountId") {
-      const account = expenseAccounts.find((a) => a._id === value);
+      const account = allAccounts.find((a) => a._id === value);
       setItems(
         items.map((item) =>
           item.id === id
@@ -561,12 +488,15 @@ export function AdvanceSettlementForm({ advanceClaim, expenseAccounts = [] }) {
               </p>
             </div>
           )}
-          {/* Project-specific: Project Code */}
-          {advanceType === "project" && (
+          {/* Linked Project */}
+          {advanceClaim.project?.name && (
             <div>
-              <p className="text-xs text-muted-foreground mb-1">Project Code</p>
+              <p className="text-xs text-muted-foreground mb-1">Project</p>
               <p className="text-sm font-medium text-foreground">
-                {advanceClaim.advanceDetails?.projectCode || "N/A"}
+                <span className="font-mono text-xs text-muted-foreground mr-1">
+                  {advanceClaim.project.projectNumber}
+                </span>
+                {advanceClaim.project.name}
               </p>
             </div>
           )}
@@ -621,7 +551,6 @@ export function AdvanceSettlementForm({ advanceClaim, expenseAccounts = [] }) {
                     <span className="font-bold">2.</span>
                     <span>
                       Your manager will review and approve the settlement
-                      {advanceType === "project" && " against the project budget"}
                     </span>
                   </li>
                   <li className="flex items-start gap-2">
@@ -681,7 +610,14 @@ export function AdvanceSettlementForm({ advanceClaim, expenseAccounts = [] }) {
                   travelDates={advanceClaim.advanceDetails?.travelDates}
                   advanceType={advanceType}
                   errors={itemErrors[item.id]}
-                  expenseAccounts={expenseAccounts}
+                  expenseAccounts={allAccounts}
+                  onAccountCreated={(acc) =>
+                    setAllAccounts((prev) =>
+                      [...prev, acc].sort((a, b) =>
+                        a.accountCode.localeCompare(b.accountCode),
+                      ),
+                    )
+                  }
                 />
               ))}
             </div>
@@ -870,7 +806,6 @@ export function AdvanceSettlementForm({ advanceClaim, expenseAccounts = [] }) {
             </span>
             <span>
               Your manager reviews the settlement and actual expenses
-              {advanceType === "project" && " against project budget"}
             </span>
           </li>
           <li className="flex items-start gap-3">

@@ -59,6 +59,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import ProjectPicker from "@/components/project-picker";
 
 // Tax rate presets for Kenya
 const TAX_RATE_OPTIONS = [
@@ -84,6 +85,7 @@ export default function EditInvoiceFormClient({
   customers,
   products,
   checkouts = [],
+  projects = [],
   user,
 }) {
   const router = useRouter();
@@ -175,6 +177,7 @@ export default function EditInvoiceFormClient({
     invoice.discountPercentage || 0,
   );
   const [notes, setNotes] = useState(invoice.notes || "");
+  const [projectId, setProjectId] = useState(invoice.projectId || "");
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -500,6 +503,7 @@ export default function EditInvoiceFormClient({
       })),
       discountPercentage,
       notes,
+      projectId: projectId || null,
     };
 
     // Create FormData
@@ -719,6 +723,21 @@ export default function EditInvoiceFormClient({
               />
             </div>
           </div>
+
+          {projects.length > 0 && (
+            <div className="space-y-1">
+              <Label>
+                Project{" "}
+                <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <ProjectPicker
+                value={projectId}
+                onValueChange={setProjectId}
+                projects={projects}
+                placeholder="Link to a project..."
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
 

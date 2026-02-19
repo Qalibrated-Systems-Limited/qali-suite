@@ -18,6 +18,7 @@ import {
   validateTenantAccess,
 } from "@/lib/utils/tenant-utils";
 import dbConnect from "@/app/config/dbConnect";
+import Project from "../models/project";
 
 const ObjectId = mongoose.Types.ObjectId;
 
@@ -437,6 +438,21 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       existingInvoice.notes = invoiceData.notes || "";
       existingInvoice.termsAndConditions = invoiceData.termsAndConditions || "";
 
+      // Project linking (optional)
+      if (invoiceData.projectId) {
+        const proj = await Project.findById(invoiceData.projectId)
+          .select("projectNumber name status")
+          .session(mongoSession)
+          .lean();
+        if (proj && proj.status !== "closed") {
+          existingInvoice.projectId = proj._id;
+          existingInvoice.project = { projectNumber: proj.projectNumber, name: proj.name };
+        }
+      } else {
+        existingInvoice.projectId = undefined;
+        existingInvoice.project = undefined;
+      }
+
       existingInvoice.amountDue = total - existingInvoice.amountPaid;
 
       if (existingInvoice.amountPaid > 0) {
@@ -477,6 +493,10 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       revalidatePath(`/dashboard/invoices/${invoiceId}`);
       revalidatePath(`/dashboard/invoices/${invoiceId}/edit`);
       revalidatePath("/dashboard/stocks");
+      if (existingInvoice.projectId) {
+        revalidatePath("/dashboard/projects");
+        revalidatePath(`/dashboard/projects/${existingInvoice.projectId}`);
+      }
 
       return {
         success: true,
@@ -768,6 +788,19 @@ export async function createInvoice(prevState, formData) {
       return "";
     };
 
+    // Resolve project if provided
+    if (data.projectId) {
+      const proj = await Project.findById(data.projectId)
+        .select("projectNumber name status")
+        .session(mongoSession)
+        .lean();
+      if (proj && proj.status !== "closed") {
+        data._resolvedProject = proj;
+      } else {
+        data.projectId = null;
+      }
+    }
+
     // Create invoice using new Invoice model
     const invoice = await Invoice.create(
       [
@@ -808,6 +841,11 @@ export async function createInvoice(prevState, formData) {
           companyId: new ObjectId(companyId), // Tenant isolation
           // Set expiry only for invoices with committed stock
           ...(draftExpiresAt && { draftExpiresAt }),
+          // Project linking (optional)
+          ...(data.projectId && data._resolvedProject && {
+            projectId: new ObjectId(data.projectId),
+            project: { projectNumber: data._resolvedProject.projectNumber, name: data._resolvedProject.name },
+          }),
         },
       ],
       { session: mongoSession }
@@ -821,6 +859,10 @@ export async function createInvoice(prevState, formData) {
 
     revalidatePath("/dashboard/invoices");
     revalidatePath("/dashboard/stocks");
+    if (data.projectId) {
+      revalidatePath("/dashboard/projects");
+      revalidatePath(`/dashboard/projects/${data.projectId}`);
+    }
 
     return {
       message: `Invoice ${invoiceNumber} created as draft. Stock reserved. Post it to finalize.`,
@@ -1052,6 +1094,10 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
     revalidatePath("/dashboard/invoices");
     revalidatePath(`/dashboard/invoices/${invoiceId}`);
     revalidatePath("/dashboard/payments");
+    if (invoice.projectId) {
+      revalidatePath("/dashboard/projects");
+      revalidatePath(`/dashboard/projects/${invoice.projectId}`);
+    }
 
     return {
       success: true,
@@ -1140,6 +1186,10 @@ export async function cancelInvoice(invoiceId, reason = "") {
   revalidatePath("/dashboard/stocks");
   revalidatePath("/dashboard/movements");
   revalidatePath("/dashboard/accounts");
+  if (invoice.projectId) {
+    revalidatePath("/dashboard/projects");
+    revalidatePath(`/dashboard/projects/${invoice.projectId}`);
+  }
   redirect("/dashboard/invoices");
 }
 
@@ -1257,6 +1307,33 @@ export async function completeInvoice(invoiceId) {
     });
 
     // ============================================
+    // STEP 2b: UPDATE PROJECT FINANCIALS (Revenue + COGS)
+    // ============================================
+    if (invoice.projectId) {
+      // Only count COGS for direct-store items.
+      // Tech stock items (from checkouts/requests) already had their
+      // cost tracked when the stock request was fulfilled.
+      const directStoreCOGS = invoice.items
+        .filter(
+          (item) =>
+            item.itemType === "product" &&
+            !item.relatedCheckout?.checkoutId &&
+            !item.relatedRequest?.requestId,
+        )
+        .reduce((sum, item) => sum + (item.costing?.totalCost || 0), 0);
+
+      const incUpdate = { "financials.totalRevenue": invoice.total };
+      if (directStoreCOGS > 0) {
+        incUpdate["financials.totalCosts"] = directStoreCOGS;
+      }
+      await Project.findByIdAndUpdate(
+        invoice.projectId,
+        { $inc: incUpdate },
+        { session: mongoSession },
+      );
+    }
+
+    // ============================================
     // STEP 3: COMMIT CHECKOUT TRANSACTION
     // ============================================
     // Invoice completed successfully, now commit checkout updates
@@ -1280,6 +1357,10 @@ export async function completeInvoice(invoiceId) {
   revalidatePath("/dashboard/movements");
   revalidatePath("/dashboard/accounts");
   revalidatePath("/dashboard/checkouts");
+  if (invoice.projectId) {
+    revalidatePath("/dashboard/projects");
+    revalidatePath(`/dashboard/projects/${invoice.projectId}`);
+  }
   redirect(`/dashboard/invoices/${invoiceId}`);
 }
 

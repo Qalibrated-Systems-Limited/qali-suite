@@ -30,6 +30,7 @@ import {
   ArrowRight,
   ClipboardList,
   HandCoins,
+  FolderKanban,
 } from "lucide-react";
 import { useDebouncedCallback } from "use-debounce";
 import { globalSearch } from "@/app/mongodb/actions/global-search-action";
@@ -48,8 +49,10 @@ const PAGES = [
   { label: "Delivery Notes", href: "/dashboard/dnotes", icon: Package },
   { label: "Purchase Orders", href: "/dashboard/purchase-orders", icon: FileText },
   { label: "Stock Requests", href: "/dashboard/requests", icon: List },
+  { label: "Categories", href: "/dashboard/categories", icon: List },
   { label: "Claims", href: "/dashboard/claims", icon: HandCoins },
   { label: "My Claims", href: "/dashboard/my-claims", icon: ClipboardList },
+  { label: "Projects", href: "/dashboard/projects", icon: FolderKanban },
   { label: "Expenses", href: "/dashboard/expenses", icon: Wallet },
   { label: "Chart of Accounts", href: "/dashboard/accounts", icon: BookOpen },
   { label: "Journal Entries", href: "/dashboard/journal", icon: FileSpreadsheet },
@@ -67,6 +70,7 @@ const ACTIONS = [
   { label: "Create Request", href: "/dashboard/requests/create", icon: Plus },
   { label: "Request Advance", href: "/dashboard/claims/create/advance", icon: Plus },
   { label: "Submit Reimbursement", href: "/dashboard/claims/create/reimbursement", icon: Plus },
+  { label: "Create Project", href: "/dashboard/projects/create", icon: Plus },
 ];
 
 // ============================================
@@ -182,7 +186,8 @@ export function CommandPalette({ open, setOpen }) {
       results.customers?.length > 0 ||
       results.suppliers?.length > 0 ||
       results.claims?.length > 0 ||
-      results.stockRequests?.length > 0);
+      results.stockRequests?.length > 0 ||
+      results.projects?.length > 0);
 
   // Manual filtering for pages & actions (since shouldFilter={false})
   const filteredPages = queryTrimmed
@@ -476,6 +481,41 @@ export function CommandPalette({ open, setOpen }) {
                         <span className={`text-xs ${statusBadge(r.status)}`}>
                           {r.status?.replace("_", " ")}
                         </span>
+                      </div>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+
+            {/* Projects */}
+            {results.projects?.length > 0 && (
+              <CommandGroup heading="Projects">
+                {results.projects.map((p) => (
+                  <CommandItem
+                    key={`prj-${p._id}`}
+                    value={`prj-${p._id}`}
+                    onSelect={() =>
+                      handleSelect(`/dashboard/projects/${p._id}`)
+                    }
+                  >
+                    <FolderKanban className="mr-2 h-4 w-4 text-violet-500" />
+                    <div className="flex flex-1 items-center justify-between min-w-0">
+                      <div className="min-w-0">
+                        <span className="font-medium">{p.projectNumber}</span>
+                        <span className="ml-2 text-xs text-muted-foreground truncate">
+                          {p.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 ml-2 shrink-0">
+                        <span className={`text-xs ${statusBadge(p.status)}`}>
+                          {p.status}
+                        </span>
+                        {p.client?.name && (
+                          <span className="text-xs text-muted-foreground">
+                            {p.client.name}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </CommandItem>

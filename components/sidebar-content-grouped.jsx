@@ -28,6 +28,7 @@ import {
   ShoppingCart,
   Calendar,
   FolderTree,
+  FolderKanban,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -272,6 +273,18 @@ const getNavigationGroups = (user) => [
         badge: "Soon",
       },
     ],
+  },
+
+  // ============================================
+  // PROJECTS
+  // ============================================
+  {
+    type: "single",
+    icon: FolderKanban,
+    label: "Projects",
+    id: "projects",
+    href: "/dashboard/projects",
+    hidden: !["Admin", "Accountant", "Manager"].includes(user?.role),
   },
 
   // ============================================

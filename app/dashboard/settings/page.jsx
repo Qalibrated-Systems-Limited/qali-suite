@@ -11,6 +11,7 @@ import {
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import AccountSetupCard from "./components/AccountSetupCard";
+import ChartOfAccountsSyncCard from "./components/ChartOfAccountsSyncCard";
 
 // ============================================
 // METADATA
@@ -158,6 +159,8 @@ export default async function SettingsPage() {
           >
             <AccountSetupCard />
           </Suspense>
+
+          <ChartOfAccountsSyncCard />
         </div>
       </div>
     </div>

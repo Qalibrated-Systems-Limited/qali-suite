@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import ExpenseList from "../components/ExpenseList";
 import { getExpenses, getExpenseSummary, getExpenseCategories } from "@/app/mongodb/queries/expense-queries";
+import { FormBanner } from "@/components/ui/form-banner";
 
 export const metadata = {
   title: "Expenses | ERP",
@@ -29,6 +30,7 @@ export default async function ExpensesPage({ searchParams }) {
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
+      <FormBanner searchParams={params} />
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold">Expenses</h1>

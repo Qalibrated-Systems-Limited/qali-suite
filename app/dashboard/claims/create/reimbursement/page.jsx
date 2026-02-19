@@ -1,5 +1,6 @@
 import { ReimbursementForm } from "../../components/ReimbursementForm";
 import { getExpenseAccountsForCategories } from "@/app/mongodb/queries/claimQueries";
+import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
 export const metadata = {
   title: "Create Reimbursement | ERP System",
@@ -7,7 +8,10 @@ export const metadata = {
 };
 
 export default async function CreateReimbursementPage() {
-  const expenseAccounts = await getExpenseAccountsForCategories();
+  const [expenseAccounts, projects] = await Promise.all([
+    getExpenseAccountsForCategories(),
+    getActiveProjects(),
+  ]);
 
-  return <ReimbursementForm expenseAccounts={expenseAccounts} />;
+  return <ReimbursementForm expenseAccounts={expenseAccounts} projects={projects} />;
 }

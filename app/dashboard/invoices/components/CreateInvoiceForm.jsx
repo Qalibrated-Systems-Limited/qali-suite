@@ -57,11 +57,13 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { createInvoice } from "@/app/mongodb/invoice-actions";
 import QuickCreatePartyDialog from "./QuickCreateCustomerDialog";
+import ProjectPicker from "@/components/project-picker";
 
 export default function CreateInvoiceFormClient({
   customers: initialCustomers = [],
   products = [],
   checkouts = [],
+  projects = [],
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -83,6 +85,7 @@ export default function CreateInvoiceFormClient({
   const [purchaseOrderNumber, setPurchaseOrderNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [termsAndConditions, setTermsAndConditions] = useState("");
+  const [projectId, setProjectId] = useState("");
 
   // Line Items
   const [stockItems, setStockItems] = useState([]);
@@ -373,6 +376,7 @@ export default function CreateInvoiceFormClient({
       vatPercentage,
       notes,
       termsAndConditions,
+      projectId: projectId || null,
     };
 
     const formData = new FormData();
@@ -578,6 +582,21 @@ export default function CreateInvoiceFormClient({
               />
             </div>
           </div>
+
+          {projects.length > 0 && (
+            <div className="space-y-1">
+              <Label className="text-foreground">
+                Project{" "}
+                <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <ProjectPicker
+                value={projectId}
+                onValueChange={setProjectId}
+                projects={projects}
+                placeholder="Link to a project..."
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
 

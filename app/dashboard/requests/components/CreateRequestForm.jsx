@@ -45,6 +45,7 @@ import {
   IconAlertCircle,
 } from "@tabler/icons-react";
 import { cn, stockRequestTypes, stockRequestTypeConfig } from "@/lib/utils";
+import ProjectPicker from "@/components/project-picker";
 
 // ============================================
 // HELPER: Get available stock from product
@@ -206,6 +207,7 @@ function CustomerSearchCombobox({ customers, selectedCustomer, onSelect, disable
 export function CreateStockRequestForm({
   products = [],
   customers = [],
+  projects = [],
   user,
   createRequestAction,
 }) {
@@ -234,6 +236,7 @@ export function CreateStockRequestForm({
     state?.values?.requiredByDate ? new Date(state.values.requiredByDate) : undefined
   );
   const [notes, setNotes] = useState(state?.values?.notes || "");
+  const [projectId, setProjectId] = useState(state?.values?.projectId || "");
 
   // Determine if customer is required based on request type
   const typeConfig = stockRequestTypeConfig[requestType];
@@ -372,6 +375,11 @@ export function CreateStockRequestForm({
 
     // Add items as JSON
     formData.append("items", JSON.stringify(items));
+
+    // Project (optional)
+    if (projectId) {
+      formData.append("projectId", projectId);
+    }
 
     startTransition(() => {
       formAction(formData);
@@ -547,6 +555,25 @@ export function CreateStockRequestForm({
               <p className="text-xs text-destructive">{fieldErrors.notes}</p>
             )}
           </div>
+
+          {/* Project (optional) */}
+          {projects.length > 0 && (
+            <div className="space-y-1">
+              <Label>
+                Project{" "}
+                <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <ProjectPicker
+                value={projectId}
+                onValueChange={setProjectId}
+                projects={projects}
+                placeholder="Link to a project..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Tag this request to a project for cost tracking
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

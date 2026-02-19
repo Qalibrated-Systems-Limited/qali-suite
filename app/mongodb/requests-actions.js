@@ -20,6 +20,14 @@ import {
   validateTenantAccess,
 } from "@/lib/utils/tenant-utils";
 import { stockRequestTypes, stockRequestTypeConfig } from "@/lib/utils";
+import Project from "../models/project";
+
+function revalidateProject(projectId) {
+  if (projectId) {
+    revalidatePath("/dashboard/projects");
+    revalidatePath(`/dashboard/projects/${projectId}`);
+  }
+}
 
 // ============================================
 // 1. APPROVE REQUEST (Manager/Admin only)
@@ -184,9 +192,28 @@ export async function approveRequest(requestId, prevState, formData) {
       itemApprovals
     );
 
+    // Update project committed costs if request is linked to a project
+    if (request.projectId) {
+      let committedAmount = 0;
+      for (const item of request.items) {
+        const approval = itemApprovals[item._id.toString()];
+        if (approval && approval.quantity > 0) {
+          committedAmount += approval.quantity * (item.unitPrice || 0);
+        }
+      }
+      if (committedAmount > 0) {
+        await Project.findByIdAndUpdate(
+          request.projectId,
+          { $inc: { "financials.totalCommitted": committedAmount } },
+          { session }
+        );
+      }
+    }
+
     await session.commitTransaction();
     revalidatePath("/dashboard/requests");
     revalidatePath("/dashboard/stocks");
+    revalidateProject(request.projectId);
     success = true;
   } catch (error) {
     if (session && session.inTransaction()) {
@@ -280,6 +307,7 @@ export async function rejectRequest(requestId, prevState, formData) {
 
     await session.commitTransaction();
     revalidatePath("/dashboard/requests");
+    revalidateProject(request.projectId);
     success = true;
   } catch (error) {
     if (session && session.inTransaction()) {
@@ -689,6 +717,7 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
     revalidatePath("/dashboard/stocks");
     revalidatePath("/dashboard/checkouts");
     revalidatePath("/dashboard/dnotes");
+    revalidateProject(request.projectId);
 
     return { message: "success" };
   } catch (error) {
@@ -825,6 +854,7 @@ export async function cancelRequest(requestId, prevState, formData) {
     await session.commitTransaction();
     revalidatePath("/dashboard/requests");
     revalidatePath("/dashboard/stocks");
+    revalidateProject(request.projectId);
     success = true;
   } catch (error) {
     if (session && session.inTransaction()) {
@@ -877,6 +907,9 @@ export async function createStockRequest(prevState, formData) {
     notes: formData.get("notes") || "",
     requiredByDate: formData.get("requiredByDate"),
     items: formData.get("items"),
+    projectId: formData.get("projectId") || "",
+    projectNumber: formData.get("projectNumber") || "",
+    projectName: formData.get("projectName") || "",
   };
 
   try {
@@ -1029,6 +1062,17 @@ export async function createStockRequest(prevState, formData) {
       name: "Internal Use",
     };
 
+    // Resolve project if provided
+    if (rawData.projectId) {
+      const proj = await Project.findById(rawData.projectId)
+        .select("projectNumber name status")
+        .session(session)
+        .lean();
+      if (proj && proj.status !== "closed") {
+        rawData._resolvedProject = proj;
+      }
+    }
+
     // Create request
     await StockRequest.create(
       [
@@ -1051,6 +1095,11 @@ export async function createStockRequest(prevState, formData) {
           approvalHistory: [],
           attachments: [],
           companyId, // Tenant isolation
+          // Project linking (optional)
+          ...(rawData._resolvedProject && {
+            projectId: rawData._resolvedProject._id,
+            project: { projectNumber: rawData._resolvedProject.projectNumber, name: rawData._resolvedProject.name },
+          }),
         },
       ],
       { session }
@@ -1059,6 +1108,7 @@ export async function createStockRequest(prevState, formData) {
     await session.commitTransaction();
 
     revalidatePath("/dashboard/requests");
+    revalidateProject(rawData._resolvedProject?._id);
   } catch (error) {
     if (session && session.inTransaction()) {
       await session.abortTransaction();
@@ -2067,6 +2117,31 @@ export async function fulfillRequest(requestId, prevState, formData) {
     }
 
     // ========================================
+    // UPDATE PROJECT FINANCIALS (move committed → cost)
+    // ========================================
+    if (request.projectId && itemsFulfilledCount > 0) {
+      let fulfilledCost = 0;
+      for (const item of request.items) {
+        const fulfillQty = parseInt(rawFormData[`item_${item._id}`] || "0");
+        if (fulfillQty > 0) {
+          fulfilledCost += fulfillQty * (item.unitPrice || 0);
+        }
+      }
+      if (fulfilledCost > 0) {
+        await Project.findByIdAndUpdate(
+          request.projectId,
+          {
+            $inc: {
+              "financials.totalCosts": fulfilledCost,
+              "financials.totalCommitted": -fulfilledCost,
+            },
+          },
+          { session }
+        );
+      }
+    }
+
+    // ========================================
     // SAVE REQUEST (recalculation already done by addFulfillment)
     // ========================================
     await request.save({ session });
@@ -2080,6 +2155,7 @@ export async function fulfillRequest(requestId, prevState, formData) {
     revalidatePath("/dashboard/dnotes");
     revalidatePath("/dashboard/movement");
     revalidatePath("/dashboard/invoices");
+    revalidateProject(request.projectId);
 
     success = true;
   } catch (error) {

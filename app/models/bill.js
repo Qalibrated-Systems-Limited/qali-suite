@@ -181,6 +181,22 @@ const billSchema = new Schema(
     },
 
     // ==========================================
+    // PROJECT (optional)
+    // ==========================================
+    projectId: {
+      type: Schema.Types.ObjectId,
+      ref: "Project",
+      index: true,
+    },
+    project: {
+      projectNumber: String,
+      name: String,
+    },
+    // Cost code (optional — construction cost categorization)
+    costCodeId: { type: Schema.Types.ObjectId, ref: "ProjectCostCode" },
+    costCode: { code: String, name: String },
+
+    // ==========================================
     // SUPPLIER (Snapshot - immutable after creation)
     // ==========================================
     supplier: {

@@ -4,6 +4,7 @@ import {
   getClaimById,
   getExpenseAccountsForCategories,
 } from "@/app/mongodb/queries/claimQueries";
+import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 import { AdvanceRequestForm } from "../../components/AdvanceRequestFrom";
 import { ReimbursementForm } from "../../components/ReimbursementForm";
 
@@ -44,13 +45,16 @@ export default async function EditClaimPage({ params }) {
     redirect(`/dashboard/claims/${id}`);
   }
 
-  const expenseAccounts = await getExpenseAccountsForCategories();
+  const [expenseAccounts, projects] = await Promise.all([
+    getExpenseAccountsForCategories(),
+    getActiveProjects(),
+  ]);
 
   // Render appropriate form based on claim type
   if (claim.claimType === "advance_request") {
-    return <AdvanceRequestForm claim={claim} />;
+    return <AdvanceRequestForm claim={claim} projects={projects} />;
   } else if (claim.claimType === "reimbursement") {
-    return <ReimbursementForm claim={claim} expenseAccounts={expenseAccounts} />;
+    return <ReimbursementForm claim={claim} expenseAccounts={expenseAccounts} projects={projects} />;
   } else {
     // Settlement claims cannot be edited
     redirect(`/dashboard/claims/${id}`);

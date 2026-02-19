@@ -24,6 +24,20 @@ const stockRequestSchema = new Schema(
       required: [true, "Request type is required"],
       index: true,
     },
+    // Project (optional)
+    projectId: {
+      type: Schema.Types.ObjectId,
+      ref: "Project",
+      index: true,
+    },
+    project: {
+      projectNumber: String,
+      name: String,
+    },
+    // Cost code (optional — construction cost categorization)
+    costCodeId: { type: Schema.Types.ObjectId, ref: "ProjectCostCode" },
+    costCode: { code: String, name: String },
+
     // Customer/Party snapshot (same pattern as Invoice)
     customer: {
       id: {

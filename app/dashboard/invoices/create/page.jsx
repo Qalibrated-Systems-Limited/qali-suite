@@ -5,6 +5,7 @@ import {
   fetchAvailableProducts,
 } from "@/app/mongodb/queries/invoice-queries";
 import { getActiveCheckouts } from "@/app/mongodb/queries/checkout-queries";
+import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 import CreateInvoiceFormClient from "../components/CreateInvoiceForm";
 
 export default async function CreateInvoicePage() {
@@ -33,10 +34,11 @@ export default async function CreateInvoicePage() {
   }
 
   // Fetch customers, products, and active checkouts
-  const [customers, products, checkouts] = await Promise.all([
+  const [customers, products, checkouts, projects] = await Promise.all([
     fetchActiveCustomers(),
     fetchAvailableProducts(),
     getActiveCheckouts(),
+    getActiveProjects(),
   ]);
 
   return (
@@ -54,6 +56,7 @@ export default async function CreateInvoicePage() {
         customers={customers}
         products={products}
         checkouts={checkouts}
+        projects={projects}
       />
     </div>
   );

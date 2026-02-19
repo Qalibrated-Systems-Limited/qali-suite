@@ -88,7 +88,8 @@ export const reimbursementSchema = z.object({
 });
 
 // Define advance types as a const tuple for z.enum
-const advanceTypesEnum = ["travel", "petty_cash", "project", "operational"];
+// "project" removed — project linking is cross-cutting via project picker
+const advanceTypesEnum = ["travel", "petty_cash", "operational"];
 
 export const advanceRequestSchema = z
   .object({
@@ -121,10 +122,10 @@ export const advanceRequestSchema = z
       z.string().optional()
     ),
 
-    // Project-specific (optional - validated conditionally)
-    projectCode: z.preprocess(
+    // Project picker (optional — available for all advance types)
+    projectId: z.preprocess(
       (val) => (val === null ? undefined : val),
-      z.string().max(50, "Project code is too long").optional()
+      z.string().optional()
     ),
 
     // Common optional fields
@@ -175,16 +176,6 @@ export const advanceRequestSchema = z
       }
     }
 
-    // Project type requires project code
-    if (data.advanceType === "project") {
-      if (!data.projectCode?.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Project code is required for project advances",
-          path: ["projectCode"],
-        });
-      }
-    }
   });
 
 export const deliveryNoteZodSchema = z.object({

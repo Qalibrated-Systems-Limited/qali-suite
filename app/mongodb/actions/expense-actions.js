@@ -7,11 +7,19 @@ import mongoose from "mongoose";
 
 import Expense from "@/app/models/expenses";
 import Account from "@/app/models/account";
+import Project from "@/app/models/project";
 import dbConnect from "@/app/config/dbConnect";
 import {
   getTenantContext,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+
+function revalidateProject(projectId) {
+  if (projectId) {
+    revalidatePath("/dashboard/projects");
+    revalidatePath(`/dashboard/projects/${projectId}`);
+  }
+}
 
 // ============================================
 // ROLE-BASED ACCESS
@@ -83,29 +91,36 @@ function parseReceipts(formData, user) {
   return [];
 }
 
-export async function createExpense(prevState, formData) {
+export async function createExpense(prevState, formData, { skipRedirect = false } = {}) {
+  const rawValues = Object.fromEntries(formData.entries());
+  let redirectUrl;
+
   try {
     const { companyId, user } = await getTenantContext();
 
     if (!hasRole(user, EXPENSE_ROLES.CREATE)) {
-      return { success: false, error: "Insufficient permissions to create expenses" };
+      return { errors: { _form: ["Insufficient permissions to create expenses"] }, values: rawValues };
     }
 
     await dbConnect();
 
-    // Parse and validate form data
-    const rawData = Object.fromEntries(formData.entries());
-    const validatedData = expenseSchema.parse(rawData);
+    // Validate
+    const result = expenseSchema.safeParse(rawValues);
+    if (!result.success) {
+      return { errors: result.error.flatten().fieldErrors, values: rawValues };
+    }
+
+    const validatedData = result.data;
     const receipts = parseReceipts(formData, user);
 
     // Get expense account details
     const expenseAccount = await Account.findById(validatedData.accountId);
     if (!expenseAccount) {
-      return { success: false, error: "Expense account not found" };
+      return { errors: { _form: ["Expense account not found"] }, values: rawValues };
     }
 
     if (expenseAccount.accountType !== "expense") {
-      return { success: false, error: "Selected account is not an expense account" };
+      return { errors: { _form: ["Selected account is not an expense account"] }, values: rawValues };
     }
 
     // Generate expense number
@@ -114,6 +129,21 @@ export async function createExpense(prevState, formData) {
     // Calculate totals
     const subtotal = validatedData.amount;
     const total = subtotal + validatedData.taxAmount - validatedData.withholdingTax;
+
+    // Resolve project (optional)
+    let projectFields = {};
+    const rawProjectId = rawValues.projectId;
+    if (rawProjectId) {
+      const project = await Project.findById(rawProjectId)
+        .select("projectNumber name status")
+        .lean();
+      if (project && project.status !== "closed") {
+        projectFields = {
+          projectId: project._id,
+          project: { projectNumber: project.projectNumber, name: project.name },
+        };
+      }
+    }
 
     // Create expense
     const expense = await Expense.create({
@@ -135,7 +165,7 @@ export async function createExpense(prevState, formData) {
       paidFrom: validatedData.paidFrom || null,
       paidAt: validatedData.paymentMethod !== "unpaid" ? new Date() : null,
       vendor: {
-        id: validatedData.vendorId || null, // Party ID if selected from list
+        id: validatedData.vendorId || null,
         name: validatedData.vendorName,
         phone: validatedData.vendorPhone,
         email: validatedData.vendorEmail,
@@ -151,55 +181,65 @@ export async function createExpense(prevState, formData) {
       receipts,
       status: "draft",
       createdBy: formatUser(user),
+      ...projectFields,
     });
 
     revalidatePath("/dashboard/expenses");
+    revalidateProject(expense.projectId);
 
-    return {
-      success: true,
-      message: `Expense ${expenseNumber} created`,
-      data: { expenseId: expense._id.toString() },
-    };
+    if (skipRedirect) {
+      return { success: true, data: { expenseId: expense._id.toString() } };
+    }
+
+    redirectUrl = `/dashboard/expenses?success=${encodeURIComponent(`Expense ${expenseNumber} created`)}`;
   } catch (error) {
     console.error("Create expense error:", error);
-    if (error instanceof z.ZodError) {
-      return { success: false, error: error.errors[0].message };
-    }
-    return { success: false, error: error.message || "Failed to create expense" };
+    return {
+      errors: { _form: [error.message || "Failed to create expense"] },
+      values: rawValues,
+    };
   }
+
+  redirect(redirectUrl);
 }
 
 // ============================================
 // UPDATE EXPENSE
 // ============================================
 export async function updateExpense(expenseId, prevState, formData) {
+  const rawValues = Object.fromEntries(formData.entries());
+  let redirectUrl;
+
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     await dbConnect();
 
-    // Get expense
     const expense = await Expense.findOne(
       withTenantScope({ _id: expenseId }, companyId, isSuperAdmin)
     );
 
     if (!expense) {
-      return { success: false, error: "Expense not found" };
+      return { errors: { _form: ["Expense not found"] }, values: rawValues };
     }
 
     if (expense.status !== "draft" && expense.status !== "rejected") {
-      return { success: false, error: "Can only edit draft or rejected expenses" };
+      return { errors: { _form: ["Can only edit draft or rejected expenses"] }, values: rawValues };
     }
 
-    // Parse and validate form data
-    const rawData = Object.fromEntries(formData.entries());
-    const validatedData = expenseSchema.parse(rawData);
+    // Validate
+    const result = expenseSchema.safeParse(rawValues);
+    if (!result.success) {
+      return { errors: result.error.flatten().fieldErrors, values: rawValues };
+    }
+
+    const validatedData = result.data;
     const receipts = parseReceipts(formData, user);
 
     // Get expense account details
     const expenseAccount = await Account.findById(validatedData.accountId);
     if (!expenseAccount || expenseAccount.accountType !== "expense") {
-      return { success: false, error: "Invalid expense account" };
+      return { errors: { _form: ["Invalid expense account"] }, values: rawValues };
     }
 
     // Calculate totals
@@ -236,6 +276,21 @@ export async function updateExpense(expenseId, prevState, formData) {
     expense.notes = validatedData.notes;
     expense.lastModifiedBy = formatUser(user);
 
+    // Update project (optional)
+    const updatedProjectId = rawValues.projectId;
+    if (updatedProjectId) {
+      const project = await Project.findById(updatedProjectId)
+        .select("projectNumber name status")
+        .lean();
+      if (project && project.status !== "closed") {
+        expense.projectId = project._id;
+        expense.project = { projectNumber: project.projectNumber, name: project.name };
+      }
+    } else {
+      expense.projectId = undefined;
+      expense.project = undefined;
+    }
+
     // If was rejected, reset to draft
     if (expense.status === "rejected") {
       expense.status = "draft";
@@ -248,18 +303,18 @@ export async function updateExpense(expenseId, prevState, formData) {
 
     revalidatePath("/dashboard/expenses");
     revalidatePath(`/dashboard/expenses/${expenseId}`);
+    revalidateProject(expense.projectId);
 
-    return {
-      success: true,
-      message: `Expense ${expense.expenseNumber} updated`,
-    };
+    redirectUrl = `/dashboard/expenses/${expenseId}?success=${encodeURIComponent(`Expense ${expense.expenseNumber} updated`)}`;
   } catch (error) {
     console.error("Update expense error:", error);
-    if (error instanceof z.ZodError) {
-      return { success: false, error: error.errors[0].message };
-    }
-    return { success: false, error: error.message || "Failed to update expense" };
+    return {
+      errors: { _form: [error.message || "Failed to update expense"] },
+      values: rawValues,
+    };
   }
+
+  redirect(redirectUrl);
 }
 
 // ============================================
@@ -288,6 +343,7 @@ export async function submitExpense(expenseId) {
     revalidatePath("/dashboard/expenses");
     revalidatePath(`/dashboard/expenses/${expenseId}`);
     revalidatePath("/dashboard/expenses/pending");
+    revalidateProject(expense.projectId);
 
     return {
       success: true,
@@ -326,9 +382,17 @@ export async function approveExpense(expenseId) {
 
     await expense.approve(formatUser(user));
 
+    // Update project financials — approved expense = committed cost
+    if (expense.projectId) {
+      await Project.findByIdAndUpdate(expense.projectId, {
+        $inc: { "financials.totalCommitted": expense.total },
+      });
+    }
+
     revalidatePath("/dashboard/expenses");
     revalidatePath(`/dashboard/expenses/${expenseId}`);
     revalidatePath("/dashboard/expenses/pending");
+    revalidateProject(expense.projectId);
 
     return {
       success: true,
@@ -372,6 +436,7 @@ export async function rejectExpense(expenseId, prevState, formData) {
     revalidatePath("/dashboard/expenses");
     revalidatePath(`/dashboard/expenses/${expenseId}`);
     revalidatePath("/dashboard/expenses/pending");
+    revalidateProject(expense.projectId);
 
     return {
       success: true,
@@ -427,9 +492,20 @@ export async function markExpenseAsPaid(expenseId, prevState, formData) {
       paidAt: paidAt ? new Date(paidAt) : new Date(),
     });
 
+    // Update project financials — payment moves from committed to actual cost
+    if (expense.projectId) {
+      await Project.findByIdAndUpdate(expense.projectId, {
+        $inc: {
+          "financials.totalCosts": expense.total,
+          "financials.totalCommitted": -expense.total,
+        },
+      });
+    }
+
     revalidatePath("/dashboard/expenses");
     revalidatePath(`/dashboard/expenses/${expenseId}`);
     revalidatePath("/dashboard/journal");
+    revalidateProject(expense.projectId);
 
     return {
       success: true,
@@ -473,6 +549,7 @@ export async function deleteExpense(expenseId) {
     await Expense.deleteOne({ _id: expenseId });
 
     revalidatePath("/dashboard/expenses");
+    revalidateProject(expense.projectId);
 
     return {
       success: true,
@@ -488,26 +565,20 @@ export async function deleteExpense(expenseId) {
 // QUICK EXPENSE (Create + Submit in one step)
 // ============================================
 export async function quickExpense(prevState, formData) {
-  const result = await createExpense(prevState, formData);
+  // Create without redirecting
+  const result = await createExpense(prevState, formData, { skipRedirect: true });
 
-  if (!result.success) {
+  // If createExpense returned errors, pass them through
+  if (result?.errors) {
     return result;
   }
 
   // Auto-submit for approval
   const submitResult = await submitExpense(result.data.expenseId);
 
-  if (!submitResult.success) {
-    return {
-      success: true,
-      message: `${result.message} (Note: Auto-submit failed - ${submitResult.error})`,
-      data: result.data,
-    };
-  }
+  const message = submitResult.success
+    ? "Expense created and submitted for approval"
+    : `Expense created (auto-submit failed: ${submitResult.error})`;
 
-  return {
-    success: true,
-    message: `Expense created and submitted for approval`,
-    data: result.data,
-  };
+  redirect(`/dashboard/expenses?success=${encodeURIComponent(message)}`);
 }

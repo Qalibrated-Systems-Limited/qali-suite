@@ -36,6 +36,20 @@ const employeeClaimSchema = new Schema(
       // Prevents double settlement
     },
 
+    // Project (optional — any claim can be linked to a project)
+    projectId: {
+      type: Schema.Types.ObjectId,
+      ref: "Project",
+      index: true,
+    },
+    project: {
+      projectNumber: String,
+      name: String,
+    },
+    // Cost code (optional — construction cost categorization)
+    costCodeId: { type: Schema.Types.ObjectId, ref: "ProjectCostCode" },
+    costCode: { code: String, name: String },
+
     // Employee (links to User AND Party)
     employee: {
       userId: {
@@ -70,12 +84,13 @@ const employeeClaimSchema = new Schema(
       index: true,
     },
 
-    // For Advance Request (travel, petty_cash, project, operational)
+    // For Advance Request (travel, petty_cash, operational)
+    // "project" kept in enum for backward compatibility with existing data
     advanceDetails: {
       advanceType: {
         type: String,
         enum: {
-          values: advanceTypesList,
+          values: [...advanceTypesList, "project"],
           message: "{VALUE} is not a valid advance type",
         },
         default: "travel",
@@ -91,7 +106,7 @@ const employeeClaimSchema = new Schema(
         to: Date,
       },
       destination: String,
-      // Project-specific (optional - required only for project type)
+      // Legacy field — kept for existing data, no longer set on new claims
       projectCode: String,
       // Common optional
       estimatedExpenses: String,

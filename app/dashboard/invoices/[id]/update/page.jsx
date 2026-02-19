@@ -6,6 +6,7 @@ import {
   fetchAvailableProducts,
 } from "@/app/mongodb/queries/invoice-queries";
 import { getActiveCheckouts } from "@/app/mongodb/queries/checkout-queries";
+import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 import EditInvoiceFormClient from "../../components/EditInvoiceForm";
 import { serializeBsonType } from "@/lib/utils";
 
@@ -69,10 +70,11 @@ export default async function EditInvoicePage({ params }) {
   }
 
   // Fetch customers, products, and active checkouts in parallel
-  const [customers, products, checkouts] = await Promise.all([
+  const [customers, products, checkouts, projects] = await Promise.all([
     fetchActiveCustomers(),
     fetchAvailableProducts(),
     getActiveCheckouts(),
+    getActiveProjects(),
   ]);
 
   return (
@@ -81,6 +83,7 @@ export default async function EditInvoicePage({ params }) {
       customers={customers}
       products={products}
       checkouts={checkouts}
+      projects={projects}
       user={user}
     />
   );

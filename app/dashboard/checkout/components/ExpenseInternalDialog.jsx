@@ -13,15 +13,9 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { expenseInternalCheckout } from "@/app/mongodb/checkout-action";
 import { Receipt, Loader2, Package, User, AlertCircle } from "lucide-react";
+import ExpenseAccountCombobox from "@/components/expense-account-combobox";
 
 export function ExpenseInternalDialog({
   checkout,
@@ -38,6 +32,7 @@ export function ExpenseInternalDialog({
 
   const [selectedAccount, setSelectedAccount] = useState("");
   const [quantity, setQuantity] = useState(checkout.quantity);
+  const [allAccounts, setAllAccounts] = useState(expenseAccounts);
 
   // Reset form when dialog opens
   useEffect(() => {
@@ -109,32 +104,22 @@ export function ExpenseInternalDialog({
 
             {/* Expense Account Selection */}
             <div className="space-y-2">
-              <Label htmlFor="expenseAccountId">
+              <Label>
                 Expense Account <span className="text-red-500">*</span>
               </Label>
-              <Select
-                name="expenseAccountId"
+              <ExpenseAccountCombobox
                 value={selectedAccount}
-                onValueChange={setSelectedAccount}
-                required
-              >
-                <SelectTrigger className="bg-background border-border">
-                  <SelectValue placeholder="Select expense account..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {expenseAccounts.length === 0 ? (
-                    <SelectItem value="" disabled>
-                      No expense accounts available
-                    </SelectItem>
-                  ) : (
-                    expenseAccounts.map((account) => (
-                      <SelectItem key={account._id} value={account._id}>
-                        {account.accountCode} - {account.accountName}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+                onValueChange={(id) => setSelectedAccount(id)}
+                accounts={allAccounts}
+                onAccountCreated={(acc) =>
+                  setAllAccounts((prev) =>
+                    [...prev, acc].sort((a, b) =>
+                      a.accountCode.localeCompare(b.accountCode),
+                    ),
+                  )
+                }
+                placeholder="Select expense account..."
+              />
               <input
                 type="hidden"
                 name="expenseAccountId"

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { FormBanner } from "@/components/ui/form-banner";
 import { getSignedUrl } from "@/lib/cloudinary";
 import {
   ChevronLeft,
@@ -142,8 +143,9 @@ async function getPaymentAccounts() {
   }));
 }
 
-export default async function ExpenseDetailPage({ params }) {
+export default async function ExpenseDetailPage({ params, searchParams }) {
   const { id } = await params;
+  const resolvedSearchParams = await searchParams;
   const [expense, paymentAccounts] = await Promise.all([
     getExpenseById(id),
     getPaymentAccounts(),
@@ -158,6 +160,7 @@ export default async function ExpenseDetailPage({ params }) {
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
+      <FormBanner searchParams={resolvedSearchParams} />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div className="flex items-start gap-4">

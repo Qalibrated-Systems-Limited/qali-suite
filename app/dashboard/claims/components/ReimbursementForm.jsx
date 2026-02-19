@@ -8,19 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
   ArrowLeft,
   Loader2,
   Send,
@@ -29,8 +16,6 @@ import {
   Receipt as ReceiptIcon,
   DollarSign,
   Upload,
-  ChevronsUpDown,
-  Check,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -40,70 +25,8 @@ import {
 import { toast } from "sonner";
 import { useActionState } from "react";
 import { FileUpload } from "@/components/file-upload";
-import { cn } from "@/lib/utils";
-
-// ============================================
-// EXPENSE ACCOUNT COMBOBOX COMPONENT
-// ============================================
-function ExpenseAccountCombobox({ value, onValueChange, expenseAccounts }) {
-  const [open, setOpen] = useState(false);
-  const selected = value
-    ? expenseAccounts.find((a) => a._id === value)
-    : null;
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="h-11 w-full justify-between font-normal"
-        >
-          {selected ? (
-            <span className="truncate">
-              {selected.accountCode} - {selected.accountName}
-            </span>
-          ) : (
-            <span className="text-muted-foreground">Select expense account...</span>
-          )}
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-75 p-0" align="start">
-        <Command>
-          <CommandInput placeholder="Search accounts..." />
-          <CommandList>
-            <CommandEmpty>No account found.</CommandEmpty>
-            <CommandGroup>
-              {expenseAccounts.map((acc) => (
-                <CommandItem
-                  key={acc._id}
-                  value={`${acc.accountCode} ${acc.accountName}`}
-                  onSelect={() => {
-                    onValueChange(acc._id);
-                    setOpen(false);
-                  }}
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4",
-                      value === acc._id ? "opacity-100" : "opacity-0"
-                    )}
-                  />
-                  <span className="font-mono text-xs mr-2 text-muted-foreground">
-                    {acc.accountCode}
-                  </span>
-                  {acc.accountName}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}
+import ProjectPicker from "@/components/project-picker";
+import ExpenseAccountCombobox from "@/components/expense-account-combobox";
 
 function SubmitButton({ isEdit, pending }) {
   return (
@@ -127,9 +50,13 @@ function SubmitButton({ isEdit, pending }) {
   );
 }
 
-export function ReimbursementForm({ claim = null, expenseAccounts = [] }) {
+export function ReimbursementForm({ claim = null, expenseAccounts = [], projects = [] }) {
   const router = useRouter();
   const isEdit = !!claim;
+  const [allAccounts, setAllAccounts] = useState(expenseAccounts);
+
+  // Project selection (optional)
+  const [projectId, setProjectId] = useState(claim?.projectId || "");
 
   // Use different action based on mode
   const action = isEdit
@@ -342,6 +269,25 @@ export function ReimbursementForm({ claim = null, expenseAccounts = [] }) {
                 className="resize-none"
               />
             </div>
+
+            {/* Project Selection (optional) */}
+            {projects.length > 0 && (
+              <div className="space-y-2.5">
+                <Label className="text-sm sm:text-base font-medium">
+                  Link to Project <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <input type="hidden" name="projectId" value={projectId} />
+                <ProjectPicker
+                  value={projectId}
+                  onValueChange={setProjectId}
+                  projects={projects}
+                  placeholder="Select a project..."
+                />
+                <p className="text-xs sm:text-sm text-muted-foreground">
+                  Link this reimbursement to a project for budget tracking
+                </p>
+              </div>
+            )}
           </Card>
 
           {/* Expense Items Card */}
@@ -413,10 +359,19 @@ export function ReimbursementForm({ claim = null, expenseAccounts = [] }) {
                       </Label>
                       <ExpenseAccountCombobox
                         value={item.expenseAccountId}
-                        onValueChange={(value) =>
-                          updateItem(item.id, "expenseAccountId", value)
+                        onValueChange={(id) =>
+                          updateItem(item.id, "expenseAccountId", id)
                         }
-                        expenseAccounts={expenseAccounts}
+                        accounts={allAccounts}
+                        onAccountCreated={(acc) =>
+                          setAllAccounts((prev) =>
+                            [...prev, acc].sort((a, b) =>
+                              a.accountCode.localeCompare(b.accountCode),
+                            ),
+                          )
+                        }
+                        placeholder="Select expense account..."
+                        className="h-11"
                       />
                     </div>
 

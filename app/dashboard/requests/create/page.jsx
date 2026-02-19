@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { CreateStockRequestForm } from "../components/CreateRequestForm";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
 export const metadata = {
   title: "Create Stock Request",
@@ -59,9 +60,10 @@ export default async function CreateRequestPage() {
   const { companyId } = await getTenantContext();
 
   // Fetch products and customers in parallel
-  const [products, customers] = await Promise.all([
+  const [products, customers, projects] = await Promise.all([
     getProducts(companyId),
     getCustomers(companyId),
+    getActiveProjects(),
   ]);
 
   return (
@@ -96,6 +98,7 @@ export default async function CreateRequestPage() {
       <CreateStockRequestForm
         products={products}
         customers={customers}
+        projects={projects}
         user={session.user}
         createRequestAction={createStockRequest}
       />

@@ -12,6 +12,7 @@ import {
   Receipt,
   FileText,
   User,
+  FolderKanban,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -51,6 +52,13 @@ export const SidebarContent = ({ onItemClick, user }) => {
       label: "Requests",
       id: "requests",
       href: "/dashboard/requests",
+    },
+    {
+      icon: FolderKanban,
+      label: "Projects",
+      id: "projects",
+      href: "/dashboard/projects",
+      hidden: !["Admin", "admin", "Accountant", "Manager"].includes(user?.role),
     },
     {
       icon: Package,

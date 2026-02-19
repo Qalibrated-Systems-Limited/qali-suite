@@ -7,6 +7,7 @@ import Party from "@/app/models/parties";
 import dbConnect from "@/app/config/dbConnect";
 import { getExpenseCategories } from "@/app/mongodb/queries/expense-queries";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
 export const metadata = {
   title: "Create Expense | ERP",
@@ -75,7 +76,10 @@ async function getFormData() {
 }
 
 export default async function CreateExpensePage() {
-  const { accounts, paymentAccounts, vendors } = await getFormData();
+  const [{ accounts, paymentAccounts, vendors }, projects] = await Promise.all([
+    getFormData(),
+    getActiveProjects(),
+  ]);
   const categories = getExpenseCategories();
 
   return (
@@ -114,6 +118,7 @@ export default async function CreateExpensePage() {
           paymentAccounts={paymentAccounts}
           vendors={vendors}
           categories={categories}
+          projects={projects}
         />
       </div>
     </div>

@@ -1,8 +1,7 @@
-import React from "react";
 import { AdvanceRequestForm } from "../../components/AdvanceRequestFrom";
+import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
-function page() {
-  return <AdvanceRequestForm />;
+export default async function AdvanceCreatePage() {
+  const projects = await getActiveProjects();
+  return <AdvanceRequestForm projects={projects} />;
 }
-
-export default page;

@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState } from "react";
-import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
@@ -17,6 +16,7 @@ import {
   Plus,
   PenLine,
   Upload,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,8 +46,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { createExpense, quickExpense, updateExpense } from "@/app/mongodb/actions/expense-actions";
 import { FileUpload } from "@/components/file-upload";
+import ProjectPicker from "@/components/project-picker";
+import ExpenseAccountCombobox from "@/components/expense-account-combobox";
 
 const formatCurrency = (amount) => {
   return new Intl.NumberFormat("en-KE", {
@@ -60,16 +68,17 @@ const formatCurrency = (amount) => {
 // ============================================
 // VENDOR COMBOBOX - Select from parties or enter manually
 // ============================================
-function VendorCombobox({ vendors = [], defaultValue, error }) {
+function VendorCombobox({ vendors = [], defaultValue, error, onVendorCreated }) {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState(defaultValue ? "select" : "select"); // "select" or "manual"
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [mode, setMode] = useState("select"); // "select" or "manual"
   const [vendorId, setVendorId] = useState(defaultValue?.vendorId || "");
   const [vendorName, setVendorName] = useState(defaultValue?.name || "");
   const [vendorTaxPin, setVendorTaxPin] = useState(defaultValue?.taxPin || "");
   const [vendorPhone, setVendorPhone] = useState(defaultValue?.phone || "");
   const [vendorEmail, setVendorEmail] = useState(defaultValue?.email || "");
-
-  const selectedVendor = vendors.find((v) => v._id === vendorId);
 
   // When vendor is selected, populate fields
   const handleSelect = (vendor) => {
@@ -88,152 +97,280 @@ function VendorCombobox({ vendors = [], defaultValue, error }) {
     setOpen(false);
   };
 
-  return (
-    <div className="space-y-4">
-      {/* Hidden inputs for form submission */}
-      <input type="hidden" name="vendorId" value={vendorId} />
-      <input type="hidden" name="vendorName" value={vendorName} />
-      <input type="hidden" name="vendorTaxPin" value={vendorTaxPin} />
-      <input type="hidden" name="vendorPhone" value={vendorPhone} />
-      <input type="hidden" name="vendorEmail" value={vendorEmail} />
+  async function handleCreateVendor(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setCreating(true);
+    setCreateError("");
 
-      <div className="grid sm:grid-cols-2 gap-4">
-        {/* Vendor Selection */}
-        <div className="space-y-2">
-          <Label>
-            Vendor / Payee <span className="text-destructive">*</span>
-          </Label>
-          <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
+    const formData = new FormData(e.target);
+    formData.set("type", "supplier");
+    const { quickCreateParty } = await import("@/app/mongodb/actions/party-actions");
+    const result = await quickCreateParty(formData);
+
+    if (result.success) {
+      handleSelect({
+        _id: result.party._id,
+        name: result.party.name,
+        taxPin: result.party.taxPin || "",
+        phone: result.party.phone || "",
+        email: result.party.email || "",
+      });
+      onVendorCreated?.(result.party);
+      setDialogOpen(false);
+      e.target.reset();
+    } else {
+      setCreateError(result.error);
+    }
+    setCreating(false);
+  }
+
+  const createButton = (
+    <button
+      type="button"
+      onClick={() => { setOpen(false); setDialogOpen(true); }}
+      className="flex items-center gap-2 w-full px-2 py-2 text-sm font-medium text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/10 rounded-md cursor-pointer transition-colors"
+    >
+      <div className="flex items-center justify-center h-5 w-5 rounded bg-yellow-500/15 shrink-0">
+        <Plus className="h-3.5 w-3.5" />
+      </div>
+      Create vendor
+    </button>
+  );
+
+  return (
+    <>
+      <div className="space-y-4">
+        {/* Hidden inputs for form submission */}
+        <input type="hidden" name="vendorId" value={vendorId} />
+        <input type="hidden" name="vendorName" value={vendorName} />
+        <input type="hidden" name="vendorTaxPin" value={vendorTaxPin} />
+        <input type="hidden" name="vendorPhone" value={vendorPhone} />
+        <input type="hidden" name="vendorEmail" value={vendorEmail} />
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          {/* Vendor Selection */}
+          <div className="space-y-2">
+            <Label>
+              Vendor / Payee <span className="text-destructive">*</span>
+            </Label>
+            <Popover open={open} onOpenChange={setOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={open}
+                  className={cn(
+                    "w-full justify-between font-normal",
+                    !vendorName && "text-muted-foreground",
+                    error && "border-destructive"
+                  )}
+                >
+                  {vendorName ? (
+                    <span className="flex items-center gap-2 truncate">
+                      <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                      {vendorName}
+                      {mode === "manual" && (
+                        <span className="text-xs text-muted-foreground">(manual)</span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4" />
+                      Select or enter vendor...
+                    </span>
+                  )}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search vendors..." />
+                  <CommandList>
+                    <CommandEmpty>
+                      <div className="py-2 text-center space-y-2">
+                        <p className="text-sm text-muted-foreground">No vendor found.</p>
+                        {createButton}
+                      </div>
+                    </CommandEmpty>
+                    <CommandGroup heading="Registered Vendors">
+                      {vendors.map((vendor) => (
+                        <CommandItem
+                          key={vendor._id}
+                          value={`${vendor.name} ${vendor.taxPin || ""}`}
+                          onSelect={() => handleSelect(vendor)}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              vendorId === vendor._id ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          <div className="flex flex-col">
+                            <span className="font-medium">{vendor.name}</span>
+                            {vendor.taxPin && (
+                              <span className="text-xs text-muted-foreground">
+                                PIN: {vendor.taxPin}
+                              </span>
+                            )}
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                    <CommandSeparator />
+                    <CommandGroup>
+                      <CommandItem onSelect={handleManualEntry}>
+                        <PenLine className="mr-2 h-4 w-4" />
+                        Enter vendor manually
+                      </CommandItem>
+                    </CommandGroup>
+                  </CommandList>
+                  <div className="border-t p-1">{createButton}</div>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* KRA PIN */}
+          <div className="space-y-2">
+            <Label htmlFor="vendorTaxPinDisplay">KRA PIN</Label>
+            <Input
+              id="vendorTaxPinDisplay"
+              placeholder="e.g., P051234567X"
+              value={vendorTaxPin}
+              onChange={(e) => setVendorTaxPin(e.target.value)}
+              disabled={mode === "select" && vendorId}
+            />
+          </div>
+        </div>
+
+        {/* Manual entry fields */}
+        {mode === "manual" && (
+          <div className="grid sm:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="vendorNameManual">
+                Vendor Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="vendorNameManual"
+                placeholder="e.g., Kenya Power"
+                value={vendorName}
+                onChange={(e) => setVendorName(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="vendorPhoneManual">Phone</Label>
+              <Input
+                id="vendorPhoneManual"
+                placeholder="+254..."
+                value={vendorPhone}
+                onChange={(e) => setVendorPhone(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="vendorEmailManual">Email</Label>
+              <Input
+                id="vendorEmailManual"
+                type="email"
+                placeholder="vendor@example.com"
+                value={vendorEmail}
+                onChange={(e) => setVendorEmail(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Quick-create vendor dialog */}
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(v) => {
+          setDialogOpen(v);
+          if (!v) setCreateError("");
+        }}
+      >
+        <DialogContent className="sm:max-w-sm bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="text-foreground flex items-center gap-2">
+              <Plus className="h-4 w-4 text-yellow-500" />
+              New Vendor
+            </DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateVendor} className="space-y-4">
+            {createError && (
+              <div className="flex items-center gap-2 p-2 rounded bg-red-500/10 border border-red-500/20 text-sm text-red-600 dark:text-red-400">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {createError}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>
+                Name <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                name="name"
+                placeholder="Vendor name"
+                required
+                disabled={creating}
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Phone</Label>
+              <Input
+                name="phone"
+                type="tel"
+                placeholder="0712 345 678"
+                disabled={creating}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input
+                name="email"
+                type="email"
+                placeholder="vendor@example.com"
+                disabled={creating}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
               <Button
                 type="button"
                 variant="outline"
-                role="combobox"
-                aria-expanded={open}
-                className={cn(
-                  "w-full justify-between font-normal",
-                  !vendorName && "text-muted-foreground",
-                  error && "border-destructive"
-                )}
+                onClick={() => setDialogOpen(false)}
+                disabled={creating}
               >
-                {vendorName ? (
-                  <span className="flex items-center gap-2 truncate">
-                    <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
-                    {vendorName}
-                    {mode === "manual" && (
-                      <span className="text-xs text-muted-foreground">(manual)</span>
-                    )}
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <Building2 className="h-4 w-4" />
-                    Select or enter vendor...
-                  </span>
-                )}
-                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                Cancel
               </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-              <Command>
-                <CommandInput placeholder="Search vendors..." />
-                <CommandList>
-                  <CommandEmpty>No vendor found.</CommandEmpty>
-                  <CommandGroup heading="Registered Vendors">
-                    {vendors.map((vendor) => (
-                      <CommandItem
-                        key={vendor._id}
-                        value={`${vendor.name} ${vendor.taxPin || ""}`}
-                        onSelect={() => handleSelect(vendor)}
-                      >
-                        <Check
-                          className={cn(
-                            "mr-2 h-4 w-4",
-                            vendorId === vendor._id ? "opacity-100" : "opacity-0"
-                          )}
-                        />
-                        <div className="flex flex-col">
-                          <span className="font-medium">{vendor.name}</span>
-                          {vendor.taxPin && (
-                            <span className="text-xs text-muted-foreground">
-                              PIN: {vendor.taxPin}
-                            </span>
-                          )}
-                        </div>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                  <CommandSeparator />
-                  <CommandGroup>
-                    <CommandItem onSelect={handleManualEntry}>
-                      <PenLine className="mr-2 h-4 w-4" />
-                      Enter vendor manually
-                    </CommandItem>
-                    <CommandItem asChild>
-                      <Link
-                        href="/dashboard/parties/create?type=supplier&returnTo=/dashboard/expenses/create"
-                        className="flex items-center"
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add new vendor
-                      </Link>
-                    </CommandItem>
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </div>
-
-        {/* KRA PIN */}
-        <div className="space-y-2">
-          <Label htmlFor="vendorTaxPinDisplay">KRA PIN</Label>
-          <Input
-            id="vendorTaxPinDisplay"
-            placeholder="e.g., P051234567X"
-            value={vendorTaxPin}
-            onChange={(e) => setVendorTaxPin(e.target.value)}
-            disabled={mode === "select" && vendorId}
-          />
-        </div>
-      </div>
-
-      {/* Manual entry fields or editable when in manual mode */}
-      {mode === "manual" && (
-        <div className="grid sm:grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="vendorNameManual">
-              Vendor Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="vendorNameManual"
-              placeholder="e.g., Kenya Power"
-              value={vendorName}
-              onChange={(e) => setVendorName(e.target.value)}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="vendorPhoneManual">Phone</Label>
-            <Input
-              id="vendorPhoneManual"
-              placeholder="+254..."
-              value={vendorPhone}
-              onChange={(e) => setVendorPhone(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="vendorEmailManual">Email</Label>
-            <Input
-              id="vendorEmailManual"
-              type="email"
-              placeholder="vendor@example.com"
-              value={vendorEmail}
-              onChange={(e) => setVendorEmail(e.target.value)}
-            />
-          </div>
-        </div>
-      )}
-    </div>
+              <Button
+                type="submit"
+                className="bg-yellow-500 hover:bg-yellow-600 text-black font-medium"
+                disabled={creating}
+              >
+                {creating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Vendor
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -334,11 +471,10 @@ function AccountCombobox({
 }
 
 // ============================================
-// CATEGORY COMBOBOX - Searchable static list
+// CATEGORY COMBOBOX - Searchable static list (controlled)
 // ============================================
-function CategoryCombobox({ categories = [], defaultValue, error }) {
+function CategoryCombobox({ categories = [], value, onValueChange, error }) {
   const [open, setOpen] = useState(false);
-  const [value, setValue] = useState(defaultValue || "");
 
   const selectedCategory = categories.find((c) => c.value === value);
 
@@ -376,7 +512,7 @@ function CategoryCombobox({ categories = [], defaultValue, error }) {
                     key={category.value}
                     value={category.label}
                     onSelect={() => {
-                      setValue(category.value);
+                      onValueChange(category.value);
                       setOpen(false);
                     }}
                   >
@@ -399,6 +535,35 @@ function CategoryCombobox({ categories = [], defaultValue, error }) {
   );
 }
 
+// Map expense account subType → expense category
+const SUB_TYPE_TO_CATEGORY = {
+  direct_cost: "materials",
+  operating_expense: "maintenance",
+  admin: "office_supplies",
+  transport: "transport",
+  transport_expense: "transport",
+  travel_expense: "transport",
+  fuel_expense: "transport",
+  occupancy: "rent",
+  communication: "telecommunications",
+  professional: "legal_professional",
+  insurance: "insurance",
+  financial: "bank_charges",
+  depreciation: "depreciation",
+  employee_expense: "salaries",
+  meals_expense: "meals_entertainment",
+  utilities_expense: "utilities",
+  other_expense: "other",
+};
+
+// ============================================
+// FIELD ERROR HELPER
+// ============================================
+function FieldError({ errors, field }) {
+  if (!errors?.[field]) return null;
+  return <p className="text-sm text-destructive">{errors[field][0]}</p>;
+}
+
 // ============================================
 // MAIN EXPENSE FORM
 // ============================================
@@ -408,8 +573,8 @@ export default function ExpenseForm({
   paymentAccounts = [],
   vendors = [],
   categories = [],
+  projects = [],
 }) {
-  const router = useRouter();
   const isEditing = !!expense;
 
   // Form state
@@ -422,6 +587,21 @@ export default function ExpenseForm({
   const [isReimbursable, setIsReimbursable] = useState(expense?.isReimbursable || false);
   const [submitAndApprove, setSubmitAndApprove] = useState(false);
   const [receipts, setReceipts] = useState(expense?.receipts || []);
+  const [projectId, setProjectId] = useState(expense?.projectId || "");
+  const [category, setCategory] = useState(expense?.category || "");
+  const [expenseAccountId, setExpenseAccountId] = useState(expense?.accountId || "");
+  const [allExpenseAccounts, setAllExpenseAccounts] = useState(accounts);
+  const [allVendors, setAllVendors] = useState(vendors);
+
+  // Auto-suggest category when expense account changes
+  function handleExpenseAccountChange(id) {
+    setExpenseAccountId(id);
+    const account = allExpenseAccounts.find((a) => a._id === id);
+    if (account?.subType) {
+      const suggested = SUB_TYPE_TO_CATEGORY[account.subType];
+      if (suggested) setCategory(suggested);
+    }
+  }
 
   // Calculate tax amount when rate or amount changes
   useEffect(() => {
@@ -444,21 +624,20 @@ export default function ExpenseForm({
     ? quickExpense
     : createExpense;
 
-  const [state, formAction, isPending] = useActionState(actionFn, {});
+  const [state, formAction, isPending] = useActionState(actionFn, null);
 
-  // Handle successful submission
-  useEffect(() => {
-    if (state?.success) {
-      router.push("/dashboard/expenses");
-    }
-  }, [state, router]);
+  const errors = state?.errors;
 
   return (
     <form action={formAction} className="space-y-6">
-      {/* Error Display */}
-      {state?.error && (
-        <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg text-sm">
-          {state.error}
+      {/* Form-level errors */}
+      {errors?._form && (
+        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4">
+          {errors._form.map((error, i) => (
+            <p key={i} className="text-sm text-red-600 dark:text-red-400">
+              {error}
+            </p>
+          ))}
         </div>
       )}
 
@@ -487,13 +666,15 @@ export default function ExpenseForm({
                 }
                 required
               />
+              <FieldError errors={errors} field="expenseDate" />
             </div>
 
-            {/* Category - Searchable */}
+            {/* Category - Searchable, auto-set from expense account */}
             <CategoryCombobox
               categories={categories}
-              defaultValue={expense?.category}
-              error={state?.fieldErrors?.category}
+              value={category}
+              onValueChange={setCategory}
+              error={errors?.category?.[0]}
             />
           </div>
 
@@ -506,23 +687,34 @@ export default function ExpenseForm({
               id="description"
               name="description"
               placeholder="What was this expense for?"
-              defaultValue={expense?.description || ""}
+              defaultValue={expense?.description || state?.values?.description || ""}
               required
               rows={2}
             />
+            <FieldError errors={errors} field="description" />
           </div>
 
           {/* Expense Account - Searchable with quick add */}
-          <AccountCombobox
-            accounts={accounts}
-            name="accountId"
-            label="Expense Account"
-            placeholder="Select expense account..."
-            defaultValue={expense?.accountId}
-            error={state?.fieldErrors?.accountId}
-            required
-            createUrl="/dashboard/accounts/create?type=expense&returnTo=/dashboard/expenses/create"
-          />
+          <div className="space-y-2">
+            <Label>
+              Expense Account <span className="text-destructive">*</span>
+            </Label>
+            <ExpenseAccountCombobox
+              value={expenseAccountId}
+              onValueChange={(id) => handleExpenseAccountChange(id)}
+              accounts={allExpenseAccounts}
+              onAccountCreated={(acc) =>
+                setAllExpenseAccounts((prev) =>
+                  [...prev, acc].sort((a, b) =>
+                    a.accountCode.localeCompare(b.accountCode),
+                  ),
+                )
+              }
+              placeholder="Select expense account..."
+            />
+            <input type="hidden" name="accountId" value={expenseAccountId} />
+            <FieldError errors={errors} field="accountId" />
+          </div>
         </CardContent>
       </Card>
 
@@ -536,9 +728,12 @@ export default function ExpenseForm({
         </CardHeader>
         <CardContent>
           <VendorCombobox
-            vendors={vendors}
+            vendors={allVendors}
             defaultValue={expense?.vendor}
-            error={state?.fieldErrors?.vendorName}
+            error={errors?.vendorName?.[0]}
+            onVendorCreated={(party) =>
+              setAllVendors((prev) => [...prev, party])
+            }
           />
         </CardContent>
       </Card>
@@ -670,7 +865,7 @@ export default function ExpenseForm({
                 label="Paid From Account"
                 placeholder="Select payment account..."
                 defaultValue={paidFrom}
-                error={state?.fieldErrors?.paidFrom}
+                error={errors?.paidFrom?.[0]}
                 required
               />
             )}
@@ -709,6 +904,26 @@ export default function ExpenseForm({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Project (Optional) */}
+          {projects.length > 0 && (
+            <div className="space-y-2">
+              <Label>
+                Project{" "}
+                <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <input type="hidden" name="projectId" value={projectId} />
+              <ProjectPicker
+                value={projectId}
+                onValueChange={setProjectId}
+                projects={projects}
+                placeholder="Link to a project..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Tag this expense to a project for cost tracking
+              </p>
+            </div>
+          )}
+
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="reference">Reference Number</Label>
@@ -787,13 +1002,8 @@ export default function ExpenseForm({
 
       {/* Actions */}
       <div className="flex flex-col sm:flex-row gap-3 justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => router.back()}
-          disabled={isPending}
-        >
-          Cancel
+        <Button variant="outline" asChild>
+          <Link href="/dashboard/expenses">Cancel</Link>
         </Button>
 
         {!isEditing && (

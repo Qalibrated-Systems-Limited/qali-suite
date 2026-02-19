@@ -1,10 +1,7 @@
 import Expense from "../../models/expenses";
 import dbConnect from "../../config/dbConnect";
 import { ObjectId } from "mongodb";
-import {
-  getTenantContext,
-  withTenantScope,
-} from "@/lib/utils/tenant-utils";
+import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -39,7 +36,8 @@ export async function getExpenses(page = 1, filters = {}) {
 
   // Reimbursable filter
   if (filters.isReimbursable !== undefined) {
-    query.isReimbursable = filters.isReimbursable === "true" || filters.isReimbursable === true;
+    query.isReimbursable =
+      filters.isReimbursable === "true" || filters.isReimbursable === true;
   }
 
   // Date range filter
@@ -88,11 +86,13 @@ export async function getExpenses(page = 1, filters = {}) {
     total: exp.total,
     currency: exp.currency,
     paymentMethod: exp.paymentMethod,
-    vendor: exp.vendor ? {
-      id: exp.vendor.id,
-      name: exp.vendor.name,
-      taxPin: exp.vendor.taxPin,
-    } : null,
+    vendor: exp.vendor
+      ? {
+          id: exp.vendor.id,
+          name: exp.vendor.name,
+          taxPin: exp.vendor.taxPin,
+        }
+      : null,
     description: exp.description,
     reference: exp.reference,
     status: exp.status,
@@ -155,11 +155,12 @@ export async function getExpenseById(expenseId) {
     description: expense.description,
     reference: expense.reference,
     invoiceNumber: expense.invoiceNumber,
-    receipts: expense.receipts?.map(r => ({
-      filename: r.filename,
-      url: r.url,
-      uploadedAt: r.uploadedAt?.toISOString(),
-    })) || [],
+    receipts:
+      expense.receipts?.map((r) => ({
+        filename: r.filename,
+        url: r.url,
+        uploadedAt: r.uploadedAt?.toISOString(),
+      })) || [],
     isReimbursable: expense.isReimbursable,
     employeeId: expense.employeeId,
     employeeName: expense.employeeName,
@@ -191,9 +192,7 @@ export async function getPendingExpenses() {
 
   const query = withTenantScope({ status: "pending" }, companyId, isSuperAdmin);
 
-  const expenses = await Expense.find(query)
-    .sort({ submittedAt: -1 })
-    .lean();
+  const expenses = await Expense.find(query).sort({ submittedAt: -1 }).lean();
 
   return expenses.map((exp) => ({
     _id: exp._id.toString(),
@@ -226,13 +225,21 @@ export async function getExpenseSummary(startDate = null, endDate = null) {
     endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
   }
 
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin
+    ? {}
+    : { companyId: new ObjectId(companyId) };
 
   const [byStatus, byCategory, totals] = await Promise.all([
     // Count by status
     Expense.aggregate([
       { $match: { ...tenantMatch } },
-      { $group: { _id: "$status", count: { $sum: 1 }, total: { $sum: "$total" } } },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+          total: { $sum: "$total" },
+        },
+      },
     ]),
 
     // Sum by category for the period
@@ -324,6 +331,13 @@ export function getExpenseCategories() {
     { value: "meals_entertainment", label: "Meals & Entertainment" },
     { value: "telecommunications", label: "Telecommunications" },
     { value: "training", label: "Training & Development" },
+    { value: "materials", label: "Materials & Supplies" },
+    { value: "subscriptions", label: "Subscriptions & Licenses" },
+    { value: "security", label: "Security Services" },
+    { value: "cleaning", label: "Cleaning & Janitorial" },
+    { value: "licenses_permits", label: "Licenses & Permits" },
+    { value: "printing_stationery", label: "Printing & Stationery" },
+    { value: "courier_postage", label: "Courier & Postage" },
     { value: "other", label: "Other Expenses" },
   ];
 }
@@ -347,9 +361,7 @@ export async function getReimbursableExpenses(employeeId = null) {
 
   query = withTenantScope(query, companyId, isSuperAdmin);
 
-  const expenses = await Expense.find(query)
-    .sort({ expenseDate: -1 })
-    .lean();
+  const expenses = await Expense.find(query).sort({ expenseDate: -1 }).lean();
 
   return expenses.map((exp) => ({
     _id: exp._id.toString(),

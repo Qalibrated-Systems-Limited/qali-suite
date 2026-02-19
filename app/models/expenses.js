@@ -59,12 +59,33 @@ const expenseSchema = new Schema(
           "meals_entertainment",
           "telecommunications",
           "training",
+          "materials",
+          "subscriptions",
+          "security",
+          "cleaning",
+          "licenses_permits",
+          "printing_stationery",
+          "courier_postage",
           "other",
         ],
         message: "{VALUE} is not a valid expense category",
       },
       index: true,
     },
+
+    // Project (optional)
+    projectId: {
+      type: Schema.Types.ObjectId,
+      ref: "Project",
+      index: true,
+    },
+    project: {
+      projectNumber: String,
+      name: String,
+    },
+    // Cost code (optional — construction cost categorization)
+    costCodeId: { type: Schema.Types.ObjectId, ref: "ProjectCostCode" },
+    costCode: { code: String, name: String },
 
     // Account (Expense account from COA)
     accountId: {

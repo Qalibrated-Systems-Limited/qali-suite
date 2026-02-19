@@ -14,6 +14,7 @@ import dbConnect from "@/app/config/dbConnect";
 import { auth } from "@/auth";
 import { serializeBsonType } from "@/lib/utils";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
 // ============================================
 // METADATA
@@ -107,9 +108,10 @@ async function getBillFormData() {
 // FORM WRAPPER (Server Component)
 // ============================================
 async function BillEditFormWrapper({ billId }) {
-  const [{ bill, error }, formData] = await Promise.all([
+  const [{ bill, error }, formData, projects] = await Promise.all([
     getBillById(billId),
     getBillFormData(),
+    getActiveProjects(),
   ]);
 
   if (error || !bill) {
@@ -145,6 +147,7 @@ async function BillEditFormWrapper({ billId }) {
       suppliers={suppliers}
       accounts={accounts}
       products={products}
+      projects={projects}
     />
   );
 }

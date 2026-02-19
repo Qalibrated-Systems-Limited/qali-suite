@@ -60,6 +60,7 @@ import {
 import { cn } from "@/lib/utils";
 import { createBill, updateBill } from "@/app/mongodb/actions/bill-actions";
 import QuickCreatePartyDialog from "@/app/dashboard/invoices/components/QuickCreateCustomerDialog";
+import ProjectPicker from "@/components/project-picker";
 
 // ============================================
 // INITIAL STATE
@@ -727,6 +728,7 @@ export default function BillForm({
   suppliers = [],
   accounts = [],
   products = [],
+  projects = [],
 }) {
   const formRef = useRef(null);
   const isEdit = !!bill;
@@ -758,6 +760,11 @@ export default function BillForm({
   const [whtApplicable, setWhtApplicable] = useState(
     bill?.whtApplicable || false
   );
+
+  // ----------------------------------------
+  // Project State (optional)
+  // ----------------------------------------
+  const [projectId, setProjectId] = useState(bill?.projectId || "");
 
   // ----------------------------------------
   // Line Management
@@ -1056,7 +1063,27 @@ export default function BillForm({
           </h2>
         </div>
 
-        <div className="p-4 sm:p-6">
+        <div className="p-4 sm:p-6 space-y-4">
+          {/* Project (Optional) */}
+          {projects.length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">
+                Project{" "}
+                <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <input type="hidden" name="projectId" value={projectId} />
+              <ProjectPicker
+                value={projectId}
+                onValueChange={setProjectId}
+                projects={projects}
+                placeholder="Link to a project..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Tag this bill to a project for cost tracking
+              </p>
+            </div>
+          )}
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="description" className="text-sm font-medium">

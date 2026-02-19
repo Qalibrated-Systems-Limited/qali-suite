@@ -34,6 +34,7 @@ import {
 } from "@/app/mongodb/actions/claim-action";
 import { toast } from "sonner";
 import { ADVANCE_TYPES } from "@/lib/utils";
+import ProjectPicker from "@/components/project-picker";
 
 function SubmitButton({ isEdit, pending }) {
   return (
@@ -64,8 +65,6 @@ function getAdvanceTypeIcon(type) {
       return <MapPin className="w-4 h-4" />;
     case "petty_cash":
       return <Wallet className="w-4 h-4" />;
-    case "project":
-      return <FolderKanban className="w-4 h-4" />;
     case "operational":
       return <Building2 className="w-4 h-4" />;
     default:
@@ -80,8 +79,6 @@ function getAdvanceTip(type) {
       return "Travel advances must be settled with receipts within 7 days after your return.";
     case "petty_cash":
       return "Petty cash advances are for small recurring office expenses. Keep all receipts for reconciliation.";
-    case "project":
-      return "Project advances are tied to specific project budgets. Include your project code for tracking.";
     case "operational":
       return "Operational advances are for general business expenses. Submit receipts within 14 days.";
     default:
@@ -89,7 +86,7 @@ function getAdvanceTip(type) {
   }
 }
 
-export function AdvanceRequestForm({ claim = null }) {
+export function AdvanceRequestForm({ claim = null, projects = [] }) {
   const router = useRouter();
   const isEdit = !!claim;
 
@@ -97,6 +94,9 @@ export function AdvanceRequestForm({ claim = null }) {
   const [advanceType, setAdvanceType] = useState(
     claim?.advanceDetails?.advanceType || "travel"
   );
+
+  // Project selection (optional for all advance types)
+  const [projectId, setProjectId] = useState(claim?.projectId || "");
 
   // Use different action based on mode
   const action = isEdit
@@ -398,39 +398,30 @@ export function AdvanceRequestForm({ claim = null }) {
             </div>
           )}
 
-          {/* Project Details Section - Only for project type */}
-          {advanceType === "project" && (
+          {/* Project Selection - Available for all advance types (optional) */}
+          {projects.length > 0 && (
             <div className="space-y-5 pt-4 border-t border-border">
               <div className="flex items-center gap-2 text-foreground">
                 <FolderKanban className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" />
                 <h3 className="text-base sm:text-lg font-semibold">
-                  Project Details
+                  Project
                 </h3>
+                <span className="text-xs text-muted-foreground">(optional)</span>
               </div>
 
               <div className="space-y-2.5">
-                <Label
-                  htmlFor="projectCode"
-                  className="text-sm sm:text-base font-medium"
-                >
-                  Project Code <span className="text-red-500">*</span>
+                <Label className="text-sm sm:text-base font-medium">
+                  Link to Project
                 </Label>
-                <Input
-                  id="projectCode"
-                  name="projectCode"
-                  type="text"
-                  placeholder="e.g., PRJ-2024-001"
-                  defaultValue={state?.values?.projectCode ?? claim?.advanceDetails?.projectCode ?? ""}
-                  key={`proj-${state?.values?.projectCode ?? "init"}`}
-                  className="h-12"
+                <input type="hidden" name="projectId" value={projectId} />
+                <ProjectPicker
+                  value={projectId}
+                  onValueChange={setProjectId}
+                  projects={projects}
+                  placeholder="Select a project..."
                 />
-                {state?.errors?.projectCode && (
-                  <p className="text-sm text-red-600 dark:text-red-400">
-                    {state.errors.projectCode[0]}
-                  </p>
-                )}
                 <p className="text-xs sm:text-sm text-muted-foreground">
-                  Enter the project code this advance is associated with
+                  Link this advance to a project for budget tracking
                 </p>
               </div>
             </div>

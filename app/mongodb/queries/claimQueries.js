@@ -375,7 +375,7 @@ export const getExpenseAccountsForCategories = async () => {
     canPost: true,
     isActive: { $ne: false },
   })
-    .select("_id accountCode accountName")
+    .select("_id accountCode accountName subType")
     .sort({ accountCode: 1 })
     .lean();
 

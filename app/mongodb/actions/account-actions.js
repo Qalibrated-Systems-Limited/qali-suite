@@ -10,6 +10,7 @@ import {
   getCompanyIdForCreate,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+import { CompanyOnboardingService } from "../services/companyOnboardingService";
 
 // ============================================
 // ZOD SCHEMAS
@@ -200,6 +201,85 @@ export async function createAccount(prevState, formData) {
         _form: [error.message || "Failed to create account"],
       },
     };
+  }
+}
+
+/**
+ * Quick-create an expense account from inline dialogs (e.g. budget form).
+ * Returns { success, account } or { success: false, error, values }.
+ * On error, `values` contains submitted data so the form can persist state.
+ */
+export async function quickCreateExpenseAccount(formData) {
+  const accountCode = (formData.get("accountCode") || "").trim();
+  const accountName = (formData.get("accountName") || "").trim();
+  const subType = formData.get("subType") || "operating_expense";
+  const values = { accountCode, accountName, subType };
+
+  try {
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+
+    if (!["Admin", "Accountant"].includes(user.role)) {
+      return { success: false, error: "Only Admin or Accountant can create accounts", values };
+    }
+
+    if (!accountCode || !/^[0-9]+$/.test(accountCode)) {
+      return { success: false, error: "Account code must be numeric", values };
+    }
+    if (!accountName) {
+      return { success: false, error: "Account name is required", values };
+    }
+
+    // Validate account code range based on subType
+    const codeNum = parseInt(accountCode, 10);
+    if (subType === "direct_cost") {
+      // Direct project costs: 5000-5999
+      if (codeNum < 5000 || codeNum > 5999) {
+        return { success: false, error: "Direct cost accounts must be between 5000 and 5999", values };
+      }
+    } else {
+      // Operating expenses: 6000-6999
+      if (codeNum < 6000 || codeNum > 6999) {
+        return { success: false, error: "Expense account codes must be between 6000 and 6999", values };
+      }
+    }
+
+    await connectDB();
+
+    // Check uniqueness
+    const existingCode = await Account.findOne(
+      withTenantScope({ accountCode }, tenantCompanyId, isSuperAdmin),
+    );
+    if (existingCode) {
+      return { success: false, error: `Account code ${accountCode} already exists`, values };
+    }
+
+    const account = await Account.create({
+      companyId: tenantCompanyId,
+      accountCode,
+      accountName,
+      accountType: "expense",
+      subType,
+      canPost: true,
+      isActive: true,
+      createdBy: { name: user.name, id: user.id },
+      lastModifiedBy: { name: user.name, id: user.id },
+    });
+
+    revalidatePath("/dashboard/accounts");
+
+    return {
+      success: true,
+      account: {
+        _id: account._id.toString(),
+        accountCode: account.accountCode,
+        accountName: account.accountName,
+        subType: account.subType,
+      },
+    };
+  } catch (error) {
+    console.error("Quick create expense account error:", error);
+    return { success: false, error: error.message || "Failed to create account", values };
   }
 }
 
@@ -850,6 +930,132 @@ export async function ensureAdvanceAccountsExist() {
     return {
       success: false,
       error: error.message || "Failed to ensure advance accounts exist",
+    };
+  }
+}
+
+// ============================================
+// SYNC CHART OF ACCOUNTS (create missing seed accounts)
+// ============================================
+export async function syncChartOfAccounts() {
+  try {
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!["Admin", "Accountant"].includes(user.role)) {
+      return {
+        success: false,
+        error: "Unauthorized: Admin or Accountant role required",
+      };
+    }
+
+    await connectDB();
+
+    // Get seed accounts and existing accounts
+    const seedAccounts =
+      CompanyOnboardingService.getStandardChartOfAccounts();
+    const existingAccounts = await Account.find(
+      withTenantScope({}, companyId, isSuperAdmin)
+    )
+      .select("accountCode")
+      .lean();
+
+    const existingCodes = new Set(
+      existingAccounts.map((a) => a.accountCode)
+    );
+
+    // Find missing accounts
+    const missing = seedAccounts.filter(
+      (a) => !existingCodes.has(a.accountCode)
+    );
+
+    if (missing.length === 0) {
+      return {
+        success: true,
+        created: 0,
+        message: "All accounts are up to date",
+        accounts: [],
+      };
+    }
+
+    // Create missing accounts in two passes (same as seed logic)
+    const accountMap = new Map();
+
+    // Populate map with existing accounts for parent lookups
+    const existingFull = await Account.find(
+      withTenantScope({}, companyId, isSuperAdmin)
+    )
+      .select("accountCode _id parentAccount ancestors path level")
+      .lean();
+
+    for (const acc of existingFull) {
+      accountMap.set(acc.accountCode, acc);
+    }
+
+    // First pass: create missing accounts without parent references
+    const created = [];
+    for (const seedAccount of missing) {
+      const { parentCode, ...data } = seedAccount;
+
+      const account = await Account.create({
+        ...data,
+        companyId,
+        isActive: true,
+        balance: 0,
+        createdBy: { name: user.name, id: user.id },
+      });
+
+      accountMap.set(data.accountCode, account);
+      created.push(account);
+    }
+
+    // Second pass: update parent references for newly created accounts
+    for (const seedAccount of missing) {
+      if (seedAccount.parentCode) {
+        const parent = accountMap.get(seedAccount.parentCode);
+        const child = accountMap.get(seedAccount.accountCode);
+
+        if (parent && child) {
+          const parentId = parent._id;
+          const parentAncestors = parent.ancestors || [];
+          const parentPath = parent.path || parent.accountCode;
+          const parentLevel = parent.level || 0;
+
+          await Account.findByIdAndUpdate(child._id, {
+            $set: {
+              parentAccount: parentId,
+              ancestors: [...parentAncestors, parentId],
+              level: parentLevel + 1,
+              path: `${parentPath}/${child.accountCode}`,
+            },
+          });
+
+          // Ensure parent is a header (canPost: false) if it has children
+          if (parent.canPost !== false) {
+            await Account.findByIdAndUpdate(parentId, {
+              $set: { canPost: false },
+            });
+          }
+        }
+      }
+    }
+
+    revalidatePath("/dashboard/accounts");
+    revalidatePath("/dashboard/settings");
+
+    return {
+      success: true,
+      created: created.length,
+      message: `Created ${created.length} missing account${created.length === 1 ? "" : "s"}`,
+      accounts: created.map((a) => ({
+        accountCode: a.accountCode,
+        accountName: a.accountName,
+      })),
+    };
+  } catch (error) {
+    console.error("Sync chart of accounts error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to sync chart of accounts",
     };
   }
 }

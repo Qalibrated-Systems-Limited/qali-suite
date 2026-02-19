@@ -8,6 +8,7 @@ import Party from "../../models/parties";
 import Account from "../../models/account";
 import JournalEntry from "../../models/JournalEntry";
 import ErpCounter from "../../models/erp-counter";
+import Project from "../../models/project";
 import { format } from "date-fns";
 import dbConnect from "../../config/dbConnect";
 import { generateUniqueEntryNumber } from "@/lib/utils/server-utils";
@@ -29,6 +30,16 @@ const settleAdvanceSchema = z.object({
     .max(50, "Maximum 50 expense items allowed"),
   notes: z.string().max(500, "Notes too long").optional().or(z.literal("")),
 });
+
+// ============================================
+// HELPER: Revalidate project pages if claim has a projectId
+// ============================================
+function revalidateProject(projectId) {
+  if (projectId) {
+    revalidatePath("/dashboard/projects");
+    revalidatePath(`/dashboard/projects/${projectId}`);
+  }
+}
 
 // ============================================
 // HELPER: Parse receipt uploads from form data
@@ -244,7 +255,7 @@ export async function createAdvanceRequest(prevState, formData) {
       destination: formData.get("destination"),
       travelFromDate: formData.get("travelFromDate"),
       travelToDate: formData.get("travelToDate"),
-      projectCode: formData.get("projectCode"),
+      projectId: formData.get("projectId") || "",
       estimatedExpenses: formData.get("estimatedExpenses"),
       notes: formData.get("notes"),
     };
@@ -256,7 +267,7 @@ export async function createAdvanceRequest(prevState, formData) {
       destination,
       travelFromDate,
       travelToDate,
-      projectCode,
+      projectId: rawProjectId,
       estimatedExpenses,
       notes,
     } = rawValues;
@@ -268,7 +279,7 @@ export async function createAdvanceRequest(prevState, formData) {
       destination,
       travelFromDate,
       travelToDate,
-      projectCode,
+      projectId: rawProjectId,
       estimatedExpenses,
       notes,
     });
@@ -305,9 +316,17 @@ export async function createAdvanceRequest(prevState, formData) {
       };
     }
 
-    // Add project-specific fields only for project type
-    if (data.advanceType === "project") {
-      advanceDetails.projectCode = data.projectCode?.trim() || "";
+    // Look up project if provided (optional)
+    let projectFields = {};
+    const projectId = rawValues.projectId;
+    if (projectId) {
+      const project = await Project.findById(projectId).select("projectNumber name status").lean();
+      if (project && project.status !== "closed") {
+        projectFields = {
+          projectId: project._id,
+          project: { projectNumber: project.projectNumber, name: project.name },
+        };
+      }
     }
 
     // Create claim
@@ -327,6 +346,7 @@ export async function createAdvanceRequest(prevState, formData) {
           },
           claimType: "advance_request",
           advanceDetails,
+          ...projectFields,
           totalAmount: requestedAmount,
           description: `${data.advanceType.replace("_", " ")} advance for ${data.purpose.trim()}`,
           notes: data.notes?.trim() || "",
@@ -344,6 +364,7 @@ export async function createAdvanceRequest(prevState, formData) {
 
     revalidatePath("/dashboard/claims");
     revalidatePath("/dashboard/claims/my-claims");
+    revalidateProject(claim[0].projectId);
 
     return {
       success: true,
@@ -416,7 +437,8 @@ export async function createReimbursement(prevState, formData) {
     const notes = formData.get("notes");
     const itemsJson = formData.get("items");
     const receipts = parseReceipts(formData, user);
-    const rawValues = { description, notes };
+    const rawProjectId = formData.get("projectId") || "";
+    const rawValues = { description, notes, projectId: rawProjectId };
 
     // Validation
     let parsedItems;
@@ -492,6 +514,18 @@ export async function createReimbursement(prevState, formData) {
     // Generate claim number (tenant-scoped)
     const claimNumber = await generateClaimNumber(tenantCompanyId, session);
 
+    // Look up project if provided (optional)
+    let projectFields = {};
+    if (rawProjectId) {
+      const project = await Project.findById(rawProjectId).select("projectNumber name status").lean();
+      if (project && project.status !== "closed") {
+        projectFields = {
+          projectId: project._id,
+          project: { projectNumber: project.projectNumber, name: project.name },
+        };
+      }
+    }
+
     // Create claim
     const claim = await EmployeeClaim.create(
       [
@@ -509,6 +543,7 @@ export async function createReimbursement(prevState, formData) {
           },
           claimType: "reimbursement",
           items: validatedItems,
+          ...projectFields,
           totalAmount,
           description: description.trim(),
           notes: notes?.trim() || "",
@@ -527,6 +562,7 @@ export async function createReimbursement(prevState, formData) {
 
     revalidatePath("/dashboard/claims");
     revalidatePath("/dashboard/claims/my-claims");
+    revalidateProject(claim[0].projectId);
 
     return {
       success: true,
@@ -610,12 +646,22 @@ export async function approveEmployeeClaim(claimId, prevState, formData) {
     // Approve
     await claim.approve(formatUserForAudit(user));
 
+    // Update project financials: increase committed
+    if (claim.projectId) {
+      await Project.findByIdAndUpdate(
+        claim.projectId,
+        { $inc: { "financials.totalCommitted": claim.totalAmount } },
+        { session },
+      );
+    }
+
     await session.commitTransaction();
 
     revalidatePath("/dashboard/claims");
     revalidatePath("/dashboard/claims/pending");
     revalidatePath("/dashboard/claims/payments");
     revalidatePath(`/dashboard/claims/${claimId}`);
+    revalidateProject(claim.projectId);
 
     return { message: "success" };
   } catch (error) {
@@ -686,6 +732,7 @@ export async function rejectEmployeeClaim(claimId, prevState, formData) {
     revalidatePath("/dashboard/claims");
     revalidatePath("/dashboard/claims/pending");
     revalidatePath(`/dashboard/claims/${claimId}`);
+    revalidateProject(claim.projectId);
 
     return { message: "success" };
   } catch (error) {
@@ -744,6 +791,7 @@ export async function recallEmployeeClaim(claimId) {
     revalidatePath("/dashboard/claims/my-claims");
     revalidatePath("/dashboard/claims/pending");
     revalidatePath(`/dashboard/claims/${claimId}`);
+    revalidateProject(claim.projectId);
 
     return { success: true, message: "Claim recalled to draft" };
   } catch (error) {
@@ -800,6 +848,7 @@ export async function resubmitEmployeeClaim(claimId) {
     revalidatePath("/dashboard/claims/my-claims");
     revalidatePath("/dashboard/claims/pending");
     revalidatePath(`/dashboard/claims/${claimId}`);
+    revalidateProject(claim.projectId);
 
     return { success: true, message: "Claim resubmitted for approval" };
   } catch (error) {
@@ -1065,6 +1114,13 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
     // ============================================
     // 12. CREATE SETTLEMENT CLAIM
     // ============================================
+    // Inherit project from parent advance claim
+    const inheritedProject = {};
+    if (advanceClaim.projectId) {
+      inheritedProject.projectId = advanceClaim.projectId;
+      inheritedProject.project = advanceClaim.project;
+    }
+
     const settlementClaim = await EmployeeClaim.create(
       [
         {
@@ -1072,6 +1128,7 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
           claimNumber: settlementNumber,
           claimDate: new Date(),
           employee: advanceClaim.employee, // Copy employee info
+          ...inheritedProject,
           claimType: "advance_return",
           returnDetails: {
             advanceClaimId: advanceClaim._id,
@@ -1121,6 +1178,7 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
     revalidatePath("/dashboard/claims/my-claims");
     revalidatePath(`/dashboard/claims/${advanceClaimId}`);
     revalidatePath(`/dashboard/claims/${settlementClaim[0]._id}`);
+    revalidateProject(advanceClaim.projectId);
 
     // ============================================
     // 16. RETURN SUCCESS
@@ -1380,6 +1438,7 @@ export async function closeSettlementt(settlementId, prevState, formData) {
     revalidatePath("/dashboard/claims");
     revalidatePath("/dashboard/claims/payments");
     revalidatePath(`/dashboard/claims/${settlementId}`);
+    revalidateProject(settlement.projectId);
 
     return { message: "success" };
   } catch (error) {
@@ -1460,6 +1519,19 @@ export async function updateClaim(claimId, prevState, formData) {
       };
     }
 
+    // Handle project update (shared across claim types)
+    const updatedProjectId = formData.get("projectId") || "";
+    if (updatedProjectId) {
+      const project = await Project.findById(updatedProjectId).select("projectNumber name status").lean();
+      if (project && project.status !== "closed") {
+        claim.projectId = project._id;
+        claim.project = { projectNumber: project.projectNumber, name: project.name };
+      }
+    } else {
+      claim.projectId = undefined;
+      claim.project = undefined;
+    }
+
     // Update based on claim type
     if (claim.claimType === "advance_request") {
       const requestedAmount = parseFloat(formData.get("requestedAmount"));
@@ -1473,7 +1545,7 @@ export async function updateClaim(claimId, prevState, formData) {
         advanceType: formData.get("advanceType"),
         requestedAmount: formData.get("requestedAmount"),
         purpose, destination, travelFromDate, travelToDate,
-        projectCode: formData.get("projectCode"),
+        projectId: updatedProjectId,
         estimatedExpenses, notes,
       };
 
@@ -1498,36 +1570,48 @@ export async function updateClaim(claimId, prevState, formData) {
         };
       }
 
-      if (!travelFromDate || !travelToDate) {
-        return {
-          errors: {
-            _form: ["Please provide both travel start and end dates"],
-          },
-          values: rawAdvanceValues,
-        };
-      }
+      // Travel-specific validation
+      const currentAdvanceType = formData.get("advanceType") || claim.advanceDetails?.advanceType;
+      if (currentAdvanceType === "travel") {
+        if (!travelFromDate || !travelToDate) {
+          return {
+            errors: {
+              _form: ["Please provide both travel start and end dates"],
+            },
+            values: rawAdvanceValues,
+          };
+        }
 
-      const fromDate = new Date(travelFromDate);
-      const toDate = new Date(travelToDate);
+        const fromDate = new Date(travelFromDate);
+        const toDate = new Date(travelToDate);
 
-      if (toDate < fromDate) {
-        return {
-          errors: {
-            _form: ["Travel end date cannot be before start date"],
-          },
-          values: rawAdvanceValues,
-        };
+        if (toDate < fromDate) {
+          return {
+            errors: {
+              _form: ["Travel end date cannot be before start date"],
+            },
+            values: rawAdvanceValues,
+          };
+        }
       }
 
       // Update claim
+      claim.advanceDetails.advanceType = currentAdvanceType;
       claim.advanceDetails.requestedAmount = requestedAmount;
       claim.advanceDetails.purpose = purpose.trim();
-      claim.advanceDetails.destination = destination?.trim() || "";
-      claim.advanceDetails.travelDates = { from: fromDate, to: toDate };
       claim.advanceDetails.estimatedExpenses = estimatedExpenses?.trim() || "";
       claim.totalAmount = requestedAmount;
       claim.description = `Advance request for ${purpose.trim()}`;
       claim.notes = notes?.trim() || "";
+
+      // Travel-specific fields
+      if (currentAdvanceType === "travel") {
+        claim.advanceDetails.destination = destination?.trim() || "";
+        claim.advanceDetails.travelDates = {
+          from: new Date(travelFromDate),
+          to: new Date(travelToDate),
+        };
+      }
     } else if (claim.claimType === "reimbursement") {
       const description = formData.get("description");
       const notes = formData.get("notes");
@@ -1626,6 +1710,7 @@ export async function updateClaim(claimId, prevState, formData) {
     revalidatePath("/dashboard/claims/my-claims");
     revalidatePath("/dashboard/claims/pending");
     revalidatePath(`/dashboard/claims/${claimId}`);
+    revalidateProject(claim.projectId);
 
     return {
       success: true,
@@ -2033,6 +2118,7 @@ export async function closeSettlement(settlementId, prevState, formData) {
     revalidatePath("/dashboard/claims");
     revalidatePath("/dashboard/claims/payments");
     revalidatePath(`/dashboard/claims/${settlementId}`);
+    revalidateProject(settlement.projectId);
 
     return {
       success: true,
@@ -2320,6 +2406,7 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
     revalidatePath("/dashboard/claims");
     revalidatePath("/dashboard/claims/payments");
     revalidatePath(`/dashboard/claims/${settlementId}`);
+    revalidateProject(settlement.projectId);
 
     const remainingBalance = balance - data.amount;
 
@@ -2581,6 +2668,7 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
     revalidatePath("/dashboard/claims");
     revalidatePath("/dashboard/claims/payments");
     revalidatePath(`/dashboard/claims/${settlementId}`);
+    revalidateProject(settlement.projectId);
 
     return {
       success: true,
@@ -2832,6 +2920,23 @@ export async function payAdvance(claimId, prevState, formData) {
     }
 
     // ============================================
+    // 9b. UPDATE PROJECT FINANCIALS
+    // Move from committed → cost
+    // ============================================
+    if (claim.projectId) {
+      await Project.findByIdAndUpdate(
+        claim.projectId,
+        {
+          $inc: {
+            "financials.totalCosts": claim.totalAmount,
+            "financials.totalCommitted": -claim.totalAmount,
+          },
+        },
+        { session },
+      );
+    }
+
+    // ============================================
     // 10. COMMIT TRANSACTION
     // ============================================
     await session.commitTransaction();
@@ -2842,6 +2947,7 @@ export async function payAdvance(claimId, prevState, formData) {
     revalidatePath("/dashboard/claims");
     revalidatePath("/dashboard/claims/payments");
     revalidatePath(`/dashboard/claims/${claimId}`);
+    revalidateProject(claim.projectId);
 
     return {
       success: true,
@@ -3169,6 +3275,23 @@ export async function payReimbursement(claimId, prevState, formData) {
     }
 
     // ============================================
+    // 11b. UPDATE PROJECT FINANCIALS
+    // Move from committed → cost
+    // ============================================
+    if (claim.projectId) {
+      await Project.findByIdAndUpdate(
+        claim.projectId,
+        {
+          $inc: {
+            "financials.totalCosts": claim.totalAmount,
+            "financials.totalCommitted": -claim.totalAmount,
+          },
+        },
+        { session },
+      );
+    }
+
+    // ============================================
     // 12. COMMIT TRANSACTION
     // ============================================
     await session.commitTransaction();
@@ -3179,6 +3302,7 @@ export async function payReimbursement(claimId, prevState, formData) {
     revalidatePath("/dashboard/claims");
     revalidatePath("/dashboard/claims/payments");
     revalidatePath(`/dashboard/claims/${claimId}`);
+    revalidateProject(claim.projectId);
 
     return {
       success: true,

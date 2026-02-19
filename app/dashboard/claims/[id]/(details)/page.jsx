@@ -34,6 +34,8 @@ import { RecordReturnDialog } from "../../components/RecordReturnDialog";
 import { PayBalanceDialog } from "../../components/PayBalanceDialog";
 import { RecallClaimButton } from "../../components/RecallClaimButton";
 import { ResubmitClaimButton } from "../../components/ResubmitClaimButton";
+import ProjectContextCard from "../../components/ProjectContextCard";
+import { Suspense } from "react";
 import { Banknote } from "lucide-react";
 import dbConnect from "@/app/config/dbConnect";
 import Account from "@/app/models/account";
@@ -139,6 +141,20 @@ export default async function ClaimDetailPage({ params }) {
           </p>
         </div>
       </div>
+
+      {/* Project Context (if linked to a project) */}
+      {claim.projectId && (
+        <Suspense fallback={null}>
+          <ProjectContextCard
+            projectId={claim.projectId}
+            claimAmount={claim.totalAmount}
+            claimStatus={claim.status}
+            expenseAccountId={
+              claim.items?.[0]?.expenseAccountId || null
+            }
+          />
+        </Suspense>
+      )}
 
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">

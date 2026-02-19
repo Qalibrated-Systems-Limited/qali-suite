@@ -8,6 +8,7 @@ import Bill from "@/app/models/bill";
 import Party from "@/app/models/parties";
 import EmployeeClaim from "@/app/models/employeesClaims";
 import { StockRequest } from "@/app/models/requests";
+import Project from "@/app/models/project";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import { sanitizeSearchTerm } from "@/lib/utils/sanitize";
 
@@ -24,6 +25,7 @@ export async function globalSearch(searchTerm) {
       suppliers: [],
       claims: [],
       stockRequests: [],
+      projects: [],
     };
   }
 
@@ -32,7 +34,7 @@ export async function globalSearch(searchTerm) {
   const safe = sanitizeSearchTerm(searchTerm);
   const regex = { $regex: safe, $options: "i" };
 
-  const [products, invoices, quotes, bills, customers, suppliers, claims, stockRequests] =
+  const [products, invoices, quotes, bills, customers, suppliers, claims, stockRequests, projects] =
     await Promise.all([
       // Products: name + SKU
       Product.find(
@@ -158,9 +160,28 @@ export async function globalSearch(searchTerm) {
         .sort({ createdAt: -1 })
         .limit(LIMIT)
         .lean(),
+
+      // Projects: projectNumber + name + client.name
+      Project.find(
+        withTenantScope(
+          {
+            $or: [
+              { projectNumber: regex },
+              { name: regex },
+              { "client.name": regex },
+            ],
+          },
+          companyId,
+          isSuperAdmin
+        )
+      )
+        .select("projectNumber name client.name status budget.amount")
+        .sort({ createdAt: -1 })
+        .limit(LIMIT)
+        .lean(),
     ]);
 
   return JSON.parse(
-    JSON.stringify({ products, invoices, quotes, bills, customers, suppliers, claims, stockRequests })
+    JSON.stringify({ products, invoices, quotes, bills, customers, suppliers, claims, stockRequests, projects })
   );
 }

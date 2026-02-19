@@ -38,12 +38,23 @@ import Bill from "@/app/models/bill";
 import Party from "@/app/models/parties";
 import Product from "@/app/models/product";
 import Account from "@/app/models/account";
+import Project from "@/app/models/project";
 import dbConnect from "@/app/config/dbConnect";
 import {
   getTenantContext,
   getCompanyIdForCreate,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+
+// ============================================
+// HELPERS
+// ============================================
+function revalidateProject(projectId) {
+  if (projectId) {
+    revalidatePath("/dashboard/projects");
+    revalidatePath(`/dashboard/projects/${projectId}`);
+  }
+}
 
 // ============================================
 // CONSTANTS
@@ -378,7 +389,23 @@ export async function createBill(prevState, formData) {
       balance: netPayable,
     };
 
-    // 11. Create bill (with tenant companyId)
+    // 11. Resolve project (optional)
+    let projectFields = {};
+    const rawProjectId = rawData.projectId;
+    if (rawProjectId) {
+      const project = await Project.findById(rawProjectId)
+        .select("projectNumber name status")
+        .session(mongoSession)
+        .lean();
+      if (project && project.status !== "closed") {
+        projectFields = {
+          projectId: project._id,
+          project: { projectNumber: project.projectNumber, name: project.name },
+        };
+      }
+    }
+
+    // 12. Create bill (with tenant companyId)
     const [bill] = await Bill.create(
       [
         {
@@ -399,6 +426,7 @@ export async function createBill(prevState, formData) {
           internalNotes: data.internalNotes || "",
           status: "draft",
           createdBy: formatUser(user),
+          ...projectFields,
         },
       ],
       { session: mongoSession }
@@ -415,6 +443,7 @@ export async function createBill(prevState, formData) {
 
     // 13. Revalidate
     revalidatePath("/dashboard/bills");
+    revalidateProject(bill.projectId);
   } catch (error) {
     // Abort transaction on error
     if (mongoSession) {
@@ -687,6 +716,23 @@ export async function updateBill(billId, prevState, formData) {
     bill.internalNotes = data.internalNotes || "";
     bill.lastModifiedBy = formatUser({ user });
 
+    // Update project (optional)
+    const oldProjectId = bill.projectId;
+    const updatedProjectId = rawData.projectId;
+    if (updatedProjectId) {
+      const project = await Project.findById(updatedProjectId)
+        .select("projectNumber name status")
+        .session(mongoSession)
+        .lean();
+      if (project && project.status !== "closed") {
+        bill.projectId = project._id;
+        bill.project = { projectNumber: project.projectNumber, name: project.name };
+      }
+    } else {
+      bill.projectId = undefined;
+      bill.project = undefined;
+    }
+
     // Update fiscal period
     const billDate = new Date(data.billDate);
     bill.fiscalPeriod = `${billDate.getFullYear()}-${String(
@@ -708,6 +754,8 @@ export async function updateBill(billId, prevState, formData) {
     // 12. Revalidate
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
+    revalidateProject(oldProjectId);
+    revalidateProject(bill.projectId);
   } catch (error) {
     // Abort transaction on error
     if (mongoSession) {
@@ -772,6 +820,7 @@ export async function submitBill(billId) {
 
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
+    revalidateProject(bill.projectId);
 
     return {
       success: true,
@@ -831,10 +880,18 @@ export async function approveBill(billId) {
     // The approve method should use its own transaction internally
     await bill.approve(formatUser({ user }));
 
+    // Update project financials — bill approved = committed cost
+    if (bill.projectId) {
+      await Project.findByIdAndUpdate(bill.projectId, {
+        $inc: { "financials.totalCommitted": bill.amounts?.netPayable || 0 },
+      });
+    }
+
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
     revalidatePath("/dashboard/journal-entries");
     revalidatePath("/dashboard/stocks");
+    revalidateProject(bill.projectId);
 
     return {
       success: true,
@@ -901,6 +958,7 @@ export async function rejectBill(billId, prevState, formData) {
 
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
+    revalidateProject(bill.projectId);
 
     return {
       success: true,
@@ -968,6 +1026,7 @@ export async function cancelBill(billId, prevState, formData) {
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
     revalidatePath("/dashboard/journal-entries");
+    revalidateProject(bill.projectId);
 
     return {
       success: true,
@@ -1021,9 +1080,11 @@ export async function deleteBill(billId) {
     }
 
     const billNumber = bill.billNumber;
+    const deletedProjectId = bill.projectId;
     await Bill.findByIdAndDelete(billId);
 
     revalidatePath("/dashboard/bills");
+    revalidateProject(deletedProjectId);
 
     return {
       success: true,
@@ -1208,11 +1269,26 @@ export async function createBillPayment(billId, prevState, formData) {
     // Pass session so it uses our transaction instead of creating its own
     await payment.confirm(user, mongoSession);
 
+    // Update project financials — payment moves from committed to actual cost
+    if (bill.projectId) {
+      await Project.findByIdAndUpdate(
+        bill.projectId,
+        {
+          $inc: {
+            "financials.totalCosts": amount,
+            "financials.totalCommitted": -amount,
+          },
+        },
+        { session: mongoSession }
+      );
+    }
+
     await mongoSession.commitTransaction();
 
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
     revalidatePath("/dashboard/payments");
+    revalidateProject(bill.projectId);
 
     return {
       success: true,
@@ -1294,6 +1370,7 @@ export async function reverseBillPayment(billId, paymentId, amount) {
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
     revalidatePath("/dashboard/payments");
+    revalidateProject(bill.projectId);
 
     return {
       success: true,
