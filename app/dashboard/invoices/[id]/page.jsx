@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { InvoiceDetailActions } from "../components/InvoiceDetailActions";
 import { InvoicePDFDownloadButton } from "../components/InvoicePDFButton";
+import { DeliveryNotePDFButton } from "../components/DeliveryNotePDFButton";
 
 export default async function InvoiceDetailsPage({ params }) {
   const resolvedParams = await params;
@@ -181,6 +182,9 @@ export default async function InvoiceDetailsPage({ params }) {
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-2">
             <InvoicePDFDownloadButton invoice={invoice} company={company} />
+            {invoice.status === "completed" && (
+              <DeliveryNotePDFButton invoice={invoice} company={company} />
+            )}
             <Button
               variant="outline"
               size="sm"

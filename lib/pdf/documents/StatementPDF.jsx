@@ -404,7 +404,7 @@ export const StatementPDF = ({ statement, company }) => {
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.logoSection}>
-            <Image style={styles.logo} src="/qsl.png" />
+            <Image style={styles.logo} src={company.logo || "/qsl.png"} />
             <Text style={styles.companyDetails}>
               {formatAddress(company.address)}
               {company.city && `, ${company.city}`}

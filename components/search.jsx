@@ -21,7 +21,6 @@ const SEARCH_CONFIG = {
   "/dashboard/claims/pending": "Search pending claims...",
   "/dashboard/claims/payments": "Search claims pending payment...",
   "/dashboard/invoices": "Search invoices by number or customer...",
-  "/dashboard/dnotes": "Search delivery notes...",
   "/dashboard/parties": "Search parties by name, email, or tax PIN...",
   "/dashboard/customers": "Search customers...",
   "/dashboard/suppliers": "Search suppliers...",

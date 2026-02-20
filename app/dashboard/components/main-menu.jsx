@@ -32,7 +32,6 @@ const menuItems = [
   { title: "Cart", href: "/dashboard/cart", Icon: ShoppingCart },
 
   { title: "Invoices", href: "/dashboard/invoices", Icon: ReceiptIcon },
-  { title: "Dnotes", href: "/dashboard/dnotes", Icon: ListCheckIcon },
 
   {
     title: "Transaction",

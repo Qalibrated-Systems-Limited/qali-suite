@@ -46,7 +46,6 @@ const PAGES = [
   { label: "Bills", href: "/dashboard/bills", icon: Receipt },
   { label: "Customers", href: "/dashboard/customers", icon: Users },
   { label: "Suppliers", href: "/dashboard/suppliers", icon: Building2 },
-  { label: "Delivery Notes", href: "/dashboard/dnotes", icon: Package },
   { label: "Purchase Orders", href: "/dashboard/purchase-orders", icon: FileText },
   { label: "Stock Requests", href: "/dashboard/requests", icon: List },
   { label: "Categories", href: "/dashboard/categories", icon: List },

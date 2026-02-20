@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createCompany, updateCompany } from "@/app/mongodb/actions/company-actions";
 import { toast } from "sonner";
@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Building2, Mail, MapPin, CreditCard, Smartphone } from "lucide-react";
+import { Building2, Mail, MapPin, CreditCard, Smartphone, Upload, X, Loader2 } from "lucide-react";
 
 export default function CompanyForm({ company = null, isSuperAdmin = false }) {
   const router = useRouter();
@@ -28,6 +28,34 @@ export default function CompanyForm({ company = null, isSuperAdmin = false }) {
 
   // Helper to get field value - prioritize submitted values on error, then company data
   const v = (field, fallback = "") => state.values?.[field] ?? fallback;
+
+  // Logo upload state
+  const [logoUrl, setLogoUrl] = useState(company?.logo || "");
+  const [logoUploading, setLogoUploading] = useState(false);
+  const logoInputRef = useRef(null);
+
+  const handleLogoUpload = useCallback(async (file) => {
+    if (!file || logoUploading) return;
+    setLogoUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("folder", "company-logos");
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Upload failed");
+      }
+      const data = await res.json();
+      setLogoUrl(data.url);
+      toast.success("Logo uploaded");
+    } catch (error) {
+      toast.error(error.message || "Failed to upload logo");
+    } finally {
+      setLogoUploading(false);
+      if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  }, [logoUploading]);
 
   // Show toast for form-level errors only
   useEffect(() => {
@@ -105,17 +133,59 @@ export default function CompanyForm({ company = null, isSuperAdmin = false }) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="logo">Logo URL</Label>
-            <Input
-              id="logo"
-              name="logo"
-              defaultValue={v("logo", company?.logo || "")}
-              placeholder="/company-logo.png or https://..."
-              className="bg-background"
-            />
-            <p className="text-xs text-muted-foreground">
-              Path to your company logo (used in PDFs and documents)
-            </p>
+            <Label>Company Logo</Label>
+            <input type="hidden" name="logo" value={logoUrl} />
+            <div className="flex items-start gap-4">
+              {/* Preview */}
+              <div className="w-20 h-20 rounded-lg border-2 border-dashed border-muted-foreground/25 flex items-center justify-center overflow-hidden shrink-0 bg-muted/30">
+                {logoUrl ? (
+                  <img
+                    src={logoUrl}
+                    alt="Company logo"
+                    className="w-full h-full object-contain p-1"
+                  />
+                ) : (
+                  <Building2 className="w-8 h-8 text-muted-foreground/40" />
+                )}
+              </div>
+              <div className="flex-1 space-y-2">
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={logoUploading}
+                    onClick={() => logoInputRef.current?.click()}
+                  >
+                    {logoUploading ? (
+                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Uploading...</>
+                    ) : (
+                      <><Upload className="mr-2 h-4 w-4" /> Upload Logo</>
+                    )}
+                  </Button>
+                  {logoUrl && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setLogoUrl("")}
+                    >
+                      <X className="mr-1 h-4 w-4" /> Remove
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  PNG or JPEG, used on invoices, quotes, and delivery notes
+                </p>
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => handleLogoUpload(e.target.files?.[0])}
+                />
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>

@@ -10,6 +10,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { IconClock, IconCheck, IconX, IconBan } from "@tabler/icons-react";
+import { RequestDeliveryNotePDFButton } from "./RequestDeliveryNotePDFButton";
 
 const statusConfig = {
   pending: {
@@ -51,7 +52,7 @@ const priorityConfig = {
   urgent: { label: "Urgent", color: "bg-red-500" },
 };
 
-export function ViewRequestDialog({ request, open, onOpenChange }) {
+export function ViewRequestDialog({ request, open, onOpenChange, company }) {
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     return new Date(dateString).toLocaleDateString("en-US", {
@@ -269,9 +270,12 @@ export function ViewRequestDialog({ request, open, onOpenChange }) {
           {request.storekeeper && (
             <Card className="bg-green-50/50 dark:bg-green-950/20">
               <CardContent className="p-4">
-                <h4 className="font-semibold mb-3 text-green-700 dark:text-green-400">
-                  Fulfillment Information
-                </h4>
+                <div className="flex items-start justify-between mb-3">
+                  <h4 className="font-semibold text-green-700 dark:text-green-400">
+                    Fulfillment Information
+                  </h4>
+                  <RequestDeliveryNotePDFButton request={request} company={company} />
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-muted-foreground text-xs">

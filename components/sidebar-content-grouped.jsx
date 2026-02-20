@@ -147,13 +147,6 @@ const getNavigationGroups = (user) => [
         hidden: !["Admin", "Accountant"].includes(user?.role),
       },
       {
-        icon: FileText,
-        label: "Delivery Notes",
-        id: "dnotes",
-        href: "/dashboard/dnotes",
-        hidden: !["Admin", "Store Manager", "Sales"].includes(user?.role),
-      },
-      {
         icon: Users,
         label: "Customers",
         id: "customers",

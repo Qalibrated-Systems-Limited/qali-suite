@@ -204,16 +204,6 @@ export const invoiceItemForm = z.object({
   serialNo: z.string().optional(),
 });
 
-export const dnoteItemForm = z.object({
-  description: z.string().min(8).max(300),
-  unit: z.string(),
-  unitPrice: z.string().optional(),
-  quantity: z.string().min(1).refine(
-    (val) => Number.isInteger(Number(val)) && Number(val) > 0,
-    { message: "Quantity must be a positive whole number" }
-  ),
-});
-
 export const updateAccountForm = z.object({
   name: z.string().max(100).min(4),
   address: z.string().min(4),
@@ -369,7 +359,6 @@ export const validateInvoiceWithId = (rawData) =>
   updatedInvoiceWithIdSchema.safeParse(rawData);
 export const validateDNote = (rawData) =>
   deliveryNoteZodSchema.safeParse(rawData);
-export const validateDnoteItem = (rawData) => dnoteItemForm.safeParse(rawData);
 export const validateCreateRequestFromCart = (rawData) =>
   createRequestFromCartSchema.safeParse(rawData);
 

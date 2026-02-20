@@ -85,7 +85,7 @@ const priorityConfig = {
   urgent: { label: "Urgent", color: "bg-red-500" },
 };
 
-export function RequestsListWithActions({ requests, userRole, userId }) {
+export function RequestsListWithActions({ requests, userRole, userId, company }) {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [approveDialogOpen, setApproveDialogOpen] = useState(false);
@@ -548,6 +548,7 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
             request={selectedRequest}
             open={viewDialogOpen}
             onOpenChange={setViewDialogOpen}
+            company={company}
           />
 
           <ApproveDialog

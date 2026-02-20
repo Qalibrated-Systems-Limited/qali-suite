@@ -80,13 +80,6 @@ export const SidebarContent = ({ onItemClick, user }) => {
       hidden: !["Admin", "admin", "Accountant"].includes(user?.role),
     },
     {
-      icon: FileText,
-      label: "Delivery Notes",
-      id: "dnotes",
-      href: "/dashboard/dnotes",
-      hidden: !["Admin", "Store Manager"].includes(user?.role),
-    },
-    {
       icon: Users,
       label: "Users",
       id: "users",

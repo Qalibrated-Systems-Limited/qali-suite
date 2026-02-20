@@ -716,7 +716,6 @@ export async function fulfillRequestOldVersion(requestId, prevState, formData) {
     revalidatePath("/dashboard/requests");
     revalidatePath("/dashboard/stocks");
     revalidatePath("/dashboard/checkouts");
-    revalidatePath("/dashboard/dnotes");
     revalidateProject(request.projectId);
 
     return { message: "success" };
@@ -2152,7 +2151,6 @@ export async function fulfillRequest(requestId, prevState, formData) {
     revalidatePath("/dashboard/requests");
     revalidatePath("/dashboard/stocks");
     revalidatePath("/dashboard/checkouts");
-    revalidatePath("/dashboard/dnotes");
     revalidatePath("/dashboard/movement");
     revalidatePath("/dashboard/invoices");
     revalidateProject(request.projectId);

@@ -13,6 +13,9 @@ import {
   fetchRequestPages,
   getRequestStats,
 } from "@/app/mongodb/queries/request-queries";
+import { getCompanyById } from "@/app/mongodb/queries/company-queries";
+import { auth } from "@/auth";
+import { serializeBsonType } from "@/lib/utils";
 import { RequestsListWithActions } from "./request";
 import Pagination from "@/components/pagination";
 
@@ -152,13 +155,23 @@ export async function RequestsTableServer({
   userId,
   userRole,
 }) {
-  const requests = await searchRequests(query, page, userId, userRole, filters);
+  const [requests, session] = await Promise.all([
+    searchRequests(query, page, userId, userRole, filters),
+    auth(),
+  ]);
+
+  let company = null;
+  if (session?.user?.companyId) {
+    company = await getCompanyById(session.user.companyId);
+    if (company) company = serializeBsonType(company);
+  }
 
   return (
     <RequestsListWithActions
       requests={requests}
       userId={userId}
       userRole={userRole}
+      company={company}
     />
   );
 }

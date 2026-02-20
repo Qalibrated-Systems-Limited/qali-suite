@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { CreateRequestFromCartForm } from "./createRequestForm";
 import { IconClipboardList } from "@tabler/icons-react";
-import { CreateDNoteForm } from "./AddDnoteForm";
+
 import CreateReqComponent from "./createReqComponent";
 export function RequestDialog({ cart, cartTotal, customers = [] }) {
   // Fetch customers (accounts)
@@ -50,7 +50,6 @@ export function RequestDialog({ cart, cartTotal, customers = [] }) {
         </DialogHeader>
 
         <CreateReqComponent />
-        {/* <CreateDNoteForm /> */}
       </DialogContent>
     </Dialog>
   );

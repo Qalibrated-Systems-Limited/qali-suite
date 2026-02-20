@@ -52,11 +52,6 @@ export function CreateButton({ user }) {
       label: "Invoice",
       roles: ["Admin", "Accountant", "Sales"],
     },
-    "/dashboard/dnotes": {
-      href: "/dashboard/dnotes/create",
-      label: "Delivery Note",
-      roles: ["Admin", "Store Manager", "Sales"],
-    },
     "/dashboard/quotes": {
       href: "/dashboard/quotes/create",
       label: "Quote",
