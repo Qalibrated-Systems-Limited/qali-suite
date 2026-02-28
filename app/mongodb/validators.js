@@ -267,11 +267,6 @@ export const settingsForm = z.object({
   division: z.string(),
 });
 
-export const stationForm = z.object({
-  name: z.string().max(50).min(4),
-  ipaddress: z.string().ip(),
-  code: z.string().max(20).min(3),
-});
 const userForm = z.object({
   password: z
     .string({
@@ -343,7 +338,6 @@ export const validateUpdateAccount = (userRawData) =>
 
 export const validateAccount = (rawData) => accountForm.safeParse(rawData);
 
-export const validateStation = (rawData) => stationForm.safeParse(rawData);
 
 export const validateSettings = (rawData) => settingsForm.safeParse(rawData);
 export const ValidateStock = (rawData) => stockForm.safeParse(rawData);
