@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import {
   ArrowLeft,
   ArrowRight,
@@ -258,17 +258,23 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
     if (isExcel) {
       // Handle Excel file
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
-          const fileData = new Uint8Array(e.target.result);
-          const workbook = XLSX.read(fileData, { type: "array" });
+          const workbook = new ExcelJS.Workbook();
+          await workbook.xlsx.load(e.target.result);
 
           // Get the first sheet
-          const sheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[sheetName];
+          const worksheet = workbook.worksheets[0];
 
           // Convert to array of arrays
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+          const jsonData = [];
+          worksheet.eachRow({ includeEmpty: true }, (row) => {
+            jsonData.push(
+              row.values.slice(1).map((cell) =>
+                cell == null ? "" : typeof cell === "object" && cell.result !== undefined ? cell.result : cell
+              )
+            );
+          });
 
           // Filter out completely empty rows
           const allRows = jsonData.filter((row) =>

@@ -1,30 +1,41 @@
 "use client";
 
 import { FileDownIcon } from "lucide-react";
-
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 export function DownloadReport({ summaryResult, startDate, endDate }) {
-  const transformedData = summaryResult.map((res) => {
-    return {
-      "INVOICE NUMBER": res.invoiceNumber,
-      DATE: res.date,
+  async function downloadExcel() {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("reports");
 
-      CUSTOMER: res.customer,
-      AMOUNT: res.totalAmount,
-      STATUS: res.status,
-    };
-  });
+    worksheet.columns = [
+      { header: "INVOICE NUMBER", key: "invoiceNumber", width: 20 },
+      { header: "DATE", key: "date", width: 15 },
+      { header: "CUSTOMER", key: "customer", width: 25 },
+      { header: "AMOUNT", key: "amount", width: 15 },
+      { header: "STATUS", key: "status", width: 12 },
+    ];
 
-  function downloadExcel() {
-    const worksheet = XLSX.utils.json_to_sheet(transformedData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, ` reports`);
+    summaryResult.forEach((res) => {
+      worksheet.addRow({
+        invoiceNumber: res.invoiceNumber,
+        date: res.date,
+        customer: res.customer,
+        amount: res.totalAmount,
+        status: res.status,
+      });
+    });
 
-    XLSX.writeFile(
-      workbook,
-      `Invoices reports from ${startDate}-${endDate}.xlsx`
-    );
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Invoices reports from ${startDate}-${endDate}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return <FileDownIcon onClick={downloadExcel} size={30} />;

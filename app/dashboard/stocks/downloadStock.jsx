@@ -3,27 +3,39 @@
 import { format } from "date-fns/format";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 export function DownloadStock({ summaryResult }) {
-  const transformedData = summaryResult.map((res) => {
-    return {
-      SKU: res.SKU,
-      NAME: res.name,
-      "PRICE PER UNIT": (res.pricing?.sellingPrice ?? 0).toString(),
-      QUANTITY: (res.inventory?.quantityOnHand ?? 0).toString(),
-    };
-  });
+  async function downloadExcel() {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("reports");
 
-  function downloadExcel() {
-    const worksheet = XLSX.utils.json_to_sheet(transformedData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "reports");
+    worksheet.columns = [
+      { header: "SKU", key: "sku", width: 15 },
+      { header: "NAME", key: "name", width: 30 },
+      { header: "PRICE PER UNIT", key: "price", width: 15 },
+      { header: "QUANTITY", key: "quantity", width: 12 },
+    ];
 
-    XLSX.writeFile(
-      workbook,
-      `Stock as at ${format(new Date(), "dd-MM-yyyy")}.xlsx`
-    );
+    summaryResult.forEach((res) => {
+      worksheet.addRow({
+        sku: res.SKU,
+        name: res.name,
+        price: res.pricing?.sellingPrice ?? 0,
+        quantity: res.inventory?.quantityOnHand ?? 0,
+      });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Stock as at ${format(new Date(), "dd-MM-yyyy")}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (

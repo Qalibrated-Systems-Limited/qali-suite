@@ -1,33 +1,47 @@
 "use client";
 
 import { FileDownIcon } from "lucide-react";
-
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 export function DownloadReport({ summaryResult, startDate, endDate }) {
-  const transformedData = summaryResult.map((res) => {
-    return {
-      "TRAN ID": res._id,
-      TIMESTAMP: res.date,
-      COMMODITY: res.commodity,
-      CUSTOMER: res.customer,
-      VEHICLE: res.vehRegNo,
+  async function downloadExcel() {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("reports");
 
-      "FIRST WEIGHT(Kg)": res.firstWeight && res.firstWeight.toString(),
-      "SECOND WEIGHT(Kg)": res.secondWeight && res.secondWeight.toString(),
-      "NET WEIGHT(KG)": res.netWeight && res.netWeight.toString(),
-    };
-  });
+    worksheet.columns = [
+      { header: "TRAN ID", key: "tranId", width: 15 },
+      { header: "TIMESTAMP", key: "timestamp", width: 20 },
+      { header: "COMMODITY", key: "commodity", width: 20 },
+      { header: "CUSTOMER", key: "customer", width: 20 },
+      { header: "VEHICLE", key: "vehicle", width: 15 },
+      { header: "FIRST WEIGHT(Kg)", key: "firstWeight", width: 18 },
+      { header: "SECOND WEIGHT(Kg)", key: "secondWeight", width: 18 },
+      { header: "NET WEIGHT(KG)", key: "netWeight", width: 18 },
+    ];
 
-  function downloadExcel() {
-    const worksheet = XLSX.utils.json_to_sheet(transformedData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, ` reports`);
+    summaryResult.forEach((res) => {
+      worksheet.addRow({
+        tranId: res._id,
+        timestamp: res.date,
+        commodity: res.commodity,
+        customer: res.customer,
+        vehicle: res.vehRegNo,
+        firstWeight: res.firstWeight ?? "",
+        secondWeight: res.secondWeight ?? "",
+        netWeight: res.netWeight ?? "",
+      });
+    });
 
-    XLSX.writeFile(
-      workbook,
-      `Weights reports from ${startDate}-${endDate}.xlsx`
-    );
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Weights reports from ${startDate}-${endDate}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return <FileDownIcon onClick={downloadExcel} size={30} />;
