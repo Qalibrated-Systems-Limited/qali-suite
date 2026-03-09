@@ -35,7 +35,7 @@ export async function POST(req) {
         userId: user._id.toString(),
         userName: user.name,
       },
-      "SFGGDGDG788DFF244255TYY_90",
+      process.env.JWT_KEY,
       { expiresIn: "12h" }
     );
 

@@ -1,44 +1,40 @@
 import { isAuth } from "../../middlewares/auth";
-import { authErrorResponse } from "../../utils/customres";
+import Transaction from "../../models/transaction";
+import {
+  authErrorResponse,
+  failedResponse,
+  okResponse,
+} from "../../utils/customres";
 
 export async function GET(req) {
-  isAuth(req);
+  await isAuth(req);
 
   if (!req.isAuth) {
     return authErrorResponse("Not authorized");
   }
 
-  const { start, end, reportType, customer, vehicle, commodity } =
-    await req.json();
+  const { searchParams } = new URL(req.url);
+  const start = searchParams.get("start");
+  const end = searchParams.get("end");
+  const customer = searchParams.get("customer");
+  const vehicle = searchParams.get("vehicle");
+  const commodity = searchParams.get("commodity");
 
-  const vehicleMatch = { veRegNo: vehicle };
-  const commodityMatch = { commodity };
-  const customerMatch = { "customer.name": customer };
-
-  let startDate = new Date();
+  let startDate = start ? new Date(start) : new Date();
   startDate.setUTCHours(0, 0, 0, 0);
 
-  let endDate = new Date(startDate);
+  let endDate = end ? new Date(end) : new Date(startDate);
+  endDate.setUTCDate(endDate.getUTCDate() + 1);
 
-  endDate.setUTCDate(startDate.getUTCDate() + 1);
-
-  const groupFacetMatchStage = {
-    $math: {
-      "secondWeight.date": { $gte: startDate, $lte: endDate },
-      "secondWeight.value": { $gte: 400 },
-    },
-  };
-
-  const genOn = reportType;
   let matchStage = {
-    $math: {
+    $match: {
       "secondWeight.date": { $gte: startDate, $lte: endDate },
       status: "Active",
       isComplete: true,
       "secondWeight.value": { $gte: 400 },
-      ...(customer && customerMatch),
-      ...(vehicle && vehicleMatch),
-      ...(commodity && commodityMatch),
+      ...(customer && { "customer.name": customer }),
+      ...(vehicle && { veRegNo: vehicle }),
+      ...(commodity && { commodity }),
     },
   };
 
@@ -53,4 +49,11 @@ export async function GET(req) {
       count: { $sum: 1 },
     },
   };
+
+  try {
+    const result = await Transaction.aggregate([matchStage, groupStage]);
+    return okResponse(result);
+  } catch (e) {
+    return failedResponse();
+  }
 }
