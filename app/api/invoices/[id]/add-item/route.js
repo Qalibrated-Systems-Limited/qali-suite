@@ -24,7 +24,7 @@ export async function POST(req, { params }) {
 
   try {
     const id = (await params).id;
-    dbConnect();
+    await dbConnect();
 
     const rawFormData = await req.json();
 
@@ -169,7 +169,7 @@ export async function DELETE(req, { params }) {
   }
 
   try {
-    dbConnect();
+    await dbConnect();
     const id = (await params).id;
     const { itemId } = await req.json();
 
@@ -181,19 +181,16 @@ export async function DELETE(req, { params }) {
     if (res) {
       const deletedItem = res.items.find((item) => item._id == itemId);
       if (deletedItem) {
-        console.log(deletedItem);
         const result = await StockTransaction.deleteOne({
           SKU: deletedItem.name,
           ref: res.invoiceNumber,
         });
 
-        console.log(result);
         const res2 = await Product.updateOne(
           { SKU: deletedItem.name },
           { $inc: { "inventory.quantityOnHand": deletedItem.quantity, "inventory.quantityAvailable": deletedItem.quantity } }
         );
 
-        console.log(res2);
       }
     }
 
@@ -205,7 +202,6 @@ export async function DELETE(req, { params }) {
     }
 
     const date = format(res.createdAt, "mm-MM-yyyy");
-    console.log(totalAmount);
     return okResponse({
       date,
       invoiceNumber: res.invoiceNumber,

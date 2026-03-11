@@ -1,6 +1,5 @@
-import dbConnect from "../../config/dbConnect";
 import { isAuth } from "../../middlewares/auth";
-import Account from "../../models/account";
+import { getActiveAccounts } from "../../mongodb/queries/weighbridge-queries";
 import { authErrorResponse, okResponse } from "../../utils/customres";
 import { errorHandlers } from "../../utils/errorHandler";
 
@@ -12,32 +11,8 @@ export async function GET(req) {
   }
 
   try {
-    dbConnect();
-
-    const matchStage = {
-      $match: { status: "Active" },
-    };
-
-    const sortStage = { $sort: { createdAt: -1 } };
-
-    const projectStage = {
-      $project: {
-        name: 1,
-        email: 1,
-        accountType: "$accountType",
-        nationalId: 1,
-        phoneNumber: 1,
-        address: 1,
-      },
-    };
-
-    const pipeline = [matchStage, sortStage, projectStage];
-
-    const result = await Account.aggregate(pipeline);
-
-    if (result) {
-      return okResponse(result);
-    }
+    const result = await getActiveAccounts(req.companyId);
+    return result ? okResponse(result) : okResponse([]);
   } catch (e) {
     return errorHandlers(e);
   }

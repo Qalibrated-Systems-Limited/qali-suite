@@ -334,7 +334,7 @@ const getNavigationGroups = (user) => [
   // ============================================
   {
     type: "group",
-    label: "Tax Management",
+    label: "Taxes",
     icon: FileText,
     id: "tax",
     defaultOpen: false,
@@ -365,8 +365,7 @@ const getNavigationGroups = (user) => [
         label: "KRA Filings",
         id: "kra-filings",
         href: "/dashboard/tax/kra",
-        hidden: user?.role !== "Admin",
-        badge: "Soon",
+        hidden: !["Admin", "Accountant"].includes(user?.role),
       },
     ],
   },

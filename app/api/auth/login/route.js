@@ -11,11 +11,10 @@ import { errorHandlers } from "../../../utils/errorHandler";
 import jsonwebtoken from "jsonwebtoken";
 
 export async function POST(req) {
-  console.log("ok");
   const { email, password } = await req.json();
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const user = await User.findOne({ email: email }).select("+password");
 

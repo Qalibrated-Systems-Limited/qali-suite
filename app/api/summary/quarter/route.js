@@ -20,7 +20,6 @@ export async function GET(req) {
 
   try {
     const result = await quarterlySalesDistro();
-    console.log(result);
     return okResponse(result);
   } catch (e) {
     return failedResponse();

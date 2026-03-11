@@ -12,7 +12,7 @@ import { errorHandlers } from "../../../utils/errorHandler";
 import { toTitle, validateEmail } from "../../../utils/validators";
 
 export async function POST(req) {
-  isAuth(req);
+  await isAuth(req);
 
   if (req.role !== "Admin") {
     return authErrorResponse("Not allowed");
@@ -31,7 +31,7 @@ export async function POST(req) {
   const creator = { name: req.userName, id: req.userId };
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const user = await User.findByEmail(email);
 
@@ -58,7 +58,7 @@ export async function POST(req) {
 }
 
 export async function PUT(req) {
-  isAuth(req);
+  await isAuth(req);
 
   if (req.role !== "Admin") {
     return authErrorResponse("Not allowed");
@@ -67,7 +67,7 @@ export async function PUT(req) {
   const modName = toTitle(name);
 
   try {
-    dbConnect();
+    await dbConnect();
     const result = await User.findOneAndUpdate(
       { email },
       { name: modName, role }
@@ -79,13 +79,12 @@ export async function PUT(req) {
 
     return failedResponse();
   } catch (e) {
-    console.log(e);
     return errorHandlers(e);
   }
 }
 
 export async function PATCH(req) {
-  isAuth(req);
+  await isAuth(req);
 
   if (req.role !== "Admin") {
     return authErrorResponse("Not allowed");
@@ -93,7 +92,7 @@ export async function PATCH(req) {
   const { password } = await req.json();
 
   try {
-    dbConnect();
+    await dbConnect();
     const result = await User.findOneAndUpdate({ email }, { password });
 
     if (result) {
@@ -102,7 +101,6 @@ export async function PATCH(req) {
 
     return failedResponse();
   } catch (e) {
-    console.log(e);
     return errorHandlers(e);
   }
 }

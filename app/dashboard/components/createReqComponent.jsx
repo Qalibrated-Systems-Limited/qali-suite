@@ -9,8 +9,8 @@ import { CreateRequestFromCartForm } from "./createRequestForm";
 
 async function CreateReqComponent() {
   await dbConnect();
-  const sesssion = await auth();
-  const user = sesssion && sesssion.user;
+  const session = await auth();
+  const user = session && session.user;
   const { companyId } = await getTenantContext();
 
   const userWithCart = await User.findById(user.id).lean();

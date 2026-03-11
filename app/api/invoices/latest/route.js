@@ -13,7 +13,7 @@ export async function GET(req) {
   }
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const limitStage = { $limit: 10 };
     const sortStage = { $sort: { createdAt: -1 } };

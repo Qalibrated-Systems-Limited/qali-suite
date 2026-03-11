@@ -20,7 +20,7 @@ export async function GET(req) {
   }
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const limitStage = { $limit: 1000 };
     const sortStage = { $sort: { createdAt: -1 } };
@@ -44,7 +44,7 @@ export async function POST(req) {
   }
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const rawFormData = await req.json();
 
@@ -90,40 +90,48 @@ export async function PUT(req) {
   }
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const rawFormData = await req.json();
     const validatedFields = ValidateStock(rawFormData);
     if (!validatedFields.success) {
       return clientSideErrorResponse("Some required fields missing");
     }
-    const product = await Product.findById(id);
+
+    const data = validatedFields.data;
+    const product = await Product.findById(data.id);
+
+    if (!product) {
+      return clientSideErrorResponse("Product not found");
+    }
+
     const oldStock = product.inventory?.quantityOnHand ?? 0;
-    if (product) {
-      product.name = toTitle(validatedFields.data.name);
-      product.SKU = validatedFields.data.SKU;
-      product.pricing = product.pricing || {};
-      product.pricing.sellingPrice = validatedFields.data.price;
-      product.inventory = product.inventory || {};
-      product.inventory.quantityOnHand = validatedFields.data.stock;
-      product.category = validatedFields.data.category;
-      product.description = validatedFields.data.description;
-      const result = await product.save();
-      if (result) {
-        const addedProducts = Number(validatedFields.data.stock) - oldStock;
-        if (addedProducts > 0) {
-          const amount = Number(validatedFields.data.price) * addedProducts;
-          await StockTransaction.create({
-            SKU: validatedFields.data.SKU,
-            amount: amount,
-            transactionType: "Purchase",
-            quantity: addedProducts,
-          });
-        }
+
+    product.name = toTitle(data.name);
+    product.SKU = data.SKU;
+    product.pricing = product.pricing || {};
+    product.pricing.sellingPrice = data.price;
+    product.inventory = product.inventory || {};
+    product.inventory.quantityOnHand = data.stock;
+    product.category = data.category;
+    product.description = data.description;
+
+    const result = await product.save();
+
+    if (result) {
+      const addedProducts = Number(data.stock) - oldStock;
+      if (addedProducts > 0) {
+        const amount = Number(data.price) * addedProducts;
+        await StockTransaction.create({
+          SKU: data.SKU,
+          amount: amount,
+          transactionType: "Purchase",
+          quantity: addedProducts,
+        });
       }
     }
 
-    return okResponse(invoice);
+    return okResponse(result);
   } catch (e) {
     return errorHandlers(e);
   }

@@ -1,5 +1,5 @@
 import { isAuth } from "../../middlewares/auth";
-import Transaction from "../../models/transaction";
+import { getWeighbridgeReport } from "../../mongodb/queries/weighbridge-queries";
 import {
   authErrorResponse,
   failedResponse,
@@ -26,32 +26,15 @@ export async function GET(req) {
   let endDate = end ? new Date(end) : new Date(startDate);
   endDate.setUTCDate(endDate.getUTCDate() + 1);
 
-  let matchStage = {
-    $match: {
-      "secondWeight.date": { $gte: startDate, $lte: endDate },
-      status: "Active",
-      isComplete: true,
-      "secondWeight.value": { $gte: 400 },
-      ...(customer && { "customer.name": customer }),
-      ...(vehicle && { veRegNo: vehicle }),
-      ...(commodity && { commodity }),
-    },
-  };
-
-  const groupStage = {
-    $group: {
-      _id: null,
-      totalWeight: {
-        $sum: {
-          $abs: { $subtract: ["$secondWeight.value", "$firstWeight.value"] },
-        },
-      },
-      count: { $sum: 1 },
-    },
-  };
-
   try {
-    const result = await Transaction.aggregate([matchStage, groupStage]);
+    const result = await getWeighbridgeReport({
+      startDate,
+      endDate,
+      customer,
+      vehicle,
+      commodity,
+      companyId: req.companyId,
+    });
     return okResponse(result);
   } catch (e) {
     return failedResponse();

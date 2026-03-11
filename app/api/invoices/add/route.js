@@ -25,7 +25,7 @@ export async function POST(req) {
   }
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const rawFormData = await req.json();
 
@@ -84,7 +84,7 @@ export async function PUT(req) {
   }
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const rawFormData = await req.json();
 

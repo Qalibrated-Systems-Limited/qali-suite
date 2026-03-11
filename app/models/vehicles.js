@@ -39,11 +39,6 @@ const vehicleSchema =
     { timestamps: true }
   );
 
-// Encrypting password before saving vehicle
-
-// Compare vehicle password
-// Generate password reset token
-
 // Indexes
 // Unique number plate per company
 vehicleSchema.index({ companyId: 1, numberPlate: 1 }, { unique: true });

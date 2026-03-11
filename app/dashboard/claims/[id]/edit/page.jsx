@@ -5,7 +5,7 @@ import {
   getExpenseAccountsForCategories,
 } from "@/app/mongodb/queries/claimQueries";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
-import { AdvanceRequestForm } from "../../components/AdvanceRequestFrom";
+import { AdvanceRequestForm } from "../../components/AdvanceRequestForm";
 import { ReimbursementForm } from "../../components/ReimbursementForm";
 
 export const metadata = {

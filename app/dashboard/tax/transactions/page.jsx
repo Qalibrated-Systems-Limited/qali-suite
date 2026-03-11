@@ -8,7 +8,7 @@ import {
 import { getTaxTransactions, getFilingPeriods } from "@/app/mongodb/queries/taxQueries";
 
 export const metadata = {
-  title: "Tax Transactions | Tax Management",
+  title: "Tax Transactions | Taxes",
   description: "View all tax transactions including VAT, WHT, PAYE for KRA compliance",
 };
 

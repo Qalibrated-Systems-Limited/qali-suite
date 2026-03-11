@@ -21,7 +21,7 @@ export async function PUT(req, { params }) {
 
   try {
     const id = (await params).id;
-    dbConnect();
+    await dbConnect();
 
     const rawFormData = await req.json();
     const validatedFields = ValidateStock(rawFormData);

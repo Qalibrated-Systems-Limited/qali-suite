@@ -16,7 +16,7 @@ export async function GET(req) {
   const query = searchParams.get("query");
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const searchStage = {
       $search: {
@@ -39,7 +39,6 @@ export async function GET(req) {
     }
 
     const result = await Invoice.aggregate(pipeline);
-    console.log(result);
 
     if (result) {
       return okResponse(result);

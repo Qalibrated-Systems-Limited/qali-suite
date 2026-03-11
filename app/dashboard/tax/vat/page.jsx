@@ -8,7 +8,7 @@ import {
 import { getVATDashboard, getFilingPeriods, getTaxTransactions } from "@/app/mongodb/queries/taxQueries";
 
 export const metadata = {
-  title: "VAT Returns | Tax Management",
+  title: "VAT Returns | Taxes",
   description: "VAT Output and Input tracking for Kenya Revenue Authority compliance",
 };
 

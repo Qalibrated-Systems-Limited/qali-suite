@@ -19,16 +19,14 @@ export async function PUT(req, { params }) {
   }
 
   try {
-    dbConnect();
+    await dbConnect();
     const id = (await params).id;
 
     const rawFormData = await req.json();
-    console.log(rawFormData);
 
     const validatedFields = validateAccount(rawFormData);
 
     if (!validatedFields.success) {
-      console.log("Validation failed");
       return clientSideErrorResponse("Missing Fields. Failed to add stock.");
     }
 
@@ -54,7 +52,6 @@ export async function PUT(req, { params }) {
 
     return okResponse(result);
   } catch (e) {
-    console.log(e);
     return errorHandlers(e);
   }
 }

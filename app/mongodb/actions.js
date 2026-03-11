@@ -60,8 +60,8 @@ export async function authenticate(prevState, formData) {
 //Cart
 export async function decreaseQTY(productId) {
   await dbConnect();
-  const sesssion = await auth();
-  const user = sesssion && sesssion.user;
+  const session = await auth();
+  const user = session && session.user;
   try {
     await User.findOneAndUpdate(
       { _id: user.id, "cart.id": productId },
@@ -88,8 +88,8 @@ export async function decreaseQTY(productId) {
 
 export async function removeCartItem(productId) {
   await dbConnect();
-  const sesssion = await auth();
-  const user = sesssion && sesssion.user;
+  const session = await auth();
+  const user = session && session.user;
   try {
     await User.updateOne(
       { _id: user.id },
@@ -107,8 +107,8 @@ export async function removeCartItem(productId) {
 
 export async function increaseQTY(productId) {
   await dbConnect();
-  const sesssion = await auth();
-  const user = sesssion && sesssion.user;
+  const session = await auth();
+  const user = session && session.user;
   try {
     const product = await Product.findOne({ SKU: productId });
     const res = await User.findOneAndUpdate(
@@ -146,8 +146,8 @@ export async function addToCart(productId, state, formData) {
       };
     }
     const data = validatedFields.data;
-    const sesssion = await auth();
-    const user = sesssion && sesssion.user;
+    const session = await auth();
+    const user = session && session.user;
 
     const product = await Product.findById(productId);
 
@@ -188,8 +188,8 @@ export async function addToCart(productId, state, formData) {
 export async function createAccount(state, formData) {
   await dbConnect();
   try {
-    const sesssion = await auth();
-    const user = sesssion && sesssion.user;
+    const session = await auth();
+    const user = session && session.user;
     const rawFormData = Object.fromEntries(formData.entries());
 
     const validatedFields = validateAccount(rawFormData);
@@ -537,8 +537,8 @@ export const deleteAccount = async (id) => {
 export async function createUser(state, formData) {
   await dbConnect();
   try {
-    const sesssion = await auth();
-    const user = sesssion && sesssion.user;
+    const session = await auth();
+    const user = session && session.user;
     const rawFormData = Object.fromEntries(formData.entries());
 
     const validatedFields = validateNewUser(rawFormData);
@@ -966,8 +966,8 @@ export async function returnDNoteItems(id) {
   await dbConnect();
   const mongodbSession = await mongoose.startSession();
   try {
-    const sesssion = await auth();
-    const user = sesssion && sesssion.user;
+    const session = await auth();
+    const user = session && session.user;
 
     mongodbSession.startTransaction();
     const dNote = await DeliveryNote.findById(id).session(mongodbSession);

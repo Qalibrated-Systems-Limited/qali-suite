@@ -1,6 +1,5 @@
-import dbConnect from "../../config/dbConnect";
 import { isAuth } from "../../middlewares/auth";
-import BridgeConfig from "../../models/bridgeConfigs";
+import { getBridgeConfig } from "../../mongodb/queries/weighbridge-queries";
 import {
   authErrorResponse,
   failedResponse,
@@ -8,7 +7,6 @@ import {
 } from "../../utils/customres";
 import { errorHandlers } from "../../utils/errorHandler";
 
-//Fetch recently added transactions
 export async function GET(req) {
   await isAuth(req);
 
@@ -17,14 +15,8 @@ export async function GET(req) {
   }
 
   try {
-    dbConnect();
-
-    const result = await BridgeConfig.findOne({ weigherId: "WB/FEED/001" });
-
-    if (result) {
-      return okResponse(result);
-    }
-    return failedResponse("Failed");
+    const result = await getBridgeConfig(req.companyId);
+    return result ? okResponse(result) : failedResponse("Not configured");
   } catch (e) {
     return errorHandlers(e);
   }

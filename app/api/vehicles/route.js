@@ -1,6 +1,5 @@
-import dbConnect from "../../config/dbConnect";
 import { isAuth } from "../../middlewares/auth";
-import Vehicle from "../../models/vehicles";
+import { getActiveVehicles } from "../../mongodb/queries/weighbridge-queries";
 import { authErrorResponse, okResponse } from "../../utils/customres";
 import { errorHandlers } from "../../utils/errorHandler";
 
@@ -12,23 +11,8 @@ export async function GET(req) {
   }
 
   try {
-    dbConnect();
-
-    const matchStage = { $match: { status: "Active" } };
-
-    const sortStage = { $sort: { createdAt: -1 } };
-
-    const projectStage = {
-      $project: { numberPlate: 1, vehicleType: 1, tareWeight: 1 },
-    };
-
-    const pipeline = [matchStage, sortStage, projectStage];
-
-    const result = await Vehicle.aggregate(pipeline);
-
-    if (result) {
-      return okResponse(result);
-    }
+    const result = await getActiveVehicles(req.companyId);
+    return result ? okResponse(result) : okResponse([]);
   } catch (e) {
     return errorHandlers(e);
   }

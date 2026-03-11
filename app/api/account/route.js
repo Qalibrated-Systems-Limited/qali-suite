@@ -1,5 +1,5 @@
-import dbConnect from "../../config/dbConnect";
 import { isAuth } from "../../middlewares/auth";
+import dbConnect from "../../config/dbConnect";
 import Account from "../../models/account";
 import { authErrorResponse, okResponse } from "../../utils/customres";
 import { errorHandlers } from "../../utils/errorHandler";
@@ -13,15 +13,13 @@ export async function POST(req) {
   }
 
   try {
-    dbConnect();
-
+    await dbConnect();
     const creator = { id: req.userId, name: req.userName };
     const { name, nationalId, phoneNumber, address, email, accountType } =
       await req.json();
-    const modName = toTitle(name);
 
     const account = new Account({
-      name: modName,
+      name: toTitle(name),
       nationalId,
       phoneNumber,
       address,
@@ -31,73 +29,51 @@ export async function POST(req) {
     });
 
     const result = await account.save();
-
-    if (result) {
-      return okResponse(result);
-    }
+    return result ? okResponse(result) : errorHandlers(new Error("Failed to create"));
   } catch (e) {
     return errorHandlers(e);
   }
 }
 
 export async function PUT(req) {
-  isAuth(req);
+  await isAuth(req);
 
   if (!req.isAuth) {
     return authErrorResponse("Not allowed");
   }
 
   try {
-    dbConnect();
-
-    const creator = { id: req.userId, name: req.userName };
-    const {
-      name,
-      nationalId,
-      phoneNumber,
-      address,
-      email,
-      accountType,
-      accountId,
-    } = await req.json();
-
-    const modName = toTitle(name);
+    await dbConnect();
+    const { name, nationalId, phoneNumber, address, email, accountType, accountId } =
+      await req.json();
 
     const result = await Account.findByIdAndUpdate(accountId, {
-      name: modName,
+      name: toTitle(name),
       nationalId,
       phoneNumber,
       address,
       email,
       accountType,
-      creator,
     });
 
-    if (result) {
-      return okResponse(result);
-    }
+    return result ? okResponse(result) : errorHandlers(new Error("Not found"));
   } catch (e) {
     return errorHandlers(e);
   }
 }
 
 export async function DELETE(req) {
-  isAuth(req);
+  await isAuth(req);
 
   if (!req.isAuth) {
     return authErrorResponse("Not allowed");
   }
 
   try {
-    dbConnect();
-
+    await dbConnect();
     const { accountId } = await req.json();
-
     const result = await Account.findByIdAndDelete(accountId);
-
-    if (result) {
-      return okResponse(result);
-    }
+    return result ? okResponse(result) : errorHandlers(new Error("Not found"));
   } catch (e) {
     return errorHandlers(e);
   }

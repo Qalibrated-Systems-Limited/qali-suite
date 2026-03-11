@@ -13,7 +13,7 @@ export async function GET(req) {
   }
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const matchStage = { $match: { status: "Active", accountType: "Driver" } };
 

@@ -19,7 +19,7 @@ export async function GET(req) {
   }
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const matchStage = {
       $match: { status: "Active" },
@@ -57,15 +57,13 @@ export async function POST(req) {
   }
 
   try {
-    dbConnect();
+    await dbConnect();
 
     const rawFormData = await req.json();
-    console.log(rawFormData);
 
     const validatedFields = validateAccount(rawFormData);
 
     if (!validatedFields.success) {
-      console.log("Validation failed");
       return clientSideErrorResponse("Missing Fields. Failed to add stock.");
     }
 
@@ -86,7 +84,6 @@ export async function POST(req) {
 
     return okResponse(result);
   } catch (e) {
-    console.log(e);
     return errorHandlers(e);
   }
 }

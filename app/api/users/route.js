@@ -7,29 +7,30 @@ import { errorHandlers } from "../../utils/errorHandler";
 //Get admin users
 
 export async function GET(req) {
-  isAuth(req);
+  await isAuth(req);
 
   if (req.role !== "Admin") {
     return authErrorResponse("Not allowed");
   }
-  const matchStage = {
-    $match: {
-      status: "Active",
-    },
-  };
 
-  const projectStage = {
-    $project: {
-      name: 1,
-      email: 1,
-      role: 1,
-    },
-  };
-
-  const pipeline = [matchStage, projectStage];
   try {
-    dbConnect();
+    await dbConnect();
 
+    const matchStage = {
+      $match: {
+        status: "Active",
+      },
+    };
+
+    const projectStage = {
+      $project: {
+        name: 1,
+        email: 1,
+        role: 1,
+      },
+    };
+
+    const pipeline = [matchStage, projectStage];
     const users = await User.aggregate(pipeline);
 
     if (users) {

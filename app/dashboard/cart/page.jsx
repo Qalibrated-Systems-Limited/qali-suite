@@ -3,8 +3,8 @@ import { CartComp } from "./Cart";
 import { auth } from "../../../auth";
 
 export default async function page({}) {
-  const sesssion = await auth();
-  const user = sesssion && sesssion.user;
+  const session = await auth();
+  const user = session && session.user;
 
   const userWithCart = await User.findById(user.id);
 

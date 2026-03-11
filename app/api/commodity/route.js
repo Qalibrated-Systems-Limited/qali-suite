@@ -1,13 +1,14 @@
-import dbConnect from "../../config/dbConnect";
 import { isAuth } from "../../middlewares/auth";
-import Commodity from "../../models/commodity";
-
+import {
+  createCommodity,
+  deleteCommodity,
+} from "../../mongodb/actions/weighbridge-actions";
+import { getCommodities } from "../../mongodb/queries/weighbridge-queries";
 import {
   okResponse,
   failedResponse,
   authErrorResponse,
 } from "../../utils/customres";
-
 import { errorHandlers } from "../../utils/errorHandler";
 import { toTitle } from "../../utils/validators";
 
@@ -17,28 +18,21 @@ export async function POST(req) {
   if (!req.role) {
     return authErrorResponse("Not allowed");
   }
-  const { code, name } = await req.json();
 
-  const creator = { name: req.userName, id: req.userId };
   try {
-    dbConnect();
-    const modName = toTitle(name);
+    const { code, name } = await req.json();
+    const result = await createCommodity({
+      code,
+      name: toTitle(name),
+      companyId: req.companyId,
+      creator: { name: req.userName, id: req.userId },
+    });
 
-    const commodity = new Commodity({ code, name: modName, creator });
-
-    const result = await commodity.save();
-
-    if (result) {
-      return okResponse(result);
-    } else {
-      return failedResponse();
-    }
+    return result.data ? okResponse(result.data) : failedResponse();
   } catch (e) {
     return errorHandlers(e);
   }
 }
-
-//Get commodities
 
 export async function GET(req) {
   await isAuth(req);
@@ -48,30 +42,25 @@ export async function GET(req) {
   }
 
   try {
-    dbConnect();
-    const result = await Commodity.find();
-    if (result) {
-      return okResponse(result);
-    }
+    const result = await getCommodities(req.companyId);
+    return result ? okResponse(result) : okResponse([]);
   } catch (e) {
-    errorHandlers(e);
+    return errorHandlers(e);
   }
 }
 
 export async function DELETE(req) {
   await isAuth(req);
 
-  if (!req.isAuth) return authErrorResponse("Not allowed");
-
-  const { commodityId } = await req.json();
+  if (!req.isAuth) {
+    return authErrorResponse("Not allowed");
+  }
 
   try {
-    dbConnect();
-    await Commodity.findByIdAndDelete(commodityId);
-
-    return okResponse("ok");
+    const { commodityId } = await req.json();
+    const result = await deleteCommodity(commodityId);
+    return result.data ? okResponse("ok") : errorHandlers(new Error("Not found"));
   } catch (e) {
-    console.log(e);
     return errorHandlers(e);
   }
 }

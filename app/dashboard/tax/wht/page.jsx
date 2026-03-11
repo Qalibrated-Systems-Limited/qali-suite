@@ -8,7 +8,7 @@ import {
 import { getWHTDashboard, getTaxTransactions } from "@/app/mongodb/queries/taxQueries";
 
 export const metadata = {
-  title: "WHT Reports | Tax Management",
+  title: "WHT Reports | Taxes",
   description: "Withholding Tax tracking and KRA compliance",
 };
 
