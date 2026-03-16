@@ -24,20 +24,45 @@ import { PcNav } from "@/components/pc-nav";
 import { CreateButton } from "@/app/dashboard/components/smartCreateButton";
 import { MobileSearch, DesktopSearch } from "@/components/search";
 import { useTheme } from "next-themes";
+import { QaliSuiteIcon } from "@/components/qalisuite-logo";
 
 export function AppSidebar({ children, user, ...props }) {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [mounted, setMounted] = React.useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
   const { theme, setTheme } = useTheme();
 
-  // Avoid hydration mismatch
+  // Avoid hydration mismatch & restore collapsed state
   React.useEffect(() => {
     setMounted(true);
+    const saved = localStorage.getItem("sidebar-collapsed");
+    if (saved !== null) setSidebarCollapsed(JSON.parse(saved));
   }, []);
+
+  // Auto-collapse between lg (1024) and xl (1280)
+  React.useEffect(() => {
+    const handleResize = () => {
+      const w = window.innerWidth;
+      if (w >= 1024 && w < 1280) {
+        setSidebarCollapsed(true);
+      }
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem("sidebar-collapsed", JSON.stringify(next));
+      return next;
+    });
+  };
 
   return (
     <div className="flex h-screen bg-background text-foreground">
-      <PcNav user={user} />
+      <PcNav user={user} collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
       <MobileNav
         mobileMenuOpen={mobileMenuOpen}
         setMobileMenuOpen={setMobileMenuOpen}
@@ -57,7 +82,7 @@ export function AppSidebar({ children, user, ...props }) {
                 >
                   <Menu className="w-5 h-5" />
                 </Button>
-                <span className="text-yellow-500 font-bold text-lg">Q</span>
+                <QaliSuiteIcon className="w-8 h-8" />
               </div>
 
               {/* Center: Desktop search (hidden on mobile) */}

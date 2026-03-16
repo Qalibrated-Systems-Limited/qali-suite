@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <defs>
+    <linearGradient id="qg2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE047"/>
+      <stop offset="50%" stop-color="#EAB308"/>
+      <stop offset="100%" stop-color="#A16207"/>
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+  <!-- Main shape: squircle -->
+  <rect x="3" y="3" width="42" height="42" rx="14" ry="14" fill="url(#qg2)" filter="url(#shadow)"/>
+  <!-- Q letter - bold geometric -->
+  <circle cx="24" cy="21" r="10" fill="none" stroke="white" stroke-width="4" opacity="0.95"/>
+  <!-- Q tail -->
+  <line x1="30" y1="27" x2="37" y2="34" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.95"/>
+</svg>

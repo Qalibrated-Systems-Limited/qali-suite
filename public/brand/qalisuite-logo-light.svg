@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 48" width="200" height="48">
+  <defs>
+    <linearGradient id="qg_logo_light" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE047"/>
+      <stop offset="50%" stop-color="#EAB308"/>
+      <stop offset="100%" stop-color="#A16207"/>
+    </linearGradient>
+    <filter id="shadow_logo_light">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <!-- Icon -->
+  <rect x="2" y="2" width="44" height="44" rx="14" ry="14" fill="url(#qg_logo_light)" filter="url(#shadow_logo_light)"/>
+  <circle cx="24" cy="22" r="10" fill="none" stroke="white" stroke-width="4" opacity="0.95"/>
+  <line x1="30" y1="28" x2="37" y2="35" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.95"/>
+
+  <!-- Text: QaliSuite -->
+  <text x="54" y="28" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="22" font-weight="700" fill="#18181B" letter-spacing="-0.5">
+    <tspan>Qali</tspan><tspan fill="#EAB308">Suite</tspan>
+  </text>
+  <!-- Subtitle -->
+  <text x="54" y="42" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="9" font-weight="500" fill="#71717A" letter-spacing="2.5" text-transform="uppercase">
+    ERP SYSTEM
+  </text>
+</svg>

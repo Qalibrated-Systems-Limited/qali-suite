@@ -46,6 +46,13 @@ import { getInitials } from "@/lib/utils";
 import { logout } from "@/app/mongodb/actions";
 import { NextThemeToggler } from "./NextThemeToggler";
 import { useState, useEffect } from "react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
+import { QaliSuiteIcon, QaliSuiteMark } from "./qalisuite-logo";
 
 // ============================================
 // NAV GROUP CONFIGURATION - GENERAL NAMING
@@ -518,7 +525,7 @@ const getNavigationGroups = (user) => [
 // COMPONENTS
 // ============================================
 
-const NavGroup = ({ group, user, onItemClick }) => {
+const NavGroup = ({ group, user, onItemClick, collapsed }) => {
   const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(group.defaultOpen ?? false);
 
@@ -538,6 +545,52 @@ const NavGroup = ({ group, user, onItemClick }) => {
   const visibleItems = group.items?.filter((item) => !item.hidden) || [];
 
   if (visibleItems.length === 0) return null;
+
+  // Collapsed: show group icon as a dropdown menu
+  if (collapsed) {
+    return (
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={clsx(
+                  "w-full flex items-center justify-center p-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+                  "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  { "bg-accent/50 text-foreground": hasActiveChild }
+                )}
+              >
+                <group.icon className="w-5 h-5 shrink-0" />
+              </button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8}>
+            {group.label}
+          </TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent side="right" align="start" className="w-48 bg-card border-border" sideOffset={8}>
+          <DropdownMenuLabel className="text-xs text-muted-foreground">{group.label}</DropdownMenuLabel>
+          <DropdownMenuSeparator className="bg-border" />
+          {visibleItems.map((item) => {
+            const isActive = pathname === item.href;
+            return (
+              <DropdownMenuItem key={item.id} asChild className={clsx("cursor-pointer", { "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400": isActive })}>
+                <Link href={item.href} onClick={() => onItemClick?.()} className="flex items-center gap-2">
+                  <item.icon className="w-4 h-4" />
+                  <span>{item.label}</span>
+                  {item.badge && (
+                    <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-md bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 font-medium">
+                      {item.badge}
+                    </span>
+                  )}
+                </Link>
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
 
   return (
     <div className="space-y-1">
@@ -586,18 +639,46 @@ const NavGroup = ({ group, user, onItemClick }) => {
   );
 };
 
-const NavItem = ({ item, onItemClick }) => {
+const NavItem = ({ item, onItemClick, collapsed }) => {
   const pathname = usePathname();
 
   const isActive = (itemId, itemHref) => {
     if (itemId === "dashboard") {
       return pathname === "/dashboard";
     }
-    // Exact match only — prevents sibling routes from both highlighting
     return pathname === itemHref;
   };
 
   const active = isActive(item.id, item.href);
+
+  if (collapsed) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Link
+            href={item.href}
+            onClick={() => onItemClick?.()}
+            className={clsx(
+              "group w-full flex items-center justify-center p-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+              {
+                "bg-yellow-500 text-black shadow-sm hover:shadow-md": active,
+                "text-muted-foreground hover:bg-accent hover:text-foreground": !active,
+              }
+            )}
+          >
+            <item.icon
+              className={clsx("w-5 h-5 transition-transform group-hover:scale-110", {
+                "text-black": active,
+              })}
+            />
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent side="right" sideOffset={8}>
+          {item.label}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
 
   return (
     <Link
@@ -636,168 +717,185 @@ const NavItem = ({ item, onItemClick }) => {
 // ============================================
 // MAIN SIDEBAR CONTENT
 // ============================================
-export const SidebarContentGrouped = ({ onItemClick, user }) => {
+export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
   const navigationGroups = getNavigationGroups(user);
 
   return (
-    <div className="flex flex-col h-full bg-card">
-      {/* Logo */}
-      <div className="p-4 md:p-6 border-b border-border">
-        <Link
-          href="/dashboard"
-          className="flex items-center gap-3 group"
-          onClick={() => onItemClick?.()}
-        >
-          <div className="w-10 h-10 bg-yellow-500 rounded-lg flex items-center justify-center font-bold text-black text-xl shadow-sm group-hover:shadow-md transition-shadow">
-            Q
-          </div>
-          <div className="flex flex-col">
-            <span className="text-lg font-bold text-foreground">
-              QaliSuite
-            </span>
-            <span className="text-xs text-muted-foreground">
-              ERP System
-            </span>
-          </div>
-        </Link>
-      </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 p-3 md:p-4 space-y-1 overflow-y-auto">
-        {navigationGroups.map((navItem) => {
-          // Skip hidden items
-          if (navItem.hidden) return null;
-
-          // Single items (ungrouped)
-          if (navItem.type === "single") {
-            return (
-              <NavItem
-                key={navItem.id}
-                item={navItem}
-                onItemClick={onItemClick}
-              />
-            );
-          }
-
-          // Grouped items
-          if (navItem.type === "group") {
-            return (
-              <NavGroup
-                key={navItem.id}
-                group={navItem}
-                user={user}
-                onItemClick={onItemClick}
-              />
-            );
-          }
-
-          return null;
-        })}
-      </nav>
-
-      {/* Theme Toggle */}
-      <NextThemeToggler />
-
-      {/* User Profile */}
-      <div className="p-4 border-t border-border bg-muted/30">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="w-full flex items-center gap-3 hover:bg-accent p-2.5 rounded-lg transition-all duration-200">
-              <Avatar className="w-10 h-10 ring-2 ring-border">
-                <AvatarImage
-                  src={user?.image || "https://github.com/shadcn.png"}
-                  alt={user?.name}
-                />
-                <AvatarFallback className="bg-yellow-500 text-black font-bold">
-                  {getInitials(user?.name)}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1 min-w-0 text-left">
-                <p className="text-sm font-semibold text-foreground truncate">
-                  {user?.name}
-                </p>
-                <p className="text-xs text-muted-foreground truncate">
-                  {user?.role || "User"}
-                </p>
-              </div>
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="w-64 bg-card border-border"
-            sideOffset={5}
+    <TooltipProvider delayDuration={0}>
+      <div className="flex flex-col h-full bg-card overflow-hidden">
+        {/* Logo */}
+        <div className={clsx("border-b border-border", collapsed ? "p-3" : "p-4 md:p-5")}>
+          <Link
+            href="/dashboard"
+            className="flex items-center group"
+            onClick={() => onItemClick?.()}
           >
-            <DropdownMenuLabel>
-              <div className="flex items-center gap-3 pb-2">
-                <Avatar className="w-12 h-12 ring-2 ring-border">
-                  <AvatarImage
-                    src={user?.image || "https://github.com/shadcn.png"}
-                    alt={user?.name}
-                  />
-                  <AvatarFallback className="bg-yellow-500 text-black font-bold">
-                    {getInitials(user?.name)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-foreground truncate">
+            {collapsed ? (
+              <QaliSuiteIcon className="w-10 h-10 group-hover:scale-105 transition-transform" />
+            ) : (
+              <QaliSuiteMark size="md" subtitle="ERP System" className="group-hover:scale-[1.02] transition-transform" />
+            )}
+          </Link>
+        </div>
+
+        {/* Navigation */}
+        <nav className={clsx("flex-1 space-y-1 overflow-y-auto", collapsed ? "p-2" : "p-3 md:p-4")}>
+          {navigationGroups.map((navItem) => {
+            if (navItem.hidden) return null;
+
+            if (navItem.type === "single") {
+              return (
+                <NavItem
+                  key={navItem.id}
+                  item={navItem}
+                  onItemClick={onItemClick}
+                  collapsed={collapsed}
+                />
+              );
+            }
+
+            if (navItem.type === "group") {
+              return (
+                <NavGroup
+                  key={navItem.id}
+                  group={navItem}
+                  user={user}
+                  onItemClick={onItemClick}
+                  collapsed={collapsed}
+                />
+              );
+            }
+
+            return null;
+          })}
+        </nav>
+
+        {/* Theme Toggle */}
+        {!collapsed && <NextThemeToggler />}
+
+        {/* User Profile */}
+        <div className={clsx("border-t border-border bg-muted/30", collapsed ? "p-2" : "p-4")}>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              {collapsed ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button className="w-full flex items-center justify-center hover:bg-accent p-2 rounded-lg transition-all duration-200">
+                      <Avatar className="w-8 h-8 ring-2 ring-border">
+                        <AvatarImage
+                          src={user?.image || "https://github.com/shadcn.png"}
+                          alt={user?.name}
+                        />
+                        <AvatarFallback className="bg-yellow-500 text-black font-bold text-xs">
+                          {getInitials(user?.name)}
+                        </AvatarFallback>
+                      </Avatar>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
                     {user?.name}
-                  </p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {user?.email}
-                  </p>
-                  <p className="text-xs font-medium text-yellow-600 dark:text-yellow-500 truncate mt-1">
-                    {user?.role || "User"}
-                  </p>
-                </div>
-              </div>
-            </DropdownMenuLabel>
-
-            <DropdownMenuSeparator className="bg-border" />
-
-            <DropdownMenuItem
-              asChild
-              className="cursor-pointer focus:bg-accent focus:text-accent-foreground"
-            >
-              <Link href="/dashboard/profile" className="flex items-center">
-                <User className="mr-2 h-4 w-4" />
-                <span>Profile</span>
-              </Link>
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
-              asChild
-              className="cursor-pointer focus:bg-accent focus:text-accent-foreground"
-            >
-              <Link href="/dashboard/settings" className="flex items-center">
-                <Settings className="mr-2 h-4 w-4" />
-                <span>Settings</span>
-              </Link>
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator className="bg-border" />
-
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
-              asChild
-            >
-              <form
-                action={async () => {
-                  await logout();
-                }}
-                className="w-full"
-              >
-                <button
-                  className="w-full flex items-center text-left"
-                  type="submit"
-                >
-                  <LogOut className="mr-2 h-4 w-4" />
-                  <span>Log out</span>
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <button className="w-full flex items-center gap-3 hover:bg-accent p-2.5 rounded-lg transition-all duration-200">
+                  <Avatar className="w-10 h-10 ring-2 ring-border">
+                    <AvatarImage
+                      src={user?.image || "https://github.com/shadcn.png"}
+                      alt={user?.name}
+                    />
+                    <AvatarFallback className="bg-yellow-500 text-black font-bold">
+                      {getInitials(user?.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0 text-left">
+                    <p className="text-sm font-semibold text-foreground truncate">
+                      {user?.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {user?.role || "User"}
+                    </p>
+                  </div>
                 </button>
-              </form>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              )}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align={collapsed ? "start" : "start"}
+              side={collapsed ? "right" : "top"}
+              className="w-64 bg-card border-border"
+              sideOffset={5}
+            >
+              <DropdownMenuLabel>
+                <div className="flex items-center gap-3 pb-2">
+                  <Avatar className="w-12 h-12 ring-2 ring-border">
+                    <AvatarImage
+                      src={user?.image || "https://github.com/shadcn.png"}
+                      alt={user?.name}
+                    />
+                    <AvatarFallback className="bg-yellow-500 text-black font-bold">
+                      {getInitials(user?.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">
+                      {user?.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {user?.email}
+                    </p>
+                    <p className="text-xs font-medium text-yellow-600 dark:text-yellow-500 truncate mt-1">
+                      {user?.role || "User"}
+                    </p>
+                  </div>
+                </div>
+              </DropdownMenuLabel>
+
+              <DropdownMenuSeparator className="bg-border" />
+
+              <DropdownMenuItem
+                asChild
+                className="cursor-pointer focus:bg-accent focus:text-accent-foreground"
+              >
+                <Link href="/dashboard/profile" className="flex items-center">
+                  <User className="mr-2 h-4 w-4" />
+                  <span>Profile</span>
+                </Link>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                asChild
+                className="cursor-pointer focus:bg-accent focus:text-accent-foreground"
+              >
+                <Link href="/dashboard/settings" className="flex items-center">
+                  <Settings className="mr-2 h-4 w-4" />
+                  <span>Settings</span>
+                </Link>
+              </DropdownMenuItem>
+
+              <DropdownMenuSeparator className="bg-border" />
+
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
+                asChild
+              >
+                <form
+                  action={async () => {
+                    await logout();
+                  }}
+                  className="w-full"
+                >
+                  <button
+                    className="w-full flex items-center text-left"
+                    type="submit"
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />
+                    <span>Log out</span>
+                  </button>
+                </form>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 };

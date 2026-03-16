@@ -3,6 +3,7 @@ import AcceptInviteClient from "./AcceptInviteClient";
 import { AlertCircle, Clock, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { QaliSuiteMark } from "@/components/qalisuite-logo";
 
 export async function generateMetadata({ params }) {
   const { token } = await params;
@@ -26,12 +27,8 @@ export default async function InvitePage({ params }) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <div className="w-full max-w-md space-y-6 text-center">
-          {/* Logo */}
-          <div className="flex flex-col items-center space-y-3">
-            <div className="w-16 h-16 bg-yellow-500 rounded-xl flex items-center justify-center shadow-lg shadow-yellow-500/20">
-              <span className="text-3xl font-bold text-black">Q</span>
-            </div>
-            <h1 className="text-2xl font-bold text-foreground">QaliSuite</h1>
+          <div className="flex justify-center">
+            <QaliSuiteMark size="lg" />
           </div>
 
           {/* Error Card */}
@@ -55,17 +52,8 @@ export default async function InvitePage({ params }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="w-full max-w-md space-y-6">
-        {/* Logo */}
-        <div className="flex flex-col items-center space-y-3">
-          <div className="w-16 h-16 bg-yellow-500 rounded-xl flex items-center justify-center shadow-lg shadow-yellow-500/20">
-            <span className="text-3xl font-bold text-black">Q</span>
-          </div>
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-foreground">QaliSuite</h1>
-            <p className="text-sm text-muted-foreground">
-              Enterprise Resource Planning
-            </p>
-          </div>
+        <div className="flex justify-center">
+          <QaliSuiteMark size="lg" subtitle="ERP System" />
         </div>
 
         {/* Invite Info */}
@@ -75,7 +63,7 @@ export default async function InvitePage({ params }) {
           </div>
           <div>
             <h2 className="text-xl font-semibold text-foreground">
-              You're invited!
+              You&apos;re invited!
             </h2>
             <p className="text-sm text-muted-foreground mt-1">
               <strong>{result.invite.invitedBy}</strong> invited you to join{" "}

@@ -8,10 +8,7 @@ import {
   Users,
   Wallet,
   Package,
-  Sparkles,
-  Zap,
   Shield,
-  Globe,
   ChevronRight,
   BookOpen,
   ClipboardCheck,
@@ -23,431 +20,329 @@ import {
   Mail,
   Phone,
   ExternalLink,
+  Check,
+  Zap,
+  ArrowUpRight,
 } from "lucide-react";
+import { QaliSuiteIcon, QaliSuiteMark } from "@/components/qalisuite-logo";
+
+const MODULES = [
+  { icon: Package, name: "Inventory", desc: "Stock tracking, reorder alerts, multi-location" },
+  { icon: Receipt, name: "Invoicing", desc: "Quotes, invoices, credit notes, delivery notes" },
+  { icon: Wallet, name: "Accounting", desc: "Double-entry ledger, chart of accounts, journals" },
+  { icon: Users, name: "CRM", desc: "Customer & supplier management, transaction history" },
+  { icon: CreditCard, name: "Expenses", desc: "Advances, petty cash, claims with receipt uploads" },
+  { icon: BarChart3, name: "Reports", desc: "P&L, balance sheet, cash flow, sales analytics" },
+  { icon: Briefcase, name: "Purchases", desc: "Purchase orders, bills, supplier reconciliation" },
+  { icon: Shield, name: "Tax", desc: "VAT returns, WHT reports, KRA compliance" },
+  { icon: FileText, name: "Requests", desc: "Stock request workflows with approval chains" },
+  { icon: ClipboardCheck, name: "Claims", desc: "Expense reimbursements with approval workflows" },
+  { icon: BookOpen, name: "Finance", desc: "Bank feeds, fiscal periods, full audit trail" },
+  { icon: FolderKanban, name: "Projects", desc: "Project tracking & resource management", soon: true },
+];
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-background overflow-hidden">
-      {/* Floating Particles */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[10%] left-[15%] w-2 h-2 bg-yellow-500/60 rounded-full animate-ping animation-duration-[3s]" />
-        <div className="absolute top-[20%] right-[20%] w-1.5 h-1.5 bg-yellow-400/50 rounded-full animate-ping animation-duration-[4s] [animation-delay:1s]" />
-        <div className="absolute top-[60%] left-[10%] w-1 h-1 bg-orange-500/40 rounded-full animate-ping animation-duration-[5s] [animation-delay:2s]" />
-        <div className="absolute top-[80%] right-[15%] w-2 h-2 bg-yellow-500/30 rounded-full animate-ping animation-duration-[4s] [animation-delay:0.5s]" />
-      </div>
-
-      {/* ========== HERO ========== */}
-      <section className="relative pt-10 sm:pt-20 pb-0 px-3 sm:px-6">
-        {/* Gradient Orbs */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[min(800px,100vw)] h-[500px] bg-linear-to-br from-yellow-500/15 via-orange-500/8 to-transparent rounded-full blur-3xl animate-pulse" />
-
-        {/* Grid */}
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(234,179,8,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(234,179,8,0.03)_1px,transparent_1px)] bg-size-[clamp(20px,4vw,60px)_clamp(20px,4vw,60px)] mask-[radial-gradient(ellipse_60%_40%_at_50%_20%,black,transparent)]" />
-
-        <div className="relative z-10 max-w-6xl mx-auto text-center">
-          {/* Logo */}
-          <div className="mb-3 sm:mb-6 inline-flex animate-[fadeInUp_0.6s_ease-out_forwards] opacity-0 [animation-delay:0.05s]">
-            <div className="relative group">
-              <div className="absolute -inset-3 bg-linear-to-r from-yellow-400 to-orange-500 rounded-2xl blur-xl opacity-30 group-hover:opacity-50 transition-opacity duration-700 animate-pulse" />
-              <div className="relative w-10 h-10 sm:w-16 sm:h-16 bg-linear-to-br from-yellow-400 via-yellow-500 to-orange-500 rounded-lg sm:rounded-2xl flex items-center justify-center shadow-2xl shadow-yellow-500/25">
-                <span className="text-lg sm:text-3xl font-black text-black">Q</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Title */}
-          <h1 className="text-[clamp(1.85rem,7vw,5rem)] font-black tracking-tighter leading-[0.9] mb-2 sm:mb-4 animate-[fadeInUp_0.6s_ease-out_forwards] opacity-0 [animation-delay:0.15s]">
-            <span className="text-foreground">Qali</span>
-            <span className="bg-linear-to-r from-yellow-400 via-yellow-500 to-orange-500 bg-clip-text text-transparent">Suite</span>
-          </h1>
-
-          {/* Tagline */}
-          <p className="text-[clamp(0.8rem,2.5vw,1.35rem)] text-muted-foreground font-medium mb-4 sm:mb-6 max-w-2xl mx-auto px-2 sm:px-0 animate-[fadeInUp_0.6s_ease-out_forwards] opacity-0 [animation-delay:0.3s]">
-            Inventory, invoicing, accounting, and operations — all in one modern platform built for growing businesses
-          </p>
-
-          {/* CTA */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 mb-6 sm:mb-14 animate-[fadeInUp_0.6s_ease-out_forwards] opacity-0 [animation-delay:0.45s]">
-            <Button
-              size="lg"
-              className="group w-full sm:w-auto bg-linear-to-r from-yellow-400 via-yellow-500 to-orange-500 hover:from-yellow-500 hover:to-orange-600 text-black font-bold px-6 sm:px-8 h-10 sm:h-13 rounded-xl sm:rounded-2xl shadow-xl shadow-yellow-500/20 hover:shadow-yellow-500/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-sm sm:text-base"
-              asChild
-            >
-              <Link href="/login">
-                Get Started Free
-                <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
-              </Link>
+    <div className="min-h-screen bg-background text-foreground">
+      {/* ── Nav ── */}
+      <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-border/50">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+          <Link href="/">
+            <QaliSuiteMark size="sm" />
+          </Link>
+          <div className="flex items-center gap-1.5">
+            <Button variant="ghost" size="sm" className="text-sm text-muted-foreground" asChild>
+              <Link href="/login">Log in</Link>
             </Button>
-            <Button
-              variant="ghost"
-              size="lg"
-              className="w-full sm:w-auto h-10 sm:h-13 px-6 rounded-xl sm:rounded-2xl text-muted-foreground hover:text-foreground hover:bg-card/50 transition-all duration-300 text-sm sm:text-base"
-              asChild
-            >
-              <Link href="/login">
-                <Sparkles className="mr-2 h-4 w-4 text-yellow-500" />
-                See Demo
-              </Link>
+            <Button size="sm" className="text-sm bg-yellow-500 hover:bg-yellow-600 text-black font-medium h-8 px-4" asChild>
+              <Link href="/login">Get Started <ArrowRight className="ml-1 h-3.5 w-3.5" /></Link>
             </Button>
           </div>
-
-          {/* ===== Hero Screenshot ===== */}
-          <div className="relative animate-[fadeInUp_0.8s_ease-out_forwards] opacity-0 [animation-delay:0.6s]">
-            {/* Glow */}
-            <div className="absolute inset-x-4 -bottom-8 h-32 bg-linear-to-t from-yellow-500/20 via-yellow-500/5 to-transparent blur-2xl rounded-full" />
-
-            {/* ---- MOBILE: Phone mockup ---- */}
-            <div className="sm:hidden flex justify-center">
-              <div className="relative mx-auto w-65">
-                {/* Phone body */}
-                <div className="relative rounded-[2.5rem] border-[6px] border-gray-800 dark:border-gray-600 bg-black shadow-2xl shadow-black/40 overflow-hidden">
-                  {/* Notch / Dynamic Island */}
-                  <div className="absolute top-2 left-1/2 -translate-x-1/2 w-20 h-5 bg-black rounded-full z-20" />
-                  {/* Screen content */}
-                  <div className="relative">
-                    {/* Dark mode */}
-                    <div className="hidden dark:block">
-                      <Image
-                        src="/screenshots/mobile-dark.jpeg"
-                        alt="QaliSuite Dashboard - Mobile"
-                        width={750}
-                        height={1334}
-                        className="w-full h-auto"
-                        priority
-                      />
-                    </div>
-                    {/* Light mode */}
-                    <div className="block dark:hidden">
-                      <Image
-                        src="/screenshots/mobile-light.jpeg"
-                        alt="QaliSuite Dashboard - Mobile"
-                        width={750}
-                        height={1334}
-                        className="w-full h-auto"
-                        priority
-                      />
-                    </div>
-                  </div>
-                  {/* Home indicator */}
-                  <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 w-24 h-1 bg-white/30 rounded-full z-20" />
-                </div>
-              </div>
-            </div>
-
-            {/* ---- DESKTOP: MacBook mockup ---- */}
-            <div className="hidden sm:block relative mx-auto max-w-5xl">
-              {/* Laptop screen */}
-              <div className="relative rounded-t-xl border-[8px] border-gray-800 dark:border-gray-700 bg-gray-800 dark:bg-gray-700 shadow-2xl shadow-black/30 overflow-hidden">
-                {/* Camera notch */}
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3 h-3 -mt-[8px] z-20 flex items-center justify-center">
-                  <div className="w-1.5 h-1.5 rounded-full bg-gray-600 dark:bg-gray-500 ring-1 ring-gray-700 dark:ring-gray-600" />
-                </div>
-                {/* Screen content */}
-                <div className="hidden dark:block">
-                  <Image
-                    src="/screenshots/dark-mode-cropped.png"
-                    alt="QaliSuite Dashboard"
-                    width={1920}
-                    height={1080}
-                    className="w-full h-auto"
-                    priority
-                  />
-                </div>
-                <div className="block dark:hidden">
-                  <Image
-                    src="/screenshots/light-mode-cropped.png"
-                    alt="QaliSuite Dashboard"
-                    width={1920}
-                    height={1080}
-                    className="w-full h-auto"
-                    priority
-                  />
-                </div>
-              </div>
-              {/* Laptop base / hinge */}
-              <div className="relative mx-auto">
-                {/* Hinge strip */}
-                <div className="h-3 bg-gradient-to-b from-gray-700 to-gray-800 dark:from-gray-600 dark:to-gray-700 rounded-b-sm" />
-                {/* Base / keyboard deck */}
-                <div className="mx-auto w-[70%] h-4 bg-gradient-to-b from-gray-800 to-gray-900 dark:from-gray-700 dark:to-gray-800 rounded-b-2xl shadow-lg shadow-black/20" />
-              </div>
-            </div>
-
-            {/* Bottom fade into page */}
-            <div className="absolute bottom-0 left-0 right-0 h-24 bg-linear-to-t from-background to-transparent" />
-          </div>
         </div>
-      </section>
+      </nav>
 
-      {/* ========== TRUST STRIP ========== */}
-      <section className="relative z-10 py-5 sm:py-10 px-3 sm:px-6">
-        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-muted-foreground">
-          {[
-            { icon: Zap, label: "Lightning Fast" },
-            { icon: Shield, label: "Bank-grade Security" },
-            { icon: Globe, label: "Access Anywhere" },
-          ].map((item, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs sm:text-sm">
-              <item.icon className="w-4 h-4 text-yellow-500/70" />
-              <span>{item.label}</span>
-            </div>
-          ))}
-        </div>
-      </section>
+      {/* ── Hero ── */}
+      <section className="relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-125 h-125 rounded-full bg-yellow-500/4 blur-[120px] pointer-events-none" />
 
-      {/* ========== FEATURES OVERVIEW ========== */}
-      <section className="relative py-8 sm:py-24 px-3 sm:px-6">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-6 sm:mb-14">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-yellow-500/10 text-yellow-600 dark:text-yellow-500 text-xs sm:text-sm font-medium mb-3 sm:mb-4">
-              <Sparkles className="w-3.5 h-3.5" />
-              Everything You Need
-            </span>
-            <h2 className="text-[clamp(1.5rem,4.5vw,2.75rem)] font-bold text-foreground leading-tight">
-              One platform for your <span className="text-yellow-500">entire business</span>
-            </h2>
-          </div>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-14 sm:pt-20 pb-0">
+          <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-start">
+            {/* Left: copy */}
+            <div className="pt-2 sm:pt-6">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 text-xs font-medium mb-5">
+                <Zap className="w-3 h-3" />
+                All-in-one ERP for growing businesses
+              </div>
 
-          {/* Feature Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-4">
-            {[
-              { icon: Package, title: "Inventory", desc: "Real-time stock tracking & reorder alerts" },
-              { icon: Receipt, title: "Invoicing", desc: "Professional invoices, quotes & delivery notes" },
-              { icon: Wallet, title: "Accounting", desc: "Double-entry ledger & chart of accounts" },
-              { icon: BookOpen, title: "Journal Entries", desc: "Full audit trail with auto-posting" },
-              { icon: Users, title: "Customers & Suppliers", desc: "Complete party management & history" },
-              { icon: CreditCard, title: "Employee Advances", desc: "Petty cash & salary advance tracking" },
-              { icon: ClipboardCheck, title: "Reimbursements", desc: "Expense claims with receipt uploads" },
-              { icon: FileText, title: "Stock Requests", desc: "Request & approval workflows" },
-              { icon: BarChart3, title: "Reports", desc: "P&L, balance sheet & sales analytics" },
-              { icon: Briefcase, title: "Purchases", desc: "Purchase orders & supplier management" },
-              { icon: Shield, title: "Tax Management", desc: "VAT, WHT & compliance ready" },
-              { icon: FolderKanban, title: "Projects", desc: "Project management (coming soon)", coming: true },
-            ].map((item, i) => (
-              <div
-                key={i}
-                className={`group relative p-3 sm:p-5 rounded-lg sm:rounded-2xl bg-card border border-border/50 hover:border-yellow-500/30 hover:bg-yellow-500/5 transition-all duration-300 ${item.coming ? "opacity-60" : ""}`}
-              >
-                <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-md sm:rounded-lg bg-yellow-500/10 flex items-center justify-center mb-1.5 sm:mb-3 group-hover:bg-yellow-500/20 group-hover:scale-110 transition-all duration-300">
-                  <item.icon className="w-3.5 h-3.5 sm:w-4.5 sm:h-4.5 text-yellow-500" />
-                </div>
-                <h3 className="text-xs sm:text-base font-semibold text-foreground mb-0.5 group-hover:text-yellow-500 transition-colors">
-                  {item.title}
-                </h3>
-                <p className="text-[10px] sm:text-xs text-muted-foreground leading-snug sm:leading-relaxed">
-                  {item.desc}
-                </p>
-                {item.coming && (
-                  <span className="absolute top-2 right-2 sm:top-3 sm:right-3 text-[8px] sm:text-[10px] font-medium px-1 sm:px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-500">
-                    Soon
+              <h1 className="text-[clamp(2rem,5vw,3.5rem)] font-bold tracking-tight leading-[1.08] mb-4">
+                Inventory, finance
+                <br className="hidden sm:block" />
+                & operations —{" "}
+                <span className="text-yellow-500">unified.</span>
+              </h1>
+
+              <p className="text-muted-foreground text-base sm:text-lg leading-relaxed mb-6 max-w-lg">
+                Replace disconnected spreadsheets and tools with one platform.
+                Track stock, send invoices, manage accounts, and run reports — all connected.
+              </p>
+
+              <div className="flex flex-wrap gap-2.5 mb-6">
+                <Button size="lg" className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold h-11 px-7 rounded-lg" asChild>
+                  <Link href="/login">Start free <ArrowRight className="ml-1.5 h-4 w-4" /></Link>
+                </Button>
+                <Button variant="outline" size="lg" className="h-11 px-6 rounded-lg" asChild>
+                  <Link href="/login">View demo</Link>
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+                {["No credit card", "5-minute setup", "Free tier"].map((t) => (
+                  <span key={t} className="flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5 text-yellow-500" />
+                    {t}
                   </span>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
+            </div>
 
-      {/* ========== HR & OPERATIONS ========== */}
-      <section className="py-8 sm:py-24 px-3 sm:px-6 bg-muted/20">
-        <div className="max-w-6xl mx-auto text-center">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-yellow-500/10 text-yellow-600 dark:text-yellow-500 text-xs sm:text-sm font-medium mb-3 sm:mb-4">
-            <Briefcase className="w-3.5 h-3.5" />
-            Beyond ERP
-          </span>
-          <h2 className="text-[clamp(1.25rem,4.5vw,2.75rem)] font-bold text-foreground mb-2 sm:mb-3 leading-tight">
-            Manage your <span className="text-yellow-500">people</span> too
-          </h2>
-          <p className="text-xs sm:text-base text-muted-foreground mb-5 sm:mb-10 max-w-2xl mx-auto px-2 sm:px-0">
-            From employee advances to expense reimbursements with receipt attachments — QaliSuite keeps your operations running smooth.
-          </p>
-
-          <div className="grid sm:grid-cols-3 gap-2.5 sm:gap-4 max-w-3xl mx-auto">
-            {[
-              {
-                icon: CreditCard,
-                title: "Employee Advances",
-                desc: "Issue and track petty cash & salary advances. Full settlement workflow with ledger integration.",
-              },
-              {
-                icon: ClipboardCheck,
-                title: "Reimbursements",
-                desc: "Employees submit claims with receipt photos. Approve, settle, and auto-post to accounts.",
-              },
-              {
-                icon: FileText,
-                title: "Stock Requests",
-                desc: "Request stock from warehouse. Multi-level approvals with inventory commitment on approval.",
-              },
-            ].map((item, i) => (
-              <div
-                key={i}
-                className="group p-3.5 sm:p-6 rounded-lg sm:rounded-2xl bg-card border border-border/50 hover:border-yellow-500/30 text-left transition-all duration-300"
-              >
-                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-yellow-500/10 flex items-center justify-center mb-2.5 sm:mb-4 group-hover:bg-yellow-500/20 group-hover:scale-110 transition-all duration-300">
-                  <item.icon className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-500" />
-                </div>
-                <h3 className="text-xs sm:text-base font-semibold text-foreground mb-1 sm:mb-1.5 group-hover:text-yellow-500 transition-colors">
-                  {item.title}
-                </h3>
-                <p className="text-[11px] sm:text-sm text-muted-foreground leading-snug sm:leading-relaxed">
-                  {item.desc}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ========== STATS ========== */}
-      <section className="py-8 sm:py-20 px-3 sm:px-6">
-        <div className="max-w-4xl mx-auto">
-          <div className="relative rounded-xl sm:rounded-3xl overflow-hidden">
-            <div className="absolute inset-0 bg-linear-to-r from-yellow-400 via-yellow-500 to-orange-500" />
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_50%,rgba(0,0,0,0)_0%,rgba(0,0,0,0.15)_100%)]" />
-
-            <div className="relative px-4 py-6 sm:px-12 sm:py-14">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-8">
+            {/* Right: stats + quick features */}
+            <div className="hidden lg:block pt-4">
+              {/* Stats row */}
+              <div className="grid grid-cols-3 gap-4 mb-6">
                 {[
-                  { value: "99.9%", label: "Uptime" },
-                  { value: "10x", label: "Faster Ops" },
-                  { value: "50+", label: "Hours Saved/Mo" },
-                  { value: "24/7", label: "Support" },
-                ].map((stat, i) => (
-                  <div key={i} className="text-center">
-                    <div className="text-xl sm:text-3xl lg:text-4xl font-bold text-black">{stat.value}</div>
-                    <div className="text-[10px] sm:text-sm text-black/60 font-medium">{stat.label}</div>
+                  { val: "99.9%", label: "Uptime" },
+                  { val: "10x", label: "Faster ops" },
+                  { val: "50+", label: "Hours saved/mo" },
+                ].map((s) => (
+                  <div key={s.label} className="p-4 rounded-xl bg-card border border-border text-center">
+                    <div className="text-2xl font-bold text-foreground">{s.val}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Quick feature list */}
+              <div className="rounded-xl bg-card border border-border divide-y divide-border">
+                {[
+                  { icon: Package, text: "Real-time inventory across locations" },
+                  { icon: Receipt, text: "Auto-commit stock when you invoice" },
+                  { icon: Wallet, text: "Every transaction auto-posts to ledger" },
+                  { icon: BarChart3, text: "Financial reports in one click" },
+                ].map((f) => (
+                  <div key={f.text} className="flex items-center gap-3 px-4 py-3">
+                    <div className="w-7 h-7 rounded-lg bg-yellow-500/10 flex items-center justify-center shrink-0">
+                      <f.icon className="w-3.5 h-3.5 text-yellow-500" />
+                    </div>
+                    <span className="text-sm text-foreground">{f.text}</span>
                   </div>
                 ))}
               </div>
             </div>
           </div>
+
+          {/* Screenshot — browser chrome */}
+          <div className="mt-12 sm:mt-16 relative">
+            {/* Desktop */}
+            <div className="hidden sm:block rounded-t-xl border border-b-0 border-border bg-card overflow-hidden shadow-xl dark:shadow-black/40">
+              <div className="flex items-center gap-1.5 px-4 py-2 bg-muted/60 border-b border-border">
+                <div className="flex gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-400/60" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-400/60" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-400/60" />
+                </div>
+                <div className="ml-3 flex-1 max-w-xs">
+                  <div className="h-4 rounded bg-border/60 w-40" />
+                </div>
+              </div>
+              <div className="hidden dark:block">
+                <Image src="/screenshots/dark-mode-cropped.png" alt="QaliSuite Dashboard" width={1920} height={1080} className="w-full h-auto" priority />
+              </div>
+              <div className="block dark:hidden">
+                <Image src="/screenshots/light-mode-cropped.png" alt="QaliSuite Dashboard" width={1920} height={1080} className="w-full h-auto" priority />
+              </div>
+            </div>
+            {/* Mobile */}
+            <div className="sm:hidden flex justify-center">
+              <div className="relative w-60 rounded-[2rem] border-[5px] border-zinc-800 dark:border-zinc-600 bg-black shadow-2xl overflow-hidden">
+                <div className="absolute top-1.5 left-1/2 -translate-x-1/2 w-14 h-3.5 bg-black rounded-full z-10" />
+                <div className="hidden dark:block">
+                  <Image src="/screenshots/mobile-dark.jpeg" alt="QaliSuite Mobile" width={750} height={1334} className="w-full h-auto" priority />
+                </div>
+                <div className="block dark:hidden">
+                  <Image src="/screenshots/mobile-light.jpeg" alt="QaliSuite Mobile" width={750} height={1334} className="w-full h-auto" priority />
+                </div>
+              </div>
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 h-24 bg-linear-to-t from-background to-transparent pointer-events-none" />
+          </div>
         </div>
       </section>
 
-      {/* ========== CTA ========== */}
-      <section className="py-8 sm:py-24 px-3 sm:px-6">
-        <div className="max-w-4xl mx-auto">
-          <div className="relative rounded-xl sm:rounded-3xl overflow-hidden">
-            <div className="absolute inset-0 bg-linear-to-br from-gray-900 via-gray-900 to-black" />
-            <div className="absolute top-0 right-0 w-48 sm:w-72 h-48 sm:h-72 bg-yellow-500/15 rounded-full blur-3xl" />
-            <div className="absolute bottom-0 left-0 w-48 sm:w-72 h-48 sm:h-72 bg-orange-500/10 rounded-full blur-3xl" />
-
-            <div className="relative px-5 py-10 sm:px-12 sm:py-20 text-center">
-              <h2 className="text-[clamp(1.25rem,4vw,2.5rem)] font-bold text-white mb-2 sm:mb-3 leading-tight">
-                Ready to streamline<br className="hidden sm:block" />
-                <span className="bg-linear-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
-                  your business?
-                </span>
+      {/* ── Modules grid ── */}
+      <section className="py-16 sm:py-24 px-4 sm:px-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-10">
+            <div>
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
+                Everything you need.
+                <span className="text-muted-foreground"> Nothing you don&apos;t.</span>
               </h2>
-              <p className="text-gray-400 mb-5 sm:mb-8 text-xs sm:text-base max-w-md mx-auto">
-                Start free. No credit card required. Set up in minutes.
+              <p className="text-muted-foreground text-sm mt-2 max-w-lg">
+                Each module works standalone or together — inventory feeds invoicing, invoicing posts to accounting, expenses reconcile automatically.
               </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {MODULES.map((m) => (
+              <div
+                key={m.name}
+                className={`group relative p-4 rounded-xl bg-card border border-border hover:border-yellow-500/40 transition-colors ${m.soon ? "opacity-50" : ""}`}
+              >
+                <div className="flex items-start justify-between mb-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-yellow-500/10 flex items-center justify-center group-hover:bg-yellow-500/15 transition-colors">
+                    <m.icon className="w-4 h-4 text-yellow-500" />
+                  </div>
+                  {m.soon && (
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Soon</span>
+                  )}
+                </div>
+                <h3 className="text-sm font-semibold text-foreground mb-0.5">{m.name}</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">{m.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── How it flows ── */}
+      <section className="py-16 sm:py-24 px-4 sm:px-6 border-y border-border bg-muted/20">
+        <div className="max-w-6xl mx-auto">
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-10">
+            How it works
+          </h2>
+
+          <div className="grid sm:grid-cols-3 gap-px bg-border rounded-xl overflow-hidden border border-border">
+            {[
+              {
+                n: "1",
+                title: "Track your stock",
+                desc: "Add products, set reorder points, manage across locations. Every movement is auto-logged with full audit trail.",
+                icon: Package,
+              },
+              {
+                n: "2",
+                title: "Invoice & collect",
+                desc: "Create quotes, convert to invoices, record payments. Stock commits automatically when you invoice — no manual adjustments.",
+                icon: Receipt,
+              },
+              {
+                n: "3",
+                title: "See the full picture",
+                desc: "Every transaction auto-posts to your ledger. Pull P&L, balance sheets, tax reports, and analytics instantly.",
+                icon: BarChart3,
+              },
+            ].map((step) => (
+              <div key={step.n} className="bg-card p-6 sm:p-8">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-8 h-8 rounded-full bg-yellow-500 text-black flex items-center justify-center text-sm font-bold shrink-0">
+                    {step.n}
+                  </div>
+                  <step.icon className="w-5 h-5 text-muted-foreground" />
+                </div>
+                <h3 className="text-base font-semibold text-foreground mb-2">{step.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{step.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── CTA ── */}
+      <section className="py-16 sm:py-24 px-4 sm:px-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="rounded-2xl bg-zinc-950 dark:bg-zinc-900 p-8 sm:p-12 relative overflow-hidden">
+            <div className="absolute -bottom-20 -right-20 w-72 h-72 rounded-full bg-yellow-500/6 blur-[80px]" />
+
+            <div className="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+              <div>
+                <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight mb-2">
+                  Ready to get started?
+                </h2>
+                <p className="text-zinc-400 text-sm max-w-md">
+                  Free to start. No credit card required. Set up in minutes.
+                </p>
+              </div>
               <Button
                 size="lg"
-                className="group bg-linear-to-r from-yellow-400 to-yellow-600 hover:from-yellow-500 hover:to-orange-500 text-black font-bold px-6 sm:px-10 h-10 sm:h-14 rounded-xl sm:rounded-2xl shadow-2xl shadow-yellow-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 text-sm sm:text-base"
+                className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold h-11 px-8 rounded-lg shrink-0 w-fit"
                 asChild
               >
                 <Link href="/login">
-                  Start Free Trial
-                  <ChevronRight className="ml-2 h-4 w-4 sm:h-5 sm:w-5 group-hover:translate-x-1 transition-transform" />
+                  Start free
+                  <ArrowUpRight className="ml-1.5 h-4 w-4" />
                 </Link>
               </Button>
-              <p className="text-gray-600 text-[10px] sm:text-xs mt-3 sm:mt-5">
-                No credit card required. Cancel anytime.
-              </p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ========== FOOTER ========== */}
-      <footer className="border-t border-border/30">
-        <div className="max-w-6xl mx-auto px-3 sm:px-6">
-          {/* Top section */}
-          <div className="py-6 sm:py-14 grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-8 lg:gap-12">
-            {/* Brand */}
+      {/* ── Footer ── */}
+      <footer className="border-t border-border">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="py-10 sm:py-12 grid grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
             <div className="col-span-2 lg:col-span-1">
-              <div className="flex items-center gap-2.5 mb-3 sm:mb-4">
-                <div className="w-8 h-8 sm:w-9 sm:h-9 bg-linear-to-br from-yellow-400 to-orange-500 rounded-lg flex items-center justify-center">
-                  <span className="text-xs sm:text-sm font-black text-black">Q</span>
-                </div>
-                <div>
-                  <span className="font-bold text-foreground text-base sm:text-lg">QaliSuite</span>
-                  <p className="text-[10px] sm:text-xs text-muted-foreground -mt-0.5">by Qalibrated Systems</p>
-                </div>
+              <div className="mb-3">
+                <QaliSuiteMark size="sm" subtitle="by Qalibrated Systems" />
               </div>
-              <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-xs">
-                Modern ERP platform for inventory, invoicing, accounting, and business operations.
+              <p className="text-[13px] text-muted-foreground leading-relaxed max-w-xs">
+                Modern ERP for inventory, invoicing, accounting, and operations.
               </p>
             </div>
 
-            {/* Quick Links */}
             <div>
-              <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2.5 sm:mb-4">Product</h4>
-              <ul className="space-y-1.5 sm:space-y-2.5">
-                <li>
-                  <Link href="/login" className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors">
-                    Login
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/login" className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors">
-                    Get Started
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/policy" className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors">
-                    Privacy Policy
-                  </Link>
-                </li>
+              <h4 className="text-[13px] font-medium text-foreground mb-3">Product</h4>
+              <ul className="space-y-2">
+                {[
+                  { label: "Log in", href: "/login" },
+                  { label: "Get Started", href: "/login" },
+                  { label: "Privacy Policy", href: "/policy" },
+                ].map((l) => (
+                  <li key={l.label}>
+                    <Link href={l.href} className="text-[13px] text-muted-foreground hover:text-foreground transition-colors">{l.label}</Link>
+                  </li>
+                ))}
               </ul>
             </div>
 
-            {/* Company */}
             <div>
-              <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2.5 sm:mb-4">Company</h4>
-              <ul className="space-y-1.5 sm:space-y-2.5">
+              <h4 className="text-[13px] font-medium text-foreground mb-3">Company</h4>
+              <ul className="space-y-2">
                 <li>
-                  <a
-                    href="https://www.qalibrated.com"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
-                  >
-                    www.qalibrated.com
-                    <ExternalLink className="w-3 h-3" />
+                  <a href="https://www.qalibrated.com" target="_blank" rel="noopener noreferrer" className="text-[13px] text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1">
+                    qalibrated.com <ExternalLink className="w-3 h-3" />
                   </a>
                 </li>
-                <li>
-                  <span className="text-xs sm:text-sm text-muted-foreground">Qalibrated Systems Ltd</span>
-                </li>
+                <li><span className="text-[13px] text-muted-foreground">Qalibrated Systems Ltd</span></li>
               </ul>
             </div>
 
-            {/* Contact */}
             <div>
-              <h4 className="text-xs sm:text-sm font-semibold text-foreground mb-2.5 sm:mb-4">Contact</h4>
-              <ul className="space-y-1.5 sm:space-y-2.5">
-                <li className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-muted-foreground">
-                  <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-yellow-500 shrink-0" />
+              <h4 className="text-[13px] font-medium text-foreground mb-3">Contact</h4>
+              <ul className="space-y-2">
+                <li className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                  <MapPin className="w-3.5 h-3.5 shrink-0 opacity-50" />
                   Nairobi, Kenya
                 </li>
                 <li>
-                  <a
-                    href="mailto:info@qalibrated.com"
-                    className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Mail className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-yellow-500 shrink-0" />
+                  <a href="mailto:info@qalibrated.com" className="flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground transition-colors">
+                    <Mail className="w-3.5 h-3.5 shrink-0 opacity-50" />
                     info@qalibrated.com
                   </a>
                 </li>
                 <li>
-                  <a
-                    href="tel:+254714999996"
-                    className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Phone className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-yellow-500 shrink-0" />
+                  <a href="tel:+254714999996" className="flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground transition-colors">
+                    <Phone className="w-3.5 h-3.5 shrink-0 opacity-50" />
                     +254 714 999 996
                   </a>
                 </li>
@@ -455,14 +350,12 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Bottom bar */}
-          <div className="py-4 sm:py-5 border-t border-border/30 flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-3">
-            <p className="text-[10px] sm:text-xs text-muted-foreground">
+          <div className="py-4 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-2">
+            <p className="text-[11px] text-muted-foreground">
               &copy; {new Date().getFullYear()} Qalibrated Systems Ltd. All rights reserved.
             </p>
-            <div className="flex items-center gap-4 text-[10px] sm:text-xs text-muted-foreground">
+            <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
               <Link href="/policy" className="hover:text-foreground transition-colors">Privacy</Link>
-              <span className="text-border">|</span>
               <a href="mailto:info@qalibrated.com" className="hover:text-foreground transition-colors">Support</a>
             </div>
           </div>

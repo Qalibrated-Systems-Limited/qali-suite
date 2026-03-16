@@ -2,14 +2,6 @@
 import { Suspense, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "../../../components/ui/card";
-import {
   Form,
   FormControl,
   FormField,
@@ -18,18 +10,24 @@ import {
   FormMessage,
 } from "../../../components/ui/form";
 import { Input } from "../../../components/ui/input";
-import { Alert, AlertDescription } from "../../../components/ui/alert";
+// Alert components available if needed
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   TriangleAlert,
   Loader2,
-  User,
+  Package,
+  Receipt,
+  BarChart3,
+  Wallet,
+  Shield,
+  ArrowRight,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
-import { cn } from "../../../lib/utils";
+import Link from "next/link";
+import { QaliSuiteMark } from "@/components/qalisuite-logo";
 
 const formSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
@@ -52,25 +50,20 @@ function LoginContent() {
 
   const form = useForm({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      email: "",
-      password: "",
-    },
+    defaultValues: { email: "", password: "" },
   });
 
   const handleCredentialsLogin = async (data) => {
     setIsPending(true);
     setErrorMessage("");
-
     const result = await signIn("credentials", {
       email: data.email,
       password: data.password,
       callbackUrl: "/dashboard",
       redirect: false,
     });
-
     if (result?.error) {
-      setErrorMessage("Invalid credentials.");
+      setErrorMessage("Invalid email or password.");
       setIsPending(false);
     } else if (result?.url) {
       window.location.href = result.url;
@@ -78,164 +71,201 @@ function LoginContent() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md space-y-6">
-        {/* Logo & Branding */}
-        <div className="flex flex-col items-center space-y-3">
-          <div className="w-16 h-16 bg-yellow-500 rounded-xl flex items-center justify-center shadow-lg shadow-yellow-500/20">
-            <span className="text-3xl font-bold text-black">Q</span>
-          </div>
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-foreground">QaliSuite</h1>
-            <p className="text-sm text-muted-foreground">
-              Enterprise Resource Planning
-            </p>
-          </div>
-        </div>
+    <div className="min-h-screen flex bg-background">
+      {/* ── Left panel: brand showcase ── */}
+      <div className="hidden lg:flex lg:w-1/2 xl:w-[55%] bg-zinc-950 relative overflow-hidden">
+        {/* Warm glow accents - not gradient bars, just ambient warmth */}
+        <div className="absolute -bottom-32 -left-32 w-96 h-96 rounded-full bg-yellow-500/7 blur-[100px]" />
+        <div className="absolute -top-20 -right-20 w-72 h-72 rounded-full bg-yellow-500/4 blur-[80px]" />
 
-        {/* Login Card */}
-        <Card className="bg-card border-border">
-          <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl text-foreground">Sign in</CardTitle>
-            <CardDescription className="text-muted-foreground">
-              Enter your credentials to access your account
-            </CardDescription>
-          </CardHeader>
+        {/* Dot grid texture */}
+        <div className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:24px_24px]" />
 
-          <CardContent>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(handleCredentialsLogin)} className="space-y-4">
-                {/* OAuth Error (e.g. uninvited Google sign-in) */}
-                {oauthError && (
-                  <Alert className="bg-amber-500/10 border-amber-500/20">
-                    <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                    <AlertDescription className="text-amber-600 dark:text-amber-400">
-                      No account found for this email. Ask your administrator to
-                      send you an invite first.
-                    </AlertDescription>
-                  </Alert>
-                )}
+        <div className="relative z-10 flex flex-col justify-between p-10 xl:p-14 w-full">
+          {/* Top: Logo */}
+          <Link href="/" className="w-fit">
+            <QaliSuiteMark size="md" light />
+          </Link>
 
-                {/* Credentials Error */}
-                {errorMessage && (
-                  <Alert
-                    variant="destructive"
-                    className="bg-red-500/10 border-red-500/20"
-                  >
-                    <TriangleAlert className="h-4 w-4 text-red-600 dark:text-red-400" />
-                    <AlertDescription className="text-red-600 dark:text-red-400">
-                      {errorMessage}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {/* Email Field */}
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-foreground">
-                        Email address
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          type="email"
-                          placeholder="you@example.com"
-                          className="bg-background border-border text-foreground placeholder:text-muted-foreground"
-                          disabled={isPending}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {/* Password Field */}
-                <FormField
-                  control={form.control}
-                  name="password"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-foreground">
-                        Password
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          type="password"
-                          placeholder="••••••••"
-                          className="bg-background border-border text-foreground placeholder:text-muted-foreground"
-                          disabled={isPending}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {/* Login Button */}
-                <LoginButton isPending={isPending} />
-              </form>
-            </Form>
-
-            {/* Divider */}
-            <div className="relative my-2">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">or</span>
-              </div>
+          {/* Center: Value prop */}
+          <div className="space-y-8">
+            <div>
+              <h2 className="text-[2.5rem] xl:text-5xl font-bold text-white tracking-tight leading-[1.1]">
+                Your business,
+                <br />
+                <span className="text-yellow-500">simplified.</span>
+              </h2>
+              <p className="text-zinc-400 mt-4 max-w-md leading-relaxed">
+                Everything from stock to statements in one place.
+                No more switching between five different apps.
+              </p>
             </div>
 
-            {/* Google Sign In */}
-            <GoogleSignInButton />
-          </CardContent>
+            {/* Feature pills */}
+            <div className="flex flex-wrap gap-2">
+              {[
+                { icon: Package, label: "Inventory" },
+                { icon: Receipt, label: "Invoicing" },
+                { icon: Wallet, label: "Accounting" },
+                { icon: BarChart3, label: "Reports" },
+                { icon: Shield, label: "Tax & Compliance" },
+              ].map((f) => (
+                <div
+                  key={f.label}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/6 border border-white/8 text-zinc-300 text-xs font-medium"
+                >
+                  <f.icon className="w-3.5 h-3.5 text-yellow-500/80" />
+                  {f.label}
+                </div>
+              ))}
+            </div>
 
-          {/* Footer */}
-          <CardFooter className="flex flex-col space-y-4 border-t border-border pt-6">
-            <Alert className="bg-blue-500/10 border-blue-500/20">
-              <User className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-              <AlertDescription className="text-sm text-blue-600 dark:text-blue-400">
-                <strong>New users:</strong> Ask your administrator to send you
-                an invite to get started.
-              </AlertDescription>
-            </Alert>
-          </CardFooter>
-        </Card>
+            {/* Social proof strip */}
+            <div className="flex items-center gap-6 pt-2">
+              {[
+                { val: "99.9%", label: "Uptime" },
+                { val: "10x", label: "Faster ops" },
+                { val: "24/7", label: "Support" },
+              ].map((s) => (
+                <div key={s.label}>
+                  <div className="text-xl font-bold text-white">{s.val}</div>
+                  <div className="text-[11px] text-zinc-500">{s.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
 
-        {/* Footer Info */}
-        <p className="text-center text-xs text-muted-foreground">
-          By signing in, you agree to our Terms of Service and Privacy Policy
-        </p>
+          {/* Bottom: Copyright */}
+          <p className="text-zinc-700 text-xs">
+            &copy; {new Date().getFullYear()} Qalibrated Systems Ltd &middot; Nairobi, Kenya
+          </p>
+        </div>
+      </div>
+
+      {/* ── Right panel: login form ── */}
+      <div className="flex-1 flex items-center justify-center px-5 py-8">
+        <div className="w-full max-w-[380px]">
+          {/* Mobile header */}
+          <div className="lg:hidden mb-8">
+            <Link href="/">
+              <QaliSuiteMark size="md" />
+            </Link>
+          </div>
+
+          {/* Heading */}
+          <div className="mb-6">
+            <h1 className="text-xl font-semibold text-foreground tracking-tight">Welcome back</h1>
+            <p className="text-[13px] text-muted-foreground mt-0.5">
+              Sign in to your account to continue
+            </p>
+          </div>
+
+          {/* Errors */}
+          {oauthError && (
+            <div className="mb-4 flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[13px] text-amber-600 dark:text-amber-400">
+              <TriangleAlert className="h-4 w-4 shrink-0 mt-0.5" />
+              No account found. Ask your admin for an invite first.
+            </div>
+          )}
+          {errorMessage && (
+            <div className="mb-4 flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-[13px] text-red-600 dark:text-red-400">
+              <TriangleAlert className="h-4 w-4 shrink-0 mt-0.5" />
+              {errorMessage}
+            </div>
+          )}
+
+          {/* Google — lead with social for faster conversion */}
+          <GoogleSignInButton />
+
+          {/* Divider */}
+          <div className="relative my-5">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center">
+              <span className="bg-background px-3 text-[11px] text-muted-foreground uppercase tracking-widest">
+                or sign in with email
+              </span>
+            </div>
+          </div>
+
+          {/* Credentials form */}
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleCredentialsLogin)} className="space-y-3">
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem className="space-y-1.5">
+                    <FormLabel className="text-foreground text-[13px] font-medium">Email</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="email"
+                        placeholder="you@company.com"
+                        className="h-9 text-sm bg-background border-border focus-visible:ring-yellow-500/30"
+                        disabled={isPending}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage className="text-xs" />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem className="space-y-1.5">
+                    <FormLabel className="text-foreground text-[13px] font-medium">Password</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="password"
+                        placeholder="••••••••"
+                        className="h-9 text-sm bg-background border-border focus-visible:ring-yellow-500/30"
+                        disabled={isPending}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage className="text-xs" />
+                  </FormItem>
+                )}
+              />
+
+              <Button
+                type="submit"
+                disabled={isPending}
+                className="w-full h-9 bg-yellow-500 hover:bg-yellow-600 text-black font-medium text-sm mt-1"
+              >
+                {isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    Signing in…
+                  </>
+                ) : (
+                  <>
+                    Sign in
+                    <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                  </>
+                )}
+              </Button>
+            </form>
+          </Form>
+
+          {/* Help text */}
+          <p className="mt-5 text-center text-xs text-muted-foreground leading-relaxed">
+            Don&apos;t have an account? Ask your admin for an invite.
+          </p>
+
+          <p className="text-center text-[11px] text-muted-foreground/60 mt-4">
+            By signing in you agree to our{" "}
+            <Link href="/policy" className="underline hover:text-muted-foreground transition-colors">
+              Privacy Policy
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
-  );
-}
-
-function LoginButton({ isPending }) {
-  return (
-    <Button
-      type="submit"
-      disabled={isPending}
-      className={cn(
-        "w-full font-medium",
-        isPending
-          ? "bg-yellow-500/50 cursor-not-allowed"
-          : "bg-yellow-500 hover:bg-yellow-600 text-black"
-      )}
-    >
-      {isPending ? (
-        <>
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Signing in...
-        </>
-      ) : (
-        "Sign in"
-      )}
-    </Button>
   );
 }
 
@@ -246,7 +276,7 @@ function GoogleSignInButton() {
     <Button
       type="button"
       variant="outline"
-      className="w-full h-11 border-border text-foreground hover:bg-accent gap-3"
+      className="w-full h-10 border-border text-foreground hover:bg-accent gap-2.5 font-medium"
       disabled={loading}
       onClick={() => {
         setLoading(true);
@@ -256,26 +286,14 @@ function GoogleSignInButton() {
       {loading ? (
         <Loader2 className="h-4 w-4 animate-spin" />
       ) : (
-        <svg className="h-5 w-5" viewBox="0 0 24 24">
-          <path
-            d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
-            fill="#4285F4"
-          />
-          <path
-            d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-            fill="#34A853"
-          />
-          <path
-            d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-            fill="#FBBC05"
-          />
-          <path
-            d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-            fill="#EA4335"
-          />
+        <svg className="h-4 w-4" viewBox="0 0 24 24">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
         </svg>
       )}
-      Sign in with Google
+      Continue with Google
     </Button>
   );
 }
