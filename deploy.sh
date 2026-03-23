@@ -11,7 +11,9 @@ echo "  QaliSuite Build & Deploy"
 echo "  Image: $IMAGE:$TAG"
 echo "========================================="
 
-echo ""
+echo ""cd /opt/qalisuite
+vim .env
+
 echo "[1/4] Building Docker image..."
 docker build -t $IMAGE:$TAG .
 

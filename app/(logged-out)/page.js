@@ -1,6 +1,5 @@
 import { Button } from "../../components/ui/button";
 import Link from "next/link";
-import Image from "next/image";
 import {
   ArrowRight,
   BarChart3,
@@ -22,45 +21,74 @@ import {
   Check,
   Zap,
   ArrowUpRight,
-  TrendingUp,
   Clock,
+  UserCog,
+  Building2,
+  Truck,
+  Wrench,
+  ShoppingBag,
+  Landmark,
+  Globe,
+  Lock,
+  CalendarCheck,
+  ChevronRight,
 } from "lucide-react";
 import { QaliSuiteMark } from "@/components/qalisuite-logo";
 
 const MODULES = [
-  { icon: Package,       name: "Inventory",   desc: "Stock tracking, reorder alerts, multi-location" },
-  { icon: Receipt,       name: "Invoicing",   desc: "Quotes, invoices, credit notes, delivery notes" },
-  { icon: Wallet,        name: "Accounting",  desc: "Double-entry ledger, chart of accounts, journals" },
-  { icon: Users,         name: "CRM",         desc: "Customer & supplier management, transaction history" },
-  { icon: CreditCard,    name: "Expenses",    desc: "Advances, petty cash, claims with receipt uploads" },
-  { icon: BarChart3,     name: "Reports",     desc: "P&L, balance sheet, cash flow, sales analytics" },
-  { icon: Briefcase,     name: "Purchases",   desc: "Purchase orders, bills, supplier reconciliation" },
-  { icon: Shield,        name: "Tax",         desc: "VAT returns, WHT reports, KRA compliance" },
-  { icon: FileText,      name: "Requests",    desc: "Stock request workflows with approval chains" },
-  { icon: ClipboardCheck,name: "Claims",      desc: "Expense reimbursements with approval workflows" },
-  { icon: BookOpen,      name: "Finance",     desc: "Bank feeds, fiscal periods, full audit trail" },
-  { icon: FolderKanban,  name: "Projects",    desc: "Project tracking & resource management", soon: true },
+  { icon: Package,        name: "Inventory",       desc: "Stock tracking, reorder alerts, multi-location" },
+  { icon: Receipt,        name: "Invoicing",       desc: "Quotes, invoices, credit notes, delivery notes" },
+  { icon: Wallet,         name: "Accounting",      desc: "Double-entry ledger, chart of accounts, journals" },
+  { icon: Users,          name: "CRM",             desc: "Customer & supplier management, history" },
+  { icon: CreditCard,     name: "Expenses",        desc: "Advances, petty cash, claims & receipts" },
+  { icon: BarChart3,      name: "Reports",         desc: "P&L, balance sheet, cash flow, analytics" },
+  { icon: Briefcase,      name: "Purchases",       desc: "Purchase orders, bills, supplier reconciliation" },
+  { icon: Shield,         name: "Tax & Compliance", desc: "VAT, WHT, KRA-ready filing" },
+  { icon: FileText,       name: "Requests",        desc: "Stock request workflows with approvals" },
+  { icon: ClipboardCheck, name: "Claims",          desc: "Expense reimbursements with approval chains" },
+  { icon: BookOpen,       name: "Finance",         desc: "Bank feeds, fiscal periods, audit trail" },
+  { icon: FolderKanban,   name: "Projects",        desc: "Budgets, cost codes & financial rollup" },
+  { icon: UserCog,        name: "HR & Payroll",    desc: "Employee records, leave, Kenya payroll" },
+  { icon: CalendarCheck,  name: "Attendance",      desc: "Clock in/out, rosters, overtime tracking" },
 ];
 
 const STEPS = [
   {
     n: "01",
     icon: Package,
-    title: "Track your stock",
-    desc: "Add products, set reorder points, manage across locations. Every movement is auto-logged with full audit trail.",
+    title: "Set up your business",
+    desc: "Add products, accounts, employees, and team. Invite staff with role-based access.",
   },
   {
     n: "02",
     icon: Receipt,
-    title: "Invoice & collect",
-    desc: "Create quotes, convert to invoices, record payments. Stock commits automatically when you invoice.",
+    title: "Run daily operations",
+    desc: "Invoice, purchase, expense, claim — stock and ledger update automatically.",
   },
   {
     n: "03",
     icon: BarChart3,
     title: "See the full picture",
-    desc: "Every transaction auto-posts to your ledger. Pull P&L, balance sheets, tax reports, and analytics instantly.",
+    desc: "P&L, balance sheets, payroll summaries, project profitability — one click.",
   },
+];
+
+const INDUSTRIES = [
+  { icon: ShoppingBag, name: "Retail & Distribution",       desc: "Multi-location stock, sales, suppliers" },
+  { icon: Building2,   name: "Construction & Engineering",  desc: "Project budgets, cost codes, subcontractors" },
+  { icon: Wrench,      name: "Service Companies",           desc: "T&M billing, expenses, project profitability" },
+  { icon: Truck,       name: "Logistics & Warehousing",     desc: "Stock movements, delivery notes, multi-warehouse" },
+  { icon: Landmark,    name: "Professional Firms",          desc: "Client billing, reimbursements, payroll" },
+  { icon: Globe,       name: "NGOs & SMEs",                 desc: "Budget tracking, donor reporting, compliance" },
+];
+
+const COMPLIANCE = [
+  { label: "PAYE / P9A / P10", desc: "Auto-calculated brackets, annual certificates" },
+  { label: "NSSF (Tier I & II)", desc: "Employee & employer contributions" },
+  { label: "SHIF", desc: "Social Health Insurance Fund deductions" },
+  { label: "AHL / Housing Levy", desc: "Affordable Housing Levy compliance" },
+  { label: "VAT & WHT", desc: "Tax transaction tracking & returns" },
+  { label: "KRA-ready exports", desc: "CSV exports for iTax filing" },
 ];
 
 export default function LandingPage() {
@@ -69,8 +97,13 @@ export default function LandingPage() {
 
       {/* ── Nav ── */}
       <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-border/50">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <Link href="/"><QaliSuiteMark size="sm" /></Link>
+          <div className="hidden sm:flex items-center gap-6 text-[13px] text-muted-foreground">
+            <a href="#modules" className="hover:text-foreground transition-colors">Modules</a>
+            <a href="#industries" className="hover:text-foreground transition-colors">Industries</a>
+            <a href="#compliance" className="hover:text-foreground transition-colors">Compliance</a>
+          </div>
           <div className="flex items-center gap-1.5">
             <Button variant="ghost" size="sm" className="text-sm text-muted-foreground" asChild>
               <Link href="/login">Log in</Link>
@@ -84,162 +117,104 @@ export default function LandingPage() {
 
       {/* ── Hero ── */}
       <section className="relative overflow-hidden">
-        {/* Background atmosphere */}
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,hsl(var(--primary)/0.08),transparent)]" />
-        <div className="absolute top-0 right-0 w-[600px] h-[500px] rounded-full bg-primary/5 blur-[120px] pointer-events-none" />
-        <div className="absolute top-1/3 left-0 w-[300px] h-[300px] rounded-full bg-primary/3 blur-[100px] pointer-events-none" />
 
-        <div className="relative max-w-6xl mx-auto px-4 sm:px-6 pt-16 sm:pt-24 pb-0">
-          <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-start">
-
-            {/* Left: copy */}
-            <div className="pt-2 sm:pt-4">
-              {/* Badge */}
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-primary/30 bg-primary/8 text-primary dark:text-primary text-xs font-medium mb-6">
-                <Zap className="w-3 h-3" />
-                All-in-one ERP for growing businesses
-              </div>
-
-              <h1 className="text-[clamp(2.2rem,5.5vw,3.75rem)] font-bold tracking-tight leading-[1.06] mb-5">
-                Inventory, finance
-                <br />
-                &amp; operations —{" "}
-                <span className="text-primary">unified.</span>
-              </h1>
-
-              <p className="text-muted-foreground text-base sm:text-lg leading-relaxed mb-8 max-w-md">
-                Replace disconnected spreadsheets with one platform.
-                Track stock, send invoices, manage accounts, and run reports — all connected.
-              </p>
-
-              <div className="flex flex-wrap gap-3 mb-7">
-                <Button
-                  size="lg"
-                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-11 px-7 rounded-lg"
-                  asChild
-                >
-                  <Link href="/login">Start free <ArrowRight className="ml-1.5 h-4 w-4" /></Link>
-                </Button>
-                <Button variant="outline" size="lg" className="h-11 px-6 rounded-lg font-medium" asChild>
-                  <Link href="/login">View demo</Link>
-                </Button>
-              </div>
-
-              <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-[13px] text-muted-foreground">
-                {["No credit card", "5-minute setup", "Free tier available"].map((t) => (
-                  <span key={t} className="flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5 text-primary shrink-0" />
-                    {t}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* Right: social proof + feature highlights */}
-            <div className="hidden lg:flex flex-col gap-4 pt-2">
-              {/* Stats */}
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { val: "99.9%", label: "Uptime SLA",      icon: TrendingUp },
-                  { val: "10×",   label: "Faster ops",       icon: Zap },
-                  { val: "50+",   label: "Hours saved / mo", icon: Clock },
-                ].map((s) => (
-                  <div key={s.label} className="rounded-xl border border-border bg-card p-4 text-center">
-                    <s.icon className="w-4 h-4 text-primary mx-auto mb-1.5 opacity-70" />
-                    <div className="text-2xl font-bold tracking-tight text-foreground">{s.val}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5 leading-tight">{s.label}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Feature list */}
-              <div className="rounded-xl border border-border bg-card overflow-hidden">
-                <div className="px-4 py-2.5 border-b border-border bg-muted/30">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Core capabilities</p>
-                </div>
-                {[
-                  { icon: Package,  text: "Real-time inventory across locations" },
-                  { icon: Receipt,  text: "Auto-commit stock when you invoice" },
-                  { icon: Wallet,   text: "Every transaction posts to ledger automatically" },
-                  { icon: BarChart3,text: "Financial reports in one click" },
-                ].map((f, i) => (
-                  <div key={f.text} className={`flex items-center gap-3 px-4 py-3 ${i < 3 ? "border-b border-border" : ""}`}>
-                    <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                      <f.icon className="w-3.5 h-3.5 text-primary" />
-                    </div>
-                    <span className="text-sm text-foreground">{f.text}</span>
-                    <Check className="w-4 h-4 text-primary ml-auto shrink-0 opacity-60" />
-                  </div>
-                ))}
-              </div>
-            </div>
+        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 pt-20 sm:pt-32 pb-20 sm:pb-32 text-center">
+          {/* Badge — fade in */}
+          <div className="animate-[fadeInUp_0.5s_ease-out_both] inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-primary/30 bg-primary/8 text-primary text-xs font-medium mb-8">
+            <Zap className="w-3 h-3" />
+            All-in-one ERP for growing businesses
           </div>
 
-          {/* Screenshot — browser chrome */}
-          <div className="mt-14 sm:mt-20 relative">
-            <div className="hidden sm:block rounded-t-2xl border border-b-0 border-border bg-card overflow-hidden shadow-2xl shadow-black/10 dark:shadow-black/50">
-              <div className="flex items-center gap-1.5 px-4 py-3 bg-muted/60 border-b border-border">
-                <div className="flex gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full bg-red-400/60" />
-                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-400/60" />
-                  <div className="w-2.5 h-2.5 rounded-full bg-green-400/60" />
+          {/* Headline */}
+          <h1 className="animate-[fadeInUp_0.6s_ease-out_0.1s_both] text-[clamp(2rem,5vw,3.5rem)] font-bold tracking-tight leading-[1.08] mb-6 max-w-2xl mx-auto">
+            Inventory, finance &amp; operations —{" "}
+            <span className="text-primary">unified.</span>
+          </h1>
+
+          {/* Subhead */}
+          <p className="animate-[fadeInUp_0.6s_ease-out_0.2s_both] text-muted-foreground text-base sm:text-lg leading-relaxed mb-10 max-w-lg mx-auto">
+            Replace disconnected spreadsheets with one platform.
+            Track stock, send invoices, run payroll, manage projects — all connected.
+          </p>
+
+          {/* CTA */}
+          <div className="animate-[fadeInUp_0.6s_ease-out_0.3s_both] flex flex-wrap justify-center gap-3 mb-8">
+            <Button
+              size="lg"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 px-8 rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
+              asChild
+            >
+              <Link href="/login">Start free <ArrowRight className="ml-1.5 h-4 w-4" /></Link>
+            </Button>
+            <Button variant="outline" size="lg" className="h-12 px-7 rounded-xl font-medium hover:bg-muted/50 transition-all" asChild>
+              <Link href="/login">View demo</Link>
+            </Button>
+          </div>
+
+          {/* Trust line */}
+          <div className="animate-[fadeInUp_0.6s_ease-out_0.4s_both] flex flex-wrap justify-center gap-x-6 gap-y-2 text-[13px] text-muted-foreground">
+            {["No credit card", "5-minute setup", "Free tier available"].map((t) => (
+              <span key={t} className="flex items-center gap-1.5">
+                <Check className="w-3.5 h-3.5 text-primary shrink-0" />
+                {t}
+              </span>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Connected flow strip ── */}
+      <section className="border-y border-border bg-muted/30 py-10 sm:py-14 px-4 sm:px-6 overflow-hidden">
+        <div className="max-w-5xl mx-auto">
+          <p className="text-center text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-8">One action. Multiple updates.</p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-0">
+            {[
+              { icon: Receipt,       label: "Invoice created" },
+              { icon: Package,       label: "Stock committed" },
+              { icon: Wallet,        label: "Ledger posted" },
+              { icon: FolderKanban,  label: "Project updated" },
+              { icon: Shield,        label: "Tax recorded" },
+            ].map((step, i) => (
+              <div key={step.label} className="flex items-center gap-3 sm:gap-0" style={{ animationDelay: `${0.1 * i}s` }}>
+                <div className="flex flex-col items-center gap-2 animate-[fadeInUp_0.5s_ease-out_both]" style={{ animationDelay: `${0.1 * i + 0.5}s` }}>
+                  <div className="w-11 h-11 rounded-xl bg-card border border-border flex items-center justify-center shadow-sm hover:border-primary/40 hover:shadow-md transition-all">
+                    <step.icon className="w-4.5 h-4.5 text-primary" />
+                  </div>
+                  <span className="text-[11px] text-muted-foreground font-medium whitespace-nowrap">{step.label}</span>
                 </div>
-                <div className="ml-3 flex-1 max-w-xs">
-                  <div className="h-4 rounded-md bg-border/60 w-44" />
-                </div>
+                {i < 4 && (
+                  <ChevronRight className="hidden sm:block w-4 h-4 text-border mx-4 shrink-0" />
+                )}
               </div>
-              <div className="hidden dark:block">
-                <Image src="/screenshots/dark-mode-cropped.png" alt="QaliSuite Dashboard" width={1920} height={1080} className="w-full h-auto" priority />
-              </div>
-              <div className="block dark:hidden">
-                <Image src="/screenshots/light-mode-cropped.png" alt="QaliSuite Dashboard" width={1920} height={1080} className="w-full h-auto" priority />
-              </div>
-            </div>
-            {/* Mobile */}
-            <div className="sm:hidden flex justify-center">
-              <div className="relative w-60 rounded-[2rem] border-[5px] border-zinc-800 dark:border-zinc-600 bg-black shadow-2xl overflow-hidden">
-                <div className="absolute top-1.5 left-1/2 -translate-x-1/2 w-14 h-3.5 bg-black rounded-full z-10" />
-                <div className="hidden dark:block">
-                  <Image src="/screenshots/mobile-dark.jpeg" alt="QaliSuite Mobile" width={750} height={1334} className="w-full h-auto" priority />
-                </div>
-                <div className="block dark:hidden">
-                  <Image src="/screenshots/mobile-light.jpeg" alt="QaliSuite Mobile" width={750} height={1334} className="w-full h-auto" priority />
-                </div>
-              </div>
-            </div>
-            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent pointer-events-none" />
+            ))}
           </div>
         </div>
       </section>
 
       {/* ── Modules grid ── */}
-      <section className="py-20 sm:py-28 px-4 sm:px-6">
-        <div className="max-w-6xl mx-auto">
-          <div className="mb-12">
+      <section id="modules" className="py-20 sm:py-28 px-4 sm:px-6 scroll-mt-16">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-14">
             <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Modules</p>
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
               Everything you need.{" "}
               <span className="text-muted-foreground">Nothing you don&apos;t.</span>
             </h2>
-            <p className="text-muted-foreground text-sm sm:text-base max-w-xl">
-              Each module works standalone or together — inventory feeds invoicing,
-              invoicing posts to accounting, expenses reconcile automatically.
+            <p className="text-muted-foreground text-sm sm:text-base max-w-lg mx-auto">
+              14 modules that work standalone or together — inventory feeds invoicing,
+              invoicing posts to accounting, payroll generates journals.
             </p>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {MODULES.map((m) => (
+            {MODULES.map((m, i) => (
               <div
                 key={m.name}
-                className={`group relative p-4 sm:p-5 rounded-xl bg-card border border-border hover:border-primary/40 hover:shadow-sm transition-all ${m.soon ? "opacity-50" : ""}`}
+                className="group p-4 sm:p-5 rounded-xl bg-card border border-border hover:border-primary/40 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
-                    <m.icon className="w-4 h-4 text-primary" />
-                  </div>
-                  {m.soon && (
-                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground tracking-wide">SOON</span>
-                  )}
+                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/15 group-hover:scale-105 transition-all duration-200">
+                  <m.icon className="w-4 h-4 text-primary" />
                 </div>
                 <h3 className="text-sm font-semibold text-foreground mb-1">{m.name}</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">{m.desc}</p>
@@ -251,24 +226,20 @@ export default function LandingPage() {
 
       {/* ── How it works ── */}
       <section className="py-20 sm:py-28 px-4 sm:px-6 border-y border-border bg-muted/20">
-        <div className="max-w-6xl mx-auto">
-          <div className="mb-12">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-14">
             <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">How it works</p>
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
               Three steps to clarity.
             </h2>
           </div>
 
-          <div className="grid sm:grid-cols-3 gap-6">
+          <div className="grid sm:grid-cols-3 gap-5">
             {STEPS.map((step, i) => (
-              <div key={step.n} className="relative">
-                {/* Connector line between steps (desktop) */}
-                {i < STEPS.length - 1 && (
-                  <div className="hidden sm:block absolute top-7 left-[calc(100%+0.75rem)] w-6 h-px bg-border -translate-y-1/2 z-10" />
-                )}
-                <div className="rounded-xl border border-border bg-card p-6 h-full">
+              <div key={step.n} className="relative group">
+                <div className="rounded-xl border border-border bg-card p-6 h-full hover:border-primary/30 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
                   <div className="flex items-center gap-3 mb-4">
-                    <div className="w-9 h-9 rounded-xl bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold shrink-0">
+                    <div className="w-9 h-9 rounded-xl bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold shrink-0 group-hover:scale-105 transition-transform duration-200">
                       {step.n}
                     </div>
                     <div className="h-px flex-1 bg-border" />
@@ -283,31 +254,99 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── Industries ── */}
+      <section id="industries" className="py-20 sm:py-28 px-4 sm:px-6 scroll-mt-16">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-14">
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Industries</p>
+            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
+              Built for how <span className="text-primary">you</span> work.
+            </h2>
+            <p className="text-muted-foreground text-sm sm:text-base max-w-lg mx-auto">
+              Whether you manage a warehouse, run a construction site, or bill professional services.
+            </p>
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {INDUSTRIES.map((ind) => (
+              <div key={ind.name} className="group flex items-start gap-4 p-5 rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/15 group-hover:scale-105 transition-all duration-200">
+                  <ind.icon className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground mb-1">{ind.name}</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{ind.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Kenya Compliance ── */}
+      <section id="compliance" className="py-20 sm:py-28 px-4 sm:px-6 border-y border-border bg-muted/20 scroll-mt-16">
+        <div className="max-w-5xl mx-auto">
+          <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Compliance</p>
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
+                Kenya statutory compliance,{" "}
+                <span className="text-primary">built in.</span>
+              </h2>
+              <p className="text-muted-foreground text-sm sm:text-base leading-relaxed mb-6 max-w-md">
+                Stop calculating PAYE brackets in spreadsheets. All Kenyan statutory deductions, P9A certificates, and CSV exports ready for KRA iTax, NSSF, and SHIF portals.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {["PAYE", "NSSF", "SHIF", "AHL", "VAT", "WHT"].map((tag) => (
+                  <span key={tag} className="inline-flex items-center px-2.5 py-1 rounded-md bg-primary/10 text-primary text-xs font-semibold">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {COMPLIANCE.map((item, i) => (
+                <div key={item.label} className="group flex items-start gap-3 p-4 rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-sm transition-all duration-200">
+                  <div className="mt-0.5">
+                    <Lock className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">{item.label}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{item.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── CTA ── */}
       <section className="py-20 sm:py-28 px-4 sm:px-6">
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <div className="rounded-2xl bg-slate-900 dark:bg-zinc-900 p-8 sm:p-14 relative overflow-hidden">
             <div className="absolute -top-32 -right-32 w-80 h-80 rounded-full bg-primary/10 blur-[100px]" />
             <div className="absolute -bottom-24 -left-24 w-64 h-64 rounded-full bg-primary/5 blur-[80px]" />
-            <div className="relative z-10 max-w-xl">
+            <div className="relative z-10 text-center max-w-lg mx-auto">
               <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Get started</p>
-              <h2 className="text-2xl sm:text-4xl font-bold text-white tracking-tight mb-3 leading-tight">
+              <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight mb-3 leading-tight">
                 Ready to run your business smarter?
               </h2>
               <p className="text-slate-400 text-sm sm:text-base mb-8 leading-relaxed">
                 Free to start. No credit card required. Set up in minutes.
               </p>
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-wrap justify-center gap-3">
                 <Button
                   size="lg"
-                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-11 px-8 rounded-lg"
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 px-8 rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
                   asChild
                 >
                   <Link href="/login">
                     Start free <ArrowUpRight className="ml-1.5 h-4 w-4" />
                   </Link>
                 </Button>
-                <Button variant="outline" size="lg" className="h-11 px-6 rounded-lg font-medium border-white/20 text-white hover:bg-white/10 hover:text-white" asChild>
+                <Button variant="outline" size="lg" className="h-12 px-7 rounded-xl font-medium border-white/20 text-white hover:bg-white/10 hover:text-white transition-all" asChild>
                   <Link href="/login">Log in</Link>
                 </Button>
               </div>
@@ -318,14 +357,14 @@ export default function LandingPage() {
 
       {/* ── Footer ── */}
       <footer className="border-t border-border">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6">
           <div className="py-10 sm:py-12 grid grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
             <div className="col-span-2 lg:col-span-1">
               <div className="mb-3">
                 <QaliSuiteMark size="sm" subtitle="by Qalibrated Systems" />
               </div>
               <p className="text-[13px] text-muted-foreground leading-relaxed max-w-xs">
-                Modern ERP for inventory, invoicing, accounting, and operations.
+                Modern ERP for inventory, invoicing, accounting, HR, and project management.
               </p>
             </div>
 
