@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, Save, Check } from "lucide-react";
 import { updateProfile } from "@/app/mongodb/actions/profile-actions";
 
-export default function ProfileForm({ user }) {
+export default function ProfileForm({ user, hasEmployeeProfile = false }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -66,16 +66,18 @@ export default function ProfileForm({ user }) {
         </p>
       </div>
 
-      <div>
-        <label className="block text-sm font-medium mb-2">Department</label>
-        <input
-          type="text"
-          value={formData.department}
-          onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-          placeholder="e.g., Sales, Engineering, HR"
-          className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        />
-      </div>
+      {!hasEmployeeProfile && (
+        <div>
+          <label className="block text-sm font-medium mb-2">Department</label>
+          <input
+            type="text"
+            value={formData.department}
+            onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+            placeholder="e.g., Sales, Engineering, HR"
+            className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+      )}
 
       {error && (
         <p className="text-sm text-red-500 bg-red-50 dark:bg-red-900/20 p-3 rounded-lg">

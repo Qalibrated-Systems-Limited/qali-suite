@@ -1,5 +1,8 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 import {
   searchUserClaims,
   fetchUserClaimPages,
@@ -56,13 +59,14 @@ export default async function MyClaimsPage({ searchParams }) {
   return (
     <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
       {/* Header */}
-      <div className="space-y-1 sm:space-y-2">
-        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
-          My Claims
-        </h1>
-        <p className="text-sm sm:text-base text-muted-foreground">
-          View and manage your expense claims
-        </p>
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight">My Claims</h1>
+        <Button asChild size="sm">
+          <Link href="/dashboard/claims/create">
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            New Claim
+          </Link>
+        </Button>
       </div>
 
       {/* Claim Stats */}

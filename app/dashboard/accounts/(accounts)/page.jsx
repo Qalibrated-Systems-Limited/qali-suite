@@ -18,16 +18,11 @@ export default async function AccountsPage() {
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">Chart of Accounts</h1>
-          <p className="text-sm sm:text-base text-muted-foreground mt-1">
-            Manage your accounting structure
-          </p>
-        </div>
-        <Button asChild className="sm:w-auto">
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight">Chart of Accounts</h1>
+        <Button asChild size="sm">
           <Link href="/dashboard/accounts/create">
-            <Plus className="w-4 h-4 mr-2" />
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
             New Account
           </Link>
         </Button>

@@ -3,7 +3,9 @@
 
 import { Suspense } from "react";
 import { auth } from "@/auth";
-import { AlertCircle } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { AlertCircle, Plus } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 import { SiteHeader } from "@/components/site-header";
@@ -59,6 +61,14 @@ export default async function CategoriesPage({ searchParams }) {
       <SiteHeader
         title="Categories"
         description="Manage product categories and hierarchy"
+        Action={() => (
+          <Button asChild size="sm">
+            <Link href="/dashboard/categories/create">
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              New Category
+            </Link>
+          </Button>
+        )}
       />
 
       {/* Success/Error Banner */}

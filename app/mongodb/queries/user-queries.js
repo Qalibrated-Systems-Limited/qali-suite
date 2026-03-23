@@ -242,6 +242,7 @@ export const getUserById = async (userId) => {
     password: undefined, // never leak the hash
     hasPassword,
     _id: user._id.toString(),
+    companyId: user.companyId?.toString() || null,
     createdAt: user.createdAt?.toISOString() || null,
     updatedAt: user.updatedAt?.toISOString() || null,
   };

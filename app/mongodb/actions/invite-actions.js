@@ -5,6 +5,8 @@ import dbConnect from "@/app/config/dbConnect";
 import Invite from "@/app/models/invite";
 import User from "@/app/models/user";
 import Company from "@/app/models/Company";
+import Party from "@/app/models/parties";
+import EmployeeProfile from "@/app/models/employeeProfile";
 import { userRoles } from "@/lib/utils";
 import { sendInviteEmail } from "@/lib/email";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
@@ -215,7 +217,7 @@ export async function acceptInviteWithPassword(rawToken, formData) {
     }
 
     // No existing user — create one
-    await User.create({
+    const newUser = await User.create({
       name,
       email: invite.email,
       password,
@@ -224,6 +226,19 @@ export async function acceptInviteWithPassword(rawToken, formData) {
       authProvider: "credentials",
       creator: invite.invitedBy,
     });
+
+    // If this is an employee portal invite, link the new User back to
+    // the employee's Party and EmployeeProfile records.
+    // This completes the triangle: User ↔ Party ↔ EmployeeProfile
+    if (invite.partyId) {
+      await Promise.all([
+        Party.findByIdAndUpdate(invite.partyId, { userId: newUser._id }),
+        EmployeeProfile.findOneAndUpdate(
+          { partyId: invite.partyId },
+          { userId: newUser._id }
+        ),
+      ]);
+    }
 
     invite.status = "accepted";
     invite.acceptedAt = new Date();

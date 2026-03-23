@@ -7,6 +7,10 @@ import {
   FileText,
   ChevronRight,
   Calendar,
+  Briefcase,
+  DollarSign,
+  CalendarDays,
+  Clock,
 } from "lucide-react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
@@ -52,117 +56,155 @@ export default async function SettingsPage() {
     redirect("/login");
   }
 
-  const isAdmin = session.user.role === "Admin";
-  const isAccountant = session.user.role === "Accountant";
-  const canManageSettings = isAdmin || isAccountant;
+  const { role } = session.user;
+  const isAdmin = role === "Admin";
+  const isAccountant = role === "Accountant";
+  const isHR = role === "HR";
 
-  if (!canManageSettings) {
+  // At least one settings section must be visible
+  const canSeeGeneralOrAccounting = isAdmin || isAccountant;
+  const canSeeHR = isAdmin || isHR;
+
+  if (!canSeeGeneralOrAccounting && !canSeeHR) {
     return (
-      <div className="flex min-h-[400px] items-center justify-center">
+      <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-foreground mb-2">
-            Access Denied
-          </h2>
-          <p className="text-muted-foreground">
-            You don&apos;t have permission to access settings.
-          </p>
+          <h2 className="text-2xl font-bold text-foreground mb-2">Access Denied</h2>
+          <p className="text-muted-foreground">You don&apos;t have permission to access settings.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+    <div className="space-y-8 p-4 sm:p-6 lg:p-8 max-w-5xl">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">
-          Manage your company settings and system configuration
-        </p>
+        <p className="text-muted-foreground">Manage your company settings and system configuration</p>
       </div>
 
-      {/* Quick Settings */}
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold">General Settings</h2>
-        <div className="grid gap-4 md:grid-cols-2">
-          <SettingsCard
-            href="/dashboard/company"
-            icon={Building2}
-            iconColor="text-blue-500"
-            iconBg="bg-blue-500/10"
-            title="Company Profile"
-            description="Manage company details, logo, and contact information"
-          />
-          <SettingsCard
-            href="/dashboard/parties"
-            icon={Users}
-            iconColor="text-purple-500"
-            iconBg="bg-purple-500/10"
-            title="Customers & Suppliers"
-            description="Manage your business contacts"
-          />
-        </div>
-      </div>
+      {canSeeGeneralOrAccounting && (
+        <>
+          {/* General */}
+          <div className="space-y-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">General</h2>
+            <div className="grid gap-3 md:grid-cols-2">
+              <SettingsCard
+                href="/dashboard/company"
+                icon={Building2}
+                iconColor="text-blue-500"
+                iconBg="bg-blue-500/10"
+                title="Company Profile"
+                description="Company details, logo, and contact information"
+              />
+              <SettingsCard
+                href="/dashboard/parties"
+                icon={Users}
+                iconColor="text-purple-500"
+                iconBg="bg-purple-500/10"
+                title="Customers & Suppliers"
+                description="Manage your business contacts and parties"
+              />
+            </div>
+          </div>
 
-      {/* Accounting Settings */}
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold">Accounting Settings</h2>
-        <div className="grid gap-4 md:grid-cols-2">
-          <SettingsCard
-            href="/dashboard/accounts"
-            icon={FileText}
-            iconColor="text-emerald-500"
-            iconBg="bg-emerald-500/10"
-            title="Chart of Accounts"
-            description="Manage your chart of accounts and account structure"
-          />
-          <SettingsCard
-            href="/dashboard/settings/fiscal-periods"
-            icon={Calendar}
-            iconColor="text-indigo-500"
-            iconBg="bg-indigo-500/10"
-            title="Fiscal Periods"
-            description="Manage accounting periods and period closing"
-          />
-          <SettingsCard
-            href="/dashboard/banking"
-            icon={CreditCard}
-            iconColor="text-amber-500"
-            iconBg="bg-amber-500/10"
-            title="Bank Feed"
-            description="Import and allocate bank statements"
-          />
-        </div>
-      </div>
+          {/* Accounting */}
+          <div className="space-y-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Accounting</h2>
+            <div className="grid gap-3 md:grid-cols-2">
+              <SettingsCard
+                href="/dashboard/accounts"
+                icon={FileText}
+                iconColor="text-emerald-500"
+                iconBg="bg-emerald-500/10"
+                title="Chart of Accounts"
+                description="Account structure and GL account management"
+              />
+              <SettingsCard
+                href="/dashboard/settings/fiscal-periods"
+                icon={Calendar}
+                iconColor="text-indigo-500"
+                iconBg="bg-indigo-500/10"
+                title="Fiscal Periods"
+                description="Accounting periods and period closing"
+              />
+              <SettingsCard
+                href="/dashboard/banking"
+                icon={CreditCard}
+                iconColor="text-amber-500"
+                iconBg="bg-amber-500/10"
+                title="Bank Feed"
+                description="Import and allocate bank statements"
+              />
+            </div>
+          </div>
 
-      {/* System Setup */}
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold">System Setup</h2>
-        <p className="text-sm text-muted-foreground">
-          One-time setup tasks to ensure your system is properly configured
-        </p>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          {/* Advance Accounts Setup */}
-          <Suspense
-            fallback={
-              <div className="rounded-lg border bg-card p-4 animate-pulse">
-                <div className="flex items-center gap-4">
-                  <div className="h-11 w-11 rounded-lg bg-muted" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-4 w-32 bg-muted rounded" />
-                    <div className="h-3 w-48 bg-muted rounded" />
+          {/* System Setup */}
+          <div className="space-y-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">System Setup</h2>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Suspense
+                fallback={
+                  <div className="rounded-lg border bg-card p-4 animate-pulse">
+                    <div className="flex items-center gap-4">
+                      <div className="h-11 w-11 rounded-lg bg-muted" />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-4 w-32 bg-muted rounded" />
+                        <div className="h-3 w-48 bg-muted rounded" />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            }
-          >
-            <AccountSetupCard />
-          </Suspense>
+                }
+              >
+                <AccountSetupCard />
+              </Suspense>
+              <ChartOfAccountsSyncCard />
+            </div>
+          </div>
+        </>
+      )}
 
-          <ChartOfAccountsSyncCard />
+      {/* HR */}
+      {canSeeHR && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Human Resources</h2>
+          <div className="grid gap-3 md:grid-cols-2">
+            <SettingsCard
+              href="/dashboard/settings/payroll-config"
+              icon={DollarSign}
+              iconColor="text-emerald-500"
+              iconBg="bg-emerald-500/10"
+              title="Payroll Configuration"
+              description="PAYE brackets, NSSF tiers, SHIF & AHL rates — required before running payroll"
+            />
+            <SettingsCard
+              href="/dashboard/hr/departments"
+              icon={Briefcase}
+              iconColor="text-blue-500"
+              iconBg="bg-blue-500/10"
+              title="Departments"
+              description="Manage organisational structure and departments"
+            />
+            <SettingsCard
+              href="/dashboard/settings/public-holidays"
+              icon={CalendarDays}
+              iconColor="text-orange-500"
+              iconBg="bg-orange-500/10"
+              title="Public Holidays"
+              description="Manage holiday calendar — excluded from leave and payroll working days"
+            />
+            <SettingsCard
+              href="/dashboard/settings/attendance-config"
+              icon={Clock}
+              iconColor="text-teal-500"
+              iconBg="bg-teal-500/10"
+              title="Attendance Configuration"
+              description="Shift hours, late threshold, IP whitelist, and GPS geofencing for clock-in"
+            />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

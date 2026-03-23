@@ -1,4 +1,7 @@
 import { Suspense } from "react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -24,13 +27,14 @@ export default async function PartiesPage({ searchParams }) {
   return (
     <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
       {/* Header */}
-      <div className="space-y-1 sm:space-y-2">
-        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
-          Parties
-        </h1>
-        <p className="text-sm sm:text-base text-muted-foreground">
-          Manage customers, suppliers, and employees
-        </p>
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight">Parties</h1>
+        <Button asChild size="sm">
+          <Link href="/dashboard/parties/create">
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            New Party
+          </Link>
+        </Button>
       </div>
 
       {/* Stats Cards - Stream independently */}

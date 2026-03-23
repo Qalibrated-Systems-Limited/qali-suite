@@ -18,6 +18,9 @@ import {
   POTableSkeleton,
   POPaginationServer,
 } from "../components/POServerComponents";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 
 export const metadata = {
   title: "Purchase Orders | ERP",
@@ -72,11 +75,14 @@ async function PurchaseOrdersPage(props) {
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">Purchase Orders</h1>
-        <p className="text-muted-foreground">
-          Create and manage supplier purchase orders
-        </p>
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight">Purchase Orders</h1>
+        <Button asChild size="sm">
+          <Link href="/dashboard/purchase-orders/create">
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            New PO
+          </Link>
+        </Button>
       </div>
 
       {/* Stats Cards - Stream independently */}

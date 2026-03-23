@@ -1,0 +1,170 @@
+"use server";
+
+import mongoose from "mongoose";
+import { revalidatePath } from "next/cache";
+import dbConnect from "@/app/config/dbConnect";
+import { getTenantContext, getCompanyIdForCreate } from "@/lib/utils/tenant-utils";
+import EmployeeProfile from "@/app/models/employeeProfile";
+import Party from "@/app/models/parties";
+
+const ALLOWED = ["Admin", "HR"];
+
+// ============================================
+// BULK EMPLOYEE IMPORT
+// ============================================
+// Accepts a JSON array (parsed from CSV on the client).
+// Each row maps to one employee (Party + EmployeeProfile).
+// Returns per-row results: created, skipped (duplicate email), errors.
+// ============================================
+
+const DEFAULT_LEAVE_POLICY = [
+  { leaveType: "annual",       label: "Annual Leave",       entitledDays: 21, carryOver: 0 },
+  { leaveType: "sick",         label: "Sick Leave",         entitledDays: 14, carryOver: 0 },
+  { leaveType: "maternity",    label: "Maternity Leave",    entitledDays: 90, carryOver: 0 },
+  { leaveType: "paternity",    label: "Paternity Leave",    entitledDays: 14, carryOver: 0 },
+  { leaveType: "compassionate",label: "Compassionate Leave",entitledDays: 5,  carryOver: 0 },
+];
+
+export async function bulkImportEmployees(rows) {
+  try {
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!ALLOWED.includes(user?.role)) {
+      return { success: false, error: "Only Admin or HR can import employees" };
+    }
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { success: false, error: "No data to import" };
+    }
+
+    if (rows.length > 200) {
+      return { success: false, error: "Maximum 200 rows per import" };
+    }
+
+    const tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+    await dbConnect();
+
+    const results = [];
+    let created = 0;
+    let skipped = 0;
+    let errors = 0;
+    const currentYear = new Date().getFullYear();
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2; // 1-indexed + header row
+
+      try {
+        const firstName = row.firstName?.trim();
+        const lastName = row.lastName?.trim();
+        const email = row.email?.trim().toLowerCase() || null;
+        const phone = row.phone?.trim() || null;
+        const nationalId = row.nationalId?.trim() || null;
+        const kraPin = row.kraPin?.trim().toUpperCase() || null;
+        const nssfNumber = row.nssfNumber?.trim() || null;
+        const nhifNumber = row.nhifNumber?.trim() || null;
+        const gender = row.gender?.toLowerCase() || null;
+        const department = row.department?.trim() || null;
+        const designation = row.designation?.trim() || null;
+        const employmentType = row.employmentType?.trim() || "full_time";
+        const hireDate = row.hireDate ? new Date(row.hireDate) : new Date();
+        const basicSalary = parseFloat(row.basicSalary || "0");
+        const paymentMethod = row.paymentMethod?.trim() || "bank";
+        const bankName = row.bankName?.trim() || null;
+        const bankAccount = row.bankAccount?.trim() || null;
+        const bankBranch = row.bankBranch?.trim() || null;
+        const mpesaNumber = row.mpesaNumber?.trim() || null;
+
+        if (!firstName || !lastName) {
+          results.push({ row: rowNum, status: "error", message: "First name and last name are required" });
+          errors++;
+          continue;
+        }
+
+        // Check for duplicate email
+        if (email) {
+          const exists = await Party.findOne({ companyId: tenantCompanyId, email, type: "employee" });
+          if (exists) {
+            results.push({ row: rowNum, status: "skipped", name: `${firstName} ${lastName}`, message: `Email ${email} already exists` });
+            skipped++;
+            continue;
+          }
+        }
+
+        const mongoSession = await mongoose.startSession();
+        mongoSession.startTransaction();
+
+        try {
+          // Generate employee number
+          const employeeNumber = await EmployeeProfile.generateEmployeeNumber(tenantCompanyId, mongoSession);
+
+          // Create Party
+          const [party] = await Party.create(
+            [{
+              companyId: tenantCompanyId,
+              name: `${firstName} ${lastName}`,
+              type: "employee",
+              email,
+              phone,
+              employeeNumber,
+              department,
+              designation,
+              isActive: true,
+              createdBy: { name: user.name, id: user.id },
+            }],
+            { session: mongoSession }
+          );
+
+          // Create EmployeeProfile
+          const profileDoc = {
+            companyId: tenantCompanyId,
+            partyId: party._id,
+            employeeNumber,
+            personalInfo: { firstName, lastName, nationalId, kraPin, nssfNumber, nhifNumber, gender: ["male","female","other"].includes(gender) ? gender : undefined },
+            employment: {
+              department,
+              designation,
+              employmentType: ["full_time","part_time","contract","intern","casual"].includes(employmentType) ? employmentType : "full_time",
+              hireDate,
+              status: "probation",
+            },
+            compensation: {
+              basicSalary,
+              currency: "KES",
+              paymentMethod: ["bank","mpesa","cash"].includes(paymentMethod) ? paymentMethod : "bank",
+              bankName,
+              bankAccount,
+              bankBranch,
+              mpesaNumber,
+            },
+            createdBy: { name: user.name, id: user.id },
+          };
+
+          const [profile] = await EmployeeProfile.create([profileDoc], { session: mongoSession });
+
+          // Init leave balances
+          profile.initLeaveBalances(currentYear, DEFAULT_LEAVE_POLICY);
+          await profile.save({ session: mongoSession });
+
+          await mongoSession.commitTransaction();
+          mongoSession.endSession();
+
+          results.push({ row: rowNum, status: "created", name: `${firstName} ${lastName}`, employeeNumber });
+          created++;
+        } catch (innerErr) {
+          await mongoSession.abortTransaction();
+          mongoSession.endSession();
+          throw innerErr;
+        }
+      } catch (rowErr) {
+        results.push({ row: rowNum, status: "error", message: rowErr.message || "Unknown error" });
+        errors++;
+      }
+    }
+
+    revalidatePath("/dashboard/hr/employees");
+    return { success: true, created, skipped, errors, results };
+  } catch (error) {
+    return { success: false, error: error.message || "Import failed" };
+  }
+}

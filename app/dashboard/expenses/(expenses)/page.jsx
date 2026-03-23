@@ -1,4 +1,7 @@
 import { Suspense } from "react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 import ExpenseList from "../components/ExpenseList";
 import { getExpenses, getExpenseSummary, getExpenseCategories } from "@/app/mongodb/queries/expense-queries";
 import { FormBanner } from "@/components/ui/form-banner";
@@ -32,11 +35,14 @@ export default async function ExpensesPage({ searchParams }) {
     <div className="p-4 sm:p-6 space-y-6">
       <FormBanner searchParams={params} />
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Expenses</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Track and manage business expenses
-        </p>
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight">Expenses</h1>
+        <Button asChild size="sm">
+          <Link href="/dashboard/expenses/create">
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            New Expense
+          </Link>
+        </Button>
       </div>
 
       {/* Content */}

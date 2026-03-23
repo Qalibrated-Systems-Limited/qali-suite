@@ -73,17 +73,12 @@ export default async function JournalPage({
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">Journal Entries</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Browse and manage your accounting journal
-          </p>
-        </div>
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight">Journal Entries</h1>
         {["Admin", "Accountant"].includes(session.user.role as string) && (
-          <Button asChild className="sm:w-auto">
+          <Button asChild size="sm">
             <Link href="/dashboard/journal/create">
-              <Plus className="w-4 h-4 mr-2" />
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
               New Entry
             </Link>
           </Button>

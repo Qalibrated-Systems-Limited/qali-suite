@@ -1,14 +1,24 @@
 import "./globals.css";
-import { Poppins } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 
 import { cn } from "../lib/utils";
 import { ThemeProvider } from "@/components/Theme-Provider";
 import { Toaster } from "sonner";
 
-const poppins = Poppins({
+// Inter — variable font, industry standard for dashboards/ERP
+// (Linear, Stripe, GitHub, Vercel all use Inter)
+const inter = Inter({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  variable: "--font-sans",
   display: "swap",
+});
+
+// JetBrains Mono — for amounts, codes, IDs, financial figures
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  display: "swap",
+  weight: ["400", "500"],
 });
 
 export const metadata = {
@@ -19,7 +29,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={cn(poppins.className)}>
+      <body className={cn(inter.variable, jetbrainsMono.variable, "font-sans")}>
         <ThemeProvider
           attribute="class"
           defaultTheme="light"

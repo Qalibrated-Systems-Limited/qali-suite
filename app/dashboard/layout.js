@@ -26,7 +26,7 @@ async function DashboardLayout({ children }) {
     <CommandPaletteProvider>
       <AppSidebar
         user={user}
-        children={<div className=" p-4 md:p-6 lg:p-8">{children}</div>}
+        children={<div className="p-4 md:p-6">{children}</div>}
       />
     </CommandPaletteProvider>
   );

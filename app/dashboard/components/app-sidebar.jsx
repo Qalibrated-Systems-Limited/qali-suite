@@ -21,7 +21,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MobileNav } from "@/components/mobile-nav";
 import { PcNav } from "@/components/pc-nav";
-import { CreateButton } from "@/app/dashboard/components/smartCreateButton";
 import { MobileSearch, DesktopSearch } from "@/components/search";
 import { useTheme } from "next-themes";
 import { QaliSuiteIcon } from "@/components/qalisuite-logo";
@@ -123,9 +122,6 @@ export function AppSidebar({ children, user, ...props }) {
                   <Bell className="w-4 h-4" />
                   <span className="sr-only">Notifications</span>
                 </Button>
-
-                {/* Smart Create Button */}
-                <CreateButton user={user} />
 
                 {/* User Menu */}
                 <DropdownMenu>

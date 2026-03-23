@@ -11,6 +11,9 @@ import {
   FilterBadge,
 } from "../components/filters";
 import { SiteHeader } from "@/components/site-header";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 import {
   RequestStatsCards,
   RequestStatsSkeleton,
@@ -74,6 +77,14 @@ const RequestsPage = async (props) => {
             ? "View and track your submitted requests"
             : "Review and manage all stock requests"
         }
+        Action={() => (
+          <Button asChild size="sm">
+            <Link href="/dashboard/requests/create">
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              New Request
+            </Link>
+          </Button>
+        )}
       />
 
       {/* Stats Cards - Stream independently */}

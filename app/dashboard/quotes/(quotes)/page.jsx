@@ -20,6 +20,9 @@ import {
   QuotesPaginationServer,
   PaginationSkeleton,
 } from "../components/QuoteServerComponents";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 
 async function QuotesPage(props) {
   const searchParams = await props.searchParams;
@@ -53,11 +56,14 @@ async function QuotesPage(props) {
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">Quotes</h1>
-        <p className="text-muted-foreground">
-          Create and manage customer quotations
-        </p>
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight">Quotes</h1>
+        <Button asChild size="sm">
+          <Link href="/dashboard/quotes/create">
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            New Quote
+          </Link>
+        </Button>
       </div>
 
       {/* Stats Cards - Stream independently */}

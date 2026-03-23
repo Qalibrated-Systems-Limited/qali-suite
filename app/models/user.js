@@ -11,6 +11,7 @@ export const userRoles = [
   "Viewer",
   "Manager",
   "Accountant",
+  "HR",
   "Employee",
   "Technician",
 ];

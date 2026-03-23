@@ -3,6 +3,7 @@
 import { auth } from "@/auth";
 import dbConnect from "@/app/config/dbConnect";
 import User from "@/app/models/user";
+import Party from "@/app/models/parties";
 import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 
@@ -37,6 +38,14 @@ export async function updateProfile(data) {
     }
 
     await User.findByIdAndUpdate(session.user.id, updateData);
+
+    // Keep Party (financial identity) name in sync when user changes their display name
+    if (name) {
+      await Party.findOneAndUpdate(
+        { userId: session.user.id, type: "employee" },
+        { name: name.trim() }
+      );
+    }
 
     revalidatePath("/dashboard/profile");
 

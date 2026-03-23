@@ -32,6 +32,16 @@ const inviteSchema = new Schema(
       id: { type: String, required: true },
     },
 
+    // For employee portal invites — links this invite to a specific Party record.
+    // When the invite is accepted, User.id is written back to Party.userId
+    // and EmployeeProfile.userId, completing the login connection.
+    // null = general user invite (not an employee portal invite)
+    partyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Party",
+      default: null,
+    },
+
     // Store hashed token — raw token is sent in the email link
     token: {
       type: String,

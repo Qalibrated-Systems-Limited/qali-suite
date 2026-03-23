@@ -18,6 +18,9 @@ import {
   InvoicesPaginationServer,
   PaginationSkeleton,
 } from "../components/InvoiceServerComponents";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 
 async function InvoicesPage(props) {
   const searchParams = await props.searchParams;
@@ -67,13 +70,14 @@ async function InvoicesPage(props) {
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Invoices</h1>
-          <p className="text-muted-foreground">
-            Manage and track all your invoices
-          </p>
-        </div>
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold tracking-tight">Invoices</h1>
+        <Button asChild size="sm">
+          <Link href="/dashboard/invoices/create">
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            New Invoice
+          </Link>
+        </Button>
       </div>
 
       {/* Stats Cards - Stream independently */}

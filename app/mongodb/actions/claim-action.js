@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import EmployeeClaim from "../../models/employeesClaims";
 import Company from "../../models/Company";
 import Party from "../../models/parties";
+import EmployeeProfile from "../../models/employeeProfile";
 import Account from "../../models/account";
 import JournalEntry from "../../models/JournalEntry";
 import ErpCounter from "../../models/erp-counter";
@@ -79,7 +80,8 @@ async function getOrCreateEmployeeParty(user, tenantCompanyId, isSuperAdmin, ses
   ).session(session);
 
   if (!party) {
-    // Auto-create employee party for this user
+    // Auto-create employee party — Party is the financial identity only.
+    // Department/designation are HR data and live in EmployeeProfile, not here.
     const created = await Party.create(
       [
         {
@@ -88,11 +90,7 @@ async function getOrCreateEmployeeParty(user, tenantCompanyId, isSuperAdmin, ses
           userId: user.id,
           name: user.name || user.email,
           email: user.email,
-          department: user.department || "",
-          createdBy: {
-            name: "System",
-            id: "system",
-          },
+          createdBy: { name: "System", id: "system" },
         },
       ],
       { session },
@@ -101,6 +99,20 @@ async function getOrCreateEmployeeParty(user, tenantCompanyId, isSuperAdmin, ses
   }
 
   return party;
+}
+
+// Fetch HR snapshot data from EmployeeProfile (source of truth for department/designation).
+// Falls back to empty strings if user has no profile yet.
+async function getEmployeeHRSnapshot(partyId, session) {
+  const profile = await EmployeeProfile.findOne({ partyId })
+    .select("employeeNumber employment.department employment.designation")
+    .session(session)
+    .lean();
+  return {
+    employeeNumber: profile?.employeeNumber || "",
+    department: profile?.employment?.department || "",
+    designation: profile?.employment?.designation || "",
+  };
 }
 
 // ============================================
@@ -299,6 +311,9 @@ export async function createAdvanceRequest(prevState, formData) {
     // Generate claim number (tenant-scoped)
     const claimNumber = await generateClaimNumber(tenantCompanyId, session);
 
+    // Fetch HR snapshot from EmployeeProfile — source of truth for department/designation
+    const hrSnapshot = await getEmployeeHRSnapshot(party._id, session);
+
     // Build advanceDetails based on type
     const advanceDetails = {
       advanceType: data.advanceType,
@@ -340,8 +355,8 @@ export async function createAdvanceRequest(prevState, formData) {
             userId: user.id,
             partyId: party._id,
             name: user.name,
-            employeeNumber: party.employeeNumber,
-            department: party.department,
+            employeeNumber: hrSnapshot.employeeNumber,
+            department: hrSnapshot.department,
             email: user.email,
           },
           claimType: "advance_request",
@@ -514,6 +529,9 @@ export async function createReimbursement(prevState, formData) {
     // Generate claim number (tenant-scoped)
     const claimNumber = await generateClaimNumber(tenantCompanyId, session);
 
+    // Fetch HR snapshot from EmployeeProfile — source of truth for department/designation
+    const hrSnapshot = await getEmployeeHRSnapshot(party._id, session);
+
     // Look up project if provided (optional)
     let projectFields = {};
     if (rawProjectId) {
@@ -537,8 +555,8 @@ export async function createReimbursement(prevState, formData) {
             userId: user.id,
             partyId: party._id,
             name: user.name,
-            employeeNumber: party.employeeNumber,
-            department: party.department,
+            employeeNumber: hrSnapshot.employeeNumber,
+            department: hrSnapshot.department,
             email: user.email,
           },
           claimType: "reimbursement",

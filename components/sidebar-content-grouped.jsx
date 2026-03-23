@@ -29,6 +29,7 @@ import {
   Calendar,
   FolderTree,
   FolderKanban,
+  Clock,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -53,6 +54,7 @@ import {
   TooltipTrigger,
 } from "./ui/tooltip";
 import { QaliSuiteIcon, QaliSuiteMark } from "./qalisuite-logo";
+import { SidebarClockWidget } from "./sidebar-clock-widget";
 
 // ============================================
 // NAV GROUP CONFIGURATION - GENERAL NAMING
@@ -79,6 +81,7 @@ const getNavigationGroups = (user) => [
     icon: Package,
     id: "inventory",
     defaultOpen: true,
+    hidden: user?.role === "HR",
     items: [
       {
         icon: Boxes,
@@ -99,7 +102,7 @@ const getNavigationGroups = (user) => [
         label: "Stock Movements",
         id: "movements",
         href: "/dashboard/movements",
-        // View only - auto-generated
+        hidden: !["Admin", "Manager", "Accountant", "Store Manager"].includes(user?.role),
       },
       {
         icon: FileText,
@@ -132,19 +135,21 @@ const getNavigationGroups = (user) => [
     icon: ShoppingBag,
     id: "sales",
     defaultOpen: false,
+    hidden: user?.role === "HR",
     items: [
       {
         icon: FileText,
         label: "Quotes",
         id: "quotes",
         href: "/dashboard/quotes",
+        hidden: !["Admin", "Manager", "Accountant", "Store Manager"].includes(user?.role),
       },
       {
         icon: Receipt,
         label: "Invoices",
         id: "invoices",
         href: "/dashboard/invoices",
-        hidden: !["Admin", "Accountant", "Sales"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role),
       },
       {
         icon: Receipt,
@@ -158,7 +163,7 @@ const getNavigationGroups = (user) => [
         label: "Customers",
         id: "customers",
         href: "/dashboard/customers",
-        hidden: !["Admin", "Accountant", "Sales"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role),
       },
       {
         icon: CreditCard,
@@ -186,6 +191,7 @@ const getNavigationGroups = (user) => [
     icon: ShoppingCart,
     id: "purchases",
     defaultOpen: false,
+    hidden: user?.role === "HR",
     items: [
       {
         icon: FileText,
@@ -285,6 +291,7 @@ const getNavigationGroups = (user) => [
     id: "projects",
     href: "/dashboard/projects",
     hidden: !["Admin", "Accountant", "Manager"].includes(user?.role),
+    // HR intentionally excluded
   },
 
   // ============================================
@@ -297,6 +304,7 @@ const getNavigationGroups = (user) => [
     id: "finance",
     defaultOpen: false,
     badge: "New",
+    hidden: user?.role === "HR",
     items: [
       {
         icon: Briefcase, // or Building2 or Users
@@ -345,6 +353,7 @@ const getNavigationGroups = (user) => [
     icon: FileText,
     id: "tax",
     defaultOpen: false,
+    hidden: user?.role === "HR",
     items: [
       {
         icon: Receipt,
@@ -386,6 +395,7 @@ const getNavigationGroups = (user) => [
     icon: BarChart3,
     id: "reports",
     defaultOpen: false,
+    hidden: user?.role === "HR",
     items: [
       // Financial Reports
       {
@@ -445,13 +455,14 @@ const getNavigationGroups = (user) => [
         label: "Inventory Reports",
         id: "inventory-reports",
         href: "/dashboard/reports/inventory",
+        hidden: !["Admin", "Manager", "Accountant", "Store Manager"].includes(user?.role),
       },
       {
         icon: ShoppingBag,
         label: "Sales Reports",
         id: "sales-reports",
         href: "/dashboard/reports/sales",
-        hidden: !["Admin", "Accountant", "Sales"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role),
       },
       {
         icon: ShoppingCart,
@@ -465,13 +476,90 @@ const getNavigationGroups = (user) => [
         label: "Customer Reports",
         id: "customer-reports",
         href: "/dashboard/reports/customers",
-        hidden: !["Admin", "Accountant", "Sales"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role),
       },
     ],
   },
 
   // ============================================
-  // PEOPLE & HR
+  // HUMAN RESOURCES
+  // ============================================
+  {
+    type: "group",
+    label: "Human Resources",
+    icon: Briefcase,
+    id: "hr",
+    defaultOpen: user?.role === "HR",
+    hidden: user?.role === "SuperAdmin",
+    items: [
+      {
+        icon: LayoutDashboard,
+        label: "HR Overview",
+        id: "hr-overview",
+        href: "/dashboard/hr",
+        hidden: !["Admin", "Manager", "HR"].includes(user?.role),
+      },
+      {
+        icon: Users,
+        label: "Employees",
+        id: "hr-employees",
+        href: "/dashboard/hr/employees",
+        hidden: !["Admin", "Manager", "HR"].includes(user?.role),
+      },
+      {
+        icon: Building2,
+        label: "Departments",
+        id: "hr-departments",
+        href: "/dashboard/hr/departments",
+        hidden: !["Admin", "Manager", "HR"].includes(user?.role),
+      },
+      {
+        icon: Calendar,
+        label: "Leave",
+        id: "hr-leave",
+        href: "/dashboard/hr/leave",
+        hidden: user?.role === "SuperAdmin",
+      },
+      {
+        icon: Clock,
+        label: "Attendance",
+        id: "hr-attendance",
+        href: "/dashboard/hr/attendance",
+        hidden: !["Admin", "HR", "Manager"].includes(user?.role),
+      },
+      {
+        icon: Clock,
+        label: "My Attendance",
+        id: "hr-my-attendance",
+        href: "/dashboard/hr/my-attendance",
+        hidden: user?.role === "SuperAdmin",
+      },
+      {
+        icon: FileSpreadsheet,
+        label: "My Payslips",
+        id: "hr-my-payslips",
+        href: "/dashboard/hr/my-payslips",
+        hidden: user?.role === "SuperAdmin",
+      },
+      {
+        icon: DollarSign,
+        label: "Payroll",
+        id: "hr-payroll",
+        href: "/dashboard/hr/payroll",
+        hidden: !["Admin", "HR"].includes(user?.role),
+      },
+      {
+        icon: Users,
+        label: "User Accounts",
+        id: "hr-users",
+        href: "/dashboard/users",
+        hidden: user?.role !== "HR",
+      },
+    ],
+  },
+
+  // ============================================
+  // PEOPLE & ADMIN
   // ============================================
   {
     type: "group",
@@ -518,6 +606,7 @@ const getNavigationGroups = (user) => [
     label: "Settings",
     id: "settings",
     href: "/dashboard/settings",
+    hidden: !["Admin", "Accountant", "HR"].includes(user?.role),
   },
 ];
 
@@ -769,6 +858,9 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
             return null;
           })}
         </nav>
+
+        {/* Clock In/Out */}
+        <SidebarClockWidget collapsed={collapsed} />
 
         {/* Theme Toggle */}
         {!collapsed && <NextThemeToggler />}

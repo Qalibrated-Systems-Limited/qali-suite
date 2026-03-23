@@ -15,17 +15,15 @@ import {
   EmptyState,
   ActivityCardSkeleton,
 } from "./ActivityCard";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-
 // Icons
-import { Wallet, FileText, Clock, CheckCircle, Plus } from "lucide-react";
+import { Wallet, FileText, CheckCircle, Plus, Calendar, Receipt } from "lucide-react";
 
 // Queries
 import {
   getEmployeeSummary,
   getEmployeeFinancialSummary,
 } from "@/app/mongodb/queries/erp-dashboard-queries";
+import MyHRStrip from "./MyHRStrip";
 import EmployeeClaim from "../../models/employeesClaims";
 import { StockRequest } from "../../models/requests";
 
@@ -46,20 +44,20 @@ export default async function EmployeeDashboardPage() {
   const userName = user.name?.split(" ")[0] || "there";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
+        <h1 className="text-xl font-semibold text-foreground tracking-tight">
           Welcome back, {userName}! 👋
         </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Here's your personal dashboard
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Your personal dashboard
         </p>
       </div>
 
       {/* Quick Actions */}
       <section>
-        <h2 className="text-sm font-medium text-muted-foreground mb-3">
+        <h2 className="text-xs font-medium text-muted-foreground mb-2">
           Quick Actions
         </h2>
         <QuickActionsGrid />
@@ -67,7 +65,7 @@ export default async function EmployeeDashboardPage() {
 
       {/* My Stats */}
       <section>
-        <h2 className="text-sm font-medium text-muted-foreground mb-3">
+        <h2 className="text-xs font-medium text-muted-foreground mb-2">
           My Overview
         </h2>
         <Suspense fallback={<MetricCardsGridSkeleton count={4} />}>
@@ -75,8 +73,16 @@ export default async function EmployeeDashboardPage() {
         </Suspense>
       </section>
 
+      {/* HR Section */}
+      <section>
+        <h2 className="text-xs font-medium text-muted-foreground mb-2">
+          My HR
+        </h2>
+        <MyHRStrip />
+      </section>
+
       {/* Recent Activity */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
         <Suspense fallback={<ActivityCardSkeleton />}>
           <MyRecentClaimsCard userId={user.id} />
         </Suspense>
@@ -94,17 +100,31 @@ export default async function EmployeeDashboardPage() {
 function QuickActionsGrid() {
   const actions = [
     {
+      title: "Request Leave",
+      description: "Annual, sick, or other leave",
+      href: "/dashboard/hr/leave/create",
+      icon: Calendar,
+      color: "bg-teal-600 hover:bg-teal-700 text-white dark:bg-teal-500 dark:hover:bg-teal-600",
+    },
+    {
       title: "Request Advance",
       description: "For travel or expenses",
       href: "/dashboard/claims/create?type=advance",
       icon: Wallet,
-      color: "bg-yellow-500 hover:bg-yellow-600 text-black",
+      color: "bg-card hover:bg-accent border border-border",
     },
     {
       title: "Submit Reimbursement",
       description: "Get expenses back",
       href: "/dashboard/claims/create?type=reimbursement",
       icon: FileText,
+      color: "bg-card hover:bg-accent border border-border",
+    },
+    {
+      title: "My Payslips",
+      description: "View salary statements",
+      href: "/dashboard/hr/my-payslips",
+      icon: Receipt,
       color: "bg-card hover:bg-accent border border-border",
     },
     {
@@ -117,19 +137,19 @@ function QuickActionsGrid() {
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
       {actions.map((action, index) => (
         <Link
           key={index}
           href={action.href}
-          className={`flex items-start gap-3 p-4 rounded-lg transition-all ${action.color}`}
+          className={`flex items-center gap-2.5 p-3 rounded-lg transition-all ${action.color}`}
         >
-          <div className="shrink-0 mt-0.5">
-            <action.icon className="w-5 h-5" />
+          <div className="shrink-0">
+            <action.icon className="w-4 h-4" />
           </div>
-          <div>
-            <p className="font-medium text-sm">{action.title}</p>
-            <p className="text-xs opacity-70">{action.description}</p>
+          <div className="min-w-0">
+            <p className="font-medium text-xs leading-tight">{action.title}</p>
+            <p className="text-xs opacity-60 truncate">{action.description}</p>
           </div>
         </Link>
       ))}
@@ -155,7 +175,7 @@ async function EmployeeStatsCards({ userId }: { userId: string }) {
         value={totalClaims}
         subtitle="Total submitted"
         icon="FileText"
-        iconColor="text-blue-500"
+        iconColor="text-primary"
         href="/dashboard/my-claims"
       />
       <MetricCard

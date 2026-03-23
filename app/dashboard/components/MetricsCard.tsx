@@ -118,56 +118,36 @@ export function MetricCard({
         href && "cursor-pointer"
       )}
     >
-      {/* Alert indicator */}
-      {alert && (
-        <div className="absolute top-3 right-3 z-10">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-yellow-500" />
-          </span>
-        </div>
-      )}
-
-      <div className="p-4 sm:p-5">
-        {/* Header: Icon + Title */}
-        <div className="flex items-center gap-3 mb-3">
-          <div
-            className={cn(
-              "flex items-center justify-center",
-              "w-9 h-9 sm:w-10 sm:h-10 rounded-lg",
-              "bg-muted/50"
-            )}
-          >
-            <Icon className={cn("w-4 h-4 sm:w-5 sm:h-5", iconColor)} />
-          </div>
-          <span className="text-sm font-medium text-muted-foreground truncate">
+      <div className="p-3 sm:p-4">
+        {/* Header: Label + Icon */}
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <span className="text-xs font-medium text-muted-foreground leading-none">
             {title}
           </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {alert && (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500" />
+              </span>
+            )}
+            <Icon className={cn("w-3.5 h-3.5", iconColor)} />
+          </div>
         </div>
 
         {/* Value */}
-        <div className="mb-1">
-          <p className="text-2xl sm:text-3xl font-bold text-foreground tabular-nums tracking-tight">
-            {value}
-          </p>
-        </div>
+        <p className="text-xl sm:text-2xl font-bold text-foreground tabular-nums tracking-tight leading-none">
+          {value}
+        </p>
 
         {/* Footer: Subtitle + Trend */}
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 mt-1.5">
           {subtitle && (
-            <p className="text-xs sm:text-sm text-muted-foreground truncate">
-              {subtitle}
-            </p>
+            <p className="text-xs text-muted-foreground truncate">{subtitle}</p>
           )}
-
           {trend !== undefined && TrendIcon && (
-            <div
-              className={cn(
-                "flex items-center gap-0.5 text-xs font-medium",
-                trendColor
-              )}
-            >
-              <TrendIcon className="w-3.5 h-3.5" />
+            <div className={cn("flex items-center gap-0.5 text-xs font-medium shrink-0", trendColor)}>
+              <TrendIcon className="w-3 h-3" />
               <span>{Math.abs(trend).toFixed(1)}%</span>
             </div>
           )}
@@ -193,20 +173,13 @@ export function MetricCard({
 export function MetricCardSkeleton() {
   return (
     <Card className="h-full bg-card border border-border/40">
-      <div className="p-4 sm:p-5">
-        {/* Header skeleton */}
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-muted animate-pulse" />
-          <div className="h-4 w-20 bg-muted animate-pulse rounded" />
+      <div className="p-3 sm:p-4">
+        <div className="flex items-start justify-between mb-2">
+          <div className="h-3 w-20 bg-muted animate-pulse rounded" />
+          <div className="h-3.5 w-3.5 bg-muted animate-pulse rounded" />
         </div>
-
-        {/* Value skeleton */}
-        <div className="mb-1">
-          <div className="h-8 sm:h-9 w-24 bg-muted animate-pulse rounded" />
-        </div>
-
-        {/* Footer skeleton */}
-        <div className="h-4 w-16 bg-muted animate-pulse rounded" />
+        <div className="h-7 w-20 bg-muted animate-pulse rounded mb-1.5" />
+        <div className="h-3 w-14 bg-muted animate-pulse rounded" />
       </div>
     </Card>
   );

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 // Client Component (uses useSearchParams)
 import { DashboardTabs } from "./tabs/DashboardTabs";
+import MyHRStrip from "./MyHRStrip";
 
 // Server Components (Tabs)
 import { FinanceTab, FinanceTabSkeleton } from "./tabs/FinanceTab";
@@ -46,20 +47,22 @@ export async function AdminDashboardPage() {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
-          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-foreground tracking-tight">
-            {greeting}, {firstName}
-          </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground">
-            {formatDate(new Date())}
-          </p>
-        </div>
+      <div>
+        <p className="text-xs text-muted-foreground">{formatDate(new Date())}</p>
+        <h1 className="mt-0.5 text-xl font-semibold tracking-tight text-foreground">
+          {greeting}, {firstName}
+        </h1>
       </div>
 
-      {/* 
+      {/* Personal HR strip */}
+      <section>
+        <h2 className="text-xs font-medium text-muted-foreground mb-2">My HR</h2>
+        <MyHRStrip />
+      </section>
+
+      {/*
         IMPORTANT: Wrap in Suspense for useSearchParams
         Next.js 16 requires this for client components using useSearchParams
       */}
