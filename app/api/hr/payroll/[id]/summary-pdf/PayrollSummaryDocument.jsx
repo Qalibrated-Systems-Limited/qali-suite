@@ -99,16 +99,16 @@ const s = StyleSheet.create({
   },
   footerText: { fontSize: 7, color: "#9ca3af" },
   // Columns — named for clarity
-  colNo: { width: "4%", ...s?.td },
-  colName: { width: "22%", ...s?.td },
-  colDept: { width: "14%", ...s?.td },
-  colBasic: { width: "10%", textAlign: "right", ...s?.td },
-  colGross: { width: "10%", textAlign: "right", ...s?.td },
-  colPAYE: { width: "9%", textAlign: "right", ...s?.td },
-  colNSSF: { width: "7%", textAlign: "right", ...s?.td },
-  colSHIF: { width: "7%", textAlign: "right", ...s?.td },
-  colAHL: { width: "7%", textAlign: "right", ...s?.td },
-  colNet: { width: "10%", textAlign: "right", fontFamily: "Helvetica-Bold", ...s?.td },
+  colNo: { width: "4%", color: "#374151" },
+  colName: { width: "22%", color: "#374151" },
+  colDept: { width: "14%", color: "#374151" },
+  colBasic: { width: "10%", textAlign: "right", color: "#374151" },
+  colGross: { width: "10%", textAlign: "right", color: "#374151" },
+  colPAYE: { width: "9%", textAlign: "right", color: "#374151" },
+  colNSSF: { width: "7%", textAlign: "right", color: "#374151" },
+  colSHIF: { width: "7%", textAlign: "right", color: "#374151" },
+  colAHL: { width: "7%", textAlign: "right", color: "#374151" },
+  colNet: { width: "10%", textAlign: "right", fontFamily: "Helvetica-Bold", color: "#374151" },
 });
 
 const fmt = (n) => (n || 0).toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
