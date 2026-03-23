@@ -346,7 +346,7 @@ export default function LandingPage() {
                     Start free <ArrowUpRight className="ml-1.5 h-4 w-4" />
                   </Link>
                 </Button>
-                <Button variant="outline" size="lg" className="h-12 px-7 rounded-xl font-medium border-white/20 text-white hover:bg-white/10 hover:text-white transition-all" asChild>
+                <Button variant="outline" size="lg" className="h-12 px-7 rounded-xl font-medium border-white/40 text-white bg-white/10 hover:bg-white/20 hover:text-white transition-all" asChild>
                   <Link href="/login">Log in</Link>
                 </Button>
               </div>
