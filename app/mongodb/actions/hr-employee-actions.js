@@ -109,8 +109,9 @@ export async function createEmployee(_prevState, formData) {
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    // Generate employee number
-    const employeeNumber = await EmployeeProfile.generateEmployeeNumber(tenantCompanyId, mongoSession);
+    // Employee number — use manual input if provided, otherwise auto-generate
+    const manualEmpNo = formData.get("employeeNumber")?.toString().trim() || null;
+    const employeeNumber = manualEmpNo || await EmployeeProfile.generateEmployeeNumber(tenantCompanyId, mongoSession);
     const fullName = `${firstName} ${lastName}`;
 
     // 1. Create Party (financial identity — used in EmployeeClaims, payroll payments)
@@ -227,6 +228,12 @@ export async function updateEmployee(_prevState, formData) {
 
     if (!profile) return { success: false, error: "Employee not found" };
 
+    // Update employee number if provided
+    const newEmpNo = formData.get("employeeNumber")?.toString().trim();
+    if (newEmpNo && newEmpNo !== profile.employeeNumber) {
+      profile.employeeNumber = newEmpNo;
+    }
+
     // Update personal info
     if (profile.personalInfo) {
       profile.personalInfo.firstName = formData.get("firstName")?.toString().trim() || profile.personalInfo.firstName;
@@ -288,6 +295,7 @@ export async function updateEmployee(_prevState, formData) {
         name: fullName,
         department: syncDepartment,
         designation: syncDesignation,
+        employeeNumber: profile.employeeNumber,
         lastModifiedBy: { name: user.name, id: user.id },
       };
       // Only update email if employee has no portal login (userId)

@@ -137,6 +137,11 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
       {/* Employment */}
       <SectionCard title="Employment">
         <div>
+          <Label>Employee Number</Label>
+          <Input name="employeeNumber" placeholder="Auto-generated if left blank" error={e.employeeNumber} />
+          <p className="mt-1 text-xs text-muted-foreground">Leave blank to auto-generate (e.g. EMP0001)</p>
+        </div>
+        <div>
           <Label required>Hire Date</Label>
           <Input
             name="hireDate"

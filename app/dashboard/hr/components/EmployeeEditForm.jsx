@@ -153,6 +153,10 @@ export default function EmployeeEditForm({ employee, departments = [] }) {
       {/* Employment (non-financial) */}
       <SectionCard title="Employment">
         <div>
+          <Label>Employee Number</Label>
+          <Input name="employeeNumber" defaultValue={employee.employeeNumber} placeholder="e.g. EMP0001" error={e.employeeNumber} />
+        </div>
+        <div>
           <Label>Department</Label>
           <DepartmentCombobox
             initialDepartments={departments}

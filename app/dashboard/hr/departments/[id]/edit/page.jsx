@@ -4,6 +4,9 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { getDepartmentById } from "@/app/mongodb/queries/hr-queries";
+import dbConnect from "@/app/config/dbConnect";
+import EmployeeProfile from "@/app/models/employeeProfile";
+import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import DepartmentEditForm from "../../../components/DepartmentEditForm";
 
 const EDIT_ROLES = ["Admin", "Manager", "HR"];
@@ -18,7 +21,25 @@ export async function generateMetadata({ params }) {
 async function DeptEditLoader({ id }) {
   const { department, error } = await getDepartmentById(id);
   if (error || !department) notFound();
-  return <DepartmentEditForm department={department} />;
+
+  await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const profiles = await EmployeeProfile.find(
+    withTenantScope({ "employment.status": { $in: ["active", "probation"] } }, companyId, isSuperAdmin)
+  )
+    .select("partyId employeeNumber personalInfo.firstName personalInfo.lastName")
+    .sort({ "personalInfo.lastName": 1 })
+    .limit(200)
+    .lean();
+
+  const employees = profiles.map((p) => ({
+    partyId: p.partyId?.toString() || "",
+    employeeNumber: p.employeeNumber || "",
+    name: `${p.personalInfo?.firstName || ""} ${p.personalInfo?.lastName || ""}`.trim(),
+  }));
+
+  return <DepartmentEditForm department={department} employees={employees} />;
 }
 
 function FormSkeleton() {
