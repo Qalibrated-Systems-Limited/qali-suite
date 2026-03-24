@@ -176,7 +176,7 @@ async function HRMetrics() {
 // PENDING LEAVE APPROVALS
 // ============================================
 async function PendingLeaveCard() {
-  const { requests } = await getLeaveRequests({ status: "submitted", limit: 8 });
+  const { leaveRequests: requests } = await getLeaveRequests({ status: "submitted", limit: 8 });
 
   const TYPE_COLOR: Record<string, string> = {
     annual:        "bg-blue-500/10 text-blue-700 dark:text-blue-300",
