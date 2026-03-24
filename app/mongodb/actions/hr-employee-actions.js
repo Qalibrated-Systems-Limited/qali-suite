@@ -600,7 +600,7 @@ export async function updateLeaveBalance(_prevState, formData) {
 // When the invite is accepted, User.id is written back to Party and
 // EmployeeProfile, completing the login connection.
 // ============================================
-export async function sendEmployeePortalInvite(profileId) {
+export async function sendEmployeePortalInvite(profileId, role = "Employee") {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
@@ -644,14 +644,22 @@ export async function sendEmployeePortalInvite(profileId) {
     }
 
     // Check if a User with this email already exists
-    const existingUser = await User.findOne({ email }).lean();
+    // Validate role
+    const ALLOWED_ROLES = ["Employee", "Manager", "Accountant", "HR", "Store Manager", "Admin"];
+    const inviteRole = ALLOWED_ROLES.includes(role) ? role : "Employee";
+
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
-      // User exists but userId not linked yet — link directly
+      // User exists — link to employee profile and set chosen role
+      existingUser.role = inviteRole;
+      if (!existingUser.companyId) existingUser.companyId = profile.companyId;
+      await existingUser.save();
+
       await Promise.all([
         Party.findByIdAndUpdate(profile.partyId, { userId: existingUser._id }),
         EmployeeProfile.findByIdAndUpdate(profileId, { userId: existingUser._id }),
       ]);
-      return { success: true, message: "Existing account linked to employee profile" };
+      return { success: true, message: `Account (${email}) linked with role: ${inviteRole}` };
     }
 
     // Fetch company name for the email
@@ -661,9 +669,9 @@ export async function sendEmployeePortalInvite(profileId) {
 
     await Invite.create({
       email,
-      role: "Employee",
+      role: inviteRole,
       companyId: profile.companyId,
-      partyId: profile.partyId,   // ← key link: ties invite to this Party
+      partyId: profile.partyId,
       invitedBy: { name: user.name, id: user.id },
       token: hashedToken,
     });
@@ -674,7 +682,7 @@ export async function sendEmployeePortalInvite(profileId) {
         to: email,
         inviterName: user.name,
         companyName: company?.name || "Your Company",
-        role: "Employee",
+        role: inviteRole,
         rawToken,
       });
     } catch (emailErr) {

@@ -278,6 +278,7 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
             status={employee.employment?.status}
             hasLogin={!!employee.userId}
             userRole={session.user.role}
+            email={employee.contactEmail}
           />
           {canEditCompensation && (
             <Link

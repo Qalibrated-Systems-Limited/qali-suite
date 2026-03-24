@@ -43,6 +43,76 @@ function ConfirmDialog({ open, onClose, title, description, confirmLabel, onConf
   );
 }
 
+const INVITE_ROLES = [
+  { value: "Employee", label: "Employee", desc: "View own payslips, leave, attendance" },
+  { value: "Manager", label: "Manager", desc: "Approve leave, view team data" },
+  { value: "HR", label: "HR", desc: "Full HR access — employees, payroll, leave" },
+  { value: "Accountant", label: "Accountant", desc: "Finance, reports, tax compliance" },
+  { value: "Store Manager", label: "Store Manager", desc: "Inventory, stock requests" },
+  { value: "Admin", label: "Admin", desc: "Full system access" },
+];
+
+function InviteDialog({ open, onClose, onConfirm, isPending, error, email }) {
+  const [selectedRole, setSelectedRole] = useState("Employee");
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-xl">
+        <h3 className="text-base font-semibold text-foreground">Send Portal Invite</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Invite <span className="font-medium text-foreground">{email}</span> to sign in to the portal.
+        </p>
+
+        <div className="mt-4">
+          <label className="mb-2 block text-sm font-medium text-foreground">Portal Role</label>
+          <div className="space-y-2">
+            {INVITE_ROLES.map((r) => (
+              <label
+                key={r.value}
+                className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                  selectedRole === r.value
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:bg-muted/50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="inviteRole"
+                  value={r.value}
+                  checked={selectedRole === r.value}
+                  onChange={(e) => setSelectedRole(e.target.value)}
+                  className="mt-0.5 accent-primary"
+                />
+                <div>
+                  <p className="text-sm font-medium text-foreground">{r.label}</p>
+                  <p className="text-xs text-muted-foreground">{r.desc}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {error && (
+          <div className="mt-3 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+            <AlertCircle className="h-3 w-3 shrink-0" />
+            {error}
+          </div>
+        )}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={() => onConfirm(selectedRole)} disabled={isPending}>
+            {isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+            Send Invite
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TerminateDialog({ open, onClose, onConfirm, isPending, error }) {
   const [reason, setReason] = useState("");
   if (!open) return null;
@@ -83,7 +153,7 @@ function TerminateDialog({ open, onClose, onConfirm, isPending, error }) {
   );
 }
 
-export function EmployeeActions({ profileId, status, hasLogin, userRole }) {
+export function EmployeeActions({ profileId, status, hasLogin, userRole, email }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [dialog, setDialog] = useState(null);
@@ -125,14 +195,18 @@ export function EmployeeActions({ profileId, status, hasLogin, userRole }) {
     });
   }
 
-  function handleInvite() {
+  function handleInvite(selectedRole) {
+    setDialogError(null);
     startTransition(async () => {
-      const result = await sendEmployeePortalInvite(profileId);
+      const result = await sendEmployeePortalInvite(profileId, selectedRole);
       if (result?.success === false) {
-        toast.error(result.error);
+        setDialogError(result.error);
       } else if (result?.warning) {
+        setDialog(null);
         toast.warning(result.message);
+        router.refresh();
       } else {
+        setDialog(null);
         toast.success(result.message || "Invite sent");
         router.refresh();
       }
@@ -143,8 +217,8 @@ export function EmployeeActions({ profileId, status, hasLogin, userRole }) {
     <>
       <div className="flex flex-wrap gap-2">
         {canInvite && (
-          <Button variant="outline" size="sm" onClick={handleInvite} disabled={isPending}>
-            {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+          <Button variant="outline" size="sm" onClick={() => { setDialogError(null); setDialog("invite"); }} disabled={isPending}>
+            <Mail className="h-4 w-4" />
             <span className="hidden sm:inline">Send Portal Invite</span>
           </Button>
         )}
@@ -178,6 +252,15 @@ export function EmployeeActions({ profileId, status, hasLogin, userRole }) {
           </Button>
         )}
       </div>
+
+      <InviteDialog
+        open={dialog === "invite"}
+        onClose={() => setDialog(null)}
+        onConfirm={handleInvite}
+        isPending={isPending}
+        error={dialogError}
+        email={email}
+      />
 
       <ConfirmDialog
         open={dialog === "confirm"}

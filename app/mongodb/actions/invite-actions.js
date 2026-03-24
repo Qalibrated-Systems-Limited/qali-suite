@@ -203,11 +203,25 @@ export async function acceptInviteWithPassword(rawToken, formData) {
         return { success: false, error: "An account with this email already exists. Please sign in instead." };
       }
 
-      // User exists but has no password — set their name and password
+      // User exists but has no password — set their name and password, preserve existing role
       existingUser.name = name;
       existingUser.password = password;
+      const hasExistingRole = existingUser.role && existingUser.role !== "User" && existingUser.role !== "Viewer";
+      if (!hasExistingRole) existingUser.role = invite.role;
+      if (!existingUser.companyId) existingUser.companyId = invite.companyId;
       existingUser.authProvider = "credentials";
       await existingUser.save();
+
+      // Link to employee profile if this is an employee invite
+      if (invite.partyId) {
+        await Promise.all([
+          Party.findByIdAndUpdate(invite.partyId, { userId: existingUser._id }),
+          EmployeeProfile.findOneAndUpdate(
+            { partyId: invite.partyId },
+            { userId: existingUser._id }
+          ),
+        ]);
+      }
 
       invite.status = "accepted";
       invite.acceptedAt = new Date();

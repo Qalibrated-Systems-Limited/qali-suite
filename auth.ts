@@ -96,11 +96,39 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
             await existingUser.save();
           }
 
-          // Mark any pending invites as accepted
-          await Invite.updateMany(
-            { email, status: "pending" },
-            { $set: { status: "accepted", acceptedAt: new Date() } },
-          );
+          // Check for pending invites — apply role and link employee profile
+          const pendingInvite = await Invite.findOne({
+            email,
+            status: "pending",
+            expiresAt: { $gt: new Date() },
+          });
+
+          if (pendingInvite) {
+            // Only set role if user doesn't already have a meaningful one
+            const hasExistingRole = existingUser.role && existingUser.role !== "User" && existingUser.role !== "Viewer";
+            if (!hasExistingRole) existingUser.role = pendingInvite.role;
+            if (!existingUser.companyId && pendingInvite.companyId) existingUser.companyId = pendingInvite.companyId;
+            await existingUser.save();
+
+            // Link employee profile if this is an employee invite
+            if (pendingInvite.partyId) {
+              const Party = (await import("@/app/models/parties")).default;
+              const EmployeeProfile = (await import("@/app/models/employeeProfile")).default;
+              await Promise.all([
+                Party.findByIdAndUpdate(pendingInvite.partyId, { userId: existingUser._id }),
+                EmployeeProfile.findOneAndUpdate(
+                  { partyId: pendingInvite.partyId },
+                  { userId: existingUser._id },
+                ),
+              ]);
+            }
+
+            // Mark all pending invites for this email as accepted
+            await Invite.updateMany(
+              { email, status: "pending" },
+              { $set: { status: "accepted", acceptedAt: new Date() } },
+            );
+          }
 
           return true;
         }
@@ -118,7 +146,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
         }
 
         // Create new user from Google profile + invite data
-        await User.create({
+        const newUser = await User.create({
           name: user.name,
           email,
           avatar: user.image,
@@ -127,6 +155,19 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           authProvider: "google",
           creator: invite.invitedBy,
         });
+
+        // Link to employee profile if this is an employee invite
+        if (invite.partyId) {
+          const Party = (await import("@/app/models/parties")).default;
+          const EmployeeProfile = (await import("@/app/models/employeeProfile")).default;
+          await Promise.all([
+            Party.findByIdAndUpdate(invite.partyId, { userId: newUser._id }),
+            EmployeeProfile.findOneAndUpdate(
+              { partyId: invite.partyId },
+              { userId: newUser._id },
+            ),
+          ]);
+        }
 
         // Mark invite as accepted
         invite.status = "accepted";
