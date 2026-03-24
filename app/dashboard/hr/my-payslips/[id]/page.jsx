@@ -1,12 +1,13 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft, Printer } from "lucide-react";
+import { ChevronLeft, Printer, Download } from "lucide-react";
 import { getMyEmployeeProfile } from "@/app/mongodb/queries/hr-queries";
 import dbConnect from "@/app/config/dbConnect";
 import PayrollEntry from "@/app/models/payrollEntry";
 import EmployeeProfile from "@/app/models/employeeProfile";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import PayslipActions from "./PayslipActions";
 
 export const metadata = { title: "Payslip | HR" };
 
@@ -73,13 +74,7 @@ export default async function PayslipDetailPage({ params }) {
           <span>/</span>
           <span className="text-foreground">{periodLabel}</span>
         </div>
-        <button
-          onClick={undefined}
-          className="hidden items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs hover:bg-accent sm:flex"
-          aria-label="Print payslip"
-        >
-          <Printer className="h-3.5 w-3.5" /> Print
-        </button>
+        <PayslipActions entryId={id} />
       </div>
 
       {/* Payslip card */}

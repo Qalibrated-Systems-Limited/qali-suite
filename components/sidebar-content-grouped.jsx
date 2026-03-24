@@ -515,10 +515,10 @@ const getNavigationGroups = (user) => [
       },
       {
         icon: Calendar,
-        label: "Leave",
+        label: "Leave Management",
         id: "hr-leave",
         href: "/dashboard/hr/leave",
-        hidden: user?.role === "SuperAdmin",
+        hidden: !["Admin", "HR", "Manager"].includes(user?.role),
       },
       {
         icon: Clock,
@@ -526,6 +526,13 @@ const getNavigationGroups = (user) => [
         id: "hr-attendance",
         href: "/dashboard/hr/attendance",
         hidden: !["Admin", "HR", "Manager"].includes(user?.role),
+      },
+      {
+        icon: Calendar,
+        label: "My Leave",
+        id: "hr-my-leave",
+        href: "/dashboard/hr/my-leave",
+        hidden: user?.role === "SuperAdmin",
       },
       {
         icon: Clock,

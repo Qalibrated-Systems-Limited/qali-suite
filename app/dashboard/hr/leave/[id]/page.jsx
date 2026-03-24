@@ -160,29 +160,71 @@ export default async function LeaveDetailPage({ params }) {
           )}
 
           {/* Balance snapshot */}
-          {leave.balanceSnapshot && (
-            <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-              <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Balance at Submission
-              </h2>
-              <div className="grid grid-cols-3 gap-4 text-center text-sm">
+          {leave.balanceSnapshot && (() => {
+            const entitled = leave.balanceSnapshot.entitledDays;
+            const usedBefore = leave.balanceSnapshot.usedDaysBefore ?? leave.balanceSnapshot.usedDays;
+            const balanceBefore = leave.balanceSnapshot.balanceBefore ?? leave.balanceSnapshot.balanceDays;
+            const totalDays = leave.dates?.totalDays || 0;
+            const usedAfter = usedBefore != null ? usedBefore + totalDays : null;
+            const balanceAfter = balanceBefore != null ? balanceBefore - totalDays : null;
+
+            return (
+              <div className="rounded-lg border border-border bg-card p-5 shadow-sm space-y-4">
+                {/* Before */}
                 <div>
-                  <p className="text-xs text-muted-foreground">Entitled</p>
-                  <p className="mt-1 text-lg font-bold text-foreground">{leave.balanceSnapshot.entitledDays ?? "—"}</p>
+                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Balance before this leave
+                  </h2>
+                  <div className="grid grid-cols-3 gap-4 text-center text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Entitled</p>
+                      <p className="mt-1 text-lg font-bold text-foreground">{entitled ?? "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Used</p>
+                      <p className="mt-1 text-lg font-bold text-foreground">{usedBefore ?? "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Remaining</p>
+                      <p className="mt-1 text-lg font-bold text-foreground">{balanceBefore ?? "—"}</p>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Used</p>
-                  <p className="mt-1 text-lg font-bold text-foreground">{leave.balanceSnapshot.usedDays ?? "—"}</p>
+
+                {/* Divider with leave days */}
+                <div className="flex items-center gap-3">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-xs font-medium text-primary bg-primary/10 px-2.5 py-0.5 rounded-full">
+                    −{totalDays} day{totalDays !== 1 ? "s" : ""}
+                  </span>
+                  <div className="h-px flex-1 bg-border" />
                 </div>
+
+                {/* After */}
                 <div>
-                  <p className="text-xs text-muted-foreground">Remaining</p>
-                  <p className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-400">
-                    {leave.balanceSnapshot.balanceDays ?? "—"}
-                  </p>
+                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Balance after this leave
+                  </h2>
+                  <div className="grid grid-cols-3 gap-4 text-center text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Entitled</p>
+                      <p className="mt-1 text-lg font-bold text-foreground">{entitled ?? "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Used</p>
+                      <p className="mt-1 text-lg font-bold text-foreground">{usedAfter ?? "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Remaining</p>
+                      <p className={`mt-1 text-lg font-bold ${balanceAfter != null && balanceAfter <= 3 ? "text-amber-600 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>
+                        {balanceAfter ?? "—"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
 
         {/* ── Right: Employee + Timeline ── */}

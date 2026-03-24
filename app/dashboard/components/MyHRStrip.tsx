@@ -97,7 +97,7 @@ async function HRStripContent() {
 
       {/* Leave Balance */}
       <Link
-        href="/dashboard/hr/leave"
+        href="/dashboard/hr/my-leave"
         className="flex items-start gap-3 rounded-lg border border-border bg-card p-4 shadow-sm hover:bg-muted/40 transition-colors"
       >
         <div className="rounded-lg bg-blue-500/10 p-2 shrink-0">
@@ -124,6 +124,7 @@ async function HRStripContent() {
               {!annualLeave && !sickLeave && leaveBalances[0] && (
                 <p className="text-sm font-semibold text-foreground">{leaveBalances[0].balanceDays} days</p>
               )}
+              <p className="text-xs text-primary mt-1">View all balances →</p>
             </div>
           )}
         </div>

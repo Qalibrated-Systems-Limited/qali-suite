@@ -125,12 +125,22 @@ async function PayslipList({ searchParams }) {
                     <StatusBadge status={p.paymentStatus} />
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Link
-                      href={`/dashboard/hr/my-payslips/${p._id}`}
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                    >
-                      <FileText className="h-3 w-3" /> View
-                    </Link>
+                    <div className="flex items-center justify-end gap-2">
+                      <Link
+                        href={`/dashboard/hr/my-payslips/${p._id}`}
+                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        <FileText className="h-3 w-3" /> View
+                      </Link>
+                      <a
+                        href={`/api/hr/my-payslip/${p._id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        <Download className="h-3 w-3" /> PDF
+                      </a>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -184,12 +194,22 @@ async function PayslipList({ searchParams }) {
               </div>
             </div>
             <div className="mt-3 border-t border-border pt-3">
-              <Link
-                href={`/dashboard/hr/my-payslips/${p._id}`}
-                className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-              >
-                <FileText className="h-3 w-3" /> View Payslip
-              </Link>
+              <div className="flex items-center gap-3">
+                <Link
+                  href={`/dashboard/hr/my-payslips/${p._id}`}
+                  className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                >
+                  <FileText className="h-3 w-3" /> View
+                </Link>
+                <a
+                  href={`/api/hr/my-payslip/${p._id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <Download className="h-3 w-3" /> Download PDF
+                </a>
+              </div>
             </div>
           </div>
         ))}

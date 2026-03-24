@@ -26,12 +26,22 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingBottom: 12,
     borderBottomWidth: 2,
-    borderBottomColor: "#1d4ed8",
+    borderBottomColor: "#CA8A04",
+  },
+  companyLogo: {
+    width: 36,
+    height: 36,
+    marginRight: 8,
+    borderRadius: 6,
+  },
+  companyHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "flex-start",
   },
   companyName: {
     fontSize: 16,
     fontFamily: "Helvetica-Bold",
-    color: "#1d4ed8",
+    color: "#111827",
   },
   companyMeta: {
     fontSize: 8,
@@ -41,7 +51,7 @@ const styles = StyleSheet.create({
   payslipTitle: {
     fontSize: 11,
     fontFamily: "Helvetica-Bold",
-    color: "#1d4ed8",
+    color: "#CA8A04",
     textAlign: "right",
   },
   periodLabel: {
@@ -98,9 +108,9 @@ const styles = StyleSheet.create({
   },
   tableHeaderRow: {
     flexDirection: "row",
-    backgroundColor: "#f3f4f6",
+    backgroundColor: "#fefce8",
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
+    borderBottomColor: "#fde047",
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
@@ -171,7 +181,7 @@ const styles = StyleSheet.create({
   },
   // Net pay box
   netPayBox: {
-    backgroundColor: "#1d4ed8",
+    backgroundColor: "#a16207",
     borderRadius: 6,
     padding: 12,
     flexDirection: "row",
@@ -221,9 +231,9 @@ const styles = StyleSheet.create({
   },
   // Payment details
   paymentBox: {
-    backgroundColor: "#eff6ff",
+    backgroundColor: "#fefce8",
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: "#fde047",
     borderRadius: 4,
     padding: 8,
     marginBottom: 10,
@@ -231,7 +241,7 @@ const styles = StyleSheet.create({
   paymentTitle: {
     fontSize: 7,
     fontFamily: "Helvetica-Bold",
-    color: "#1d4ed8",
+    color: "#CA8A04",
     textTransform: "uppercase",
     marginBottom: 5,
   },
@@ -508,6 +518,7 @@ export function PayslipDocument({ run, entry, company }) {
             Generated on {new Date().toLocaleDateString("en-KE", { day: "numeric", month: "long", year: "numeric" })}
           </Text>
           <Text style={styles.confidential}>CONFIDENTIAL — For the named employee only</Text>
+          <Text style={{ fontSize: 7, color: "#CA8A04" }}>Powered by QaliSuite</Text>
         </View>
       </Page>
     </Document>

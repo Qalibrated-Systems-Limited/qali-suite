@@ -398,6 +398,7 @@ export async function getLeaveRequests({
   status = "",
   leaveType = "",
   partyId = "",
+  year = "",
 } = {}) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
@@ -406,6 +407,13 @@ export async function getLeaveRequests({
   if (status) scope.status = status;
   if (leaveType) scope.leaveType = leaveType;
   if (partyId) scope["employee.partyId"] = partyId;
+  if (year) {
+    const y = parseInt(year);
+    scope["dates.from"] = {
+      $gte: new Date(y, 0, 1),
+      $lt: new Date(y + 1, 0, 1),
+    };
+  }
   if (search) {
     scope.$or = [
       { leaveNumber: new RegExp(search, "i") },
