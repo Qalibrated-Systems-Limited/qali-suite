@@ -303,7 +303,21 @@ export async function getEmployeeById(id) {
   ).lean();
 
   if (!profile) return { employee: null, error: "Employee not found" };
-  return { employee: serializeEmployee(profile) };
+
+  // Fetch contact info from Party (email, phone live there)
+  let contactEmail = null;
+  let contactPhone = null;
+  if (profile.partyId) {
+    const Party = (await import("@/app/models/parties")).default;
+    const party = await Party.findById(profile.partyId).select("email phone").lean();
+    contactEmail = party?.email || null;
+    contactPhone = party?.phone || null;
+  }
+
+  const serialized = serializeEmployee(profile);
+  serialized.contactEmail = contactEmail;
+  serialized.contactPhone = contactPhone;
+  return { employee: serialized };
 }
 
 export async function getEmployeeByPartyId(partyId) {

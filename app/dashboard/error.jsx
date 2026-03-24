@@ -39,21 +39,11 @@ export default function Error({ error, reset }) {
             </AlertDescription>
           </Alert>
 
-          {/* Error Details (Development Only) */}
-          {process.env.NODE_ENV === "development" && error && (
-            <div className="mb-6 p-4 bg-muted rounded-lg border border-border">
-              <p className="text-xs font-mono text-muted-foreground mb-2">
-                Error Details (Development Only):
-              </p>
-              <p className="text-sm text-red-600 dark:text-red-400 font-mono break-all">
-                {error.message}
-              </p>
-              {error.digest && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  Error ID: {error.digest}
-                </p>
-              )}
-            </div>
+          {/* Error reference — never expose raw error messages */}
+          {error?.digest && (
+            <p className="text-xs text-center text-muted-foreground mb-6 font-mono">
+              Reference: {error.digest}
+            </p>
           )}
 
           {/* Error Message */}

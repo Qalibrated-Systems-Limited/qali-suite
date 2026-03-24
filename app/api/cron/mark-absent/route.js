@@ -33,12 +33,33 @@ export async function GET(request) {
   try {
     await dbConnect();
 
-    const dateKey = toDateKey(new Date());
+    const now = new Date();
+    const dateKey = toDateKey(now);
 
     // Get all non-SuperAdmin companies
     const companies = await Company.find({}).select("_id name").lean();
 
     const results = [];
+
+    // ── AUTO CLOCK-OUT: close any open sessions from today ──
+    // If employee forgot to clock out, cap their hours at standardHours (default 8).
+    const openRecords = await Attendance.find({
+      date: dateKey,
+      checkIn: { $exists: true, $ne: null },
+      checkOut: null,
+    });
+
+    let autoClockedOut = 0;
+    for (const record of openRecords) {
+      const maxHours = record.standardHours || 8;
+      const autoCheckOut = new Date(record.checkIn.getTime() + maxHours * 3_600_000);
+      record.checkOut = autoCheckOut;
+      record.hoursWorked = maxHours;
+      record.overtime = 0;
+      record.notes = (record.notes ? record.notes + " | " : "") + "Auto clock-out: employee did not clock out";
+      await record.save();
+      autoClockedOut++;
+    }
 
     for (const company of companies) {
       const companyId = company._id;
@@ -83,9 +104,9 @@ export async function GET(request) {
     }
 
     const totalMarked = results.reduce((s, r) => s + r.marked, 0);
-    console.log(`[cron/mark-absent] ${new Date().toISOString()} — marked ${totalMarked} absent across ${companies.length} companies`);
+    console.log(`[cron/mark-absent] ${now.toISOString()} — marked ${totalMarked} absent, auto-clocked-out ${autoClockedOut} across ${companies.length} companies`);
 
-    return NextResponse.json({ ok: true, date: dateKey, results });
+    return NextResponse.json({ ok: true, date: dateKey, autoClockedOut, results });
   } catch (error) {
     console.error("[cron/mark-absent] error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });

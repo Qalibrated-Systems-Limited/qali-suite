@@ -82,6 +82,29 @@ export default function EmployeeEditForm({ employee, departments = [] }) {
         </div>
       )}
 
+      {/* Contact */}
+      <SectionCard title="Contact Information">
+        <div>
+          <Label>Email Address</Label>
+          {employee.userId ? (
+            <>
+              <input type="hidden" name="email" value={employee.contactEmail || ""} />
+              <p className="mt-1 text-sm text-foreground">{employee.contactEmail || "—"}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Email cannot be changed — employee has an active portal login.</p>
+            </>
+          ) : (
+            <>
+              <Input name="email" type="email" defaultValue={employee.contactEmail} placeholder="john.doe@company.com" error={e.email} />
+              <p className="mt-1 text-xs text-muted-foreground">Used for portal invite</p>
+            </>
+          )}
+        </div>
+        <div>
+          <Label>Phone</Label>
+          <Input name="phone" type="tel" defaultValue={employee.contactPhone} placeholder="+254 7xx xxx xxx" error={e.phone} />
+        </div>
+      </SectionCard>
+
       {/* Personal */}
       <SectionCard title="Personal Information">
         <div>

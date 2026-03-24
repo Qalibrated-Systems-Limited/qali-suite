@@ -274,19 +274,27 @@ export async function updateEmployee(_prevState, formData) {
 
     await profile.save();
 
-    // Sync Party + User when name/department/designation change
+    // Sync Party + User when name/department/designation/contact change
     const newFirstName = formData.get("firstName")?.toString().trim();
     const newLastName = formData.get("lastName")?.toString().trim();
     const syncDepartment = formData.get("department")?.toString() || undefined;
     const syncDesignation = formData.get("designation")?.toString() || undefined;
+    const newEmail = formData.get("email")?.toString().trim().toLowerCase() || undefined;
+    const newPhone = formData.get("phone")?.toString().trim() || undefined;
+
     if (newFirstName && newLastName) {
       const fullName = `${newFirstName} ${newLastName}`;
-      await Party.findByIdAndUpdate(profile.partyId, {
+      const partyUpdate = {
         name: fullName,
         department: syncDepartment,
         designation: syncDesignation,
         lastModifiedBy: { name: user.name, id: user.id },
-      });
+      };
+      // Only update email if employee has no portal login (userId)
+      if (!profile.userId && newEmail !== undefined) partyUpdate.email = newEmail;
+      if (newPhone !== undefined) partyUpdate.phone = newPhone;
+
+      await Party.findByIdAndUpdate(profile.partyId, partyUpdate);
       // Keep User display name in sync with the authoritative HR name
       if (profile.userId) {
         await User.findByIdAndUpdate(profile.userId, {
@@ -294,13 +302,17 @@ export async function updateEmployee(_prevState, formData) {
           ...(syncDepartment ? { department: syncDepartment } : {}),
         });
       }
-    } else if ((syncDepartment || syncDesignation) && profile.partyId) {
-      // Name didn't change but department/designation did — still sync those
-      await Party.findByIdAndUpdate(profile.partyId, {
+    } else if ((syncDepartment || syncDesignation || newEmail || newPhone) && profile.partyId) {
+      // Name didn't change but other fields did — still sync
+      const partyUpdate = {
         ...(syncDepartment ? { department: syncDepartment } : {}),
         ...(syncDesignation ? { designation: syncDesignation } : {}),
         lastModifiedBy: { name: user.name, id: user.id },
-      });
+      };
+      if (!profile.userId && newEmail !== undefined) partyUpdate.email = newEmail;
+      if (newPhone !== undefined) partyUpdate.phone = newPhone;
+
+      await Party.findByIdAndUpdate(profile.partyId, partyUpdate);
       if (profile.userId && syncDepartment) {
         await User.findByIdAndUpdate(profile.userId, { department: syncDepartment });
       }
