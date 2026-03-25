@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * QaliSuite brand components — single source of truth.
+ * Matches the SVGs in /public/brand/
  *
  * Usage:
  *   <QaliSuiteIcon />                         — icon only (collapsed sidebar, favicon)
@@ -12,7 +13,7 @@ import { cn } from "@/lib/utils";
  *   <QaliSuiteLogo />                         — full SVG logo with embedded subtitle (legacy/print)
  */
 
-// ─── Shared icon SVG (gradient squircle + colleague's Q lettermark) ───
+// ─── Shared icon SVG (matches /public/brand/qalisuite-icon.svg) ───
 function IconSvg({ className, id = "qs" }) {
   return (
     <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
@@ -20,17 +21,15 @@ function IconSvg({ className, id = "qs" }) {
         <linearGradient id={`${id}-grad`} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="#FDE047" />
           <stop offset="50%" stopColor="#EAB308" />
-          <stop offset="100%" stopColor="#CA8A04" />
+          <stop offset="100%" stopColor="#A16207" />
         </linearGradient>
+        <filter id={`${id}-shadow`}>
+          <feDropShadow dx="0" dy="1" stdDeviation="1.5" floodOpacity="0.15" />
+        </filter>
       </defs>
-      <rect width="48" height="48" rx="12" fill={`url(#${id}-grad)`} />
-      <g transform="translate(8, 7.5) scale(0.077)">
-        <path
-          fill="white"
-          fillOpacity="0.95"
-          d="M207.75 207.22V349.65c-.19 0-.37.01-.56.01-78.54 0-142.45-63.9-142.45-142.44s63.91-142.44 142.45-142.44 142.44 63.9 142.44 142.44c0 25.52-6.75 49.49-18.56 70.22l46.98 46.99c7.87-11.44 14.57-23.65 20.03-36.55 10.82-25.56 16.3-52.7 16.3-80.66s-5.48-55.09-16.3-80.66C390.45 108.67 375.52 86.51 356.5 67.5 337.48 48.48 315.33 33.54 290.65 23.11 265.09 12.29 237.95 6.81 210 6.81s-55.09 5.48-80.66 16.3C103.66 33.54 81.51 48.48 62.49 67.5 43.47 86.51 28.54 108.67 18.1 133.34 7.29 158.91 1.81 186.04 1.81 214s5.48 55.09 18.1 80.66c10.44 24.67 25.37 46.83 44.39 65.85 19.02 19.01 41.17 33.95 65.85 44.39 25.56 10.81 52.7 16.3 80.66 16.3 22.43 0 44.32-3.54 65.31-10.52V370.31l50.88 50.88h91.56L207.75 207.22"
-        />
-      </g>
+      <rect x="3" y="3" width="42" height="42" rx="14" ry="14" fill={`url(#${id}-grad)`} filter={`url(#${id}-shadow)`} />
+      <circle cx="24" cy="21" r="10" fill="none" stroke="white" strokeWidth="4" opacity="0.95" />
+      <line x1="30" y1="27" x2="37" y2="34" stroke="white" strokeWidth="4" strokeLinecap="round" opacity="0.95" />
     </svg>
   );
 }
@@ -84,6 +83,7 @@ export function QaliSuiteMark({
 
 /**
  * Full SVG logo — icon + text baked into one SVG.
+ * Matches /public/brand/qalisuite-logo-light.svg (dark mode uses currentColor)
  * Best for the expanded sidebar where we need a single scalable unit.
  * Includes "ERP SYSTEM" subtitle.
  */
@@ -95,17 +95,17 @@ export function QaliSuiteLogo({ className = "h-11" }) {
           <linearGradient id="qs-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#FDE047" />
             <stop offset="50%" stopColor="#EAB308" />
-            <stop offset="100%" stopColor="#CA8A04" />
+            <stop offset="100%" stopColor="#A16207" />
           </linearGradient>
+          <filter id="qs-logo-shadow">
+            <feDropShadow dx="0" dy="1" stdDeviation="1.5" floodOpacity="0.15" />
+          </filter>
         </defs>
-        <rect width="48" height="48" rx="12" fill="url(#qs-logo-grad)" />
-        <g transform="translate(8, 7.5) scale(0.077)">
-          <path
-            fill="white"
-            fillOpacity="0.95"
-            d="M207.75 207.22V349.65c-.19 0-.37.01-.56.01-78.54 0-142.45-63.9-142.45-142.44s63.91-142.44 142.45-142.44 142.44 63.9 142.44 142.44c0 25.52-6.75 49.49-18.56 70.22l46.98 46.99c7.87-11.44 14.57-23.65 20.03-36.55 10.82-25.56 16.3-52.7 16.3-80.66s-5.48-55.09-16.3-80.66C390.45 108.67 375.52 86.51 356.5 67.5 337.48 48.48 315.33 33.54 290.65 23.11 265.09 12.29 237.95 6.81 210 6.81s-55.09 5.48-80.66 16.3C103.66 33.54 81.51 48.48 62.49 67.5 43.47 86.51 28.54 108.67 18.1 133.34 7.29 158.91 1.81 186.04 1.81 214s5.48 55.09 18.1 80.66c10.44 24.67 25.37 46.83 44.39 65.85 19.02 19.01 41.17 33.95 65.85 44.39 25.56 10.81 52.7 16.3 80.66 16.3 22.43 0 44.32-3.54 65.31-10.52V370.31l50.88 50.88h91.56L207.75 207.22"
-          />
-        </g>
+        {/* Icon */}
+        <rect x="2" y="2" width="44" height="44" rx="14" ry="14" fill="url(#qs-logo-grad)" filter="url(#qs-logo-shadow)" />
+        <circle cx="24" cy="22" r="10" fill="none" stroke="white" strokeWidth="4" opacity="0.95" />
+        <line x1="30" y1="28" x2="37" y2="35" stroke="white" strokeWidth="4" strokeLinecap="round" opacity="0.95" />
+        {/* Text */}
         <text x="54" y="28" fontFamily="system-ui, -apple-system, 'Segoe UI', sans-serif" fontSize="22" fontWeight="700" fill="currentColor" letterSpacing="-0.5">
           <tspan>Qali</tspan>
           <tspan fill="#EAB308">Suite</tspan>
