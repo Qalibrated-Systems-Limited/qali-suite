@@ -54,11 +54,20 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
 
           if (passwordsMatch) {
             let companyCode: string | undefined;
+            let companyPlan: string = "free";
+            let subscriptionStatus: string = "trial";
+            let trialEndsAt: string | null = null;
+            let maxUsers: number = 5;
             if (user.companyId) {
               const company = await Company.findById(user.companyId)
-                .select("code")
+                .select("code subscription")
                 .lean();
               companyCode = (company as any)?.code;
+              const sub = (company as any)?.subscription || {};
+              companyPlan = sub.plan || "free";
+              subscriptionStatus = sub.status || "trial";
+              trialEndsAt = sub.trialEndsAt?.toISOString() || null;
+              maxUsers = sub.maxUsers || 5;
             }
             return {
               id: user._id.toString(),
@@ -68,6 +77,10 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
               image: user.avatar,
               companyId: user.companyId?.toString(),
               companyCode,
+              companyPlan,
+              subscriptionStatus,
+              trialEndsAt,
+              maxUsers,
             } as UserType;
           }
         }
@@ -197,6 +210,11 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
         token.avatar = user.image;
         token.companyId = user.companyId;
         token.companyCode = user.companyCode;
+        token.companyPlan = user.companyPlan;
+        token.subscriptionStatus = user.subscriptionStatus;
+        token.trialEndsAt = user.trialEndsAt;
+        token.maxUsers = user.maxUsers;
+        token.planRefreshedAt = Date.now();
         token.user = user;
       }
 
@@ -208,17 +226,31 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
         });
         if (dbUser) {
           let companyCode: string | undefined;
+          let companyPlan: string = "free";
+          let subscriptionStatus: string = "trial";
+          let trialEndsAt: string | null = null;
+          let maxUsers: number = 5;
           if (dbUser.companyId) {
             const company = await Company.findById(dbUser.companyId)
-              .select("code")
+              .select("code subscription")
               .lean();
             companyCode = (company as any)?.code;
+            const sub = (company as any)?.subscription || {};
+            companyPlan = sub.plan || "free";
+            subscriptionStatus = sub.status || "trial";
+            trialEndsAt = sub.trialEndsAt?.toISOString() || null;
+            maxUsers = sub.maxUsers || 5;
           }
           token.role = dbUser.role;
           token.id = dbUser._id.toString();
           token.avatar = dbUser.avatar || user.image;
           token.companyId = dbUser.companyId?.toString();
           token.companyCode = companyCode;
+          token.companyPlan = companyPlan;
+          token.subscriptionStatus = subscriptionStatus;
+          token.trialEndsAt = trialEndsAt;
+          token.maxUsers = maxUsers;
+          token.planRefreshedAt = Date.now();
           token.user = {
             id: dbUser._id.toString(),
             name: dbUser.name,
@@ -227,9 +259,16 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
             image: dbUser.avatar || user.image,
             companyId: dbUser.companyId?.toString(),
             companyCode,
+            companyPlan,
           };
         }
       }
+
+      // Note: Periodic DB refresh removed — edge runtime can't reliably
+      // connect to MongoDB. Plan data is set at login. When SuperAdmin
+      // changes a company's plan, the user must re-login to pick it up.
+      // For instant effect, use the server-side checkPlanAccess() in
+      // plan-gate.js which reads the session (set at login time).
 
       return token;
     },
@@ -244,6 +283,10 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           avatar: token.avatar,
           companyId: token.companyId,
           companyCode: token.companyCode,
+          companyPlan: token.companyPlan || "free",
+          subscriptionStatus: token.subscriptionStatus || "active",
+          trialEndsAt: token.trialEndsAt || null,
+          maxUsers: token.maxUsers || 5,
         };
       }
       return session;

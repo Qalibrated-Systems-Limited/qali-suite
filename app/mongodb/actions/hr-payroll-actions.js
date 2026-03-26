@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope, getCompanyIdForCreate } from "@/lib/utils/tenant-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 import PayrollRun from "@/app/models/payrollRun";
 import PayrollEntry from "@/app/models/payrollEntry";
 import PayrollConfig from "@/app/models/payrollConfig";
@@ -116,17 +117,19 @@ function calculateAHL(grossPay, config) {
  * Count working days between two dates (inclusive), excluding weekends and public holidays.
  * Uses PublicHoliday.getDateSet() for the holiday lookup.
  */
-async function countWorkingDays(companyId, fromDate, toDate) {
-  const holidaySet = await PublicHoliday.getDateSet(companyId, fromDate, toDate);
+async function countWorkingDays(companyId, fromDate, toDate, holidaySet = null) {
+  if (!holidaySet) {
+    holidaySet = await PublicHoliday.getDateSet(companyId, fromDate, toDate);
+  }
   let count = 0;
   const cur = new Date(fromDate);
-  cur.setHours(0, 0, 0, 0);
+  cur.setUTCHours(0, 0, 0, 0);
   const end = new Date(toDate);
-  end.setHours(23, 59, 59, 999);
+  end.setUTCHours(23, 59, 59, 999);
   while (cur <= end) {
-    const day = cur.getDay();
+    const day = cur.getUTCDay();
     if (day !== 0 && day !== 6 && !holidaySet.has(cur.toISOString().slice(0, 10))) count++;
-    cur.setDate(cur.getDate() + 1);
+    cur.setUTCDate(cur.getUTCDate() + 1);
   }
   return count;
 }
@@ -162,6 +165,7 @@ export async function createPayrollRun(_prevState, formData) {
   let createdId = null;
 
   try {
+    await requirePlanAccess("hr");
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     if (!hasRole(user, PAYROLL_ROLES.CREATE)) {
@@ -291,8 +295,11 @@ export async function generatePayrollEntries(payrollRunId) {
     const periodFrom = new Date(run.period.year, run.period.month - 1, 1);
     const periodTo = new Date(run.period.year, run.period.month, 0, 23, 59, 59);
 
+    // Pre-fetch holiday set once for the entire period (avoids re-fetching per employee/leave)
+    const holidaySet = await PublicHoliday.getDateSet(run.companyId, periodFrom, periodTo);
+
     // Total working days in the period (shared for all pro-rata calculations)
-    const totalWorkingDays = await countWorkingDays(run.companyId, periodFrom, periodTo);
+    const totalWorkingDays = await countWorkingDays(run.companyId, periodFrom, periodTo, holidaySet);
 
     // Fetch all approved unpaid leaves overlapping this period (batch — one query for all employees)
     const partyIds = employees.map((e) => e.partyId);
@@ -315,7 +322,7 @@ export async function generatePayrollEntries(payrollRunId) {
       // Clip leave dates to the period
       const leaveFrom = new Date(Math.max(new Date(leave.dates.from), periodFrom));
       const leaveTo = new Date(Math.min(new Date(leave.dates.to), periodTo));
-      const lwopDays = await countWorkingDays(run.companyId, leaveFrom, leaveTo);
+      const lwopDays = await countWorkingDays(run.companyId, leaveFrom, leaveTo, holidaySet);
       unpaidLeaveDaysMap[pid] = (unpaidLeaveDaysMap[pid] || 0) + lwopDays;
     }
 
@@ -328,6 +335,7 @@ export async function generatePayrollEntries(payrollRunId) {
     run.preparedAt = new Date();
     await run.save({ session: mongoSession });
 
+    // TODO: Convert to bulkWrite() for better performance with large employee counts
     // Upsert one PayrollEntry per employee
     for (const emp of employees) {
       const comp = emp.compensation || {};
@@ -344,7 +352,7 @@ export async function generatePayrollEntries(payrollRunId) {
       const effectiveTo = (termDate && termDate < periodTo) ? termDate : periodTo;
 
       if (effectiveFrom > periodFrom || effectiveTo < periodTo) {
-        daysWorked = await countWorkingDays(run.companyId, effectiveFrom, effectiveTo);
+        daysWorked = await countWorkingDays(run.companyId, effectiveFrom, effectiveTo, holidaySet);
         isProRata = true;
       }
 
@@ -797,8 +805,8 @@ export async function updatePayrollEntry(_prevState, formData) {
       withTenantScope({ _id: payrollRunId }, companyId, isSuperAdmin)
     );
     if (!run) return { success: false, error: "Payroll run not found" };
-    if (["paid", "voided"].includes(run.status)) {
-      return { success: false, error: "Cannot edit entries on a paid or voided payroll run" };
+    if (["paid", "voided", "approved"].includes(run.status)) {
+      return { success: false, error: "Cannot edit entries in an approved, paid, or voided payroll run" };
     }
 
     const entry = await PayrollEntry.findOne({ _id: entryId, payrollRunId, companyId: run.companyId });

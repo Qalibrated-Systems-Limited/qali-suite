@@ -5,9 +5,11 @@ import { revalidatePath } from "next/cache";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import AttendanceConfig from "@/app/models/attendanceConfig";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 export async function saveAttendanceConfig(_prevState, formData) {
   try {
+    await requirePlanAccess("hr");
     const session = await auth();
     if (!session?.user) return { success: false, error: "Unauthorized" };
     if (!["Admin", "HR"].includes(session.user.role)) return { success: false, error: "Forbidden" };

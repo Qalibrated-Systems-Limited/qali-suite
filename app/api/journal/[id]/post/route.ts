@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { safeErrorMessage } from "@/lib/safe-error";
 import dbConnect from "@/app/config/dbConnect";
 import JournalEntry from "@/app/models/JournalEntry";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { checkPlanAccess } from "@/lib/plan-gate";
 
 export async function POST(
   request: NextRequest,
@@ -13,6 +15,11 @@ export async function POST(
 
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const gate = await checkPlanAccess("finance");
+    if (!gate.allowed) {
+      return NextResponse.json({ error: "This feature requires a plan upgrade" }, { status: 403 });
     }
 
     const { id } = await params;
@@ -55,7 +62,7 @@ export async function POST(
   } catch (error) {
     console.error("Error posting journal entry:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to post entry" },
+      { error: safeErrorMessage(error, "Failed to post entry") },
       { status: 500 }
     );
   }

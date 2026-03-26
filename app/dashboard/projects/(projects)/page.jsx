@@ -35,6 +35,14 @@ export default async function ProjectsPage({ searchParams }) {
     redirect("/login");
   }
 
+  // Plan gate
+  const { checkPlanAccess } = await import("@/lib/plan-gate");
+  const { UpgradePrompt } = await import("@/components/upgrade-prompt");
+  const gate = await checkPlanAccess("projects");
+  if (!gate.allowed) {
+    return <UpgradePrompt currentPlan={gate.currentPlan} requiredPlan={gate.requiredPlan} feature="Project Management" />;
+  }
+
   const { user } = session;
 
   if (!["Admin", "Accountant", "Manager"].includes(user.role)) {

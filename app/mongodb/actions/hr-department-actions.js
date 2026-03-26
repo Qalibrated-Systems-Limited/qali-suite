@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope, getCompanyIdForCreate } from "@/lib/utils/tenant-utils";
 import Department from "@/app/models/department";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 // ============================================
 // ROLE AUTHORIZATION
@@ -74,6 +75,8 @@ export async function createDepartment(prevState, formData) {
   let mongoSession = null;
 
   try {
+    await requirePlanAccess("hr");
+
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     if (!hasRole(user, DEPT_ROLES.CREATE)) {

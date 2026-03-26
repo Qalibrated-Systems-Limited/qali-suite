@@ -6,6 +6,7 @@ import { BankStatement, BankFeedLine } from "../../models/bankFeed";
 import BankFeedService from "../services/bankFeedService";
 import dbConnect from "../../config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 // ============================================
 // BANK FEED SERVER ACTIONS
@@ -17,6 +18,7 @@ import { getTenantContext } from "@/lib/utils/tenant-utils";
  */
 export async function importBankStatement(formData) {
   try {
+    await requirePlanAccess("finance");
     await dbConnect();
 
     const session = await auth();

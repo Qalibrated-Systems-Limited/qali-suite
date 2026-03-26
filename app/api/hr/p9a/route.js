@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { safeErrorMessage } from "@/lib/safe-error";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import PayrollEntry from "@/app/models/payrollEntry";
 import EmployeeProfile from "@/app/models/employeeProfile";
+import { checkPlanAccess } from "@/lib/plan-gate";
 
 const ALLOWED = ["Admin", "HR", "Accountant"];
 
@@ -23,6 +25,11 @@ export async function GET(req) {
     const session = await auth();
     if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (!ALLOWED.includes(session.user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const gate = await checkPlanAccess("hr");
+    if (!gate.allowed) {
+      return NextResponse.json({ error: "This feature requires a plan upgrade" }, { status: 403 });
+    }
 
     const { searchParams } = new URL(req.url);
     const year = parseInt(searchParams.get("year") || new Date().getFullYear());
@@ -140,6 +147,6 @@ export async function GET(req) {
       },
     });
   } catch (error) {
-    return NextResponse.json({ error: error.message || "P9A generation failed" }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(error, "P9A generation failed") }, { status: 500 });
   }
 }

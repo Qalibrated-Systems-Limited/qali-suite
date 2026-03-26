@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeErrorMessage } from "@/lib/safe-error";
 import dbConnect from "@/app/config/dbConnect";
 import Attendance from "@/app/models/attendance";
 import EmployeeProfile from "@/app/models/employeeProfile";
@@ -109,6 +110,6 @@ export async function GET(request) {
     return NextResponse.json({ ok: true, date: dateKey, autoClockedOut, results });
   } catch (error) {
     console.error("[cron/mark-absent] error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
   }
 }

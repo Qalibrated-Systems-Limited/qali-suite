@@ -24,6 +24,7 @@ import {
   getCompanyIdForCreate,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 const settleAdvanceSchema = z.object({
   items: z
     .array(expenseItemSchema)
@@ -627,6 +628,7 @@ export async function approveEmployeeClaim(claimId, prevState, formData) {
   let session;
 
   try {
+    await requirePlanAccess("all-claims");
     await dbConnect();
 
     // Auth check with tenant context

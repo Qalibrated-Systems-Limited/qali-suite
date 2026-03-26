@@ -13,6 +13,7 @@ import {
   getCompanyIdForCreate,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 // ============================================
 // HELPERS
@@ -107,6 +108,10 @@ const CreateBudgetSchema = z.object({
 export async function createProject(prevState, formData) {
   let session;
   let redirectUrl;
+
+  try { await requirePlanAccess("projects"); } catch (e) {
+    return { success: false, error: e.message };
+  }
 
   // Extract form values early so all error paths can return them
   const rawValues = {

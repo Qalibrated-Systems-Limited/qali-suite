@@ -7,6 +7,7 @@ import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import Attendance from "@/app/models/attendance";
 import AttendanceConfig from "@/app/models/attendanceConfig";
 import EmployeeProfile from "@/app/models/employeeProfile";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 // ============================================
 // HR ATTENDANCE ACTIONS
@@ -26,8 +27,8 @@ function toDateKey(d) {
 // Determine if checkIn is "late" relative to shiftStart (HH:MM) + 15 min grace
 function isLate(checkIn, shiftStart = "08:00") {
   const [h, m] = shiftStart.split(":").map(Number);
-  // Use UTC offset-naive comparison (assume server local = company timezone for now)
-  const checkInMins = checkIn.getHours() * 60 + checkIn.getMinutes();
+  // Use UTC methods — shift config times are stored as UTC-based values
+  const checkInMins = checkIn.getUTCHours() * 60 + checkIn.getUTCMinutes();
   const shiftMins = h * 60 + m + 15; // 15-minute grace period
   return checkInMins > shiftMins;
 }
@@ -50,11 +51,21 @@ function employeeSnapshot(profile) {
 // enabled, those rules are validated here before writing the record.
 export async function clockIn({ profileId, method = "web", ipAddress, location } = {}) {
   try {
+    await requirePlanAccess("hr");
+
     const session = await auth();
     if (!session?.user) return { success: false, error: "Unauthorized" };
 
     await dbConnect();
     const { companyId } = await getTenantContext();
+
+    // Ownership check — employees can only clock in for themselves
+    if (!["Admin", "HR", "Manager", "SuperAdmin"].includes(session.user.role)) {
+      const ownerProfile = await EmployeeProfile.findById(profileId).select("userId").lean();
+      if (!ownerProfile || ownerProfile.userId?.toString() !== session.user.id) {
+        return { success: false, error: "You can only clock in for yourself" };
+      }
+    }
 
     // ── Load config & enforce rules ───────────────────────────────────────
     const config = await AttendanceConfig.getActive(companyId);
@@ -88,7 +99,7 @@ export async function clockIn({ profileId, method = "web", ipAddress, location }
 
     // ── Determine late status using config grace period ───────────────────
     const [h, m] = shiftStart.split(":").map(Number);
-    const checkInMins = now.getHours() * 60 + now.getMinutes();
+    const checkInMins = now.getUTCHours() * 60 + now.getUTCMinutes();
     const graceEndMins = h * 60 + m + lateGraceMins;
     const late = checkInMins > graceEndMins;
 
@@ -183,6 +194,14 @@ export async function clockOut({ profileId, method = "web", ipAddress } = {}) {
 
     await dbConnect();
     const { companyId } = await getTenantContext();
+
+    // Ownership check — employees can only clock out for themselves
+    if (!["Admin", "HR", "Manager", "SuperAdmin"].includes(session.user.role)) {
+      const profile = await EmployeeProfile.findById(profileId).select("userId").lean();
+      if (!profile || profile.userId?.toString() !== session.user.id) {
+        return { success: false, error: "You can only clock out for yourself" };
+      }
+    }
 
     const now = new Date();
     const dateKey = toDateKey(now);

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope, getCompanyIdForCreate } from "@/lib/utils/tenant-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 import LeaveRequest from "@/app/models/leaveRequest";
 import EmployeeProfile from "@/app/models/employeeProfile";
 import PublicHoliday from "@/app/models/publicHoliday";
@@ -37,17 +38,17 @@ async function calcWorkingDays(companyId, fromDate, toDate, halfDay = false) {
 
   let count = 0;
   const current = new Date(fromDate);
-  current.setHours(0, 0, 0, 0);
+  current.setUTCHours(0, 0, 0, 0);
   const end = new Date(toDate);
-  end.setHours(23, 59, 59, 999);
+  end.setUTCHours(23, 59, 59, 999);
 
   while (current <= end) {
-    const day = current.getDay();
+    const day = current.getUTCDay();
     if (day !== 0 && day !== 6) {
       const key = current.toISOString().slice(0, 10);
       if (!holidaySet.has(key)) count++;
     }
-    current.setDate(current.getDate() + 1);
+    current.setUTCDate(current.getUTCDate() + 1);
   }
   return count;
 }
@@ -70,6 +71,15 @@ export async function createLeaveRequest(_prevState, formData) {
 
     // Parse form data
     const profileId = formData.get("profileId")?.toString();
+
+    // Ownership check — employees can only create leave for themselves
+    if (!["Admin", "HR", "Manager", "SuperAdmin"].includes(user.role)) {
+      await dbConnect();
+      const ownerProfile = await EmployeeProfile.findById(profileId).select("userId").lean();
+      if (!ownerProfile || ownerProfile.userId?.toString() !== user.id) {
+        return { success: false, error: "You can only create leave requests for yourself" };
+      }
+    }
     const partyId = formData.get("partyId")?.toString();
     const leaveType = formData.get("leaveType")?.toString();
     const fromDate = formData.get("fromDate") ? new Date(formData.get("fromDate")) : null;
@@ -208,10 +218,17 @@ export async function submitLeaveRequest(leaveId) {
     );
     if (!leave) return { success: false, error: "Leave request not found" };
 
+    // Ownership check — employees can only submit their own leave requests
+    if (!["Admin", "HR", "Manager", "SuperAdmin"].includes(user.role)) {
+      if (leave.employee.userId?.toString() !== user.id) {
+        return { success: false, error: "You can only submit your own leave requests" };
+      }
+    }
+
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    await leave.submit({ name: user.name, id: user.id });
+    await leave.submit({ name: user.name, id: user.id }, { session: mongoSession });
 
     // Mark days as pending in profile balance
     if (leave.leaveType !== "unpaid") {
@@ -246,6 +263,7 @@ export async function approveLeaveRequest(leaveId) {
   let mongoSession = null;
 
   try {
+    await requirePlanAccess("hr");
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     if (!hasRole(user, LEAVE_ROLES.APPROVE)) {
@@ -262,7 +280,7 @@ export async function approveLeaveRequest(leaveId) {
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    await leave.approve({ name: user.name, id: user.id });
+    await leave.approve({ name: user.name, id: user.id }, { session: mongoSession });
 
     // Debit leave balance: usedDays += N, balanceDays -= N, pendingDays -= N
     if (leave.leaveType !== "unpaid") {
@@ -307,6 +325,7 @@ export async function rejectLeaveRequest(_prevState, formData) {
   let mongoSession = null;
 
   try {
+    await requirePlanAccess("hr");
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     if (!hasRole(user, LEAVE_ROLES.APPROVE)) {
@@ -329,7 +348,7 @@ export async function rejectLeaveRequest(_prevState, formData) {
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    await leave.reject({ name: user.name, id: user.id }, reason);
+    await leave.reject({ name: user.name, id: user.id }, reason, { session: mongoSession });
 
     // Release pending days in profile balance
     if (leave.leaveType !== "unpaid") {
@@ -381,7 +400,7 @@ export async function recallLeaveRequest(leaveId) {
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
-    await leave.recall();
+    await leave.recall({ session: mongoSession });
 
     // Release pending days
     if (leave.leaveType !== "unpaid") {

@@ -234,40 +234,40 @@ leaveRequestSchema.pre("validate", function () {
 // INSTANCE METHODS (mirror EmployeeClaim pattern)
 // ============================================
 
-leaveRequestSchema.methods.submit = async function (submittedBy) {
+leaveRequestSchema.methods.submit = async function (submittedBy, options = {}) {
   if (this.status !== "draft") throw new Error("Only draft requests can be submitted");
   this.status = "submitted";
   this.submittedAt = new Date();
   this.submittedBy = submittedBy;
-  await this.save();
+  await this.save(options);
   return this;
 };
 
-leaveRequestSchema.methods.approve = async function (approvedBy) {
+leaveRequestSchema.methods.approve = async function (approvedBy, options = {}) {
   if (this.status !== "submitted") throw new Error("Only submitted requests can be approved");
   this.status = "approved";
   this.approvedAt = new Date();
   this.approvedBy = approvedBy;
-  await this.save();
+  await this.save(options);
   return this;
 };
 
-leaveRequestSchema.methods.reject = async function (rejectedBy, reason) {
+leaveRequestSchema.methods.reject = async function (rejectedBy, reason, options = {}) {
   if (this.status !== "submitted") throw new Error("Only submitted requests can be rejected");
   if (!reason?.trim()) throw new Error("Rejection reason is required");
   this.status = "rejected";
   this.rejectedAt = new Date();
   this.rejectedBy = rejectedBy;
   this.rejectionReason = reason;
-  await this.save();
+  await this.save(options);
   return this;
 };
 
-leaveRequestSchema.methods.recall = async function () {
+leaveRequestSchema.methods.recall = async function (options = {}) {
   if (this.status !== "submitted") throw new Error("Only submitted requests can be recalled");
   this.status = "recalled";
   this.recalledAt = new Date();
-  await this.save();
+  await this.save(options);
   return this;
 };
 

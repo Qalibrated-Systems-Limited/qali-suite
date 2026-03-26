@@ -9,6 +9,7 @@ import Account from "@/app/models/account";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { generateUniqueEntryNumber } from "@/lib/utils/server-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 // ============================================
 // VALIDATION SCHEMA
@@ -74,6 +75,8 @@ export async function createManualJournalEntry(prevState, formData) {
   }
 
   try {
+    await requirePlanAccess("finance");
+
     // Parse lines from FormData
     const linesData = [];
     let i = 0;

@@ -12,6 +12,7 @@ import dbConnect from "../config/dbConnect";
 import { userRoles } from "@/lib/utils";
 import mongoose from "mongoose";
 import { sendInviteEmail } from "@/lib/email";
+import { checkUserLimit } from "@/lib/check-user-limit";
 
 // ============================================
 // AUTHORIZATION HELPERS
@@ -133,6 +134,12 @@ export async function createUser(prevState, formData) {
         values: formValues,
       };
     }
+  }
+
+  // Check user limit before creating
+  const limitCheck = await checkUserLimit(assignedCompanyId);
+  if (!limitCheck.allowed) {
+    return { message: limitCheck.error, errors: { _form: [limitCheck.error] }, values: formValues };
   }
 
   let newUserId = null;

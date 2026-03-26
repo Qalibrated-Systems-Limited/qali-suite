@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import cloudinary from "@/lib/cloudinary";
 import { auth } from "@/auth";
+import { safeErrorMessage } from "@/lib/safe-error";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_TYPES = [
@@ -69,7 +70,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("Upload error:", error);
     return NextResponse.json(
-      { error: error.message || "Upload failed" },
+      { error: safeErrorMessage(error, "Upload failed") },
       { status: 500 }
     );
   }

@@ -41,6 +41,7 @@ import {
   getTenantContext,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 // ============================================
 // CONSTANTS
@@ -160,6 +161,8 @@ export async function createPurchaseOrder(prevState, formData) {
   let mongoSession = null;
 
   try {
+    await requirePlanAccess("purchases");
+
     // 1. Auth check
     const session = await auth();
     if (!session?.user) {

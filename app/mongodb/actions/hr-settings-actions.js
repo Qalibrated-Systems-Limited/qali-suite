@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope, getCompanyIdForCreate } from "@/lib/utils/tenant-utils";
 import PayrollConfig from "@/app/models/payrollConfig";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 // ============================================
 // ROLE GUARD
@@ -21,6 +22,7 @@ function guard(user) {
 // ============================================
 export async function createPayrollConfig(_prevState, formData) {
   try {
+    await requirePlanAccess("hr");
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const err = guard(user);
     if (err) return { success: false, error: err };
@@ -102,6 +104,7 @@ export async function createPayrollConfig(_prevState, formData) {
 // ============================================
 export async function savePayrollGlMapping(_prevState, formData) {
   try {
+    await requirePlanAccess("hr");
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const err = guard(user);
     if (err) return { success: false, error: err };
@@ -148,6 +151,7 @@ export async function savePayrollGlMapping(_prevState, formData) {
 // ============================================
 export async function activatePayrollConfig(configId) {
   try {
+    await requirePlanAccess("hr");
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const err = guard(user);
     if (err) return { success: false, error: err };

@@ -13,6 +13,7 @@ import {
   getFiscalPeriodStats,
 } from "../queries/fiscalPeriodQueries";
 import { auth } from "@/auth";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 // ============================================
 // FISCAL PERIOD SERVER ACTIONS
@@ -140,6 +141,7 @@ export async function fetchFiscalPeriodStats() {
  */
 export async function createFiscalPeriod(data) {
   try {
+    await requirePlanAccess("finance");
     const session = await auth();
     if (!session?.user) {
       return { success: false, error: "Not authenticated" };

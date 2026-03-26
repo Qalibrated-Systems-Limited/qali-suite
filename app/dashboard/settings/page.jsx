@@ -57,7 +57,8 @@ export default async function SettingsPage() {
   }
 
   const { role } = session.user;
-  const isAdmin = role === "Admin";
+  const isSuperAdmin = role === "SuperAdmin";
+  const isAdmin = role === "Admin" || isSuperAdmin;
   const isAccountant = role === "Accountant";
   const isHR = role === "HR";
 

@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, getCompanyIdForCreate } from "@/lib/utils/tenant-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 import EmployeeProfile from "@/app/models/employeeProfile";
 import Party from "@/app/models/parties";
 
@@ -27,6 +28,7 @@ const DEFAULT_LEAVE_POLICY = [
 
 export async function bulkImportEmployees(rows) {
   try {
+    await requirePlanAccess("hr");
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     if (!ALLOWED.includes(user?.role)) {

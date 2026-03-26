@@ -11,6 +11,7 @@ import {
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
 import { CompanyOnboardingService } from "../services/companyOnboardingService";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 // ============================================
 // ZOD SCHEMAS
@@ -58,6 +59,8 @@ const UpdateAccountSchema = z.object({
  */
 export async function createAccount(prevState, formData) {
   try {
+    await requirePlanAccess("finance");
+
     // Auth & tenant check
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);

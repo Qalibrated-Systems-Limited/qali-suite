@@ -17,6 +17,7 @@ import {
   Smartphone,
   Calendar,
   Users,
+  Shield,
 } from "lucide-react";
 
 export async function generateMetadata({ params }) {
@@ -99,6 +100,12 @@ export default async function CompanyDetailPage({ params }) {
           <Badge variant="outline" className={planColors[company.subscription?.plan]}>
             {company.subscription?.plan}
           </Badge>
+          <Button variant="outline" asChild>
+            <Link href={`/dashboard/admin/companies/${company._id}/subscription`}>
+              <Shield className="h-4 w-4 mr-2" />
+              Subscription
+            </Link>
+          </Button>
           <Button asChild className="bg-yellow-500 text-black hover:bg-yellow-600">
             <Link href={`/dashboard/admin/companies/${company._id}/edit`}>
               <Edit className="h-4 w-4 mr-2" />

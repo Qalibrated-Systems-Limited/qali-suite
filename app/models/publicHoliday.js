@@ -64,16 +64,16 @@ publicHolidaySchema.statics.getDateSet = async function (companyId, fromDate, to
   for (const h of holidays) {
     if (h.isRecurring) {
       // Apply to every year in the range
-      const startYear = from.getFullYear();
-      const endYear = to.getFullYear();
+      const startYear = from.getUTCFullYear();
+      const endYear = to.getUTCFullYear();
       for (let y = startYear; y <= endYear; y++) {
-        const d = new Date(y, h.month - 1, h.day);
+        const d = new Date(Date.UTC(y, h.month - 1, h.day));
         if (d >= from && d <= to) {
           set.add(d.toISOString().slice(0, 10));
         }
       }
     } else if (h.year) {
-      const d = new Date(h.year, h.month - 1, h.day);
+      const d = new Date(Date.UTC(h.year, h.month - 1, h.day));
       if (d >= from && d <= to) {
         set.add(d.toISOString().slice(0, 10));
       }

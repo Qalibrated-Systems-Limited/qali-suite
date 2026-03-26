@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-
 export const authConfig = {
   pages: {
     signIn: "/",
@@ -7,17 +5,18 @@ export const authConfig = {
     error: "/login",
   },
   callbacks: {
+    // Authentication only — "is this user logged in?"
+    // Authorization (subscription gating, plan checks) lives in proxy.ts
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user;
       const isOnDashboard = nextUrl.pathname.startsWith("/dashboard");
       const isInvitePage = nextUrl.pathname.startsWith("/invite");
 
       if (isOnDashboard) {
-        if (isLoggedIn) return true;
-        return false; // Redirect unauthenticated users to login page
+        if (!isLoggedIn) return false;
+        return true;
       }
 
-      // Allow invite pages for everyone (don't redirect logged-in users)
       if (isInvitePage) return true;
 
       // Redirect logged-in users away from login page to dashboard

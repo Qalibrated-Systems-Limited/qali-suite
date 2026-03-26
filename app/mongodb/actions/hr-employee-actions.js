@@ -14,6 +14,8 @@ import User from "@/app/models/user";
 import Company from "@/app/models/Company";
 import { sendInviteEmail } from "@/lib/email";
 import cloudinary from "@/lib/cloudinary";
+import { requirePlanAccess } from "@/lib/plan-gate";
+import { checkUserLimit } from "@/lib/check-user-limit";
 
 // ============================================
 // ROLE AUTHORIZATION
@@ -52,6 +54,8 @@ export async function createEmployee(_prevState, formData) {
   let mongoSession = null;
 
   try {
+    await requirePlanAccess("hr");
+
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     if (!hasRole(user, EMP_ROLES.CREATE)) {
@@ -668,6 +672,12 @@ export async function sendEmployeePortalInvite(profileId, role = "Employee") {
         EmployeeProfile.findByIdAndUpdate(profileId, { userId: existingUser._id }),
       ]);
       return { success: true, message: `Account (${email}) linked with role: ${inviteRole}` };
+    }
+
+    // Check user limit before creating invite
+    const limitCheck = await checkUserLimit(profile.companyId);
+    if (!limitCheck.allowed) {
+      return { success: false, error: limitCheck.error };
     }
 
     // Fetch company name for the email

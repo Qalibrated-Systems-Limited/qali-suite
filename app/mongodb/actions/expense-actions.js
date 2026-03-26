@@ -13,6 +13,7 @@ import {
   getTenantContext,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 function revalidateProject(projectId) {
   if (projectId) {
@@ -96,6 +97,7 @@ export async function createExpense(prevState, formData, { skipRedirect = false 
   let redirectUrl;
 
   try {
+    await requirePlanAccess("all-claims");
     const { companyId, user } = await getTenantContext();
 
     if (!hasRole(user, EXPENSE_ROLES.CREATE)) {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { safeErrorMessage } from "@/lib/safe-error";
 import { renderToBuffer } from "@react-pdf/renderer";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
@@ -67,7 +68,7 @@ export async function GET(_req, { params }) {
   } catch (error) {
     console.error("Employee payslip generation error:", error);
     return NextResponse.json(
-      { error: error.message || "Payslip generation failed" },
+      { error: safeErrorMessage(error, "Payslip generation failed") },
       { status: 500 }
     );
   }

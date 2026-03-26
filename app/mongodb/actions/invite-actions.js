@@ -12,6 +12,7 @@ import { sendInviteEmail } from "@/lib/email";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { revalidatePath } from "next/cache";
 import crypto from "crypto";
+import { checkUserLimit } from "@/lib/check-user-limit";
 
 const ADMIN_ROLES = ["SuperAdmin", "Admin"];
 
@@ -80,6 +81,12 @@ export async function sendInvite(prevState, formData) {
 
     if (!company) {
       return { success: false, error: "Company not found" };
+    }
+
+    // Check user limit before creating invite
+    const limitCheck = await checkUserLimit(companyId);
+    if (!limitCheck.allowed) {
+      return { success: false, error: limitCheck.error };
     }
 
     // Generate token
@@ -228,6 +235,12 @@ export async function acceptInviteWithPassword(rawToken, formData) {
       await invite.save();
 
       return { success: true, message: "Password set! You can now sign in." };
+    }
+
+    // Check user limit before creating new user
+    const limitCheck = await checkUserLimit(invite.companyId);
+    if (!limitCheck.allowed) {
+      return { success: false, error: limitCheck.error };
     }
 
     // No existing user — create one

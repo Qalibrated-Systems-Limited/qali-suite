@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import EmployeeProfile from "@/app/models/employeeProfile";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 const ALLOWED = ["Admin", "HR"];
 
@@ -28,6 +29,8 @@ function guard(user) {
 // ============================================
 export async function runLeaveCarryOver({ fromYear, toYear, maxCarryOver = 10, leaveType = "annual" }) {
   try {
+    await requirePlanAccess("hr");
+
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const err = guard(user);
     if (err) return { success: false, error: err };
@@ -98,6 +101,8 @@ export async function runLeaveCarryOver({ fromYear, toYear, maxCarryOver = 10, l
 // ============================================
 export async function runLeaveAccrual({ year, month, leaveType = "annual", accrualDays = 1.75 }) {
   try {
+    await requirePlanAccess("hr");
+
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const err = guard(user);
     if (err) return { success: false, error: err };
@@ -144,6 +149,8 @@ export async function runLeaveAccrual({ year, month, leaveType = "annual", accru
 // ============================================
 export async function encashLeave({ profileId, leaveType = "annual", daysToEncash, dailyRate }) {
   try {
+    await requirePlanAccess("hr");
+
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const err = guard(user);
     if (err) return { success: false, error: err };

@@ -45,6 +45,7 @@ import {
   getCompanyIdForCreate,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 // ============================================
 // HELPERS
@@ -172,6 +173,8 @@ export async function createBill(prevState, formData) {
   const rawData = parseFormData(formData);
 
   try {
+    await requirePlanAccess("purchases");
+
     // 2. Auth & tenant check
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 

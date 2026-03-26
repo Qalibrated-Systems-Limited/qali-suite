@@ -57,12 +57,19 @@ import { QaliSuiteIcon, QaliSuiteMark } from "./qalisuite-logo";
 import { SidebarClockWidget } from "./sidebar-clock-widget";
 
 // ============================================
-// NAV GROUP CONFIGURATION - GENERAL NAMING
+// PLAN GATING HELPER
 // ============================================
+import { getAllowedModules } from "@/lib/plans";
+
 // ============================================
 // NAV GROUP CONFIGURATION - ERP FOCUSED
 // ============================================
-const getNavigationGroups = (user) => [
+const getNavigationGroups = (user) => {
+  const plan = user?.companyPlan || "free";
+  const allowed = new Set(getAllowedModules(plan));
+  const hasMod = (id) => user?.role === "SuperAdmin" || allowed.has(id);
+
+  return [
   // Dashboard (ungrouped)
   {
     type: "single",
@@ -191,7 +198,7 @@ const getNavigationGroups = (user) => [
     icon: ShoppingCart,
     id: "purchases",
     defaultOpen: false,
-    hidden: user?.role === "HR",
+    hidden: user?.role === "HR" || !hasMod("purchases"),
     items: [
       {
         icon: FileText,
@@ -254,28 +261,28 @@ const getNavigationGroups = (user) => [
         label: "All Claims", // ← Admin/Accountant view
         id: "all-claims",
         href: "/dashboard/claims",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("all-claims"),
       },
       {
         icon: Receipt,
         label: "All Expenses",
         id: "expenses",
         href: "/dashboard/expenses",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("all-claims"),
       },
       {
         icon: FileText,
         label: "Pending Approval",
         id: "expenses-pending",
         href: "/dashboard/expenses/pending",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("all-claims"),
       },
       {
         icon: CreditCard,
         label: "Reimbursements",
         id: "reimbursements",
         href: "/dashboard/expenses/reimbursements",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("all-claims"),
         badge: "Soon",
       },
     ],
@@ -290,7 +297,7 @@ const getNavigationGroups = (user) => [
     label: "Projects",
     id: "projects",
     href: "/dashboard/projects",
-    hidden: !["Admin", "Accountant", "Manager"].includes(user?.role),
+    hidden: !["Admin", "Accountant", "Manager"].includes(user?.role) || !hasMod("projects"),
     // HR intentionally excluded
   },
 
@@ -304,7 +311,7 @@ const getNavigationGroups = (user) => [
     id: "finance",
     defaultOpen: false,
     badge: "New",
-    hidden: user?.role === "HR",
+    hidden: user?.role === "HR" || !hasMod("finance"),
     items: [
       {
         icon: Briefcase, // or Building2 or Users
@@ -353,7 +360,7 @@ const getNavigationGroups = (user) => [
     icon: FileText,
     id: "tax",
     defaultOpen: false,
-    hidden: user?.role === "HR",
+    hidden: user?.role === "HR" || !hasMod("tax"),
     items: [
       {
         icon: Receipt,
@@ -397,55 +404,55 @@ const getNavigationGroups = (user) => [
     defaultOpen: false,
     hidden: user?.role === "HR",
     items: [
-      // Financial Reports
+      // Financial Reports (gated to starter+)
       {
         icon: TrendingUp,
         label: "Profit & Loss",
         id: "profit-loss",
         href: "/dashboard/reports/profit-loss",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("profit-loss"),
       },
       {
         icon: Building2,
         label: "Balance Sheet",
         id: "balance-sheet",
         href: "/dashboard/reports/balance-sheet",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("balance-sheet"),
       },
       {
         icon: Activity,
         label: "Cash Flow",
         id: "cash-flow",
         href: "/dashboard/reports/cash-flow",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("cash-flow"),
       },
       {
         icon: FileSpreadsheet,
         label: "Trial Balance",
         id: "trial-balance",
         href: "/dashboard/reports/trial-balance",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("trial-balance"),
       },
       {
         icon: BookOpen,
         label: "General Ledger",
         id: "general-ledger",
         href: "/dashboard/reports/general-ledger",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("general-ledger"),
       },
       {
         icon: Users,
         label: "AR Aging",
         id: "ar-aging",
         href: "/dashboard/reports/ar-aging",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("ar-aging"),
       },
       {
         icon: Building2,
         label: "AP Aging",
         id: "ap-aging",
         href: "/dashboard/reports/ap-aging",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("ap-aging"),
       },
 
       // Divider comment
@@ -469,14 +476,14 @@ const getNavigationGroups = (user) => [
         label: "Purchase Reports",
         id: "purchase-reports",
         href: "/dashboard/reports/purchases",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("purchase-reports"),
       },
       {
         icon: Users,
         label: "Customer Reports",
         id: "customer-reports",
         href: "/dashboard/reports/customers",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("customer-reports"),
       },
     ],
   },
@@ -490,7 +497,7 @@ const getNavigationGroups = (user) => [
     icon: Briefcase,
     id: "hr",
     defaultOpen: user?.role === "HR",
-    hidden: user?.role === "SuperAdmin",
+    hidden: !hasMod("hr"),
     items: [
       {
         icon: LayoutDashboard,
@@ -613,9 +620,10 @@ const getNavigationGroups = (user) => [
     label: "Settings",
     id: "settings",
     href: "/dashboard/settings",
-    hidden: !["Admin", "Accountant", "HR"].includes(user?.role),
+    hidden: !["SuperAdmin", "Admin", "Accountant", "HR"].includes(user?.role),
   },
 ];
+}; // end getNavigationGroups
 
 // ============================================
 // COMPONENTS

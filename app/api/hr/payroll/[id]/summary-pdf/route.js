@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { safeErrorMessage } from "@/lib/safe-error";
 import { renderToBuffer } from "@react-pdf/renderer";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
@@ -7,6 +8,7 @@ import PayrollRun from "@/app/models/payrollRun";
 import PayrollEntry from "@/app/models/payrollEntry";
 import Company from "@/app/models/Company";
 import { PayrollSummaryDocument } from "./PayrollSummaryDocument";
+import { checkPlanAccess } from "@/lib/plan-gate";
 
 const ALLOWED = ["Admin", "HR", "Accountant"];
 
@@ -15,6 +17,11 @@ export async function GET(_req, { params }) {
     const session = await auth();
     if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     if (!ALLOWED.includes(session.user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const gate = await checkPlanAccess("hr");
+    if (!gate.allowed) {
+      return NextResponse.json({ error: "This feature requires a plan upgrade" }, { status: 403 });
+    }
 
     const { id } = await params;
     await dbConnect();
@@ -61,6 +68,6 @@ export async function GET(_req, { params }) {
     });
   } catch (error) {
     console.error("Summary PDF error:", error);
-    return NextResponse.json({ error: error.message || "PDF generation failed" }, { status: 500 });
+    return NextResponse.json({ error: safeErrorMessage(error, "PDF generation failed") }, { status: 500 });
   }
 }

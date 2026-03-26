@@ -9,6 +9,7 @@ import {
   getCompanyIdForCreate,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 
 // ============================================
 // ZOD SCHEMAS
@@ -61,6 +62,14 @@ const CreateEmployeePartySchema = z.object({
  * Create a new party (customer/supplier/employee)
  */
 export async function createParty(prevState, formData) {
+  try {
+    await requirePlanAccess("finance");
+  } catch (error) {
+    return {
+      errors: { _form: [error.message] },
+    };
+  }
+
   // Extract form values to preserve on error
   const formValues = {
     name: formData.get("name"),

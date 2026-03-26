@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope, getCompanyIdForCreate } from "@/lib/utils/tenant-utils";
+import { requirePlanAccess } from "@/lib/plan-gate";
 import PublicHoliday from "@/app/models/publicHoliday";
 
 const ALLOWED = ["Admin", "HR"];
@@ -37,6 +38,7 @@ const KENYA_HOLIDAYS = [
 // ============================================
 export async function seedKenyaHolidays() {
   try {
+    await requirePlanAccess("hr");
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const err = guard(user);
     if (err) return { success: false, error: err };
@@ -78,6 +80,7 @@ export async function seedKenyaHolidays() {
 // ============================================
 export async function createPublicHoliday(_prevState, formData) {
   try {
+    await requirePlanAccess("hr");
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const err = guard(user);
     if (err) return { success: false, error: err };
@@ -119,6 +122,7 @@ export async function createPublicHoliday(_prevState, formData) {
 // ============================================
 export async function deletePublicHoliday(holidayId) {
   try {
+    await requirePlanAccess("hr");
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const err = guard(user);
     if (err) return { success: false, error: err };

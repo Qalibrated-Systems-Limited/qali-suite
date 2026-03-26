@@ -11,7 +11,10 @@ import {
   CheckCircle,
   XCircle,
   AlertCircle,
+  Plus,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import CompanyListClient from "../components/companyListClient";
 
 export const metadata = {
@@ -55,16 +58,24 @@ export default async function CompaniesPage({ searchParams }) {
   return (
     <div className="container py-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="p-2 bg-yellow-500/10 rounded-lg">
-          <Building2 className="h-6 w-6 text-yellow-600" />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-yellow-500/10 rounded-lg">
+            <Building2 className="h-6 w-6 text-yellow-600" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold">Companies</h1>
+            <p className="text-muted-foreground">
+              Manage all tenant companies
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold">Companies</h1>
-          <p className="text-muted-foreground">
-            Manage all tenant companies
-          </p>
-        </div>
+        <Button asChild>
+          <Link href="/dashboard/admin/companies/create">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Company
+          </Link>
+        </Button>
       </div>
 
       {/* Stats Cards */}
