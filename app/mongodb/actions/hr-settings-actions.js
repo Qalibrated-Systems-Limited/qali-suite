@@ -1,5 +1,6 @@
 "use server";
 
+import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope, getCompanyIdForCreate } from "@/lib/utils/tenant-utils";
@@ -39,6 +40,8 @@ export async function createPayrollConfig(_prevState, formData) {
     const shifRate = parseFloat(formData.get("shifRate") || "0") / 100;
     const ahlEmployeeRate = parseFloat(formData.get("ahlEmployeeRate") || "0") / 100;
     const ahlEmployerRate = parseFloat(formData.get("ahlEmployerRate") || "0") / 100;
+    const insuranceReliefRate = parseFloat(formData.get("insuranceReliefRate") || "0.15");
+    const insuranceReliefCap = parseFloat(formData.get("insuranceReliefCap") || "5000");
     const notes = formData.get("notes")?.toString().trim() || "";
 
     if (!name) return { success: false, error: "Config name is required", fieldErrors: { name: "Required" } };
@@ -88,6 +91,8 @@ export async function createPayrollConfig(_prevState, formData) {
       shifRate,
       ahlEmployeeRate,
       ahlEmployerRate,
+      insuranceReliefRate,
+      insuranceReliefCap,
       notes,
       createdBy: { name: user.name, id: user.id },
     });
@@ -125,7 +130,7 @@ export async function savePayrollGlMapping(_prevState, formData) {
       return v || null;
     }
 
-    config.glMapping = {
+    const mapping = {
       salaryExpense:       acctId("salaryExpense"),
       employerNssfExpense: acctId("employerNssfExpense"),
       employerAhlExpense:  acctId("employerAhlExpense"),
@@ -136,6 +141,21 @@ export async function savePayrollGlMapping(_prevState, formData) {
       ahlPayable:          acctId("ahlPayable"),
       bankAccount:         acctId("bankAccount"),
     };
+
+    // Validate all account IDs exist and belong to the company
+    const accountIds = Object.values(mapping).filter(Boolean);
+    if (accountIds.length > 0) {
+      const Account = mongoose.model("Account");
+      const validCount = await Account.countDocuments({
+        _id: { $in: accountIds },
+        companyId,
+      });
+      if (validCount !== accountIds.length) {
+        return { success: false, error: "One or more GL accounts are invalid or do not belong to this company" };
+      }
+    }
+
+    config.glMapping = mapping;
     config.lastModifiedBy = { name: user.name, id: user.id };
     await config.save();
 

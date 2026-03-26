@@ -409,10 +409,14 @@ export async function generatePayrollEntries(payrollRunId) {
       const lwopDays = unpaidLeaveDaysMap[pid] || 0;
       let lwopDeduction = 0;
       if (lwopDays > 0 && totalWorkingDays > 0) {
-        const lwopFraction = lwopDays / totalWorkingDays;
-        lwopDeduction = Math.round((basic + housing + transport + medical + otherAllowance) * lwopFraction);
-        // Deduct proportionally from basic first (simplified approach)
-        basic = Math.max(0, basic - Math.round((comp.basicSalary || 0) * (isProRata ? proRataFraction : 1) * lwopFraction));
+        const lwopRatio = (totalWorkingDays - lwopDays) / totalWorkingDays;
+        lwopDeduction = Math.round((basic + housing + transport + medical + otherAllowance) * (1 - lwopRatio));
+        // Deduct proportionally from ALL earnings
+        basic = Math.round(basic * lwopRatio);
+        housing = Math.round(housing * lwopRatio);
+        transport = Math.round(transport * lwopRatio);
+        medical = Math.round(medical * lwopRatio);
+        otherAllowance = Math.round(otherAllowance * lwopRatio);
       }
 
       const grossPay = basic + housing + transport + medical + otherAllowance;
@@ -464,6 +468,7 @@ export async function generatePayrollEntries(payrollRunId) {
             "earnings.housingAllowance": housing,
             "earnings.transportAllowance": transport,
             "earnings.medicalAllowance": medical,
+            "earnings.otherAllowance": otherAllowance,
             "earnings.grossPay": grossPay,
             "deductions.paye": paye,
             "deductions.nssf": nssf,
@@ -609,6 +614,15 @@ async function postPayrollAccrualJournal(run, glMapping, user) {
 
   if (lines.length < 2) return null;
 
+  // BUG-6: Verify journal is balanced before posting (catches partial GL mapping)
+  const totalDebits = lines.reduce((s, l) => s + (l.debit || 0), 0);
+  const totalCredits = lines.reduce((s, l) => s + (l.credit || 0), 0);
+  if (Math.abs(totalDebits - totalCredits) > 1) {
+    throw new Error(`Payroll journal is unbalanced: debits=${totalDebits}, credits=${totalCredits}. Check GL mapping — all accounts must be configured.`);
+  }
+
+  // TODO: Validate fiscal period is open before posting. Currently allows posting to closed periods.
+
   const seq = await ErpCounter.getNextSequence("je-pay", run.companyId);
   const entryNumber = `JE-PAY-${String(seq).padStart(4, "0")}`;
 
@@ -737,6 +751,7 @@ export async function approvePayrollRun(payrollRunId) {
     }
 
     // GL: post payroll accrual journal (optional — skipped if no glMapping)
+    let glWarning = null;
     try {
       const payConfig = await PayrollConfig.getActive(run.companyId);
       const jeId = await postPayrollAccrualJournal(run, payConfig?.glMapping, user);
@@ -744,13 +759,13 @@ export async function approvePayrollRun(payrollRunId) {
         await PayrollRun.findByIdAndUpdate(run._id, { $push: { journalEntryIds: jeId } });
       }
     } catch (glErr) {
-      // GL posting failure must not block approval — log and continue
       console.error("[approvePayrollRun] GL posting failed:", glErr.message);
+      glWarning = "Payroll approved but GL journal entry failed. Check GL mapping.";
     }
 
     revalidatePath(`/dashboard/hr/payroll/${payrollRunId}`);
     revalidatePath("/dashboard/hr/payroll");
-    return { success: true };
+    return { success: true, ...(glWarning && { warning: glWarning }) };
   } catch (error) {
     return { success: false, error: error.message || "Failed to approve payroll" };
   }
@@ -790,6 +805,51 @@ export async function voidPayrollRun(_prevState, formData) {
     run.lastModifiedBy = { name: user.name, id: user.id };
     await run.save();
 
+    // Reverse journal entries if any exist
+    if (run.journalEntryIds?.length > 0) {
+      for (const jeId of run.journalEntryIds) {
+        const originalJe = await JournalEntry.findById(jeId);
+        if (originalJe && originalJe.status === "posted") {
+          // Create reversal entry with debits/credits swapped
+          const reversalLines = originalJe.lines.map(line => ({
+            accountId: line.accountId,
+            accountCode: line.accountCode,
+            accountName: line.accountName,
+            accountType: line.accountType,
+            debit: line.credit,    // swap
+            credit: line.debit,    // swap
+            description: `Reversal — ${line.description || ""}`,
+          }));
+
+          const seq = await ErpCounter.getNextSequence("je-pay", run.companyId);
+          const reversalEntryNumber = `JE-PAY-${String(seq).padStart(4, "0")}`;
+
+          const reversalJe = new JournalEntry({
+            companyId: originalJe.companyId,
+            entryNumber: reversalEntryNumber,
+            entryDate: new Date(),
+            entryType: "payroll",
+            description: `Reversal of ${originalJe.description}`,
+            reference: originalJe.reference,
+            lines: reversalLines,
+            fiscalYear: originalJe.fiscalYear,
+            fiscalMonth: originalJe.fiscalMonth,
+            originalEntryId: originalJe._id,
+            createdBy: { name: user.name, id: user.id },
+          });
+
+          await reversalJe.post({ name: user.name, id: user.id });
+
+          // Mark original as reversed
+          originalJe.status = "reversed";
+          originalJe.reversedAt = new Date();
+          originalJe.reversedBy = { name: user.name, id: user.id };
+          originalJe.reversalEntryId = reversalJe._id;
+          await originalJe.save();
+        }
+      }
+    }
+
     revalidatePath(`/dashboard/hr/payroll/${payrollRunId}`);
     revalidatePath("/dashboard/hr/payroll");
     return { success: true };
@@ -828,6 +888,7 @@ export async function markPayrollPaid(payrollRunId) {
     await run.save();
 
     // GL: post payment clearing journal (optional — skipped if not configured)
+    let glWarning = null;
     try {
       const payConfig = await PayrollConfig.getActive(run.companyId);
       const jeId = await postPayrollPaymentJournal(run, payConfig?.glMapping, user);
@@ -836,6 +897,7 @@ export async function markPayrollPaid(payrollRunId) {
       }
     } catch (glErr) {
       console.error("[markPayrollPaid] GL posting failed:", glErr.message);
+      glWarning = "Payroll marked as paid but GL journal entry failed. Check GL mapping.";
     }
 
     // Mark all entries as paid
@@ -852,7 +914,7 @@ export async function markPayrollPaid(payrollRunId) {
 
     revalidatePath(`/dashboard/hr/payroll/${payrollRunId}`);
     revalidatePath("/dashboard/hr/payroll");
-    return { success: true };
+    return { success: true, ...(glWarning && { warning: glWarning }) };
   } catch (error) {
     return { success: false, error: error.message || "Failed to mark payroll as paid" };
   }
