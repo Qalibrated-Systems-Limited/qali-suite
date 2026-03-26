@@ -210,6 +210,9 @@ const payrollConfigSchema = new Schema(
       ahlPayable:           { type: Schema.Types.ObjectId, ref: "Account" },
       // Bank account (credited on paid)
       bankAccount:          { type: Schema.Types.ObjectId, ref: "Account" },
+      // Loan accounts
+      staffLoansReceivable: { type: Schema.Types.ObjectId, ref: "Account" },
+      interestIncome:       { type: Schema.Types.ObjectId, ref: "Account" },
     },
 
     // Audit trail

@@ -80,10 +80,6 @@ const leaveRequestSchema = new Schema(
     leaveType: {
       type: String,
       required: [true, "Leave type is required"],
-      enum: {
-        values: ["annual", "sick", "maternity", "paternity", "compassionate", "study", "unpaid"],
-        message: "{VALUE} is not a valid leave type",
-      },
       index: true,
     },
 

@@ -46,7 +46,7 @@ export async function GET(_req, { params }) {
       payrollRunId: run._id,
       companyId: run.companyId,
     })
-      .select("profileId employeeName employeeNumber earnings.basicSalary earnings.grossPay deductions.paye deductions.nssf deductions.shif deductions.housingLevy")
+      .select("profileId employeeName employeeNumber earnings.basicSalary earnings.grossPay deductions.paye deductions.nssf deductions.shif deductions.housingLevy deductions.insuranceRelief")
       .sort({ employeeName: 1 })
       .lean();
 
@@ -68,6 +68,7 @@ export async function GET(_req, { params }) {
       "Gross Pay (KES)",
       "Taxable Income (KES)",
       "PAYE (KES)",
+      "Insurance Relief (KES)",
       "NSSF Employee (KES)",
       "SHIF (KES)",
       "AHL Employee (KES)",
@@ -91,6 +92,7 @@ export async function GET(_req, { params }) {
         n(e.earnings?.grossPay),
         n(taxableIncome),
         n(e.deductions?.paye),
+        n(e.deductions?.insuranceRelief),
         n(e.deductions?.nssf),
         n(e.deductions?.shif),
         n(e.deductions?.housingLevy),
@@ -104,12 +106,13 @@ export async function GET(_req, { params }) {
         acc.grossPay += e.earnings?.grossPay || 0;
         acc.taxable += (e.earnings?.grossPay || 0) - (e.deductions?.nssf || 0);
         acc.paye += e.deductions?.paye || 0;
+        acc.insuranceRelief += e.deductions?.insuranceRelief || 0;
         acc.nssf += e.deductions?.nssf || 0;
         acc.shif += e.deductions?.shif || 0;
         acc.ahl += e.deductions?.housingLevy || 0;
         return acc;
       },
-      { basicSalary: 0, grossPay: 0, taxable: 0, paye: 0, nssf: 0, shif: 0, ahl: 0 }
+      { basicSalary: 0, grossPay: 0, taxable: 0, paye: 0, insuranceRelief: 0, nssf: 0, shif: 0, ahl: 0 }
     );
     const totalsRow = [
       `"TOTAL (${entries.length} employees)"`,
@@ -120,6 +123,7 @@ export async function GET(_req, { params }) {
       n(totals.grossPay),
       n(totals.taxable),
       n(totals.paye),
+      n(totals.insuranceRelief),
       n(totals.nssf),
       n(totals.shif),
       n(totals.ahl),

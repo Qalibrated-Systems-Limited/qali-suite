@@ -415,6 +415,7 @@ export function PayslipDocument({ run, entry, company }) {
                 <Text style={styles.colAmountHeader}>Amount (KES)</Text>
               </View>
               <DeductionRow label="PAYE (Income Tax)" value={d.paye} />
+              {d.insuranceRelief > 0 && <DeductionRow label="  Less: Insurance Relief" value={-d.insuranceRelief} />}
               <DeductionRow label="NSSF (Employee)" value={d.nssf} />
               <DeductionRow label="SHIF" value={d.shif} />
               <DeductionRow label="Housing Levy (AHL)" value={d.housingLevy} />

@@ -43,7 +43,6 @@ const leaveBalanceSchema = new Schema(
     leaveType: {
       type: String,
       required: true,
-      enum: ["annual", "sick", "maternity", "paternity", "compassionate", "study", "unpaid"],
     },
     label: String,         // "Annual Leave" — for display without enum mapping
     entitledDays: {        // Days allocated per year

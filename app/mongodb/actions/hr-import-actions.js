@@ -7,6 +7,7 @@ import { getTenantContext, getCompanyIdForCreate } from "@/lib/utils/tenant-util
 import { requirePlanAccess } from "@/lib/plan-gate";
 import EmployeeProfile from "@/app/models/employeeProfile";
 import Party from "@/app/models/parties";
+import LeaveType from "@/app/models/leaveType";
 
 const ALLOWED = ["Admin", "HR"];
 
@@ -18,13 +19,22 @@ const ALLOWED = ["Admin", "HR"];
 // Returns per-row results: created, skipped (duplicate email), errors.
 // ============================================
 
-const DEFAULT_LEAVE_POLICY = [
-  { leaveType: "annual",       label: "Annual Leave",       entitledDays: 21, carryOver: 0 },
-  { leaveType: "sick",         label: "Sick Leave",         entitledDays: 14, carryOver: 0 },
-  { leaveType: "maternity",    label: "Maternity Leave",    entitledDays: 90, carryOver: 0 },
-  { leaveType: "paternity",    label: "Paternity Leave",    entitledDays: 14, carryOver: 0 },
-  { leaveType: "compassionate",label: "Compassionate Leave",entitledDays: 5,  carryOver: 0 },
-];
+// Dynamic leave policy — fetched from LeaveType collection, filtered by gender
+async function getLeavePolicy(companyId, gender) {
+  await LeaveType.seedDefaults(companyId);
+  const leaveTypes = await LeaveType.find({ companyId, isActive: true })
+    .sort({ sortOrder: 1 })
+    .lean();
+
+  return leaveTypes
+    .filter((lt) => lt.applicableGender === "all" || lt.applicableGender === gender)
+    .map((lt) => ({
+      leaveType: lt.code,
+      label: lt.name,
+      entitledDays: lt.defaultEntitlement,
+      carryOver: 0,
+    }));
+}
 
 export async function bulkImportEmployees(rows) {
   try {
@@ -144,8 +154,9 @@ export async function bulkImportEmployees(rows) {
 
           const [profile] = await EmployeeProfile.create([profileDoc], { session: mongoSession });
 
-          // Init leave balances
-          profile.initLeaveBalances(currentYear, DEFAULT_LEAVE_POLICY);
+          // Init leave balances (dynamic, gender-filtered)
+          const leavePolicy = await getLeavePolicy(tenantCompanyId, gender);
+          profile.initLeaveBalances(currentYear, leavePolicy);
           await profile.save({ session: mongoSession });
 
           await mongoSession.commitTransaction();

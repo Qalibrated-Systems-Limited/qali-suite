@@ -14,6 +14,7 @@ import LeaveRequest from "@/app/models/leaveRequest";
 import PublicHoliday from "@/app/models/publicHoliday";
 import JournalEntry from "@/app/models/JournalEntry";
 import ErpCounter from "@/app/models/erp-counter";
+import Loan from "@/app/models/loan";
 
 // ============================================
 // ROLE AUTHORIZATION (extended)
@@ -43,9 +44,13 @@ function hasRole(user, allowedRoles) {
 /**
  * Calculate PAYE using PAYE brackets from PayrollConfig.
  * Taxable income = grossPay - nssfEmployee (NSSF reduces taxable income).
- * Returns monthly PAYE after personal relief.
+ * Returns { paye, insuranceRelief } after personal relief and insurance relief.
+ *
+ * Insurance relief: 15% of SHIF contribution, capped at KES 5,000/month.
+ * This is a Kenyan tax incentive — SHIF premiums qualify as insurance premiums,
+ * so 15% of the amount (up to the cap) directly reduces PAYE payable.
  */
-function calculatePAYE(taxableMonthly, config) {
+function calculatePAYE(taxableMonthly, config, shif = 0) {
   const annual = taxableMonthly * 12;
   let annualTax = 0;
   let remaining = annual;
@@ -63,8 +68,18 @@ function calculatePAYE(taxableMonthly, config) {
   }
 
   const monthlyTax = annualTax / 12;
-  const relief = config.personalRelief || 0;
-  return Math.max(0, Math.round(monthlyTax - relief));
+  const personalRelief = config.personalRelief || 0;
+
+  // Insurance relief: percentage of SHIF contribution, subject to monthly cap
+  const insuranceRelief = Math.round(
+    Math.min(
+      shif * (config.insuranceReliefRate || 0.15),
+      config.insuranceReliefCap || 5000
+    )
+  );
+
+  const paye = Math.max(0, Math.round(monthlyTax - personalRelief - insuranceRelief));
+  return { paye, insuranceRelief };
 }
 
 /**
@@ -326,6 +341,30 @@ export async function generatePayrollEntries(payrollRunId) {
       unpaidLeaveDaysMap[pid] = (unpaidLeaveDaysMap[pid] || 0) + lwopDays;
     }
 
+    // Fetch all active loans with pending installments for this period
+    const activeLoans = await Loan.getPendingInstallments(
+      run.companyId, run.period.month, run.period.year
+    );
+
+    // Build map: partyId -> { loanRepayment, saccoDeduction }
+    const loanDeductionMap = new Map();
+    for (const loan of activeLoans) {
+      const lpid = loan.partyId.toString();
+      if (!loanDeductionMap.has(lpid)) {
+        loanDeductionMap.set(lpid, { loanRepayment: 0, saccoDeduction: 0 });
+      }
+      const loanEntry = loanDeductionMap.get(lpid);
+      const installment = loan.installments.find(
+        (i) => i.month === run.period.month && i.year === run.period.year && i.status === "pending"
+      );
+      if (!installment) continue;
+      if (loan.loanType === "sacco_deduction") {
+        loanEntry.saccoDeduction += installment.total;
+      } else {
+        loanEntry.loanRepayment += installment.total;
+      }
+    }
+
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
@@ -383,19 +422,23 @@ export async function generatePayrollEntries(payrollRunId) {
       const nssf = nssfResult.employee;
       const nssfEmployer = nssfResult.employer;
 
-      // PAYE on taxable income (gross minus NSSF employee deduction)
-      const taxableMonthly = Math.max(0, grossPay - nssf);
-      const paye = calculatePAYE(taxableMonthly, payConfig);
-
-      // SHIF (flat % of gross — not deducted before PAYE)
+      // SHIF (flat % of gross — calculated before PAYE because it feeds insurance relief)
       const shif = calculateSHIF(grossPay, payConfig);
+
+      // PAYE on taxable income (gross minus NSSF employee deduction)
+      // Insurance relief (15% of SHIF, capped) is applied inside calculatePAYE
+      const taxableMonthly = Math.max(0, grossPay - nssf);
+      const { paye, insuranceRelief } = calculatePAYE(taxableMonthly, payConfig, shif);
 
       // Affordable Housing Levy
       const ahlResult = calculateAHL(grossPay, payConfig);
       const housingLevy = ahlResult.employee;
       const housingLevyEmployer = ahlResult.employer;
 
-      const totalDeductions = paye + nssf + shif + housingLevy;
+      // Loan / SACCO deductions from active loans
+      const loanDed = loanDeductionMap.get(pid) || { loanRepayment: 0, saccoDeduction: 0 };
+
+      const totalDeductions = paye + nssf + shif + housingLevy + loanDed.loanRepayment + loanDed.saccoDeduction;
       const netPay = grossPay - totalDeductions;
 
       const fullName = `${emp.personalInfo?.firstName || ""} ${emp.personalInfo?.lastName || ""}`.trim();
@@ -426,6 +469,9 @@ export async function generatePayrollEntries(payrollRunId) {
             "deductions.nssf": nssf,
             "deductions.shif": shif,
             "deductions.housingLevy": housingLevy,
+            "deductions.insuranceRelief": insuranceRelief,
+            "deductions.loanRepayment": loanDed.loanRepayment,
+            "deductions.saccoDeduction": loanDed.saccoDeduction,
             "deductions.totalDeductions": totalDeductions,
             "employerContributions.nssf": nssfEmployer,
             "employerContributions.housingLevy": housingLevyEmployer,
@@ -527,6 +573,7 @@ async function postPayrollAccrualJournal(run, glMapping, user) {
   const totalNetPay       = t.totalNetPay || 0;
   const totalEmployerNSSF = t.totalEmployerNSSF || 0;
   const totalEmployerAHL  = t.totalEmployerAHL || 0;
+  const totalOtherDeductions = t.totalOtherDeductions || 0;
 
   // Collect all account IDs we need
   const accountIds = [
@@ -538,6 +585,7 @@ async function postPayrollAccrualJournal(run, glMapping, user) {
     glMapping.shifPayable,
     glMapping.ahlPayable,
     glMapping.salaryPayable,
+    glMapping.staffLoansReceivable,
   ];
 
   // If no accounts mapped at all, skip
@@ -555,6 +603,8 @@ async function postPayrollAccrualJournal(run, glMapping, user) {
     jeLine(accountMap, glMapping.shifPayable,          0,  totalSHIF,                           `SHIF payable — ${periodLabel}`),
     jeLine(accountMap, glMapping.ahlPayable,           0,  totalHousingLevy + totalEmployerAHL, `AHL payable (employee + employer) — ${periodLabel}`),
     jeLine(accountMap, glMapping.salaryPayable,        0,  totalNetPay,                         `Net salaries payable — ${periodLabel}`),
+    // Loan/SACCO repayments — reduces Staff Loans Receivable asset
+    jeLine(accountMap, glMapping.staffLoansReceivable, 0, totalOtherDeductions,                 `Staff loan/SACCO repayments — ${periodLabel}`),
   ].filter(Boolean);
 
   if (lines.length < 2) return null;
@@ -625,6 +675,28 @@ async function postPayrollPaymentJournal(run, glMapping, user) {
 }
 
 // ============================================
+// UPDATE LOAN BALANCES AFTER PAYROLL APPROVAL
+// ============================================
+async function updateLoanBalancesAfterApproval(run) {
+  const loans = await Loan.find({
+    companyId: run.companyId,
+    status: { $in: ["disbursed", "active"] },
+    installments: {
+      $elemMatch: {
+        month: run.period.month,
+        year: run.period.year,
+        status: "pending",
+      },
+    },
+  });
+
+  for (const loan of loans) {
+    loan.recordRepayment(run.period.month, run.period.year, run._id);
+    await loan.save();
+  }
+}
+
+// ============================================
 // APPROVE PAYROLL RUN
 // ============================================
 export async function approvePayrollRun(payrollRunId) {
@@ -656,6 +728,13 @@ export async function approvePayrollRun(payrollRunId) {
     run.approvedAt = new Date();
     run.lastModifiedBy = { name: user.name, id: user.id };
     await run.save();
+
+    // Update loan balances — mark installments as deducted
+    try {
+      await updateLoanBalancesAfterApproval(run);
+    } catch (loanErr) {
+      console.error("[approvePayrollRun] Loan balance update failed:", loanErr.message);
+    }
 
     // GL: post payroll accrual journal (optional — skipped if no glMapping)
     try {
@@ -826,6 +905,7 @@ export async function updatePayrollEntry(_prevState, formData) {
     entry.deductions.nssf = parseFloat(formData.get("nssf") || "0");
     entry.deductions.shif = parseFloat(formData.get("shif") || "0");
     entry.deductions.housingLevy = parseFloat(formData.get("housingLevy") || "0");
+    entry.deductions.insuranceRelief = parseFloat(formData.get("insuranceRelief") || "0");
     entry.deductions.loanRepayment = parseFloat(formData.get("loanRepayment") || "0");
     entry.deductions.saccoDeduction = parseFloat(formData.get("saccoDeduction") || "0");
 

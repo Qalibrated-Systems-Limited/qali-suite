@@ -45,7 +45,7 @@ export async function GET(req) {
         isSuperAdmin
       )
     )
-      .select("partyId profileId employeeName employeeNumber department period.month earnings.grossPay deductions.paye deductions.nssf deductions.shif deductions.housingLevy")
+      .select("partyId profileId employeeName employeeNumber department period.month earnings.grossPay deductions.paye deductions.nssf deductions.shif deductions.housingLevy deductions.insuranceRelief")
       .sort({ "period.month": 1 })
       .lean();
 
@@ -82,6 +82,7 @@ export async function GET(req) {
           paye: entry.deductions?.paye || 0,
           shif: entry.deductions?.shif || 0,
           ahl: entry.deductions?.housingLevy || 0,
+          insuranceRelief: entry.deductions?.insuranceRelief || 0,
         };
       }
     }
@@ -91,8 +92,8 @@ export async function GET(req) {
     // Build headers: Employee info + per-month gross + taxable + paye, then annual totals
     const headers = [
       "Employee Name", "Employee No", "KRA PIN", "National ID", "Department",
-      ...MONTH_NAMES.flatMap((m) => [`${m} Gross`, `${m} Taxable`, `${m} PAYE`]),
-      "Annual Gross", "Annual NSSF", "Annual Taxable", "Annual PAYE",
+      ...MONTH_NAMES.flatMap((m) => [`${m} Gross`, `${m} Taxable`, `${m} PAYE`, `${m} Ins Relief`]),
+      "Annual Gross", "Annual NSSF", "Annual Taxable", "Annual PAYE", "Annual Ins Relief",
     ];
 
     const q = (s) => `"${(s || "").toString().replace(/"/g, '""')}"`;
@@ -103,16 +104,17 @@ export async function GET(req) {
       const kraPin = prof.personalInfo?.kraPin || "";
       const nationalId = prof.personalInfo?.nationalId || "";
 
-      let annualGross = 0, annualNSSF = 0, annualPAYE = 0;
+      let annualGross = 0, annualNSSF = 0, annualPAYE = 0, annualInsRelief = 0;
       const monthCols = [];
 
       for (let m = 1; m <= 12; m++) {
-        const mo = emp.months[m] || { grossPay: 0, nssf: 0, paye: 0 };
+        const mo = emp.months[m] || { grossPay: 0, nssf: 0, paye: 0, insuranceRelief: 0 };
         const taxable = Math.max(0, mo.grossPay - mo.nssf);
-        monthCols.push(n(mo.grossPay), n(taxable), n(mo.paye));
+        monthCols.push(n(mo.grossPay), n(taxable), n(mo.paye), n(mo.insuranceRelief));
         annualGross += mo.grossPay;
         annualNSSF += mo.nssf;
         annualPAYE += mo.paye;
+        annualInsRelief += mo.insuranceRelief;
       }
 
       const annualTaxable = Math.max(0, annualGross - annualNSSF);
@@ -128,6 +130,7 @@ export async function GET(req) {
         n(annualNSSF),
         n(annualTaxable),
         n(annualPAYE),
+        n(annualInsRelief),
       ].join(",");
     });
 

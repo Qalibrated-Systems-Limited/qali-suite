@@ -16,6 +16,7 @@ import { sendInviteEmail } from "@/lib/email";
 import cloudinary from "@/lib/cloudinary";
 import { requirePlanAccess } from "@/lib/plan-gate";
 import { checkUserLimit } from "@/lib/check-user-limit";
+import LeaveType from "@/app/models/leaveType";
 
 // ============================================
 // ROLE AUTHORIZATION
@@ -32,17 +33,25 @@ function hasRole(user, allowedRoles) {
 }
 
 // ============================================
-// DEFAULT LEAVE POLICY
+// DYNAMIC LEAVE POLICY
 // ============================================
-// Applied when a new employee is created.
-// In a future iteration, this would come from a configurable HR settings collection.
-const DEFAULT_LEAVE_POLICY = [
-  { leaveType: "annual", label: "Annual Leave", entitledDays: 21, carryOver: 0 },
-  { leaveType: "sick", label: "Sick Leave", entitledDays: 14, carryOver: 0 },
-  { leaveType: "maternity", label: "Maternity Leave", entitledDays: 90, carryOver: 0 },
-  { leaveType: "paternity", label: "Paternity Leave", entitledDays: 14, carryOver: 0 },
-  { leaveType: "compassionate", label: "Compassionate Leave", entitledDays: 5, carryOver: 0 },
-];
+// Fetches leave types from the LeaveType collection for the company.
+// Seeds defaults if none exist yet. Filters by employee gender.
+async function getLeavePolicy(companyId, gender) {
+  await LeaveType.seedDefaults(companyId);
+  const leaveTypes = await LeaveType.find({ companyId, isActive: true })
+    .sort({ sortOrder: 1 })
+    .lean();
+
+  return leaveTypes
+    .filter((lt) => lt.applicableGender === "all" || lt.applicableGender === gender)
+    .map((lt) => ({
+      leaveType: lt.code,
+      label: lt.name,
+      entitledDays: lt.defaultEntitlement,
+      carryOver: 0,
+    }));
+}
 
 // ============================================
 // CREATE EMPLOYEE
@@ -191,8 +200,9 @@ export async function createEmployee(_prevState, formData) {
       { session: mongoSession }
     );
 
-    // 3. Initialize leave balances for current year
-    profile.initLeaveBalances(currentYear, DEFAULT_LEAVE_POLICY);
+    // 3. Initialize leave balances for current year (dynamic, gender-filtered)
+    const leavePolicy = await getLeavePolicy(tenantCompanyId, gender);
+    profile.initLeaveBalances(currentYear, leavePolicy);
     await profile.save({ session: mongoSession });
 
     await mongoSession.commitTransaction();

@@ -62,6 +62,7 @@ const journalEntrySchema = new Schema(
         "other",
         //Other
         "liability_payment",
+        "loan_disbursement",
       ],
       index: true,
     },

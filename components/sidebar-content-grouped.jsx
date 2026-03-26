@@ -563,6 +563,13 @@ const getNavigationGroups = (user) => {
         hidden: !["Admin", "HR"].includes(user?.role),
       },
       {
+        icon: Wallet,
+        label: "Loans & Advances",
+        id: "hr-loans",
+        href: "/dashboard/hr/loans",
+        hidden: !["Admin", "HR", "Manager"].includes(user?.role),
+      },
+      {
         icon: Users,
         label: "User Accounts",
         id: "hr-users",

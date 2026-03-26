@@ -125,6 +125,10 @@ const payrollEntrySchema = new Schema(
       shif: { type: Number, default: 0, min: 0 },          // SHIF (replaced NHIF Oct 2024) — flat % of gross
       housingLevy: { type: Number, default: 0, min: 0 },   // Affordable Housing Levy employee share
 
+      // Insurance relief — 15% of SHIF contribution, capped at KES 5,000/month.
+      // Reduces PAYE payable; stored for payslip display and audit.
+      insuranceRelief: { type: Number, default: 0, min: 0 },
+
       // Common recurring
       loanRepayment: { type: Number, default: 0, min: 0 }, // Salary advance recovery
       saccoDeduction: { type: Number, default: 0, min: 0 }, // SACCO contributions
