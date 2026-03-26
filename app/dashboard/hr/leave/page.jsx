@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getLeaveRequests, getMyEmployeeProfile } from "@/app/mongodb/queries/hr-queries";
 import { Calendar, Plus, Settings2 } from "lucide-react";
+import { MyLeaveContent } from "../my-leave/page";
 
 export const metadata = { title: "Leave | HR" };
 
@@ -191,22 +192,20 @@ export default async function LeavePage({ searchParams }) {
   if (!HR_ROLES.includes(session.user.role)) redirect("/dashboard");
 
   const params = await searchParams;
-  const isEmployee = !["Admin", "Manager", "HR"].includes(session.user.role);
   const canAdmin = ["Admin", "Manager", "HR"].includes(session.user.role);
+  const activeTab = canAdmin ? (params.tab === "mine" ? "mine" : "all") : "mine";
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-foreground sm:text-2xl">
-            {isEmployee ? "My Leave" : "Leave"}
-          </h1>
+          <h1 className="text-xl font-bold text-foreground sm:text-2xl">Leave</h1>
           <p className="hidden sm:block text-sm text-muted-foreground">
-            {isEmployee ? "Your leave requests and balances" : "Track and approve employee leave"}
+            {canAdmin ? "Manage employee leave and track your own" : "Your leave requests and balances"}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {canAdmin && (
+          {canAdmin && activeTab === "all" && (
             <Link
               href="/dashboard/hr/leave/calendar"
               className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors"
@@ -215,7 +214,7 @@ export default async function LeavePage({ searchParams }) {
               <span className="hidden sm:inline">Calendar</span>
             </Link>
           )}
-          {canAdmin && (
+          {canAdmin && activeTab === "all" && (
             <Link
               href="/dashboard/hr/leave/admin"
               className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors"
@@ -235,34 +234,75 @@ export default async function LeavePage({ searchParams }) {
         </div>
       </div>
 
-      {/* Status filter tabs */}
-      <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1 shadow-sm">
-        {["", "submitted", "approved", "rejected"].map((s) => (
+      {/* Admin tab switcher */}
+      {canAdmin && (
+        <div className="flex gap-1 rounded-lg border border-border bg-card p-1 shadow-sm w-fit">
           <Link
-            key={s}
-            href={`?status=${s}`}
-            className={`shrink-0 rounded-md px-4 py-1.5 text-sm transition-colors ${
-              params.status === s || (!params.status && s === "")
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
+            href="?"
+            className={`rounded-md px-4 py-1.5 text-sm transition-colors ${
+              activeTab === "all" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {s === "" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
+            All Requests
           </Link>
-        ))}
-      </div>
+          <Link
+            href="?tab=mine"
+            className={`rounded-md px-4 py-1.5 text-sm transition-colors ${
+              activeTab === "mine" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            My Leave
+          </Link>
+        </div>
+      )}
 
-      <Suspense
-        fallback={
-          <div className="space-y-3">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="h-14 animate-pulse rounded-lg bg-muted" />
+      {activeTab === "mine" ? (
+        <Suspense
+          fallback={
+            <div className="space-y-6">
+              <div className="grid grid-cols-4 gap-2">
+                {[1, 2, 3, 4].map((i) => <div key={i} className="h-20 animate-pulse rounded-lg bg-muted" />)}
+              </div>
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />)}
+              </div>
+            </div>
+          }
+        >
+          <MyLeaveContent searchParams={searchParams} />
+        </Suspense>
+      ) : (
+        <>
+          {/* Status filter tabs */}
+          <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1 shadow-sm">
+            {["", "submitted", "approved", "rejected"].map((s) => (
+              <Link
+                key={s}
+                href={`?status=${s}`}
+                className={`shrink-0 rounded-md px-4 py-1.5 text-sm transition-colors ${
+                  params.status === s || (!params.status && s === "")
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {s === "" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
+              </Link>
             ))}
           </div>
-        }
-      >
-        <LeaveRequestList searchParams={searchParams} isEmployee={isEmployee} />
-      </Suspense>
+
+          <Suspense
+            fallback={
+              <div className="space-y-3">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-14 animate-pulse rounded-lg bg-muted" />
+                ))}
+              </div>
+            }
+          >
+            <LeaveRequestList searchParams={searchParams} isEmployee={false} />
+          </Suspense>
+        </>
+      )}
     </div>
   );
 }

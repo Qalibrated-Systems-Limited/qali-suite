@@ -275,7 +275,7 @@ async function LeaveRequestHistory({ partyId, searchParams }) {
 // ============================================
 // MAIN PAGE
 // ============================================
-async function MyLeaveContent({ searchParams }) {
+export async function MyLeaveContent({ searchParams }) {
   const profile = await getMyEmployeeProfile();
 
   if (!profile) {
