@@ -95,6 +95,7 @@ const payrollEntrySchema = new Schema(
       housingAllowance: { type: Number, default: 0, min: 0 },
       transportAllowance: { type: Number, default: 0, min: 0 },
       medicalAllowance: { type: Number, default: 0, min: 0 },
+      otherAllowance: { type: Number, default: 0, min: 0 },
 
       // Variable
       overtime: { type: Number, default: 0, min: 0 },
@@ -250,6 +251,7 @@ payrollEntrySchema.methods.recalculate = function () {
     (e.housingAllowance || 0) +
     (e.transportAllowance || 0) +
     (e.medicalAllowance || 0) +
+    (e.otherAllowance || 0) +
     (e.overtime || 0) +
     (e.bonus || 0) +
     (e.commission || 0) +
@@ -312,6 +314,7 @@ payrollEntrySchema.statics.aggregateTotals = async function (payrollRunId) {
               "$earnings.housingAllowance",
               "$earnings.transportAllowance",
               "$earnings.medicalAllowance",
+              "$earnings.otherAllowance",
             ],
           },
         },
