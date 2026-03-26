@@ -120,18 +120,18 @@ export default async function LeaveDetailPage({ params }) {
             <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">
               <Calendar className="h-4 w-4 text-muted-foreground" /> Leave Period
             </h2>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="rounded-lg bg-muted/50 p-4 text-center">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">From</p>
-                <p className="mt-1 text-base font-bold text-foreground">{formatDate(leave.dates?.from)}</p>
+            <div className="grid grid-cols-3 gap-2 sm:gap-4">
+              <div className="rounded-lg bg-muted/50 p-3 sm:p-4 text-center">
+                <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wide">From</p>
+                <p className="mt-1 text-sm sm:text-base font-bold text-foreground">{formatDate(leave.dates?.from)}</p>
               </div>
-              <div className="rounded-lg bg-muted/50 p-4 text-center">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">To</p>
-                <p className="mt-1 text-base font-bold text-foreground">{formatDate(leave.dates?.to)}</p>
+              <div className="rounded-lg bg-muted/50 p-3 sm:p-4 text-center">
+                <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wide">To</p>
+                <p className="mt-1 text-sm sm:text-base font-bold text-foreground">{formatDate(leave.dates?.to)}</p>
               </div>
-              <div className="rounded-lg bg-primary/5 p-4 text-center">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Duration</p>
-                <p className="mt-1 text-lg font-bold text-primary">
+              <div className="rounded-lg bg-primary/5 p-3 sm:p-4 text-center">
+                <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wide">Duration</p>
+                <p className="mt-1 text-base sm:text-lg font-bold text-primary">
                   {leave.dates?.totalDays} {leave.dates?.totalDays === 1 ? "day" : "days"}
                 </p>
                 {leave.dates?.halfDay && <p className="text-xs text-muted-foreground">half day</p>}
@@ -175,7 +175,7 @@ export default async function LeaveDetailPage({ params }) {
                   <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Balance before this leave
                   </h2>
-                  <div className="grid grid-cols-3 gap-4 text-center text-sm">
+                  <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center text-sm">
                     <div>
                       <p className="text-xs text-muted-foreground">Entitled</p>
                       <p className="mt-1 text-lg font-bold text-foreground">{entitled ?? "—"}</p>
@@ -205,7 +205,7 @@ export default async function LeaveDetailPage({ params }) {
                   <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Balance after this leave
                   </h2>
-                  <div className="grid grid-cols-3 gap-4 text-center text-sm">
+                  <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center text-sm">
                     <div>
                       <p className="text-xs text-muted-foreground">Entitled</p>
                       <p className="mt-1 text-lg font-bold text-foreground">{entitled ?? "—"}</p>

@@ -81,7 +81,7 @@ function LeaveBalances({ balances, gender }) {
   return (
     <div className="space-y-4">
       {/* Summary strip */}
-      <div className="grid grid-cols-4 gap-2 sm:gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
         {[
           { label: "Entitled", value: totalEntitled, color: "text-foreground" },
           { label: "Used", value: totalUsed, color: "text-foreground" },
@@ -275,7 +275,7 @@ async function LeaveRequestHistory({ partyId, searchParams }) {
 // ============================================
 // MAIN PAGE
 // ============================================
-export async function MyLeaveContent({ searchParams }) {
+async function MyLeaveContent({ searchParams }) {
   const profile = await getMyEmployeeProfile();
 
   if (!profile) {

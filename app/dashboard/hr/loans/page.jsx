@@ -57,20 +57,20 @@ function formatCurrency(amount) {
   return (amount || 0).toLocaleString("en-KE", { minimumFractionDigits: 0 });
 }
 
-function StatsCards({ stats }) {
+function StatsCards({ stats, canAdmin }) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="flex items-center gap-2 text-muted-foreground">
           <TrendingUp className="h-4 w-4" />
-          <p className="text-xs font-medium uppercase tracking-wide">Active Loans</p>
+          <p className="text-xs font-medium uppercase tracking-wide">{canAdmin ? "Active Loans" : "Active"}</p>
         </div>
         <p className="mt-2 text-2xl font-bold text-foreground">{stats.totalActive}</p>
       </div>
       <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="flex items-center gap-2 text-muted-foreground">
           <DollarSign className="h-4 w-4" />
-          <p className="text-xs font-medium uppercase tracking-wide">Total Disbursed</p>
+          <p className="text-xs font-medium uppercase tracking-wide">{canAdmin ? "Total Disbursed" : "Borrowed"}</p>
         </div>
         <p className="mt-2 text-2xl font-bold text-foreground">KES {formatCurrency(stats.totalDisbursed)}</p>
       </div>
@@ -84,7 +84,7 @@ function StatsCards({ stats }) {
       <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="flex items-center gap-2 text-muted-foreground">
           <Clock className="h-4 w-4" />
-          <p className="text-xs font-medium uppercase tracking-wide">Pending Approval</p>
+          <p className="text-xs font-medium uppercase tracking-wide">{canAdmin ? "Pending Approval" : "Pending"}</p>
         </div>
         <p className="mt-2 text-2xl font-bold text-foreground">{stats.pendingCount}</p>
       </div>
@@ -92,7 +92,7 @@ function StatsCards({ stats }) {
   );
 }
 
-async function LoanList({ searchParams }) {
+async function LoanList({ searchParams, canAdmin }) {
   const params = await searchParams;
 
   const currentPage = parseInt(params.page || "1");
@@ -147,14 +147,19 @@ async function LoanList({ searchParams }) {
 
   return (
     <>
-      <StatsCards stats={stats} />
+      <StatsCards stats={stats} canAdmin={canAdmin} />
 
       {serialized.length === 0 ? (
         <div className="rounded-lg border border-border bg-card p-12 text-center shadow-sm">
           <Banknote className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
           <p className="text-muted-foreground">
-            {status ? `No ${status.replace("_", " ")} loans` : "No loans yet."}
+            {status ? `No ${status.replace("_", " ")} loans` : canAdmin ? "No loans yet." : "You have no loan requests yet."}
           </p>
+          {!canAdmin && !status && (
+            <a href="/dashboard/hr/loans/create" className="mt-3 inline-block text-sm text-primary hover:underline">
+              Request a salary advance or loan →
+            </a>
+          )}
         </div>
       ) : (
         <div className="rounded-lg border border-border bg-card shadow-sm">
@@ -322,7 +327,7 @@ export default async function LoansPage({ searchParams }) {
           </div>
         }
       >
-        <LoanList searchParams={searchParams} />
+        <LoanList searchParams={searchParams} canAdmin={canAdmin} />
       </Suspense>
     </div>
   );

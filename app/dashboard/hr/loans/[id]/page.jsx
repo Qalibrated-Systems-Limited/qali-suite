@@ -299,7 +299,9 @@ export default async function LoanDetailPage({ params }) {
               <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Calendar className="h-4 w-4 text-muted-foreground" /> Installment Schedule
               </h2>
-              <div className="overflow-x-auto">
+
+              {/* Desktop table */}
+              <div className="hidden overflow-x-auto sm:block">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -353,6 +355,53 @@ export default async function LoanDetailPage({ params }) {
                     })}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Mobile list */}
+              <div className="divide-y divide-border sm:hidden">
+                {loan.installments.map((inst, i) => {
+                  const isCurrent = inst.month === currentMonth && inst.year === currentYear;
+                  const isDeducted = inst.status === "deducted";
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-center justify-between gap-3 py-3 ${isCurrent ? "bg-primary/5 -mx-5 px-5" : ""}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground w-5 shrink-0">{i + 1}</span>
+                          <p className={`text-sm font-medium ${isDeducted ? "text-emerald-700 dark:text-emerald-400" : "text-foreground"}`}>
+                            {MONTH_NAMES[inst.month]} {inst.year}
+                          </p>
+                          {isCurrent && (
+                            <span className="inline-flex rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                              Now
+                            </span>
+                          )}
+                        </div>
+                        <p className="ml-7 text-xs text-muted-foreground">
+                          Total: KES {formatCurrency(inst.total)}
+                        </p>
+                      </div>
+                      <div className="shrink-0">
+                        {isDeducted ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Paid
+                          </span>
+                        ) : inst.status === "skipped" ? (
+                          <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                            Skipped
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                            Pending
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

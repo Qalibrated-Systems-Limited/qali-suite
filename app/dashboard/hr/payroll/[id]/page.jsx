@@ -94,9 +94,9 @@ export default async function PayrollRunDetailPage({ params }) {
           <TotalsCard label="Employees" value={totals.employeeCount} sub="in this run" />
           <TotalsCard label="Gross Pay" value={`${currency} ${fmt(totals.totalGrossPay)}`} sub="before deductions" />
           <TotalsCard
-            label="Total Deductions"
+            label="Deductions"
             value={`${currency} ${fmt(totals.totalDeductions)}`}
-            sub={`PAYE ${fmt(totals.totalPAYE)} · NSSF ${fmt(totals.totalNSSF)} · SHIF ${fmt(totals.totalSHIF)} · AHL ${fmt(totals.totalHousingLevy)}`}
+            sub={<span className="hidden sm:inline">PAYE {fmt(totals.totalPAYE)} · NSSF {fmt(totals.totalNSSF)} · SHIF {fmt(totals.totalSHIF)}</span>}
           />
           <TotalsCard label="Net Pay" value={`${currency} ${fmt(totals.totalNetPay)}`} highlight />
         </div>
@@ -220,25 +220,28 @@ export default async function PayrollRunDetailPage({ params }) {
               {entries.map((entry) => (
                 <div key={entry._id} className="p-4">
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="font-medium text-foreground">{entry.employeeName}</p>
+                    <div className="min-w-0">
+                      <p className="font-medium text-foreground truncate">{entry.employeeName}</p>
                       <p className="text-xs text-muted-foreground">{entry.department || entry.employeeNumber}</p>
                     </div>
-                    <p className="font-bold text-primary">{fmt(entry.netPay)}</p>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <PayslipButton payrollRunId={run._id} entryId={entry._id} />
+                      <p className="font-bold text-primary tabular-nums">{fmt(entry.netPay)}</p>
+                    </div>
                   </div>
-                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                    <div>
-                      <p className="text-muted-foreground">Gross</p>
-                      <p className="font-medium text-foreground">{fmt(entry.earnings?.grossPay)}</p>
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    <div className="rounded bg-muted/50 p-2 text-center">
+                      <p className="text-[10px] text-muted-foreground">Gross</p>
+                      <p className="text-xs font-semibold text-foreground tabular-nums">{fmt(entry.earnings?.grossPay)}</p>
                     </div>
-                    <div>
-                      <p className="text-muted-foreground">PAYE</p>
-                      <p className="font-medium text-red-600 dark:text-red-400">{fmt(entry.deductions?.paye)}</p>
+                    <div className="rounded bg-red-500/5 p-2 text-center">
+                      <p className="text-[10px] text-muted-foreground">PAYE</p>
+                      <p className="text-xs font-semibold text-red-600 dark:text-red-400 tabular-nums">{fmt(entry.deductions?.paye)}</p>
                     </div>
-                    <div>
-                      <p className="text-muted-foreground">NSSF+NHIF</p>
-                      <p className="font-medium text-red-600 dark:text-red-400">
-                        {fmt((entry.deductions?.nssf || 0) + (entry.deductions?.nhif || 0))}
+                    <div className="rounded bg-red-500/5 p-2 text-center">
+                      <p className="text-[10px] text-muted-foreground">NSSF+SHIF</p>
+                      <p className="text-xs font-semibold text-red-600 dark:text-red-400 tabular-nums">
+                        {fmt((entry.deductions?.nssf || 0) + (entry.deductions?.shif || 0))}
                       </p>
                     </div>
                   </div>
