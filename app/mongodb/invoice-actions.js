@@ -19,6 +19,7 @@ import {
 } from "@/lib/utils/tenant-utils";
 import dbConnect from "@/app/config/dbConnect";
 import Project from "../models/project";
+import { emitWebhookEvent } from "@/lib/integrations/webhooks/emitter";
 
 const ObjectId = mongoose.Types.ObjectId;
 
@@ -864,6 +865,16 @@ export async function createInvoice(prevState, formData) {
       revalidatePath(`/dashboard/projects/${data.projectId}`);
     }
 
+    emitWebhookEvent({
+      companyId: companyId.toString(),
+      event: "invoice.created",
+      payload: {
+        invoiceId: invoice[0]._id.toString(),
+        invoiceNumber: invoice[0].invoiceNumber,
+        status: "draft",
+      },
+    });
+
     return {
       message: `Invoice ${invoiceNumber} created as draft. Stock reserved. Post it to finalize.`,
       success: true,
@@ -1098,6 +1109,19 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
       revalidatePath("/dashboard/projects");
       revalidatePath(`/dashboard/projects/${invoice.projectId}`);
     }
+
+    emitWebhookEvent({
+      companyId: companyId.toString(),
+      event: invoice.paymentStatus === "paid" ? "invoice.paid" : "payment.received",
+      payload: {
+        invoiceId: invoiceId.toString(),
+        invoiceNumber: invoice.invoiceNumber,
+        paymentId: payment._id.toString(),
+        paymentNumber: payment.paymentNumber,
+        amount,
+        paymentStatus: invoice.paymentStatus,
+      },
+    });
 
     return {
       success: true,

@@ -263,6 +263,21 @@ const invoiceSchema = new Schema(
             type: Boolean,
             default: false,
           },
+
+          // Weighbridge fulfillment — set by the WB connector when the outbound
+          // ticket completes and this item's inventory has already been moved.
+          // When true, invoice posting MUST skip inventory reduction and COGS JE
+          // for this item — WB already posted: DR COGS, CR Inventory.
+          // Invoice only needs to post the revenue side: DR AR, CR Revenue.
+          weighbridgeTicketId: {
+            type: Schema.Types.ObjectId,
+            ref: "WeighbridgeTicket",
+            default: null,
+          },
+          weighbridgeTicketNumber: {
+            type: String,
+            default: null,
+          },
         },
       ],
       validate: {
@@ -1141,6 +1156,11 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
     // Check if item is from technician stock (either via request or direct checkout)
     const isFromTechnicianStock = !!(item.relatedRequest?.requestId || item.relatedCheckout?.checkoutId);
 
+    // Check if inventory was already moved by the weighbridge connector.
+    // When true: WB already posted DR COGS / CR Inventory.
+    // Invoice posting must skip inventory + COGS for this item — only post revenue.
+    const isWBFulfilled = !!item.weighbridgeTicketId;
+
     // Check if stock was pre-committed (new commitment-based flow)
     const isStockCommitted = item.stockCommitted === true;
 
@@ -1150,15 +1170,18 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
     if (isFromTechnicianStock) {
       totalCOGSFromTechStock += lineCOGS;
       itemsFromTechStock.push({ item, product, lineCOGS });
+    } else if (isWBFulfilled) {
+      // WB-fulfilled items: inventory and COGS already handled by the WB connector.
+      // Do not add to itemsFromInventory — they won't get another stock movement or COGS JE.
     } else {
       totalCOGSFromInventory += lineCOGS;
       itemsFromInventory.push({ item, product, lineCOGS });
     }
 
     // ============================================
-    // FULFILL INVENTORY (only for store inventory items)
+    // FULFILL INVENTORY (only for store inventory items not yet moved by WB)
     // ============================================
-    if (!isFromTechnicianStock) {
+    if (!isFromTechnicianStock && !isWBFulfilled) {
       const previousOnHand = product.inventory?.quantityOnHand || 0;
 
       if (isStockCommitted) {

@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MobileNav } from "@/components/mobile-nav";
 import { PcNav } from "@/components/pc-nav";
-import { MobileSearch, DesktopSearch } from "@/components/search";
+import { MobileSearch } from "@/components/search";
 import { useTheme } from "next-themes";
 import { QaliSuiteIcon } from "@/components/qalisuite-logo";
 
@@ -84,12 +84,9 @@ export function AppSidebar({ children, user, ...props }) {
                 <QaliSuiteIcon className="w-8 h-8" />
               </div>
 
-              {/* Center: Desktop search (hidden on mobile) */}
-              <DesktopSearch />
-
               {/* Right: Action Buttons */}
               <div className="flex items-center gap-0.5 sm:gap-1.5 ml-auto shrink-0">
-                {/* Mobile search icon — grouped with other actions */}
+                {/* Mobile search icon — opens command palette */}
                 <MobileSearch />
 
                 {/* Theme Toggle */}

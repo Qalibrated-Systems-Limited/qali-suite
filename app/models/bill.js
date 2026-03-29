@@ -120,6 +120,15 @@ const billLineSchema = new Schema(
       poNumber: String,
       poLineIndex: Number,
     },
+
+    // Weighbridge Receipt Reference
+    // When set: bill posting debits GR/IR (to clear it) instead of Inventory
+    // because WB receipt already did DR Inventory / CR GR/IR.
+    // Represents the GR/IR matching step: DR GR/IR, CR Accounts Payable.
+    weighbridgeRef: {
+      ticketId:     { type: Schema.Types.ObjectId, ref: "WeighbridgeTicket", default: null },
+      ticketNumber: { type: String, default: null },
+    },
   },
   { _id: true },
 );
@@ -649,12 +658,13 @@ billSchema.methods.approve = async function (user) {
   // 2. Get Required System Accounts (tenant-scoped)
   // ==========================================
   const accountFilter = this.companyId ? { companyId: this.companyId } : {};
-  const [apAccount, vatInputAccount, whtPayableAccount, inventoryAccount] =
+  const [apAccount, vatInputAccount, whtPayableAccount, inventoryAccount, grniAccount] =
     await Promise.all([
       Account.findOne({ ...accountFilter, systemAccount: "accounts_payable" }),
       Account.findOne({ ...accountFilter, systemAccount: "vat_input" }),
       Account.findOne({ ...accountFilter, systemAccount: "wht_payable" }),
       Account.findOne({ ...accountFilter, systemAccount: "inventory" }),
+      Account.findOne({ ...accountFilter, systemAccount: "grni" }),
     ]);
 
   if (!apAccount) {
@@ -681,18 +691,33 @@ billSchema.methods.approve = async function (user) {
       line.product?.id && line.account.type === "asset";
 
     if (isInventoryPurchase && inventoryAccount) {
-      // Inventory purchase - debit Inventory account
-      jeLines.push({
-        accountId: inventoryAccount._id,
-        accountCode: inventoryAccount.accountCode,
-        accountName: inventoryAccount.accountName,
-        accountType: "asset",
-        debit: line.amount,
-        credit: 0,
-        description: `Purchase: ${line.product.name || line.description} (${
-          line.quantity
-        } ${line.unit})`,
-      });
+      const hasWbReceipt = !!line.weighbridgeRef?.ticketId;
+
+      if (hasWbReceipt && grniAccount) {
+        // Goods already received via weighbridge: WB entry posted DR Inventory / CR GR/IR.
+        // This bill clears the GR/IR liability: DR GR/IR, CR Accounts Payable.
+        // Inventory account is NOT touched again — it was already debited at WB receipt.
+        jeLines.push({
+          accountId:   grniAccount._id,
+          accountCode: grniAccount.accountCode,
+          accountName: grniAccount.accountName,
+          accountType: "liability",
+          debit:       line.amount,
+          credit:      0,
+          description: `GR/IR clearing — ${line.product.name || line.description} · WB ${line.weighbridgeRef.ticketNumber}`,
+        });
+      } else {
+        // Direct inventory purchase (no weighbridge) — debit Inventory as normal
+        jeLines.push({
+          accountId:   inventoryAccount._id,
+          accountCode: inventoryAccount.accountCode,
+          accountName: inventoryAccount.accountName,
+          accountType: "asset",
+          debit:       line.amount,
+          credit:      0,
+          description: `Purchase: ${line.product.name || line.description} (${line.quantity} ${line.unit})`,
+        });
+      }
 
       // Queue stock movement
       stockMovements.push({
@@ -887,6 +912,24 @@ billSchema.methods.approve = async function (user) {
   this.lastModifiedBy = userInfo;
 
   await this.save();
+
+  // Mark any linked weighbridge tickets as GR/IR matched.
+  // Collect unique ticket IDs from lines that have a weighbridgeRef.
+  const wbTicketIds = [
+    ...new Set(
+      this.lines
+        .filter((l) => l.weighbridgeRef?.ticketId)
+        .map((l) => l.weighbridgeRef.ticketId.toString())
+    ),
+  ];
+
+  if (wbTicketIds.length > 0) {
+    const WeighbridgeTicket = mongoose.model("WeighbridgeTicket");
+    await WeighbridgeTicket.updateMany(
+      { _id: { $in: wbTicketIds } },
+      { $set: { billId: this._id, billRef: this.billNumber } }
+    );
+  }
 
   return this;
 };

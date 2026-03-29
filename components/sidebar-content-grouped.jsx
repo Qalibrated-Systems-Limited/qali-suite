@@ -30,6 +30,8 @@ import {
   FolderTree,
   FolderKanban,
   Clock,
+  Search,
+  Plug,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -55,6 +57,7 @@ import {
 } from "./ui/tooltip";
 import { QaliSuiteIcon, QaliSuiteMark } from "./qalisuite-logo";
 import { SidebarClockWidget } from "./sidebar-clock-widget";
+import { useCommandPalette } from "./command-palette-provider";
 
 // ============================================
 // PLAN GATING HELPER
@@ -598,6 +601,18 @@ const getNavigationGroups = (user) => {
   },
 
   // ============================================
+  // INTEGRATIONS (ungrouped, Enterprise + Admin only)
+  // ============================================
+  {
+    type: "single",
+    icon: Plug,
+    label: "Integrations",
+    id: "integration",
+    href: "/dashboard/integrations",
+    hidden: user?.role !== "Admin" || !hasMod("integration"),
+  },
+
+  // ============================================
   // SETTINGS (ungrouped)
   // ============================================
   {
@@ -809,6 +824,7 @@ const NavItem = ({ item, onItemClick, collapsed }) => {
 // ============================================
 export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
   const navigationGroups = getNavigationGroups(user);
+  const { setOpen: openCommandPalette } = useCommandPalette();
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -830,6 +846,31 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
 
         {/* Navigation */}
         <nav className={clsx("flex-1 space-y-1 overflow-y-auto", collapsed ? "p-2" : "p-3 md:p-4")}>
+          {/* Search */}
+          {collapsed ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => openCommandPalette(true)}
+                  className="group w-full flex items-center justify-center p-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-all duration-200"
+                >
+                  <Search className="w-5 h-5 transition-transform group-hover:scale-110" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>
+                Search
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <button
+              onClick={() => openCommandPalette(true)}
+              className="group w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-all duration-200"
+            >
+              <Search className="w-4 h-4 transition-transform group-hover:scale-110" />
+              <span>Search</span>
+            </button>
+          )}
+
           {navigationGroups.map((navItem) => {
             if (navItem.hidden) return null;
 

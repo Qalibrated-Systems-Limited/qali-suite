@@ -1,6 +1,8 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { auth } from "@/auth";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import User from "@/app/models/user";
 import { SiteHeader } from "@/components/site-header";
 import {
@@ -22,16 +24,27 @@ import {
   StockCategoryFilterServer,
   CategoryFilterSkeleton,
 } from "../components/StockServerComponents";
+import { Plus } from "lucide-react";
 
 // ============================================
-// ACTION BUTTONS (with lazy PDF export)
+// ACTION BUTTONS
 // ============================================
 
-function ActionButtons() {
+function ActionButtons({ canCreate }) {
   return (
-    <Suspense fallback={<PDFExportSkeleton />}>
-      <StockPDFExportServer />
-    </Suspense>
+    <div className="flex items-center gap-2">
+      {canCreate && (
+        <Button asChild size="sm">
+          <Link href="/dashboard/stocks/create">
+            <Plus className="h-4 w-4 mr-1" />
+            Add Product
+          </Link>
+        </Button>
+      )}
+      <Suspense fallback={<PDFExportSkeleton />}>
+        <StockPDFExportServer />
+      </Suspense>
+    </div>
   );
 }
 
@@ -77,17 +90,20 @@ async function StockPage(props) {
     <div className="flex flex-col gap-6">
       {/* Header */}
       <SiteHeader
-        title={
-          action === "request"
-            ? "Select Items"
-            : "Stock"
-        }
+        title={action === "request" ? "Select Items" : "Stock"}
         description={
           action === "request"
             ? "Add items to your request cart"
             : "Manage inventory and stock levels"
         }
-        Action={() => <ActionButtons />}
+        Action={() => (
+          <ActionButtons
+            canCreate={
+              action !== "request" &&
+              ["Admin", "Store Manager", "SuperAdmin"].includes(user?.role)
+            }
+          />
+        )}
       />
 
       {/* Success/Error Banner */}

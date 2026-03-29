@@ -63,6 +63,8 @@ const journalEntrySchema = new Schema(
         //Other
         "liability_payment",
         "loan_disbursement",
+        "goods_receipt",    // WB inbound — DR Inventory, CR GR/IR
+        "goods_dispatch",   // WB outbound — DR COGS, CR Inventory
       ],
       index: true,
     },
@@ -143,6 +145,8 @@ const journalEntrySchema = new Schema(
       billId: Schema.Types.ObjectId,
       billNumber: String,
       stockMovementId: Schema.Types.ObjectId,
+      weighbridgeTicketId: Schema.Types.ObjectId,
+      weighbridgeTicketNumber: String,
     },
 
     // Status & Control
