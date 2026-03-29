@@ -23,6 +23,7 @@ export const UNIT_OPTIONS = [
   { value: "set", label: "Set" },
   { value: "unit", label: "Unit" },
   { value: "kg", label: "Kilogram (kg)" },
+  { value: "t", label: "Tonne (t)" },
   { value: "g", label: "Gram (g)" },
   { value: "m", label: "Meter (m)" },
   { value: "mm", label: "Millimeter (mm)" },

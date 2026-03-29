@@ -1,1 +1,1 @@
-export const units = ["pcs", "kg", "litre", "mtr", "mm", "ft", "box", "pack"];
+export const units = ["pcs", "kg", "t", "litre", "mtr", "mm", "ft", "box", "pack"];
