@@ -52,7 +52,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { createExpense, quickExpense, updateExpense } from "@/app/mongodb/actions/expense-actions";
+import { createExpense, updateExpense } from "@/app/mongodb/actions/expense-actions";
 import { FileUpload } from "@/components/file-upload";
 import ProjectPicker from "@/components/project-picker";
 import ExpenseAccountCombobox from "@/components/expense-account-combobox";
@@ -585,7 +585,7 @@ export default function ExpenseForm({
   const [paymentMethod, setPaymentMethod] = useState(expense?.paymentMethod || "unpaid");
   const [paidFrom, setPaidFrom] = useState(expense?.paidFrom || "");
   const [isReimbursable, setIsReimbursable] = useState(expense?.isReimbursable || false);
-  const [submitAndApprove, setSubmitAndApprove] = useState(false);
+  // submitAndApprove removed — all expenses auto-post on save
   const [receipts, setReceipts] = useState(expense?.receipts || []);
   const [projectId, setProjectId] = useState(expense?.projectId || "");
   const [category, setCategory] = useState(expense?.category || "");
@@ -617,11 +617,9 @@ export default function ExpenseForm({
   const subtotal = parseFloat(amount) || 0;
   const total = subtotal + taxAmount - withholdingTax;
 
-  // Action handler
+  // Action handler — single path: create + auto-post (or update + auto-post)
   const actionFn = isEditing
     ? updateExpense.bind(null, expense._id)
-    : submitAndApprove
-    ? quickExpense
     : createExpense;
 
   const [state, formAction, isPending] = useActionState(actionFn, null);
@@ -1006,33 +1004,13 @@ export default function ExpenseForm({
           <Link href="/dashboard/expenses">Cancel</Link>
         </Button>
 
-        {!isEditing && (
-          <Button
-            type="submit"
-            variant="secondary"
-            disabled={isPending}
-            onClick={() => setSubmitAndApprove(false)}
-          >
-            {isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4 mr-2" />
-            )}
-            Save as Draft
-          </Button>
-        )}
-
-        <Button
-          type="submit"
-          disabled={isPending}
-          onClick={() => setSubmitAndApprove(!isEditing)}
-        >
+        <Button type="submit" disabled={isPending}>
           {isPending ? (
             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
           ) : (
             <Send className="w-4 h-4 mr-2" />
           )}
-          {isEditing ? "Update Expense" : "Save & Submit"}
+          {isEditing ? "Update & Post" : "Post Expense"}
         </Button>
       </div>
     </form>

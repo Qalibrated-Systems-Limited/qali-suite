@@ -2,13 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
-  Edit,
   Trash2,
-  Send,
-  CheckCircle2,
-  XCircle,
   Wallet,
   Loader2,
   MoreHorizontal,
@@ -21,7 +16,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -33,7 +27,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -55,11 +48,9 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  submitExpense,
-  approveExpense,
-  rejectExpense,
-  markExpenseAsPaid,
+  recordExpensePayment,
   deleteExpense,
+  postLegacyExpense,
 } from "@/app/mongodb/actions/expense-actions";
 
 export default function ExpenseActions({ expense, paymentAccounts = [] }) {
@@ -68,52 +59,64 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
   const [error, setError] = useState(null);
 
   // Dialog states
-  const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [showPayDialog, setShowPayDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  // Form states
-  const [rejectReason, setRejectReason] = useState("");
+  // Payment form states
   const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
   const [paidFrom, setPaidFrom] = useState("");
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
 
-  // Find selected account for display
   const selectedAccount = paymentAccounts.find((a) => a._id === paidFrom);
 
-  const handleAction = async (action, formData = null) => {
+  const handlePay = async () => {
     setLoading(true);
     setError(null);
-
     try {
-      let result;
+      const formData = new FormData();
+      formData.append("paymentMethod", paymentMethod);
+      formData.append("paidFrom", paidFrom);
+      formData.append("paidAt", new Date().toISOString());
 
-      switch (action) {
-        case "submit":
-          result = await submitExpense(expense._id);
-          break;
-        case "approve":
-          result = await approveExpense(expense._id);
-          break;
-        case "reject":
-          result = await rejectExpense(expense._id, {}, formData);
-          setShowRejectDialog(false);
-          break;
-        case "pay":
-          result = await markExpenseAsPaid(expense._id, {}, formData);
-          setShowPayDialog(false);
-          break;
-        case "delete":
-          result = await deleteExpense(expense._id);
-          if (result.success) {
-            router.push("/dashboard/expenses");
-            return;
-          }
-          break;
-      }
-
+      const result = await recordExpensePayment(expense._id, {}, formData);
       if (!result?.success) {
-        setError(result?.error || "Action failed");
+        setError(result?.error || "Failed to record payment");
+      } else {
+        setShowPayDialog(false);
+        router.refresh();
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await deleteExpense(expense._id);
+      if (result?.success) {
+        router.push("/dashboard/expenses");
+        return;
+      }
+      setError(result?.error || "Failed to delete");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+      setShowDeleteDialog(false);
+    }
+  };
+
+  const handlePostLegacy = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await postLegacyExpense(expense._id);
+      if (!result?.success) {
+        setError(result?.error || "Failed to post expense");
       } else {
         router.refresh();
       }
@@ -124,23 +127,14 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
     }
   };
 
-  const handleReject = () => {
-    const formData = new FormData();
-    formData.append("reason", rejectReason);
-    handleAction("reject", formData);
-  };
-
-  const handlePay = () => {
-    const formData = new FormData();
-    formData.append("paymentMethod", paymentMethod);
-    formData.append("paidFrom", paidFrom);
-    formData.append("paidAt", new Date().toISOString());
-    handleAction("pay", formData);
-  };
+  // Determine which actions to show
+  const isLegacy = ["pending", "approved", "rejected"].includes(expense.status);
+  const isUnpaid = expense.paymentStatus === "unpaid" &&
+    ["posted", "approved"].includes(expense.status);
+  const canDelete = expense.status === "draft";
 
   return (
     <>
-      {/* Error Display */}
       {error && (
         <div className="fixed bottom-4 right-4 bg-destructive text-destructive-foreground px-4 py-2 rounded-lg shadow-lg text-sm z-50">
           {error}
@@ -148,78 +142,36 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
       )}
 
       <div className="flex items-center gap-2">
-        {/* Primary Actions based on status */}
-        {expense.status === "draft" && (
-          <>
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/dashboard/expenses/${expense._id}/edit`}>
-                <Edit className="w-4 h-4 mr-2" />
-                Edit
-              </Link>
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => handleAction("submit")}
-              disabled={loading}
-            >
-              {loading ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4 mr-2" />
-              )}
-              Submit
-            </Button>
-          </>
+        {/* Legacy migration — post old pending/approved/rejected expenses */}
+        {isLegacy && (
+          <Button
+            size="sm"
+            onClick={handlePostLegacy}
+            disabled={loading}
+          >
+            {loading ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Wallet className="w-4 h-4 mr-2" />
+            )}
+            Post Now
+          </Button>
         )}
 
-        {expense.status === "pending" && (
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowRejectDialog(true)}
-              disabled={loading}
-            >
-              <XCircle className="w-4 h-4 mr-2" />
-              Reject
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => handleAction("approve")}
-              disabled={loading}
-            >
-              {loading ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <CheckCircle2 className="w-4 h-4 mr-2" />
-              )}
-              Approve
-            </Button>
-          </>
-        )}
-
-        {expense.status === "approved" && (
+        {/* Record Payment — only for unpaid posted expenses */}
+        {isUnpaid && !isLegacy && (
           <Button
             size="sm"
             onClick={() => setShowPayDialog(true)}
             disabled={loading}
           >
             <Wallet className="w-4 h-4 mr-2" />
-            Mark as Paid
+            Record Payment
           </Button>
         )}
 
-        {expense.status === "rejected" && (
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/dashboard/expenses/${expense._id}/edit`}>
-              <Edit className="w-4 h-4 mr-2" />
-              Edit & Resubmit
-            </Link>
-          </Button>
-        )}
-
-        {/* More Actions */}
-        {(expense.status === "draft" || expense.status === "rejected") && (
+        {/* More actions */}
+        {canDelete && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" className="h-9 w-9">
@@ -239,60 +191,14 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
         )}
       </div>
 
-      {/* Reject Dialog */}
-      <Dialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reject Expense</DialogTitle>
-            <DialogDescription>
-              Please provide a reason for rejecting this expense. The submitter
-              will be notified.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="reason">Reason for Rejection</Label>
-              <Textarea
-                id="reason"
-                placeholder="e.g., Missing receipt, incorrect category, not approved..."
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                rows={3}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowRejectDialog(false)}
-              disabled={loading}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleReject}
-              disabled={loading || !rejectReason.trim()}
-            >
-              {loading ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <XCircle className="w-4 h-4 mr-2" />
-              )}
-              Reject Expense
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Pay Dialog */}
       <Dialog open={showPayDialog} onOpenChange={setShowPayDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Record Payment</DialogTitle>
             <DialogDescription>
-              Record payment details for this expense. A journal entry will be
-              created automatically.
+              Record payment for this expense. A clearing journal entry
+              (DR Accrued Expenses / CR Cash or Bank) will be created.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -361,9 +267,6 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
                   </Command>
                 </PopoverContent>
               </Popover>
-              <p className="text-xs text-muted-foreground">
-                Select the cash/bank account used for payment
-              </p>
             </div>
           </div>
           <DialogFooter>
@@ -409,10 +312,7 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
             </Button>
             <Button
               variant="destructive"
-              onClick={() => {
-                setShowDeleteDialog(false);
-                handleAction("delete");
-              }}
+              onClick={handleDelete}
               disabled={loading}
             >
               {loading ? (

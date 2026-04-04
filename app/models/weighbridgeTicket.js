@@ -160,6 +160,7 @@ const weighbridgeTicketSchema = new Schema(
     completedAt: { type: Date, default: null },
     voidedAt:    { type: Date, default: null },
     voidReason:  { type: String, default: null },
+    voidedBy:    { id: { type: String }, name: { type: String } },
     notes:       { type: String, maxlength: 500, default: "" },
 
     // Non-blocking warnings set on completion — surfaced in UI

@@ -75,31 +75,44 @@ const statusConfig = {
     label: "Draft",
     variant: "secondary",
     icon: Receipt,
-    description: "Expense is saved but not submitted",
+    description: "Expense is saved but not posted",
   },
-  pending: {
-    label: "Pending Approval",
-    variant: "warning",
-    icon: Clock,
-    description: "Waiting for manager approval",
-  },
-  approved: {
-    label: "Approved",
+  posted: {
+    label: "Posted",
     variant: "success",
     icon: CheckCircle2,
-    description: "Ready for payment",
-  },
-  rejected: {
-    label: "Rejected",
-    variant: "destructive",
-    icon: XCircle,
-    description: "Expense was rejected",
+    description: "Journal entry created",
   },
   paid: {
     label: "Paid",
     variant: "default",
     icon: Wallet,
     description: "Payment completed",
+  },
+  void: {
+    label: "Void",
+    variant: "destructive",
+    icon: XCircle,
+    description: "Expense voided and reversed",
+  },
+  // Legacy statuses — still displayed for old data
+  pending: {
+    label: "Pending (Legacy)",
+    variant: "warning",
+    icon: Clock,
+    description: "Old workflow — click Post Now to migrate",
+  },
+  approved: {
+    label: "Approved (Legacy)",
+    variant: "success",
+    icon: CheckCircle2,
+    description: "Old workflow — click Post Now to migrate",
+  },
+  rejected: {
+    label: "Rejected (Legacy)",
+    variant: "destructive",
+    icon: XCircle,
+    description: "Old workflow — click Post Now to migrate",
   },
 };
 
@@ -441,11 +454,11 @@ export default async function ExpenseDetailPage({ params, searchParams }) {
                 <p className="text-sm text-muted-foreground">Method</p>
                 <p className="capitalize">
                   {expense.paymentMethod === "unpaid"
-                    ? "Not Paid"
+                    ? "Unpaid (Accrued)"
                     : expense.paymentMethod?.replace("_", " ")}
                 </p>
               </div>
-              {expense.status === "paid" && expense.paidAt && (
+              {expense.paidAt && (
                 <div>
                   <p className="text-sm text-muted-foreground">Paid On</p>
                   <p>{formatDateTime(expense.paidAt)}</p>
@@ -480,7 +493,23 @@ export default async function ExpenseDetailPage({ params, searchParams }) {
                   {expense.createdBy?.name} on {formatDateTime(expense.createdAt)}
                 </p>
               </div>
-              {expense.submittedAt && (
+              {expense.postedAt && (
+                <div className="text-sm">
+                  <p className="text-muted-foreground">Posted</p>
+                  <p>
+                    {expense.postedBy?.name} on{" "}
+                    {formatDateTime(expense.postedAt)}
+                  </p>
+                </div>
+              )}
+              {expense.paidAt && (
+                <div className="text-sm">
+                  <p className="text-muted-foreground">Paid</p>
+                  <p>{formatDateTime(expense.paidAt)}</p>
+                </div>
+              )}
+              {/* Legacy audit fields for old data */}
+              {expense.submittedAt && !expense.postedAt && (
                 <div className="text-sm">
                   <p className="text-muted-foreground">Submitted</p>
                   <p>
@@ -489,7 +518,7 @@ export default async function ExpenseDetailPage({ params, searchParams }) {
                   </p>
                 </div>
               )}
-              {expense.approvedAt && (
+              {expense.approvedAt && !expense.postedAt && (
                 <div className="text-sm">
                   <p className="text-muted-foreground">Approved</p>
                   <p>

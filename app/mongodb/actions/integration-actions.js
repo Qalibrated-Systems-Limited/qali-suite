@@ -9,6 +9,8 @@ import IntegrationKey from "@/app/models/integrationKey";
 import WebhookSubscription from "@/app/models/webhookSubscription";
 import SyncLog from "@/app/models/syncLog";
 import WeighbridgeTicket from "@/app/models/weighbridgeTicket";
+import { StockMovement } from "@/app/models/stockmovement";
+import JournalEntry from "@/app/models/JournalEntry";
 import { revalidatePath } from "next/cache";
 
 // ============================================
@@ -424,5 +426,79 @@ export async function getWeighbridgeStats() {
     };
   } catch (err) {
     return { total: 0, completed: 0, pending: 0, voided: 0, totalNetKg: 0 };
+  }
+}
+
+// ── Void Weighbridge Ticket (Admin, with full reversal) ───
+
+/**
+ * Void a weighbridge ticket — including reversal of its stock movement
+ * and journal entry — so the GL and inventory stay clean.
+ *
+ * Allowed for:
+ *   - pending / first_recorded → void only (no GL to reverse)
+ *   - completed                → reverse StockMovement + JE, then void
+ *
+ * NOT allowed once already voided.
+ */
+export async function voidWeighbridgeTicket(ticketId, reason) {
+  try {
+    if (!ticketId) return { error: "ticketId is required" };
+    if (!reason?.trim()) return { error: "A void reason is required" };
+
+    const { user, companyId } = await getAuthContext();
+    await dbConnect();
+
+    const ticket = await WeighbridgeTicket.findOne({ _id: ticketId, companyId });
+    if (!ticket) return { error: "Ticket not found" };
+    if (ticket.status === "voided") return { error: "Ticket is already voided" };
+
+    const reversals = { movement: null, journalEntry: null };
+
+    if (ticket.status === "completed") {
+      // ── Reverse the stock movement ──────────────────────────
+      if (ticket.internalId) {
+        const movement = await StockMovement.findOne({
+          _id:       ticket.internalId,
+          companyId,
+        });
+
+        if (movement && !movement.isReversed) {
+          const reversal = await movement.reverse(
+            { id: user.id, name: user.name, role: user.role },
+            `WB ticket ${ticket.ticketNumber} voided — ${reason}`
+          );
+          // movement.reverse() also reverses the linked JE if it exists
+          reversals.movement    = reversal.movementNumber;
+          reversals.journalEntry = reversal.accounting?.journalEntryId?.toString() ?? null;
+        } else if (movement?.isReversed) {
+          // Movement was already reversed by another process — safe to proceed
+          reversals.movement = "already reversed";
+        }
+      }
+    }
+
+    // ── Mark ticket voided ──────────────────────────────────
+    ticket.status    = "voided";
+    ticket.voidedAt  = new Date();
+    ticket.voidReason = reason.trim();
+    ticket.voidedBy  = { id: user.id, name: user.name };
+    await ticket.save();
+
+    revalidatePath("/dashboard/integrations/weighbridge");
+
+    return {
+      success:     true,
+      ticketNumber: ticket.ticketNumber,
+      reversals,
+      message:
+        ticket.status === "voided" &&
+        reversals.movement &&
+        reversals.movement !== "already reversed"
+          ? `Ticket ${ticket.ticketNumber} voided. Stock movement and GL entry reversed.`
+          : `Ticket ${ticket.ticketNumber} voided.`,
+    };
+  } catch (err) {
+    return { error: err.message || "Failed to void ticket" };
   }
 }

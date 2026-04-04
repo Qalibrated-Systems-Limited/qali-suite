@@ -27,7 +27,6 @@ function revalidateProject(projectId) {
 // ============================================
 const EXPENSE_ROLES = {
   CREATE: ["Employee", "Accountant", "Manager", "Admin"],
-  APPROVE: ["Manager", "Admin"],
   PAY: ["Accountant", "Manager", "Admin"],
   DELETE: ["Admin"],
 };
@@ -44,7 +43,7 @@ function formatUser(user) {
 }
 
 // ============================================
-// VALIDATION SCHEMAS
+// VALIDATION SCHEMA
 // ============================================
 const expenseSchema = z.object({
   expenseDate: z.string().min(1, "Expense date is required"),
@@ -56,7 +55,7 @@ const expenseSchema = z.object({
   withholdingTax: z.coerce.number().min(0).optional().default(0),
   paymentMethod: z.enum(["cash", "mpesa", "bank_transfer", "cheque", "card", "unpaid"]).default("unpaid"),
   paidFrom: z.string().optional(),
-  vendorId: z.string().optional(), // Party ID if selected from list
+  vendorId: z.string().optional(),
   vendorName: z.string().min(1, "Vendor name is required"),
   vendorPhone: z.string().optional(),
   vendorEmail: z.string().email().optional().or(z.literal("")),
@@ -71,7 +70,7 @@ const expenseSchema = z.object({
 });
 
 // ============================================
-// CREATE EXPENSE
+// PARSE RECEIPTS FROM FORM
 // ============================================
 function parseReceipts(formData, user) {
   try {
@@ -92,7 +91,14 @@ function parseReceipts(formData, user) {
   return [];
 }
 
-export async function createExpense(prevState, formData, { skipRedirect = false } = {}) {
+// ============================================
+// CREATE EXPENSE (creates + auto-posts JE)
+// ============================================
+// Industry-standard one-step flow:
+//   Paid   → DR Expense / CR Cash|Bank|Mpesa (posted immediately)
+//   Unpaid → DR Expense / CR Accrued Expenses (accrual, pay later)
+//
+export async function createExpense(prevState, formData) {
   const rawValues = Object.fromEntries(formData.entries());
   let redirectUrl;
 
@@ -120,9 +126,19 @@ export async function createExpense(prevState, formData, { skipRedirect = false 
     if (!expenseAccount) {
       return { errors: { _form: ["Expense account not found"] }, values: rawValues };
     }
-
     if (expenseAccount.accountType !== "expense") {
       return { errors: { _form: ["Selected account is not an expense account"] }, values: rawValues };
+    }
+
+    // Validate payment account if paid
+    if (validatedData.paymentMethod !== "unpaid") {
+      if (!validatedData.paidFrom) {
+        return { errors: { _form: ["Payment account is required when expense is paid"] }, values: rawValues };
+      }
+      const paymentAccount = await Account.findById(validatedData.paidFrom);
+      if (!paymentAccount) {
+        return { errors: { _form: ["Payment account not found"] }, values: rawValues };
+      }
     }
 
     // Generate expense number
@@ -147,7 +163,7 @@ export async function createExpense(prevState, formData, { skipRedirect = false 
       }
     }
 
-    // Create expense
+    // Create expense as draft (post() will set it to "posted")
     const expense = await Expense.create({
       companyId,
       expenseNumber,
@@ -186,14 +202,24 @@ export async function createExpense(prevState, formData, { skipRedirect = false 
       ...projectFields,
     });
 
-    revalidatePath("/dashboard/expenses");
-    revalidateProject(expense.projectId);
+    // Auto-post: creates JE immediately
+    await expense.post(formatUser(user));
 
-    if (skipRedirect) {
-      return { success: true, data: { expenseId: expense._id.toString() } };
+    // Update project financials
+    if (expense.projectId) {
+      const isPaid = expense.paymentStatus === "paid";
+      await Project.findByIdAndUpdate(expense.projectId, {
+        $inc: isPaid
+          ? { "financials.totalCosts": expense.total }
+          : { "financials.totalCommitted": expense.total },
+      });
     }
 
-    redirectUrl = `/dashboard/expenses?success=${encodeURIComponent(`Expense ${expenseNumber} created`)}`;
+    revalidatePath("/dashboard/expenses");
+    revalidatePath("/dashboard/journal");
+    revalidateProject(expense.projectId);
+
+    redirectUrl = `/dashboard/expenses?success=${encodeURIComponent(`Expense ${expenseNumber} posted`)}`;
   } catch (error) {
     console.error("Create expense error:", error);
     return {
@@ -206,7 +232,7 @@ export async function createExpense(prevState, formData, { skipRedirect = false 
 }
 
 // ============================================
-// UPDATE EXPENSE
+// UPDATE EXPENSE (draft only)
 // ============================================
 export async function updateExpense(expenseId, prevState, formData) {
   const rawValues = Object.fromEntries(formData.entries());
@@ -225,8 +251,8 @@ export async function updateExpense(expenseId, prevState, formData) {
       return { errors: { _form: ["Expense not found"] }, values: rawValues };
     }
 
-    if (expense.status !== "draft" && expense.status !== "rejected") {
-      return { errors: { _form: ["Can only edit draft or rejected expenses"] }, values: rawValues };
+    if (expense.status !== "draft") {
+      return { errors: { _form: ["Can only edit draft expenses"] }, values: rawValues };
     }
 
     // Validate
@@ -293,21 +319,17 @@ export async function updateExpense(expenseId, prevState, formData) {
       expense.project = undefined;
     }
 
-    // If was rejected, reset to draft
-    if (expense.status === "rejected") {
-      expense.status = "draft";
-      expense.rejectedAt = null;
-      expense.rejectedBy = null;
-      expense.rejectionReason = null;
-    }
-
     await expense.save();
+
+    // Auto-post after update
+    await expense.post(formatUser(user));
 
     revalidatePath("/dashboard/expenses");
     revalidatePath(`/dashboard/expenses/${expenseId}`);
+    revalidatePath("/dashboard/journal");
     revalidateProject(expense.projectId);
 
-    redirectUrl = `/dashboard/expenses/${expenseId}?success=${encodeURIComponent(`Expense ${expense.expenseNumber} updated`)}`;
+    redirectUrl = `/dashboard/expenses/${expenseId}?success=${encodeURIComponent(`Expense ${expense.expenseNumber} posted`)}`;
   } catch (error) {
     console.error("Update expense error:", error);
     return {
@@ -320,140 +342,11 @@ export async function updateExpense(expenseId, prevState, formData) {
 }
 
 // ============================================
-// SUBMIT EXPENSE FOR APPROVAL
+// RECORD PAYMENT (for unpaid/accrued expenses)
 // ============================================
-export async function submitExpense(expenseId) {
-  try {
-    const { companyId, isSuperAdmin, user } = await getTenantContext();
-
-    await dbConnect();
-
-    const expense = await Expense.findOne(
-      withTenantScope({ _id: expenseId }, companyId, isSuperAdmin)
-    );
-
-    if (!expense) {
-      return { success: false, error: "Expense not found" };
-    }
-
-    if (expense.status !== "draft") {
-      return { success: false, error: "Can only submit draft expenses" };
-    }
-
-    await expense.submit(formatUser(user));
-
-    revalidatePath("/dashboard/expenses");
-    revalidatePath(`/dashboard/expenses/${expenseId}`);
-    revalidatePath("/dashboard/expenses/pending");
-    revalidateProject(expense.projectId);
-
-    return {
-      success: true,
-      message: `Expense ${expense.expenseNumber} submitted for approval`,
-    };
-  } catch (error) {
-    console.error("Submit expense error:", error);
-    return { success: false, error: error.message || "Failed to submit expense" };
-  }
-}
-
-// ============================================
-// APPROVE EXPENSE
-// ============================================
-export async function approveExpense(expenseId) {
-  try {
-    const { companyId, isSuperAdmin, user } = await getTenantContext();
-
-    if (!hasRole(user, EXPENSE_ROLES.APPROVE)) {
-      return { success: false, error: "Only Managers and Admins can approve expenses" };
-    }
-
-    await dbConnect();
-
-    const expense = await Expense.findOne(
-      withTenantScope({ _id: expenseId }, companyId, isSuperAdmin)
-    );
-
-    if (!expense) {
-      return { success: false, error: "Expense not found" };
-    }
-
-    if (expense.status !== "pending") {
-      return { success: false, error: "Can only approve pending expenses" };
-    }
-
-    await expense.approve(formatUser(user));
-
-    // Update project financials — approved expense = committed cost
-    if (expense.projectId) {
-      await Project.findByIdAndUpdate(expense.projectId, {
-        $inc: { "financials.totalCommitted": expense.total },
-      });
-    }
-
-    revalidatePath("/dashboard/expenses");
-    revalidatePath(`/dashboard/expenses/${expenseId}`);
-    revalidatePath("/dashboard/expenses/pending");
-    revalidateProject(expense.projectId);
-
-    return {
-      success: true,
-      message: `Expense ${expense.expenseNumber} approved`,
-    };
-  } catch (error) {
-    console.error("Approve expense error:", error);
-    return { success: false, error: error.message || "Failed to approve expense" };
-  }
-}
-
-// ============================================
-// REJECT EXPENSE
-// ============================================
-export async function rejectExpense(expenseId, prevState, formData) {
-  try {
-    const { companyId, isSuperAdmin, user } = await getTenantContext();
-
-    if (!hasRole(user, EXPENSE_ROLES.APPROVE)) {
-      return { success: false, error: "Only Managers and Admins can reject expenses" };
-    }
-
-    const reason = formData.get("reason")?.toString() || "No reason provided";
-
-    await dbConnect();
-
-    const expense = await Expense.findOne(
-      withTenantScope({ _id: expenseId }, companyId, isSuperAdmin)
-    );
-
-    if (!expense) {
-      return { success: false, error: "Expense not found" };
-    }
-
-    if (expense.status !== "pending") {
-      return { success: false, error: "Can only reject pending expenses" };
-    }
-
-    await expense.reject(formatUser(user), reason);
-
-    revalidatePath("/dashboard/expenses");
-    revalidatePath(`/dashboard/expenses/${expenseId}`);
-    revalidatePath("/dashboard/expenses/pending");
-    revalidateProject(expense.projectId);
-
-    return {
-      success: true,
-      message: `Expense ${expense.expenseNumber} rejected`,
-    };
-  } catch (error) {
-    console.error("Reject expense error:", error);
-    return { success: false, error: error.message || "Failed to reject expense" };
-  }
-}
-
-// ============================================
-// MARK EXPENSE AS PAID
-// ============================================
-export async function markExpenseAsPaid(expenseId, prevState, formData) {
+// Creates clearing JE: DR Accrued Expenses / CR Cash|Bank
+//
+export async function recordExpensePayment(expenseId, prevState, formData) {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
@@ -479,17 +372,12 @@ export async function markExpenseAsPaid(expenseId, prevState, formData) {
       return { success: false, error: "Expense not found" };
     }
 
-    if (expense.status !== "approved") {
-      return { success: false, error: "Expense must be approved before payment" };
+    if (expense.paymentStatus === "paid") {
+      return { success: false, error: "Expense is already paid" };
     }
 
-    // Update payment details
-    expense.paymentMethod = paymentMethod;
-    expense.paidFrom = paidFrom;
-    await expense.save();
-
-    // Mark as paid (creates journal entry)
-    await expense.markAsPaid(formatUser(user), {
+    await expense.recordPayment(formatUser(user), {
+      paymentMethod,
       paidFrom,
       paidAt: paidAt ? new Date(paidAt) : new Date(),
     });
@@ -511,11 +399,11 @@ export async function markExpenseAsPaid(expenseId, prevState, formData) {
 
     return {
       success: true,
-      message: `Expense ${expense.expenseNumber} marked as paid`,
+      message: `Payment recorded for ${expense.expenseNumber}`,
     };
   } catch (error) {
-    console.error("Mark expense as paid error:", error);
-    return { success: false, error: error.message || "Failed to mark expense as paid" };
+    console.error("Record expense payment error:", error);
+    return { success: false, error: error.message || "Failed to record payment" };
   }
 }
 
@@ -540,12 +428,12 @@ export async function deleteExpense(expenseId) {
       return { success: false, error: "Expense not found" };
     }
 
-    if (expense.status === "paid") {
-      return { success: false, error: "Cannot delete paid expenses" };
+    if (expense.journalEntryId) {
+      return { success: false, error: "Cannot delete posted expense — void it instead" };
     }
 
-    if (expense.journalEntryId) {
-      return { success: false, error: "Cannot delete expense with journal entry" };
+    if (expense.status !== "draft") {
+      return { success: false, error: "Can only delete draft expenses" };
     }
 
     await Expense.deleteOne({ _id: expenseId });
@@ -564,23 +452,67 @@ export async function deleteExpense(expenseId) {
 }
 
 // ============================================
-// QUICK EXPENSE (Create + Submit in one step)
+// POST LEGACY EXPENSE
 // ============================================
-export async function quickExpense(prevState, formData) {
-  // Create without redirecting
-  const result = await createExpense(prevState, formData, { skipRedirect: true });
+// Migrates old pending/approved/rejected expenses
+// to the new one-step flow by posting them now.
+//
+export async function postLegacyExpense(expenseId) {
+  try {
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-  // If createExpense returned errors, pass them through
-  if (result?.errors) {
-    return result;
+    if (!hasRole(user, EXPENSE_ROLES.PAY)) {
+      return { success: false, error: "Insufficient permissions" };
+    }
+
+    await dbConnect();
+
+    const expense = await Expense.findOne(
+      withTenantScope({ _id: expenseId }, companyId, isSuperAdmin)
+    );
+
+    if (!expense) {
+      return { success: false, error: "Expense not found" };
+    }
+
+    // Only handle legacy statuses that don't have a JE yet
+    if (!["pending", "approved", "rejected"].includes(expense.status)) {
+      return { success: false, error: `Expense is already ${expense.status}` };
+    }
+
+    if (expense.journalEntryId) {
+      // Already has a JE (approved+paid in the old flow) — just fix the status
+      expense.status = expense.paymentMethod !== "unpaid" ? "paid" : "posted";
+      expense.paymentStatus = expense.paymentMethod !== "unpaid" ? "paid" : "unpaid";
+      expense.postedAt = expense.approvedAt || new Date();
+      expense.postedBy = formatUser(user);
+      await expense.save();
+    } else {
+      // No JE yet — reset to draft so post() can run.
+      //
+      // Edge case: old expense has paymentMethod (e.g. "cash") but no paidFrom
+      // account selected. post() would wrongly treat it as an accrual.
+      // Fix: clear the paymentMethod so it posts as unpaid accrual.
+      // User can then click "Record Payment" to select the correct account.
+      if (expense.paymentMethod !== "unpaid" && !expense.paidFrom) {
+        expense.paymentMethod = "unpaid";
+      }
+
+      expense.status = "draft";
+      await expense.save();
+      await expense.post(formatUser(user));
+    }
+
+    revalidatePath("/dashboard/expenses");
+    revalidatePath(`/dashboard/expenses/${expenseId}`);
+    revalidatePath("/dashboard/journal");
+
+    return {
+      success: true,
+      message: `Expense ${expense.expenseNumber} posted`,
+    };
+  } catch (error) {
+    console.error("Post legacy expense error:", error);
+    return { success: false, error: error.message || "Failed to post expense" };
   }
-
-  // Auto-submit for approval
-  const submitResult = await submitExpense(result.data.expenseId);
-
-  const message = submitResult.success
-    ? "Expense created and submitted for approval"
-    : `Expense created (auto-submit failed: ${submitResult.error})`;
-
-  redirect(`/dashboard/expenses?success=${encodeURIComponent(message)}`);
 }

@@ -64,11 +64,14 @@ const formatDate = (date) => {
 };
 
 const statusConfig = {
-  draft: { label: "Draft", variant: "secondary", icon: Receipt },
-  pending: { label: "Pending", variant: "warning", icon: Clock },
-  approved: { label: "Approved", variant: "success", icon: CheckCircle2 },
-  rejected: { label: "Rejected", variant: "destructive", icon: XCircle },
-  paid: { label: "Paid", variant: "default", icon: Wallet },
+  draft:    { label: "Draft",    variant: "secondary",    icon: Receipt },
+  posted:   { label: "Posted",   variant: "success",      icon: CheckCircle2 },
+  paid:     { label: "Paid",     variant: "default",      icon: Wallet },
+  void:     { label: "Void",     variant: "destructive",  icon: XCircle },
+  // Legacy statuses — still shown for old data
+  pending:  { label: "Pending",  variant: "warning",      icon: Clock },
+  approved: { label: "Approved", variant: "success",      icon: CheckCircle2 },
+  rejected: { label: "Rejected", variant: "destructive",  icon: XCircle },
 };
 
 const categoryLabels = {
@@ -144,14 +147,21 @@ export default function ExpenseList({
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-2">
-              <Clock className="w-4 h-4 text-yellow-500" />
-              <span className="text-sm text-muted-foreground">Pending</span>
+              <CheckCircle2 className="w-4 h-4 text-green-500" />
+              <span className="text-sm text-muted-foreground">Posted</span>
             </div>
             <p className="text-2xl font-bold tabular-nums">
-              {formatCurrency(summary?.byStatus?.pending?.total || 0)}
+              {formatCurrency(
+                (summary?.byStatus?.posted?.total || 0) +
+                (summary?.byStatus?.approved?.total || 0) +
+                (summary?.byStatus?.pending?.total || 0)
+              )}
             </p>
             <p className="text-xs text-muted-foreground">
-              {summary?.byStatus?.pending?.count || 0} awaiting approval
+              {(summary?.byStatus?.posted?.count || 0) +
+               (summary?.byStatus?.approved?.count || 0) +
+               (summary?.byStatus?.pending?.count || 0)}{" "}
+              expenses
             </p>
           </CardContent>
         </Card>
@@ -159,14 +169,19 @@ export default function ExpenseList({
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-2">
-              <CheckCircle2 className="w-4 h-4 text-green-500" />
-              <span className="text-sm text-muted-foreground">Approved</span>
+              <AlertCircle className="w-4 h-4 text-orange-500" />
+              <span className="text-sm text-muted-foreground">Unpaid</span>
             </div>
             <p className="text-2xl font-bold tabular-nums">
-              {formatCurrency(summary?.byStatus?.approved?.total || 0)}
+              {formatCurrency(
+                (summary?.byStatus?.posted?.total || 0) +
+                (summary?.byStatus?.approved?.total || 0)
+              )}
             </p>
             <p className="text-xs text-muted-foreground">
-              {summary?.byStatus?.approved?.count || 0} ready to pay
+              {(summary?.byStatus?.posted?.count || 0) +
+               (summary?.byStatus?.approved?.count || 0)}{" "}
+              awaiting payment
             </p>
           </CardContent>
         </Card>
@@ -214,11 +229,10 @@ export default function ExpenseList({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
-                <SelectItem value="rejected">Rejected</SelectItem>
+                <SelectItem value="posted">Posted</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="draft">Draft</SelectItem>
+                <SelectItem value="void">Void</SelectItem>
               </SelectContent>
             </Select>
 

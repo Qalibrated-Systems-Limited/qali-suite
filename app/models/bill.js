@@ -697,6 +697,7 @@ billSchema.methods.approve = async function (user) {
         // Goods already received via weighbridge: WB entry posted DR Inventory / CR GR/IR.
         // This bill clears the GR/IR liability: DR GR/IR, CR Accounts Payable.
         // Inventory account is NOT touched again — it was already debited at WB receipt.
+        // No stock movement queued — WB connector already created it.
         jeLines.push({
           accountId:   grniAccount._id,
           accountCode: grniAccount.accountCode,
@@ -707,7 +708,7 @@ billSchema.methods.approve = async function (user) {
           description: `GR/IR clearing — ${line.product.name || line.description} · WB ${line.weighbridgeRef.ticketNumber}`,
         });
       } else {
-        // Direct inventory purchase (no weighbridge) — debit Inventory as normal
+        // Direct inventory purchase (no weighbridge) — debit Inventory and queue stock movement
         jeLines.push({
           accountId:   inventoryAccount._id,
           accountCode: inventoryAccount.accountCode,
@@ -717,16 +718,16 @@ billSchema.methods.approve = async function (user) {
           credit:      0,
           description: `Purchase: ${line.product.name || line.description} (${line.quantity} ${line.unit})`,
         });
-      }
 
-      // Queue stock movement
-      stockMovements.push({
-        productId: line.product.id,
-        quantity: line.quantity,
-        unitCost: line.unitPrice,
-        totalCost: line.amount,
-        description: line.description,
-      });
+        // Queue stock movement (only for direct purchases — WB-backed lines skip this)
+        stockMovements.push({
+          productId: line.product.id,
+          quantity: line.quantity,
+          unitCost: line.unitPrice,
+          totalCost: line.amount,
+          description: line.description,
+        });
+      }
     } else {
       // Expense/Asset purchase - debit the specified account
       jeLines.push({

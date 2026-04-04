@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Key, ArrowUpRight, CheckCircle2, XCircle, Clock, Activity, Plus, Globe, Scale } from "lucide-react";
+import { Key, ArrowUpRight, CheckCircle2, XCircle, Clock, Activity, Plus, Globe, Scale, Coffee } from "lucide-react";
 import { getIntegrationStats, getRecentSyncLogs } from "@/app/mongodb/actions/integration-actions";
 
 export const metadata = { title: "Integrations | Settings" };
@@ -130,6 +130,22 @@ export default async function IntegrationsPage() {
             <div>
               <p className="font-medium text-foreground">Weighbridge</p>
               <p className="text-xs text-muted-foreground">Two-pass ticket monitor</p>
+            </div>
+          </div>
+          <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+        </Link>
+
+        <Link
+          href="/dashboard/integrations/coffee-coop"
+          className="group flex items-center justify-between rounded-lg border border-border bg-card p-4 shadow-sm hover:bg-accent transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-500/10">
+              <Coffee className="h-4 w-4 text-green-700 dark:text-green-400" />
+            </div>
+            <div>
+              <p className="font-medium text-foreground">Coffee Collection</p>
+              <p className="text-xs text-muted-foreground">Farmer intake monitor</p>
             </div>
           </div>
           <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />

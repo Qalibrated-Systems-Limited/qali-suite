@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ChevronLeft, Scale, CheckCircle2, Clock, TrendingUp, AlertTriangle } from "lucide-react";
+import { auth } from "@/auth";
 import { getWeighbridgeTickets, getWeighbridgeStats } from "@/app/mongodb/actions/integration-actions";
+import { VoidTicketButton } from "./components/VoidTicketButton";
 
 export const metadata = { title: "Weighbridge | Integrations" };
 
@@ -107,11 +109,13 @@ function StatCard({ label, value, icon: Icon, color = "text-foreground", sub }) 
 }
 
 export default async function WeighbridgePage() {
-  const [tickets, stats] = await Promise.all([
+  const [{ user }, tickets, stats] = await Promise.all([
+    auth(),
     getWeighbridgeTickets({ limit: 100 }),
     getWeighbridgeStats(),
   ]);
 
+  const canVoid     = user?.role === "Admin" || user?.role === "SuperAdmin";
   const totalTonnes = (stats.totalNetKg / 1000).toFixed(2);
 
   return (
@@ -240,6 +244,7 @@ Authorization: Bearer YOUR_WEIGHBRIDGE_KEY
                   <th className="px-4 py-3">Net</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Time</th>
+                  {canVoid && <th className="px-4 py-3" />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -288,6 +293,17 @@ Authorization: Bearer YOUR_WEIGHBRIDGE_KEY
                     <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
                       {formatTime(t.createdAt)}
                     </td>
+                    {canVoid && (
+                      <td className="px-4 py-3">
+                        {t.status !== "voided" && (
+                          <VoidTicketButton
+                            ticketId={t._id}
+                            ticketNumber={t.ticketNumber}
+                            status={t.status}
+                          />
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -337,9 +353,16 @@ Authorization: Bearer YOUR_WEIGHBRIDGE_KEY
                 </div>
 
                 {t.internalRef && <p className="mt-1 text-xs text-primary">{t.internalRef}</p>}
-                <div className="mt-1 flex flex-wrap gap-1">
+                <div className="mt-1 flex flex-wrap items-center gap-1">
                   <GrirBadge ticket={t} />
                   <TransferBadge ticket={t} />
+                  {canVoid && t.status !== "voided" && (
+                    <VoidTicketButton
+                      ticketId={t._id}
+                      ticketNumber={t.ticketNumber}
+                      status={t.status}
+                    />
+                  )}
                 </div>
               </div>
             ))}

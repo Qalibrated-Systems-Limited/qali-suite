@@ -209,36 +209,55 @@ const expenseSchema = new Schema(
       id: String,
     },
 
-    // Approval Workflow
+    // ── Status ─────────────────────────────────
+    // Industry-standard: no approval workflow for expenses.
+    // Paid expenses post immediately. Unpaid expenses post as accruals.
+    //
+    //   draft  → expense being entered (not yet posted)
+    //   posted → JE created (DR Expense / CR Cash or Accrued Expenses)
+    //   paid   → was unpaid, now payment recorded (clearing JE created)
+    //   void   → reversed (JE reversed)
+    //
+    // Legacy statuses (pending, approved, rejected) are kept in the enum
+    // for backward compatibility with existing data but are no longer
+    // created by the current workflow.
     status: {
       type: String,
-      enum: ["draft", "pending", "approved", "rejected", "paid"],
+      enum: ["draft", "posted", "paid", "void", "pending", "approved", "rejected"],
       default: "draft",
       index: true,
     },
 
+    // Payment tracking (separate from document status)
+    paymentStatus: {
+      type: String,
+      enum: ["paid", "unpaid"],
+      default: "unpaid",
+      index: true,
+    },
+
+    // Legacy approval fields — kept for backward compat, not used in new flow
     submittedAt: Date,
-
-    submittedBy: {
-      name: String,
-      id: String,
-    },
-
+    submittedBy: { name: String, id: String },
     approvedAt: Date,
-
-    approvedBy: {
-      name: String,
-      id: String,
-    },
-
+    approvedBy: { name: String, id: String },
     rejectedAt: Date,
-
-    rejectedBy: {
-      name: String,
-      id: String,
-    },
-
+    rejectedBy: { name: String, id: String },
     rejectionReason: String,
+
+    // New: posting audit trail
+    postedAt: Date,
+    postedBy: { name: String, id: String },
+    voidedAt: Date,
+    voidedBy: { name: String, id: String },
+    voidReason: String,
+
+    // Clearing JE when an unpaid expense is later paid
+    clearingJournalEntryId: {
+      type: Schema.Types.ObjectId,
+      ref: "JournalEntry",
+      default: null,
+    },
 
     // Accounting Link
     journalEntryId: {
@@ -300,10 +319,29 @@ expenseSchema.index({ companyId: 1, isReimbursable: 1, employeeId: 1 });
 expenseSchema.index({ companyId: 1, status: 1, approvedAt: -1 });
 
 // ============================================
+// BACKFILL paymentStatus FOR OLD DATA
+// ============================================
+// Old expenses don't have paymentStatus in the DB.
+// Mongoose defaults it to "unpaid" on read — wrong for
+// expenses that were already paid in the old workflow.
+// This hook corrects it at read time based on old fields.
+expenseSchema.post("init", function () {
+  if (this.paymentStatus) return; // already set — skip
+
+  if (this.status === "paid") {
+    this.paymentStatus = "paid";
+  } else if (this.paymentMethod && this.paymentMethod !== "unpaid" && this.paidFrom) {
+    this.paymentStatus = "paid";
+  } else {
+    this.paymentStatus = "unpaid";
+  }
+});
+
+// ============================================
 // VIRTUALS
 // ============================================
 expenseSchema.virtual("isPaid").get(function () {
-  return this.status === "paid";
+  return this.paymentStatus === "paid" || this.status === "paid";
 });
 
 expenseSchema.virtual("needsApproval").get(function () {
@@ -394,187 +432,216 @@ expenseSchema.methods.validateBeforeApproval = async function () {
 };
 
 // ============================================
-// SUBMIT FOR APPROVAL
+// POST EXPENSE (one-step — replaces submit/approve)
 // ============================================
-expenseSchema.methods.submit = async function (submittedBy) {
+// Called immediately on creation. Creates the JE and marks as posted.
+//
+// Paid expenses:   DR Expense / CR Cash|Bank|Mpesa
+// Unpaid expenses: DR Expense / CR Accrued Expenses (liability)
+//
+expenseSchema.methods.post = async function (user) {
   if (this.status !== "draft") {
-    throw new Error("Can only submit draft expenses");
+    throw new Error(`Cannot post expense in status: ${this.status}`);
   }
 
   await this.validateBeforeApproval();
 
-  this.status = "pending";
-  this.submittedAt = new Date();
-  this.submittedBy = submittedBy;
+  const Account = mongoose.model("Account");
+  const JournalEntry = mongoose.model("JournalEntry");
+
+  // Get expense account
+  const expenseAccount = await Account.findById(this.accountId);
+  if (!expenseAccount) throw new Error("Expense account not found");
+
+  // Determine credit account based on payment status
+  let creditAccount;
+  const isPaid = this.paymentMethod !== "unpaid" && this.paidFrom;
+
+  if (isPaid) {
+    // Already paid → credit the payment account (cash/bank/mpesa)
+    creditAccount = await Account.findById(this.paidFrom);
+    if (!creditAccount) throw new Error("Payment account not found");
+  } else {
+    // Unpaid → credit Accrued Expenses (liability)
+    creditAccount = await Account.findOne({
+      companyId: this.companyId,
+      systemAccount: "accrued_expenses",
+    });
+    if (!creditAccount) {
+      throw new Error(
+        "Accrued Expenses account not configured. " +
+        "Add an account with system type 'accrued_expenses' to record unpaid expenses."
+      );
+    }
+  }
+
+  // Build JE lines
+  let lines = [
+    {
+      accountId:   expenseAccount._id,
+      accountCode: expenseAccount.accountCode,
+      accountName: expenseAccount.accountName,
+      accountType: expenseAccount.accountType,
+      debit:       this.total,
+      credit:      0,
+      description: this.description,
+    },
+    {
+      accountId:   creditAccount._id,
+      accountCode: creditAccount.accountCode,
+      accountName: creditAccount.accountName,
+      accountType: creditAccount.accountType,
+      debit:       0,
+      credit:      this.total,
+      description: isPaid
+        ? `Payment for ${this.description}`
+        : `Accrued — ${this.description}`,
+    },
+  ];
+
+  // VAT line if applicable
+  if (this.taxAmount > 0) {
+    const vatAccount = await Account.findOne({
+      companyId: this.companyId,
+      systemAccount: "vat_input",
+    });
+    if (vatAccount) {
+      lines[0].debit = this.amount; // expense net of VAT
+      lines.splice(1, 0, {
+        accountId:   vatAccount._id,
+        accountCode: vatAccount.accountCode,
+        accountName: vatAccount.accountName,
+        accountType: vatAccount.accountType,
+        debit:       this.taxAmount,
+        credit:      0,
+        description: `VAT on expense — ${this.description}`,
+      });
+    }
+  }
+
+  // Generate and create JE
+  const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
+  const entryNumber = await generateUniqueEntryNumber("EXP", this.companyId);
+
+  const journalEntry = await JournalEntry.create({
+    companyId:   this.companyId,
+    entryNumber,
+    entryDate:   this.expenseDate,
+    entryType:   "expense",
+    description: `Expense: ${this.description}`,
+    reference:   this.reference,
+    lines,
+    party: {
+      type: "supplier",
+      id:   this.vendor.id,
+      name: this.vendor.name,
+    },
+    relatedDocuments: {
+      expenseId:     this._id,
+      expenseNumber: this.expenseNumber,
+    },
+    status:    "draft",
+    createdBy: this.createdBy || user, // attribute JE to original expense creator
+  });
+
+  await journalEntry.post(user); // posted by whoever triggered the action
+
+  // Update expense
+  // "paid"   = money already left the account (cash/mpesa/bank credited)
+  // "posted" = accrual only (liability recognized, payment pending)
+  this.journalEntryId = journalEntry._id;
+  this.status         = isPaid ? "paid" : "posted";
+  this.paymentStatus  = isPaid ? "paid" : "unpaid";
+  this.postedAt       = new Date();
+  this.postedBy       = user;
+  if (isPaid) {
+    this.paidAt = this.paidAt || new Date();
+  }
   await this.save();
 
-  return this;
+  return journalEntry;
 };
 
 // ============================================
-// APPROVE EXPENSE
+// RECORD PAYMENT (for unpaid/accrued expenses)
 // ============================================
-expenseSchema.methods.approve = async function (approvedBy) {
-  if (this.status !== "pending") {
-    throw new Error("Can only approve pending expenses");
+// Creates a clearing JE: DR Accrued Expenses / CR Cash|Bank|Mpesa
+//
+expenseSchema.methods.recordPayment = async function (user, paymentDetails) {
+  if (this.paymentStatus === "paid") {
+    throw new Error("Expense is already paid");
   }
 
-  await this.validateBeforeApproval();
-
-  this.status = "approved";
-  this.approvedAt = new Date();
-  this.approvedBy = approvedBy;
-  await this.save();
-
-  // If already paid, create journal entry
-  if (this.paymentMethod !== "unpaid") {
-    await this.createJournalEntry(approvedBy);
+  if (!["posted", "approved"].includes(this.status)) {
+    throw new Error(`Cannot record payment for expense in status: ${this.status}`);
   }
 
-  return this;
-};
-
-// ============================================
-// REJECT EXPENSE
-// ============================================
-expenseSchema.methods.reject = async function (rejectedBy, reason) {
-  if (this.status !== "pending") {
-    throw new Error("Can only reject pending expenses");
-  }
-
-  this.status = "rejected";
-  this.rejectedAt = new Date();
-  this.rejectedBy = rejectedBy;
-  this.rejectionReason = reason;
-  await this.save();
-
-  return this;
-};
-
-// ============================================
-// MARK AS PAID
-// ============================================
-expenseSchema.methods.markAsPaid = async function (paidBy, paymentDetails) {
-  if (this.status !== "approved") {
-    throw new Error("Expense must be approved before marking as paid");
-  }
-
-  if (this.paymentMethod === "unpaid") {
-    throw new Error("Payment method is required");
-  }
-
-  // Update payment details
-  this.paidAt = paymentDetails.paidAt || new Date();
-  this.paidFrom = paymentDetails.paidFrom;
-  this.status = "paid";
-  await this.save();
-
-  // Create journal entry (skip if already exists - handles retry scenarios)
-  if (!this.journalEntryId) {
-    await this.createJournalEntry(paidBy);
-  }
-
-  return this;
-};
-
-// ============================================
-// CREATE JOURNAL ENTRY
-// ============================================
-expenseSchema.methods.createJournalEntry = async function (user) {
-  if (this.journalEntryId) {
-    throw new Error("Journal entry already created for this expense");
-  }
-
-  if (this.paymentMethod === "unpaid" || !this.paidFrom) {
-    throw new Error("Cannot create journal entry for unpaid expense");
+  if (!paymentDetails.paymentMethod || !paymentDetails.paidFrom) {
+    throw new Error("Payment method and payment account are required");
   }
 
   const Account = mongoose.model("Account");
   const JournalEntry = mongoose.model("JournalEntry");
 
-  // Get accounts
-  const expenseAccount = await Account.findById(this.accountId);
-  const paymentAccount = await Account.findById(this.paidFrom);
-
-  if (!expenseAccount || !paymentAccount) {
-    throw new Error("Accounts not found");
-  }
-
-  let lines = [
-    {
-      accountId: expenseAccount._id,
-      accountCode: expenseAccount.accountCode,
-      accountName: expenseAccount.accountName,
-      accountType: expenseAccount.accountType,
-      debit: this.total,
-      credit: 0,
-      description: this.description,
-    },
-    {
-      accountId: paymentAccount._id,
-      accountCode: paymentAccount.accountCode,
-      accountName: paymentAccount.accountName,
-      accountType: paymentAccount.accountType,
-      debit: 0,
-      credit: this.total,
-      description: `Payment for ${this.description}`,
-    },
-  ];
-
-  // Add tax lines if applicable
-  if (this.taxAmount > 0) {
-    const vatAccount = await Account.findOne({ companyId: this.companyId, systemAccount: "vat_output" });
-    if (vatAccount) {
-      // Adjust expense line
-      lines[0].debit = this.amount;
-      
-      // Add VAT line
-      lines.splice(1, 0, {
-        accountId: vatAccount._id,
-        accountCode: vatAccount.accountCode,
-        accountName: vatAccount.accountName,
-        accountType: vatAccount.accountType,
-        debit: this.taxAmount,
-        credit: 0,
-        description: "VAT on expense",
-      });
-    }
-  }
-
-  // Generate entry number using centralized utility
-  const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
-  const entryNumber = await generateUniqueEntryNumber("EXP", this.companyId);
-
-  // Create journal entry
-  const journalEntry = await JournalEntry.create({
+  const accruedAccount = await Account.findOne({
     companyId: this.companyId,
+    systemAccount: "accrued_expenses",
+  });
+  const paymentAccount = await Account.findById(paymentDetails.paidFrom);
+
+  if (!accruedAccount) throw new Error("Accrued Expenses account not configured");
+  if (!paymentAccount) throw new Error("Payment account not found");
+
+  // Clearing JE: DR Accrued Expenses / CR Cash|Bank
+  const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
+  const entryNumber = await generateUniqueEntryNumber("EXP-CLR", this.companyId);
+
+  const clearingJE = await JournalEntry.create({
+    companyId:   this.companyId,
     entryNumber,
-    entryDate: this.expenseDate,
-    entryType: "expense",
-    description: `Expense: ${this.description}`,
-    reference: this.reference,
-    lines,
-    party: {
-      type: "supplier",
-      id: this.vendor.id,
-      name: this.vendor.name,
-    },
+    entryDate:   paymentDetails.paidAt || new Date(),
+    entryType:   "expense",
+    description: `Payment clearing — ${this.expenseNumber}: ${this.description}`,
+    reference:   this.expenseNumber,
+    lines: [
+      {
+        accountId:   accruedAccount._id,
+        accountCode: accruedAccount.accountCode,
+        accountName: accruedAccount.accountName,
+        accountType: accruedAccount.accountType,
+        debit:       this.total,
+        credit:      0,
+        description: `Clear accrual — ${this.description}`,
+      },
+      {
+        accountId:   paymentAccount._id,
+        accountCode: paymentAccount.accountCode,
+        accountName: paymentAccount.accountName,
+        accountType: paymentAccount.accountType,
+        debit:       0,
+        credit:      this.total,
+        description: `Payment for ${this.description}`,
+      },
+    ],
     relatedDocuments: {
-      expenseId: this._id,
+      expenseId:     this._id,
       expenseNumber: this.expenseNumber,
     },
-    status: "draft",
-    createdBy: user,
+    status:    "draft",
+    createdBy: this.createdBy || user,
   });
 
-  // Post journal entry
-  await journalEntry.post(user);
+  await clearingJE.post(user);
 
-  // Link to expense
-  this.journalEntryId = journalEntry._id;
+  this.clearingJournalEntryId = clearingJE._id;
+  this.paymentMethod = paymentDetails.paymentMethod;
+  this.paidFrom      = paymentDetails.paidFrom;
+  this.paidAt        = paymentDetails.paidAt || new Date();
+  this.paymentStatus = "paid";
+  this.status        = "paid";
   await this.save();
 
-  return journalEntry;
+  return clearingJE;
 };
 
 // ============================================
