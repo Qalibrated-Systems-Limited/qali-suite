@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import Company from "../../models/Company";
 import connectDB from "../../config/dbConnect";
+import { updateSubscription } from "@/lib/subscription-helpers";
 
 // ============================================
 // ZOD SCHEMAS
@@ -487,7 +488,9 @@ export async function updateCompanyStatus(companyId, status) {
 }
 
 /**
- * Update company subscription (SuperAdmin only)
+ * Update company subscription (SuperAdmin only).
+ * Delegates to lib/subscription-helpers.updateSubscription so all mutations
+ * go through a single audited path.
  */
 export async function updateCompanySubscription(companyId, subscriptionData) {
   const session = await auth();
@@ -503,28 +506,21 @@ export async function updateCompanySubscription(companyId, subscriptionData) {
   try {
     await connectDB();
 
-    const company = await Company.findById(companyId);
-    if (!company) {
-      return { errors: { _form: ["Company not found"] } };
-    }
-
-    // Update subscription fields
-    if (subscriptionData.plan)
-      company.subscription.plan = subscriptionData.plan;
-    if (subscriptionData.status)
-      company.subscription.status = subscriptionData.status;
-    if (subscriptionData.maxUsers)
-      company.subscription.maxUsers = subscriptionData.maxUsers;
-
-    company.lastModifiedBy = {
-      name: session.user.name,
-      id: session.user.id,
-    };
-
-    await company.save();
+    await updateSubscription(
+      companyId,
+      {
+        plan: subscriptionData.plan,
+        status: subscriptionData.status,
+        maxUsers: subscriptionData.maxUsers,
+        trialEndsAt: subscriptionData.trialEndsAt,
+        currentPeriodStart: subscriptionData.currentPeriodStart,
+        currentPeriodEnd: subscriptionData.currentPeriodEnd,
+      },
+      { name: session.user.name, id: session.user.id },
+      subscriptionData.reason || ""
+    );
 
     revalidatePath("/dashboard/admin/companies");
-
     return { success: true, message: "Subscription updated successfully" };
   } catch (error) {
     console.error("Update subscription error:", error);

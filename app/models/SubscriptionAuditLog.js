@@ -5,7 +5,15 @@ const subscriptionAuditLogSchema = new mongoose.Schema(
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: "Company", required: true, index: true },
     action: {
       type: String,
-      enum: ["plan_changed", "status_changed", "trial_started", "trial_extended", "max_users_changed"],
+      enum: [
+        "plan_changed",
+        "status_changed",
+        "trial_started",
+        "trial_extended",
+        "max_users_changed",
+        "renewed",
+        "auto_expired",
+      ],
       required: true,
     },
     previous: {
@@ -13,12 +21,16 @@ const subscriptionAuditLogSchema = new mongoose.Schema(
       status: String,
       maxUsers: Number,
       trialEndsAt: Date,
+      currentPeriodStart: Date,
+      currentPeriodEnd: Date,
     },
     updated: {
       plan: String,
       status: String,
       maxUsers: Number,
       trialEndsAt: Date,
+      currentPeriodStart: Date,
+      currentPeriodEnd: Date,
     },
     changedBy: {
       name: String,

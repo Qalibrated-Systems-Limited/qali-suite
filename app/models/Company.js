@@ -172,7 +172,7 @@ const companySchema = new Schema(
       currentPeriodEnd: Date,
       maxUsers: {
         type: Number,
-        default: 5,
+        default: 2, // matches free plan in lib/plans.js (-1 = unlimited)
       },
     },
 

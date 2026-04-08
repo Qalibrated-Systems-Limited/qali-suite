@@ -202,7 +202,32 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
       return true;
     },
 
-    async jwt({ token, user, account }: any) {
+    async jwt({ token, user, account, trigger }: any) {
+      // Manual refresh trigger from client (useSession().update())
+      // Re-reads subscription/plan data from DB so the session reflects
+      // a recent plan change without forcing a re-login.
+      if (trigger === "update" && token?.companyId) {
+        try {
+          await dbConnect();
+          const company = await Company.findById(token.companyId)
+            .select("code subscription")
+            .lean();
+          if (company) {
+            const sub = (company as any).subscription || {};
+            token.companyCode = (company as any).code;
+            token.companyPlan = sub.plan || "free";
+            token.subscriptionStatus = sub.status || "trial";
+            token.trialEndsAt = sub.trialEndsAt?.toISOString() || null;
+            token.maxUsers = sub.maxUsers ?? 2;
+            token.planRefreshedAt = Date.now();
+          }
+        } catch {
+          // If DB unreachable in edge runtime, leave token unchanged
+        }
+        return token;
+      }
+
+
       // For credentials login — user object has all the data we need
       if (user && account?.provider === "credentials") {
         token.role = user.role;

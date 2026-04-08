@@ -3,6 +3,7 @@ import Company from "../../models/Company";
 import Account from "../../models/account";
 import FiscalPeriod from "../../models/fiscalPeriod";
 import dbConnect from "../../config/dbConnect";
+import { getPlanLimits } from "../../../lib/plans";
 
 // ============================================
 // COMPANY ONBOARDING SERVICE
@@ -1111,13 +1112,7 @@ export class CompanyOnboardingService {
   // HELPER METHODS
   // ============================================
   static getMaxUsersForPlan(plan) {
-    const limits = {
-      free: 2,
-      starter: 5,
-      professional: 20,
-      enterprise: 999,
-    };
-    return limits[plan] || 2;
+    return getPlanLimits(plan).maxUsers;
   }
 
   static getDefaultFeatures(plan) {

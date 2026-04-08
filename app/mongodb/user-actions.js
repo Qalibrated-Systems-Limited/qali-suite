@@ -136,8 +136,10 @@ export async function createUser(prevState, formData) {
     }
   }
 
-  // Check user limit before creating
-  const limitCheck = await checkUserLimit(assignedCompanyId);
+  // Check user limit — SuperAdmin bypasses when acting on behalf of a tenant
+  const limitCheck = await checkUserLimit(assignedCompanyId, {
+    bypass: currentUser.role === "SuperAdmin",
+  });
   if (!limitCheck.allowed) {
     return { message: limitCheck.error, errors: { _form: [limitCheck.error] }, values: formValues };
   }

@@ -38,6 +38,8 @@ const actionLabels = {
   trial_started: "Trial Started",
   trial_extended: "Trial Extended",
   max_users_changed: "Max Users Changed",
+  renewed: "Renewed",
+  auto_expired: "Auto-Expired",
 };
 
 export default async function SubscriptionPage({ params }) {

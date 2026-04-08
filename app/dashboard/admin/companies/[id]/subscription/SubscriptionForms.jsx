@@ -16,7 +16,14 @@ import {
   updateCompanyPlan,
   updateCompanyStatus,
   extendTrial,
+  renewSubscription,
 } from "@/app/mongodb/actions/subscription-actions";
+import { DEFAULT_PLANS } from "@/lib/plans";
+
+function planLabel(p) {
+  const seats = p.maxUsers === -1 ? "Unlimited" : `${p.maxUsers} users`;
+  return `${p.label} (${seats})`;
+}
 
 function StatusMessage({ state }) {
   if (!state) return null;
@@ -33,6 +40,7 @@ export default function SubscriptionForms({ companyId, currentPlan, currentStatu
   const [planState, planAction, planPending] = useActionState(updateCompanyPlan, null);
   const [statusState, statusAction, statusPending] = useActionState(updateCompanyStatus, null);
   const [trialState, trialAction, trialPending] = useActionState(extendTrial, null);
+  const [renewState, renewAction, renewPending] = useActionState(renewSubscription, null);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -51,12 +59,18 @@ export default function SubscriptionForms({ companyId, currentPlan, currentStatu
                   <SelectValue placeholder="Select plan" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="free">Free (2 users)</SelectItem>
-                  <SelectItem value="starter">Starter (5 users)</SelectItem>
-                  <SelectItem value="professional">Professional (20 users)</SelectItem>
-                  <SelectItem value="enterprise">Enterprise (Unlimited)</SelectItem>
+                  {DEFAULT_PLANS.map((p) => (
+                    <SelectItem key={p.code} value={p.code}>
+                      {planLabel(p)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+              {planState?.requiresForce && (
+                <p className="text-xs text-orange-600">
+                  Override: pass force=true to proceed despite seat overage.
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="plan-reason">Reason</Label>
@@ -118,6 +132,53 @@ export default function SubscriptionForms({ companyId, currentPlan, currentStatu
               {statusPending ? "Updating..." : "Update Status"}
             </Button>
             <StatusMessage state={statusState} />
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Renew Subscription */}
+      <Card className="md:col-span-2">
+        <CardHeader>
+          <CardTitle className="text-lg">Renew Subscription</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form action={renewAction} className="space-y-4">
+            <input type="hidden" name="companyId" value={companyId} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="months">Months</Label>
+                <Input
+                  id="months"
+                  name="months"
+                  type="number"
+                  min="1"
+                  max="60"
+                  defaultValue="1"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="renew-reason">Reason</Label>
+                <Input
+                  id="renew-reason"
+                  name="reason"
+                  placeholder="Payment received, ref #..."
+                  required
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Sets status to <strong>active</strong> and extends the billing
+              period. Chains from the current period end if still in the future.
+            </p>
+            <Button
+              type="submit"
+              disabled={renewPending}
+              className="bg-yellow-500 text-black hover:bg-yellow-600"
+            >
+              {renewPending ? "Renewing..." : "Renew Subscription"}
+            </Button>
+            <StatusMessage state={renewState} />
           </form>
         </CardContent>
       </Card>

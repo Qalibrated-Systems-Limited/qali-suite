@@ -684,8 +684,8 @@ export async function sendEmployeePortalInvite(profileId, role = "Employee") {
       return { success: true, message: `Account (${email}) linked with role: ${inviteRole}` };
     }
 
-    // Check user limit before creating invite
-    const limitCheck = await checkUserLimit(profile.companyId);
+    // Check user limit — SuperAdmin bypasses when acting on behalf of a tenant
+    const limitCheck = await checkUserLimit(profile.companyId, { bypass: isSuperAdmin });
     if (!limitCheck.allowed) {
       return { success: false, error: limitCheck.error };
     }
