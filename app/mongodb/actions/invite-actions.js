@@ -11,6 +11,7 @@ import { userRoles } from "@/lib/utils";
 import { sendInviteEmail } from "@/lib/email";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import crypto from "crypto";
 import { checkUserLimit } from "@/lib/check-user-limit";
 
@@ -103,16 +104,24 @@ export async function sendInvite(prevState, formData) {
       token: hashedToken,
     });
 
-    // Send email in background — don't block the response
-    sendInviteEmail({
-      to: email,
-      inviterName: currentUser.name,
-      companyName: company.name,
-      role,
-      rawToken,
-    }).catch((err) => console.error("Failed to send invite email:", err));
-
     revalidatePath("/dashboard/users");
+
+    // Send email AFTER the response is sent. Uses Next.js after() so a slow
+    // or hung Resend call (or missing RESEND_API_KEY) never blocks the action.
+    after(async () => {
+      try {
+        await sendInviteEmail({
+          to: email,
+          inviterName: currentUser.name,
+          companyName: company.name,
+          role,
+          rawToken,
+        });
+      } catch (err) {
+        console.error("Failed to send invite email:", err);
+      }
+    });
+
     return { success: true, message: `Invite sent to ${email}` };
   } catch (error) {
     console.error("Send invite error:", error);
