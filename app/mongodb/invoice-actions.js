@@ -612,30 +612,34 @@ export async function createInvoice(prevState, formData) {
       const isFromTechnicianStock = item.stockSource === "technician" && item.relatedCheckout?.checkoutId;
 
       if (!isFromTechnicianStock) {
-        const available = product.inventory?.quantityAvailable ?? 0;
-        if (available < item.quantity) {
-          await mongoSession.abortTransaction();
-          return {
-            message: `Insufficient stock for ${product.name}. Available: ${available}, Required: ${item.quantity}`,
-            success: false,
-          };
-        }
-
         // ============================================
-        // COMMIT INVENTORY - Reserve stock for this invoice
+        // COMMIT INVENTORY (atomic, race-safe)
         // ============================================
-        // This prevents race conditions where multiple invoices
-        // could be created for the same limited stock
-        await Product.findByIdAndUpdate(
-          item.productId,
+        // Conditional findOneAndUpdate: only succeeds if quantityAvailable
+        // is still >= the requested amount. Two concurrent drafts for the
+        // last unit cannot both pass — the second one returns null.
+        const committed = await Product.findOneAndUpdate(
+          {
+            _id: item.productId,
+            "inventory.quantityAvailable": { $gte: item.quantity },
+          },
           {
             $inc: {
               "inventory.quantityCommitted": item.quantity,
               "inventory.quantityAvailable": -item.quantity,
             },
           },
-          { session: mongoSession }
+          { session: mongoSession, new: true }
         );
+
+        if (!committed) {
+          const available = product.inventory?.quantityAvailable ?? 0;
+          await mongoSession.abortTransaction();
+          return {
+            message: `Insufficient stock for ${product.name}. Available: ${available}, Required: ${item.quantity}`,
+            success: false,
+          };
+        }
       }
 
       // Use per-item tax rate, fallback to global vatPercentage, then default 16%

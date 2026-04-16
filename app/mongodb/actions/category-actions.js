@@ -55,10 +55,10 @@ function checkAdminPermission(user) {
     };
   }
 
-  if (!["admin", "manager"].includes(user.role.toLowerCase())) {
+  if (!["admin", "manager", "store manager"].includes(user.role.toLowerCase())) {
     return {
       error: {
-        _form: ["Admin or Manager role required to manage categories"],
+        _form: ["Admin, Manager, or Store Manager role required to manage categories"],
       },
     };
   }

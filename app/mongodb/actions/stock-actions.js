@@ -21,13 +21,16 @@ import {
 
 function checkPermission(
   user,
-  allowedRoles = ["admin", "manager", "store_manager"]
+  allowedRoles = ["admin", "manager", "store manager"]
 ) {
   if (!user) {
     return {
       error: { _form: ["You must be logged in to perform this action"] },
     };
   }
+  // Normalize the user's role to lowercase for comparison.
+  // Note: session role is "Store Manager" (with space), so allowedRoles
+  // must use the same form (lowercased: "store manager").
   if (!allowedRoles.includes(user.role.toLowerCase())) {
     return { error: { _form: ["You don't have permission for this action"] } };
   }
@@ -328,7 +331,7 @@ export async function updateProduct(productId, prevState, formData) {
   const permError = checkPermission(user, [
     "admin",
     "manager",
-    "store_manager",
+    "store manager",
   ]);
   if (permError) return permError;
 

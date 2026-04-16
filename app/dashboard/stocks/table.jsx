@@ -45,10 +45,10 @@ export function InventoryTable({ cart = [], stock, action }) {
                 Category
               </TableHead>
               <TableHead className="font-semibold text-muted-foreground">
-                Landing Cost
+                Selling Price
               </TableHead>
               <TableHead className="font-semibold text-muted-foreground">
-                Stock
+                Available
               </TableHead>
               <TableHead className="text-right font-semibold text-muted-foreground">
                 Actions
@@ -74,10 +74,13 @@ export function InventoryTable({ cart = [], stock, action }) {
                 const cartItem = cart.find(
                   (cartItem) => cartItem.id === item.SKU
                 );
-                const stock = item.inventory?.quantityOnHand ?? 0;
+                const onHand = item.inventory?.quantityOnHand ?? 0;
+                const committed = item.inventory?.quantityCommitted ?? 0;
+                const available = item.inventory?.quantityAvailable ?? (onHand - committed);
+                const reorderLevel = item.inventory?.reorderLevel ?? 10;
                 const price = item.pricing?.sellingPrice ?? 0;
-                const isLowStock = stock > 0 && stock < 10;
-                const isOutOfStock = stock === 0;
+                const isOutOfStock = available <= 0;
+                const isLowStock = !isOutOfStock && available <= reorderLevel;
 
                 return (
                   <TableRow
@@ -127,9 +130,15 @@ export function InventoryTable({ cart = [], stock, action }) {
                               ? "text-orange-500"
                               : "text-green-500"
                           }`}
+                          title={`On hand: ${onHand} • Committed: ${committed} • Reorder at: ${reorderLevel}`}
                         >
-                          {stock}
+                          {available}
                         </span>
+                        {committed > 0 && (
+                          <span className="text-xs text-muted-foreground">
+                            ({onHand} − {committed})
+                          </span>
+                        )}
                         {isOutOfStock && (
                           <Badge
                             variant="outline"
@@ -161,13 +170,13 @@ export function InventoryTable({ cart = [], stock, action }) {
 
                     {/* Actions */}
                     <TableCell>
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-end gap-1 flex-wrap">
                         {/* View Details Button */}
                         <Button
                           asChild
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-accent"
+                          className="h-10 w-10 text-muted-foreground hover:text-foreground hover:bg-accent"
                         >
                           <Link href={`/dashboard/stocks/${item._id}`}>
                             <Eye className="h-4 w-4" />
@@ -181,7 +190,7 @@ export function InventoryTable({ cart = [], stock, action }) {
                             asChild
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-accent"
+                            className="h-10 w-10 text-muted-foreground hover:text-foreground hover:bg-accent"
                           >
                             <Link href={`/dashboard/stocks/${item._id}/update`}>
                               <Pencil className="h-4 w-4" />
@@ -245,10 +254,13 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
       ) : (
         stock.map((item) => {
           const cartItem = cart.find((cartItem) => cartItem.id === item.SKU);
-          const stock = item.inventory?.quantityOnHand ?? 0;
+          const onHand = item.inventory?.quantityOnHand ?? 0;
+          const committed = item.inventory?.quantityCommitted ?? 0;
+          const available = item.inventory?.quantityAvailable ?? (onHand - committed);
+          const reorderLevel = item.inventory?.reorderLevel ?? 10;
           const price = item.pricing?.sellingPrice ?? 0;
-          const isLowStock = stock > 0 && stock < 10;
-          const isOutOfStock = stock === 0;
+          const isOutOfStock = available <= 0;
+          const isLowStock = !isOutOfStock && available <= reorderLevel;
 
           return (
             <Card key={item._id} className="bg-card border-border">
@@ -315,7 +327,7 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
                       </p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground text-xs">Stock</p>
+                      <p className="text-muted-foreground text-xs">Available</p>
                       <p
                         className={`font-semibold ${
                           isOutOfStock
@@ -324,14 +336,20 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
                             ? "text-orange-500"
                             : "text-green-500"
                         }`}
+                        title={`On hand: ${onHand} • Committed: ${committed} • Reorder at: ${reorderLevel}`}
                       >
-                        {stock}
+                        {available}
+                        {committed > 0 && (
+                          <span className="ml-1 text-xs font-normal text-muted-foreground">
+                            ({onHand}−{committed})
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center gap-2 pt-2 border-t border-border">
+                  <div className="flex items-center gap-2 pt-2 border-t border-border flex-wrap">
                     {/* View Details Button */}
                     <Button
                       asChild

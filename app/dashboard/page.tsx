@@ -7,6 +7,7 @@ import EmployeeDashboard from "./components/EmployeeDashborad";
 import AccountantDashboard from "./components/AccountantDashboard";
 import SuperAdminDashboard from "./components/SuperAdminDashboard";
 import HRDashboardPage from "./components/HRDashboard";
+import StoreManagerDashboard from "./components/StoreManagerDashboard";
 
 // ============================================
 // MAIN DASHBOARD ROUTER
@@ -38,9 +39,11 @@ export default async function DashboardPage() {
     case "HR":
       return <HRDashboardPage />;
 
+    case "Store Manager":
+      return <StoreManagerDashboard />;
+
     case "Admin":
     case "Manager":
-    case "Store Manager":
       return <AdminDashboardPage />;
 
     case "Accountant":

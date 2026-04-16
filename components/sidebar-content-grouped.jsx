@@ -105,7 +105,7 @@ const getNavigationGroups = (user) => {
         label: "Categories",
         id: "categories",
         href: "/dashboard/categories",
-        hidden: !["Admin", "Manager"].includes(user?.role),
+        hidden: !["Admin", "Manager", "Store Manager"].includes(user?.role),
       },
       {
         icon: Activity,

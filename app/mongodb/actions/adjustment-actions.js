@@ -148,10 +148,15 @@ export async function createStockAdjustment(prevState, formData) {
     );
 
     // Approve immediately (creates journal entries and stock movements)
-    await adjustment[0].approve({
-      name: user.name,
-      id: user.id,
-    });
+    // Pass the transaction session so all writes inside approve() participate
+    // in the same atomic unit and can be rolled back together.
+    await adjustment[0].approve(
+      {
+        name: user.name,
+        id: user.id,
+      },
+      session
+    );
 
     await session.commitTransaction();
 

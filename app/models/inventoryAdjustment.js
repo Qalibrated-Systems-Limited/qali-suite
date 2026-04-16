@@ -372,7 +372,7 @@ inventoryAdjustmentSchema.methods.validateBeforeApproval = async function () {
 // ============================================
 // APPROVE ADJUSTMENT
 // ============================================
-inventoryAdjustmentSchema.methods.approve = async function (approvedBy) {
+inventoryAdjustmentSchema.methods.approve = async function (approvedBy, session = null) {
   if (this.status !== "draft") {
     throw new Error(
       `Can only approve draft adjustments. Current status: ${this.status}`
@@ -396,7 +396,7 @@ inventoryAdjustmentSchema.methods.approve = async function (approvedBy) {
     for (const line of this.lines) {
       if (line.adjustmentQuantity === 0) continue; // Skip no-change lines
 
-      const product = await Product.findById(line.productId);
+      const product = await Product.findById(line.productId).session(session || null);
 
       if (!product) {
         throw new Error(`Product not found: ${line.productId}`);
@@ -408,20 +408,22 @@ inventoryAdjustmentSchema.methods.approve = async function (approvedBy) {
         await product.increaseInventory(
           line.adjustmentQuantity,
           line.unitCost,
-          `Adjustment ${this.adjustmentNumber} - ${this.adjustmentType}: ${line.reason}`
+          `Adjustment ${this.adjustmentNumber} - ${this.adjustmentType}: ${line.reason}`,
+          session
         );
       } else {
         // Decrease
         await product.decreaseInventory(
           Math.abs(line.adjustmentQuantity),
-          `Adjustment ${this.adjustmentNumber} - ${this.adjustmentType}: ${line.reason}`
+          `Adjustment ${this.adjustmentNumber} - ${this.adjustmentType}: ${line.reason}`,
+          session
         );
       }
 
       // Create stock movement
       const movementNumber = await StockMovement.generateMovementNumber(this.companyId);
 
-      const movement = await StockMovement.create({
+      const [movement] = await StockMovement.create([{
         companyId: this.companyId, // Tenant scoping
         movementNumber,
         productId: product._id,
@@ -459,14 +461,14 @@ inventoryAdjustmentSchema.methods.approve = async function (approvedBy) {
           affectsAccounting: true,
           accountingPosted: false,
         },
-      });
+      }], session ? { session } : undefined);
 
       stockMovements.push(movement);
       line.stockMovementId = movement._id;
     }
 
     // Create journal entry (may be null if no net change)
-    const journalEntry = await this.createJournalEntry(userInfo);
+    const journalEntry = await this.createJournalEntry(userInfo, session);
 
     if (journalEntry) {
       this.journalEntryId = journalEntry._id;
@@ -476,7 +478,7 @@ inventoryAdjustmentSchema.methods.approve = async function (approvedBy) {
         movement.accounting.journalEntryId = journalEntry._id;
         movement.accounting.accountingPosted = true;
         movement.accounting.accountingPostedAt = new Date();
-        await movement.save();
+        await movement.save(session ? { session } : undefined);
       }
     }
 
@@ -486,7 +488,7 @@ inventoryAdjustmentSchema.methods.approve = async function (approvedBy) {
     this.approvedBy = userInfo;
     this.lastModifiedBy = userInfo;
 
-    await this.save();
+    await this.save(session ? { session } : undefined);
 
     return this;
   } catch (error) {
@@ -517,11 +519,10 @@ inventoryAdjustmentSchema.methods.approve = async function (approvedBy) {
 // ============================================
 // CREATE JOURNAL ENTRY
 // ============================================
-inventoryAdjustmentSchema.methods.createJournalEntry = async function (user) {
+inventoryAdjustmentSchema.methods.createJournalEntry = async function (user, session = null) {
   if (this.journalEntryId) {
     throw new Error("Journal entry already exists for this adjustment");
   }
-  console.log("calledd===");
   const Account = mongoose.model("Account");
   const JournalEntry = mongoose.model("JournalEntry");
 
@@ -529,11 +530,11 @@ inventoryAdjustmentSchema.methods.createJournalEntry = async function (user) {
   const inventoryAccount = await Account.findOne({
     companyId: this.companyId,
     systemAccount: "inventory",
-  });
+  }).session(session || null);
   const adjustmentAccount = await Account.findOne({
     companyId: this.companyId,
     systemAccount: "inventory_adjustments",
-  });
+  }).session(session || null);
 
   if (!inventoryAccount) {
     throw new Error("Inventory account not configured");
@@ -616,7 +617,7 @@ inventoryAdjustmentSchema.methods.createJournalEntry = async function (user) {
   const entryNumber = await this.generateUniqueEntryNumber();
 
   // Create journal entry (with tenant scoping)
-  const journalEntry = await JournalEntry.create({
+  const [journalEntry] = await JournalEntry.create([{
     companyId: this.companyId, // Tenant scoping
     entryNumber,
     entryDate: this.adjustmentDate,
@@ -629,10 +630,10 @@ inventoryAdjustmentSchema.methods.createJournalEntry = async function (user) {
     },
     status: "draft",
     createdBy: user,
-  });
+  }], session ? { session } : undefined);
 
   // Post journal entry
-  await journalEntry.post(user);
+  await journalEntry.post(user, session);
 
   return journalEntry;
 };

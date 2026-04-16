@@ -75,6 +75,7 @@ const productSchema =
         quantityAvailable: {
           type: Number,
           default: 0,
+          min: [0, "Available quantity cannot be negative"],
           // = quantityOnHand - quantityCommitted
         },
 
@@ -537,6 +538,7 @@ productSchema.methods.increaseInventory = async function (
   quantity,
   cost,
   reason,
+  session = null,
 ) {
   if (quantity <= 0) {
     throw new Error("Quantity must be greater than zero");
@@ -574,7 +576,7 @@ productSchema.methods.increaseInventory = async function (
   this.lifetimeTotals.totalPurchaseValue =
     (this.lifetimeTotals.totalPurchaseValue || 0) + quantity * cost;
 
-  await this.save();
+  await this.save(session ? { session } : undefined);
 
   return this;
 };
@@ -582,7 +584,7 @@ productSchema.methods.increaseInventory = async function (
 /**
  * Decrease inventory (sale, issue, adjustment out)
  */
-productSchema.methods.decreaseInventory = async function (quantity) {
+productSchema.methods.decreaseInventory = async function (quantity, _reason, session = null) {
   if (quantity <= 0) {
     throw new Error("Quantity must be greater than zero");
   }
@@ -606,7 +608,7 @@ productSchema.methods.decreaseInventory = async function (quantity) {
   this.inventory.quantityAvailable =
     this.inventory.quantityOnHand - (this.inventory.quantityCommitted || 0);
 
-  await this.save();
+  await this.save(session ? { session } : undefined);
 
   // Return COGS for this transaction
   const cogs = quantity * (this.costing?.costPrice || 0);
