@@ -172,33 +172,11 @@ export async function createUser(prevState, formData) {
 
     newUserId = newUser._id.toString();
 
-    // Auto-create employee Party record linked to this user
-    if (assignedCompanyId) {
-      try {
-        const existingParty = await Party.findOne({
-          companyId: assignedCompanyId,
-          userId: newUser._id,
-          type: "employee",
-        });
-        if (!existingParty) {
-          await Party.create({
-            companyId: assignedCompanyId,
-            type: "employee",
-            userId: newUser._id,
-            name,
-            email,
-            department: department || "",
-            createdBy: {
-              name: currentUser.name,
-              id: currentUser.id,
-            },
-          });
-        }
-      } catch (partyErr) {
-        console.error("Failed to auto-create employee party:", partyErr);
-        // Non-blocking — user is created, party can be linked later
-      }
-    }
+    // Note: We do NOT auto-create a Party here. The proper employee flow is:
+    //   HR creates employee → Party + EmployeeProfile (together, transactional)
+    //   HR sends portal invite → links User to existing Party + Profile
+    // Creating a Party without an EmployeeProfile leaves an orphan record.
+    // Admin creating a User here gives them a login only — not an employee record.
 
     // Send invite email so user can set up their account
     let emailSent = false;
@@ -478,8 +456,17 @@ export async function deleteUser(userId) {
 
     await User.findByIdAndDelete(userId);
 
+    // Cascade: clear userId references in Party and EmployeeProfile
+    // so they don't hold dangling refs to the deleted User.
+    const EmployeeProfile = (await import("../models/employeeProfile")).default;
+    await Promise.all([
+      Party.updateMany({ userId }, { $unset: { userId: "" } }),
+      EmployeeProfile.updateMany({ userId }, { $unset: { userId: "" } }),
+    ]);
+
     revalidatePath("/dashboard/users");
     revalidatePath("/dashboard/admin/users");
+    revalidatePath("/dashboard/hr/employees");
     return { message: "User deleted successfully", success: true };
   } catch (error) {
     console.error("Delete user error:", error);

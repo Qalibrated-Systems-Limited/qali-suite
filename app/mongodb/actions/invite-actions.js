@@ -232,6 +232,7 @@ export async function acceptInviteWithPassword(rawToken, formData) {
       await existingUser.save();
 
       // Link to employee profile if this is an employee invite
+      // Complete the triangle: User.partyId ↔ Party.userId ↔ EmployeeProfile.userId
       if (invite.partyId) {
         await Promise.all([
           Party.findByIdAndUpdate(invite.partyId, { userId: existingUser._id }),
@@ -239,6 +240,7 @@ export async function acceptInviteWithPassword(rawToken, formData) {
             { partyId: invite.partyId },
             { userId: existingUser._id }
           ),
+          User.findByIdAndUpdate(existingUser._id, { partyId: invite.partyId }),
         ]);
       }
 
@@ -269,6 +271,7 @@ export async function acceptInviteWithPassword(rawToken, formData) {
     // If this is an employee portal invite, link the new User back to
     // the employee's Party and EmployeeProfile records.
     // This completes the triangle: User ↔ Party ↔ EmployeeProfile
+    // Complete the triangle: User.partyId ↔ Party.userId ↔ EmployeeProfile.userId
     if (invite.partyId) {
       await Promise.all([
         Party.findByIdAndUpdate(invite.partyId, { userId: newUser._id }),
@@ -276,6 +279,7 @@ export async function acceptInviteWithPassword(rawToken, formData) {
           { partyId: invite.partyId },
           { userId: newUser._id }
         ),
+        User.findByIdAndUpdate(newUser._id, { partyId: invite.partyId }),
       ]);
     }
 

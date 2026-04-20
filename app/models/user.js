@@ -79,6 +79,16 @@ const userSchema = new Schema(
       index: true,
     },
 
+    // Back-reference to Party (set when employee invite is accepted or
+    // when admin links a user to a party). Enables user.partyId lookups
+    // without querying Party.findOne({ userId }).
+    partyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Party",
+      sparse: true,
+      index: true,
+    },
+
     resetPasswordToken: String,
     resetPasswordExpire: Date,
   },

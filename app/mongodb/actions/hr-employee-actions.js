@@ -673,7 +673,9 @@ export async function sendEmployeePortalInvite(profileId, role = "Employee") {
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       // User exists — link to employee profile and set chosen role
+      // Complete the triangle: User.partyId ↔ Party.userId ↔ EmployeeProfile.userId
       existingUser.role = inviteRole;
+      existingUser.partyId = profile.partyId;
       if (!existingUser.companyId) existingUser.companyId = profile.companyId;
       await existingUser.save();
 

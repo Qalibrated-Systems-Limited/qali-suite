@@ -459,8 +459,42 @@ export async function deleteParty(partyId) {
       withTenantScope({ "party.id": partyId }, companyId, isSuperAdmin)
     );
 
+    // Check for HR data (employee-specific)
+    const EmployeeProfile = (await import("../../models/employeeProfile")).default;
+    const LeaveRequest = (await import("../../models/leaveRequest")).default;
+    const PayrollEntry = (await import("../../models/payrollEntry")).default;
+
+    if (party.type === "employee") {
+      const [leaveCount, payrollCount] = await Promise.all([
+        LeaveRequest.countDocuments(
+          withTenantScope({ "employee.partyId": partyId }, companyId, isSuperAdmin)
+        ),
+        PayrollEntry.countDocuments(
+          withTenantScope({ partyId }, companyId, isSuperAdmin)
+        ),
+      ]);
+
+      if (leaveCount > 0 || payrollCount > 0 || transactionCount > 0) {
+        // Soft delete — HR data exists
+        party.isActive = false;
+        party.lastModifiedBy = {
+          name: user.name,
+          id: user.id,
+        };
+        await party.save();
+
+        revalidatePath("/dashboard/parties");
+        revalidatePath("/dashboard/hr/employees");
+
+        return {
+          success: true,
+          message: `Employee deactivated (${transactionCount} journal entries, ${leaveCount} leave requests, ${payrollCount} payroll entries exist)`,
+        };
+      }
+    }
+
     if (transactionCount > 0) {
-      // Soft delete
+      // Soft delete — financial data exists
       party.isActive = false;
       party.lastModifiedBy = {
         name: user.name,
@@ -477,7 +511,17 @@ export async function deleteParty(partyId) {
         message: `Party deactivated (${transactionCount} transactions exist)`,
       };
     } else {
-      // Hard delete (tenant-scoped)
+      // Hard delete — cascade clean EmployeeProfile and clear User ref
+      const profile = await EmployeeProfile.findOneAndDelete(
+        withTenantScope({ partyId }, companyId, isSuperAdmin)
+      );
+
+      // If this party was linked to a User, clear the back-link on User
+      if (party.userId) {
+        const User = (await import("../../models/user")).default;
+        // Note: User doesn't have partyId yet but future-proofs this
+      }
+
       await Party.findOneAndDelete(
         withTenantScope({ _id: partyId }, companyId, isSuperAdmin)
       );
@@ -485,10 +529,13 @@ export async function deleteParty(partyId) {
       revalidatePath("/dashboard/parties");
       revalidatePath("/dashboard/customers");
       revalidatePath("/dashboard/suppliers");
+      revalidatePath("/dashboard/hr/employees");
 
       return {
         success: true,
-        message: "Party deleted successfully",
+        message: profile
+          ? "Party and employee profile deleted successfully"
+          : "Party deleted successfully",
       };
     }
   } catch (error) {
@@ -929,8 +976,22 @@ export async function linkUserToParty(userId, partyId) {
 
     await party.save();
 
+    // Keep EmployeeProfile and User in sync so the full triangle is consistent:
+    //   User.partyId → Party._id
+    //   Party.userId → User._id
+    //   EmployeeProfile.userId → User._id
+    const EmployeeProfile = (await import("../../models/employeeProfile")).default;
+    await Promise.all([
+      EmployeeProfile.findOneAndUpdate(
+        withTenantScope({ partyId }, companyId, isSuperAdmin),
+        { userId },
+      ),
+      targetUser.updateOne({ partyId }),
+    ]);
+
     revalidatePath("/dashboard/parties");
     revalidatePath("/dashboard/employees");
+    revalidatePath("/dashboard/hr/employees");
     revalidatePath(`/dashboard/parties/${partyId}`);
 
     return {

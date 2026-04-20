@@ -8,7 +8,7 @@
 set -euo pipefail
 
 APP_DIR="/opt/qalisuite"
-REPO="https://github.com/YOUR_USERNAME/YOUR_REPO.git"  # <-- UPDATE THIS
+REPO="git@github.com:YOUR_USERNAME/YOUR_REPO.git"  # <-- UPDATE THIS (SSH URL from GitHub)
 BRANCH="main"
 
 cd "$APP_DIR"
