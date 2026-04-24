@@ -345,6 +345,13 @@ const getNavigationGroups = (user) => {
         hidden: !["Admin", "Accountant"].includes(user?.role),
       },
       {
+        icon: Package,
+        label: "Fixed Assets",
+        id: "assets",
+        href: "/dashboard/assets",
+        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("assets"),
+      },
+      {
         icon: Calendar,
         label: "Fiscal Periods",
         id: "fiscal-periods",

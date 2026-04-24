@@ -65,6 +65,7 @@ const journalEntrySchema = new Schema(
         "loan_disbursement",
         "goods_receipt",    // WB inbound — DR Inventory, CR GR/IR
         "goods_dispatch",   // WB outbound — DR COGS, CR Inventory
+        "asset_disposal",   // Asset disposal — DR Bank/Loss, DR Accum Dep, CR Asset Cost, CR Gain
       ],
       index: true,
     },
