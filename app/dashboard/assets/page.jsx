@@ -168,19 +168,57 @@ function StatsCards({ totals }) {
   );
 }
 
-async function AssetList({ searchParams }) {
-  const params = await searchParams;
+async function AssetStats() {
+  const totalsResult = await getAssetsTotals();
+  return <StatsCards totals={totalsResult.totals} />;
+}
 
-  const page = parseInt(params.page || "1", 10);
-  const status = params.status || "";
-  const category = params.category || "";
-  const search = params.search || "";
+function FilterForm({ search, category, status }) {
+  return (
+    <form className="grid gap-3 rounded-lg border border-border bg-card p-4 shadow-sm sm:grid-cols-[1fr_auto_auto_auto]">
+      <input
+        type="text"
+        name="search"
+        defaultValue={search}
+        placeholder="Search by asset #, name, serial number..."
+        className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+      />
+      <select
+        name="category"
+        defaultValue={category}
+        className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+      >
+        {CATEGORY_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <select
+        name="status"
+        defaultValue={status}
+        className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+      >
+        {STATUS_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="submit"
+        className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground"
+      >
+        Filter
+      </button>
+    </form>
+  );
+}
+
+async function AssetList({ page, status, category, search }) {
   const limit = 20;
 
-  const [result, totalsResult] = await Promise.all([
-    getAssets({ page, limit, status, category, search }),
-    getAssetsTotals(),
-  ]);
+  const result = await getAssets({ page, limit, status, category, search });
 
   const assets = result.assets || [];
   const total = result.total || 0;
@@ -203,47 +241,6 @@ async function AssetList({ searchParams }) {
 
   return (
     <>
-      <StatsCards totals={totalsResult.totals} />
-
-      {/* Filter form */}
-      <form className="grid gap-3 rounded-lg border border-border bg-card p-4 shadow-sm sm:grid-cols-[1fr_auto_auto_auto]">
-        <input
-          type="text"
-          name="search"
-          defaultValue={search}
-          placeholder="Search by asset #, name, serial number..."
-          className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-        />
-        <select
-          name="category"
-          defaultValue={category}
-          className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-        >
-          {CATEGORY_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <select
-          name="status"
-          defaultValue={status}
-          className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-        >
-          {STATUS_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <button
-          type="submit"
-          className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground"
-        >
-          Filter
-        </button>
-      </form>
-
       {serialized.length === 0 ? (
         <div className="rounded-lg border border-border bg-card p-12 text-center shadow-sm">
           <Package className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
@@ -386,6 +383,12 @@ export default async function AssetsPage({ searchParams }) {
   const canAdmin =
     ADMIN_ROLES.includes(session.user.role) || session.user.role === "SuperAdmin";
 
+  const params = await searchParams;
+  const page = parseInt(params.page || "1", 10);
+  const status = params.status || "";
+  const category = params.category || "";
+  const search = params.search || "";
+
   return (
     <div className="space-y-6 p-4 sm:p-6">
       <div className="flex items-center justify-between gap-3">
@@ -412,14 +415,27 @@ export default async function AssetsPage({ searchParams }) {
 
       <Suspense
         fallback={
-          <div className="space-y-3">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="h-14 animate-pulse rounded-lg bg-muted" />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-24 animate-pulse rounded-lg border border-border bg-muted"
+              />
             ))}
           </div>
         }
       >
-        <AssetList searchParams={searchParams} />
+        <AssetStats />
+      </Suspense>
+
+      <FilterForm search={search} category={category} status={status} />
+
+      <Suspense
+        fallback={
+          <div className="h-64 animate-pulse rounded-lg bg-muted" />
+        }
+      >
+        <AssetList page={page} status={status} category={category} search={search} />
       </Suspense>
     </div>
   );

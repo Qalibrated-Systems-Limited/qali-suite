@@ -3,7 +3,13 @@
 import { useActionState, useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Loader2,
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+} from "lucide-react";
 import { createAsset } from "@/app/mongodb/actions/asset-actions";
 
 const CATEGORIES = [
@@ -113,20 +119,32 @@ function computeReducingBalancePreview(cost, salvage, months, rate, startDate, c
   return schedule;
 }
 
-export default function AssetForm({ accountsByType = {} }) {
+export default function AssetForm({
+  accountsByType = {},
+  initialValues = null,
+  capitalizationSource = null,
+  capitalizationThreshold = 0,
+}) {
   const router = useRouter();
   const [state, formAction, isPending] = useActionState(createAsset, initialState);
 
   const today = new Date().toISOString().slice(0, 10);
+  const initialDate = initialValues?.acquisitionDate
+    ? initialValues.acquisitionDate.slice(0, 10)
+    : today;
 
   const [category, setCategory] = useState("equipment");
-  const [acquisitionCost, setAcquisitionCost] = useState("");
-  const [acquisitionDate, setAcquisitionDate] = useState(today);
+  const [acquisitionCost, setAcquisitionCost] = useState(
+    initialValues?.acquisitionCost
+      ? String(initialValues.acquisitionCost)
+      : ""
+  );
+  const [acquisitionDate, setAcquisitionDate] = useState(initialDate);
   const [depreciationMethod, setDepreciationMethod] = useState("straight_line");
   const [usefulLifeMonths, setUsefulLifeMonths] = useState("60");
   const [salvageValue, setSalvageValue] = useState("0");
   const [depreciationRate, setDepreciationRate] = useState("0");
-  const [depreciationStartDate, setDepreciationStartDate] = useState(today);
+  const [depreciationStartDate, setDepreciationStartDate] = useState(initialDate);
   const [glOpen, setGlOpen] = useState(false);
 
   // Sync deprecation start date with acquisition date by default
@@ -181,6 +199,49 @@ export default function AssetForm({ accountsByType = {} }) {
 
   return (
     <form action={formAction} className="space-y-6">
+      {/* Hidden source-tracking fields (populated when capitalizing from a bill) */}
+      {initialValues?.sourceType && (
+        <input
+          type="hidden"
+          name="sourceType"
+          value={initialValues.sourceType}
+        />
+      )}
+      {initialValues?.sourceId && (
+        <input type="hidden" name="sourceId" value={initialValues.sourceId} />
+      )}
+      {initialValues?.sourceReference && (
+        <input
+          type="hidden"
+          name="sourceReference"
+          value={initialValues.sourceReference}
+        />
+      )}
+      {initialValues?.billLineId && (
+        <input
+          type="hidden"
+          name="billLineId"
+          value={initialValues.billLineId}
+        />
+      )}
+
+      {capitalizationSource && (
+        <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-500/5 p-3 text-sm text-blue-800 dark:border-blue-900 dark:text-blue-300">
+          <FileText className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium">
+              Capitalizing from Bill {capitalizationSource.billNumber}
+            </p>
+            <p className="mt-0.5 text-xs text-blue-700/80 dark:text-blue-400/80">
+              Pre-filled from the bill line: &ldquo;
+              {capitalizationSource.lineDescription}&rdquo;. Cost shown excludes
+              VAT (recoverable separately). Choose the category, useful life,
+              and GL accounts below.
+            </p>
+          </div>
+        </div>
+      )}
+
       {state.error && (
         <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-500/5 p-3 text-sm text-red-700 dark:border-red-900 dark:text-red-400">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -201,6 +262,7 @@ export default function AssetForm({ accountsByType = {} }) {
             name="name"
             required
             maxLength={200}
+            defaultValue={initialValues?.name || ""}
             placeholder="e.g. Toyota Hilux Pickup"
             className={`w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary ${
               state.fieldErrors?.name ? "border-destructive" : "border-border"
@@ -258,6 +320,7 @@ export default function AssetForm({ accountsByType = {} }) {
             name="description"
             rows={2}
             maxLength={1000}
+            defaultValue={initialValues?.description || ""}
             placeholder="Brief description of the asset..."
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           />
@@ -356,6 +419,17 @@ export default function AssetForm({ accountsByType = {} }) {
                 KES {formatCurrency(parseFloat(acquisitionCost))}
               </p>
             )}
+            {capitalizationThreshold > 0 &&
+              acquisitionCost &&
+              parseFloat(acquisitionCost) > 0 &&
+              parseFloat(acquisitionCost) < capitalizationThreshold && (
+                <p className="mt-1 rounded-md border border-amber-200 bg-amber-500/5 px-2 py-1 text-xs text-amber-800 dark:border-amber-900 dark:text-amber-300">
+                  Below capitalization threshold of KES{" "}
+                  {formatCurrency(capitalizationThreshold)}. Consider expensing
+                  this as &ldquo;Office Supplies&rdquo; or similar instead of
+                  registering as a fixed asset.
+                </p>
+              )}
             {state.fieldErrors?.acquisitionCost && (
               <p className="mt-1 text-xs text-destructive">
                 {state.fieldErrors.acquisitionCost}
@@ -494,20 +568,46 @@ export default function AssetForm({ accountsByType = {} }) {
               </div>
             )}
 
-            <div>
-              <label className="mb-1 block text-sm font-medium text-foreground">
-                Depreciation Start Date
-              </label>
-              <input
-                type="date"
-                name="depreciationStartDate"
-                value={depreciationStartDate}
-                onChange={(e) => setDepreciationStartDate(e.target.value)}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">
-                Defaults to acquisition date
-              </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-foreground">
+                  Depreciation Start Date
+                </label>
+                <input
+                  type="date"
+                  name="depreciationStartDate"
+                  value={depreciationStartDate}
+                  onChange={(e) => setDepreciationStartDate(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Defaults to acquisition date
+                </p>
+              </div>
+
+              {depreciationMethod === "straight_line" && (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-foreground">
+                    First-Period Convention
+                  </label>
+                  <select
+                    name="depreciationConvention"
+                    defaultValue="full_month"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="full_month">
+                      Full month (charge full month from start)
+                    </option>
+                    <option value="pro_rata">
+                      Pro-rata (charge by days in start month)
+                    </option>
+                  </select>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Pro-rata is IFRS-preferred for material assets bought
+                    mid-month.
+                  </p>
+                </div>
+              )}
             </div>
           </>
         )}

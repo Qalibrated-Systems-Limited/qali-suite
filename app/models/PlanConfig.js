@@ -45,7 +45,6 @@ const planConfigSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-planConfigSchema.index({ code: 1 }, { unique: true });
 planConfigSchema.index({ sortOrder: 1 });
 
 export default mongoose.models.PlanConfig ||

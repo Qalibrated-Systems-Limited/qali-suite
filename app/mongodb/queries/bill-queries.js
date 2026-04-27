@@ -45,6 +45,7 @@ function serializeBill(bill) {
     whtRate: bill.whtRate || 0,
 
     lines: (bill.lines || []).map((line) => ({
+      _id: line._id?.toString() || null,
       lineNumber: line.lineNumber,
       product: line.product
         ? {
@@ -60,6 +61,14 @@ function serializeBill(bill) {
         name: line.account?.name || "",
         type: line.account?.type || "",
       },
+      asset: line.asset?.id
+        ? {
+            id: line.asset.id.toString(),
+            assetNumber: line.asset.assetNumber || "",
+            name: line.asset.name || "",
+          }
+        : null,
+      capitalizedAssetId: line.capitalizedAssetId?.toString() || null,
       quantity: line.quantity,
       unit: line.unit,
       unitPrice: line.unitPrice,

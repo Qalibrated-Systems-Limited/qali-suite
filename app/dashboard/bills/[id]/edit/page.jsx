@@ -10,6 +10,7 @@ import { getBillById } from "@/app/mongodb/queries/bill-queries";
 import Party from "@/app/models/parties";
 import Account from "@/app/models/account";
 import Product from "@/app/models/product";
+import Asset from "@/app/models/asset";
 import dbConnect from "@/app/config/dbConnect";
 import { auth } from "@/auth";
 import { serializeBsonType } from "@/lib/utils";
@@ -70,6 +71,15 @@ async function getBillFormData() {
     .sort({ name: 1 })
     .lean();
 
+  // Fetch active fixed assets (optional per-line tagging) - tenant-scoped
+  const assets = await Asset.find({
+    companyId,
+    status: { $in: ["active", "idle", "in_maintenance"] },
+  })
+    .select("_id assetNumber name registrationNumber")
+    .sort({ assetNumber: 1 })
+    .lean();
+
   // Serialize MongoDB objects for client components
   const serializedSuppliers = suppliers.map((s) => ({
     _id: s._id.toString(),
@@ -97,10 +107,18 @@ async function getBillFormData() {
     costPrice: p.costing?.costPrice || p.costPrice || 0,
   }));
 
+  const serializedAssets = assets.map((a) => ({
+    _id: a._id.toString(),
+    assetNumber: a.assetNumber,
+    name: a.name,
+    registrationNumber: a.registrationNumber || "",
+  }));
+
   return {
     suppliers: serializedSuppliers,
     accounts: serializedAccounts,
     products: serializedProducts,
+    assets: serializedAssets,
   };
 }
 
@@ -139,7 +157,7 @@ async function BillEditFormWrapper({ billId }) {
     );
   }
 
-  const { suppliers, accounts, products } = formData;
+  const { suppliers, accounts, products, assets } = formData;
 
   return (
     <BillForm
@@ -147,6 +165,7 @@ async function BillEditFormWrapper({ billId }) {
       suppliers={suppliers}
       accounts={accounts}
       products={products}
+      assets={assets}
       projects={projects}
     />
   );

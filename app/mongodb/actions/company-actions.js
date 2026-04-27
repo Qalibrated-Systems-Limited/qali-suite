@@ -92,6 +92,7 @@ const CreateCompanySchema = z.object({
   defaultVatRate: optionalNumber(0, 100),
   fiscalYearStart: optionalNumber(1, 12),
   defaultPaymentTermsDays: optionalNumber(0, 365),
+  capitalizationThreshold: optionalNumber(0, 1_000_000_000),
 });
 
 const UpdateCompanySchema = CreateCompanySchema.partial();
@@ -148,6 +149,7 @@ export async function createCompany(prevState, formData) {
     defaultVatRate: formData.get("defaultVatRate"),
     fiscalYearStart: formData.get("fiscalYearStart"),
     defaultPaymentTermsDays: formData.get("defaultPaymentTermsDays"),
+    capitalizationThreshold: formData.get("capitalizationThreshold"),
   };
 
   if (!session?.user) {
@@ -222,6 +224,7 @@ export async function createCompany(prevState, formData) {
         defaultVatRate: data.defaultVatRate ?? 16,
         fiscalYearStart: data.fiscalYearStart || 1,
         defaultPaymentTermsDays: data.defaultPaymentTermsDays || 30,
+        capitalizationThreshold: data.capitalizationThreshold ?? 0,
       },
       createdBy: {
         name: session.user.name,
@@ -295,6 +298,7 @@ export async function updateCompany(prevState, formData) {
     defaultVatRate: formData.get("defaultVatRate"),
     fiscalYearStart: formData.get("fiscalYearStart"),
     defaultPaymentTermsDays: formData.get("defaultPaymentTermsDays"),
+    capitalizationThreshold: formData.get("capitalizationThreshold"),
   };
 
   if (!session?.user) {
@@ -419,6 +423,8 @@ export async function updateCompany(prevState, formData) {
       company.settings.fiscalYearStart = data.fiscalYearStart;
     if (data.defaultPaymentTermsDays !== undefined)
       company.settings.defaultPaymentTermsDays = data.defaultPaymentTermsDays;
+    if (data.capitalizationThreshold !== undefined)
+      company.settings.capitalizationThreshold = data.capitalizationThreshold;
 
     // Audit
     company.lastModifiedBy = {

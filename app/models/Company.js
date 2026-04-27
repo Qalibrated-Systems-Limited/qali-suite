@@ -282,6 +282,16 @@ const companySchema = new Schema(
         min: [1, "Draft expiry must be at least 1 day"],
         max: [90, "Draft expiry cannot exceed 90 days"],
       },
+
+      // Fixed Asset capitalization policy.
+      // Items below this amount are treated as expense rather than capitalized.
+      // 0 disables the policy entirely (no warning shown). Soft policy — the
+      // user is warned but can override.
+      capitalizationThreshold: {
+        type: Number,
+        default: 0,
+        min: [0, "Threshold cannot be negative"],
+      },
     },
 
     // ============================================

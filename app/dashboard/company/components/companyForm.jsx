@@ -543,6 +543,33 @@ export default function CompanyForm({ company = null, isSuperAdmin = false }) {
                   <p className="text-sm text-destructive">{state.errors.defaultPaymentTermsDays[0]}</p>
                 )}
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="capitalizationThreshold">
+                  Capitalization Threshold (KES)
+                </Label>
+                <Input
+                  id="capitalizationThreshold"
+                  name="capitalizationThreshold"
+                  type="number"
+                  min="0"
+                  step="1"
+                  defaultValue={v(
+                    "capitalizationThreshold",
+                    company?.settings?.capitalizationThreshold ?? 0
+                  )}
+                  className="bg-background"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Items below this amount are warned to be expensed instead of
+                  capitalized as fixed assets. Set to 0 to disable.
+                </p>
+                {state.errors?.capitalizationThreshold && (
+                  <p className="text-sm text-destructive">
+                    {state.errors.capitalizationThreshold[0]}
+                  </p>
+                )}
+              </div>
             </div>
 
             {!isEdit && (

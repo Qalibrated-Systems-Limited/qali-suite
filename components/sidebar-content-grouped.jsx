@@ -464,6 +464,15 @@ const getNavigationGroups = (user) => {
         href: "/dashboard/reports/ap-aging",
         hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("ap-aging"),
       },
+      {
+        icon: Package,
+        label: "Asset Rollforward",
+        id: "asset-rollforward",
+        href: "/dashboard/reports/asset-rollforward",
+        hidden:
+          !["Admin", "Accountant", "Manager"].includes(user?.role) ||
+          !hasMod("assets"),
+      },
 
       // Divider comment
       // Operational Reports

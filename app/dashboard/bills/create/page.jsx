@@ -8,6 +8,7 @@ import BillForm from "../components/BillForm";
 import Party from "@/app/models/parties";
 import Account from "@/app/models/account";
 import Product from "@/app/models/product";
+import Asset from "@/app/models/asset";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
@@ -60,6 +61,15 @@ async function getBillFormData() {
     .sort({ name: 1 })
     .lean();
 
+  // Fetch active fixed assets (optional per-line tagging) - tenant-scoped
+  const assets = await Asset.find({
+    companyId,
+    status: { $in: ["active", "idle", "in_maintenance"] },
+  })
+    .select("_id assetNumber name registrationNumber")
+    .sort({ assetNumber: 1 })
+    .lean();
+
   // Serialize MongoDB objects for client components
   const serializedSuppliers = suppliers.map((s) => ({
     _id: s._id.toString(),
@@ -88,10 +98,18 @@ async function getBillFormData() {
     costPrice: p.costing?.costPrice || p.costPrice || 0,
   }));
 
+  const serializedAssets = assets.map((a) => ({
+    _id: a._id.toString(),
+    assetNumber: a.assetNumber,
+    name: a.name,
+    registrationNumber: a.registrationNumber || "",
+  }));
+
   return {
     suppliers: serializedSuppliers,
     accounts: serializedAccounts,
     products: serializedProducts,
+    assets: serializedAssets,
   };
 }
 
@@ -125,10 +143,8 @@ function FormSkeleton() {
 // FORM WRAPPER (Server Component)
 // ============================================
 async function BillFormWrapper() {
-  const [{ suppliers, accounts, products }, projects] = await Promise.all([
-    getBillFormData(),
-    getActiveProjects(),
-  ]);
+  const [{ suppliers, accounts, products, assets }, projects] =
+    await Promise.all([getBillFormData(), getActiveProjects()]);
 
   // Check if we have required data
   if (suppliers.length === 0) {
@@ -178,6 +194,7 @@ async function BillFormWrapper() {
       suppliers={suppliers}
       accounts={accounts}
       products={products}
+      assets={assets}
       projects={projects}
     />
   );

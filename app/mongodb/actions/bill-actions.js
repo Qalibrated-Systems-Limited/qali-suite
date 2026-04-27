@@ -38,6 +38,7 @@ import Bill from "@/app/models/bill";
 import Party from "@/app/models/parties";
 import Product from "@/app/models/product";
 import Account from "@/app/models/account";
+import Asset from "@/app/models/asset";
 import Project from "@/app/models/project";
 import dbConnect from "@/app/config/dbConnect";
 import {
@@ -75,6 +76,7 @@ const BillLineSchema = z.object({
   customProductName: z.string().optional().nullable(), // For non-inventory items/services
   description: z.string().min(1, "Description is required"),
   accountId: z.string().min(1, "Account is required"),
+  assetId: z.string().optional().nullable(), // Optional link to a fixed asset
   quantity: z.coerce.number().positive("Quantity must be positive"),
   unit: z.string().default("pcs"),
   unitPrice: z.coerce.number().min(0, "Unit price cannot be negative"),
@@ -152,6 +154,45 @@ function parseFormData(formData) {
  */
 function hasRole(user, allowedRoles) {
   return allowedRoles.includes(user?.role);
+}
+
+/**
+ * Resolve an optional assetId from a bill line into a snapshot subdoc.
+ * Returns null if not provided. Returns an error object if the id is
+ * malformed or the asset doesn't belong to the tenant.
+ */
+async function resolveLineAsset({
+  rawAssetId,
+  companyId,
+  isSuperAdmin,
+  mongoSession,
+}) {
+  if (!rawAssetId || typeof rawAssetId !== "string") {
+    return { snapshot: null };
+  }
+  const assetId = rawAssetId.trim();
+  if (!assetId || assetId === "none") {
+    return { snapshot: null };
+  }
+  if (!mongoose.Types.ObjectId.isValid(assetId)) {
+    return { error: "Invalid asset reference" };
+  }
+  const asset = await Asset.findOne(
+    withTenantScope({ _id: assetId }, companyId, isSuperAdmin)
+  )
+    .select("_id assetNumber name")
+    .session(mongoSession)
+    .lean();
+  if (!asset) {
+    return { error: "Asset not found" };
+  }
+  return {
+    snapshot: {
+      id: asset._id,
+      assetNumber: asset.assetNumber,
+      name: asset.name,
+    },
+  };
 }
 
 /**
@@ -322,6 +363,23 @@ export async function createBill(prevState, formData) {
         };
       }
 
+      // Resolve optional asset link (tenant-scoped)
+      const assetResolution = await resolveLineAsset({
+        rawAssetId: line.assetId,
+        companyId: tenantCompanyId,
+        isSuperAdmin,
+        mongoSession,
+      });
+      if (assetResolution.error) {
+        await mongoSession.abortTransaction();
+        return {
+          success: false,
+          error: `Line ${i + 1}: ${assetResolution.error}`,
+          fieldErrors: { [`lines.${i}.assetId`]: assetResolution.error },
+          values: rawData,
+        };
+      }
+
       // Calculate amounts
       const amount = line.quantity * line.unitPrice;
       const vatAmount = (amount * line.vatRate) / 100;
@@ -336,6 +394,11 @@ export async function createBill(prevState, formData) {
           code: account.accountCode,
           name: account.accountName,
           type: account.accountType,
+        },
+        asset: assetResolution.snapshot || {
+          id: null,
+          assetNumber: null,
+          name: null,
         },
         quantity: line.quantity,
         unit: line.unit || "pcs",
@@ -660,6 +723,23 @@ export async function updateBill(billId, prevState, formData) {
         };
       }
 
+      // Resolve optional asset link (tenant-scoped)
+      const assetResolution = await resolveLineAsset({
+        rawAssetId: line.assetId,
+        companyId: billCompanyId,
+        isSuperAdmin,
+        mongoSession,
+      });
+      if (assetResolution.error) {
+        await mongoSession.abortTransaction();
+        return {
+          success: false,
+          error: `Line ${i + 1}: ${assetResolution.error}`,
+          fieldErrors: { [`lines.${i}.assetId`]: assetResolution.error },
+          values: rawData,
+        };
+      }
+
       const amount = line.quantity * line.unitPrice;
       const vatAmount = (amount * line.vatRate) / 100;
 
@@ -673,6 +753,11 @@ export async function updateBill(billId, prevState, formData) {
           code: account.accountCode,
           name: account.accountName,
           type: account.accountType,
+        },
+        asset: assetResolution.snapshot || {
+          id: null,
+          assetNumber: null,
+          name: null,
         },
         quantity: line.quantity,
         unit: line.unit || "pcs",

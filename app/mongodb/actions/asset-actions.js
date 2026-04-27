@@ -11,8 +11,125 @@ import {
 import { requirePlanAccess } from "@/lib/plan-gate";
 import { safeErrorMessage } from "@/lib/safe-error";
 import Asset from "@/app/models/asset";
+import Bill from "@/app/models/bill";
 import JournalEntry from "@/app/models/JournalEntry";
 import ErpCounter from "@/app/models/erp-counter";
+
+// ============================================
+// CAPITALIZE-FROM-BILL HELPERS
+// ============================================
+
+/**
+ * Parse a "billId:lineId" string into its parts. Returns null if malformed.
+ */
+function parseBillLineRef(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  const [billId, lineId] = raw.split(":");
+  if (!billId || !lineId) return null;
+  if (
+    !mongoose.Types.ObjectId.isValid(billId) ||
+    !mongoose.Types.ObjectId.isValid(lineId)
+  ) {
+    return null;
+  }
+  return { billId, lineId };
+}
+
+/**
+ * Public read used by the asset create page to pre-fill from a bill line.
+ * Returns serialized prefill values, or an error/redirect signal.
+ */
+export async function loadBillLineForCapitalization(billLineRef) {
+  try {
+    await requirePlanAccess("finance");
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!hasRole(user, ASSET_ROLES.CREATE)) {
+      return { error: "You do not have permission to capitalize bills" };
+    }
+
+    const parsed = parseBillLineRef(billLineRef);
+    if (!parsed) return { error: "Invalid bill line reference" };
+
+    await dbConnect();
+    const result = await loadCapitalizableLine({
+      billId: parsed.billId,
+      lineId: parsed.lineId,
+      companyId,
+      isSuperAdmin,
+      mongoSession: null,
+    });
+    if (result.error) {
+      return {
+        error: result.error,
+        alreadyCapitalizedAssetId: result.alreadyCapitalizedAssetId || null,
+      };
+    }
+
+    return {
+      prefill: {
+        name: result.line.description?.slice(0, 200) || "",
+        description: result.line.description || "",
+        acquisitionCost: result.line.amount || 0,
+        acquisitionDate:
+          result.bill.billDate?.toISOString?.() ?? result.bill.billDate ?? null,
+        sourceType: "bill",
+        sourceId: result.bill._id.toString(),
+        sourceReference: result.bill.billNumber,
+        billLineId: `${result.bill._id.toString()}:${result.line._id.toString()}`,
+      },
+    };
+  } catch (error) {
+    console.error("loadBillLineForCapitalization error:", error);
+    return {
+      error: safeErrorMessage(error, "Failed to load bill line"),
+    };
+  }
+}
+
+/**
+ * Verify a bill line is eligible to be capitalized:
+ * - Bill belongs to tenant
+ * - Bill is in a postable state (not cancelled / rejected)
+ * - Line exists, is asset-type, and is not already capitalized
+ */
+async function loadCapitalizableLine({
+  billId,
+  lineId,
+  companyId,
+  isSuperAdmin,
+  mongoSession,
+}) {
+  const filter = isSuperAdmin
+    ? { _id: billId }
+    : { _id: billId, companyId };
+  const query = Bill.findOne(filter).select(
+    "billNumber billDate companyId status lines._id lines.account lines.description lines.amount lines.capitalizedAssetId",
+  );
+  if (mongoSession) query.session(mongoSession);
+  const bill = await query.lean();
+  if (!bill) return { error: "Bill not found" };
+  if (["cancelled", "rejected"].includes(bill.status)) {
+    return { error: "Bill is cancelled or rejected — cannot capitalize" };
+  }
+  const line = (bill.lines || []).find(
+    (l) => l._id?.toString() === lineId,
+  );
+  if (!line) return { error: "Bill line not found" };
+  if (line.account?.type !== "asset") {
+    return {
+      error:
+        "Only asset-type lines can be capitalized. Re-classify the line first.",
+    };
+  }
+  if (line.capitalizedAssetId) {
+    return {
+      error: "This line has already been capitalized",
+      alreadyCapitalizedAssetId: line.capitalizedAssetId.toString(),
+    };
+  }
+  return { bill, line };
+}
 
 // ============================================
 // ZOD SCHEMAS
@@ -58,6 +175,9 @@ const CreateAssetSchema = z.object({
     .max(1, "Rate must be a decimal (e.g., 0.25 for 25%)")
     .default(0),
   depreciationStartDate: z.coerce.date().optional(),
+  depreciationConvention: z
+    .enum(["full_month", "pro_rata"])
+    .default("full_month"),
   kraClass: z
     .enum(["class_I", "class_II", "class_III", "class_IV", "none"])
     .default("none"),
@@ -152,6 +272,8 @@ const ASSET_ROLES = {
   POST_DEPRECIATION: ["Admin", "Accountant"],
   DISPOSE: ["Admin"],
   CANCEL_DEPRECIATION: ["Admin"],
+  TRANSFER: ["Admin", "Accountant", "Manager"],
+  IMPAIR: ["Admin", "Accountant"],
   VIEW_ALL: ["Admin", "Accountant", "Manager"],
 };
 
@@ -271,6 +393,8 @@ export async function createAsset(_prevState, formData) {
       depreciationStartDate:
         formData.get("depreciationStartDate")?.toString() ||
         formData.get("acquisitionDate")?.toString(),
+      depreciationConvention:
+        formData.get("depreciationConvention")?.toString() || "full_month",
       kraClass: formData.get("kraClass")?.toString() || "none",
       serialNumber: formData.get("serialNumber")?.toString() || "",
       model: formData.get("model")?.toString() || "",
@@ -290,6 +414,11 @@ export async function createAsset(_prevState, formData) {
       sourceId: formData.get("sourceId")?.toString() || "",
       sourceReference: formData.get("sourceReference")?.toString() || "",
     });
+
+    // Optional: capitalizing from a specific bill line.
+    const billLineRef = parseBillLineRef(
+      formData.get("billLineId")?.toString() || "",
+    );
 
     if (!parsed.success) {
       const fieldErrors = parsed.error.flatten().fieldErrors;
@@ -371,6 +500,7 @@ export async function createAsset(_prevState, formData) {
       depreciationRate: data.depreciationRate,
       depreciationStartDate:
         data.depreciationStartDate || data.acquisitionDate,
+      depreciationConvention: data.depreciationConvention,
       kraClass: data.kraClass,
       glMapping,
       sourceType: data.sourceType,
@@ -384,6 +514,42 @@ export async function createAsset(_prevState, formData) {
     asset.generateSchedule();
 
     await asset.save({ session: mongoSession });
+
+    // Capitalize-from-bill: re-validate the line under the same transaction
+    // and atomically tag it so we can't double-capitalize.
+    if (billLineRef) {
+      const lineCheck = await loadCapitalizableLine({
+        billId: billLineRef.billId,
+        lineId: billLineRef.lineId,
+        companyId: tenantCompanyId,
+        isSuperAdmin,
+        mongoSession,
+      });
+      if (lineCheck.error) {
+        await mongoSession.abortTransaction();
+        return { success: false, error: lineCheck.error };
+      }
+
+      const update = await Bill.updateOne(
+        {
+          _id: billLineRef.billId,
+          "lines._id": billLineRef.lineId,
+          "lines.capitalizedAssetId": null,
+        },
+        { $set: { "lines.$.capitalizedAssetId": asset._id } },
+        { session: mongoSession },
+      );
+      if (update.modifiedCount !== 1) {
+        await mongoSession.abortTransaction();
+        return {
+          success: false,
+          error: "Failed to link bill line — it may have been capitalized concurrently",
+        };
+      }
+
+      revalidatePath(`/dashboard/bills/${billLineRef.billId}`);
+    }
+
     await mongoSession.commitTransaction();
 
     revalidatePath("/dashboard/assets");
@@ -1380,6 +1546,634 @@ export async function getAssetsTotals() {
       success: false,
       error: safeErrorMessage(error, "Failed to load asset totals"),
       totals: [],
+    };
+  }
+}
+
+/**
+ * Bills tagged to a given asset (maintenance, repairs, fuel, insurance, etc.).
+ * Returns matching lines with their bill metadata. Cancelled bills excluded.
+ * Total reflects line amount (excluding VAT) — that's the cost net to the asset.
+ */
+export async function getAssetExpenses(assetId) {
+  try {
+    await requirePlanAccess("finance");
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!hasRole(user, ASSET_ROLES.VIEW_ALL)) {
+      return { success: false, error: "Access denied", entries: [], total: 0 };
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(assetId)) {
+      return {
+        success: false,
+        error: "Invalid asset id",
+        entries: [],
+        total: 0,
+      };
+    }
+
+    await dbConnect();
+
+    const assetObjectId = new mongoose.Types.ObjectId(assetId);
+    const match = isSuperAdmin
+      ? { "lines.asset.id": assetObjectId, status: { $ne: "cancelled" } }
+      : {
+          companyId,
+          "lines.asset.id": assetObjectId,
+          status: { $ne: "cancelled" },
+        };
+
+    const bills = await Bill.find(match)
+      .select(
+        "billNumber billDate status paymentStatus supplier.name lines._id lines.asset lines.description lines.amount lines.lineTotal lines.account",
+      )
+      .sort({ billDate: -1 })
+      .lean();
+
+    const entries = [];
+    let total = 0;
+    for (const bill of bills) {
+      for (const line of bill.lines || []) {
+        if (line.asset?.id?.toString() !== assetId) continue;
+        const amount = line.amount || 0;
+        total += amount;
+        entries.push({
+          billId: bill._id.toString(),
+          billNumber: bill.billNumber,
+          billDate: bill.billDate?.toISOString?.() ?? bill.billDate ?? null,
+          billStatus: bill.status,
+          paymentStatus: bill.paymentStatus,
+          supplierName: bill.supplier?.name || "—",
+          lineDescription: line.description || "",
+          accountName: line.account?.name || "",
+          accountCode: line.account?.code || "",
+          amount,
+          lineTotal: line.lineTotal || amount,
+        });
+      }
+    }
+
+    return { success: true, entries, total };
+  } catch (error) {
+    console.error("getAssetExpenses error:", error);
+    return {
+      success: false,
+      error: safeErrorMessage(error, "Failed to load asset expenses"),
+      entries: [],
+      total: 0,
+    };
+  }
+}
+
+// ============================================
+// TRANSFER ASSET
+// ============================================
+// Logs a location / department / custodian change. Append-only history.
+// Skips no-op transfers (nothing actually changed).
+// ============================================
+const TransferAssetSchema = z.object({
+  assetId: z.string().min(1, "Asset id is required"),
+  toLocation: z.string().max(200).optional().default(""),
+  toDepartment: z.string().max(100).optional().default(""),
+  toAssignedToName: z.string().max(200).optional().default(""),
+  reason: z.string().min(1, "Reason is required").max(500),
+  transferredAt: z.coerce.date().optional(),
+});
+
+export async function transferAsset(_prevState, formData) {
+  let mongoSession = null;
+  try {
+    await requirePlanAccess("finance");
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!hasRole(user, ASSET_ROLES.TRANSFER)) {
+      return {
+        success: false,
+        error: "You do not have permission to transfer assets",
+      };
+    }
+
+    const parsed = TransferAssetSchema.safeParse({
+      assetId: formData.get("assetId")?.toString() || "",
+      toLocation: formData.get("toLocation")?.toString() || "",
+      toDepartment: formData.get("toDepartment")?.toString() || "",
+      toAssignedToName: formData.get("toAssignedToName")?.toString() || "",
+      reason: formData.get("reason")?.toString() || "",
+      transferredAt: formData.get("transferredAt")?.toString() || undefined,
+    });
+
+    if (!parsed.success) {
+      const fieldErrors = parsed.error.flatten().fieldErrors;
+      return {
+        success: false,
+        error: Object.values(fieldErrors).flat()[0] || "Invalid input",
+        fieldErrors,
+      };
+    }
+    const data = parsed.data;
+
+    if (!mongoose.Types.ObjectId.isValid(data.assetId)) {
+      return { success: false, error: "Invalid asset id" };
+    }
+
+    await dbConnect();
+    mongoSession = await mongoose.startSession();
+    mongoSession.startTransaction();
+
+    const filter = isSuperAdmin
+      ? { _id: data.assetId }
+      : { _id: data.assetId, companyId };
+
+    const asset = await Asset.findOne(filter).session(mongoSession);
+    if (!asset) {
+      await mongoSession.abortTransaction();
+      return { success: false, error: "Asset not found" };
+    }
+    if (["disposed", "written_off"].includes(asset.status)) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: `Cannot transfer a ${asset.status.replace("_", " ")} asset`,
+      };
+    }
+
+    const fromLocation = asset.location || "";
+    const fromDepartment = asset.department || "";
+    const fromAssignedToName = asset.assignedToName || "";
+
+    const noChange =
+      fromLocation === data.toLocation &&
+      fromDepartment === data.toDepartment &&
+      fromAssignedToName === data.toAssignedToName;
+    if (noChange) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: "No change — at least one of location, department, or custodian must differ",
+      };
+    }
+
+    asset.transfers.push({
+      transferredAt: data.transferredAt || new Date(),
+      fromLocation,
+      toLocation: data.toLocation,
+      fromDepartment,
+      toDepartment: data.toDepartment,
+      fromAssignedToName,
+      toAssignedToName: data.toAssignedToName,
+      reason: data.reason,
+      transferredBy: { id: user.id, name: user.name },
+    });
+
+    asset.location = data.toLocation;
+    asset.department = data.toDepartment;
+    asset.assignedToName = data.toAssignedToName;
+    asset.lastModifiedBy = { id: user.id, name: user.name };
+
+    await asset.save({ session: mongoSession });
+    await mongoSession.commitTransaction();
+
+    revalidatePath(`/dashboard/assets/${data.assetId}`);
+    revalidatePath("/dashboard/assets");
+
+    return { success: true, assetId: data.assetId };
+  } catch (error) {
+    if (mongoSession) await mongoSession.abortTransaction();
+    console.error("transferAsset error:", error);
+    return {
+      success: false,
+      error: safeErrorMessage(error, "Failed to transfer asset"),
+    };
+  } finally {
+    if (mongoSession) mongoSession.endSession();
+  }
+}
+
+// ============================================
+// IMPAIR ASSET
+// ============================================
+// Records a partial write-down (IFRS impairment).
+// JE: Dr Impairment Loss / Cr Accumulated Depreciation.
+// Future depreciation schedule is revised over the remaining useful life.
+// ============================================
+const ImpairAssetSchema = z.object({
+  assetId: z.string().min(1, "Asset id is required"),
+  amount: z.coerce
+    .number()
+    .positive("Impairment amount must be greater than zero"),
+  reason: z.string().min(1, "Reason is required").max(500),
+  impairedAt: z.coerce.date().optional(),
+  impairmentLossAccountId: z
+    .string()
+    .min(1, "Impairment loss account is required"),
+});
+
+export async function impairAsset(_prevState, formData) {
+  let mongoSession = null;
+  try {
+    await requirePlanAccess("finance");
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!hasRole(user, ASSET_ROLES.IMPAIR)) {
+      return {
+        success: false,
+        error: "You do not have permission to impair assets",
+      };
+    }
+
+    const parsed = ImpairAssetSchema.safeParse({
+      assetId: formData.get("assetId")?.toString() || "",
+      amount: formData.get("amount")?.toString() || "0",
+      reason: formData.get("reason")?.toString() || "",
+      impairedAt: formData.get("impairedAt")?.toString() || undefined,
+      impairmentLossAccountId:
+        formData.get("impairmentLossAccountId")?.toString() || "",
+    });
+    if (!parsed.success) {
+      const fieldErrors = parsed.error.flatten().fieldErrors;
+      return {
+        success: false,
+        error: Object.values(fieldErrors).flat()[0] || "Invalid input",
+        fieldErrors,
+      };
+    }
+    const data = parsed.data;
+
+    if (!mongoose.Types.ObjectId.isValid(data.assetId)) {
+      return { success: false, error: "Invalid asset id" };
+    }
+
+    await dbConnect();
+    mongoSession = await mongoose.startSession();
+    mongoSession.startTransaction();
+
+    const filter = isSuperAdmin
+      ? { _id: data.assetId }
+      : { _id: data.assetId, companyId };
+    const asset = await Asset.findOne(filter).session(mongoSession);
+    if (!asset) {
+      await mongoSession.abortTransaction();
+      return { success: false, error: "Asset not found" };
+    }
+    if (asset.status !== "active" && asset.status !== "idle") {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: `Cannot impair an asset with status "${asset.status}"`,
+      };
+    }
+
+    const ceiling = (asset.bookValue || 0) - (asset.salvageValue || 0);
+    if (ceiling <= 0) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: "Asset's book value is already at or below salvage — nothing to impair",
+      };
+    }
+    if (data.amount > ceiling) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: `Impairment cannot exceed depreciable book value of KES ${ceiling.toLocaleString()}`,
+      };
+    }
+
+    // Resolve GL accounts
+    const accumDepAccountId = await resolveAccount(
+      asset.companyId,
+      asset.glMapping?.accumulatedDepreciationAccount?.toString() || "",
+      "accumulated_depreciation",
+      mongoSession,
+    );
+    if (!accumDepAccountId) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: "Could not resolve the accumulated depreciation account",
+      };
+    }
+
+    // Verify the impairment loss account belongs to the tenant and is an expense
+    const Account = mongoose.model("Account");
+    const lossAccount = await Account.findOne({
+      _id: data.impairmentLossAccountId,
+      companyId: asset.companyId,
+      isActive: true,
+    })
+      .session(mongoSession)
+      .lean();
+    if (!lossAccount) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: "Impairment loss account not found",
+        fieldErrors: { impairmentLossAccountId: "Account not found" },
+      };
+    }
+    if (lossAccount.accountType !== "expense") {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error: "Impairment loss must post to an expense account",
+        fieldErrors: {
+          impairmentLossAccountId: "Must be an expense account",
+        },
+      };
+    }
+
+    const accountMap = await fetchAccountDetails(
+      [data.impairmentLossAccountId, accumDepAccountId.toString()],
+      mongoSession,
+    );
+
+    const entryDate = data.impairedAt || new Date();
+    const description = `Impairment — ${asset.name} (${asset.assetNumber})`;
+
+    const seq = await ErpCounter.getNextSequence(
+      "je-impair",
+      asset.companyId,
+      mongoSession,
+    );
+    const entryNumber = `JE-IMP-${String(seq).padStart(4, "0")}`;
+
+    const debitLine = jeLine(
+      accountMap,
+      data.impairmentLossAccountId,
+      data.amount,
+      0,
+      description,
+    );
+    const creditLine = jeLine(
+      accountMap,
+      accumDepAccountId.toString(),
+      0,
+      data.amount,
+      description,
+    );
+
+    const je = new JournalEntry({
+      companyId: asset.companyId,
+      entryNumber,
+      entryDate,
+      entryType: "impairment",
+      description,
+      reference: asset.assetNumber,
+      lines: [debitLine, creditLine],
+      fiscalYear: entryDate.getUTCFullYear(),
+      fiscalMonth: entryDate.getUTCMonth() + 1,
+      createdBy: { name: user.name, id: user.id },
+    });
+    await je.post({ name: user.name, id: user.id }, mongoSession);
+
+    // Update asset: book value, accumulated dep, schedule, history
+    asset.applyImpairment(data.amount);
+    asset.impairments.push({
+      impairedAt: entryDate,
+      amount: data.amount,
+      reason: data.reason,
+      journalEntryId: je._id,
+      impairedBy: { id: user.id, name: user.name },
+    });
+    asset.journalEntryIds.push(je._id);
+    asset.lastModifiedBy = { id: user.id, name: user.name };
+
+    await asset.save({ session: mongoSession });
+    await mongoSession.commitTransaction();
+
+    revalidatePath(`/dashboard/assets/${data.assetId}`);
+    revalidatePath("/dashboard/assets");
+    revalidatePath("/dashboard/journal");
+
+    return { success: true, assetId: data.assetId, journalEntryId: je._id.toString() };
+  } catch (error) {
+    if (mongoSession) await mongoSession.abortTransaction();
+    console.error("impairAsset error:", error);
+    return {
+      success: false,
+      error: safeErrorMessage(error, "Failed to impair asset"),
+    };
+  } finally {
+    if (mongoSession) mongoSession.endSession();
+  }
+}
+
+// ============================================
+// ASSET ROLLFORWARD REPORT
+// ============================================
+// Audit-grade report: opening + additions − disposals = closing,
+// for both Cost and Accumulated Depreciation, grouped by category.
+// Default window is the current calendar year if no dates supplied.
+// ============================================
+const CATEGORY_LABELS = {
+  vehicle: "Vehicles",
+  equipment: "Equipment",
+  computer: "Computers",
+  furniture: "Furniture",
+  building: "Buildings",
+  land: "Land",
+  machinery: "Machinery",
+  other: "Other",
+};
+
+function emptyBucket() {
+  return {
+    openingCost: 0,
+    additions: 0,
+    disposalsCost: 0,
+    closingCost: 0,
+    openingAccDep: 0,
+    chargeAccDep: 0,
+    disposalsAccDep: 0,
+    closingAccDep: 0,
+    count: 0,
+  };
+}
+
+/**
+ * Sum posted depreciation for an asset where postedAt strictly before `boundary`.
+ * Falls back to schedule date if postedAt is missing on legacy entries.
+ */
+function depPostedBefore(asset, boundary) {
+  let total = 0;
+  for (const e of asset.depreciationSchedule || []) {
+    if (e.status !== "posted") continue;
+    const posted =
+      e.postedAt instanceof Date
+        ? e.postedAt
+        : e.postedAt
+          ? new Date(e.postedAt)
+          : null;
+    if (!posted) continue;
+    if (posted < boundary) total += e.depreciationAmount || 0;
+  }
+  return total;
+}
+
+export async function getAssetRollforward({ startDate, endDate } = {}) {
+  try {
+    await requirePlanAccess("finance");
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!hasRole(user, ASSET_ROLES.VIEW_ALL)) {
+      return {
+        success: false,
+        error: "Access denied",
+        rows: [],
+        totals: emptyBucket(),
+        period: null,
+      };
+    }
+
+    // Default to current calendar year
+    const now = new Date();
+    const start = startDate
+      ? new Date(startDate)
+      : new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+    const end = endDate
+      ? new Date(endDate)
+      : new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59, 999));
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return {
+        success: false,
+        error: "Invalid date range",
+        rows: [],
+        totals: emptyBucket(),
+        period: null,
+      };
+    }
+    if (start > end) {
+      return {
+        success: false,
+        error: "Start date must be before end date",
+        rows: [],
+        totals: emptyBucket(),
+        period: null,
+      };
+    }
+
+    await dbConnect();
+
+    const baseFilter = isSuperAdmin ? {} : { companyId };
+    // Assets that touched the books at any point during the period:
+    //   acquired on/before period end, AND not disposed before period start.
+    const filter = {
+      ...baseFilter,
+      acquisitionDate: { $lte: end },
+      $or: [
+        { disposedAt: { $exists: false } },
+        { disposedAt: null },
+        { disposedAt: { $gte: start } },
+      ],
+    };
+
+    const assets = await Asset.find(filter)
+      .select(
+        "category acquisitionDate acquisitionCost status disposedAt depreciationSchedule",
+      )
+      .lean();
+
+    // Bucket by category
+    const buckets = new Map();
+    const ensure = (cat) => {
+      if (!buckets.has(cat)) buckets.set(cat, emptyBucket());
+      return buckets.get(cat);
+    };
+
+    for (const asset of assets) {
+      const cat = asset.category || "other";
+      const b = ensure(cat);
+      b.count += 1;
+
+      const acqDate = asset.acquisitionDate
+        ? new Date(asset.acquisitionDate)
+        : null;
+      const disposedAt = asset.disposedAt
+        ? new Date(asset.disposedAt)
+        : null;
+
+      const acquiredInPeriod = acqDate && acqDate >= start && acqDate <= end;
+      const disposedInPeriod =
+        disposedAt && disposedAt >= start && disposedAt <= end;
+
+      const cost = asset.acquisitionCost || 0;
+
+      // Cost rollforward
+      if (acquiredInPeriod) {
+        b.additions += cost;
+      } else {
+        b.openingCost += cost;
+      }
+      if (disposedInPeriod) {
+        b.disposalsCost += cost;
+      } else {
+        b.closingCost += cost;
+      }
+
+      // Accumulated depreciation rollforward
+      const depBeforeStart = acquiredInPeriod ? 0 : depPostedBefore(asset, start);
+      // Up to end-of-period boundary (use one tick past end for "<=" semantics)
+      const endBoundary = new Date(end.getTime() + 1);
+      const depToEnd = depPostedBefore(asset, endBoundary);
+
+      const charge = Math.max(0, depToEnd - depBeforeStart);
+
+      b.openingAccDep += depBeforeStart;
+      b.chargeAccDep += charge;
+
+      if (disposedInPeriod) {
+        // All depreciation accumulated up to disposal exits via the disposal row
+        b.disposalsAccDep += depBeforeStart + charge;
+      } else {
+        b.closingAccDep += depBeforeStart + charge;
+      }
+    }
+
+    // Convert map → rows array, sorted by category label
+    const rows = Array.from(buckets.entries())
+      .map(([category, b]) => ({
+        category,
+        label: CATEGORY_LABELS[category] || category,
+        ...b,
+        openingNBV: b.openingCost - b.openingAccDep,
+        closingNBV: b.closingCost - b.closingAccDep,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    const totals = rows.reduce((acc, r) => {
+      acc.openingCost += r.openingCost;
+      acc.additions += r.additions;
+      acc.disposalsCost += r.disposalsCost;
+      acc.closingCost += r.closingCost;
+      acc.openingAccDep += r.openingAccDep;
+      acc.chargeAccDep += r.chargeAccDep;
+      acc.disposalsAccDep += r.disposalsAccDep;
+      acc.closingAccDep += r.closingAccDep;
+      acc.count += r.count;
+      return acc;
+    }, emptyBucket());
+    totals.openingNBV = totals.openingCost - totals.openingAccDep;
+    totals.closingNBV = totals.closingCost - totals.closingAccDep;
+
+    return {
+      success: true,
+      rows,
+      totals,
+      period: {
+        start: start.toISOString(),
+        end: end.toISOString(),
+      },
+    };
+  } catch (error) {
+    console.error("getAssetRollforward error:", error);
+    return {
+      success: false,
+      error: safeErrorMessage(error, "Failed to load asset rollforward"),
+      rows: [],
+      totals: emptyBucket(),
+      period: null,
     };
   }
 }

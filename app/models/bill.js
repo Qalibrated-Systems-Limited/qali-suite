@@ -75,6 +75,22 @@ const billLineSchema = new Schema(
       },
     },
 
+    // Optional link to a fixed asset (for maintenance/fuel/repair cost tracking).
+    // Snapshots name/number at save time so display survives asset rename/delete.
+    asset: {
+      id: { type: Schema.Types.ObjectId, ref: "Asset", default: null },
+      assetNumber: { type: String, default: null },
+      name: { type: String, default: null },
+    },
+
+    // Set when this asset-type line has been capitalized into the Fixed Asset
+    // register. Prevents double-capitalization and lets the bill UI link out.
+    capitalizedAssetId: {
+      type: Schema.Types.ObjectId,
+      ref: "Asset",
+      default: null,
+    },
+
     // Quantities & Pricing
     quantity: {
       type: Number,
@@ -467,6 +483,10 @@ billSchema.index({ companyId: 1, dueDate: 1, paymentStatus: 1 });
 billSchema.index({ companyId: 1, "supplier.partyId": 1, status: 1 });
 billSchema.index({ companyId: 1, fiscalPeriod: 1, status: 1 });
 billSchema.index({ companyId: 1, status: 1, paymentStatus: 1 });
+billSchema.index(
+  { companyId: 1, "lines.asset.id": 1, billDate: -1 },
+  { sparse: true }
+);
 
 // ============================================
 // VIRTUALS

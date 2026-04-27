@@ -517,6 +517,138 @@ function AccountCombobox({ accounts, index, defaultValue, error }) {
 }
 
 // ============================================
+// ASSET COMBOBOX COMPONENT
+// ============================================
+// Optional per-line link to a fixed asset (e.g., tag a vehicle service
+// bill to the specific Hilux it was for). Hidden input emits assetId.
+function AssetCombobox({ assets, index, defaultValue, error }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(defaultValue || "");
+  const [searchValue, setSearchValue] = useState("");
+
+  const selected = assets.find((a) => a._id === value);
+
+  const filtered = !searchValue
+    ? assets
+    : assets.filter(
+        (a) =>
+          a.assetNumber.toLowerCase().includes(searchValue.toLowerCase()) ||
+          a.name.toLowerCase().includes(searchValue.toLowerCase()) ||
+          (a.registrationNumber || "")
+            .toLowerCase()
+            .includes(searchValue.toLowerCase())
+      );
+
+  return (
+    <div className="space-y-1">
+      <input type="hidden" name={`lines[${index}].assetId`} value={value} />
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className={cn(
+              "w-full justify-between font-normal text-sm h-9",
+              !value && "text-muted-foreground",
+              error && "border-destructive"
+            )}
+          >
+            {selected ? (
+              <span className="truncate flex items-center gap-2">
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  {selected.assetNumber}
+                </span>
+                <span className="truncate">{selected.name}</span>
+              </span>
+            ) : (
+              "No asset (optional)"
+            )}
+            <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[340px] p-0" align="start">
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder="Search by asset #, name, plate..."
+              value={searchValue}
+              onValueChange={setSearchValue}
+            />
+            <CommandList>
+              {assets.length === 0 ? (
+                <CommandEmpty>
+                  <div className="py-2 text-center text-sm text-muted-foreground">
+                    No assets registered yet.
+                  </div>
+                </CommandEmpty>
+              ) : (
+                <>
+                  {value && (
+                    <CommandGroup>
+                      <CommandItem
+                        value="__clear__"
+                        onSelect={() => {
+                          setValue("");
+                          setOpen(false);
+                        }}
+                      >
+                        <X className="mr-2 h-4 w-4" />
+                        <span className="text-muted-foreground">
+                          Clear selection
+                        </span>
+                      </CommandItem>
+                    </CommandGroup>
+                  )}
+                  {filtered.length === 0 && (
+                    <CommandEmpty>
+                      <div className="py-2 text-center text-sm text-muted-foreground">
+                        No matching assets.
+                      </div>
+                    </CommandEmpty>
+                  )}
+                  {filtered.length > 0 && (
+                    <CommandGroup heading="Active Assets">
+                      {filtered.slice(0, 12).map((a) => (
+                        <CommandItem
+                          key={a._id}
+                          value={`${a.assetNumber} ${a.name}`}
+                          onSelect={() => {
+                            setValue(a._id);
+                            setOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              value === a._id ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          <div className="flex flex-col flex-1 min-w-0">
+                            <span className="font-medium truncate">
+                              {a.name}
+                            </span>
+                            <span className="font-mono text-[10px] text-muted-foreground">
+                              {a.assetNumber}
+                              {a.registrationNumber
+                                ? ` · ${a.registrationNumber}`
+                                : ""}
+                            </span>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
+                </>
+              )}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+// ============================================
 // LINE ITEM COMPONENT
 // ============================================
 function LineItem({
@@ -524,6 +656,7 @@ function LineItem({
   line,
   accounts,
   products,
+  assets,
   errors,
   onRemove,
   onProductChange,
@@ -716,6 +849,33 @@ function LineItem({
           </Select>
         </div>
       </div>
+
+      {/* Optional: link this line to a fixed asset (vehicle service, repairs, fuel, etc.) */}
+      {assets.length > 0 && (
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">
+            Linked Asset{" "}
+            <span className="text-muted-foreground font-normal">
+              (optional)
+            </span>
+          </Label>
+          <AssetCombobox
+            assets={assets}
+            index={index}
+            defaultValue={line?.asset?.id?.toString() || ""}
+            error={lineErrors[`lines.${index}.assetId`]}
+          />
+          <p className="text-xs text-muted-foreground">
+            Tag this line to a specific asset to track its maintenance & running
+            costs.
+          </p>
+          {lineErrors[`lines.${index}.assetId`] && (
+            <p className="text-xs text-destructive">
+              {lineErrors[`lines.${index}.assetId`]}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -728,6 +888,7 @@ export default function BillForm({
   suppliers = [],
   accounts = [],
   products = [],
+  assets = [],
   projects = [],
 }) {
   const formRef = useRef(null);
@@ -986,6 +1147,7 @@ export default function BillForm({
                 line={line}
                 accounts={accounts}
                 products={products}
+                assets={assets}
                 errors={errors}
                 onRemove={() => removeLine(index)}
                 onProductChange={handleProductChange}

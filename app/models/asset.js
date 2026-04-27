@@ -31,6 +31,47 @@ const depreciationScheduleSchema = new Schema(
 );
 
 // ============================================
+// TRANSFER LOG SUB-SCHEMA
+// ============================================
+// Records location/department/custodian changes with date, user, reason.
+// Append-only — preserves audit trail across the asset's lifetime.
+// ============================================
+const transferLogSchema = new Schema(
+  {
+    transferredAt: { type: Date, required: true, default: Date.now },
+    fromLocation: { type: String, default: "" },
+    toLocation: { type: String, default: "" },
+    fromDepartment: { type: String, default: "" },
+    toDepartment: { type: String, default: "" },
+    fromAssignedToName: { type: String, default: "" },
+    toAssignedToName: { type: String, default: "" },
+    reason: { type: String, default: "" },
+    transferredBy: {
+      id: { type: String, required: true },
+      name: { type: String, required: true },
+    },
+  },
+  { _id: true, timestamps: false },
+);
+
+// ============================================
+// IMPAIRMENT SUB-SCHEMA
+// ============================================
+const impairmentLogSchema = new Schema(
+  {
+    impairedAt: { type: Date, required: true, default: Date.now },
+    amount: { type: Number, required: true, min: 0 },
+    reason: { type: String, required: true },
+    journalEntryId: { type: Schema.Types.ObjectId, ref: "JournalEntry" },
+    impairedBy: {
+      id: { type: String, required: true },
+      name: { type: String, required: true },
+    },
+  },
+  { _id: true, timestamps: false },
+);
+
+// ============================================
 // ASSET SCHEMA
 // ============================================
 const assetSchema = new Schema(
@@ -104,6 +145,15 @@ const assetSchema = new Schema(
     salvageValue: { type: Number, default: 0, min: 0 }, // Residual value at end of life
     depreciationRate: { type: Number, default: 0, min: 0, max: 1 }, // For reducing balance (e.g., 0.25 = 25%)
     depreciationStartDate: { type: Date, required: true }, // When to start depreciating
+    // First-period convention. "full_month" charges a full month even if
+    // acquired late in the month (legacy default). "pro_rata" charges
+    // proportional days in the first month and bleeds the remainder into
+    // an extra final month — matches IFRS practice for material assets.
+    depreciationConvention: {
+      type: String,
+      enum: ["full_month", "pro_rata"],
+      default: "full_month",
+    },
 
     // Running totals
     accumulatedDepreciation: { type: Number, default: 0, min: 0 },
@@ -116,6 +166,12 @@ const assetSchema = new Schema(
 
     // Schedule
     depreciationSchedule: [depreciationScheduleSchema],
+
+    // Transfer history (location / department / custodian changes)
+    transfers: [transferLogSchema],
+
+    // Impairment events (partial write-downs)
+    impairments: [impairmentLogSchema],
 
     // KRA / Tax
     // Class I: 37.5% (heavy machinery)
@@ -290,16 +346,44 @@ assetSchema.methods.generateSchedule = function () {
   let remainingBookValue = this.acquisitionCost;
 
   if (this.depreciationMethod === "straight_line") {
-    const monthlyDep = depreciableAmount / this.usefulLifeMonths;
-    const roundedMonthly = Math.round(monthlyDep);
-    const totalRounded = roundedMonthly * this.usefulLifeMonths;
-    const adjustment = depreciableAmount - totalRounded; // fix rounding on last entry
+    const convention = this.depreciationConvention || "full_month";
 
-    for (let i = 0; i < this.usefulLifeMonths; i++) {
-      const thisMonthDep =
-        i === this.usefulLifeMonths - 1
-          ? roundedMonthly + adjustment
-          : roundedMonthly;
+    // Pro-rata: figure out what fraction of the start month the asset is on the books for.
+    // If startDay is 1, fraction is 1 (whole month). Otherwise, days from startDay to end of month.
+    let firstFraction = 1;
+    if (convention === "pro_rata") {
+      const startDay = startDate.getUTCDate();
+      // Days in start month: zero-th day of next month works in UTC.
+      const daysInStartMonth = new Date(
+        Date.UTC(year, month, 0),
+      ).getUTCDate();
+      if (startDay > 1 && daysInStartMonth > 0) {
+        firstFraction = (daysInStartMonth - startDay + 1) / daysInStartMonth;
+      }
+    }
+
+    const needsExtraMonth = firstFraction < 1;
+    const totalMonths = this.usefulLifeMonths + (needsExtraMonth ? 1 : 0);
+    const monthlyDepRaw = depreciableAmount / this.usefulLifeMonths;
+    const fullMonthDep = Math.round(monthlyDepRaw);
+
+    for (let i = 0; i < totalMonths; i++) {
+      let thisMonthDep;
+      if (i === totalMonths - 1) {
+        // Always true up the very last entry to the exact depreciable amount.
+        thisMonthDep = depreciableAmount - accumulated;
+      } else if (i === 0 && firstFraction < 1) {
+        thisMonthDep = Math.round(monthlyDepRaw * firstFraction);
+      } else {
+        thisMonthDep = fullMonthDep;
+      }
+
+      // Safety: never go negative or overshoot.
+      if (thisMonthDep < 0) thisMonthDep = 0;
+      if (accumulated + thisMonthDep > depreciableAmount) {
+        thisMonthDep = depreciableAmount - accumulated;
+      }
+
       accumulated += thisMonthDep;
       const bookValue = Math.max(
         this.salvageValue || 0,
@@ -356,6 +440,73 @@ assetSchema.methods.generateSchedule = function () {
 
   this.accumulatedDepreciation = 0;
   this.bookValue = this.acquisitionCost;
+};
+
+/**
+ * Apply an impairment write-down: increase accumulated depreciation,
+ * reduce book value, and recompute the remaining depreciation schedule
+ * over the same remaining months (IFRS-style revised carrying amount).
+ * Caller is responsible for adding the impairment log entry and posting
+ * the journal entry.
+ */
+assetSchema.methods.applyImpairment = function (amount) {
+  if (!amount || amount <= 0) return;
+
+  this.accumulatedDepreciation = (this.accumulatedDepreciation || 0) + amount;
+  this.bookValue = Math.max(this.salvageValue || 0, (this.bookValue || 0) - amount);
+
+  const pending = (this.depreciationSchedule || []).filter(
+    (e) => e.status === "pending",
+  );
+  const remaining = pending.length;
+  const newDepreciable = Math.max(
+    0,
+    this.bookValue - (this.salvageValue || 0),
+  );
+
+  if (remaining === 0 || newDepreciable === 0) {
+    for (const e of pending) {
+      e.depreciationAmount = 0;
+      e.accumulatedDepreciation = this.accumulatedDepreciation;
+      e.bookValue = this.bookValue;
+      e.status = "skipped";
+    }
+    return;
+  }
+
+  if (this.depreciationMethod === "straight_line") {
+    const newMonthly = Math.round(newDepreciable / remaining);
+    let runningAcc = this.accumulatedDepreciation;
+    let runningBV = this.bookValue;
+    let distributed = 0;
+    for (let i = 0; i < pending.length; i++) {
+      const isLast = i === pending.length - 1;
+      let dep = isLast ? newDepreciable - distributed : newMonthly;
+      if (dep < 0) dep = 0;
+      distributed += dep;
+      runningAcc += dep;
+      runningBV -= dep;
+      pending[i].depreciationAmount = dep;
+      pending[i].accumulatedDepreciation = runningAcc;
+      pending[i].bookValue = Math.max(this.salvageValue || 0, runningBV);
+    }
+  } else if (this.depreciationMethod === "reducing_balance") {
+    let bv = this.bookValue;
+    let runningAcc = this.accumulatedDepreciation;
+    const monthlyRate = this.depreciationRate / 12;
+    for (let i = 0; i < pending.length; i++) {
+      let dep = Math.round(bv * monthlyRate);
+      if (bv - dep < (this.salvageValue || 0)) {
+        dep = Math.max(0, bv - (this.salvageValue || 0));
+      }
+      runningAcc += dep;
+      bv -= dep;
+      pending[i].depreciationAmount = dep;
+      pending[i].accumulatedDepreciation = runningAcc;
+      pending[i].bookValue = bv;
+      if (dep === 0) pending[i].status = "skipped";
+    }
+  }
 };
 
 /**

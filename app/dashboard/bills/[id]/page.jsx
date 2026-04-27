@@ -420,6 +420,37 @@ export default async function BillDetailsPage({ params }) {
                                 {line.product.name}
                               </p>
                             )}
+                            {line.asset?.id && (
+                              <p className="mt-1 inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                                <span className="font-mono">
+                                  {line.asset.assetNumber}
+                                </span>
+                                <span>· {line.asset.name}</span>
+                              </p>
+                            )}
+                            {line.account?.type === "asset" &&
+                              ["Admin", "Accountant"].includes(user.role) &&
+                              !["cancelled", "rejected"].includes(
+                                bill.status
+                              ) && (
+                                <div className="mt-1.5">
+                                  {line.capitalizedAssetId ? (
+                                    <Link
+                                      href={`/dashboard/assets/${line.capitalizedAssetId}`}
+                                      className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-500/15 dark:border-emerald-900 dark:text-emerald-400"
+                                    >
+                                      View Asset →
+                                    </Link>
+                                  ) : line._id ? (
+                                    <Link
+                                      href={`/dashboard/assets/create?fromBillLine=${bill._id}:${line._id}`}
+                                      className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-500/10 px-2 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-500/15 dark:border-blue-900 dark:text-blue-400"
+                                    >
+                                      Capitalize →
+                                    </Link>
+                                  ) : null}
+                                </div>
+                              )}
                           </div>
                         </td>
                         <td className="px-4 py-4 text-sm">

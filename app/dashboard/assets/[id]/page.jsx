@@ -20,10 +20,18 @@ import {
   FileText,
   Info,
   CheckCircle2,
+  Receipt,
+  ArrowRightLeft,
+  History,
 } from "lucide-react";
-import { getAssetById } from "@/app/mongodb/actions/asset-actions";
+import {
+  getAssetById,
+  getAssetExpenses,
+} from "@/app/mongodb/actions/asset-actions";
 import DisposeAssetDialog from "@/app/dashboard/assets/components/DisposeAssetDialog";
 import CancelDepreciationButton from "@/app/dashboard/assets/components/CancelDepreciationButton";
+import TransferAssetDialog from "@/app/dashboard/assets/components/TransferAssetDialog";
+import ImpairAssetDialog from "@/app/dashboard/assets/components/ImpairAssetDialog";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import Account from "@/app/models/account";
@@ -101,6 +109,7 @@ function serializeAsset(raw) {
       raw.depreciationStartDate?.toISOString?.() ??
       raw.depreciationStartDate ??
       null,
+    depreciationConvention: raw.depreciationConvention || "full_month",
     accumulatedDepreciation: raw.accumulatedDepreciation || 0,
     bookValue: raw.bookValue || 0,
     kraClass: raw.kraClass || "none",
@@ -149,6 +158,35 @@ function serializeAsset(raw) {
     journalEntryIds: (raw.journalEntryIds || []).map(
       (id) => id?.toString?.() ?? id
     ),
+    assignedToName: raw.assignedToName || "",
+    transfers: (raw.transfers || []).map((t) => ({
+      _id: t._id?.toString?.() ?? null,
+      transferredAt:
+        t.transferredAt?.toISOString?.() ?? t.transferredAt ?? null,
+      fromLocation: t.fromLocation || "",
+      toLocation: t.toLocation || "",
+      fromDepartment: t.fromDepartment || "",
+      toDepartment: t.toDepartment || "",
+      fromAssignedToName: t.fromAssignedToName || "",
+      toAssignedToName: t.toAssignedToName || "",
+      reason: t.reason || "",
+      transferredBy: {
+        id: t.transferredBy?.id || "",
+        name: t.transferredBy?.name || "",
+      },
+    })),
+    impairments: (raw.impairments || []).map((im) => ({
+      _id: im._id?.toString?.() ?? null,
+      impairedAt: im.impairedAt?.toISOString?.() ?? im.impairedAt ?? null,
+      amount: im.amount || 0,
+      reason: im.reason || "",
+      journalEntryId:
+        im.journalEntryId?.toString?.() ?? im.journalEntryId ?? null,
+      impairedBy: {
+        id: im.impairedBy?.id || "",
+        name: im.impairedBy?.name || "",
+      },
+    })),
     glMapping: raw.glMapping
       ? {
           assetAccount:
@@ -252,9 +290,14 @@ export default async function AssetDetailPage({ params }) {
     redirect("/dashboard");
   }
 
-  const result = await getAssetById(id);
+  const [result, expensesResult] = await Promise.all([
+    getAssetById(id),
+    getAssetExpenses(id),
+  ]);
   if (!result.asset || result.error) notFound();
   const asset = serializeAsset(result.asset);
+  const expenseEntries = expensesResult.success ? expensesResult.entries : [];
+  const expenseTotal = expensesResult.success ? expensesResult.total : 0;
 
   const canDispose =
     ADMIN_ROLES.includes(session.user.role) ||
@@ -262,10 +305,19 @@ export default async function AssetDetailPage({ params }) {
   const canPostDep =
     POST_DEP_ROLES.includes(session.user.role) ||
     session.user.role === "SuperAdmin";
+  const canTransfer =
+    ["Admin", "Accountant", "Manager"].includes(session.user.role) ||
+    session.user.role === "SuperAdmin";
+  const canImpair =
+    ["Admin", "Accountant"].includes(session.user.role) ||
+    session.user.role === "SuperAdmin";
 
-  // Accounts for disposal dialog
+  // Accounts for dispose / impair dialogs
   let accounts = [];
-  if (canDispose && asset.status === "active") {
+  if (
+    (canDispose && asset.status === "active") ||
+    (canImpair && ["active", "idle"].includes(asset.status))
+  ) {
     accounts = await getAccountMap();
   }
 
@@ -289,6 +341,13 @@ export default async function AssetDetailPage({ params }) {
       accountCode: a.accountCode,
       accountName: a.accountName,
       systemAccount: a.systemAccount || null,
+    }));
+  const expenseAccountsForImpair = accounts
+    .filter((a) => a.accountType === "expense")
+    .map((a) => ({
+      _id: a._id.toString(),
+      accountCode: a.accountCode,
+      accountName: a.accountName,
     }));
 
   // Stats
@@ -371,6 +430,15 @@ export default async function AssetDetailPage({ params }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {!["disposed", "written_off"].includes(asset.status) && canTransfer && (
+            <TransferAssetDialog asset={asset} />
+          )}
+          {["active", "idle"].includes(asset.status) && canImpair && (
+            <ImpairAssetDialog
+              asset={asset}
+              expenseAccounts={expenseAccountsForImpair}
+            />
+          )}
           {asset.status === "active" && canDispose && (
             <DisposeAssetDialog
               asset={asset}
@@ -523,6 +591,13 @@ export default async function AssetDetailPage({ params }) {
             <InfoRow label="Depreciation Method">
               {METHOD_LABELS[asset.depreciationMethod] || asset.depreciationMethod}
             </InfoRow>
+            {asset.depreciationMethod === "straight_line" && (
+              <InfoRow label="First-Period Convention">
+                {asset.depreciationConvention === "pro_rata"
+                  ? "Pro-Rata (by days)"
+                  : "Full Month"}
+              </InfoRow>
+            )}
             <InfoRow label="Useful Life">
               {asset.usefulLifeMonths > 0
                 ? `${asset.usefulLifeMonths} months`
@@ -702,6 +777,201 @@ export default async function AssetDetailPage({ params }) {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Expense History (bills tagged to this asset) */}
+      <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Receipt className="h-4 w-4 text-muted-foreground" /> Expense
+            History
+          </h2>
+          <div className="text-right">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              Total Spent
+            </p>
+            <p className="text-base font-bold text-foreground">
+              KES {formatCurrency(expenseTotal)}
+            </p>
+          </div>
+        </div>
+        {expenseEntries.length === 0 ? (
+          <p className="rounded-md bg-muted/50 px-3 py-4 text-center text-sm text-muted-foreground">
+            No expenses tagged to this asset yet. Tag bill lines to this asset
+            to track maintenance, repairs, fuel, and running costs.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2">Bill #</th>
+                  <th className="px-3 py-2">Supplier</th>
+                  <th className="px-3 py-2">Description</th>
+                  <th className="px-3 py-2">Account</th>
+                  <th className="px-3 py-2 text-right">Amount</th>
+                  <th className="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {expenseEntries.map((e) => (
+                  <tr
+                    key={`${e.billId}-${e.lineDescription}-${e.amount}`}
+                    className="hover:bg-muted/30"
+                  >
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {formatDate(e.billDate)}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {e.billNumber}
+                    </td>
+                    <td className="px-3 py-2">{e.supplierName}</td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {e.lineDescription}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      <span className="font-mono">{e.accountCode}</span>{" "}
+                      {e.accountName}
+                    </td>
+                    <td className="px-3 py-2 text-right font-medium">
+                      {formatCurrency(e.amount)}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Link
+                        href={`/dashboard/bills/${e.billId}`}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        View
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Transfer History */}
+      {asset.transfers.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+            <ArrowRightLeft className="h-4 w-4 text-muted-foreground" /> Transfer
+            History
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2">Location</th>
+                  <th className="px-3 py-2">Department</th>
+                  <th className="px-3 py-2">Custodian</th>
+                  <th className="px-3 py-2">Reason</th>
+                  <th className="px-3 py-2">By</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {[...asset.transfers]
+                  .reverse()
+                  .map((t) => (
+                    <tr key={t._id} className="hover:bg-muted/30">
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {formatDate(t.transferredAt)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {t.fromLocation || "—"}
+                        </span>
+                        <span className="mx-1 text-muted-foreground">→</span>
+                        <span className="font-medium">
+                          {t.toLocation || "—"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {t.fromDepartment || "—"}
+                        </span>
+                        <span className="mx-1 text-muted-foreground">→</span>
+                        <span className="font-medium">
+                          {t.toDepartment || "—"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="text-muted-foreground">
+                          {t.fromAssignedToName || "—"}
+                        </span>
+                        <span className="mx-1 text-muted-foreground">→</span>
+                        <span className="font-medium">
+                          {t.toAssignedToName || "—"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {t.reason}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                        {t.transferredBy?.name || "—"}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Impairment History */}
+      {asset.impairments.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+            <History className="h-4 w-4 text-muted-foreground" /> Impairment
+            History
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <th className="px-3 py-2">Date</th>
+                  <th className="px-3 py-2 text-right">Amount</th>
+                  <th className="px-3 py-2">Reason</th>
+                  <th className="px-3 py-2">JE</th>
+                  <th className="px-3 py-2">By</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {[...asset.impairments]
+                  .reverse()
+                  .map((im) => (
+                    <tr key={im._id} className="hover:bg-muted/30">
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {formatDate(im.impairedAt)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-medium text-red-700 dark:text-red-400">
+                        KES {formatCurrency(im.amount)}
+                      </td>
+                      <td className="px-3 py-2">{im.reason}</td>
+                      <td className="px-3 py-2">
+                        {im.journalEntryId ? (
+                          <Link
+                            href={`/dashboard/journal/${im.journalEntryId}`}
+                            className="text-xs text-primary hover:underline"
+                          >
+                            View
+                          </Link>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                        {im.impairedBy?.name || "—"}
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
