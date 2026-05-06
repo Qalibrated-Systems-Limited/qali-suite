@@ -196,9 +196,43 @@ export class BankFeedService {
       }
     }
 
-    // Update statement stats
-    const totalDebits = feedLines.reduce((sum, l) => sum + l.debitAmount, 0);
-    const totalCredits = feedLines.reduce((sum, l) => sum + l.creditAmount, 0);
+    // Update statement stats — round to clean KES values.
+    const totalDebits =
+      Math.round(feedLines.reduce((sum, l) => sum + l.debitAmount, 0) * 100) /
+      100;
+    const totalCredits =
+      Math.round(feedLines.reduce((sum, l) => sum + l.creditAmount, 0) * 100) /
+      100;
+
+    // ──────────────────────────────────────────
+    // RECONCILIATION: extract opening / closing balance
+    // ──────────────────────────────────────────
+    // If the bank includes a running-balance column, infer:
+    //   openingBalance = first line's runningBalance - net effect of that line
+    //   closingBalance = last line's runningBalance
+    // Sort by date (ascending) then by row number to get chronological order
+    // — robust against banks that import lines out of date order.
+    let openingBalance = null;
+    let closingBalance = null;
+    let balanceSource = "unavailable";
+    const linesWithBalance = feedLines
+      .filter((l) => l.runningBalance != null && Number.isFinite(l.runningBalance))
+      .sort((a, b) => {
+        const ta = a.transactionDate?.getTime?.() || 0;
+        const tb = b.transactionDate?.getTime?.() || 0;
+        if (ta !== tb) return ta - tb;
+        return (a.rowNumber || 0) - (b.rowNumber || 0);
+      });
+    if (linesWithBalance.length > 0) {
+      const first = linesWithBalance[0];
+      const last = linesWithBalance[linesWithBalance.length - 1];
+      // Net effect of the first line: credit - debit. Subtract from the
+      // running balance to back-calculate what came BEFORE the first line.
+      const firstNet = (first.creditAmount || 0) - (first.debitAmount || 0);
+      openingBalance = Math.round((first.runningBalance - firstNet) * 100) / 100;
+      closingBalance = Math.round(last.runningBalance * 100) / 100;
+      balanceSource = "from_file";
+    }
 
     await BankStatement.findByIdAndUpdate(statementId, {
       status: "ready",
@@ -210,6 +244,9 @@ export class BankFeedService {
         totalDebits,
         totalCredits,
       },
+      openingBalance,
+      closingBalance,
+      balanceSource,
     });
 
     // Run auto-matching in background
@@ -385,45 +422,68 @@ export class BankFeedService {
     const lines = await BankFeedLine.find({
       statementId,
       status: "unallocated",
-    });
+    }).lean();
+
+    if (lines.length === 0) return { matched: 0, autoAllocated: 0 };
 
     // Convert companyId to ObjectId if it's a string
-    const companyOid = typeof companyId === "string"
-      ? new mongoose.Types.ObjectId(companyId)
-      : companyId;
+    const companyOid =
+      typeof companyId === "string"
+        ? new mongoose.Types.ObjectId(companyId)
+        : companyId;
 
-    // Get unpaid invoices and bills
-    // Invoice: status=completed, paymentStatus=unpaid/partial, amountDue > 0
-    // Bill: status=approved, paymentStatus=unpaid/partial, amounts.balance > 0
+    // Get unpaid invoices and bills (lean — we only need a few fields)
     const [invoices, bills] = await Promise.all([
       Invoice.find({
         companyId: companyOid,
         status: "completed",
         paymentStatus: { $in: ["unpaid", "partial"] },
         amountDue: { $gt: 0 },
-      }).lean(),
+      })
+        .select(
+          "invoiceNumber amountDue total customer.id customer.name",
+        )
+        .lean(),
       Bill.find({
         companyId: companyOid,
         status: "approved",
         paymentStatus: { $in: ["unpaid", "partial"] },
         "amounts.balance": { $gt: 0 },
-      }).lean(),
+      })
+        .select(
+          "billNumber amounts.balance total supplier.partyId supplier.name",
+        )
+        .lean(),
     ]);
+
+    // Lines that look like a perfect match (≥95 confidence, exact amount,
+    // reference number found in description) get auto-allocated below.
+    // Threshold high enough to avoid false positives — anything ambiguous
+    // still goes to the user for review.
+    const AUTO_ALLOCATE_THRESHOLD = 95;
+    const SUGGEST_THRESHOLD = 30;
+
+    const suggestionUpdates = []; // bulk-write payload
+    const autoAllocateQueue = []; // [{ lineId, type, documentId }]
 
     for (const line of lines) {
       const suggestions = [];
 
-      // Match credits (money in) to invoices
+      // Money in → match invoices
       if (line.creditAmount > 0) {
         for (const invoice of invoices) {
-          const confidence = this.calculateMatchConfidence(line, invoice, "invoice");
-          if (confidence > 30) {
+          const confidence = this.calculateMatchConfidence(
+            line,
+            invoice,
+            "invoice",
+          );
+          if (confidence > SUGGEST_THRESHOLD) {
             suggestions.push({
               type: "invoice",
               documentId: invoice._id,
               documentNumber: invoice.invoiceNumber,
               partyName: invoice.customer?.name,
-              amount: invoice.amountDue, // Use correct field
+              amount: invoice.amountDue,
               confidence,
               matchReason: this.getMatchReason(line, invoice),
             });
@@ -431,17 +491,21 @@ export class BankFeedService {
         }
       }
 
-      // Match debits (money out) to bills
+      // Money out → match bills
       if (line.debitAmount > 0) {
         for (const bill of bills) {
-          const confidence = this.calculateMatchConfidence(line, bill, "bill");
-          if (confidence > 30) {
+          const confidence = this.calculateMatchConfidence(
+            line,
+            bill,
+            "bill",
+          );
+          if (confidence > SUGGEST_THRESHOLD) {
             suggestions.push({
               type: "bill",
               documentId: bill._id,
               documentNumber: bill.billNumber,
               partyName: bill.supplier?.name,
-              amount: bill.amounts?.balance || 0, // Use correct field
+              amount: bill.amounts?.balance || 0,
               confidence,
               matchReason: this.getMatchReason(line, bill),
             });
@@ -449,16 +513,92 @@ export class BankFeedService {
         }
       }
 
-      // Sort by confidence and keep top 5
+      if (suggestions.length === 0) continue;
+
       suggestions.sort((a, b) => b.confidence - a.confidence);
       const topSuggestions = suggestions.slice(0, 5);
+      const top = topSuggestions[0];
 
-      if (topSuggestions.length > 0) {
-        await BankFeedLine.findByIdAndUpdate(line._id, {
-          suggestions: topSuggestions,
+      // If the top suggestion is perfect AND distinctly better than the
+      // next-best, auto-allocate. The "distinctly better" rule prevents
+      // the engine from confidently picking one of two identical-amount
+      // invoices for the same customer — those need a human.
+      const second = topSuggestions[1];
+      const isUnambiguous =
+        top.confidence >= AUTO_ALLOCATE_THRESHOLD &&
+        (!second || top.confidence - second.confidence >= 15);
+
+      if (isUnambiguous) {
+        autoAllocateQueue.push({
+          lineId: line._id,
+          type: top.type,
+          documentId: top.documentId,
+        });
+      } else {
+        // Just save the suggestion list — user picks.
+        suggestionUpdates.push({
+          updateOne: {
+            filter: { _id: line._id },
+            update: { $set: { suggestions: topSuggestions } },
+          },
         });
       }
     }
+
+    // Single bulk write replaces N findByIdAndUpdate calls.
+    if (suggestionUpdates.length > 0) {
+      await BankFeedLine.bulkWrite(suggestionUpdates, { ordered: false });
+    }
+
+    // Auto-allocate perfect matches sequentially (each is its own
+    // transaction, so a single failure doesn't block the others).
+    let autoAllocated = 0;
+    for (const item of autoAllocateQueue) {
+      try {
+        if (item.type === "invoice") {
+          await this.allocateToInvoice(
+            item.lineId,
+            item.documentId,
+            "system",
+            "Auto-match",
+          );
+        } else {
+          await this.allocateToBill(
+            item.lineId,
+            item.documentId,
+            "system",
+            "Auto-match",
+          );
+        }
+        autoAllocated += 1;
+      } catch (err) {
+        // Auto-allocate failed (race / state changed / etc.) — fall back
+        // to keeping the suggestion so the user can retry manually.
+        console.error("Auto-allocate failed for line", item.lineId, err.message);
+        try {
+          await BankFeedLine.findOneAndUpdate(
+            { _id: item.lineId, companyId: companyOid },
+            {
+              $set: {
+                suggestions: [
+                  {
+                    type: item.type,
+                    documentId: item.documentId,
+                    confidence: AUTO_ALLOCATE_THRESHOLD,
+                    matchReason: "auto_allocate_failed",
+                  },
+                ],
+              },
+            },
+          );
+        } catch {}
+      }
+    }
+
+    return {
+      matched: suggestionUpdates.length + autoAllocated,
+      autoAllocated,
+    };
   }
 
   /**
@@ -578,9 +718,11 @@ export class BankFeedService {
         session
       );
 
-      // Update bank feed line with overpayment info
-      await BankFeedLine.findByIdAndUpdate(
-        lineId,
+      // Update bank feed line with overpayment info — tenant-scoped
+      // so a malicious lineId from another tenant can't be hijacked
+      // even if upstream auth is bypassed.
+      await BankFeedLine.findOneAndUpdate(
+        { _id: lineId, companyId: line.companyId },
         {
           status: "allocated",
           allocationType: "invoice_payment",
@@ -590,32 +732,33 @@ export class BankFeedService {
             documentNumber: invoice.invoiceNumber,
             partyId: invoice.customer?.id,
             partyName: invoice.customer?.name,
-            appliedAmount, // Amount applied to invoice
-            overpaymentAmount, // Amount recorded as advance
+            appliedAmount,
+            overpaymentAmount,
           },
           journalEntryId: journalResult._id,
           allocatedBy: { id: userId, name: userName },
           allocatedAt: new Date(),
         },
-        { session }
+        { session },
       );
 
-      // Update invoice payment status
-      // Only credit the invoice for the applied amount (not the overpayment)
+      // Update invoice payment status — tenant-scoped + value-rounded.
+      // Only credit the invoice for the applied amount (not the overpayment).
       const currentPaid = invoice.amountPaid || 0;
       const invoiceTotal = invoice.total || 0;
-      const newAmountPaid = currentPaid + appliedAmount;
-      const newAmountDue = invoiceTotal - newAmountPaid;
+      const newAmountPaid = Math.round((currentPaid + appliedAmount) * 100) / 100;
+      const newAmountDue =
+        Math.round(Math.max(0, invoiceTotal - newAmountPaid) * 100) / 100;
       const newPaymentStatus = newAmountDue <= 0 ? "paid" : "partial";
 
-      await Invoice.findByIdAndUpdate(
-        invoiceId,
+      await Invoice.findOneAndUpdate(
+        { _id: invoiceId, companyId: line.companyId },
         {
           amountPaid: newAmountPaid,
-          amountDue: Math.max(0, newAmountDue),
+          amountDue: newAmountDue,
           paymentStatus: newPaymentStatus,
         },
-        { session }
+        { session },
       );
 
       // Update statement stats
@@ -681,9 +824,9 @@ export class BankFeedService {
         session
       );
 
-      // Update bank feed line with overpayment info
-      await BankFeedLine.findByIdAndUpdate(
-        lineId,
+      // Update bank feed line with overpayment info — tenant-scoped.
+      await BankFeedLine.findOneAndUpdate(
+        { _id: lineId, companyId: line.companyId },
         {
           status: "allocated",
           allocationType: "bill_payment",
@@ -693,32 +836,33 @@ export class BankFeedService {
             documentNumber: bill.billNumber,
             partyId: bill.supplier?.id,
             partyName: bill.supplier?.name,
-            appliedAmount, // Amount applied to bill
-            overpaymentAmount, // Amount recorded as advance
+            appliedAmount,
+            overpaymentAmount,
           },
           journalEntryId: journalResult._id,
           allocatedBy: { id: userId, name: userName },
           allocatedAt: new Date(),
         },
-        { session }
+        { session },
       );
 
-      // Update bill payment status
-      // Only credit the bill for the applied amount (not the overpayment)
+      // Update bill payment status — tenant-scoped + value-rounded.
       const currentPaid = bill.amounts?.paid || 0;
       const netPayable = bill.amounts?.netPayable || 0;
-      const newAmountPaid = currentPaid + appliedAmount;
-      const newBalance = netPayable - newAmountPaid;
+      const newAmountPaid =
+        Math.round((currentPaid + appliedAmount) * 100) / 100;
+      const newBalance =
+        Math.round(Math.max(0, netPayable - newAmountPaid) * 100) / 100;
       const newPaymentStatus = newBalance <= 0 ? "paid" : "partial";
 
-      await Bill.findByIdAndUpdate(
-        billId,
+      await Bill.findOneAndUpdate(
+        { _id: billId, companyId: line.companyId },
         {
           "amounts.paid": newAmountPaid,
-          "amounts.balance": Math.max(0, newBalance),
+          "amounts.balance": newBalance,
           paymentStatus: newPaymentStatus,
         },
-        { session }
+        { session },
       );
 
       // Update statement stats

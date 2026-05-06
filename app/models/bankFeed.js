@@ -54,6 +54,26 @@ const bankStatementSchema = new Schema(
       totalCredits: { type: Number, default: 0 },
     },
 
+    // ──────────────────────────────────────────
+    // BALANCE RECONCILIATION
+    // ──────────────────────────────────────────
+    // Reported opening balance from the statement (first line's running
+    // balance minus that line's net amount, or user-entered if the file
+    // has no balance column).
+    openingBalance: { type: Number, default: null },
+    // Reported closing balance from the statement (last line's running
+    // balance — the bank's authoritative end-of-period number).
+    closingBalance: { type: Number, default: null },
+    // How the balances were obtained — drives the UI confidence pill.
+    //   "from_file"   = parsed from runningBalance column
+    //   "manual"      = user entered after import
+    //   "unavailable" = no balance column and user hasn't entered yet
+    balanceSource: {
+      type: String,
+      enum: ["from_file", "manual", "unavailable"],
+      default: "unavailable",
+    },
+
     // Column mapping used during import
     columnMapping: {
       date: String,
@@ -181,10 +201,30 @@ const bankFeedLineSchema = new Schema(
       index: true,
     },
 
-    // Why excluded (if status is "excluded")
+    // Why excluded (if status is "excluded"). Expanded set covers the
+    // common things bookkeepers exclude from reconciliation:
+    //   - duplicate: same transaction imported twice
+    //   - opening_balance: not a real transaction (statement header line)
+    //   - bank_charge: covered separately or already booked elsewhere
+    //   - bank_interest: typically posted via journal, not allocated
+    //   - reversal: cancellation pair to ignore
+    //   - internal_transfer: between own accounts (handle via Transfer)
+    //   - personal: owner-personal that shouldn't hit business books
+    //   - manual: catch-all when none of the above fits
+    //   - other: free-text via excludeNote
     excludeReason: {
       type: String,
-      enum: ["duplicate", "opening_balance", "manual", "other"],
+      enum: [
+        "duplicate",
+        "opening_balance",
+        "bank_charge",
+        "bank_interest",
+        "reversal",
+        "internal_transfer",
+        "personal",
+        "manual",
+        "other",
+      ],
     },
 
     excludeNote: String,

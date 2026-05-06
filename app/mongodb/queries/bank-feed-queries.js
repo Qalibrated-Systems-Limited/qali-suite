@@ -227,6 +227,24 @@ export async function getStatementSummary(statementId) {
     return acc;
   }, {});
 
+  // Reconciliation: opening + credits - debits should equal closing.
+  // If we have all three numbers, compute drift; if not, return nulls
+  // so the UI can show "Not available — enter manually".
+  const opening = statement.openingBalance;
+  const closing = statement.closingBalance;
+  const totalCredits = statement.stats?.totalCredits || 0;
+  const totalDebits = statement.stats?.totalDebits || 0;
+  const computedClosing =
+    opening != null
+      ? Math.round((opening + totalCredits - totalDebits) * 100) / 100
+      : null;
+  const drift =
+    closing != null && computedClosing != null
+      ? Math.round((closing - computedClosing) * 100) / 100
+      : null;
+  // Tolerance of 1 cent — float arithmetic can drift even when rounded.
+  const balanced = drift != null && Math.abs(drift) <= 0.01;
+
   return {
     ...statement.stats,
     byStatus,
@@ -238,6 +256,18 @@ export async function getStatementSummary(statementId) {
               100
           )
         : 0,
+    reconciliation: {
+      openingBalance: opening,
+      closingBalance: closing,
+      computedClosing,
+      drift,
+      balanced,
+      source: statement.balanceSource || "unavailable",
+      totalCredits,
+      totalDebits,
+      netChange:
+        Math.round((totalCredits - totalDebits) * 100) / 100,
+    },
   };
 }
 
