@@ -1,5 +1,6 @@
 import dbConnect from "../../config/dbConnect";
 import User from "../../models/user";
+import Company from "../../models/Company";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import mongoose from "mongoose";
 
@@ -68,58 +69,46 @@ export const searchUsers = async (searchTerm, page = 1, filters = {}) => {
       email: 1,
       department: 1,
       companyId: 1,
-      companyName: { $ifNull: [{ $arrayElemAt: ["$company.name", 0] }, null] },
       createdAt: 1,
       updatedAt: 1,
     },
   };
 
-  // Only SuperAdmin needs the per-row company name.
-  const lookupStages = isSuperAdmin
-    ? [
-        {
-          $lookup: {
-            from: "companies",
-            localField: "companyId",
-            foreignField: "_id",
-            as: "company",
-            pipeline: [{ $project: { name: 1 } }],
-          },
-        },
-      ]
-    : [];
-
   const sortStage = { $sort: { createdAt: -1 } };
   const paginationStage = [{ $skip: skipRecords }, { $limit: ITEMS_PER_PAGE }];
 
-  let pipeline = [
-    baseFilterStage,
-    sortStage,
-    ...paginationStage,
-    ...lookupStages,
-    projectStage,
-  ];
+  let pipeline = [baseFilterStage, sortStage, ...paginationStage, projectStage];
 
   if (searchTerm && searchTerm.length > 0) {
-    pipeline = [
-      searchStage,
-      sortStage,
-      ...paginationStage,
-      ...lookupStages,
-      projectStage,
-    ];
+    pipeline = [searchStage, sortStage, ...paginationStage, projectStage];
   }
 
-  let result = await User.aggregate(pipeline);
-  result = result.map((res) => ({
-    ...res,
-    _id: res._id.toString(),
-    companyId: res.companyId?.toString() || null,
-    createdAt: res.createdAt?.toISOString() || null,
-    updatedAt: res.updatedAt?.toISOString() || null,
-  }));
+  // Companies map is fetched once for SuperAdmin and joined in-memory —
+  // cheaper than a per-page $lookup since the page already needs the full
+  // company list for the filter dropdown anyway. For non-SuperAdmin we
+  // skip the join entirely (single tenant — no need to display).
+  const [rawResult, companies] = await Promise.all([
+    User.aggregate(pipeline),
+    isSuperAdmin
+      ? Company.find({}).select("name").lean()
+      : Promise.resolve(null),
+  ]);
 
-  return result;
+  const companyNameById = companies
+    ? new Map(companies.map((c) => [c._id.toString(), c.name]))
+    : null;
+
+  return rawResult.map((res) => {
+    const companyIdStr = res.companyId?.toString() || null;
+    return {
+      ...res,
+      _id: res._id.toString(),
+      companyId: companyIdStr,
+      companyName: companyNameById?.get(companyIdStr) || null,
+      createdAt: res.createdAt?.toISOString() || null,
+      updatedAt: res.updatedAt?.toISOString() || null,
+    };
+  });
 };
 
 // ============================================
