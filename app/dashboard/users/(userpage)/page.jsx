@@ -16,6 +16,7 @@ import {
   UserRoleFilter,
   UserStatusFilter,
   UserDepartmentFilter,
+  UserCompanyFilter,
   ClearUserFiltersButton,
   UserFilterBadge,
 } from "../components/UserFilters";
@@ -35,6 +36,7 @@ async function UsersPage(props) {
   const role = searchParams.role || "all";
   const status = searchParams.status || "all";
   const department = searchParams.department || "all";
+  const companyIdFilter = searchParams.companyId || "all";
   const currentPage = Number(searchParams.page) || 1;
 
   // Check permissions
@@ -60,14 +62,16 @@ async function UsersPage(props) {
     );
   }
 
-  // Build filters object
+  const isSuperAdmin = user?.role === "SuperAdmin";
+
+  // Build filters object. companyId filter only applies for SuperAdmin —
+  // non-SuperAdmins are tenant-scoped server-side regardless.
   const filters = {
     role: role !== "all" ? role : "",
     status: status !== "all" ? status : "",
     department: department !== "all" ? department : "",
+    companyId: isSuperAdmin && companyIdFilter !== "all" ? companyIdFilter : "",
   };
-
-  const isSuperAdmin = user?.role === "SuperAdmin";
 
   // Fetch data in parallel
   const [totalPages, users, stats, departments, { invites }, companies] = await Promise.all([
@@ -79,9 +83,18 @@ async function UsersPage(props) {
     isSuperAdmin ? getCompaniesForDropdown() : Promise.resolve([]),
   ]);
 
+  // Resolve company name for active-filter badge (SuperAdmin only).
+  const activeCompanyName =
+    isSuperAdmin && companyIdFilter !== "all"
+      ? companies.find((c) => c._id === companyIdFilter)?.name
+      : null;
+
   // Check if any filters are active
   const hasActiveFilters =
-    role !== "all" || status !== "all" || department !== "all";
+    role !== "all" ||
+    status !== "all" ||
+    department !== "all" ||
+    (isSuperAdmin && companyIdFilter !== "all");
 
   return (
     <div className="flex flex-col gap-6">
@@ -167,7 +180,13 @@ async function UsersPage(props) {
             </div>
 
             {/* Filters Row */}
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col sm:flex-row flex-wrap gap-3">
+              {isSuperAdmin && (
+                <UserCompanyFilter
+                  currentCompanyId={companyIdFilter}
+                  companies={companies}
+                />
+              )}
               <UserRoleFilter currentRole={role} />
               <UserStatusFilter currentStatus={status} />
               <UserDepartmentFilter
@@ -200,6 +219,13 @@ async function UsersPage(props) {
                     param="department"
                   />
                 )}
+                {isSuperAdmin && companyIdFilter !== "all" && (
+                  <UserFilterBadge
+                    label="Company"
+                    value={activeCompanyName || companyIdFilter}
+                    param="companyId"
+                  />
+                )}
               </div>
             )}
           </div>
@@ -211,7 +237,7 @@ async function UsersPage(props) {
 
       {/* Users Table */}
       <Suspense fallback={<UsersTableSkeleton />}>
-        <UsersTable users={users} currentUser={user} />
+        <UsersTable users={users} currentUser={user} isSuperAdmin={isSuperAdmin} />
       </Suspense>
 
       {/* Pagination */}

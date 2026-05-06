@@ -13,13 +13,20 @@ const ITEMS_PER_PAGE = 20;
 export const searchUsers = async (searchTerm, page = 1, filters = {}) => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const { role, status, department } = filters;
+  const { role, status, department, companyId: filterCompanyId } = filters;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
-  // Build filter conditions with tenant scope
-  let matchConditions = isSuperAdmin
-    ? {}
-    : { companyId: new ObjectId(companyId) };
+  // Build filter conditions with tenant scope.
+  // SuperAdmin sees all companies by default but can narrow to one via filter.
+  let matchConditions;
+  if (isSuperAdmin) {
+    matchConditions = {};
+    if (filterCompanyId && filterCompanyId !== "all") {
+      matchConditions.companyId = new ObjectId(filterCompanyId);
+    }
+  } else {
+    matchConditions = { companyId: new ObjectId(companyId) };
+  }
 
   if (role && role !== "all") {
     matchConditions.role = role;
@@ -60,24 +67,54 @@ export const searchUsers = async (searchTerm, page = 1, filters = {}) => {
       name: 1,
       email: 1,
       department: 1,
+      companyId: 1,
+      companyName: { $ifNull: [{ $arrayElemAt: ["$company.name", 0] }, null] },
       createdAt: 1,
       updatedAt: 1,
     },
   };
 
+  // Only SuperAdmin needs the per-row company name.
+  const lookupStages = isSuperAdmin
+    ? [
+        {
+          $lookup: {
+            from: "companies",
+            localField: "companyId",
+            foreignField: "_id",
+            as: "company",
+            pipeline: [{ $project: { name: 1 } }],
+          },
+        },
+      ]
+    : [];
+
   const sortStage = { $sort: { createdAt: -1 } };
   const paginationStage = [{ $skip: skipRecords }, { $limit: ITEMS_PER_PAGE }];
 
-  let pipeline = [baseFilterStage, sortStage, ...paginationStage, projectStage];
+  let pipeline = [
+    baseFilterStage,
+    sortStage,
+    ...paginationStage,
+    ...lookupStages,
+    projectStage,
+  ];
 
   if (searchTerm && searchTerm.length > 0) {
-    pipeline = [searchStage, sortStage, ...paginationStage, projectStage];
+    pipeline = [
+      searchStage,
+      sortStage,
+      ...paginationStage,
+      ...lookupStages,
+      projectStage,
+    ];
   }
 
   let result = await User.aggregate(pipeline);
   result = result.map((res) => ({
     ...res,
     _id: res._id.toString(),
+    companyId: res.companyId?.toString() || null,
     createdAt: res.createdAt?.toISOString() || null,
     updatedAt: res.updatedAt?.toISOString() || null,
   }));
@@ -91,12 +128,19 @@ export const searchUsers = async (searchTerm, page = 1, filters = {}) => {
 export const fetchUserPages = async (searchTerm, filters = {}) => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const { role, status, department } = filters;
+  const { role, status, department, companyId: filterCompanyId } = filters;
 
-  // Build filter conditions with tenant scope
-  let matchConditions = isSuperAdmin
-    ? {}
-    : { companyId: new ObjectId(companyId) };
+  // Build filter conditions with tenant scope.
+  // SuperAdmin sees all companies by default but can narrow to one via filter.
+  let matchConditions;
+  if (isSuperAdmin) {
+    matchConditions = {};
+    if (filterCompanyId && filterCompanyId !== "all") {
+      matchConditions.companyId = new ObjectId(filterCompanyId);
+    }
+  } else {
+    matchConditions = { companyId: new ObjectId(companyId) };
+  }
 
   if (role && role !== "all") {
     matchConditions.role = role;
@@ -156,12 +200,19 @@ export const fetchUserPages = async (searchTerm, filters = {}) => {
 export const getUserStats = async (filters = {}) => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const { role, status, department } = filters;
+  const { role, status, department, companyId: filterCompanyId } = filters;
 
-  // Build filter conditions with tenant scope
-  let matchConditions = isSuperAdmin
-    ? {}
-    : { companyId: new ObjectId(companyId) };
+  // Build filter conditions with tenant scope.
+  // SuperAdmin sees all companies by default but can narrow to one via filter.
+  let matchConditions;
+  if (isSuperAdmin) {
+    matchConditions = {};
+    if (filterCompanyId && filterCompanyId !== "all") {
+      matchConditions.companyId = new ObjectId(filterCompanyId);
+    }
+  } else {
+    matchConditions = { companyId: new ObjectId(companyId) };
+  }
 
   if (role && role !== "all") {
     matchConditions.role = role;

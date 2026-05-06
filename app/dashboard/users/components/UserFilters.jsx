@@ -50,6 +50,23 @@ export function UserStatusFilter({ currentStatus }) {
   );
 }
 
+// Company Filter (SuperAdmin only)
+export function UserCompanyFilter({ currentCompanyId, companies }) {
+  const options = [
+    { value: "all", label: "All Companies" },
+    ...companies.map((c) => ({ value: c._id, label: c.name })),
+  ];
+
+  return (
+    <UserFilterSelect
+      value={currentCompanyId || "all"}
+      param="companyId"
+      placeholder="All Companies"
+      options={options}
+    />
+  );
+}
+
 // Department Filter
 export function UserDepartmentFilter({ currentDepartment, departments }) {
   const options = [
@@ -120,6 +137,7 @@ export function ClearUserFiltersButton() {
     params.delete("role");
     params.delete("status");
     params.delete("department");
+    params.delete("companyId");
     params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
   };

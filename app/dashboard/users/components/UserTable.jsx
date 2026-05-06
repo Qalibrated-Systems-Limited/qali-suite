@@ -65,7 +65,7 @@ const statusColors = {
     "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20",
 };
 
-export function UsersTable({ users, currentUser }) {
+export function UsersTable({ users, currentUser, isSuperAdmin = false }) {
   const router = useRouter();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [resetPasswordDialogOpen, setResetPasswordDialogOpen] = useState(false);
@@ -139,6 +139,11 @@ export function UsersTable({ users, currentUser }) {
                   <TableHead className="font-semibold text-foreground">
                     Department
                   </TableHead>
+                  {isSuperAdmin && (
+                    <TableHead className="font-semibold text-foreground">
+                      Company
+                    </TableHead>
+                  )}
                   <TableHead className="font-semibold text-foreground">
                     Role
                   </TableHead>
@@ -157,7 +162,7 @@ export function UsersTable({ users, currentUser }) {
                 {users.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
                     <TableCell
-                      colSpan={7}
+                      colSpan={isSuperAdmin ? 8 : 7}
                       className="h-24 text-center text-muted-foreground"
                     >
                       <div className="flex flex-col items-center gap-2">
@@ -195,6 +200,21 @@ export function UsersTable({ users, currentUser }) {
                         <TableCell className="text-foreground">
                           {user.department}
                         </TableCell>
+
+                        {isSuperAdmin && (
+                          <TableCell className="text-foreground">
+                            {user.companyName ? (
+                              <span className="inline-flex items-center gap-1.5">
+                                <Building className="w-3.5 h-3.5 text-muted-foreground" />
+                                {user.companyName}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground italic">
+                                System
+                              </span>
+                            )}
+                          </TableCell>
+                        )}
 
                         <TableCell>
                           <Badge
@@ -342,6 +362,16 @@ export function UsersTable({ users, currentUser }) {
                       <Building className="w-4 h-4" />
                       <span>{user.department}</span>
                     </div>
+                    {isSuperAdmin && (
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Building className="w-4 h-4" />
+                        <span>
+                          {user.companyName || (
+                            <span className="italic">System</span>
+                          )}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2">
                       <Shield className="w-4 h-4 text-muted-foreground" />
                       <Badge

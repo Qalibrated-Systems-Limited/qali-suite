@@ -13,7 +13,7 @@ import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import crypto from "crypto";
-import { checkUserLimit } from "@/lib/check-user-limit";
+import { checkUserLimit, evaluateUserLimit } from "@/lib/check-user-limit";
 
 const ADMIN_ROLES = ["SuperAdmin", "Admin"];
 
@@ -57,17 +57,32 @@ export async function sendInvite(prevState, formData) {
   }
 
   try {
-    // Parallel: check existing user, pending invite, and fetch company name
-    const [existingUser, existingInvite, company] = await Promise.all([
-      User.findOne({ email }).lean(),
-      Invite.findOne({
-        email,
-        companyId,
-        status: "pending",
-        expiresAt: { $gt: new Date() },
-      }).lean(),
-      Company.findById(companyId).select("name").lean(),
-    ]);
+    const bypassLimit = currentUser.role === "SuperAdmin";
+
+    // One round-trip for everything: pre-flight checks AND user limit data.
+    // We also pull subscription fields on Company so evaluateUserLimit can
+    // run inline without a second Company.findById.
+    const [existingUser, existingInvite, company, activeUserCount] =
+      await Promise.all([
+        User.findOne({ email }).select("_id").lean(),
+        Invite.findOne({
+          email,
+          companyId,
+          status: "pending",
+          expiresAt: { $gt: new Date() },
+        })
+          .select("_id")
+          .lean(),
+        Company.findById(companyId)
+          .select(
+            "name subscription.maxUsers subscription.plan subscription.status subscription.currentPeriodEnd subscription.trialEndsAt",
+          )
+          .lean(),
+        // Skip the count when SuperAdmin is bypassing — saves a roundtrip.
+        bypassLimit
+          ? Promise.resolve(0)
+          : User.countDocuments({ companyId, status: { $ne: "Inactive" } }),
+      ]);
 
     if (existingUser) {
       return { success: false, error: "A user with this email already exists" };
@@ -84,12 +99,11 @@ export async function sendInvite(prevState, formData) {
       return { success: false, error: "Company not found" };
     }
 
-    // Check user limit — SuperAdmin bypasses when acting on behalf of a tenant
-    const limitCheck = await checkUserLimit(companyId, {
-      bypass: currentUser.role === "SuperAdmin",
-    });
-    if (!limitCheck.allowed) {
-      return { success: false, error: limitCheck.error };
+    if (!bypassLimit) {
+      const limitCheck = evaluateUserLimit({ company, activeUserCount });
+      if (!limitCheck.allowed) {
+        return { success: false, error: limitCheck.error };
+      }
     }
 
     // Generate token
