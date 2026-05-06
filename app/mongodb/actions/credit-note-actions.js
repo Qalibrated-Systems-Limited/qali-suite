@@ -9,6 +9,7 @@ import Invoice from "@/app/models/invoice";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { generateUniqueEntryNumber } from "@/lib/utils/server-utils";
+import { FINANCE_WRITE_ROLES, hasRole } from "@/lib/utils/role-gates";
 
 // ============================================
 // VALIDATION SCHEMA
@@ -54,7 +55,7 @@ export async function createCreditNote(prevState, formData) {
   await dbConnect();
   const { user, companyId } = await getTenantContext();
 
-  if (!user || !["Admin", "Accountant"].includes(user.role)) {
+  if (!user || !hasRole(user, FINANCE_WRITE_ROLES)) {
     return { success: false, error: "Unauthorized" };
   }
 
@@ -216,7 +217,7 @@ export async function issueCreditNote(creditNoteId) {
   await dbConnect();
   const { user, companyId } = await getTenantContext();
 
-  if (!user || !["Admin", "Accountant"].includes(user.role)) {
+  if (!user || !hasRole(user, FINANCE_WRITE_ROLES)) {
     return { success: false, error: "Unauthorized" };
   }
 
@@ -246,8 +247,9 @@ export async function voidCreditNote(creditNoteId, prevState, formData) {
   await dbConnect();
   const { user, companyId } = await getTenantContext();
 
-  if (!user || !["Admin"].includes(user.role)) {
-    return { success: false, error: "Only admins can void credit notes" };
+  // Voiding is destructive — restrict to top-level finance authority.
+  if (!hasRole(user, ["SuperAdmin", "Admin", "CFO"])) {
+    return { success: false, error: "You don't have permission to void credit notes" };
   }
 
   try {
@@ -278,7 +280,7 @@ export async function deleteDraftCreditNote(creditNoteId) {
   await dbConnect();
   const { user, companyId } = await getTenantContext();
 
-  if (!user || !["Admin", "Accountant"].includes(user.role)) {
+  if (!user || !hasRole(user, FINANCE_WRITE_ROLES)) {
     return { success: false, error: "Unauthorized" };
   }
 
@@ -310,7 +312,7 @@ export async function applyCreditToInvoice(creditNoteId, targetInvoiceId, amount
   await dbConnect();
   const { user, companyId } = await getTenantContext();
 
-  if (!user || !["Admin", "Accountant"].includes(user.role)) {
+  if (!user || !hasRole(user, FINANCE_WRITE_ROLES)) {
     return { success: false, error: "Unauthorized" };
   }
 
@@ -484,7 +486,7 @@ export async function issueRefund(creditNoteId, prevState, formData) {
   await dbConnect();
   const { user, companyId } = await getTenantContext();
 
-  if (!user || !["Admin", "Accountant"].includes(user.role)) {
+  if (!user || !hasRole(user, FINANCE_WRITE_ROLES)) {
     return { success: false, error: "Unauthorized" };
   }
 

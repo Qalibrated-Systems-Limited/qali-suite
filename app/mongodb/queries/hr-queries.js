@@ -63,7 +63,11 @@ function serializeEmployee(profile) {
       nationalId: profile.personalInfo?.nationalId || null,
       kraPin: profile.personalInfo?.kraPin || null,
       nssfNumber: profile.personalInfo?.nssfNumber || null,
-      nhifNumber: profile.personalInfo?.nhifNumber || null,
+      // Fall back to legacy `nhifNumber` for records created before the rename.
+      shaNumber:
+        profile.personalInfo?.shaNumber ||
+        profile.personalInfo?.nhifNumber ||
+        null,
       nationality: profile.personalInfo?.nationality || null,
       photo: profile.personalInfo?.photo || null,
     },
@@ -416,6 +420,15 @@ export async function getLeaveRequests({
 } = {}) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
+
+  // Self-heal: transition expired approved leaves to "completed" and
+  // restore employees stuck on "on_leave" with no current overlap. Best
+  // effort — never blocks the page.
+  if (companyId) {
+    const { sweepCompletedLeaves } = await import("@/lib/hr/leave-sweep");
+    await sweepCompletedLeaves(companyId);
+  }
+
   const scope = withTenantScope({}, companyId, isSuperAdmin);
 
   if (status) scope.status = status;
@@ -841,7 +854,8 @@ export async function getMyEmployeeProfile() {
       "employeeNumber partyId " +
       "personalInfo.firstName personalInfo.lastName personalInfo.photo " +
       "personalInfo.gender personalInfo.dateOfBirth personalInfo.nationality " +
-      "personalInfo.nationalId personalInfo.kraPin personalInfo.nssfNumber personalInfo.nhifNumber " +
+      // Select both new + legacy field so records created before the rename still surface.
+      "personalInfo.nationalId personalInfo.kraPin personalInfo.nssfNumber personalInfo.shaNumber personalInfo.nhifNumber " +
       "employment.department employment.designation employment.employmentType " +
       "employment.hireDate employment.confirmationDate employment.status " +
       "employment.workLocation employment.managerName employment.jobGrade " +
@@ -868,7 +882,11 @@ export async function getMyEmployeeProfile() {
     nationalId: profile.personalInfo?.nationalId || null,
     kraPin: profile.personalInfo?.kraPin || null,
     nssfNumber: profile.personalInfo?.nssfNumber || null,
-    nhifNumber: profile.personalInfo?.nhifNumber || null,
+    // Fall back to legacy `nhifNumber` for records created before the rename.
+    shaNumber:
+      profile.personalInfo?.shaNumber ||
+      profile.personalInfo?.nhifNumber ||
+      null,
     // Employment
     department: profile.employment?.department || null,
     designation: profile.employment?.designation || null,

@@ -20,10 +20,16 @@ const AttendanceConfigSchema = new Schema(
     companyId: { type: Schema.Types.ObjectId, ref: "Company", required: true, index: true },
     isActive:  { type: Boolean, default: true },
 
+    // ── Timezone ──────────────────────────────────────────────────────────
+    // IANA timezone name. All shift times (shiftStart/shiftEnd) and date
+    // bucketing (today's "day key") are interpreted in this zone, not UTC.
+    // Default to Kenya since that's the primary market.
+    timezone:             { type: String, default: "Africa/Nairobi", trim: true },
+
     // ── Shift defaults ────────────────────────────────────────────────────
     // Used when no per-employee shift is specified
-    shiftStart:           { type: String, default: "08:00" }, // HH:MM (24h)
-    shiftEnd:             { type: String, default: "17:00" }, // HH:MM (24h)
+    shiftStart:           { type: String, default: "08:00" }, // HH:MM (24h, local)
+    shiftEnd:             { type: String, default: "17:00" }, // HH:MM (24h, local)
     standardHours:        { type: Number, default: 8 },       // hours per day
     lateGraceMinutes:     { type: Number, default: 15 },      // minutes after shiftStart before "late"
     overtimeRateMultiplier: { type: Number, default: 1.5 },   // 1.5 = time-and-a-half

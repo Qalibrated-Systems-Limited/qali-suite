@@ -145,8 +145,8 @@ export default function EmployeeEditForm({ employee, departments = [] }) {
           <Input name="nssfNumber" defaultValue={p.nssfNumber} placeholder="NSSF number" />
         </div>
         <div>
-          <Label>NHIF Number</Label>
-          <Input name="nhifNumber" defaultValue={p.nhifNumber} placeholder="NHIF number" />
+          <Label>SHA Number</Label>
+          <Input name="shaNumber" defaultValue={p.shaNumber} placeholder="SHA number" />
         </div>
       </SectionCard>
 

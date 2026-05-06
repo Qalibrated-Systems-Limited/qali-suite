@@ -14,12 +14,17 @@ import { revalidatePath } from "next/cache";
 // Role-gated: Admin only.
 // ============================================
 
-const ALLOWED_ROLES = ["Admin"];
+const ALLOWED_ROLES = [
+  "SuperAdmin",
+  "Admin",
+  "Manager",
+  "Procurement Officer",
+];
 
 async function getAuthContext() {
   const { user, companyId } = await getTenantContext();
   if (!ALLOWED_ROLES.includes(user.role)) {
-    throw new Error("Only Admin users can manage coffee coop settings");
+    throw new Error("You don't have permission to manage coffee coop settings");
   }
   if (!planIncludes(user.companyPlan, "integration:coffee_coop")) {
     throw new Error("Coffee Coop connector requires an Enterprise plan");

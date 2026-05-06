@@ -32,8 +32,15 @@ async function InvoicesPage(props) {
 
   const { user } = session;
 
-  // Check permissions
-  if (user.role !== "Admin" && user.role !== "Accountant") {
+  // Check permissions — match the action gate (FINANCE_WRITE_ROLES).
+  const ALLOWED = new Set([
+    "SuperAdmin",
+    "Admin",
+    "CFO",
+    "Finance Manager",
+    "Accountant",
+  ]);
+  if (!ALLOWED.has(user.role)) {
     return (
       <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">
@@ -41,7 +48,7 @@ async function InvoicesPage(props) {
             Access Denied
           </h2>
           <p className="text-muted-foreground">
-            Only Admins and Accountants can view invoices.
+            You don&apos;t have permission to view invoices.
           </p>
         </div>
       </div>

@@ -41,8 +41,14 @@ export async function GET(_req, { params }) {
       return NextResponse.json({ error: "Payslip not found" }, { status: 404 });
     }
 
-    // Load the payroll run for context
-    const run = await PayrollRun.findById(entry.payrollRunId).lean();
+    // Load the payroll run for context. Scope to the entry's companyId
+    // (defense-in-depth — entry is already tenant-scoped, but if a stale
+    // payrollRunId ever pointed to another tenant's run we'd silently
+    // render their data into this employee's payslip).
+    const run = await PayrollRun.findOne({
+      _id: entry.payrollRunId,
+      companyId: entry.companyId,
+    }).lean();
 
     if (!run) {
       return NextResponse.json({ error: "Payroll run not found" }, { status: 404 });

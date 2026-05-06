@@ -10,7 +10,7 @@ import { bulkImportEmployees } from "@/app/mongodb/actions/hr-import-actions";
 // CSV template columns and sample row
 const CSV_HEADERS = [
   "firstName","lastName","email","phone",
-  "nationalId","kraPin","nssfNumber","nhifNumber","gender",
+  "nationalId","kraPin","nssfNumber","shaNumber","gender",
   "department","designation","employmentType","hireDate",
   "basicSalary","paymentMethod","bankName","bankBranch","bankAccount","mpesaNumber",
 ];

@@ -62,11 +62,15 @@ function revalidateProject(projectId) {
 // ============================================
 // CONSTANTS
 // ============================================
+// SuperAdmin / CFO / Finance Manager are added across the board — they
+// are the senior finance authority and were missing from every gate.
+// Procurement Officer can submit bills for approval (CREATE) but not
+// approve / pay them.
 const BILL_ROLES = {
-  CREATE: ["Admin", "Manager", "Accountant"],
-  APPROVE: ["Admin", "Manager"],
-  CANCEL: ["Admin", "Manager"],
-  PAYMENT: ["Admin", "Manager", "Accountant"],
+  CREATE: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Manager", "Accountant", "Procurement Officer"],
+  APPROVE: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Manager"],
+  CANCEL: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Manager"],
+  PAYMENT: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Manager", "Accountant"],
 };
 
 // ============================================

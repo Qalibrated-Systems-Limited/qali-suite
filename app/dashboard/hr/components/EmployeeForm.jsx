@@ -116,8 +116,8 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
           <Input name="nssfNumber" placeholder="NSSF number" />
         </div>
         <div>
-          <Label>NHIF Number</Label>
-          <Input name="nhifNumber" placeholder="NHIF number" />
+          <Label>SHA Number</Label>
+          <Input name="shaNumber" placeholder="SHA number" />
         </div>
       </SectionCard>
 

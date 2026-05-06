@@ -31,6 +31,15 @@ import {
   ClipboardList,
   HandCoins,
   FolderKanban,
+  Briefcase,
+  CalendarDays,
+  Clock,
+  Banknote,
+  Landmark,
+  PiggyBank,
+  ScrollText,
+  Scale,
+  CheckSquare,
 } from "lucide-react";
 import { useDebouncedCallback } from "use-debounce";
 import { globalSearch } from "@/app/mongodb/actions/global-search-action";
@@ -38,6 +47,9 @@ import { globalSearch } from "@/app/mongodb/actions/global-search-action";
 // ============================================
 // QUICK NAVIGATION ITEMS
 // ============================================
+// Each page has an optional `category` so the palette can group results
+// (defaults to "General"). Aliases let users find pages with synonyms — e.g.
+// typing "PAYE" surfaces Payroll, "P&L" surfaces the Profit & Loss report.
 const PAGES = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Products", href: "/dashboard/stocks", icon: Boxes },
@@ -53,11 +65,51 @@ const PAGES = [
   { label: "My Claims", href: "/dashboard/my-claims", icon: ClipboardList },
   { label: "Projects", href: "/dashboard/projects", icon: FolderKanban },
   { label: "Expenses", href: "/dashboard/expenses", icon: Wallet },
-  { label: "Chart of Accounts", href: "/dashboard/accounts", icon: BookOpen },
-  { label: "Journal Entries", href: "/dashboard/journal", icon: FileSpreadsheet },
-  { label: "Reports", href: "/dashboard/reports/profit-loss", icon: TrendingUp },
+  { label: "Approvals", href: "/dashboard/approvals", icon: CheckSquare },
   { label: "Users", href: "/dashboard/users", icon: Users },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
+
+  // ── HR ─────────────────────────────────────────────
+  { label: "HR Overview", href: "/dashboard/hr", icon: Briefcase, category: "HR" },
+  { label: "Employees", href: "/dashboard/hr/employees", icon: Users, category: "HR", aliases: ["staff", "people", "workforce"] },
+  { label: "Departments", href: "/dashboard/hr/departments", icon: Building2, category: "HR" },
+  { label: "Payroll", href: "/dashboard/hr/payroll", icon: Banknote, category: "HR", aliases: ["paye", "salary", "salaries", "payslip", "shif", "nssf"] },
+  { label: "My Payslips", href: "/dashboard/hr/my-payslips", icon: ScrollText, category: "HR", aliases: ["payslip"] },
+  { label: "Leave Requests", href: "/dashboard/hr/leave", icon: CalendarDays, category: "HR" },
+  { label: "My Leave", href: "/dashboard/hr/my-leave", icon: CalendarDays, category: "HR" },
+  { label: "Leave Calendar", href: "/dashboard/hr/leave/calendar", icon: CalendarDays, category: "HR" },
+  { label: "Attendance", href: "/dashboard/hr/attendance", icon: Clock, category: "HR", aliases: ["clock-in", "timesheet"] },
+  { label: "My Attendance", href: "/dashboard/hr/my-attendance", icon: Clock, category: "HR" },
+  { label: "Loans", href: "/dashboard/hr/loans", icon: HandCoins, category: "HR", aliases: ["advance", "salary advance"] },
+
+  // ── Finance / Accounting ───────────────────────────
+  { label: "Banking", href: "/dashboard/banking", icon: Landmark, category: "Finance", aliases: ["bank", "statements", "reconcile"] },
+  { label: "Bank Statement Upload", href: "/dashboard/banking/upload", icon: Landmark, category: "Finance", aliases: ["import statement"] },
+  { label: "Unallocated Transactions", href: "/dashboard/banking/unallocated", icon: Landmark, category: "Finance" },
+  { label: "Chart of Accounts", href: "/dashboard/accounts", icon: BookOpen, category: "Finance", aliases: ["coa"] },
+  { label: "Journal Entries", href: "/dashboard/journal", icon: FileSpreadsheet, category: "Finance" },
+  { label: "Payments", href: "/dashboard/payments", icon: Wallet, category: "Finance" },
+  { label: "Payments Received", href: "/dashboard/payments/received", icon: Wallet, category: "Finance", aliases: ["customer payments", "ar"] },
+  { label: "Payments Made", href: "/dashboard/payments/made", icon: Wallet, category: "Finance", aliases: ["supplier payments", "ap"] },
+  { label: "Customer Statements", href: "/dashboard/statements", icon: FileText, category: "Finance" },
+  { label: "Supplier Statements", href: "/dashboard/supplier-statements", icon: FileText, category: "Finance" },
+  { label: "Tax Transactions", href: "/dashboard/tax/transactions", icon: PiggyBank, category: "Finance" },
+  { label: "VAT", href: "/dashboard/tax/vat", icon: PiggyBank, category: "Finance" },
+  { label: "Withholding Tax (WHT)", href: "/dashboard/tax/wht", icon: PiggyBank, category: "Finance", aliases: ["wht"] },
+  { label: "KRA Filings", href: "/dashboard/tax/kra", icon: PiggyBank, category: "Finance", aliases: ["paye", "kra"] },
+  { label: "Fiscal Periods", href: "/dashboard/settings/fiscal-periods", icon: CalendarDays, category: "Finance", aliases: ["close period"] },
+
+  // ── Reports ────────────────────────────────────────
+  { label: "Profit & Loss", href: "/dashboard/reports/profit-loss", icon: TrendingUp, category: "Reports", aliases: ["p&l", "income statement"] },
+  { label: "Balance Sheet", href: "/dashboard/reports/balance-sheet", icon: Scale, category: "Reports" },
+  { label: "Cash Flow", href: "/dashboard/reports/cash-flow", icon: TrendingUp, category: "Reports" },
+  { label: "Trial Balance", href: "/dashboard/reports/trial-balance", icon: Scale, category: "Reports" },
+  { label: "General Ledger", href: "/dashboard/reports/general-ledger", icon: BookOpen, category: "Reports", aliases: ["gl"] },
+  { label: "AR Aging", href: "/dashboard/reports/ar-aging", icon: TrendingUp, category: "Reports", aliases: ["receivables aging"] },
+  { label: "AP Aging", href: "/dashboard/reports/ap-aging", icon: TrendingUp, category: "Reports", aliases: ["payables aging"] },
+  { label: "Sales Report", href: "/dashboard/reports/sales", icon: TrendingUp, category: "Reports" },
+  { label: "Inventory Report", href: "/dashboard/reports/inventory", icon: Package, category: "Reports" },
+  { label: "Asset Rollforward", href: "/dashboard/reports/asset-rollforward", icon: Package, category: "Reports" },
 ];
 
 const ACTIONS = [
@@ -188,14 +240,29 @@ export function CommandPalette({ open, setOpen }) {
       results.stockRequests?.length > 0 ||
       results.projects?.length > 0);
 
-  // Manual filtering for pages & actions (since shouldFilter={false})
-  const filteredPages = queryTrimmed
-    ? PAGES.filter((p) => p.label.toLowerCase().includes(queryTrimmed))
-    : PAGES;
-  const filteredActions = queryTrimmed
-    ? ACTIONS.filter((a) => a.label.toLowerCase().includes(queryTrimmed))
-    : ACTIONS;
+  // Manual filtering for pages & actions (since shouldFilter={false}).
+  // Match against label OR any alias (so "PAYE" finds Payroll, "P&L" finds
+  // Profit & Loss, etc.).
+  const matchesQuery = (item) => {
+    if (!queryTrimmed) return true;
+    if (item.label.toLowerCase().includes(queryTrimmed)) return true;
+    if (item.aliases?.some((a) => a.toLowerCase().includes(queryTrimmed))) return true;
+    return false;
+  };
+  const filteredPages = PAGES.filter(matchesQuery);
+  const filteredActions = ACTIONS.filter(matchesQuery);
   const hasNavItems = filteredPages.length > 0 || filteredActions.length > 0;
+
+  // Group filtered pages by category (defaults to "General") and preserve
+  // the original order within each group.
+  const pagesByCategory = filteredPages.reduce((acc, item) => {
+    const cat = item.category || "General";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(item);
+    return acc;
+  }, {});
+  const CATEGORY_ORDER = ["General", "HR", "Finance", "Reports"];
+  const orderedCategories = CATEGORY_ORDER.filter((c) => pagesByCategory[c]);
 
   // Show "no results" only when both nav filtering AND server search return nothing
   const showEmpty =
@@ -527,24 +594,25 @@ export function CommandPalette({ open, setOpen }) {
         {/* ============================================ */}
         {/* PAGES & QUICK ACTIONS (always shown, filtered) */}
         {/* ============================================ */}
-        {filteredPages.length > 0 && (
-          <>
-            {hasQuery && hasResults && <CommandSeparator />}
-            <CommandGroup heading="Pages">
-              {filteredPages.map((item) => (
-                <CommandItem
-                  key={item.href}
-                  value={item.label}
-                  onSelect={() => handleSelect(item.href)}
-                >
-                  <item.icon className="mr-2 h-4 w-4 text-muted-foreground" />
-                  <span>{item.label}</span>
-                  <ArrowRight className="ml-auto h-3 w-3 text-muted-foreground" />
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </>
-        )}
+        {orderedCategories.map((category, idx) => (
+          <CommandGroup
+            key={category}
+            heading={category === "General" ? "Pages" : category}
+          >
+            {idx === 0 && hasQuery && hasResults && <CommandSeparator />}
+            {pagesByCategory[category].map((item) => (
+              <CommandItem
+                key={item.href}
+                value={item.label}
+                onSelect={() => handleSelect(item.href)}
+              >
+                <item.icon className="mr-2 h-4 w-4 text-muted-foreground" />
+                <span>{item.label}</span>
+                <ArrowRight className="ml-auto h-3 w-3 text-muted-foreground" />
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ))}
 
         {filteredActions.length > 0 && (
           <>

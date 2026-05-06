@@ -76,6 +76,12 @@ const AttendanceSchema = new Schema(
     notes:      { type: String },                   // HR override reason
     markedAbsentAt: { type: Date },                 // when EOD batch ran
 
+    // Set by the stale-clock-in sweep when an employee forgot to clock out
+    // and the record was auto-closed at shiftEnd. Visible on detail UIs so
+    // HR can investigate / correct via manual entry.
+    autoClosedOut:  { type: Boolean, default: false },
+    autoClosedAt:   { type: Date },
+
     // ── Modifications ─────────────────────────
     // Track if an HR admin overrode the record
     overriddenBy: {

@@ -34,13 +34,22 @@ export default async function EditCategoryPage({ params }) {
     );
   }
 
-  const userRole = session.user.role?.toLowerCase();
-  if (!["admin", "manager"].includes(userRole)) {
+  const ALLOWED = new Set([
+    "SuperAdmin",
+    "Admin",
+    "CFO",
+    "Finance Manager",
+    "Manager",
+    "Store Manager",
+  ]);
+  if (!ALLOWED.has(session.user.role)) {
     return (
       <div className="container py-6">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>Admin or Manager role required.</AlertDescription>
+          <AlertDescription>
+            You don&apos;t have permission to manage categories.
+          </AlertDescription>
         </Alert>
       </div>
     );

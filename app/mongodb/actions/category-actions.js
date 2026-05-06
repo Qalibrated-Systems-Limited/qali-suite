@@ -46,6 +46,18 @@ const categorySchema = z.object({
 // HELPER: Check admin permission (returns error or null)
 // ============================================
 
+// Roles allowed to create / edit / delete categories.
+// Categories are dual-purpose: product taxonomy (Manager / Store Manager)
+// and an accounting hierarchy (Finance roles). Lock out anyone below.
+const CATEGORY_MANAGE_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Manager",
+  "Store Manager",
+]);
+
 function checkAdminPermission(user) {
   if (!user) {
     return {
@@ -55,10 +67,13 @@ function checkAdminPermission(user) {
     };
   }
 
-  if (!["admin", "manager", "store manager"].includes(user.role.toLowerCase())) {
+  if (!CATEGORY_MANAGE_ROLES.has(user.role)) {
     return {
       error: {
-        _form: ["Admin, Manager, or Store Manager role required to manage categories"],
+        _form: [
+          "You don't have permission to manage categories. Allowed roles: " +
+            [...CATEGORY_MANAGE_ROLES].join(", "),
+        ],
       },
     };
   }

@@ -19,19 +19,26 @@ import {
 // AUTH HELPERS
 // ============================================
 
-function checkPermission(
-  user,
-  allowedRoles = ["admin", "manager", "store manager"]
-) {
+// Default product/inventory write authority. SuperAdmin, Admin, CFO,
+// Finance Manager included so finance can correct mis-priced or
+// mis-categorised items without escalation. Lowercase comparison removed
+// — use canonical role names only.
+const DEFAULT_PRODUCT_ROLES = [
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Manager",
+  "Store Manager",
+];
+
+function checkPermission(user, allowedRoles = DEFAULT_PRODUCT_ROLES) {
   if (!user) {
     return {
       error: { _form: ["You must be logged in to perform this action"] },
     };
   }
-  // Normalize the user's role to lowercase for comparison.
-  // Note: session role is "Store Manager" (with space), so allowedRoles
-  // must use the same form (lowercased: "store manager").
-  if (!allowedRoles.includes(user.role.toLowerCase())) {
+  if (!allowedRoles.includes(user.role)) {
     return { error: { _form: ["You don't have permission for this action"] } };
   }
   return null;
@@ -109,11 +116,7 @@ export async function addProduct(prevState, formData) {
     };
   }
 
-  const permError = checkPermission(user, [
-    "admin",
-    "manager",
-    "store manager",
-  ]);
+  const permError = checkPermission(user, DEFAULT_PRODUCT_ROLES);
   if (permError) return permError;
 
   // Get tenant companyId for create
@@ -187,7 +190,15 @@ export async function addProduct(prevState, formData) {
 
   // Only admins/managers can set pricing
 
-  const canSetPricing = ["admin", "manager"].includes(user.role?.toLowerCase());
+  // Pricing edit authority — finance leadership + sales/operations management.
+  const canSetPricing = [
+    "SuperAdmin",
+    "Admin",
+    "CFO",
+    "Finance Manager",
+    "Sales Manager",
+    "Manager",
+  ].includes(user.role);
   if (!canSetPricing) {
     data.costPrice = 0;
     data.sellingPrice = 0;
@@ -328,11 +339,7 @@ export async function updateProduct(productId, prevState, formData) {
     };
   }
 
-  const permError = checkPermission(user, [
-    "admin",
-    "manager",
-    "store manager",
-  ]);
+  const permError = checkPermission(user, DEFAULT_PRODUCT_ROLES);
   if (permError) return permError;
 
   // Validate product ID
@@ -488,8 +495,15 @@ export async function updateProduct(productId, prevState, formData) {
     },
   };
 
-  // Only admins/managers can update pricing
-  const canSetPricing = ["admin", "manager"].includes(user.role.toLowerCase());
+  // Pricing edit authority — finance leadership + sales/operations management.
+  const canSetPricing = [
+    "SuperAdmin",
+    "Admin",
+    "CFO",
+    "Finance Manager",
+    "Sales Manager",
+    "Manager",
+  ].includes(user.role);
   if (canSetPricing) {
     updateData.pricing = pricing;
     updateData.costing = costing;
@@ -544,7 +558,13 @@ export async function deleteProduct(productId) {
     };
   }
 
-  const permError = checkPermission(user, ["admin", "manager"]);
+  const permError = checkPermission(user, [
+    "SuperAdmin",
+    "Admin",
+    "CFO",
+    "Finance Manager",
+    "Manager",
+  ]);
   if (permError) return permError;
 
   // Validate product ID

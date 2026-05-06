@@ -914,7 +914,7 @@ function LiabilityPaymentForm({ line, onBack, onComplete }) {
 
       <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3 text-sm">
         <p className="text-blue-800 dark:text-blue-200">
-          Use this for statutory payments (HELB, PAYE, NSSF, NHIF), loan repayments,
+          Use this for statutory payments (HELB, PAYE, NSSF, SHIF), loan repayments,
           or other liability settlements.
         </p>
       </div>

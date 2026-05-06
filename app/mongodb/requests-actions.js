@@ -66,12 +66,13 @@ export async function approveRequest(requestId, prevState, formData) {
     }
 
     const user = userSession.user;
-    const userRole = (user.role || "user").toLowerCase();
 
     // Check if user has permission to approve
-    if (!["manager", "admin", "store manager"].includes(userRole)) {
+    if (
+      !["SuperAdmin", "Admin", "Manager", "Store Manager"].includes(user.role)
+    ) {
       await session.abortTransaction();
-      return { message: "Only managers, store managers, and admins can approve requests." };
+      return { message: "You don't have permission to approve requests." };
     }
 
     // Get tenant context
@@ -262,10 +263,13 @@ export async function rejectRequest(requestId, prevState, formData) {
 
     const user = userSession.user;
 
-    // Check if user has permission to reject
-    if (user.role !== "manager" && user.role !== "admin") {
+    // Check if user has permission to reject (lowercase comparison was a bug —
+    // canonical role names are capitalised, so this used to always fail).
+    if (
+      !["SuperAdmin", "Admin", "Manager", "Store Manager"].includes(user.role)
+    ) {
       await session.abortTransaction();
-      return { message: "Only managers and admins can reject requests." };
+      return { message: "You don't have permission to reject requests." };
     }
 
     // Get tenant context

@@ -146,7 +146,7 @@ export async function createProject(prevState, formData) {
     }
 
     // Role check
-    if (!["Admin", "Accountant", "Manager"].includes(user.role)) {
+    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
       return {
         errors: {
           _form: ["Unauthorized: Admin, Accountant, or Manager role required"],
@@ -319,7 +319,7 @@ export async function updateProject(projectId, prevState, formData) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant", "Manager"].includes(user.role)) {
+    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
       return {
         errors: { _form: ["Unauthorized"] },
         values: rawValues,
@@ -451,14 +451,14 @@ export async function updateProjectStatus(projectId, newStatus) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant", "Manager"].includes(user.role)) {
+    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
       return { success: false, error: "Unauthorized" };
     }
 
     // Only Admin/Accountant can close
     if (
       newStatus === "closed" &&
-      !["Admin", "Accountant"].includes(user.role)
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(user.role)
     ) {
       return {
         success: false,
@@ -574,7 +574,7 @@ export async function createProjectBudget(prevState, formData) {
       return { errors: { _form: [error.message] } };
     }
 
-    if (!["Admin", "Accountant", "Manager"].includes(user.role)) {
+    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
       return { errors: { _form: ["Unauthorized"] } };
     }
 
@@ -691,7 +691,7 @@ export async function updateProjectBudget(prevState, formData) {
       return { errors: { _form: [error.message] } };
     }
 
-    if (!["Admin", "Accountant", "Manager"].includes(user.role)) {
+    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
       return { errors: { _form: ["Unauthorized"] } };
     }
 
@@ -771,7 +771,7 @@ export async function approveProjectBudget(budgetId) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant"].includes(user.role)) {
+    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(user.role)) {
       return {
         success: false,
         error: "Unauthorized: Admin or Accountant required",
@@ -829,7 +829,7 @@ export async function updateProjectProgress(projectId, progressPercent) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant", "Manager"].includes(user.role)) {
+    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
       return { success: false, error: "Unauthorized" };
     }
 
@@ -884,7 +884,7 @@ export async function createCostCode(prevState, formData) {
       return { errors: { _form: [error.message] } };
     }
 
-    if (!["Admin", "Accountant", "Manager"].includes(user.role)) {
+    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
       return { errors: { _form: ["Unauthorized"] } };
     }
 
@@ -952,7 +952,7 @@ export async function updateCostCode(costCodeId, prevState, formData) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant", "Manager"].includes(user.role)) {
+    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
       return { errors: { _form: ["Unauthorized"] } };
     }
 
@@ -1018,7 +1018,7 @@ export async function toggleCostCodeActive(costCodeId) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant"].includes(user.role)) {
+    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(user.role)) {
       return { success: false, error: "Unauthorized" };
     }
 

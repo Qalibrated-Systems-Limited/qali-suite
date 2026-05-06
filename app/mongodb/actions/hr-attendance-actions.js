@@ -8,30 +8,18 @@ import Attendance from "@/app/models/attendance";
 import AttendanceConfig from "@/app/models/attendanceConfig";
 import EmployeeProfile from "@/app/models/employeeProfile";
 import { requirePlanAccess } from "@/lib/plan-gate";
+import {
+  getTimezone,
+  getLocalDateKey,
+  getLocalMinutesSinceMidnight,
+  localDateTime,
+} from "@/lib/hr/time";
 
 // ============================================
 // HR ATTENDANCE ACTIONS
 // ============================================
 
 const ALLOWED_HR = ["Admin", "HR", "Manager"];
-
-// ── Helpers ──────────────────────────────────────────────────────────────
-
-// Normalise a date to midnight UTC (the "day key")
-function toDateKey(d) {
-  const dt = new Date(d);
-  dt.setUTCHours(0, 0, 0, 0);
-  return dt;
-}
-
-// Determine if checkIn is "late" relative to shiftStart (HH:MM) + 15 min grace
-function isLate(checkIn, shiftStart = "08:00") {
-  const [h, m] = shiftStart.split(":").map(Number);
-  // Use UTC methods — shift config times are stored as UTC-based values
-  const checkInMins = checkIn.getUTCHours() * 60 + checkIn.getUTCMinutes();
-  const shiftMins = h * 60 + m + 15; // 15-minute grace period
-  return checkInMins > shiftMins;
-}
 
 // Build employee snapshot from profile
 function employeeSnapshot(profile) {
@@ -74,6 +62,11 @@ export async function clockIn({ profileId, method = "web", ipAddress, location }
       return { success: false, error: enforcement.reason, enforced: true };
     }
 
+    // Self-heal: close any prior-day open record this employee forgot to
+    // clock out of, so today's clock-in starts cleanly.
+    const { closeStaleAttendance } = await import("@/lib/hr/attendance-sweep");
+    await closeStaleAttendance(companyId);
+
     const configShiftStart  = config?.shiftStart || "08:00";
     const standardHours     = config?.standardHours || 8;
     const lateGraceMins     = config?.lateGraceMinutes ?? 15;
@@ -90,16 +83,17 @@ export async function clockIn({ profileId, method = "web", ipAddress, location }
     if (!profile) return { success: false, error: "Employee not found" };
     if (profile.employment?.status === "terminated") return { success: false, error: "Employee is terminated" };
 
+    const tz = getTimezone(config);
     const now = new Date();
-    const dateKey = toDateKey(now);
+    const dateKey = getLocalDateKey(now, tz);
 
     // Check for existing record today
     const existing = await Attendance.findOne({ companyId, profileId: profile._id, date: dateKey });
     if (existing?.checkIn) return { success: false, error: "Already clocked in today" };
 
-    // ── Determine late status using config grace period ───────────────────
+    // ── Determine late status using config grace period (in tenant's TZ) ──
     const [h, m] = shiftStart.split(":").map(Number);
-    const checkInMins = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const checkInMins = getLocalMinutesSinceMidnight(now, tz);
     const graceEndMins = h * 60 + m + lateGraceMins;
     const late = checkInMins > graceEndMins;
 
@@ -157,11 +151,21 @@ export async function getMyTodayAttendance() {
 
     if (!profile) return { record: null, config: null, noProfile: true };
 
-    const dateKey = toDateKey(new Date());
-    const [record, config] = await Promise.all([
-      Attendance.findOne({ companyId, profileId: profile._id, date: dateKey }).lean(),
-      AttendanceConfig.getActive(companyId),
-    ]);
+    // Need the config first to know the tenant's timezone for the day key.
+    const config = await AttendanceConfig.getActive(companyId);
+    const tz = getTimezone(config);
+
+    // Self-heal: close any clock-ins from prior days that the user forgot
+    // to close out. Best-effort; never blocks the widget.
+    const { closeStaleAttendance } = await import("@/lib/hr/attendance-sweep");
+    await closeStaleAttendance(companyId);
+
+    const dateKey = getLocalDateKey(new Date(), tz);
+    const record = await Attendance.findOne({
+      companyId,
+      profileId: profile._id,
+      date: dateKey,
+    }).lean();
 
     return {
       profileId: profile._id.toString(),
@@ -204,17 +208,19 @@ export async function clockOut({ profileId, method = "web", ipAddress } = {}) {
     }
 
     const now = new Date();
-    const dateKey = toDateKey(now);
 
+    // Close out the most recent open record (checkIn set, checkOut not yet).
+    // Using "most recent open" instead of "today's dateKey" handles night
+    // shifts that cross local midnight cleanly.
     const record = await Attendance.findOne({
       companyId,
       profileId,
-      date: dateKey,
-    });
+      checkIn: { $exists: true, $ne: null },
+      checkOut: null,
+    }).sort({ checkIn: -1 });
 
-    if (!record) return { success: false, error: "No clock-in record found for today" };
-    if (!record.checkIn) return { success: false, error: "Cannot clock out without clocking in" };
-    if (record.checkOut) return { success: false, error: "Already clocked out today" };
+    if (!record) return { success: false, error: "No open clock-in record found" };
+    if (record.checkOut) return { success: false, error: "Already clocked out" };
 
     const hoursWorked = (now - record.checkIn) / 3_600_000; // ms → hours
     const overtime = Math.max(0, hoursWorked - record.standardHours);
@@ -265,27 +271,25 @@ export async function manualAttendanceEntry(formData) {
 
     if (!profile) return { success: false, error: "Employee not found" };
 
-    const dateKey = toDateKey(new Date(dateStr));
+    // dateStr is a YYYY-MM-DD entered by an HR admin in their (i.e. the
+    // tenant's) local timezone. Bucket it as UTC midnight of that local
+    // date and interpret HH:MM strings against the same TZ so a manual
+    // "08:00" entry is 08:00 EAT, not 08:00 UTC.
+    const config = await AttendanceConfig.getActive(companyId);
+    const tz = getTimezone(config);
+    const dateKey = new Date(`${dateStr}T00:00:00.000Z`);
 
     // Build checkIn/checkOut from "HH:MM" strings (combined with the date)
     let checkIn = null, checkOut = null, hoursWorked = 0, overtime = 0;
     if (checkInStr) {
-      if (checkInStr.includes("T")) {
-        checkIn = new Date(checkInStr);
-      } else {
-        const [h, m] = checkInStr.split(":").map(Number);
-        checkIn = new Date(dateKey);
-        checkIn.setUTCHours(h, m, 0, 0);
-      }
+      checkIn = checkInStr.includes("T")
+        ? new Date(checkInStr)
+        : localDateTime(dateKey, checkInStr, tz);
     }
     if (checkOutStr) {
-      if (checkOutStr.includes("T")) {
-        checkOut = new Date(checkOutStr);
-      } else {
-        const [h, m] = checkOutStr.split(":").map(Number);
-        checkOut = new Date(dateKey);
-        checkOut.setUTCHours(h, m, 0, 0);
-      }
+      checkOut = checkOutStr.includes("T")
+        ? new Date(checkOutStr)
+        : localDateTime(dateKey, checkOutStr, tz);
     }
     if (checkIn && checkOut) {
       hoursWorked = Math.round(((checkOut - checkIn) / 3_600_000) * 100) / 100;
@@ -337,7 +341,9 @@ export async function bulkMarkAbsent(dateStr) {
     await dbConnect();
     const { companyId, isSuperAdmin } = await getTenantContext();
 
-    const dateKey = toDateKey(new Date(dateStr));
+    // dateStr is YYYY-MM-DD in the tenant's local TZ; treat as UTC midnight
+    // of that local date for the day-key.
+    const dateKey = new Date(`${dateStr}T00:00:00.000Z`);
 
     // Get all active employees
     const employees = await EmployeeProfile.find(

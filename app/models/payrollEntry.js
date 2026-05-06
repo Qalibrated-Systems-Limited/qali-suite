@@ -20,7 +20,7 @@ const Schema = mongoose.Schema;
 //   Reason: structured fields allow aggregation ($sum, $group by field)
 //   without needing $unwind on arrays. Much cheaper for payroll reports.
 //
-// - Kenya-specific deductions: PAYE, NSSF, NHIF
+// - Kenya-specific deductions: PAYE, NSSF, SHIF (formerly NHIF, Oct 2024)
 //   These are mandatory and have fixed statutory rates — explicit fields
 //   are clearer than a generic deductions array.
 //
@@ -83,7 +83,7 @@ const payrollEntrySchema = new Schema(
     employeeName: String,
     department: String,
     designation: String,
-    employmentType: String,  // Affects NSSF/NHIF calculations
+    employmentType: String,  // Affects NSSF/SHIF calculations
 
     // ============================================
     // EARNINGS (explicit fields — enables field-level aggregation)

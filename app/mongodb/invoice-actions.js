@@ -16,6 +16,7 @@ import { generateInvoiceNumber } from "./queries/invoice-queries";
 import { generateMovementNumber } from "./queries/movement-queries";
 import mongoose from "mongoose";
 import { roundCurrency, applyRate } from "@/lib/money";
+import { FINANCE_WRITE_ROLES, hasRole } from "@/lib/utils/role-gates";
 import {
   getTenantContext,
   validateTenantAccess,
@@ -46,10 +47,10 @@ export async function updateInvoice(invoiceId, prevState, formData) {
   const { user } = session;
 
   // Check permissions
-  if (user.role !== "Admin" && user.role !== "Accountant") {
+  if (!hasRole(user, FINANCE_WRITE_ROLES)) {
     return {
       success: false,
-      error: "Only Admins and Accountants can update invoices.",
+      error: "You don't have permission to update invoices.",
     };
   }
 
@@ -595,9 +596,9 @@ export async function createInvoice(prevState, formData) {
     }
 
     // Check if user has permission
-    if (user.role !== "Admin" && user.role !== "Accountant") {
+    if (!hasRole(user, FINANCE_WRITE_ROLES)) {
       return {
-        message: "Access denied. Only Admin or Accountant can create invoices.",
+        message: "You don't have permission to create invoices.",
         success: false,
       };
     }
@@ -1022,8 +1023,9 @@ export async function createInvoicePayment(invoiceId, prevState, formData) {
 
     const user = session.user;
 
-    // Role check
-    if (!["Admin", "Accountant", "Manager"].includes(user.role)) {
+    // Role check — Manager included in addition to finance roles
+    // since branch managers commonly record cash receipts.
+    if (!hasRole(user, [...FINANCE_WRITE_ROLES, "Manager"])) {
       return {
         success: false,
         error: "You don't have permission to record payments",
@@ -1247,9 +1249,9 @@ export async function cancelInvoice(invoiceId, reason = "") {
   const authSession = await auth();
   const user = authSession?.user;
 
-  if (!user || !["Admin", "Accountant"].includes(user.role)) {
+  if (!hasRole(user, FINANCE_WRITE_ROLES)) {
     return {
-      message: "Unauthorized - Admin or Accountant only",
+      message: "You don't have permission to cancel invoices.",
     };
   }
 
@@ -1327,9 +1329,9 @@ export async function completeInvoice(invoiceId) {
     };
   }
 
-  if (user.role !== "Admin" && user.role !== "Accountant") {
+  if (!hasRole(user, FINANCE_WRITE_ROLES)) {
     return {
-      message: "Access denied - Admin or Accountant only",
+      message: "You don't have permission to perform this action.",
     };
   }
 
@@ -1648,8 +1650,7 @@ export async function convertCheckoutToInvoice(prevState, formData) {
       return { success: false, error: "Unauthorized. Please log in." };
     }
 
-    // Only Accountant or Admin can convert checkouts to invoices
-    if (user.role !== "Admin" && user.role !== "Accountant") {
+    if (!hasRole(user, FINANCE_WRITE_ROLES)) {
       return {
         success: false,
         error: "Only Accountants and Admins can convert checkouts to invoices.",

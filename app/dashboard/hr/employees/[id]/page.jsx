@@ -70,7 +70,7 @@ function ProfileTab({ employee }) {
           ["National ID", p?.nationalId || "—"],
           ["KRA PIN", p?.kraPin || "—"],
           ["NSSF Number", p?.nssfNumber || "—"],
-          ["NHIF Number", p?.nhifNumber || "—"],
+          ["SHA Number", p?.shaNumber || "—"],
           ["Nationality", p?.nationality || "—"],
         ]}
       />

@@ -52,8 +52,14 @@ export async function GET(_req, { params }) {
       .lean();
 
     const profileIds = entries.map((e) => e.profileId).filter(Boolean);
-    const profiles = await EmployeeProfile.find({ _id: { $in: profileIds } })
-      .select("_id personalInfo.nationalId personalInfo.nhifNumber")
+    // Tenant-scope the batch load — without companyId, a known profileId
+    // from another tenant could leak personal info into the export.
+    const profiles = await EmployeeProfile.find({
+      _id: { $in: profileIds },
+      companyId: run.companyId,
+    })
+      // Select both new + legacy field so records created before the rename still surface.
+      .select("_id personalInfo.nationalId personalInfo.shaNumber personalInfo.nhifNumber")
       .lean();
     const profileMap = Object.fromEntries(profiles.map((p) => [p._id.toString(), p]));
 
@@ -63,7 +69,7 @@ export async function GET(_req, { params }) {
       "Employee Name",
       "Employee No",
       "National ID",
-      "SHIF/NHIF No",
+      "SHA No",
       "Gross Pay (KES)",
       "SHIF Contribution (KES)",
     ];
@@ -77,7 +83,7 @@ export async function GET(_req, { params }) {
         q(e.employeeName),
         q(e.employeeNumber),
         q(prof.personalInfo?.nationalId),
-        q(prof.personalInfo?.nhifNumber),
+        q(prof.personalInfo?.shaNumber || prof.personalInfo?.nhifNumber),
         n(e.earnings?.grossPay),
         n(e.deductions?.shif),
       ].join(",");

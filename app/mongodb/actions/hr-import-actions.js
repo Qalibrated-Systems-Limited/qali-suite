@@ -74,7 +74,8 @@ export async function bulkImportEmployees(rows) {
         const nationalId = row.nationalId?.trim() || null;
         const kraPin = row.kraPin?.trim().toUpperCase() || null;
         const nssfNumber = row.nssfNumber?.trim() || null;
-        const nhifNumber = row.nhifNumber?.trim() || null;
+        // Accept either `shaNumber` (current) or `nhifNumber` (legacy CSV templates)
+        const shaNumber = row.shaNumber?.trim() || row.nhifNumber?.trim() || null;
         const gender = row.gender?.toLowerCase() || null;
         const department = row.department?.trim() || null;
         const designation = row.designation?.trim() || null;
@@ -132,7 +133,7 @@ export async function bulkImportEmployees(rows) {
             companyId: tenantCompanyId,
             partyId: party._id,
             employeeNumber,
-            personalInfo: { firstName, lastName, nationalId, kraPin, nssfNumber, nhifNumber, gender: ["male","female","other"].includes(gender) ? gender : undefined },
+            personalInfo: { firstName, lastName, nationalId, kraPin, nssfNumber, shaNumber, gender: ["male","female","other"].includes(gender) ? gender : undefined },
             employment: {
               department,
               designation,

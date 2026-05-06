@@ -62,7 +62,11 @@ async function UsersPage(props) {
     );
   }
 
-  const isSuperAdmin = user?.role === "SuperAdmin";
+  // Match getTenantContext()'s definition: a SuperAdmin scoped to a
+  // company (companyId set on their user) acts as that tenant's admin
+  // and should not see the cross-tenant filter — otherwise the UI shows
+  // a filter the server-side query won't honor.
+  const isSuperAdmin = user?.role === "SuperAdmin" && !user?.companyId;
 
   // Build filters object. companyId filter only applies for SuperAdmin —
   // non-SuperAdmins are tenant-scoped server-side regardless.

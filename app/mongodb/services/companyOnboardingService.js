@@ -238,12 +238,12 @@ export class CompanyOnboardingService {
       },
       {
         accountCode: "2150",
-        accountName: "NHIF Payable",
+        accountName: "SHIF Payable",
         accountType: "liability",
         subType: "payroll",
         canPost: true,
         parentCode: "2100",
-        systemAccount: "nhif_payable",
+        systemAccount: "shif_payable",
       },
       {
         accountCode: "2160",

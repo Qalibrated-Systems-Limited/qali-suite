@@ -102,8 +102,14 @@ const taxTypeConfig = {
     color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200",
     group: "Payroll",
   },
+  shif: {
+    label: "SHIF",
+    shortLabel: "SHIF",
+    color: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200",
+    group: "Payroll",
+  },
   nhif: {
-    label: "NHIF",
+    label: "NHIF (legacy)",
     shortLabel: "NHIF",
     color: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200",
     group: "Payroll",
@@ -169,7 +175,7 @@ const taxTypeGroups = [
   },
   {
     label: "Payroll",
-    types: ["paye", "nssf", "nhif", "housing_levy"],
+    types: ["paye", "nssf", "shif", "housing_levy"],
   },
   {
     label: "Other",

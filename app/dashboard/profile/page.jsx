@@ -273,7 +273,7 @@ function EmploymentDetails({ emp }) {
     { label: "National ID",  value: emp.nationalId },
     { label: "KRA PIN",      value: emp.kraPin },
     { label: "NSSF No.",     value: emp.nssfNumber },
-    { label: "NHIF No.",     value: emp.nhifNumber },
+    { label: "SHA No.",      value: emp.shaNumber },
     { label: "Nationality",  value: emp.nationality },
     { label: "Gender",       value: emp.gender ? emp.gender.charAt(0).toUpperCase() + emp.gender.slice(1) : null },
     { label: "Date of Birth",value: fmt(emp.dateOfBirth) },

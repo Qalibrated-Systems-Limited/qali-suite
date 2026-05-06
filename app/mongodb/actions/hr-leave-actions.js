@@ -225,6 +225,23 @@ export async function submitLeaveRequest(leaveId) {
       }
     }
 
+    // Re-check overlap at submit time — between draft creation and submit,
+    // another leave for the same period may have been approved/submitted.
+    const overlap = await LeaveRequest.hasOverlap(
+      leave.companyId,
+      leave.employee.partyId,
+      leave.dates.from,
+      leave.dates.to,
+      leave._id // exclude self
+    );
+    if (overlap) {
+      return {
+        success: false,
+        error:
+          "You already have an approved or pending leave request that overlaps this period",
+      };
+    }
+
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 

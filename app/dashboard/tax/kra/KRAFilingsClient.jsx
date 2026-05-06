@@ -57,7 +57,8 @@ const TAX_TYPE_LABELS = {
   wht_received: "WHT Received",
   paye: "PAYE",
   nssf: "NSSF",
-  nhif: "NHIF",
+  shif: "SHIF",
+  nhif: "NHIF (legacy)",
   housing_levy: "Housing Levy",
   excise_duty: "Excise Duty",
   advance_tax: "Advance Tax",
@@ -74,6 +75,7 @@ const FILING_DEADLINES = {
   wht: "20th of following month",
   paye: "9th of following month",
   nssf: "15th of following month",
+  shif: "9th of following month",
   nhif: "15th of following month",
   housing_levy: "9th of following month",
 };

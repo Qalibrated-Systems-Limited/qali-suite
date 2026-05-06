@@ -273,9 +273,16 @@ export async function reopenFiscalPeriod(periodId, reason) {
       return { success: false, error: "Not authenticated" };
     }
 
-    // Only Admin can reopen periods
-    if (session.user.role !== "Admin") {
-      return { success: false, error: "Only administrators can reopen fiscal periods" };
+    // Reopening is finance leadership only.
+    if (
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager"].includes(
+        session.user.role,
+      )
+    ) {
+      return {
+        success: false,
+        error: "You don't have permission to reopen fiscal periods.",
+      };
     }
 
     if (!reason || reason.trim().length === 0) {
@@ -314,9 +321,16 @@ export async function lockFiscalPeriod(periodId, reason) {
       return { success: false, error: "Not authenticated" };
     }
 
-    // Only Admin can lock periods
-    if (session.user.role !== "Admin") {
-      return { success: false, error: "Only administrators can lock fiscal periods" };
+    // Locking is finance leadership only.
+    if (
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager"].includes(
+        session.user.role,
+      )
+    ) {
+      return {
+        success: false,
+        error: "You don't have permission to lock fiscal periods.",
+      };
     }
 
     const user = {

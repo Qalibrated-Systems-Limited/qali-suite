@@ -81,7 +81,11 @@ export async function createEmployee(_prevState, formData) {
     const nationalId = formData.get("nationalId")?.toString().trim() || null;
     const kraPin = formData.get("kraPin")?.toString().trim().toUpperCase() || null;
     const nssfNumber = formData.get("nssfNumber")?.toString().trim() || null;
-    const nhifNumber = formData.get("nhifNumber")?.toString().trim() || null;
+    // Accept both `shaNumber` (new) and `nhifNumber` (legacy form key) for back-compat
+    const shaNumber =
+      formData.get("shaNumber")?.toString().trim() ||
+      formData.get("nhifNumber")?.toString().trim() ||
+      null;
     const gender = formData.get("gender")?.toString() || null;
     const dateOfBirth = formData.get("dateOfBirth") ? new Date(formData.get("dateOfBirth")) : null;
 
@@ -163,7 +167,7 @@ export async function createEmployee(_prevState, formData) {
             nationalId,
             kraPin,
             nssfNumber,
-            nhifNumber,
+            shaNumber,
             nationality: formData.get("nationality")?.toString() || "Kenyan",
           },
           employment: {
@@ -257,7 +261,14 @@ export async function updateEmployee(_prevState, formData) {
       profile.personalInfo.nationalId = formData.get("nationalId")?.toString().trim() || profile.personalInfo.nationalId;
       profile.personalInfo.kraPin = formData.get("kraPin")?.toString().trim().toUpperCase() || profile.personalInfo.kraPin;
       profile.personalInfo.nssfNumber = formData.get("nssfNumber")?.toString().trim() || profile.personalInfo.nssfNumber;
-      profile.personalInfo.nhifNumber = formData.get("nhifNumber")?.toString().trim() || profile.personalInfo.nhifNumber;
+      // Accept both new and legacy form keys; backfill from legacy `nhifNumber`
+      // (which lean reads still expose) when the new `shaNumber` is empty so
+      // edits to a pre-rename record don't blank the SHA value.
+      profile.personalInfo.shaNumber =
+        formData.get("shaNumber")?.toString().trim() ||
+        formData.get("nhifNumber")?.toString().trim() ||
+        profile.personalInfo.shaNumber ||
+        profile.personalInfo.nhifNumber;
     }
 
     // Update employment info (non-financial)

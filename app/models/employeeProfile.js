@@ -149,10 +149,10 @@ const employeeProfileSchema = new Schema(
         trim: true,
         // National Social Security Fund
       },
-      nhifNumber: {
+      shaNumber: {
         type: String,
         trim: true,
-        // National Hospital Insurance Fund
+        // Social Health Authority (replaced NHIF Oct 2024)
       },
       passportNumber: {
         type: String,

@@ -102,7 +102,17 @@ export async function createParty(prevState, formData) {
     };
   }
 
-  if (!["Admin", "Accountant"].includes(user.role)) {
+  if (
+    ![
+      "SuperAdmin",
+      "Admin",
+      "CFO",
+      "Finance Manager",
+      "Accountant",
+      "Sales Manager",
+      "Procurement Officer",
+    ].includes(user.role)
+  ) {
     return {
       errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
       values: formValues,
@@ -296,7 +306,17 @@ export async function updateParty(partyId, prevState, formData) {
     };
   }
 
-  if (!["Admin", "Accountant"].includes(user.role)) {
+  if (
+    ![
+      "SuperAdmin",
+      "Admin",
+      "CFO",
+      "Finance Manager",
+      "Accountant",
+      "Sales Manager",
+      "Procurement Officer",
+    ].includes(user.role)
+  ) {
     return {
       errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
     };
@@ -434,9 +454,12 @@ export async function deleteParty(partyId) {
     };
   }
 
-  if (user.role !== "Admin") {
+  // Destructive / type-changing operations — top-level finance authority only.
+  if (!["SuperAdmin", "Admin", "CFO"].includes(user.role)) {
     return {
-      errors: { _form: ["Unauthorized: Admin role required"] },
+      errors: {
+        _form: ["You don't have permission to perform this action."],
+      },
     };
   }
 
@@ -561,7 +584,17 @@ export async function togglePartyStatus(partyId, isActive) {
     };
   }
 
-  if (!["Admin", "Accountant"].includes(user.role)) {
+  if (
+    ![
+      "SuperAdmin",
+      "Admin",
+      "CFO",
+      "Finance Manager",
+      "Accountant",
+      "Sales Manager",
+      "Procurement Officer",
+    ].includes(user.role)
+  ) {
     return {
       errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
     };
@@ -620,7 +653,17 @@ export async function refreshPartyBalance(partyId) {
     };
   }
 
-  if (!["Admin", "Accountant"].includes(user.role)) {
+  if (
+    ![
+      "SuperAdmin",
+      "Admin",
+      "CFO",
+      "Finance Manager",
+      "Accountant",
+      "Sales Manager",
+      "Procurement Officer",
+    ].includes(user.role)
+  ) {
     return {
       errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
     };
@@ -672,9 +715,12 @@ export async function refreshAllPartyBalances() {
     };
   }
 
-  if (user.role !== "Admin") {
+  // Destructive / type-changing operations — top-level finance authority only.
+  if (!["SuperAdmin", "Admin", "CFO"].includes(user.role)) {
     return {
-      errors: { _form: ["Unauthorized: Admin role required"] },
+      errors: {
+        _form: ["You don't have permission to perform this action."],
+      },
     };
   }
 
@@ -734,9 +780,12 @@ export async function convertPartyType(partyId, newType) {
     };
   }
 
-  if (user.role !== "Admin") {
+  // Destructive / type-changing operations — top-level finance authority only.
+  if (!["SuperAdmin", "Admin", "CFO"].includes(user.role)) {
     return {
-      errors: { _form: ["Unauthorized: Admin role required"] },
+      errors: {
+        _form: ["You don't have permission to perform this action."],
+      },
     };
   }
 
@@ -814,7 +863,17 @@ export async function createEmployeeParty(prevState, formData) {
     };
   }
 
-  if (!["Admin", "Accountant"].includes(user.role)) {
+  if (
+    ![
+      "SuperAdmin",
+      "Admin",
+      "CFO",
+      "Finance Manager",
+      "Accountant",
+      "Sales Manager",
+      "Procurement Officer",
+    ].includes(user.role)
+  ) {
     return {
       errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
     };
@@ -927,9 +986,12 @@ export async function linkUserToParty(userId, partyId) {
     };
   }
 
-  if (user.role !== "Admin") {
+  // Destructive / type-changing operations — top-level finance authority only.
+  if (!["SuperAdmin", "Admin", "CFO"].includes(user.role)) {
     return {
-      errors: { _form: ["Unauthorized: Admin role required"] },
+      errors: {
+        _form: ["You don't have permission to perform this action."],
+      },
     };
   }
 

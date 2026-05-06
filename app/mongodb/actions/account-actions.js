@@ -65,9 +65,13 @@ export async function createAccount(prevState, formData) {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
 
-    if (!["Admin", "Accountant"].includes(user.role)) {
+    if (
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+        user.role,
+      )
+    ) {
       return {
-        errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+        errors: { _form: ["You don't have permission to manage accounts."] },
       };
     }
 
@@ -295,9 +299,13 @@ export async function updateAccount(accountId, prevState, formData) {
     // Auth & tenant check
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant"].includes(user.role)) {
+    if (
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+        user.role,
+      )
+    ) {
       return {
-        errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+        errors: { _form: ["You don't have permission to manage accounts."] },
       };
     }
 
@@ -500,9 +508,13 @@ export async function activateAccount(accountId) {
     // Auth & tenant check
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant"].includes(user.role)) {
+    if (
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+        user.role,
+      )
+    ) {
       return {
-        errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+        errors: { _form: ["You don't have permission to manage accounts."] },
       };
     }
 
@@ -566,9 +578,13 @@ export async function calculateAccountBalance(accountId) {
     // Auth & tenant check
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant"].includes(user.role)) {
+    if (
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+        user.role,
+      )
+    ) {
       return {
-        errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+        errors: { _form: ["You don't have permission to manage accounts."] },
       };
     }
 
@@ -675,9 +691,13 @@ export async function reorderAccounts(prevState, formData) {
     // Auth & tenant check
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant"].includes(user.role)) {
+    if (
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+        user.role,
+      )
+    ) {
       return {
-        errors: { _form: ["Unauthorized: Admin or Accountant role required"] },
+        errors: { _form: ["You don't have permission to manage accounts."] },
       };
     }
 

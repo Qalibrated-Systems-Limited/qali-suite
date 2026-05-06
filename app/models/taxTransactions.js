@@ -55,7 +55,8 @@ const taxTransactionSchema = new Schema(
           // Payroll Taxes
           "paye", // Pay As You Earn (employee income tax)
           "nssf", // National Social Security Fund
-          "nhif", // National Hospital Insurance Fund
+          "shif", // Social Health Insurance Fund (replaced NHIF Oct 2024)
+          "nhif", // Legacy — kept in enum so historical records still validate
           "housing_levy", // Housing Levy (1.5%)
           // Other Taxes
           "excise_duty", // Excise duty on specific goods/services
@@ -338,7 +339,7 @@ taxTransactionSchema.virtual("isWHT").get(function () {
 });
 
 taxTransactionSchema.virtual("isPayrollTax").get(function () {
-  return ["paye", "nssf", "nhif", "housing_levy"].includes(this.taxType);
+  return ["paye", "nssf", "shif", "nhif", "housing_levy"].includes(this.taxType);
 });
 
 taxTransactionSchema.virtual("isVAT").get(function () {
@@ -354,7 +355,7 @@ taxTransactionSchema.virtual("needsFiling").get(function () {
 
 taxTransactionSchema.virtual("needsRemittance").get(function () {
   // WHT and payroll taxes need remittance to KRA
-  const remittableTaxes = ["wht", "paye", "nssf", "nhif", "housing_levy"];
+  const remittableTaxes = ["wht", "paye", "nssf", "shif", "nhif", "housing_levy"];
   return remittableTaxes.includes(this.taxType) && !this.kraTracking.remitted;
 });
 
@@ -377,7 +378,8 @@ taxTransactionSchema.virtual("filingDeadline").get(function () {
     wht: 20, // WHT: 20th of following month
     paye: 9, // PAYE: 9th of following month
     nssf: 15, // NSSF: 15th of following month
-    nhif: 9, // NHIF: 9th of following month
+    shif: 9, // SHIF: 9th of following month (replaced NHIF Oct 2024)
+    nhif: 9, // Legacy alias — kept for historical records
     housing_levy: 9, // Housing Levy: 9th of following month
   };
 
