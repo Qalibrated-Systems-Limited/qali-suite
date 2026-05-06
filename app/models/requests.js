@@ -38,19 +38,21 @@ const stockRequestSchema = new Schema(
     costCodeId: { type: Schema.Types.ObjectId, ref: "ProjectCostCode" },
     costCode: { code: String, name: String },
 
-    // Customer/Party snapshot (same pattern as Invoice)
+    // Customer/Party snapshot (same pattern as Invoice).
+    // Required for customer-facing types only — internal use and employee
+    // borrow are intra-company so they have no external customer.
     customer: {
       id: {
         type: String,
-        required: function() {
-          return this.requestType !== "internal";
+        required: function () {
+          return !["internal", "employee_borrow"].includes(this.requestType);
         },
         index: true,
       },
       name: {
         type: String,
-        required: function() {
-          return this.requestType !== "internal";
+        required: function () {
+          return !["internal", "employee_borrow"].includes(this.requestType);
         },
         trim: true,
       },

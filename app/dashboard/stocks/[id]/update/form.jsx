@@ -53,6 +53,10 @@ import {
 } from "../../components/ProductFormField";
 
 import { updateProduct } from "../../../../mongodb/actions/stock-actions";
+import {
+  canSeePricing as canSeePricingRole,
+  canEditPricing as canEditPricingRole,
+} from "@/lib/permissions";
 
 // ============================================
 // COLLAPSIBLE SECTION COMPONENT
@@ -229,7 +233,12 @@ export default function UpdateProductForm({
   userRole = "employee",
   categories = [],
 }) {
-  const canEditPricing = ["admin", "manager"].includes(userRole?.toLowerCase());
+  // Single source of truth: lib/permissions.js
+  // - canEditPricing: Admin / SuperAdmin / CFO / Finance Manager / Sales Manager
+  // - canSeePricing: above + Accountant / Procurement / Store Manager / Manager
+  // - non-pricing roles (Storekeeper / Employee / Technician): no pricing UI
+  const canEditPricing = canEditPricingRole(userRole);
+  const canSeePricing = canSeePricingRole(userRole);
 
   // Bind product ID to action
   const boundUpdateAction = updateProduct.bind(null, product._id.toString());
@@ -402,7 +411,12 @@ export default function UpdateProductForm({
           </div>
         </FormSection>
 
-        {/* Pricing - Editable or Read-only based on role */}
+        {/* Pricing — three states:
+            • Edit (Admin / CFO / Finance / Sales Manager): full inputs
+            • Read-only (Store Manager / Accountant / Procurement / Manager):
+              displayed but uneditable, with hint to use Manage pricing
+            • Hidden (Storekeeper / Employee / Technician / Viewer): redacted.
+              These roles shouldn't see cost / selling / margin at all. */}
         {canEditPricing ? (
           <FormSection title="Pricing" icon={DollarSign} badge="Admin">
             <div className="space-y-6">
@@ -435,9 +449,9 @@ export default function UpdateProductForm({
               )}
             </div>
           </FormSection>
-        ) : (
+        ) : canSeePricing ? (
           <PricingReadOnlyCard product={product} />
-        )}
+        ) : null}
 
         {/* Tax Settings */}
         <FormSection title="Tax Settings" icon={Settings}>

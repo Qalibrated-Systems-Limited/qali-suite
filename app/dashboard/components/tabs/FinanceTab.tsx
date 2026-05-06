@@ -297,7 +297,7 @@ async function PendingPaymentsCard() {
         {invoices.length === 0 ? (
           <div className="p-6 text-center">
             <p className="text-sm text-muted-foreground">
-              No overdue invoices 🎉
+              No overdue invoices
             </p>
           </div>
         ) : (

@@ -20,7 +20,7 @@ import { Card, CardContent } from "@/components/ui/card";
 // ============================================
 // DESKTOP TABLE VIEW
 // ============================================
-export function InventoryTable({ cart = [], stock, action }) {
+export function InventoryTable({ cart = [], stock, action, showPricing = true }) {
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-KE", {
       style: "currency",
@@ -44,9 +44,11 @@ export function InventoryTable({ cart = [], stock, action }) {
               <TableHead className="font-semibold text-muted-foreground">
                 Category
               </TableHead>
-              <TableHead className="font-semibold text-muted-foreground">
-                Selling Price
-              </TableHead>
+              {showPricing && (
+                <TableHead className="font-semibold text-muted-foreground">
+                  Selling Price
+                </TableHead>
+              )}
               <TableHead className="font-semibold text-muted-foreground">
                 Available
               </TableHead>
@@ -114,10 +116,12 @@ export function InventoryTable({ cart = [], stock, action }) {
                       {item.category || "N/A"}
                     </TableCell>
 
-                    {/* Price */}
-                    <TableCell className="font-medium text-foreground">
-                      {formatCurrency(price)}
-                    </TableCell>
+                    {/* Price — redacted for non-pricing roles */}
+                    {showPricing && (
+                      <TableCell className="font-medium text-foreground">
+                        {formatCurrency(price)}
+                      </TableCell>
+                    )}
 
                     {/* Stock with Status Badge */}
                     <TableCell>
@@ -230,7 +234,7 @@ export function InventoryTable({ cart = [], stock, action }) {
 // ============================================
 // MOBILE CARD VIEW
 // ============================================
-export function InventoryTableMobile({ cart = [], stock, action }) {
+export function InventoryTableMobile({ cart = [], stock, action, showPricing = true }) {
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-KE", {
       style: "currency",
@@ -313,19 +317,25 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
                   )}
 
                   {/* Details Grid */}
-                  <div className="grid grid-cols-3 gap-3 text-sm">
+                  <div
+                    className={`grid gap-3 text-sm ${
+                      showPricing ? "grid-cols-3" : "grid-cols-2"
+                    }`}
+                  >
                     <div>
                       <p className="text-muted-foreground text-xs">Category</p>
                       <p className="font-medium text-foreground truncate">
                         {item.category || "N/A"}
                       </p>
                     </div>
-                    <div>
-                      <p className="text-muted-foreground text-xs">Price</p>
-                      <p className="font-medium text-foreground">
-                        {formatCurrency(price)}
-                      </p>
-                    </div>
+                    {showPricing && (
+                      <div>
+                        <p className="text-muted-foreground text-xs">Price</p>
+                        <p className="font-medium text-foreground">
+                          {formatCurrency(price)}
+                        </p>
+                      </div>
+                    )}
                     <div>
                       <p className="text-muted-foreground text-xs">Available</p>
                       <p
@@ -407,17 +417,27 @@ export function InventoryTableMobile({ cart = [], stock, action }) {
 // ============================================
 // RESPONSIVE WRAPPER (Auto-switches based on screen size)
 // ============================================
-export function ResponsiveInventoryTable({ cart = [], stock, action }) {
+export function ResponsiveInventoryTable({ cart = [], stock, action, showPricing = true }) {
   return (
     <>
       {/* Desktop Table */}
       <div className="hidden md:block">
-        <InventoryTable cart={cart} stock={stock} action={action} />
+        <InventoryTable
+          cart={cart}
+          stock={stock}
+          action={action}
+          showPricing={showPricing}
+        />
       </div>
 
       {/* Mobile Cards */}
       <div className="block md:hidden">
-        <InventoryTableMobile cart={cart} stock={stock} action={action} />
+        <InventoryTableMobile
+          cart={cart}
+          stock={stock}
+          action={action}
+          showPricing={showPricing}
+        />
       </div>
     </>
   );

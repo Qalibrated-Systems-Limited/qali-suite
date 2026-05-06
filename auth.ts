@@ -57,6 +57,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
             let companyPlan: string = "free";
             let subscriptionStatus: string = "trial";
             let trialEndsAt: string | null = null;
+            let currentPeriodEnd: string | null = null;
             let maxUsers: number = 5;
             if (user.companyId) {
               const company = await Company.findById(user.companyId)
@@ -67,6 +68,8 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
               companyPlan = sub.plan || "free";
               subscriptionStatus = sub.status || "trial";
               trialEndsAt = sub.trialEndsAt?.toISOString() || null;
+              currentPeriodEnd =
+                sub.currentPeriodEnd?.toISOString() || null;
               maxUsers = sub.maxUsers || 5;
             }
             return {
@@ -80,6 +83,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
               companyPlan,
               subscriptionStatus,
               trialEndsAt,
+              currentPeriodEnd,
               maxUsers,
             } as UserType;
           }
@@ -218,6 +222,8 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
             token.companyPlan = sub.plan || "free";
             token.subscriptionStatus = sub.status || "trial";
             token.trialEndsAt = sub.trialEndsAt?.toISOString() || null;
+            token.currentPeriodEnd =
+              sub.currentPeriodEnd?.toISOString() || null;
             token.maxUsers = sub.maxUsers ?? 2;
             token.planRefreshedAt = Date.now();
           }
@@ -238,6 +244,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
         token.companyPlan = user.companyPlan;
         token.subscriptionStatus = user.subscriptionStatus;
         token.trialEndsAt = user.trialEndsAt;
+        token.currentPeriodEnd = user.currentPeriodEnd;
         token.maxUsers = user.maxUsers;
         token.planRefreshedAt = Date.now();
         token.user = user;
@@ -254,6 +261,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           let companyPlan: string = "free";
           let subscriptionStatus: string = "trial";
           let trialEndsAt: string | null = null;
+          let currentPeriodEnd: string | null = null;
           let maxUsers: number = 5;
           if (dbUser.companyId) {
             const company = await Company.findById(dbUser.companyId)
@@ -264,6 +272,8 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
             companyPlan = sub.plan || "free";
             subscriptionStatus = sub.status || "trial";
             trialEndsAt = sub.trialEndsAt?.toISOString() || null;
+            currentPeriodEnd =
+              sub.currentPeriodEnd?.toISOString() || null;
             maxUsers = sub.maxUsers || 5;
           }
           token.role = dbUser.role;
@@ -274,6 +284,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           token.companyPlan = companyPlan;
           token.subscriptionStatus = subscriptionStatus;
           token.trialEndsAt = trialEndsAt;
+          token.currentPeriodEnd = currentPeriodEnd;
           token.maxUsers = maxUsers;
           token.planRefreshedAt = Date.now();
           token.user = {
@@ -311,6 +322,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           companyPlan: token.companyPlan || "free",
           subscriptionStatus: token.subscriptionStatus || "active",
           trialEndsAt: token.trialEndsAt || null,
+          currentPeriodEnd: token.currentPeriodEnd || null,
           maxUsers: token.maxUsers || 5,
         };
       }

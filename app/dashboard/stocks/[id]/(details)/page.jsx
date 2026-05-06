@@ -47,7 +47,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
+import { auth } from "@/auth";
+import { canSeePricing, canEditPricing } from "@/lib/permissions";
 import { getProduct } from "@/app/mongodb/actions/stock-actions";
+import PricingDialog from "../components/PricingDialog";
 import { getRecentMovements } from "@/app/mongodb/queries/erp-dashboard-queries";
 import {
   getActiveCheckouts,
@@ -445,6 +448,11 @@ export default async function ProductDetailPage({ params, searchParams }) {
   const product = await getProduct(id);
   if (!product) notFound();
 
+  const session = await auth();
+  const role = session?.user?.role;
+  const showPricing = canSeePricing(role);
+  const canEditPrice = canEditPricing(role);
+
   const [movements, requests, checkouts] = await Promise.all([
     getAProductRecentMovements(id),
     getAProductPendingRequests(id),
@@ -569,39 +577,44 @@ export default async function ProductDetailPage({ params, searchParams }) {
           iconColor="text-emerald-500"
           iconBg="bg-emerald-500/20"
         />
-        <KPICard
-          icon={BarChart3}
-          label="Margin"
-          value={`${margin.toFixed(1)}%`}
-          iconColor="text-blue-500"
-          iconBg="bg-blue-500/20"
-          trend={margin > 25 ? margin - 25 : margin - 25}
-        />
+        {showPricing && (
+          <KPICard
+            icon={BarChart3}
+            label="Margin"
+            value={`${margin.toFixed(1)}%`}
+            iconColor="text-blue-500"
+            iconBg="bg-blue-500/20"
+            trend={margin > 25 ? margin - 25 : margin - 25}
+          />
+        )}
       </div>
 
-      {/* Pricing Summary Row */}
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-0 sm:divide-x divide-border">
-          <div className="text-center sm:text-left sm:pr-6">
-            <p className="text-sm text-muted-foreground">Cost Price</p>
-            <p className="text-xl sm:text-2xl font-semibold tracking-tight text-amber-500 mt-0.5">
-              {formatCurrency(costPrice, true)}
-            </p>
-          </div>
-          <div className="text-center sm:text-left sm:px-6">
-            <p className="text-sm text-muted-foreground">Sell Price</p>
-            <p className="text-xl sm:text-2xl font-semibold tracking-tight text-emerald-500 mt-0.5">
-              {formatCurrency(sellPrice, true)}
-            </p>
-          </div>
-          <div className="text-center sm:text-left sm:pl-6">
-            <p className="text-sm text-muted-foreground">Inventory Value</p>
-            <p className="text-xl sm:text-2xl font-semibold tracking-tight text-primary mt-0.5">
-              {formatCurrency(inventoryValue, true)}
-            </p>
+      {/* Pricing Summary Row — hidden for roles without pricing access
+          (Storekeeper, Employee, Technician, etc.). They see stock only. */}
+      {showPricing && (
+        <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-0 sm:divide-x divide-border">
+            <div className="text-center sm:text-left sm:pr-6">
+              <p className="text-sm text-muted-foreground">Cost Price</p>
+              <p className="text-xl sm:text-2xl font-semibold tracking-tight text-amber-500 mt-0.5">
+                {formatCurrency(costPrice, true)}
+              </p>
+            </div>
+            <div className="text-center sm:text-left sm:px-6">
+              <p className="text-sm text-muted-foreground">Sell Price</p>
+              <p className="text-xl sm:text-2xl font-semibold tracking-tight text-emerald-500 mt-0.5">
+                {formatCurrency(sellPrice, true)}
+              </p>
+            </div>
+            <div className="text-center sm:text-left sm:pl-6">
+              <p className="text-sm text-muted-foreground">Inventory Value</p>
+              <p className="text-xl sm:text-2xl font-semibold tracking-tight text-primary mt-0.5">
+                {formatCurrency(inventoryValue, true)}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Product Quick Info */}
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
@@ -654,10 +667,12 @@ export default async function ProductDetailPage({ params, searchParams }) {
                 <DataRow label="Quantity on Hand" value={formatNumber(qty)} />
                 <DataRow label="Committed" value={formatNumber(committed)} />
                 <DataRow label="Available" value={formatNumber(available)} />
-                <DataRow
-                  label="Inventory Value"
-                  value={formatCurrency(inventoryValue)}
-                />
+                {showPricing && (
+                  <DataRow
+                    label="Inventory Value"
+                    value={formatCurrency(inventoryValue)}
+                  />
+                )}
               </div>
               <div>
                 <DataRow
@@ -680,8 +695,34 @@ export default async function ProductDetailPage({ params, searchParams }) {
             </div>
           </SectionCard>
 
-          {/* Costing & Pricing */}
-          <SectionCard title="Costing & Pricing" icon={DollarSign}>
+          {/* Costing & Pricing — hidden entirely for roles without pricing
+              access (Storekeeper, Employee, Technician, etc.) */}
+          {showPricing && (
+          <SectionCard
+            title="Costing & Pricing"
+            icon={DollarSign}
+            action={
+              canEditPrice ? (
+                <PricingDialog
+                  product={{
+                    _id: product._id,
+                    SKU: product.SKU,
+                    name: product.name,
+                    costing: {
+                      costPrice: product.costing?.costPrice || 0,
+                    },
+                    pricing: {
+                      priceMode: product.pricing?.priceMode || "manual",
+                      sellingPrice: product.pricing?.sellingPrice || 0,
+                      markupPercentage:
+                        product.pricing?.markupPercentage || 0,
+                      minimumPrice: product.pricing?.minimumPrice || 0,
+                    },
+                  }}
+                />
+              ) : null
+            }
+          >
             <div className="grid sm:grid-cols-2 gap-x-8 gap-y-0">
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
@@ -790,8 +831,11 @@ export default async function ProductDetailPage({ params, searchParams }) {
               </div>
             )}
           </SectionCard>
+          )}
 
-          {/* Lifetime Performance */}
+          {/* Lifetime Performance — also pricing-derived (revenue/COGS/profit),
+              gate behind pricing access. */}
+          {showPricing && (
           <SectionCard title="Lifetime Performance" icon={Activity}>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
@@ -844,8 +888,11 @@ export default async function ProductDetailPage({ params, searchParams }) {
               ))}
             </div>
           </SectionCard>
+          )}
 
-          {/* Accounting & Tax */}
+          {/* Accounting & Tax — gate behind pricing access (account mappings
+              are commercial/finance data, not for storekeepers). */}
+          {showPricing && (
           <SectionCard title="Accounting & Tax" icon={FileText}>
             <div className="grid sm:grid-cols-2 gap-x-8 gap-y-0">
               <div>
@@ -894,6 +941,7 @@ export default async function ProductDetailPage({ params, searchParams }) {
               </div>
             </div>
           </SectionCard>
+          )}
 
           {/* Additional Info */}
           <SectionCard title="Additional Information" icon={Building2}>

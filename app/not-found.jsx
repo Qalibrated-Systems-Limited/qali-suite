@@ -78,11 +78,9 @@ export default function NotFound() {
             <GoBackButton />
           </div>
 
-          {/* Fun Message */}
           <div className="mt-8 text-center">
             <p className="text-xs text-muted-foreground">
-              🤔 Lost in the inventory? Don't worry, we'll help you find your
-              way!
+              If you got here from a link in the app, please report it.
             </p>
           </div>
         </CardContent>

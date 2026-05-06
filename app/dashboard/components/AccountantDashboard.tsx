@@ -21,6 +21,8 @@ import {
   ActivityCardSkeleton,
 } from "./ActivityCard";
 
+import { AlertsStrip, AlertsStripSkeleton } from "./AlertsStrip";
+
 // Queries
 import {
   getAccountantWorkload,
@@ -70,6 +72,18 @@ export default async function AccountantDashboardPage() {
           Manage receivables, payables, and payments
         </p>
       </div>
+
+      {/* Alerts strip — what needs attention right now */}
+      <Suspense fallback={<AlertsStripSkeleton />}>
+        <AlertsStrip
+          show={[
+            "overdueInvoices",
+            "pendingClaims",
+            "lowStockCount",
+            "pendingRequests",
+          ]}
+        />
+      </Suspense>
 
       {/* Financial Summary */}
       <section>

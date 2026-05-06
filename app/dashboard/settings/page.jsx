@@ -11,6 +11,7 @@ import {
   DollarSign,
   CalendarDays,
   Clock,
+  ShieldCheck,
 } from "lucide-react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
@@ -137,6 +138,14 @@ export default async function SettingsPage() {
                 iconBg="bg-amber-500/10"
                 title="Bank Feed"
                 description="Import and allocate bank statements"
+              />
+              <SettingsCard
+                href="/dashboard/settings/approvals"
+                icon={ShieldCheck}
+                iconColor="text-rose-500"
+                iconBg="bg-rose-500/10"
+                title="Approval Thresholds"
+                description="When stock adjustments, prices, and payments require approval"
               />
             </div>
           </div>

@@ -7,11 +7,13 @@ import dbConnect from "@/app/config/dbConnect";
 import {
   getTenantContext,
   getCompanyIdForCreate,
+  withTenantScope,
 } from "@/lib/utils/tenant-utils";
 import { requirePlanAccess } from "@/lib/plan-gate";
 import { safeErrorMessage } from "@/lib/safe-error";
 import Asset from "@/app/models/asset";
 import Bill from "@/app/models/bill";
+import Expense from "@/app/models/expenses";
 import JournalEntry from "@/app/models/JournalEntry";
 import ErpCounter from "@/app/models/erp-counter";
 
@@ -90,8 +92,12 @@ export async function loadBillLineForCapitalization(billLineRef) {
 /**
  * Verify a bill line is eligible to be capitalized:
  * - Bill belongs to tenant
- * - Bill is in a postable state (not cancelled / rejected)
+ * - Bill is approved (i.e., posted with a JE) — drafts/submitted/cancelled/rejected are rejected
  * - Line exists, is asset-type, and is not already capitalized
+ *
+ * Why approved-only: capitalization writes journal entries that depend on the
+ * source bill's accounts payable being on the books. Capitalizing from a draft
+ * leaves the asset orphaned if the draft is later edited or deleted.
  */
 async function loadCapitalizableLine({
   billId,
@@ -109,8 +115,10 @@ async function loadCapitalizableLine({
   if (mongoSession) query.session(mongoSession);
   const bill = await query.lean();
   if (!bill) return { error: "Bill not found" };
-  if (["cancelled", "rejected"].includes(bill.status)) {
-    return { error: "Bill is cancelled or rejected — cannot capitalize" };
+  if (bill.status !== "approved") {
+    return {
+      error: `Bill must be approved before capitalizing. Current status: ${bill.status}.`,
+    };
   }
   const line = (bill.lines || []).find(
     (l) => l._id?.toString() === lineId,
@@ -274,6 +282,7 @@ const ASSET_ROLES = {
   CANCEL_DEPRECIATION: ["Admin"],
   TRANSFER: ["Admin", "Accountant", "Manager"],
   IMPAIR: ["Admin", "Accountant"],
+  RECORD_USAGE: ["Admin", "Accountant", "Manager", "Employee"],
   VIEW_ALL: ["Admin", "Accountant", "Manager"],
 };
 
@@ -1576,29 +1585,46 @@ export async function getAssetExpenses(assetId) {
     await dbConnect();
 
     const assetObjectId = new mongoose.Types.ObjectId(assetId);
-    const match = isSuperAdmin
+    const billMatch = isSuperAdmin
       ? { "lines.asset.id": assetObjectId, status: { $ne: "cancelled" } }
       : {
           companyId,
           "lines.asset.id": assetObjectId,
           status: { $ne: "cancelled" },
         };
+    const expenseMatch = isSuperAdmin
+      ? { "asset.id": assetObjectId, status: { $nin: ["void", "rejected"] } }
+      : {
+          companyId,
+          "asset.id": assetObjectId,
+          status: { $nin: ["void", "rejected"] },
+        };
 
-    const bills = await Bill.find(match)
-      .select(
-        "billNumber billDate status paymentStatus supplier.name lines._id lines.asset lines.description lines.amount lines.lineTotal lines.account",
-      )
-      .sort({ billDate: -1 })
-      .lean();
+    const [bills, expenses] = await Promise.all([
+      Bill.find(billMatch)
+        .select(
+          "billNumber billDate status paymentStatus supplier.name lines._id lines.asset lines.description lines.amount lines.lineTotal lines.account",
+        )
+        .sort({ billDate: -1 })
+        .lean(),
+      Expense.find(expenseMatch)
+        .select(
+          "expenseNumber expenseDate status paymentStatus paymentMethod vendor.name asset description amount total accountCode accountName",
+        )
+        .sort({ expenseDate: -1 })
+        .lean(),
+    ]);
 
     const entries = [];
     let total = 0;
+
     for (const bill of bills) {
       for (const line of bill.lines || []) {
         if (line.asset?.id?.toString() !== assetId) continue;
         const amount = line.amount || 0;
         total += amount;
         entries.push({
+          source: "bill",
           billId: bill._id.toString(),
           billNumber: bill.billNumber,
           billDate: bill.billDate?.toISOString?.() ?? bill.billDate ?? null,
@@ -1613,6 +1639,32 @@ export async function getAssetExpenses(assetId) {
         });
       }
     }
+
+    for (const e of expenses) {
+      const amount = e.total || e.amount || 0;
+      total += amount;
+      entries.push({
+        source: "expense",
+        expenseId: e._id.toString(),
+        billId: e._id.toString(), // alias so existing UI links work
+        billNumber: e.expenseNumber,
+        billDate: e.expenseDate?.toISOString?.() ?? e.expenseDate ?? null,
+        billStatus: e.status,
+        paymentStatus: e.paymentStatus || e.paymentMethod || null,
+        supplierName: e.vendor?.name || "—",
+        lineDescription: e.description || "",
+        accountName: e.accountName || "",
+        accountCode: e.accountCode || "",
+        amount,
+        lineTotal: amount,
+      });
+    }
+
+    entries.sort((a, b) => {
+      const dateA = a.billDate ? new Date(a.billDate).getTime() : 0;
+      const dateB = b.billDate ? new Date(b.billDate).getTime() : 0;
+      return dateB - dateA;
+    });
 
     return { success: true, entries, total };
   } catch (error) {
@@ -2174,6 +2226,523 @@ export async function getAssetRollforward({ startDate, endDate } = {}) {
       rows: [],
       totals: emptyBucket(),
       period: null,
+    };
+  }
+}
+
+// ============================================
+// RUNNING-COST ANALYTICS
+// ============================================
+// Cost-bucket categorization rules. Expense.category gets first priority
+// (already structured). Bill lines fall back to keyword matching on the
+// account name/code + line description, since bills don't carry a category.
+const COST_BUCKETS = ["fuel", "maintenance", "insurance", "other"];
+
+const EXPENSE_CATEGORY_TO_BUCKET = {
+  transport: "fuel",
+  maintenance: "maintenance",
+  insurance: "insurance",
+};
+
+const BUCKET_KEYWORDS = {
+  fuel: ["fuel", "petrol", "diesel", "gasoline", "gas station"],
+  maintenance: [
+    "maintenance",
+    "service",
+    "repair",
+    "parts",
+    "tyre",
+    "tire",
+    "spare",
+    "lubric",
+    "oil change",
+    "engine oil",
+  ],
+  insurance: ["insurance", "premium", "cover", "policy"],
+};
+
+function classifyEntry(entry) {
+  if (entry.source === "expense" && entry.category) {
+    const direct = EXPENSE_CATEGORY_TO_BUCKET[entry.category];
+    if (direct) return direct;
+  }
+  const haystack = `${entry.accountName || ""} ${entry.accountCode || ""} ${entry.lineDescription || ""}`.toLowerCase();
+  for (const bucket of ["fuel", "maintenance", "insurance"]) {
+    if (BUCKET_KEYWORDS[bucket].some((kw) => haystack.includes(kw))) {
+      return bucket;
+    }
+  }
+  return "other";
+}
+
+function emptyBucketTotals() {
+  return COST_BUCKETS.reduce((acc, b) => ({ ...acc, [b]: 0 }), {});
+}
+
+function periodKey(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function median(values) {
+  const sorted = [...values].filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Compute trailing 12-month running cost for a list of asset IDs in a single
+ * pair of queries (one to Bills, one to Expenses). Returns Map<assetIdStr, total>.
+ *
+ * Used both per-asset (with 1 id) and fleet-wide (with many ids) so we never
+ * fan out N queries.
+ */
+async function rollupRunningCosts({
+  assetIds,
+  start,
+  end,
+  companyId,
+  isSuperAdmin,
+}) {
+  const idObjs = assetIds.map((id) => new mongoose.Types.ObjectId(id));
+  const tenantClause = isSuperAdmin ? {} : { companyId };
+
+  const [billRows, expenseRows] = await Promise.all([
+    Bill.aggregate([
+      {
+        $match: {
+          ...tenantClause,
+          status: { $ne: "cancelled" },
+          billDate: { $gte: start, $lte: end },
+          "lines.asset.id": { $in: idObjs },
+        },
+      },
+      { $unwind: "$lines" },
+      { $match: { "lines.asset.id": { $in: idObjs } } },
+      {
+        $group: {
+          _id: "$lines.asset.id",
+          total: { $sum: { $ifNull: ["$lines.amount", 0] } },
+        },
+      },
+    ]),
+    Expense.aggregate([
+      {
+        $match: {
+          ...tenantClause,
+          status: { $nin: ["void", "rejected"] },
+          expenseDate: { $gte: start, $lte: end },
+          "asset.id": { $in: idObjs },
+        },
+      },
+      {
+        $group: {
+          _id: "$asset.id",
+          total: { $sum: { $ifNull: ["$total", "$amount"] } },
+        },
+      },
+    ]),
+  ]);
+
+  const result = new Map();
+  for (const id of assetIds) result.set(id.toString(), 0);
+  for (const row of billRows) {
+    const k = row._id.toString();
+    result.set(k, (result.get(k) || 0) + (row.total || 0));
+  }
+  for (const row of expenseRows) {
+    const k = row._id.toString();
+    result.set(k, (result.get(k) || 0) + (row.total || 0));
+  }
+  return result;
+}
+
+/**
+ * Detailed running-cost analytics for a single asset:
+ *   - Trailing 12-month total + per-month breakdown
+ *   - By-bucket totals (fuel / maintenance / insurance / other)
+ *   - Cost per km/hour (uses earliest+latest readings in window)
+ *   - Peer comparison (same category, active/idle) — median + ratio
+ *   - Health classification (healthy / watch / high)
+ */
+export async function getAssetRunningCosts(assetId) {
+  try {
+    await requirePlanAccess("finance");
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!hasRole(user, ASSET_ROLES.VIEW_ALL)) {
+      return { success: false, error: "Access denied" };
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(assetId)) {
+      return { success: false, error: "Invalid asset id" };
+    }
+
+    await dbConnect();
+
+    const asset = await Asset.findOne(
+      withTenantScope({ _id: assetId }, companyId, isSuperAdmin),
+    )
+      .select(
+        "_id assetNumber name category status acquisitionCost bookValue usageUnit usageReadings currentUsage",
+      )
+      .lean();
+    if (!asset) {
+      return { success: false, error: "Asset not found" };
+    }
+
+    // Reuse the existing entries source so categorization is consistent
+    const entriesResult = await getAssetExpenses(assetId);
+    if (!entriesResult.success) {
+      return { success: false, error: entriesResult.error };
+    }
+
+    // Enrich expense entries with their category (getAssetExpenses doesn't
+    // currently surface it — fetch once, map by id)
+    const expenseIds = entriesResult.entries
+      .filter((e) => e.source === "expense" && e.expenseId)
+      .map((e) => new mongoose.Types.ObjectId(e.expenseId));
+    let categoryMap = new Map();
+    if (expenseIds.length > 0) {
+      const cats = await Expense.find({ _id: { $in: expenseIds } })
+        .select("_id category")
+        .lean();
+      categoryMap = new Map(cats.map((c) => [c._id.toString(), c.category]));
+    }
+
+    const now = new Date();
+    const windowEnd = new Date(now);
+    const windowStart = new Date(now);
+    windowStart.setFullYear(windowStart.getFullYear() - 1);
+
+    // 12 monthly buckets, oldest first — easier for sparkline rendering
+    const monthlyBuckets = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      monthlyBuckets.push({
+        period: periodKey(d),
+        total: 0,
+        ...emptyBucketTotals(),
+      });
+    }
+    const periodIndex = new Map(
+      monthlyBuckets.map((b, i) => [b.period, i]),
+    );
+
+    const bucketTotals = emptyBucketTotals();
+    let trailing12Total = 0;
+    let allTimeTotal = 0;
+
+    for (const e of entriesResult.entries) {
+      const date = e.billDate ? new Date(e.billDate) : null;
+      const amt = Number(e.amount) || 0;
+      if (!date) continue;
+
+      allTimeTotal += amt;
+
+      // Attach category for classification
+      const enriched = {
+        ...e,
+        category: e.source === "expense" ? categoryMap.get(e.expenseId) : null,
+      };
+      const bucket = classifyEntry(enriched);
+
+      if (date >= windowStart && date <= windowEnd) {
+        trailing12Total += amt;
+        bucketTotals[bucket] += amt;
+
+        const idx = periodIndex.get(periodKey(date));
+        if (idx !== undefined) {
+          monthlyBuckets[idx].total += amt;
+          monthlyBuckets[idx][bucket] += amt;
+        }
+      }
+    }
+
+    // Usage in window: earliest + latest reading inside window → distance
+    const readings = (asset.usageReadings || [])
+      .map((r) => ({
+        recordedAt: r.recordedAt ? new Date(r.recordedAt) : null,
+        reading: Number(r.reading) || 0,
+      }))
+      .filter((r) => r.recordedAt && r.recordedAt >= windowStart && r.recordedAt <= windowEnd)
+      .sort((a, b) => a.recordedAt - b.recordedAt);
+
+    let distance = null;
+    let costPerUnit = null;
+    if (readings.length >= 2) {
+      const delta = readings[readings.length - 1].reading - readings[0].reading;
+      if (delta > 0) {
+        distance = delta;
+        costPerUnit = trailing12Total / delta;
+      }
+    }
+
+    // Peer comparison: same category, active/idle, has at least one expense
+    const peerAssets = await Asset.find(
+      withTenantScope(
+        {
+          category: asset.category,
+          status: { $in: ["active", "idle"] },
+          _id: { $ne: asset._id },
+        },
+        companyId,
+        isSuperAdmin,
+      ),
+    )
+      .select("_id bookValue")
+      .lean();
+
+    const peerIds = peerAssets.map((a) => a._id.toString());
+    let peerStats = null;
+    if (peerIds.length >= 1) {
+      const peerTotals = await rollupRunningCosts({
+        assetIds: peerIds,
+        start: windowStart,
+        end: windowEnd,
+        companyId,
+        isSuperAdmin,
+      });
+      const totals = Array.from(peerTotals.values()).filter((v) => v > 0);
+      const med = median(totals);
+      peerStats = {
+        peerCount: peerIds.length,
+        peersWithSpend: totals.length,
+        median: med,
+        ratio: med && med > 0 ? trailing12Total / med : null,
+      };
+    }
+
+    // Health classification
+    const bookValue = Number(asset.bookValue) || 0;
+    const maintenancePctOfBook =
+      bookValue > 0 ? (bucketTotals.maintenance / bookValue) * 100 : null;
+    const totalPctOfBook =
+      bookValue > 0 ? (trailing12Total / bookValue) * 100 : null;
+
+    let health = "healthy";
+    let healthReasons = [];
+    const ratio = peerStats?.ratio;
+    if (ratio !== null && ratio !== undefined) {
+      if (ratio > 1.5) {
+        health = "high";
+        healthReasons.push(
+          `Spend is ${ratio.toFixed(1)}× the median for ${asset.category}s`,
+        );
+      } else if (ratio > 1.0) {
+        if (health !== "high") health = "watch";
+        healthReasons.push(
+          `Spend is ${ratio.toFixed(1)}× the peer median`,
+        );
+      }
+    }
+    if (maintenancePctOfBook !== null) {
+      if (maintenancePctOfBook > 50) {
+        health = "high";
+        healthReasons.push(
+          `Maintenance is ${maintenancePctOfBook.toFixed(0)}% of book value`,
+        );
+      } else if (maintenancePctOfBook > 30 && health === "healthy") {
+        health = "watch";
+        healthReasons.push(
+          `Maintenance is ${maintenancePctOfBook.toFixed(0)}% of book value`,
+        );
+      }
+    }
+    if (totalPctOfBook !== null && totalPctOfBook > 100) {
+      health = "high";
+      healthReasons.push(
+        `12-month running cost exceeds book value (${totalPctOfBook.toFixed(0)}%)`,
+      );
+    }
+    if (healthReasons.length === 0) {
+      healthReasons.push("Running costs within healthy range");
+    }
+
+    // Recent readings — last 6, newest first
+    const allReadings = (asset.usageReadings || [])
+      .map((r) => ({
+        _id: r._id?.toString?.() ?? null,
+        recordedAt: r.recordedAt?.toISOString?.() ?? r.recordedAt ?? null,
+        reading: Number(r.reading) || 0,
+        unit: r.unit || asset.usageUnit || "km",
+        source: r.source || "manual",
+        notes: r.notes || "",
+        recordedBy: r.recordedBy?.name || "",
+      }))
+      .sort((a, b) =>
+        a.recordedAt && b.recordedAt
+          ? new Date(b.recordedAt) - new Date(a.recordedAt)
+          : 0,
+      );
+
+    return {
+      success: true,
+      window: {
+        start: windowStart.toISOString(),
+        end: windowEnd.toISOString(),
+      },
+      asset: {
+        _id: asset._id.toString(),
+        assetNumber: asset.assetNumber,
+        name: asset.name,
+        category: asset.category,
+        status: asset.status,
+        bookValue,
+        acquisitionCost: Number(asset.acquisitionCost) || 0,
+        usageUnit: asset.usageUnit || "km",
+        currentUsage: Number(asset.currentUsage) || 0,
+      },
+      trailing12: {
+        total: trailing12Total,
+        byBucket: bucketTotals,
+        byMonth: monthlyBuckets,
+      },
+      allTimeTotal,
+      usage: {
+        unit: asset.usageUnit || "km",
+        distance,
+        costPerUnit,
+        readingsInWindow: readings.length,
+      },
+      peers: peerStats,
+      ratios: {
+        maintenancePctOfBook,
+        totalPctOfBook,
+      },
+      health: {
+        level: health,
+        reasons: healthReasons,
+      },
+      readings: allReadings.slice(0, 8),
+      readingsTotal: allReadings.length,
+    };
+  } catch (error) {
+    console.error("getAssetRunningCosts error:", error);
+    return {
+      success: false,
+      error: safeErrorMessage(error, "Failed to compute running costs"),
+    };
+  }
+}
+
+// ============================================
+// RECORD USAGE READING (odometer / hours-meter)
+// ============================================
+const UsageReadingSchema = z.object({
+  reading: z.coerce.number().min(0, "Reading must be ≥ 0"),
+  unit: z.enum(["km", "miles", "hours"]).optional(),
+  recordedAt: z.string().optional(),
+  source: z.enum(["manual", "fuel", "service", "transfer", "other"]).optional(),
+  notes: z.string().max(500).optional().default(""),
+});
+
+export async function recordUsageReading(assetId, _prevState, formData) {
+  try {
+    await requirePlanAccess("finance");
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+
+    if (!hasRole(user, ASSET_ROLES.RECORD_USAGE)) {
+      return { success: false, error: "You don't have permission to log readings" };
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(assetId)) {
+      return { success: false, error: "Invalid asset id" };
+    }
+
+    const raw = Object.fromEntries(formData.entries());
+    const parsed = UsageReadingSchema.safeParse(raw);
+    if (!parsed.success) {
+      return {
+        success: false,
+        error: "Invalid input",
+        fieldErrors: parsed.error.flatten().fieldErrors,
+      };
+    }
+    const data = parsed.data;
+
+    await dbConnect();
+
+    const asset = await Asset.findOne(
+      withTenantScope({ _id: assetId }, companyId, isSuperAdmin),
+    );
+    if (!asset) {
+      return { success: false, error: "Asset not found" };
+    }
+    if (["disposed", "written_off"].includes(asset.status)) {
+      return {
+        success: false,
+        error: "Cannot log readings for disposed or written-off assets",
+      };
+    }
+
+    const unit = data.unit || asset.usageUnit || "km";
+    const recordedAt = data.recordedAt ? new Date(data.recordedAt) : new Date();
+    if (Number.isNaN(recordedAt.getTime())) {
+      return { success: false, error: "Invalid date" };
+    }
+
+    // Sanity guard: warn (don't block) if new reading is less than the
+    // previous one — could be a meter rollover or a typo. Block if it's
+    // wildly negative (>50% less). The dialog can warn separately.
+    const lastReading = (asset.usageReadings || [])
+      .filter((r) => r.recordedAt)
+      .sort(
+        (a, b) =>
+          new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime(),
+      )[0];
+    if (lastReading && data.reading < lastReading.reading * 0.5) {
+      return {
+        success: false,
+        error: `Reading ${data.reading} is far below the last logged value (${lastReading.reading} ${lastReading.unit}). Check the value and try again.`,
+      };
+    }
+
+    const userInfo = { name: user.name, id: user.id };
+    asset.usageReadings.push({
+      recordedAt,
+      reading: data.reading,
+      unit,
+      source: data.source || "manual",
+      notes: data.notes || "",
+      recordedBy: userInfo,
+    });
+
+    // Cache: currentUsage = the reading with the latest recordedAt
+    const newest = [...asset.usageReadings]
+      .filter((r) => r.recordedAt)
+      .sort(
+        (a, b) =>
+          new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime(),
+      )[0];
+    if (newest) {
+      asset.currentUsage = newest.reading;
+      asset.lastReadingAt = newest.recordedAt;
+      asset.usageUnit = newest.unit;
+    }
+    asset.lastModifiedBy = userInfo;
+
+    await asset.save();
+
+    revalidatePath(`/dashboard/assets/${assetId}`);
+    revalidatePath("/dashboard/assets/insights");
+
+    return {
+      success: true,
+      reading: {
+        reading: data.reading,
+        unit,
+        recordedAt: recordedAt.toISOString(),
+      },
+    };
+  } catch (error) {
+    console.error("recordUsageReading error:", error);
+    return {
+      success: false,
+      error: safeErrorMessage(error, "Failed to log reading"),
     };
   }
 }

@@ -292,6 +292,64 @@ const companySchema = new Schema(
         default: 0,
         min: [0, "Threshold cannot be negative"],
       },
+
+      // ──────────────────────────────────────────
+      // APPROVAL THRESHOLDS
+      // ──────────────────────────────────────────
+      // Per-company-configurable rules driving the approval engine.
+      // Replaces hardcoded constants in the action layer so finance teams
+      // can tune authority for their risk appetite without code changes.
+      approvalThresholds: {
+        // Stock adjustments at or below this absolute KES value can be
+        // auto-approved by Store Manager / Accountant. Above this they
+        // route through the approval engine. 0 = always require approval.
+        stockAdjustmentValue: {
+          type: Number,
+          default: 50_000,
+          min: [0, "Threshold cannot be negative"],
+        },
+
+        // Adjustment types ALWAYS routed through approval engine
+        // regardless of value. These are audit-sensitive and irreversible.
+        stockHighRiskTypes: {
+          type: [String],
+          default: ["theft", "write_off", "expiry"],
+        },
+
+        // Minimum margin% — selling prices below this floor require
+        // approval (or override authority). 0 disables. Industry typical
+        // is 5–10% depending on sector.
+        minimumMarginPercent: {
+          type: Number,
+          default: 8,
+          min: [0, "Cannot be negative"],
+          max: [100, "Cannot exceed 100%"],
+        },
+
+        // Customer credit notes / refunds at or below this value can be
+        // issued by Sales Manager directly. Above this, finance approval.
+        creditNoteValue: {
+          type: Number,
+          default: 25_000,
+          min: [0],
+        },
+
+        // Bill payment release threshold — amounts above this need finance
+        // sign-off before payment is recorded (industry "two-eyes" rule).
+        billPaymentValue: {
+          type: Number,
+          default: 100_000,
+          min: [0],
+        },
+
+        // Discount cap — sales discounts above this % require approval.
+        discountCapPercent: {
+          type: Number,
+          default: 15,
+          min: [0],
+          max: [100],
+        },
+      },
     },
 
     // ============================================

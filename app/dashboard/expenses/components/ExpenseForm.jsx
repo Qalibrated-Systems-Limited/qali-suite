@@ -17,6 +17,8 @@ import {
   PenLine,
   Upload,
   AlertCircle,
+  Truck,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -535,6 +537,141 @@ function CategoryCombobox({ categories = [], value, onValueChange, error }) {
   );
 }
 
+// ============================================
+// ASSET COMBOBOX - Optional link to a fixed asset
+// ============================================
+// Used for tagging fuel, maintenance, repairs, fueling, service costs, etc.
+// to a specific vehicle/equipment so its running costs can be rolled up.
+function AssetCombobox({ assets = [], value, onValueChange, error }) {
+  const [open, setOpen] = useState(false);
+  const [searchValue, setSearchValue] = useState("");
+
+  const selected = assets.find((a) => a._id === value);
+  const filtered = !searchValue
+    ? assets
+    : assets.filter(
+        (a) =>
+          a.assetNumber.toLowerCase().includes(searchValue.toLowerCase()) ||
+          a.name.toLowerCase().includes(searchValue.toLowerCase()) ||
+          (a.registrationNumber || "")
+            .toLowerCase()
+            .includes(searchValue.toLowerCase())
+      );
+
+  return (
+    <div className="space-y-1">
+      <input type="hidden" name="assetId" value={value || ""} />
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className={cn(
+              "w-full justify-between font-normal",
+              !value && "text-muted-foreground",
+              error && "border-destructive"
+            )}
+          >
+            {selected ? (
+              <span className="flex items-center gap-2 truncate">
+                <Truck className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="font-mono text-xs text-muted-foreground">
+                  {selected.assetNumber}
+                </span>
+                <span className="truncate">{selected.name}</span>
+              </span>
+            ) : (
+              "No asset (optional)"
+            )}
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-[--radix-popover-trigger-width] p-0"
+          align="start"
+        >
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder="Search by asset #, name, plate..."
+              value={searchValue}
+              onValueChange={setSearchValue}
+            />
+            <CommandList>
+              {assets.length === 0 ? (
+                <CommandEmpty>
+                  <div className="py-2 text-center text-sm text-muted-foreground">
+                    No fixed assets registered yet.
+                  </div>
+                </CommandEmpty>
+              ) : (
+                <>
+                  {value && (
+                    <CommandGroup>
+                      <CommandItem
+                        value="__clear__"
+                        onSelect={() => {
+                          onValueChange("");
+                          setOpen(false);
+                        }}
+                      >
+                        <X className="mr-2 h-4 w-4" />
+                        <span className="text-muted-foreground">
+                          Clear selection
+                        </span>
+                      </CommandItem>
+                    </CommandGroup>
+                  )}
+                  {filtered.length === 0 ? (
+                    <CommandEmpty>
+                      <div className="py-2 text-center text-sm text-muted-foreground">
+                        No matching assets.
+                      </div>
+                    </CommandEmpty>
+                  ) : (
+                    <CommandGroup heading="Active assets">
+                      {filtered.slice(0, 15).map((a) => (
+                        <CommandItem
+                          key={a._id}
+                          value={`${a.assetNumber} ${a.name}`}
+                          onSelect={() => {
+                            onValueChange(a._id);
+                            setOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              value === a._id ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          <div className="flex min-w-0 flex-col">
+                            <span className="truncate font-medium">
+                              {a.name}
+                            </span>
+                            <span className="font-mono text-[10px] text-muted-foreground">
+                              {a.assetNumber}
+                              {a.registrationNumber
+                                ? ` · ${a.registrationNumber}`
+                                : ""}
+                            </span>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
+                </>
+              )}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
 // Map expense account subType → expense category
 const SUB_TYPE_TO_CATEGORY = {
   direct_cost: "materials",
@@ -574,6 +711,7 @@ export default function ExpenseForm({
   vendors = [],
   categories = [],
   projects = [],
+  assets = [],
 }) {
   const isEditing = !!expense;
 
@@ -588,6 +726,9 @@ export default function ExpenseForm({
   // submitAndApprove removed — all expenses auto-post on save
   const [receipts, setReceipts] = useState(expense?.receipts || []);
   const [projectId, setProjectId] = useState(expense?.projectId || "");
+  const [assetId, setAssetId] = useState(
+    expense?.asset?.id?.toString?.() || expense?.asset?.id || ""
+  );
   const [category, setCategory] = useState(expense?.category || "");
   const [expenseAccountId, setExpenseAccountId] = useState(expense?.accountId || "");
   const [allExpenseAccounts, setAllExpenseAccounts] = useState(accounts);
@@ -918,6 +1059,28 @@ export default function ExpenseForm({
               />
               <p className="text-xs text-muted-foreground">
                 Tag this expense to a project for cost tracking
+              </p>
+            </div>
+          )}
+
+          {/* Linked Asset (Optional) */}
+          {assets.length > 0 && (
+            <div className="space-y-2">
+              <Label>
+                Linked Asset{" "}
+                <span className="text-muted-foreground font-normal">
+                  (optional)
+                </span>
+              </Label>
+              <AssetCombobox
+                assets={assets}
+                value={assetId}
+                onValueChange={setAssetId}
+                error={errors?.assetId?.[0]}
+              />
+              <p className="text-xs text-muted-foreground">
+                Tag this expense to a specific vehicle / equipment to track its
+                fuel, maintenance, and running costs.
               </p>
             </div>
           )}

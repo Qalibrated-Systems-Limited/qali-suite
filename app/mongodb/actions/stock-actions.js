@@ -786,3 +786,237 @@ export async function getProduct(productId) {
     updatedAt: product.updatedAt?.toISOString(),
   };
 }
+
+// ============================================
+// PRICING UPDATE — markup-driven, audit-logged
+// ============================================
+// Industry-standard segregation: pricing decisions belong to commercial /
+// finance roles, not stockkeepers. Storekeeper / Employee never reach this.
+//
+// Modes:
+//   "markup" — caller sets markupPercent; selling price is derived
+//              (cost × (1 + markup/100)). Recomputes whenever cost changes.
+//   "manual" — caller pins a specific selling price. Markup is reflected.
+//
+// Optional minimum-margin floor: if pricing.minimumPrice > 0 and the new
+// selling price would fall below it, the change is rejected unless the
+// caller is Admin / CFO (override authority).
+const PRICING_ROLES = [
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Sales Manager",
+];
+
+const PRICING_OVERRIDE_ROLES = ["SuperAdmin", "Admin", "CFO"];
+
+const PricingSchema = z.object({
+  priceMode: z.enum(["manual", "markup"]),
+  markupPercent: z.coerce.number().min(0).max(10000).optional(),
+  sellingPrice: z.coerce.number().min(0).optional(),
+  minimumPrice: z.coerce.number().min(0).optional(),
+  reason: z.string().max(500).optional().default(""),
+});
+
+export async function updateProductPricing(productId, prevState, formData) {
+  let companyId, isSuperAdmin, user;
+  try {
+    ({ companyId, isSuperAdmin, user } = await getTenantContext());
+  } catch (error) {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  if (!PRICING_ROLES.includes(user.role)) {
+    return {
+      success: false,
+      error:
+        "Only Sales Manager, Finance Manager, CFO, or Admin can change pricing.",
+    };
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    return { success: false, error: "Invalid product id" };
+  }
+
+  const raw = Object.fromEntries(formData.entries());
+  const parsed = PricingSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: "Invalid pricing input",
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    };
+  }
+  const data = parsed.data;
+
+  try {
+    await dbConnect();
+
+    const filter = isSuperAdmin
+      ? { _id: productId }
+      : { _id: productId, companyId };
+    const product = await Product.findOne(filter);
+    if (!product) return { success: false, error: "Product not found" };
+
+    const cost = Number(product.costing?.costPrice) || 0;
+    const previousPrice = Number(product.pricing?.sellingPrice) || 0;
+    const previousMarkup = Number(product.pricing?.markupPercentage) || 0;
+
+    // Compute the prospective new selling price for validation purposes.
+    let nextSelling;
+    let nextMarkup;
+    if (data.priceMode === "markup") {
+      if (data.markupPercent === undefined) {
+        return {
+          success: false,
+          error: "Markup percent is required in markup mode",
+        };
+      }
+      nextMarkup = Number(data.markupPercent);
+      nextSelling =
+        cost > 0 ? Math.round(cost * (1 + nextMarkup / 100) * 100) / 100 : 0;
+    } else {
+      if (data.sellingPrice === undefined) {
+        return {
+          success: false,
+          error: "Selling price is required in manual mode",
+        };
+      }
+      nextSelling = Number(data.sellingPrice);
+      nextMarkup = cost > 0 ? ((nextSelling - cost) / cost) * 100 : 0;
+    }
+
+    // Floor / below-cost / below-margin guards. The first two are
+    // per-product (minimumPrice on the product doc); margin floor is
+    // company-wide (Company.settings.approvalThresholds.minimumMarginPercent).
+    // If the caller can override (Admin/CFO), apply directly. Otherwise
+    // route the change through the approval engine.
+    const effectiveFloor =
+      data.minimumPrice !== undefined
+        ? data.minimumPrice
+        : Number(product.pricing?.minimumPrice) || 0;
+    const belowFloor = effectiveFloor > 0 && nextSelling < effectiveFloor;
+    const belowCost = cost > 0 && nextSelling < cost;
+
+    // Margin floor — per-tenant configurable
+    const { getCompanyThresholds } = await import(
+      "@/app/mongodb/queries/threshold-queries"
+    );
+    const thresholds = await getCompanyThresholds(
+      companyId?.toString?.() || companyId,
+    );
+    const proposedMargin =
+      nextSelling > 0 ? ((nextSelling - cost) / nextSelling) * 100 : 0;
+    const belowMarginFloor =
+      thresholds.minimumMarginPercent > 0 &&
+      cost > 0 &&
+      nextSelling > 0 &&
+      proposedMargin < thresholds.minimumMarginPercent;
+
+    const needsApproval =
+      (belowFloor || belowCost || belowMarginFloor) &&
+      !PRICING_OVERRIDE_ROLES.includes(user.role);
+
+    if (needsApproval) {
+      // Submit an approval request and DO NOT apply the change yet.
+      const { submitApproval } = await import("./approval-actions");
+      const reasonParts = [];
+      if (belowCost) reasonParts.push("Selling price below cost");
+      if (belowFloor)
+        reasonParts.push(
+          `Selling price ${nextSelling.toFixed(2)} below floor ${effectiveFloor.toFixed(2)}`,
+        );
+      if (belowMarginFloor)
+        reasonParts.push(
+          `Margin ${proposedMargin.toFixed(1)}% below company minimum ${thresholds.minimumMarginPercent}%`,
+        );
+      const result = await submitApproval({
+        type: "price_change",
+        targetRef: {
+          kind: "Product",
+          id: product._id,
+          label: `${product.SKU} — ${product.name}`,
+        },
+        payload: {
+          priceMode: data.priceMode,
+          markupPercent: data.markupPercent,
+          sellingPrice: data.sellingPrice,
+          minimumPrice: data.minimumPrice,
+        },
+        reason: reasonParts.join("; "),
+        requesterNote: data.reason || "",
+        context: {
+          cost,
+          previousPrice,
+          previousMarkup,
+          floor: effectiveFloor,
+          marginFloorPercent: thresholds.minimumMarginPercent,
+          proposedSelling: nextSelling,
+          proposedMarkup: nextMarkup,
+          proposedMargin,
+        },
+      });
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+      return {
+        success: true,
+        requiresApproval: true,
+        approval: result.approval,
+      };
+    }
+
+    // Apply changes (pre-save hook will recompute margins consistently).
+    product.pricing.priceMode = data.priceMode;
+    if (data.minimumPrice !== undefined) {
+      product.pricing.minimumPrice = data.minimumPrice;
+    }
+    if (data.priceMode === "markup") {
+      product.pricing.markupPercentage = nextMarkup;
+      // sellingPrice is (re)derived by the pre-save hook.
+    } else {
+      product.pricing.sellingPrice = nextSelling;
+    }
+    product.pricing.lastPriceUpdate = new Date();
+
+    // Audit trail — append-only.
+    product.pricing.priceHistory = product.pricing.priceHistory || [];
+    product.pricing.priceHistory.push({
+      previousPrice,
+      newPrice: nextSelling,
+      previousMarkup,
+      newMarkup: nextMarkup,
+      costAtChange: cost,
+      mode: data.priceMode,
+      reason: data.reason || "",
+      changedBy: {
+        name: user.name || user.email || "System",
+        id: user.id || user._id?.toString?.() || "",
+        role: user.role || "",
+      },
+      changedAt: new Date(),
+    });
+
+    await product.save();
+
+    revalidatePath("/dashboard/stocks");
+    revalidatePath(`/dashboard/stocks/${productId}`);
+
+    return {
+      success: true,
+      pricing: {
+        sellingPrice: product.pricing.sellingPrice,
+        markupPercentage: product.pricing.markupPercentage,
+        marginPercentage: product.pricing.marginPercentage,
+        priceMode: product.pricing.priceMode,
+      },
+    };
+  } catch (error) {
+    console.error("updateProductPricing error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to update pricing",
+    };
+  }
+}

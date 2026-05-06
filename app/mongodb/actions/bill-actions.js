@@ -47,6 +47,7 @@ import {
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
 import { requirePlanAccess } from "@/lib/plan-gate";
+import { roundCurrency, applyRate } from "@/lib/money";
 
 // ============================================
 // HELPERS
@@ -202,6 +203,116 @@ function isOwner(user, createdBy) {
   return user?.id === createdBy?.id;
 }
 
+/**
+ * Pre-fetch all referenced documents for a set of bill lines in
+ * three batched queries (Account, Product, Asset). Replaces N+1
+ * findOne-per-line patterns. Returns Maps keyed by ObjectId-string
+ * for O(1) lookup inside the validation loop.
+ */
+async function batchResolveLineRefs({
+  lines,
+  companyId,
+  isSuperAdmin,
+  mongoSession,
+}) {
+  const tenantClause = isSuperAdmin ? {} : { companyId };
+
+  const accountIds = new Set();
+  const productIds = new Set();
+  const assetIds = new Set();
+
+  for (const line of lines || []) {
+    if (
+      line.accountId &&
+      mongoose.Types.ObjectId.isValid(line.accountId)
+    ) {
+      accountIds.add(line.accountId.toString());
+    }
+    const pid = line.productId;
+    if (
+      pid &&
+      pid !== "No Product" &&
+      pid !== "none" &&
+      pid !== "" &&
+      mongoose.Types.ObjectId.isValid(pid)
+    ) {
+      productIds.add(pid.toString());
+    }
+    if (line.assetId && typeof line.assetId === "string") {
+      const aid = line.assetId.trim();
+      if (
+        aid &&
+        aid !== "none" &&
+        mongoose.Types.ObjectId.isValid(aid)
+      ) {
+        assetIds.add(aid);
+      }
+    }
+  }
+
+  const [accounts, products, assets] = await Promise.all([
+    accountIds.size > 0
+      ? Account.find({
+          ...tenantClause,
+          _id: { $in: [...accountIds] },
+        })
+          .session(mongoSession)
+          .lean()
+      : [],
+    productIds.size > 0
+      ? Product.find({
+          ...tenantClause,
+          _id: { $in: [...productIds] },
+        })
+          .session(mongoSession)
+          .lean()
+      : [],
+    assetIds.size > 0
+      ? Asset.find({
+          ...tenantClause,
+          _id: { $in: [...assetIds] },
+        })
+          .select("_id assetNumber name")
+          .session(mongoSession)
+          .lean()
+      : [],
+  ]);
+
+  return {
+    accounts: new Map(accounts.map((a) => [a._id.toString(), a])),
+    products: new Map(products.map((p) => [p._id.toString(), p])),
+    assets: new Map(assets.map((a) => [a._id.toString(), a])),
+  };
+}
+
+/**
+ * Resolve a single line's asset reference from a pre-fetched map.
+ * Mirrors resolveLineAsset's contract — returns the snapshot or an error.
+ */
+function resolveLineAssetFromMap(rawAssetId, assetsMap) {
+  if (!rawAssetId || typeof rawAssetId !== "string") {
+    return { snapshot: null };
+  }
+  const assetId = rawAssetId.trim();
+  if (!assetId || assetId === "none") {
+    return { snapshot: null };
+  }
+  if (!mongoose.Types.ObjectId.isValid(assetId)) {
+    return { error: "Invalid asset reference" };
+  }
+  const asset = assetsMap.get(assetId);
+  if (!asset) {
+    return { error: "Asset not found" };
+  }
+  return {
+    snapshot: {
+      id: asset._id,
+      assetNumber: asset.assetNumber,
+      name: asset.name,
+    },
+  };
+}
+
 // ============================================
 // CREATE BILL
 // ============================================
@@ -284,17 +395,26 @@ export async function createBill(prevState, formData) {
     }
 
     // 7. Process line items
+    // Pre-fetch all referenced accounts / products / assets in 3 batched
+    // queries instead of N+1 findOne calls per line. For a 50-line bill
+    // this is ~3 round-trips instead of ~150.
+    const lineRefs = await batchResolveLineRefs({
+      lines: data.lines,
+      companyId: tenantCompanyId,
+      isSuperAdmin,
+      mongoSession,
+    });
     const processedLines = [];
 
     for (let i = 0; i < data.lines.length; i++) {
       const line = data.lines[i];
 
       // Validate account belongs to tenant
-      const account = await Account.findOne(
-        withTenantScope({ _id: line.accountId }, tenantCompanyId, isSuperAdmin)
-      )
-        .session(mongoSession)
-        .lean();
+      const account =
+        line.accountId &&
+        mongoose.Types.ObjectId.isValid(line.accountId)
+          ? lineRefs.accounts.get(line.accountId.toString())
+          : null;
       if (!account) {
         await mongoSession.abortTransaction();
         return {
@@ -332,19 +452,18 @@ export async function createBill(prevState, formData) {
         };
       }
 
-      // Get product if specified, or use custom product name (tenant-scoped)
+      // Get product if specified, or use custom product name. Pulled
+      // from the pre-fetched map — no DB call here.
       let productData = null;
+      const pid = line.productId;
       if (
-        line.productId &&
-        line.productId !== "No Product" &&
-        line.productId !== "none" &&
-        line.productId !== ""
+        pid &&
+        pid !== "No Product" &&
+        pid !== "none" &&
+        pid !== "" &&
+        mongoose.Types.ObjectId.isValid(pid)
       ) {
-        const product = await Product.findOne(
-          withTenantScope({ _id: line.productId }, tenantCompanyId, isSuperAdmin)
-        )
-          .session(mongoSession)
-          .lean();
+        const product = lineRefs.products.get(pid.toString());
         if (product) {
           productData = {
             id: product._id,
@@ -363,13 +482,11 @@ export async function createBill(prevState, formData) {
         };
       }
 
-      // Resolve optional asset link (tenant-scoped)
-      const assetResolution = await resolveLineAsset({
-        rawAssetId: line.assetId,
-        companyId: tenantCompanyId,
-        isSuperAdmin,
-        mongoSession,
-      });
+      // Resolve optional asset link from pre-fetched map.
+      const assetResolution = resolveLineAssetFromMap(
+        line.assetId,
+        lineRefs.assets,
+      );
       if (assetResolution.error) {
         await mongoSession.abortTransaction();
         return {
@@ -380,9 +497,9 @@ export async function createBill(prevState, formData) {
         };
       }
 
-      // Calculate amounts
-      const amount = line.quantity * line.unitPrice;
-      const vatAmount = (amount * line.vatRate) / 100;
+      // Calculate amounts (round at line-level so doc totals are clean)
+      const amount = roundCurrency(line.quantity * line.unitPrice);
+      const vatAmount = applyRate(amount, line.vatRate);
 
       processedLines.push({
         lineNumber: i + 1,
@@ -408,7 +525,7 @@ export async function createBill(prevState, formData) {
           rate: line.vatRate,
           amount: vatAmount,
         },
-        lineTotal: amount + vatAmount,
+        lineTotal: roundCurrency(amount + vatAmount),
       });
     }
 
@@ -435,15 +552,18 @@ export async function createBill(prevState, formData) {
         : "",
     };
 
-    // 10. Calculate bill amounts
-    const subtotal = processedLines.reduce((sum, line) => sum + line.amount, 0);
-    const vatTotal = processedLines.reduce(
-      (sum, line) => sum + (line.vat?.amount || 0),
-      0
+    // 10. Calculate bill amounts — round at every aggregation step
+    const subtotal = roundCurrency(
+      processedLines.reduce((sum, line) => sum + line.amount, 0),
     );
-    const total = subtotal + vatTotal;
-    const whtAmount = data.whtApplicable ? (subtotal * data.whtRate) / 100 : 0;
-    const netPayable = total - whtAmount;
+    const vatTotal = roundCurrency(
+      processedLines.reduce((sum, line) => sum + (line.vat?.amount || 0), 0),
+    );
+    const total = roundCurrency(subtotal + vatTotal);
+    const whtAmount = data.whtApplicable
+      ? applyRate(subtotal, data.whtRate)
+      : 0;
+    const netPayable = roundCurrency(total - whtAmount);
 
     const amounts = {
       subtotal,
@@ -644,17 +764,23 @@ export async function updateBill(billId, prevState, formData) {
       };
     }
 
-    // 9. Process lines (tenant-scoped lookups)
+    // 9. Process lines — batch-resolve refs in 3 round-trips, then validate.
+    const lineRefs = await batchResolveLineRefs({
+      lines: data.lines,
+      companyId: billCompanyId,
+      isSuperAdmin,
+      mongoSession,
+    });
     const processedLines = [];
 
     for (let i = 0; i < data.lines.length; i++) {
       const line = data.lines[i];
 
-      const account = await Account.findOne(
-        withTenantScope({ _id: line.accountId }, billCompanyId, isSuperAdmin)
-      )
-        .session(mongoSession)
-        .lean();
+      const account =
+        line.accountId &&
+        mongoose.Types.ObjectId.isValid(line.accountId)
+          ? lineRefs.accounts.get(line.accountId.toString())
+          : null;
       if (!account) {
         await mongoSession.abortTransaction();
         return {
@@ -692,19 +818,17 @@ export async function updateBill(billId, prevState, formData) {
         };
       }
 
-      // Get product if specified, or use custom product name (tenant-scoped)
+      // Get product from pre-fetched map, or use custom product name.
       let productData = null;
+      const pid = line.productId;
       if (
-        line.productId &&
-        line.productId !== "No Product" &&
-        line.productId !== "none" &&
-        line.productId !== ""
+        pid &&
+        pid !== "No Product" &&
+        pid !== "none" &&
+        pid !== "" &&
+        mongoose.Types.ObjectId.isValid(pid)
       ) {
-        const product = await Product.findOne(
-          withTenantScope({ _id: line.productId }, billCompanyId, isSuperAdmin)
-        )
-          .session(mongoSession)
-          .lean();
+        const product = lineRefs.products.get(pid.toString());
         if (product) {
           productData = {
             id: product._id,
@@ -723,13 +847,11 @@ export async function updateBill(billId, prevState, formData) {
         };
       }
 
-      // Resolve optional asset link (tenant-scoped)
-      const assetResolution = await resolveLineAsset({
-        rawAssetId: line.assetId,
-        companyId: billCompanyId,
-        isSuperAdmin,
-        mongoSession,
-      });
+      // Resolve optional asset link from pre-fetched map.
+      const assetResolution = resolveLineAssetFromMap(
+        line.assetId,
+        lineRefs.assets,
+      );
       if (assetResolution.error) {
         await mongoSession.abortTransaction();
         return {
@@ -740,8 +862,8 @@ export async function updateBill(billId, prevState, formData) {
         };
       }
 
-      const amount = line.quantity * line.unitPrice;
-      const vatAmount = (amount * line.vatRate) / 100;
+      const amount = roundCurrency(line.quantity * line.unitPrice);
+      const vatAmount = applyRate(amount, line.vatRate);
 
       processedLines.push({
         lineNumber: i + 1,
@@ -767,19 +889,22 @@ export async function updateBill(billId, prevState, formData) {
           rate: line.vatRate,
           amount: vatAmount,
         },
-        lineTotal: amount + vatAmount,
+        lineTotal: roundCurrency(amount + vatAmount),
       });
     }
 
-    // 10. Recalculate bill amounts
-    const subtotal = processedLines.reduce((sum, line) => sum + line.amount, 0);
-    const vatTotal = processedLines.reduce(
-      (sum, line) => sum + (line.vat?.amount || 0),
-      0
+    // 10. Recalculate bill amounts — round at every aggregation step
+    const subtotal = roundCurrency(
+      processedLines.reduce((sum, line) => sum + line.amount, 0),
     );
-    const total = subtotal + vatTotal;
-    const whtAmount = data.whtApplicable ? (subtotal * data.whtRate) / 100 : 0;
-    const netPayable = total - whtAmount;
+    const vatTotal = roundCurrency(
+      processedLines.reduce((sum, line) => sum + (line.vat?.amount || 0), 0),
+    );
+    const total = roundCurrency(subtotal + vatTotal);
+    const whtAmount = data.whtApplicable
+      ? applyRate(subtotal, data.whtRate)
+      : 0;
+    const netPayable = roundCurrency(total - whtAmount);
     const paid = bill.amounts?.paid || 0;
 
     // 10. Update bill fields
@@ -1164,6 +1289,22 @@ export async function deleteBill(billId) {
       return {
         success: false,
         error: "You can only delete bills you created",
+      };
+    }
+
+    // Defensive: refuse if any line has been capitalized into a fixed asset.
+    // Capitalization should only happen on approved bills going forward, but
+    // legacy data may contain drafts with capitalized lines — block those
+    // rather than orphan the asset.
+    const capitalizedLine = (bill.lines || []).find(
+      (l) => l.capitalizedAssetId
+    );
+    if (capitalizedLine) {
+      return {
+        success: false,
+        error:
+          "Cannot delete: a line on this bill has been capitalized into a fixed asset. Dispose or write off the asset first.",
+        capitalizedAssetId: capitalizedLine.capitalizedAssetId.toString(),
       };
     }
 

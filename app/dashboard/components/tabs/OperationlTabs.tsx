@@ -263,7 +263,7 @@ async function PendingRequestsCard() {
         {requests.length === 0 ? (
           <div className="p-6 text-center">
             <p className="text-sm text-muted-foreground">
-              No pending requests 🎉
+              No pending requests
             </p>
           </div>
         ) : (
@@ -389,7 +389,7 @@ async function PendingClaimsCard() {
         {claims.length === 0 ? (
           <div className="p-6 text-center">
             <p className="text-sm text-muted-foreground">
-              No pending claims 🎉
+              No pending claims
             </p>
           </div>
         ) : (

@@ -58,8 +58,8 @@ async function getBillFormData() {
     isActive: { $ne: false },
     canPost: true, // Filter out header accounts
   })
-    .select("_id accountCode accountName accountType")
-    .sort({ accountCode: 1 })
+    .select("_id accountCode accountName accountType subType")
+    .sort({ accountType: -1, accountCode: 1 })
     .lean();
 
   // Fetch products (optional - for inventory purchases) - tenant-scoped
@@ -97,6 +97,7 @@ async function getBillFormData() {
     accountCode: a.accountCode,
     accountName: a.accountName,
     accountType: a.accountType,
+    subType: a.subType || null,
   }));
 
   const serializedProducts = products.map((p) => ({

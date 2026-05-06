@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 // Client Component (uses useSearchParams)
 import { DashboardTabs } from "./tabs/DashboardTabs";
 import MyHRStrip from "./MyHRStrip";
+import { AlertsStrip, AlertsStripSkeleton } from "./AlertsStrip";
 
 // Server Components (Tabs)
 import { FinanceTab, FinanceTabSkeleton } from "./tabs/FinanceTab";
@@ -37,24 +38,35 @@ export async function AdminDashboardPage() {
   const firstName = user.name?.split(" ")[0] || "Admin";
   const greeting = getGreeting();
 
-  // Role check
+  // Role check — defensive; the dashboard router only sends Admin/Manager
+  // here, but this component might be rendered directly from another route.
+  // If someone lands here without authorization, send them back to the
+  // router which knows where they belong.
   const isAdmin = ["Admin", "Manager", "Store Manager", "Accountant"].includes(
     user.role
   );
 
   if (!isAdmin) {
-    redirect("/dashboard/employee");
+    redirect("/dashboard");
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Header */}
       <div>
         <p className="text-xs text-muted-foreground">{formatDate(new Date())}</p>
-        <h1 className="mt-0.5 text-xl font-semibold tracking-tight text-foreground">
+        <h1 className="mt-0.5 text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
           {greeting}, {firstName}
         </h1>
+        <p className="mt-0.5 text-xs text-muted-foreground sm:text-sm">
+          Today's pulse across operations, finance, and inventory.
+        </p>
       </div>
+
+      {/* Alerts strip — what needs attention right now */}
+      <Suspense fallback={<AlertsStripSkeleton />}>
+        <AlertsStrip />
+      </Suspense>
 
       {/* Personal HR strip */}
       <section>

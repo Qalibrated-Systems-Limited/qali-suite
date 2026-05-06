@@ -8,6 +8,7 @@ import mongoose from "mongoose";
 import Expense from "@/app/models/expenses";
 import Account from "@/app/models/account";
 import Project from "@/app/models/project";
+import Asset from "@/app/models/asset";
 import dbConnect from "@/app/config/dbConnect";
 import {
   getTenantContext,
@@ -67,7 +68,35 @@ const expenseSchema = z.object({
   employeeId: z.string().optional(),
   employeeName: z.string().optional(),
   notes: z.string().optional(),
+  assetId: z.string().optional(),
 });
+
+// ============================================
+// RESOLVE LINKED ASSET (optional)
+// ============================================
+// Returns { snapshot } on success or { error } if assetId is set but invalid
+// for this tenant. Returning a null snapshot clears any existing link.
+async function resolveAssetSnapshot(rawAssetId, companyId, isSuperAdmin) {
+  if (!rawAssetId) return { snapshot: null };
+  const trimmed = rawAssetId.toString().trim();
+  if (!trimmed || trimmed === "none") return { snapshot: null };
+  if (!mongoose.Types.ObjectId.isValid(trimmed)) {
+    return { error: "Invalid asset reference" };
+  }
+  const asset = await Asset.findOne(
+    withTenantScope({ _id: trimmed }, companyId, isSuperAdmin)
+  )
+    .select("_id assetNumber name status")
+    .lean();
+  if (!asset) return { error: "Asset not found" };
+  return {
+    snapshot: {
+      id: asset._id,
+      assetNumber: asset.assetNumber,
+      name: asset.name,
+    },
+  };
+}
 
 // ============================================
 // PARSE RECEIPTS FROM FORM
@@ -104,7 +133,7 @@ export async function createExpense(prevState, formData) {
 
   try {
     await requirePlanAccess("all-claims");
-    const { companyId, user } = await getTenantContext();
+    const { companyId, user, isSuperAdmin } = await getTenantContext();
 
     if (!hasRole(user, EXPENSE_ROLES.CREATE)) {
       return { errors: { _form: ["Insufficient permissions to create expenses"] }, values: rawValues };
@@ -163,6 +192,19 @@ export async function createExpense(prevState, formData) {
       }
     }
 
+    // Resolve linked asset (optional — fuel/repairs/maintenance tracking)
+    const assetResolution = await resolveAssetSnapshot(
+      validatedData.assetId,
+      companyId,
+      isSuperAdmin
+    );
+    if (assetResolution.error) {
+      return {
+        errors: { assetId: [assetResolution.error] },
+        values: rawValues,
+      };
+    }
+
     // Create expense as draft (post() will set it to "posted")
     const expense = await Expense.create({
       companyId,
@@ -200,6 +242,7 @@ export async function createExpense(prevState, formData) {
       status: "draft",
       createdBy: formatUser(user),
       ...projectFields,
+      ...(assetResolution.snapshot ? { asset: assetResolution.snapshot } : {}),
     });
 
     // Auto-post: creates JE immediately
@@ -318,6 +361,24 @@ export async function updateExpense(expenseId, prevState, formData) {
       expense.projectId = undefined;
       expense.project = undefined;
     }
+
+    // Update linked asset (optional)
+    const assetResolution = await resolveAssetSnapshot(
+      validatedData.assetId,
+      companyId,
+      isSuperAdmin
+    );
+    if (assetResolution.error) {
+      return {
+        errors: { assetId: [assetResolution.error] },
+        values: rawValues,
+      };
+    }
+    expense.asset = assetResolution.snapshot || {
+      id: null,
+      assetNumber: null,
+      name: null,
+    };
 
     await expense.save();
 

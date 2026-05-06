@@ -32,6 +32,7 @@ import {
   Clock,
   Search,
   Plug,
+  CheckSquare,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -63,6 +64,19 @@ import { useCommandPalette } from "./command-palette-provider";
 // PLAN GATING HELPER
 // ============================================
 import { getAllowedModules } from "@/lib/plans";
+import {
+  canSeeInventoryNav,
+  canSeeSalesNav,
+  canSeePurchasesNav,
+  canSeeFinanceNav,
+  canSeeTaxNav,
+  canSeeReportsNav,
+  canSeeProjectsNav,
+  canSeeHRNav,
+  canSeeSettingsNav,
+  canReviewClaims,
+  canSeeApprovalsNav,
+} from "@/lib/permissions";
 
 // ============================================
 // NAV GROUP CONFIGURATION - ERP FOCUSED
@@ -82,6 +96,16 @@ const getNavigationGroups = (user) => {
     href: "/dashboard",
   },
 
+  // Approvals (ungrouped — visible only to approver roles)
+  {
+    type: "single",
+    icon: CheckSquare,
+    label: "Approvals",
+    id: "approvals",
+    href: "/dashboard/approvals",
+    hidden: !canSeeApprovalsNav(user?.role),
+  },
+
   // ============================================
   // INVENTORY & PRODUCTS
   // ============================================
@@ -91,35 +115,35 @@ const getNavigationGroups = (user) => {
     icon: Package,
     id: "inventory",
     defaultOpen: true,
-    hidden: user?.role === "HR",
+    hidden: !canSeeInventoryNav(user?.role),
     items: [
       {
         icon: Boxes,
         label: "Products",
         id: "products",
         href: "/dashboard/stocks",
-        hidden: !["Admin", "Store Manager", "Accountant"].includes(user?.role),
+        hidden: !canSeeInventoryNav(user?.role),
       },
       {
         icon: FolderTree,
         label: "Categories",
         id: "categories",
         href: "/dashboard/categories",
-        hidden: !["Admin", "Manager", "Store Manager"].includes(user?.role),
+        hidden: !canSeeInventoryNav(user?.role),
       },
       {
         icon: Activity,
         label: "Stock Movements",
         id: "movements",
         href: "/dashboard/movements",
-        hidden: !["Admin", "Manager", "Accountant", "Store Manager"].includes(user?.role),
+        hidden: !canSeeInventoryNav(user?.role),
       },
       {
         icon: FileText,
         label: "Stock Adjustments",
         id: "adjustments",
         href: "/dashboard/adjustments",
-        hidden: !["Admin", "Store Manager", "Accountant"].includes(user?.role),
+        hidden: !canSeeInventoryNav(user?.role),
       },
       {
         icon: Package,
@@ -145,49 +169,49 @@ const getNavigationGroups = (user) => {
     icon: ShoppingBag,
     id: "sales",
     defaultOpen: false,
-    hidden: user?.role === "HR",
+    hidden: !canSeeSalesNav(user?.role),
     items: [
       {
         icon: FileText,
         label: "Quotes",
         id: "quotes",
         href: "/dashboard/quotes",
-        hidden: !["Admin", "Manager", "Accountant", "Store Manager"].includes(user?.role),
+        hidden: !canSeeSalesNav(user?.role),
       },
       {
         icon: Receipt,
         label: "Invoices",
         id: "invoices",
         href: "/dashboard/invoices",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeSalesNav(user?.role),
       },
       {
         icon: Receipt,
         label: "Credit Notes",
         id: "credit-notes",
         href: "/dashboard/credit-notes",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeSalesNav(user?.role),
       },
       {
         icon: Users,
         label: "Customers",
         id: "customers",
         href: "/dashboard/customers",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeSalesNav(user?.role),
       },
       {
         icon: CreditCard,
         label: "Payments Received",
         id: "payments-received",
         href: "/dashboard/payments/received",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeFinanceNav(user?.role),
       },
       {
         icon: FileText,
         label: "Statements",
         id: "statements",
         href: "/dashboard/statements",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeFinanceNav(user?.role),
       },
     ],
   },
@@ -201,42 +225,42 @@ const getNavigationGroups = (user) => {
     icon: ShoppingCart,
     id: "purchases",
     defaultOpen: false,
-    hidden: user?.role === "HR" || !hasMod("purchases"),
+    hidden: !canSeePurchasesNav(user?.role) || !hasMod("purchases"),
     items: [
       {
         icon: FileText,
         label: "Purchase Orders",
         id: "purchase-orders",
         href: "/dashboard/purchase-orders",
-        hidden: !["Admin", "Accountant", "Store Manager"].includes(user?.role),
+        hidden: !canSeePurchasesNav(user?.role),
       },
       {
         icon: Receipt,
         label: "Bills",
         id: "bills",
         href: "/dashboard/bills",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeFinanceNav(user?.role) && user?.role !== "Procurement Officer",
       },
       {
         icon: Users,
         label: "Suppliers",
         id: "suppliers",
         href: "/dashboard/suppliers",
-        hidden: !["Admin", "Accountant", "Store Manager"].includes(user?.role),
+        hidden: !canSeePurchasesNav(user?.role),
       },
       {
         icon: Wallet,
         label: "Payments Made",
         id: "payments-made",
         href: "/dashboard/payments/made",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeFinanceNav(user?.role),
       },
       {
         icon: FileText,
         label: "Supplier Statements",
         id: "supplier-statements",
         href: "/dashboard/supplier-statements",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeFinanceNav(user?.role),
       },
     ],
   },
@@ -264,28 +288,28 @@ const getNavigationGroups = (user) => {
         label: "All Claims", // ← Admin/Accountant view
         id: "all-claims",
         href: "/dashboard/claims",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("all-claims"),
+        hidden: !canReviewClaims(user?.role) || !hasMod("all-claims"),
       },
       {
         icon: Receipt,
         label: "All Expenses",
         id: "expenses",
         href: "/dashboard/expenses",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("all-claims"),
+        hidden: !canReviewClaims(user?.role) || !hasMod("all-claims"),
       },
       {
         icon: FileText,
         label: "Pending Approval",
         id: "expenses-pending",
         href: "/dashboard/expenses/pending",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("all-claims"),
+        hidden: !canReviewClaims(user?.role) || !hasMod("all-claims"),
       },
       {
         icon: CreditCard,
         label: "Reimbursements",
         id: "reimbursements",
         href: "/dashboard/expenses/reimbursements",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("all-claims"),
+        hidden: !canReviewClaims(user?.role) || !hasMod("all-claims"),
         badge: "Soon",
       },
     ],
@@ -300,8 +324,8 @@ const getNavigationGroups = (user) => {
     label: "Projects",
     id: "projects",
     href: "/dashboard/projects",
-    hidden: !["Admin", "Accountant", "Manager"].includes(user?.role) || !hasMod("projects"),
-    // HR intentionally excluded
+    hidden: !canSeeProjectsNav(user?.role) || !hasMod("projects"),
+    // HR intentionally excluded via the permission group
   },
 
   // ============================================
@@ -314,49 +338,49 @@ const getNavigationGroups = (user) => {
     id: "finance",
     defaultOpen: false,
     badge: "New",
-    hidden: user?.role === "HR" || !hasMod("finance"),
+    hidden: !canSeeFinanceNav(user?.role) || !hasMod("finance"),
     items: [
       {
         icon: Briefcase, // or Building2 or Users
         label: "Parties",
         id: "parties",
         href: "/dashboard/parties",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeFinanceNav(user?.role),
       },
       {
         icon: BookOpen,
         label: "Chart of Accounts",
         id: "accounts",
         href: "/dashboard/accounts",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeFinanceNav(user?.role),
       },
       {
         icon: FileSpreadsheet,
         label: "Journal Entries",
         id: "journal",
         href: "/dashboard/journal",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeFinanceNav(user?.role),
       },
       {
         icon: ArrowLeftRight,
         label: "Bank Feed",
         id: "bank-feed",
         href: "/dashboard/banking",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeFinanceNav(user?.role),
       },
       {
         icon: Package,
         label: "Fixed Assets",
         id: "assets",
         href: "/dashboard/assets",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("assets"),
+        hidden: !canSeeFinanceNav(user?.role) || !hasMod("assets"),
       },
       {
         icon: Calendar,
         label: "Fiscal Periods",
         id: "fiscal-periods",
-        href: "/dashboard/fiscal-periods",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        href: "/dashboard/settings/fiscal-periods",
+        hidden: !canSeeFinanceNav(user?.role),
       },
     ],
   },
@@ -370,35 +394,35 @@ const getNavigationGroups = (user) => {
     icon: FileText,
     id: "tax",
     defaultOpen: false,
-    hidden: user?.role === "HR" || !hasMod("tax"),
+    hidden: !canSeeTaxNav(user?.role) || !hasMod("tax"),
     items: [
       {
         icon: Receipt,
         label: "VAT Returns",
         id: "vat-returns",
         href: "/dashboard/tax/vat",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeTaxNav(user?.role),
       },
       {
         icon: FileText,
         label: "WHT Reports",
         id: "wht-reports",
         href: "/dashboard/tax/wht",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeTaxNav(user?.role),
       },
       {
         icon: FileSpreadsheet,
         label: "Tax Transactions",
         id: "tax-transactions",
         href: "/dashboard/tax/transactions",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeTaxNav(user?.role),
       },
       {
         icon: Building2,
         label: "KRA Filings",
         id: "kra-filings",
         href: "/dashboard/tax/kra",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeTaxNav(user?.role),
       },
     ],
   },
@@ -412,97 +436,94 @@ const getNavigationGroups = (user) => {
     icon: BarChart3,
     id: "reports",
     defaultOpen: false,
-    hidden: user?.role === "HR",
+    hidden: !canSeeReportsNav(user?.role),
     items: [
-      // Financial Reports (gated to starter+)
+      // Financial Reports — finance roles only (P&L, Balance Sheet, etc.)
       {
         icon: TrendingUp,
         label: "Profit & Loss",
         id: "profit-loss",
         href: "/dashboard/reports/profit-loss",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("profit-loss"),
+        hidden: !canSeeFinanceNav(user?.role) || !hasMod("profit-loss"),
       },
       {
         icon: Building2,
         label: "Balance Sheet",
         id: "balance-sheet",
         href: "/dashboard/reports/balance-sheet",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("balance-sheet"),
+        hidden: !canSeeFinanceNav(user?.role) || !hasMod("balance-sheet"),
       },
       {
         icon: Activity,
         label: "Cash Flow",
         id: "cash-flow",
         href: "/dashboard/reports/cash-flow",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("cash-flow"),
+        hidden: !canSeeFinanceNav(user?.role) || !hasMod("cash-flow"),
       },
       {
         icon: FileSpreadsheet,
         label: "Trial Balance",
         id: "trial-balance",
         href: "/dashboard/reports/trial-balance",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("trial-balance"),
+        hidden: !canSeeFinanceNav(user?.role) || !hasMod("trial-balance"),
       },
       {
         icon: BookOpen,
         label: "General Ledger",
         id: "general-ledger",
         href: "/dashboard/reports/general-ledger",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("general-ledger"),
+        hidden: !canSeeFinanceNav(user?.role) || !hasMod("general-ledger"),
       },
       {
         icon: Users,
         label: "AR Aging",
         id: "ar-aging",
         href: "/dashboard/reports/ar-aging",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("ar-aging"),
+        hidden: !canSeeFinanceNav(user?.role) || !hasMod("ar-aging"),
       },
       {
         icon: Building2,
         label: "AP Aging",
         id: "ap-aging",
         href: "/dashboard/reports/ap-aging",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("ap-aging"),
+        hidden: !canSeeFinanceNav(user?.role) || !hasMod("ap-aging"),
       },
       {
         icon: Package,
         label: "Asset Rollforward",
         id: "asset-rollforward",
         href: "/dashboard/reports/asset-rollforward",
-        hidden:
-          !["Admin", "Accountant", "Manager"].includes(user?.role) ||
-          !hasMod("assets"),
+        hidden: !canSeeFinanceNav(user?.role) || !hasMod("assets"),
       },
 
-      // Divider comment
-      // Operational Reports
+      // Operational Reports — broader audience matching the underlying nav.
       {
         icon: Package,
         label: "Inventory Reports",
         id: "inventory-reports",
         href: "/dashboard/reports/inventory",
-        hidden: !["Admin", "Manager", "Accountant", "Store Manager"].includes(user?.role),
+        hidden: !canSeeInventoryNav(user?.role),
       },
       {
         icon: ShoppingBag,
         label: "Sales Reports",
         id: "sales-reports",
         href: "/dashboard/reports/sales",
-        hidden: !["Admin", "Accountant"].includes(user?.role),
+        hidden: !canSeeSalesNav(user?.role),
       },
       {
         icon: ShoppingCart,
         label: "Purchase Reports",
         id: "purchase-reports",
         href: "/dashboard/reports/purchases",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("purchase-reports"),
+        hidden: !canSeePurchasesNav(user?.role) || !hasMod("purchase-reports"),
       },
       {
         icon: Users,
         label: "Customer Reports",
         id: "customer-reports",
         href: "/dashboard/reports/customers",
-        hidden: !["Admin", "Accountant"].includes(user?.role) || !hasMod("customer-reports"),
+        hidden: !canSeeSalesNav(user?.role) || !hasMod("customer-reports"),
       },
     ],
   },
@@ -523,21 +544,21 @@ const getNavigationGroups = (user) => {
         label: "HR Overview",
         id: "hr-overview",
         href: "/dashboard/hr",
-        hidden: !["Admin", "Manager", "HR"].includes(user?.role),
+        hidden: !canSeeHRNav(user?.role),
       },
       {
         icon: Users,
         label: "Employees",
         id: "hr-employees",
         href: "/dashboard/hr/employees",
-        hidden: !["Admin", "Manager", "HR"].includes(user?.role),
+        hidden: !canSeeHRNav(user?.role),
       },
       {
         icon: Building2,
         label: "Departments",
         id: "hr-departments",
         href: "/dashboard/hr/departments",
-        hidden: !["Admin", "Manager", "HR"].includes(user?.role),
+        hidden: !canSeeHRNav(user?.role),
       },
       {
         icon: Calendar,
@@ -637,7 +658,7 @@ const getNavigationGroups = (user) => {
     label: "Settings",
     id: "settings",
     href: "/dashboard/settings",
-    hidden: !["SuperAdmin", "Admin", "Accountant", "HR"].includes(user?.role),
+    hidden: !canSeeSettingsNav(user?.role) && user?.role !== "HR",
   },
 ];
 }; // end getNavigationGroups

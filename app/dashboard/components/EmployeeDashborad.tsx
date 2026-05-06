@@ -24,6 +24,7 @@ import {
   getEmployeeFinancialSummary,
 } from "@/app/mongodb/queries/erp-dashboard-queries";
 import MyHRStrip from "./MyHRStrip";
+import { MyAlertsStrip, MyAlertsStripSkeleton } from "./MyAlertsStrip";
 import EmployeeClaim from "../../models/employeesClaims";
 import { StockRequest } from "../../models/requests";
 
@@ -48,12 +49,17 @@ export default async function EmployeeDashboardPage() {
       {/* Header */}
       <div>
         <h1 className="text-xl font-semibold text-foreground tracking-tight">
-          Welcome back, {userName}! 👋
+          Welcome back, {userName}
         </h1>
         <p className="text-xs text-muted-foreground mt-0.5">
           Your personal dashboard
         </p>
       </div>
+
+      {/* Personal alerts strip — claims, items I have, leave */}
+      <Suspense fallback={<MyAlertsStripSkeleton />}>
+        <MyAlertsStrip userId={user.id} />
+      </Suspense>
 
       {/* Quick Actions */}
       <section>

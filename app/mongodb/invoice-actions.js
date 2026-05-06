@@ -1,3 +1,5 @@
+
+
 "use server";
 
 import { auth } from "@/auth";
@@ -13,6 +15,7 @@ import { redirect } from "next/navigation";
 import { generateInvoiceNumber } from "./queries/invoice-queries";
 import { generateMovementNumber } from "./queries/movement-queries";
 import mongoose from "mongoose";
+import { roundCurrency, applyRate } from "@/lib/money";
 import {
   getTenantContext,
   validateTenantAccess,
@@ -203,6 +206,27 @@ export async function updateInvoice(invoiceId, prevState, formData) {
         ...newStockItemsMap.keys(),
       ]);
 
+      // Pre-fetch all referenced products in one batched + tenant-scoped
+      // query. Replaces per-iteration Product.findById N+1, and ensures
+      // the loop can't even see a product belonging to another tenant
+      // (defense-in-depth against malicious productIds in form payload).
+      const tenantClause = isSuperAdmin ? {} : { companyId };
+      const validProductIds = [...allProductIds].filter((id) =>
+        mongoose.Types.ObjectId.isValid(id),
+      );
+      const products =
+        validProductIds.length > 0
+          ? await Product.find({
+              ...tenantClause,
+              _id: { $in: validProductIds },
+            })
+              .session(mongoSession)
+              .lean()
+          : [];
+      const productMap = new Map(
+        products.map((p) => [p._id.toString(), p]),
+      );
+
       for (const productId of allProductIds) {
         const oldItem = oldCommittedItemsMap.get(productId);
         const newItem = newStockItemsMap.get(productId);
@@ -214,7 +238,7 @@ export async function updateInvoice(invoiceId, prevState, formData) {
         // If no change in quantity, just add to line items
         if (difference === 0 && newItem) {
           const itemTaxRate = newItem.taxRate ?? 16;
-          const itemTaxAmount = (newItem.total * itemTaxRate) / 100;
+          const itemTaxAmount = applyRate(newItem.total, itemTaxRate);
 
           newLineItems.push({
             itemType: "product",
@@ -233,17 +257,19 @@ export async function updateInvoice(invoiceId, prevState, formData) {
           continue;
         }
 
-        // Fetch product for validation
-        const product = await Product.findById(productId).session(mongoSession);
+        // Resolve product from pre-fetched map (no DB call here).
+        const product = productMap.get(productId.toString());
 
         if (!product && newItem) {
           throw new Error(`Product not found: ${productId}`);
         }
 
-        // Case 1: Item removed from invoice - RELEASE commitment
+        // Case 1: Item removed from invoice — RELEASE commitment.
+        // Releases are always safe (we're returning quantity to the pool),
+        // but we still tenant-scope the write defensively.
         if (oldItem && !newItem) {
-          await Product.findByIdAndUpdate(
-            productId,
+          await Product.findOneAndUpdate(
+            { _id: productId, ...tenantClause },
             {
               $inc: {
                 "inventory.quantityCommitted": -oldQuantity,
@@ -255,28 +281,42 @@ export async function updateInvoice(invoiceId, prevState, formData) {
           continue;
         }
 
-        // Case 2: New item added - COMMIT inventory
+        // Case 2: New item added — COMMIT inventory.
+        // Atomic CAS: the conditional `quantityAvailable: { $gte: ... }`
+        // means only the write that finds enough stock at the moment of
+        // the write succeeds. Closes the prior TOCTOU where the read of
+        // `product.inventory.quantityAvailable` could be stale by the
+        // time the unconditional $inc landed.
         if (!oldItem && newItem) {
-          const available = product.inventory?.quantityAvailable ?? 0;
-          if (available < newQuantity) {
-            throw new Error(
-              `Insufficient stock for ${product.name}. Available: ${available}, Requested: ${newQuantity}`
-            );
-          }
-
-          await Product.findByIdAndUpdate(
-            productId,
+          const committed = await Product.findOneAndUpdate(
+            {
+              _id: productId,
+              ...tenantClause,
+              "inventory.quantityAvailable": { $gte: newQuantity },
+            },
             {
               $inc: {
                 "inventory.quantityCommitted": newQuantity,
                 "inventory.quantityAvailable": -newQuantity,
               },
             },
-            { session: mongoSession }
+            { session: mongoSession, new: true }
           );
 
+          if (!committed) {
+            const fresh = await Product.findOne(
+              { _id: productId, ...tenantClause },
+            )
+              .session(mongoSession)
+              .lean();
+            const available = fresh?.inventory?.quantityAvailable ?? 0;
+            throw new Error(
+              `Insufficient stock for ${product.name}. Available: ${available}, Requested: ${newQuantity}`
+            );
+          }
+
           const itemTaxRate = newItem.taxRate ?? 16;
-          const itemTaxAmount = (newItem.total * itemTaxRate) / 100;
+          const itemTaxAmount = applyRate(newItem.total, itemTaxRate);
 
           newLineItems.push({
             itemType: "product",
@@ -295,32 +335,41 @@ export async function updateInvoice(invoiceId, prevState, formData) {
           continue;
         }
 
-        // Case 3: Quantity changed - adjust commitment
+        // Case 3: Quantity changed — adjust commitment.
         if (oldItem && newItem && difference !== 0) {
           if (difference > 0) {
-            // Need to commit MORE
-            const available = product.inventory?.quantityAvailable ?? 0;
-            if (available < difference) {
-              throw new Error(
-                `Insufficient stock for ${product.name}. Available: ${available}, Additional needed: ${difference}`
-              );
-            }
-
-            await Product.findByIdAndUpdate(
-              productId,
+            // Commit MORE — same atomic CAS as Case 2 to avoid TOCTOU.
+            const committed = await Product.findOneAndUpdate(
+              {
+                _id: productId,
+                ...tenantClause,
+                "inventory.quantityAvailable": { $gte: difference },
+              },
               {
                 $inc: {
                   "inventory.quantityCommitted": difference,
                   "inventory.quantityAvailable": -difference,
                 },
               },
-              { session: mongoSession }
+              { session: mongoSession, new: true }
             );
+
+            if (!committed) {
+              const fresh = await Product.findOne(
+                { _id: productId, ...tenantClause },
+              )
+                .session(mongoSession)
+                .lean();
+              const available = fresh?.inventory?.quantityAvailable ?? 0;
+              throw new Error(
+                `Insufficient stock for ${product.name}. Available: ${available}, Additional needed: ${difference}`
+              );
+            }
           } else {
-            // Need to RELEASE some commitment
+            // Need to RELEASE some commitment (always safe).
             const releaseQty = Math.abs(difference);
-            await Product.findByIdAndUpdate(
-              productId,
+            await Product.findOneAndUpdate(
+              { _id: productId, ...tenantClause },
               {
                 $inc: {
                   "inventory.quantityCommitted": -releaseQty,
@@ -332,7 +381,7 @@ export async function updateInvoice(invoiceId, prevState, formData) {
           }
 
           const itemTaxRate = newItem.taxRate ?? 16;
-          const itemTaxAmount = (newItem.total * itemTaxRate) / 100;
+          const itemTaxAmount = applyRate(newItem.total, itemTaxRate);
 
           newLineItems.push({
             itemType: "product",
@@ -356,7 +405,7 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       // ============================================
       for (const item of technicianStockItems) {
         const techItemTaxRate = item.taxRate ?? 16;
-        const techItemTaxAmount = (item.total * techItemTaxRate) / 100;
+        const techItemTaxAmount = applyRate(item.total, techItemTaxRate);
 
         newLineItems.push({
           itemType: "product",
@@ -388,7 +437,7 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       if (invoiceData.serviceItems && invoiceData.serviceItems.length > 0) {
         for (const item of invoiceData.serviceItems) {
           const serviceTaxRate = item.taxRate ?? 16;
-          const serviceTaxAmount = (item.total * serviceTaxRate) / 100;
+          const serviceTaxAmount = applyRate(item.total, serviceTaxRate);
 
           newLineItems.push({
             itemType: "service",
@@ -407,17 +456,24 @@ export async function updateInvoice(invoiceId, prevState, formData) {
       // ============================================
       // STEP 5: CALCULATE TOTALS
       // ============================================
-      const subtotal = newLineItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+      // Round at every aggregation step so the document totals match the
+      // sum of line totals exactly — required for accounting correctness.
+      const subtotal = roundCurrency(
+        newLineItems.reduce((sum, item) => sum + (item.amount || 0), 0),
+      );
       const discountPercentage = invoiceData.discountPercentage || 0;
-      const discountAmount = (subtotal * discountPercentage) / 100;
-      const subtotalAfterDiscount = subtotal - discountAmount;
+      const discountAmount = applyRate(subtotal, discountPercentage);
+      const subtotalAfterDiscount = roundCurrency(subtotal - discountAmount);
 
       const discountFactor = subtotal > 0 ? subtotalAfterDiscount / subtotal : 1;
-      const taxAmount = newLineItems.reduce((sum, item) => {
-        return sum + ((item.taxAmount || 0) * discountFactor);
-      }, 0);
+      const taxAmount = roundCurrency(
+        newLineItems.reduce(
+          (sum, item) => sum + (item.taxAmount || 0) * discountFactor,
+          0,
+        ),
+      );
 
-      const total = subtotalAfterDiscount + taxAmount;
+      const total = roundCurrency(subtotalAfterDiscount + taxAmount);
 
       // ============================================
       // STEP 6: UPDATE INVOICE
@@ -595,9 +651,32 @@ export async function createInvoice(prevState, formData) {
     // Prepare invoice items in new Invoice model format
     const items = [];
 
+    // Pre-fetch all stock-item products in one batched + tenant-scoped
+    // query (replaces per-line Product.findById N+1). The atomic
+    // commitment update below still runs per-line so concurrent draft
+    // creation can't oversell.
+    const tenantClause = isSuperAdmin ? {} : { companyId };
+    const stockItemIds = (data.stockItems || [])
+      .map((it) => it.productId)
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+    const stockProducts =
+      stockItemIds.length > 0
+        ? await Product.find({
+            ...tenantClause,
+            _id: { $in: stockItemIds },
+          })
+            .session(mongoSession)
+            .lean()
+        : [];
+    const stockProductMap = new Map(
+      stockProducts.map((p) => [p._id.toString(), p]),
+    );
+
     // Process stock items (products)
     for (const item of data.stockItems) {
-      const product = await Product.findById(item.productId).session(mongoSession);
+      const product = item.productId
+        ? stockProductMap.get(item.productId.toString())
+        : null;
 
       if (!product) {
         await mongoSession.abortTransaction();
@@ -613,7 +692,7 @@ export async function createInvoice(prevState, formData) {
 
       if (!isFromTechnicianStock) {
         // ============================================
-        // COMMIT INVENTORY (atomic, race-safe)
+        // COMMIT INVENTORY (atomic, race-safe + tenant-scoped)
         // ============================================
         // Conditional findOneAndUpdate: only succeeds if quantityAvailable
         // is still >= the requested amount. Two concurrent drafts for the
@@ -621,6 +700,7 @@ export async function createInvoice(prevState, formData) {
         const committed = await Product.findOneAndUpdate(
           {
             _id: item.productId,
+            ...tenantClause,
             "inventory.quantityAvailable": { $gte: item.quantity },
           },
           {
@@ -633,7 +713,15 @@ export async function createInvoice(prevState, formData) {
         );
 
         if (!committed) {
-          const available = product.inventory?.quantityAvailable ?? 0;
+          // Re-read fresh value for the error message — `product` was
+          // taken from the pre-fetched map and may be stale by now.
+          const fresh = await Product.findOne({
+            _id: item.productId,
+            ...tenantClause,
+          })
+            .session(mongoSession)
+            .lean();
+          const available = fresh?.inventory?.quantityAvailable ?? 0;
           await mongoSession.abortTransaction();
           return {
             message: `Insufficient stock for ${product.name}. Available: ${available}, Required: ${item.quantity}`,
@@ -656,7 +744,7 @@ export async function createInvoice(prevState, formData) {
         unitPrice: item.sellingPrice,
         amount: item.total,
         taxRate: itemTaxRate,
-        taxAmount: (item.total * itemTaxRate) / 100,
+        taxAmount: applyRate(item.total, itemTaxRate),
         discountPercentage: 0,
         discountAmount: 0,
         // Track stock commitment status
@@ -695,25 +783,30 @@ export async function createInvoice(prevState, formData) {
         unitPrice: item.unitPrice,
         amount: item.total,
         taxRate: itemTaxRate,
-        taxAmount: (item.total * itemTaxRate) / 100,
+        taxAmount: applyRate(item.total, itemTaxRate),
         discountPercentage: 0,
         discountAmount: 0,
       });
     }
 
-    // Calculate totals
-    const subtotal = items.reduce((sum, item) => sum + item.amount, 0);
-    const totalDiscount = (subtotal * (data.discountPercentage || 0)) / 100;
+    // Calculate totals — round at every aggregation step so doc totals
+    // match the rendered sum of line totals exactly.
+    const subtotal = roundCurrency(
+      items.reduce((sum, item) => sum + item.amount, 0),
+    );
+    const totalDiscount = applyRate(subtotal, data.discountPercentage || 0);
 
     // Item taxAmount is stored as pre-discount (for model validation and audit clarity)
     // Invoice-level taxAmount applies discount proportionally
     const discountFactor = subtotal > 0 ? (subtotal - totalDiscount) / subtotal : 1;
-    const taxAmount = items.reduce((sum, item) => {
-      // Apply discount factor to each item's tax contribution
-      return sum + item.taxAmount * discountFactor;
-    }, 0);
+    const taxAmount = roundCurrency(
+      items.reduce(
+        (sum, item) => sum + item.taxAmount * discountFactor,
+        0,
+      ),
+    );
 
-    const total = subtotal - totalDiscount + taxAmount;
+    const total = roundCurrency(subtotal - totalDiscount + taxAmount);
 
     // ============================================
     // SET DRAFT EXPIRY FOR INVOICES WITH COMMITTED STOCK
@@ -1625,11 +1718,27 @@ export async function convertCheckoutToInvoice(prevState, formData) {
       taxPin: request.customer?.taxPin || "",
     };
 
-    // Build invoice items from checkouts (products)
+    // Build invoice items from checkouts (products). Batch-fetch all
+    // product details in one query — the loop is O(N) field access.
+    const checkoutProductIds = (checkouts || [])
+      .map((c) => c.productId)
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+    const checkoutProducts =
+      checkoutProductIds.length > 0
+        ? await Product.find({ _id: { $in: checkoutProductIds } })
+            .session(mongoSession)
+            .lean()
+        : [];
+    const checkoutProductMap = new Map(
+      checkoutProducts.map((p) => [p._id.toString(), p]),
+    );
+
     const invoiceItems = [];
 
     for (const checkout of checkouts) {
-      const product = await Product.findById(checkout.productId).session(mongoSession);
+      const product = checkout.productId
+        ? checkoutProductMap.get(checkout.productId.toString())
+        : null;
       const unitPrice = product?.pricing?.sellingPrice || 0;
       const unitCost = product?.costing?.costPrice || 0;
       const quantity = data.quantitiesToSell?.[checkout._id.toString()] || checkout.quantity;
@@ -1654,7 +1763,7 @@ export async function convertCheckoutToInvoice(prevState, formData) {
           marginPercentage: amount > 0 ? ((amount - totalCost) / amount) * 100 : 0,
         },
         taxRate,
-        taxAmount: (amount * taxRate) / 100,
+        taxAmount: applyRate(amount, taxRate),
         relatedRequest: {
           requestId: request._id,
           requestNumber: request.requestNumber,
@@ -1689,16 +1798,25 @@ export async function convertCheckoutToInvoice(prevState, formData) {
             marginPercentage: 100,
           },
           taxRate,
-          taxAmount: (amount * taxRate) / 100,
+          taxAmount: applyRate(amount, taxRate),
         });
       }
     }
 
-    // Calculate totals
-    const subtotal = invoiceItems.reduce((sum, item) => sum + item.amount, 0);
-    const totalTax = invoiceItems.reduce((sum, item) => sum + item.taxAmount, 0);
-    const totalCOGS = invoiceItems.reduce((sum, item) => sum + (item.costing?.totalCost || 0), 0);
-    const total = subtotal + totalTax;
+    // Calculate totals (round defensively at every aggregation)
+    const subtotal = roundCurrency(
+      invoiceItems.reduce((sum, item) => sum + item.amount, 0),
+    );
+    const totalTax = roundCurrency(
+      invoiceItems.reduce((sum, item) => sum + item.taxAmount, 0),
+    );
+    const totalCOGS = roundCurrency(
+      invoiceItems.reduce(
+        (sum, item) => sum + (item.costing?.totalCost || 0),
+        0,
+      ),
+    );
+    const total = roundCurrency(subtotal + totalTax);
 
     // Generate invoice number
     const invoiceNumber = await generateInvoiceNumber(companyId);

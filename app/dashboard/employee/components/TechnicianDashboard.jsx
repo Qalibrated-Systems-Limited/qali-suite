@@ -36,7 +36,7 @@ export async function TechnicianDashboard() {
       {/* Welcome Header */}
       <div className="space-y-1">
         <h1 className="text-3xl font-bold text-foreground">
-          Welcome back, {user?.name?.split(" ")[0] || "User"}! 👋
+          Welcome back, {user?.name?.split(" ")[0] || "there"}
         </h1>
         <p className="text-muted-foreground">
           {user?.role} • {user?.department || "QaliSuite"}

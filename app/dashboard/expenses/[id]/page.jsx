@@ -20,6 +20,8 @@ import {
   User,
   AlertCircle,
   Paperclip,
+  Truck,
+  ExternalLink,
 } from "lucide-react";
 import { ReceiptViewer } from "@/components/receipt-viewer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -263,6 +265,28 @@ export default async function ExpenseDetailPage({ params, searchParams }) {
                   {expense.accountCode} - {expense.accountName}
                 </p>
               </div>
+
+              {expense.asset?.id && (
+                <>
+                  <Separator />
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">
+                      Linked Asset
+                    </p>
+                    <Link
+                      href={`/dashboard/assets/${expense.asset.id}`}
+                      className="inline-flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-sm hover:bg-muted/60"
+                    >
+                      <Truck className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {expense.asset.assetNumber}
+                      </span>
+                      <span className="font-medium">{expense.asset.name}</span>
+                      <ExternalLink className="ml-1 h-3 w-3 text-muted-foreground" />
+                    </Link>
+                  </div>
+                </>
+              )}
 
               {(expense.reference || expense.invoiceNumber) && (
                 <>

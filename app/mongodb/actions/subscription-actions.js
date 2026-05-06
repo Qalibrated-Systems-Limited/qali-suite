@@ -9,6 +9,7 @@ import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { updateSubscription } from "@/lib/subscription-helpers";
 import { PLAN_LIMITS } from "@/lib/plans";
 import { invalidatePlanCache } from "@/lib/plans-server";
+import { addMonths } from "@/lib/dates";
 
 function requireSuperAdmin(user) {
   if (user.role !== "SuperAdmin") {
@@ -26,6 +27,12 @@ export async function updateCompanyPlan(_prevState, formData) {
     const newPlan = formData.get("plan");
     const reason = formData.get("reason") || "";
     const force = formData.get("force") === "true";
+    // When upgrading from trial / free → paid tier, also activate and
+    // start the billing period. Default 1 month; pass `months=...` to
+    // override. Set `activate=false` to suppress and just change plan
+    // (e.g., for back-office plan adjustments without billing).
+    const months = parseInt(formData.get("months") || "1", 10);
+    const activate = formData.get("activate") !== "false";
 
     if (!companyId || !newPlan) {
       return { success: false, error: "Company and plan are required" };
@@ -35,6 +42,14 @@ export async function updateCompanyPlan(_prevState, formData) {
     if (!planConfig) {
       return { success: false, error: "Invalid plan" };
     }
+
+    // Read current state once to drive the "should we activate?" decision.
+    const company = await Company.findById(companyId)
+      .select("subscription")
+      .lean();
+    if (!company) return { success: false, error: "Company not found" };
+    const currentPlan = company.subscription?.plan;
+    const currentStatus = company.subscription?.status;
 
     // Seat-count check on downgrade
     if (planConfig.maxUsers !== -1) {
@@ -53,18 +68,53 @@ export async function updateCompanyPlan(_prevState, formData) {
       }
     }
 
-    // Don't force-set status. Let updateSubscription only change plan + maxUsers.
-    // Status transitions are explicit via updateCompanyStatus / renewSubscription.
+    // Build update payload. Always set plan + maxUsers. Add status +
+    // period dates when this is an upgrade-to-paid that should activate.
+    const updates = {
+      plan: newPlan,
+      maxUsers: planConfig.maxUsers,
+    };
+
+    const isUpgradeToPaid = newPlan !== "free" && currentPlan !== newPlan;
+    const wasNotPaying =
+      currentStatus === "trial" ||
+      currentStatus === "expired" ||
+      currentStatus === "cancelled" ||
+      currentPlan === "free";
+
+    if (activate && isUpgradeToPaid && wasNotPaying) {
+      const start = new Date();
+      const end = addMonths(start, months || 1);
+      updates.status = "active";
+      updates.currentPeriodStart = start;
+      updates.currentPeriodEnd = end;
+    }
+
+    // Special case: switching to free plan should clear period dates and
+    // mark active (free is permanent, no expiry).
+    if (newPlan === "free") {
+      updates.status = "active";
+      updates.currentPeriodStart = null;
+      updates.currentPeriodEnd = null;
+      updates.trialEndsAt = null;
+    }
+
     await updateSubscription(
       companyId,
-      { plan: newPlan, maxUsers: planConfig.maxUsers },
+      updates,
       { name: user.name, id: user.id },
-      reason
+      reason,
     );
 
     revalidatePath(`/dashboard/admin/companies/${companyId}`);
     invalidatePlanCache();
-    return { success: true, message: `Plan updated to ${planConfig.label}` };
+    return {
+      success: true,
+      message:
+        updates.currentPeriodEnd
+          ? `Plan updated to ${planConfig.label} and activated until ${updates.currentPeriodEnd.toLocaleDateString()}`
+          : `Plan updated to ${planConfig.label}`,
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -98,10 +148,11 @@ export async function renewSubscription(_prevState, formData) {
       ? new Date(company.subscription.currentPeriodEnd)
       : null;
 
-    // Chain from currentPeriodEnd if still in the future, else from now
+    // Chain from currentPeriodEnd if still in the future, else from now.
+    // Use addMonths() (not setMonth) to clamp Jan 31 + 1 month → Feb 28
+    // instead of overflowing to Mar 3.
     const start = currentEnd && currentEnd > now ? currentEnd : now;
-    const end = new Date(start);
-    end.setMonth(end.getMonth() + months);
+    const end = addMonths(start, months);
 
     await updateSubscription(
       companyId,
@@ -195,6 +246,53 @@ export async function extendTrial(_prevState, formData) {
     revalidatePath(`/dashboard/admin/companies/${companyId}`);
     invalidatePlanCache();
     return { success: true, message: `Trial extended by ${days} days` };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Cancel an active or trial subscription. Status becomes "cancelled".
+ * Period dates are preserved (the company retains access until
+ * currentPeriodEnd if they were paying — industry standard "cancel at
+ * period end"). The proxy + checkUserLimit then both treat them as
+ * expired once the period actually lapses.
+ */
+export async function cancelSubscription(_prevState, formData) {
+  try {
+    await dbConnect();
+    const { user } = await getTenantContext();
+    requireSuperAdmin(user);
+
+    const companyId = formData.get("companyId");
+    const reason = formData.get("reason") || "Subscription cancelled";
+    const immediate = formData.get("immediate") === "true";
+
+    if (!companyId) return { success: false, error: "Company is required" };
+
+    const updates = { status: "cancelled" };
+    if (immediate) {
+      // Cancel-now mode: also clear the period so checkUserLimit clamps
+      // to free plan immediately rather than waiting for the period to lapse.
+      updates.currentPeriodEnd = new Date();
+    }
+
+    await updateSubscription(
+      companyId,
+      updates,
+      { name: user.name, id: user.id },
+      reason,
+      { action: "cancelled" },
+    );
+
+    revalidatePath(`/dashboard/admin/companies/${companyId}`);
+    invalidatePlanCache();
+    return {
+      success: true,
+      message: immediate
+        ? "Subscription cancelled (effective immediately)"
+        : "Subscription cancelled (effective at period end)",
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }

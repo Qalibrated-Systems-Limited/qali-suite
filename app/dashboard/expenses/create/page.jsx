@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import ExpenseForm from "../components/ExpenseForm";
 import Account from "@/app/models/account";
 import Party from "@/app/models/parties";
+import Asset from "@/app/models/asset";
 import dbConnect from "@/app/config/dbConnect";
 import { getExpenseCategories } from "@/app/mongodb/queries/expense-queries";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
@@ -19,39 +20,50 @@ async function getFormData() {
   const { companyId } = await getTenantContext();
 
   // Fetch all data in parallel
-  const [expenseAccounts, paymentAccounts, vendors] = await Promise.all([
-    // Expense accounts (for expense posting)
-    Account.find({
-      companyId,
-      accountType: "expense",
-      isActive: { $ne: false },
-      canPost: true,
-    })
-      .select("_id accountCode accountName")
-      .sort({ accountCode: 1 })
-      .lean(),
+  const [expenseAccounts, paymentAccounts, vendors, assets] = await Promise.all(
+    [
+      // Expense accounts (for expense posting)
+      Account.find({
+        companyId,
+        accountType: "expense",
+        isActive: { $ne: false },
+        canPost: true,
+      })
+        .select("_id accountCode accountName")
+        .sort({ accountCode: 1 })
+        .lean(),
 
-    // Payment accounts (cash, bank, mpesa)
-    Account.find({
-      companyId,
-      subType: { $in: ["cash", "bank", "mpesa"] },
-      isActive: { $ne: false },
-      canPost: true,
-    })
-      .select("_id accountCode accountName subType")
-      .sort({ accountCode: 1 })
-      .lean(),
+      // Payment accounts (cash, bank, mpesa)
+      Account.find({
+        companyId,
+        subType: { $in: ["cash", "bank", "mpesa"] },
+        isActive: { $ne: false },
+        canPost: true,
+      })
+        .select("_id accountCode accountName subType")
+        .sort({ accountCode: 1 })
+        .lean(),
 
-    // Vendors (suppliers from parties)
-    Party.find({
-      companyId,
-      type: { $in: ["supplier", "both"] },
-      isActive: { $ne: false },
-    })
-      .select("_id name taxPin phone email")
-      .sort({ name: 1 })
-      .lean(),
-  ]);
+      // Vendors (suppliers from parties)
+      Party.find({
+        companyId,
+        type: { $in: ["supplier", "both"] },
+        isActive: { $ne: false },
+      })
+        .select("_id name taxPin phone email")
+        .sort({ name: 1 })
+        .lean(),
+
+      // Active fixed assets (optional — for tagging fuel/repairs/maintenance)
+      Asset.find({
+        companyId,
+        status: { $in: ["active", "idle", "in_maintenance"] },
+      })
+        .select("_id assetNumber name registrationNumber")
+        .sort({ assetNumber: 1 })
+        .lean(),
+    ]
+  );
 
   return {
     accounts: expenseAccounts.map((a) => ({
@@ -72,14 +84,18 @@ async function getFormData() {
       phone: v.phone || "",
       email: v.email || "",
     })),
+    assets: assets.map((a) => ({
+      _id: a._id.toString(),
+      assetNumber: a.assetNumber,
+      name: a.name,
+      registrationNumber: a.registrationNumber || "",
+    })),
   };
 }
 
 export default async function CreateExpensePage() {
-  const [{ accounts, paymentAccounts, vendors }, projects] = await Promise.all([
-    getFormData(),
-    getActiveProjects(),
-  ]);
+  const [{ accounts, paymentAccounts, vendors, assets }, projects] =
+    await Promise.all([getFormData(), getActiveProjects()]);
   const categories = getExpenseCategories();
 
   return (
@@ -119,6 +135,7 @@ export default async function CreateExpensePage() {
           vendors={vendors}
           categories={categories}
           projects={projects}
+          assets={assets}
         />
       </div>
     </div>

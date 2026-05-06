@@ -1,7 +1,8 @@
 import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import { Crown } from "lucide-react";
+
+import { AlertsStrip, AlertsStripSkeleton } from "./AlertsStrip";
 
 // Client Component (uses useSearchParams)
 import { SuperAdminTabs } from "./tabs/SuperAdminTabs";
@@ -54,21 +55,23 @@ export default async function SuperAdminDashboard() {
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-amber-500 shadow-lg shadow-yellow-500/25">
-              <Crown className="w-4 h-4 text-black" />
-            </div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-foreground tracking-tight">
-              {greeting}, {firstName}
-            </h1>
-          </div>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-1 pl-10">
-            {formatDate(new Date())} • Platform Management
-          </p>
-        </div>
-      </div>
+      <header>
+        <p className="text-xs text-muted-foreground">
+          {formatDate(new Date())}
+        </p>
+        <h1 className="mt-0.5 text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
+          {greeting}, {firstName}
+        </h1>
+        <p className="mt-0.5 text-xs text-muted-foreground sm:text-sm">
+          Platform management — tenants, subscriptions, and system health.
+        </p>
+      </header>
+
+      {/* Cross-tenant alerts strip — SuperAdmin sees the aggregate (tenantMatch
+          is empty in their context, so getDashboardAlerts spans all companies). */}
+      <Suspense fallback={<AlertsStripSkeleton />}>
+        <AlertsStrip />
+      </Suspense>
 
       {/*
         IMPORTANT: Wrap in Suspense for useSearchParams

@@ -12,14 +12,18 @@ import {
 } from "lucide-react";
 import { createAsset } from "@/app/mongodb/actions/asset-actions";
 
+// Industry-standard PPE categories (IFRS / IAS 16 alignment).
+// Order: long-life tangibles → movable → short-life consumables.
 const CATEGORIES = [
-  { value: "vehicle", label: "Vehicle" },
-  { value: "equipment", label: "Equipment" },
-  { value: "computer", label: "Computer" },
-  { value: "furniture", label: "Furniture" },
-  { value: "building", label: "Building" },
   { value: "land", label: "Land" },
-  { value: "machinery", label: "Machinery" },
+  { value: "building", label: "Building" },
+  { value: "leasehold_improvement", label: "Leasehold Improvement" },
+  { value: "vehicle", label: "Vehicle" },
+  { value: "machinery", label: "Plant & Machinery" },
+  { value: "office_equipment", label: "Office Equipment" },
+  { value: "computer", label: "Computer Equipment" },
+  { value: "furniture", label: "Furniture & Fittings" },
+  { value: "equipment", label: "Tools & Equipment" },
   { value: "other", label: "Other" },
 ];
 
@@ -31,10 +35,26 @@ const DEPRECIATION_METHODS = [
 
 const KRA_CLASSES = [
   { value: "none", label: "None", hint: "" },
-  { value: "class_I", label: "Class I — 37.5%", hint: "Heavy machinery" },
-  { value: "class_II", label: "Class II — 30%", hint: "Computers" },
-  { value: "class_III", label: "Class III — 25%", hint: "Commercial vehicles" },
-  { value: "class_IV", label: "Class IV — 12.5%", hint: "Furniture, fittings" },
+  {
+    value: "class_I",
+    label: "Class I — 37.5%",
+    hint: "Heavy machinery, plant",
+  },
+  {
+    value: "class_II",
+    label: "Class II — 30%",
+    hint: "Computers, office equipment, copiers",
+  },
+  {
+    value: "class_III",
+    label: "Class III — 25%",
+    hint: "Commercial vehicles, light machinery",
+  },
+  {
+    value: "class_IV",
+    label: "Class IV — 12.5%",
+    hint: "Furniture, fittings, tools, leasehold improvements",
+  },
 ];
 
 const initialState = {

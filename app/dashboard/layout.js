@@ -4,6 +4,7 @@ import { auth } from "../../auth";
 
 import { AppSidebar } from "./components/app-sidebar";
 import { CommandPaletteProvider } from "@/components/command-palette-provider";
+import MobileBottomNav from "./components/MobileBottomNav";
 
 export const metadata = {
   title: "QaliSuite Dashboard",
@@ -14,19 +15,18 @@ async function DashboardLayout({ children }) {
   const session = await auth();
   const user = session?.user;
 
-  let name = "";
-  if (user) {
-    name = user.name ?? "";
-    if (name.trim().includes(" ")) {
-      name = name.split(" ")[0];
-    }
-  }
-
   return (
     <CommandPaletteProvider>
       <AppSidebar
         user={user}
-        children={<div className="p-4 md:p-6">{children}</div>}
+        children={
+          <div className="p-4 pb-20 md:p-6 md:pb-6">
+            {children}
+            {/* Mobile bottom nav — fixed, sm:hidden. Extra pb-20 above
+                so content isn't hidden behind it on small screens. */}
+            <MobileBottomNav role={user?.role} />
+          </div>
+        }
       />
     </CommandPaletteProvider>
   );

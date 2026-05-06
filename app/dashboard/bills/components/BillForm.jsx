@@ -340,8 +340,35 @@ function ProductCombobox({ products, index, defaultValue, defaultCustomName, onP
 
 // ============================================
 // ACCOUNT COMBOBOX COMPONENT
-// Groups accounts by type: Expense (services) vs Asset (inventory)
+// Groups accounts by purpose: Expense (services), Inventory (stock), Fixed Asset (acquisitions)
 // ============================================
+const FIXED_ASSET_SUBTYPES = new Set([
+  "fixed_asset",
+  "accumulated_depreciation",
+]);
+
+function accountBadge(account) {
+  if (account.accountType === "expense") {
+    return {
+      label: "EXP",
+      className:
+        "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
+    };
+  }
+  if (FIXED_ASSET_SUBTYPES.has(account.subType)) {
+    return {
+      label: "FA",
+      className:
+        "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
+    };
+  }
+  return {
+    label: "INV",
+    className:
+      "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+  };
+}
+
 function AccountCombobox({ accounts, index, defaultValue, error }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(defaultValue || "");
@@ -349,9 +376,14 @@ function AccountCombobox({ accounts, index, defaultValue, error }) {
 
   const selectedAccount = accounts.find((a) => a._id === value);
 
-  // Group accounts by type
+  // Group accounts by purpose
   const expenseAccounts = accounts.filter((a) => a.accountType === "expense");
-  const assetAccounts = accounts.filter((a) => a.accountType === "asset");
+  const fixedAssetAccounts = accounts.filter(
+    (a) => a.accountType === "asset" && FIXED_ASSET_SUBTYPES.has(a.subType)
+  );
+  const inventoryAssetAccounts = accounts.filter(
+    (a) => a.accountType === "asset" && !FIXED_ASSET_SUBTYPES.has(a.subType)
+  );
 
   // Filter by search
   const filterAccounts = (list) =>
@@ -363,8 +395,12 @@ function AccountCombobox({ accounts, index, defaultValue, error }) {
     );
 
   const filteredExpense = filterAccounts(expenseAccounts);
-  const filteredAsset = filterAccounts(assetAccounts);
-  const hasResults = filteredExpense.length > 0 || filteredAsset.length > 0;
+  const filteredAsset = filterAccounts(inventoryAssetAccounts);
+  const filteredFixedAsset = filterAccounts(fixedAssetAccounts);
+  const hasResults =
+    filteredExpense.length > 0 ||
+    filteredAsset.length > 0 ||
+    filteredFixedAsset.length > 0;
 
   return (
     <div className="space-y-1">
@@ -382,19 +418,22 @@ function AccountCombobox({ accounts, index, defaultValue, error }) {
             )}
           >
             {selectedAccount ? (
-              <span className="truncate flex items-center gap-2">
-                <span
-                  className={cn(
-                    "text-[10px] font-medium px-1.5 py-0.5 rounded",
-                    selectedAccount.accountType === "expense"
-                      ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"
-                      : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                  )}
-                >
-                  {selectedAccount.accountType === "expense" ? "EXP" : "INV"}
-                </span>
-                {selectedAccount.accountCode} - {selectedAccount.accountName}
-              </span>
+              (() => {
+                const badge = accountBadge(selectedAccount);
+                return (
+                  <span className="truncate flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "text-[10px] font-medium px-1.5 py-0.5 rounded",
+                        badge.className
+                      )}
+                    >
+                      {badge.label}
+                    </span>
+                    {selectedAccount.accountCode} - {selectedAccount.accountName}
+                  </span>
+                );
+              })()
             ) : (
               "Select account..."
             )}
@@ -489,6 +528,40 @@ function AccountCombobox({ accounts, index, defaultValue, error }) {
                       </div>
                       <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                         INV
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+
+              {/* Fixed Asset Accounts - for asset acquisitions */}
+              {filteredFixedAsset.length > 0 && (
+                <CommandGroup heading="Fixed Asset Accounts (Acquisitions)">
+                  {filteredFixedAsset.slice(0, 8).map((account) => (
+                    <CommandItem
+                      key={account._id}
+                      value={`${account.accountCode} ${account.accountName}`}
+                      onSelect={() => {
+                        setValue(account._id);
+                        setOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          value === account._id ? "opacity-100" : "opacity-0"
+                        )}
+                      />
+                      <div className="flex flex-col flex-1">
+                        <span className="font-medium">
+                          <span className="font-mono text-xs text-muted-foreground mr-1.5">
+                            {account.accountCode}
+                          </span>
+                          {account.accountName}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                        FA
                       </span>
                     </CommandItem>
                   ))}
@@ -719,7 +792,8 @@ function LineItem({
             error={lineErrors[`lines.${index}.accountId`]}
           />
           <p className="text-xs text-muted-foreground">
-            Expense for services, Inventory for stock purchases
+            Expense for services, Inventory for stock, Fixed Asset for
+            acquisitions
           </p>
           {lineErrors[`lines.${index}.accountId`] && (
             <p className="text-xs text-destructive">

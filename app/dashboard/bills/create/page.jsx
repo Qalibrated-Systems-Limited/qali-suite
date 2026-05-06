@@ -38,13 +38,11 @@ async function getBillFormData() {
     .sort({ name: 1 })
     .lean();
 
-  // Fetch expense accounts and inventory asset accounts for bill lines - tenant-scoped
+  // Fetch expense and asset accounts for bill lines (covers services,
+  // inventory purchases, and fixed asset acquisitions) - tenant-scoped
   const accounts = await Account.find({
     companyId,
-    $or: [
-      { accountType: "expense" },
-      { accountType: "asset", subType: "inventory" },
-    ],
+    accountType: { $in: ["expense", "asset"] },
     isActive: { $ne: false },
     canPost: true,
   })
@@ -177,7 +175,9 @@ async function BillFormWrapper() {
         <div>
           <h3 className="font-semibold">No Accounts Found</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            You need expense accounts (for services) or inventory accounts (for stock purchases) in your chart of accounts.
+            You need expense accounts (for services), inventory accounts (for
+            stock purchases), or fixed asset accounts (for asset acquisitions)
+            in your chart of accounts.
           </p>
         </div>
         <Button asChild>

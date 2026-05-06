@@ -12,6 +12,7 @@ const subscriptionAuditLogSchema = new mongoose.Schema(
         "trial_extended",
         "max_users_changed",
         "renewed",
+        "cancelled",
         "auto_expired",
       ],
       required: true,

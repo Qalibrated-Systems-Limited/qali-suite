@@ -12,6 +12,8 @@ import { ResponsiveInventoryTable } from "../table";
 import Pagination from "@/components/pagination";
 import { GenerateStockPDF } from "../export-to-pdf";
 import { StockCategoryFilter } from "@/components/custom-filters";
+import { auth } from "@/auth";
+import { canSeePricing } from "@/lib/permissions";
 
 // ============================================
 // STOCK STATS CARDS (Async Server Component)
@@ -124,9 +126,20 @@ export function StockStatsSkeleton() {
 // ============================================
 
 export async function StockTableServer({ query, page, filters, cart, action }) {
-  const stock = await searchStock(query, page, filters);
+  const [stock, session] = await Promise.all([
+    searchStock(query, page, filters),
+    auth(),
+  ]);
+  const showPricing = canSeePricing(session?.user?.role);
 
-  return <ResponsiveInventoryTable stock={stock} cart={cart} action={action} />;
+  return (
+    <ResponsiveInventoryTable
+      stock={stock}
+      cart={cart}
+      action={action}
+      showPricing={showPricing}
+    />
+  );
 }
 
 // ============================================

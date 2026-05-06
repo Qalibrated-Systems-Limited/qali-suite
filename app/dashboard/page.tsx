@@ -1,6 +1,8 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 
+import { DASHBOARD_FOR_ROLE } from "@/lib/permissions";
+
 // Role-specific dashboards
 import { AdminDashboardPage } from "./components/AdminDashboard";
 import EmployeeDashboard from "./components/EmployeeDashborad";
@@ -8,17 +10,34 @@ import AccountantDashboard from "./components/AccountantDashboard";
 import SuperAdminDashboard from "./components/SuperAdminDashboard";
 import HRDashboardPage from "./components/HRDashboard";
 import StoreManagerDashboard from "./components/StoreManagerDashboard";
+import CFODashboard from "./components/CFODashboard";
+import SalesManagerDashboard from "./components/SalesManagerDashboard";
+import StorekeeperDashboard from "./components/StorekeeperDashboard";
+import ProcurementDashboard from "./components/ProcurementDashboard";
 
 // ============================================
 // MAIN DASHBOARD ROUTER
 // ============================================
-// Routes users to the appropriate dashboard based on their role
-
-// ============================================
+// Maps every role in the userRoles enum to a concrete dashboard component.
+// New roles only need an entry in DASHBOARD_FOR_ROLE (lib/permissions.js)
+// and a registry mapping below — no switch statement to keep aligned.
 
 export const metadata = {
   title: "Dashboard | ERP System",
   description: "Your personalized dashboard",
+};
+
+const COMPONENT_REGISTRY: Record<string, () => Promise<React.JSX.Element>> = {
+  SuperAdminDashboard: async () => <SuperAdminDashboard />,
+  AdminDashboard: async () => <AdminDashboardPage />,
+  AccountantDashboard: async () => <AccountantDashboard />,
+  HRDashboard: async () => <HRDashboardPage />,
+  StoreManagerDashboard: async () => <StoreManagerDashboard />,
+  CFODashboard: async () => <CFODashboard />,
+  SalesManagerDashboard: async () => <SalesManagerDashboard />,
+  StorekeeperDashboard: async () => <StorekeeperDashboard />,
+  ProcurementDashboard: async () => <ProcurementDashboard />,
+  EmployeeDashboard: async () => <EmployeeDashboard />,
 };
 
 export default async function DashboardPage() {
@@ -28,30 +47,13 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  const { user } = session;
-  const userRole = (user as { role?: string }).role || "Employee";
+  const userRole =
+    (session.user as { role?: string }).role || "Employee";
 
-  // Route to appropriate dashboard based on role
-  switch (userRole) {
-    case "SuperAdmin":
-      return <SuperAdminDashboard />;
+  const componentName =
+    DASHBOARD_FOR_ROLE[userRole as keyof typeof DASHBOARD_FOR_ROLE] ||
+    "EmployeeDashboard";
 
-    case "HR":
-      return <HRDashboardPage />;
-
-    case "Store Manager":
-      return <StoreManagerDashboard />;
-
-    case "Admin":
-    case "Manager":
-      return <AdminDashboardPage />;
-
-    case "Accountant":
-      return <AccountantDashboard />;
-
-    case "Employee":
-    case "Technician":
-    default:
-      return <EmployeeDashboard />;
-  }
+  const render = COMPONENT_REGISTRY[componentName] || COMPONENT_REGISTRY.EmployeeDashboard;
+  return await render();
 }

@@ -87,6 +87,15 @@ const expenseSchema = new Schema(
     costCodeId: { type: Schema.Types.ObjectId, ref: "ProjectCostCode" },
     costCode: { code: String, name: String },
 
+    // Linked fixed asset (optional — tag fuel/repair/maintenance/etc. to a
+    // specific asset to track its running costs). Snapshots assetNumber/name
+    // so display survives asset rename.
+    asset: {
+      id: { type: Schema.Types.ObjectId, ref: "Asset", default: null },
+      assetNumber: { type: String, default: null },
+      name: { type: String, default: null },
+    },
+
     // Account (Expense account from COA)
     accountId: {
       type: Schema.Types.ObjectId,
@@ -317,6 +326,8 @@ expenseSchema.index({ companyId: 1, category: 1, status: 1 });
 expenseSchema.index({ companyId: 1, "vendor.id": 1 });
 expenseSchema.index({ companyId: 1, isReimbursable: 1, employeeId: 1 });
 expenseSchema.index({ companyId: 1, status: 1, approvedAt: -1 });
+// Asset cost lookup — used by getAssetExpenses to roll up running costs
+expenseSchema.index({ companyId: 1, "asset.id": 1, expenseDate: -1 });
 
 // ============================================
 // BACKFILL paymentStatus FOR OLD DATA

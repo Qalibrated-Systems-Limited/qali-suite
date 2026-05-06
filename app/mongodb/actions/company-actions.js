@@ -7,6 +7,36 @@ import { redirect } from "next/navigation";
 import Company from "../../models/Company";
 import connectDB from "../../config/dbConnect";
 import { updateSubscription } from "@/lib/subscription-helpers";
+import { getPlanLimits } from "@/lib/plans";
+
+// ============================================
+// SUBSCRIPTION INITIALIZATION
+// ============================================
+// Single source of truth for "what does a new company's subscription
+// look like?" — keeps maxUsers in sync with plan and applies the
+// industry-standard rule: free plan starts ACTIVE (permanent free tier),
+// paid plans start in TRIAL with a 14-day window. Without this, every
+// company defaulted to maxUsers=2 (the schema default) regardless of
+// plan, so paid-tier signups hit the user limit immediately.
+function buildInitialSubscription(plan) {
+  const limits = getPlanLimits(plan);
+  if (plan === "free") {
+    // Free is permanent — no trial, no period, no expiry. Industry
+    // standard: free is the post-trial fallback, not a paid trial.
+    return {
+      plan: "free",
+      status: "active",
+      maxUsers: limits.maxUsers,
+    };
+  }
+  // Paid plan: 14-day trial of the chosen tier.
+  return {
+    plan,
+    status: "trial",
+    trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+    maxUsers: limits.maxUsers,
+  };
+}
 
 // ============================================
 // ZOD SCHEMAS
@@ -214,11 +244,7 @@ export async function createCompany(prevState, formData) {
       swiftCode: data.swiftCode,
       mpesaPaybill: data.mpesaPaybill,
       mpesaTill: data.mpesaTill,
-      subscription: {
-        plan: data.plan || "free",
-        status: "trial",
-        trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days trial
-      },
+      subscription: buildInitialSubscription(data.plan || "free"),
       settings: {
         currency: data.currency || "KES",
         defaultVatRate: data.defaultVatRate ?? 16,

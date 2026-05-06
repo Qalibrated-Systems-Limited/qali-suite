@@ -23,12 +23,22 @@ export default auth((req) => {
   // ── Subscription expiry enforcement ──
   const status = user.subscriptionStatus;
   const trialEndsAt = user.trialEndsAt;
+  const currentPeriodEnd = user.currentPeriodEnd;
   const role = user.role;
 
+  const now = new Date();
   const isExpired =
     status === "expired" ||
     status === "cancelled" ||
-    (status === "trial" && trialEndsAt && new Date(trialEndsAt) < new Date());
+    // Trial whose window has passed
+    (status === "trial" && trialEndsAt && new Date(trialEndsAt) < now) ||
+    // Active subscription whose paid period has lapsed (silent expiry —
+    // the auto-expirer flips it to "expired" lazily; until then proxy
+    // catches it). Without this, a company can keep operating on a paid
+    // plan with stale period dates.
+    (status === "active" &&
+      currentPeriodEnd &&
+      new Date(currentPeriodEnd) < now);
 
   // Exempt paths: billing (so they can upgrade), expired page, admin
   const isExemptPath =

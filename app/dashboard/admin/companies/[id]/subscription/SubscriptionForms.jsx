@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -17,6 +18,7 @@ import {
   updateCompanyStatus,
   extendTrial,
   renewSubscription,
+  cancelSubscription,
 } from "@/app/mongodb/actions/subscription-actions";
 import { DEFAULT_PLANS } from "@/lib/plans";
 
@@ -41,6 +43,9 @@ export default function SubscriptionForms({ companyId, currentPlan, currentStatu
   const [statusState, statusAction, statusPending] = useActionState(updateCompanyStatus, null);
   const [trialState, trialAction, trialPending] = useActionState(extendTrial, null);
   const [renewState, renewAction, renewPending] = useActionState(renewSubscription, null);
+  const [cancelState, cancelAction, cancelPending] = useActionState(cancelSubscription, null);
+  const [cancelImmediate, setCancelImmediate] = useState(false);
+  const [activateOnUpgrade, setActivateOnUpgrade] = useState(true);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -52,6 +57,11 @@ export default function SubscriptionForms({ companyId, currentPlan, currentStatu
         <CardContent>
           <form action={planAction} className="space-y-4">
             <input type="hidden" name="companyId" value={companyId} />
+            <input
+              type="hidden"
+              name="activate"
+              value={activateOnUpgrade ? "true" : "false"}
+            />
             <div className="space-y-2">
               <Label htmlFor="plan">New Plan</Label>
               <Select name="plan" defaultValue={currentPlan}>
@@ -72,6 +82,32 @@ export default function SubscriptionForms({ companyId, currentPlan, currentStatu
                 </p>
               )}
             </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="plan-months">Activation period (months)</Label>
+                <Input
+                  id="plan-months"
+                  name="months"
+                  type="number"
+                  min="1"
+                  max="60"
+                  defaultValue="1"
+                  disabled={!activateOnUpgrade}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="invisible">spacer</Label>
+                <label className="flex h-10 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm">
+                  <Checkbox
+                    checked={activateOnUpgrade}
+                    onCheckedChange={(v) => setActivateOnUpgrade(!!v)}
+                  />
+                  Activate + start period
+                </label>
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="plan-reason">Reason</Label>
               <Input
@@ -81,6 +117,15 @@ export default function SubscriptionForms({ companyId, currentPlan, currentStatu
                 required
               />
             </div>
+
+            <p className="text-xs text-muted-foreground">
+              When upgrading from <strong>trial / free / expired</strong> to a
+              paid plan with "Activate" on, the company is moved to
+              <strong> active</strong> and the billing period is set to the
+              chosen number of months. Switching to <strong>free</strong>
+              clears the period (free is permanent).
+            </p>
+
             <Button
               type="submit"
               disabled={planPending}
@@ -222,6 +267,59 @@ export default function SubscriptionForms({ companyId, currentPlan, currentStatu
               {trialPending ? "Extending..." : "Extend Trial"}
             </Button>
             <StatusMessage state={trialState} />
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Cancel Subscription */}
+      <Card className="md:col-span-2 border-destructive/30">
+        <CardHeader>
+          <CardTitle className="text-lg text-destructive">
+            Cancel Subscription
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form action={cancelAction} className="space-y-4">
+            <input type="hidden" name="companyId" value={companyId} />
+            <input
+              type="hidden"
+              name="immediate"
+              value={cancelImmediate ? "true" : "false"}
+            />
+            <div className="space-y-2">
+              <Label htmlFor="cancel-reason">Reason</Label>
+              <Input
+                id="cancel-reason"
+                name="reason"
+                placeholder="Reason for cancellation"
+                required
+              />
+            </div>
+            <label className="flex items-start gap-2 rounded-md border border-border bg-muted/30 p-3 text-sm">
+              <Checkbox
+                checked={cancelImmediate}
+                onCheckedChange={(v) => setCancelImmediate(!!v)}
+                className="mt-0.5"
+              />
+              <div className="space-y-0.5">
+                <p className="font-medium">Cancel immediately</p>
+                <p className="text-xs text-muted-foreground">
+                  Off (default): the company keeps access until{" "}
+                  <code className="font-mono">currentPeriodEnd</code> — industry
+                  standard "cancel at period end". On: clears the period now,
+                  user-limit clamps to free plan immediately.
+                </p>
+              </div>
+            </label>
+            <Button
+              type="submit"
+              disabled={cancelPending}
+              variant="outline"
+              className="border-destructive/40 text-destructive hover:bg-destructive/5"
+            >
+              {cancelPending ? "Cancelling..." : "Cancel Subscription"}
+            </Button>
+            <StatusMessage state={cancelState} />
           </form>
         </CardContent>
       </Card>

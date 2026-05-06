@@ -57,6 +57,39 @@ const transferLogSchema = new Schema(
 // ============================================
 // IMPAIRMENT SUB-SCHEMA
 // ============================================
+// ============================================
+// USAGE READING SUB-DOCUMENT
+// ============================================
+// Odometer/hours-meter readings for vehicles, machinery, equipment.
+// Drives cost-per-km / cost-per-hour analytics.
+const usageReadingSchema = new Schema(
+  {
+    recordedAt: { type: Date, required: true, default: Date.now },
+    reading: { type: Number, required: true, min: 0 },
+    unit: {
+      type: String,
+      enum: ["km", "miles", "hours"],
+      required: true,
+      default: "km",
+    },
+    source: {
+      type: String,
+      enum: ["manual", "fuel", "service", "transfer", "other"],
+      default: "manual",
+    },
+    sourceRef: {
+      kind: { type: String, enum: ["bill", "expense", null], default: null },
+      id: { type: Schema.Types.ObjectId, default: null },
+    },
+    notes: String,
+    recordedBy: {
+      name: String,
+      id: String,
+    },
+  },
+  { _id: true, timestamps: true },
+);
+
 const impairmentLogSchema = new Schema(
   {
     impairedAt: { type: Date, required: true, default: Date.now },
@@ -90,13 +123,18 @@ const assetSchema = new Schema(
     category: {
       type: String,
       enum: [
-        "vehicle",
-        "equipment",
-        "computer",
-        "furniture",
-        "building",
+        // Industry-standard PPE (Property, Plant & Equipment) categories.
+        // Order roughly follows IFRS balance-sheet presentation: long-life
+        // tangibles first, then movable, then short-life.
         "land",
-        "machinery",
+        "building",
+        "leasehold_improvement", // Tenant improvements amortized over lease term
+        "vehicle",
+        "machinery", // Plant & machinery
+        "office_equipment", // Copiers, printers, AV, telephony, KRA Class II
+        "computer", // Computer equipment, laptops, servers, KRA Class II
+        "furniture", // Furniture & fittings
+        "equipment", // General tools & equipment
         "other",
       ],
       required: true,
@@ -226,6 +264,24 @@ const assetSchema = new Schema(
         uploadedAt: { type: Date, default: Date.now },
       },
     ],
+
+    // ──────────────────────────────────────────
+    // Usage tracking (odometer / hours-meter)
+    // ──────────────────────────────────────────
+    // Drives cost-per-km/hour analytics. Default unit follows category:
+    //   vehicle  → km
+    //   machinery / equipment → hours
+    //   other → km (override at create time)
+    usageUnit: {
+      type: String,
+      enum: ["km", "miles", "hours"],
+      default: "km",
+    },
+    usageReadings: [usageReadingSchema],
+    // Cached from latest entry of usageReadings — denormalized for fast
+    // listing/filtering. Always recomputed on save by recordUsageReading.
+    currentUsage: { type: Number, default: 0, min: 0 },
+    lastReadingAt: Date,
 
     // Insurance & compliance (for vehicles mainly)
     insurance: {

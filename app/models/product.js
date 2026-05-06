@@ -201,8 +201,39 @@ const productSchema =
         markupPercentage: {
           type: Number,
           default: 0,
-          // Calculated: (Selling - Cost) / Cost × 100
+          // Markup driver when priceMode = "markup", or computed reflection
+          // of (sellingPrice - costPrice) / costPrice × 100 when manual.
         },
+
+        // ──────────────────────────────────────────
+        // Pricing mode (industry-standard markup-driven pricing)
+        // ──────────────────────────────────────────
+        // "manual"  → sellingPrice is the source of truth (legacy behavior).
+        //             markup/margin recomputed on save from cost & selling.
+        //             ALL existing products default to this — no migration.
+        // "markup"  → markupPercentage is the source of truth.
+        //             sellingPrice = costPrice × (1 + markupPercentage/100)
+        //             auto-recomputed on save and whenever cost changes.
+        priceMode: {
+          type: String,
+          enum: ["manual", "markup"],
+          default: "manual",
+        },
+
+        // Append-only audit trail of every price change.
+        priceHistory: [
+          {
+            previousPrice: { type: Number, default: 0 },
+            newPrice: { type: Number, default: 0 },
+            previousMarkup: { type: Number, default: 0 },
+            newMarkup: { type: Number, default: 0 },
+            costAtChange: { type: Number, default: 0 },
+            mode: { type: String, enum: ["manual", "markup"] },
+            reason: String,
+            changedBy: { name: String, id: String, role: String },
+            changedAt: { type: Date, default: Date.now },
+          },
+        ],
 
         lastPriceUpdate: Date,
       },
@@ -456,10 +487,32 @@ productSchema.pre("save", function () {
     }
   }
 
-  // Calculate margins when pricing or costing changes
+  // ──────────────────────────────────────────
+  // Markup-driven selling price (industry standard)
+  // ──────────────────────────────────────────
+  // When priceMode = "markup", selling price is DERIVED from cost × markup.
+  // Recompute when either driver changes. Manual mode keeps the legacy
+  // behavior — sellingPrice is taken as-is and the % fields are reflected.
+  if (
+    this.pricing?.priceMode === "markup" &&
+    (this.isModified("costing.costPrice") ||
+      this.isModified("pricing.markupPercentage") ||
+      this.isModified("pricing.priceMode"))
+  ) {
+    const cost = Number(this.costing?.costPrice) || 0;
+    const markup = Number(this.pricing?.markupPercentage) || 0;
+    if (cost > 0) {
+      this.pricing.sellingPrice = Math.round(cost * (1 + markup / 100) * 100) / 100;
+    }
+  }
+
+  // Calculate margins when pricing or costing changes (always run after the
+  // markup-driven recompute above so the derived %s stay consistent).
   if (
     this.isModified("costing.costPrice") ||
-    this.isModified("pricing.sellingPrice")
+    this.isModified("pricing.sellingPrice") ||
+    this.isModified("pricing.markupPercentage") ||
+    this.isModified("pricing.priceMode")
   ) {
     this.calculateMargins();
   }
@@ -488,10 +541,16 @@ productSchema.methods.calculateMargins = function () {
   }
 
   // Markup = (Selling - Cost) / Cost × 100
-  if (cost > 0) {
-    this.pricing.markupPercentage = ((selling - cost) / cost) * 100;
-  } else {
-    this.pricing.markupPercentage = 0;
+  // In "markup" mode the user-set markup is the SOURCE OF TRUTH — preserve
+  // it (don't recompute and lose precision to selling-price rounding).
+  // In "manual" mode (legacy / default) markup is reflected from the
+  // selling/cost relationship as before.
+  if (this.pricing?.priceMode !== "markup") {
+    if (cost > 0) {
+      this.pricing.markupPercentage = ((selling - cost) / cost) * 100;
+    } else {
+      this.pricing.markupPercentage = 0;
+    }
   }
 
   return {

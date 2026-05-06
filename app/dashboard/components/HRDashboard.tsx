@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import MyHRStrip from "./MyHRStrip";
+import { HRAlertsStrip, HRAlertsStripSkeleton } from "./HRAlertsStrip";
 import {
   getHRStats,
   getExpiringContracts,
@@ -46,6 +47,11 @@ export default async function HRDashboardPage() {
           {greeting}, {firstName}
         </h1>
       </div>
+
+      {/* HR alerts strip — what needs attention */}
+      <Suspense fallback={<HRAlertsStripSkeleton />}>
+        <HRAlertsStrip />
+      </Suspense>
 
       {/* Personal HR strip */}
       <section>

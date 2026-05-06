@@ -6,14 +6,24 @@ import crypto from "crypto";
 export const userRoles = [
   "SuperAdmin", // System-wide admin (manages all companies)
   "Admin", // Company-level admin
-  "Store Manager",
-  "User",
-  "Viewer",
-  "Manager",
-  "Accountant",
+  // Finance / accounting tiers (stacked top-down)
+  "CFO", // Highest finance authority — large write-offs, price floor, policy
+  "Finance Manager", // Mid-tier finance approvals, journal posting oversight
+  "Accountant", // Posts JEs, reconciles, books variances
+  // Sales / pricing
+  "Sales Manager", // Sets selling prices, markups, discount caps
+  // Procurement
+  "Procurement Officer", // Raises POs, agrees cost prices with vendors
+  // Operations
+  "Manager", // Cross-functional operations
+  "Store Manager", // Authorizes intra-store moves, supervises counts
+  "Storekeeper", // Physical custody — receives, issues, counts. NO pricing access
+  // Other
   "HR",
-  "Employee",
   "Technician",
+  "Employee",
+  "User", // Legacy generic — prefer Employee for new users
+  "Viewer", // Read-only
 ];
 
 const Schema = mongoose.Schema;
