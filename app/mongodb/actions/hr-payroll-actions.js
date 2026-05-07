@@ -23,12 +23,14 @@ import Loan from "@/app/models/loan";
 // ============================================
 // ROLE AUTHORIZATION
 // ============================================
+// SuperAdmin / CFO / Finance Manager added across the board — they are
+// the senior finance authority. HR drafts; Finance approves and posts.
 const PAYROLL_ROLES = {
-  CREATE: ["Admin", "HR"],
-  REVIEW: ["Admin", "HR", "Manager"],
-  APPROVE: ["Admin"],
-  POST: ["Admin"],
-  VOID: ["Admin"],
+  CREATE: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR"],
+  REVIEW: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR", "Manager"],
+  APPROVE: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
+  POST: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
+  VOID: ["SuperAdmin", "Admin", "CFO"],
 };
 
 function hasRole(user, allowedRoles) {

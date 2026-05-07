@@ -45,47 +45,140 @@ const DATE_FORMATS = [
 
 const REQUIRED_FIELDS = ["date", "description"];
 
-// Keywords to detect header rows (case-insensitive)
+// Keywords to detect header rows (case-insensitive). Split into "strong"
+// signals — a real bank-statement header almost always has BOTH a date-like
+// column AND an amount-like column. We use this to disambiguate against
+// preamble rows that incidentally match a couple of generic words.
+const DATE_KEYWORDS = ["date", "posting", "value date", "txn date", "tran date"];
+const AMOUNT_KEYWORDS = [
+  "amount",
+  "debit",
+  "credit",
+  "money in",
+  "money out",
+  "withdrawal",
+  "deposit",
+  "dr amount",
+  "cr amount",
+  "paid in",
+  "paid out",
+];
 const HEADER_KEYWORDS = [
-  "date", "transaction", "description", "narration", "details", "particulars",
-  "amount", "debit", "credit", "money", "balance", "reference", "ref",
-  "value date", "posting", "cheque", "check", "withdrawal", "deposit"
+  ...DATE_KEYWORDS,
+  ...AMOUNT_KEYWORDS,
+  "transaction",
+  "description",
+  "narration",
+  "narrative",
+  "details",
+  "particulars",
+  "balance",
+  "reference",
+  "ref",
+  "cheque",
+  "check",
+  "type",
+  "tran",
+  "txn",
+  "branch",
 ];
 
 // Auto-mapping rules: column name patterns -> field keys
 // Order matters - more specific patterns should come first
 const AUTO_MAP_RULES = [
-  { patterns: ["transaction date", "trans date", "posting date", "value date", "txn date"], field: "date" },
-  { patterns: ["description", "narration", "details", "particulars", "transaction details", "remarks"], field: "description" },
-  { patterns: ["bank reference", "reference number", "ref no", "cheque no", "check no", "reference", "ref"], field: "reference" },
+  { patterns: ["transaction date", "trans date", "posting date", "value date", "txn date", "tran date", "date"], field: "date" },
+  { patterns: ["description", "narration", "narrative", "details", "particulars", "transaction details", "remarks"], field: "description" },
+  { patterns: ["bank reference", "reference number", "ref no", "cheque no", "check no", "txn id", "transaction id", "reference", "ref"], field: "reference" },
+  // "dr"/"cr" alone are dangerous as substrings (would match "Currency")
+  // — handled below as exact-only matches in autoMapColumns().
   { patterns: ["money out", "debit", "withdrawal", "paid out", "outflow", "dr amount"], field: "debit" },
   { patterns: ["money in", "credit", "deposit", "paid in", "inflow", "cr amount"], field: "credit" },
   { patterns: ["ledger balance", "running balance", "available balance", "closing balance", "balance"], field: "balance" },
   // Amount should be last and only match exact "amount" to avoid false positives
-  { patterns: ["amount", "transaction amount", "txn amount"], field: "amount" },
+  { patterns: ["amount", "transaction amount", "txn amount", "tran amount"], field: "amount" },
 ];
 
 /**
- * Find the actual header row in data that may have title/summary rows
- * Returns the index of the header row
+ * Find the actual header row in data that may have title/summary/preamble rows.
+ *
+ * Rather than returning the FIRST row that hits a fixed match threshold —
+ * which mis-fires on preambles like "Statement of account for ..." that
+ * happen to contain words like "account" or "balance" — score every row in
+ * the first 50 and return the best one. A real bank-statement header
+ * essentially always has BOTH a date-like column AND an amount-like column,
+ * so we treat that pair as the strong signal.
  */
 function findHeaderRow(rows) {
-  for (let i = 0; i < Math.min(rows.length, 25); i++) {
+  let bestIndex = -1;
+  let bestScore = 0;
+  const scanLimit = Math.min(rows.length, 50);
+
+  for (let i = 0; i < scanLimit; i++) {
     const row = rows[i];
-    if (!row || row.length < 3) continue;
+    if (!row || row.length < 2) continue;
 
-    // Count how many cells match header keywords
-    const matchCount = row.filter((cell) => {
-      const cellStr = String(cell || "").toLowerCase().trim();
-      return HEADER_KEYWORDS.some((keyword) => cellStr.includes(keyword));
-    }).length;
+    // Stringify each cell once.
+    const cells = [];
+    for (let c = 0; c < row.length; c++) {
+      cells.push(String(row[c] || "").toLowerCase().trim());
+    }
 
-    // If at least 2 cells match header keywords, this is likely the header row
-    if (matchCount >= 2) {
-      return i;
+    let totalMatches = 0;
+    let hasDate = false;
+    let hasAmount = false;
+    let nonEmptyCells = 0;
+
+    for (const cellStr of cells) {
+      if (!cellStr) continue;
+      nonEmptyCells++;
+      let matched = false;
+      for (const kw of DATE_KEYWORDS) {
+        if (cellStr.includes(kw)) {
+          hasDate = true;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        for (const kw of AMOUNT_KEYWORDS) {
+          if (cellStr.includes(kw)) {
+            hasAmount = true;
+            matched = true;
+            break;
+          }
+        }
+      }
+      if (!matched) {
+        for (const kw of HEADER_KEYWORDS) {
+          if (cellStr.includes(kw)) {
+            matched = true;
+            break;
+          }
+        }
+      }
+      if (matched) totalMatches++;
+    }
+
+    // Score: total keyword matches, with a big bonus for the strong
+    // (date + amount) pair. Prefer rows with more non-empty cells too —
+    // a single-cell preamble that matches "balance" shouldn't outrank a
+    // proper multi-column header.
+    let score = totalMatches;
+    if (hasDate && hasAmount) score += 100;
+    else if (hasDate || hasAmount) score += 5;
+    score += Math.min(nonEmptyCells, 10) * 0.1;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
     }
   }
-  return 0; // Default to first row
+
+  // Require at least the (date OR amount) signal AND ≥ 2 keyword matches.
+  // Otherwise fall back to row 0 — the user can correct via the manual
+  // header-row dropdown.
+  if (bestIndex >= 0 && bestScore >= 2) return bestIndex;
+  return 0;
 }
 
 /**
@@ -124,6 +217,16 @@ function autoMapColumns(headers) {
           scores.push({ header, field: rule.field, score, pattern });
         }
       }
+    }
+
+    // Special-case: "DR" / "CR" / "D" / "C" alone are common single-letter
+    // debit/credit indicators on Kenyan bank exports — but matching them
+    // as substrings would also match "Currency", "Description", etc. So
+    // only honour them as EXACT header matches.
+    if (headerLower === "dr" || headerLower === "d") {
+      scores.push({ header, field: "debit", score: 100, pattern: "dr-exact" });
+    } else if (headerLower === "cr" || headerLower === "c") {
+      scores.push({ header, field: "credit", score: 100, pattern: "cr-exact" });
     }
   }
 
@@ -266,14 +369,37 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
           // Get the first sheet
           const worksheet = workbook.worksheets[0];
 
-          // Convert to array of arrays
+          // Convert to array of arrays. ExcelJS returns `row.values` as a
+          // 1-indexed sparse array (leading empty cells are HOLES, not
+          // undefined). `.map` skips holes — and downstream `row.filter`
+          // skips them too — which under-counts header keyword matches when
+          // a bank pads with leading empty columns. Densify to a flat array
+          // of strings here so every column position is represented.
           const jsonData = [];
+          const widestColumn = worksheet.actualColumnCount || worksheet.columnCount || 0;
           worksheet.eachRow({ includeEmpty: true }, (row) => {
-            jsonData.push(
-              row.values.slice(1).map((cell) =>
-                cell == null ? "" : typeof cell === "object" && cell.result !== undefined ? cell.result : cell
-              )
-            );
+            const rawValues = row.values; // 1-indexed
+            const lastCol = Math.max(rawValues.length - 1, widestColumn);
+            const dense = new Array(lastCol);
+            for (let c = 0; c < lastCol; c++) {
+              const cell = rawValues[c + 1]; // skip 1-indexed slot 0
+              if (cell == null) {
+                dense[c] = "";
+              } else if (
+                typeof cell === "object" &&
+                cell.result !== undefined
+              ) {
+                dense[c] = cell.result;
+              } else if (
+                typeof cell === "object" &&
+                cell.richText !== undefined
+              ) {
+                dense[c] = cell.richText.map((t) => t.text || "").join("");
+              } else {
+                dense[c] = cell;
+              }
+            }
+            jsonData.push(dense);
           });
 
           // Filter out completely empty rows

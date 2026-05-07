@@ -226,8 +226,12 @@ export async function quickCreateExpenseAccount(formData) {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const tenantCompanyId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
 
-    if (!["Admin", "Accountant"].includes(user.role)) {
-      return { success: false, error: "Only Admin or Accountant can create accounts", values };
+    if (
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+        user.role,
+      )
+    ) {
+      return { success: false, error: "You don't have permission to manage accounts.", values };
     }
 
     if (!accountCode || !/^[0-9]+$/.test(accountCode)) {
@@ -836,10 +840,14 @@ export async function ensureAdvanceAccountsExist() {
     // Auth & tenant check
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant"].includes(user.role)) {
+    if (
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+        user.role,
+      )
+    ) {
       return {
         success: false,
-        error: "Unauthorized: Admin or Accountant role required",
+        error: "You don't have permission to manage accounts.",
       };
     }
 
@@ -964,10 +972,14 @@ export async function syncChartOfAccounts() {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "Accountant"].includes(user.role)) {
+    if (
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+        user.role,
+      )
+    ) {
       return {
         success: false,
-        error: "Unauthorized: Admin or Accountant role required",
+        error: "You don't have permission to manage accounts.",
       };
     }
 

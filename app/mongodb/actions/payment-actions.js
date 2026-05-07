@@ -185,7 +185,7 @@ export async function createPayment(prevState, formData) {
   try {
     await dbConnect();
     const user = await getCurrentUser();
-    checkRole(user, ["admin", "manager", "accountant"]);
+    checkRole(user, ["superadmin", "admin", "cfo", "finance manager", "manager", "accountant"]);
 
     // Get tenant context
     const { companyId, isSuperAdmin } = await getTenantContext();
@@ -376,7 +376,7 @@ export async function updatePayment(id, prevState, formData) {
   try {
     await dbConnect();
     const user = await getCurrentUser();
-    checkRole(user, ["admin", "manager", "accountant"]);
+    checkRole(user, ["superadmin", "admin", "cfo", "finance manager", "manager", "accountant"]);
 
     // Get tenant context for access validation
     const { companyId, isSuperAdmin } = await getTenantContext();
@@ -522,7 +522,7 @@ export async function deletePayment(id) {
   try {
     await dbConnect();
     const user = await getCurrentUser();
-    checkRole(user, ["admin", "manager"]);
+    checkRole(user, ["superadmin", "admin", "cfo", "finance manager", "manager"]);
 
     // Get tenant context for access validation
     const { companyId, isSuperAdmin } = await getTenantContext();
@@ -559,7 +559,7 @@ export async function confirmPayment(id) {
   try {
     await dbConnect();
     const user = await getCurrentUser();
-    checkRole(user, ["admin", "manager", "accountant"]);
+    checkRole(user, ["superadmin", "admin", "cfo", "finance manager", "manager", "accountant"]);
 
     // Get tenant context for access validation
     const { companyId, isSuperAdmin } = await getTenantContext();
@@ -602,7 +602,7 @@ export async function cancelPayment(id, prevState, formData) {
   try {
     await dbConnect();
     const user = await getCurrentUser();
-    checkRole(user, ["admin", "manager"]);
+    checkRole(user, ["superadmin", "admin", "cfo", "finance manager", "manager"]);
 
     const reason = formData.get("reason");
     if (!reason) {
@@ -643,7 +643,7 @@ export async function reconcilePayment(id, prevState, formData) {
   try {
     await dbConnect();
     const user = await getCurrentUser();
-    checkRole(user, ["admin", "accountant"]);
+    checkRole(user, ["superadmin", "admin", "cfo", "finance manager", "accountant"]);
 
     const statementRef = formData.get("statementReference");
 

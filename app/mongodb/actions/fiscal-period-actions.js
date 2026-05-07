@@ -240,9 +240,13 @@ export async function closeFiscalPeriod(periodId) {
       return { success: false, error: "Not authenticated" };
     }
 
-    // Only Admin or Accountant can close periods
-    if (!["Admin", "Accountant"].includes(session.user.role)) {
-      return { success: false, error: "Not authorized to close fiscal periods" };
+    // Closing periods requires finance authority + Accountant.
+    if (
+      !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+        session.user.role,
+      )
+    ) {
+      return { success: false, error: "You don't have permission to close fiscal periods." };
     }
 
     const user = {

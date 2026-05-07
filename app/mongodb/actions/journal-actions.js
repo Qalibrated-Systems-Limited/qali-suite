@@ -70,8 +70,13 @@ export async function createManualJournalEntry(prevState, formData) {
   await dbConnect();
   const { user, companyId } = await getTenantContext();
 
-  if (!user || !["Admin", "Accountant"].includes(user.role)) {
-    return { success: false, error: "Unauthorized" };
+  if (
+    !user ||
+    !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+      user.role,
+    )
+  ) {
+    return { success: false, error: "You don't have permission to manage journal entries." };
   }
 
   try {
@@ -188,8 +193,13 @@ export async function postJournalEntry(entryId) {
   await dbConnect();
   const { user, companyId } = await getTenantContext();
 
-  if (!user || !["Admin", "Accountant"].includes(user.role)) {
-    return { success: false, error: "Unauthorized" };
+  if (
+    !user ||
+    !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+      user.role,
+    )
+  ) {
+    return { success: false, error: "You don't have permission to manage journal entries." };
   }
 
   try {
@@ -217,8 +227,13 @@ export async function deleteDraftJournalEntry(entryId) {
   await dbConnect();
   const { user, companyId } = await getTenantContext();
 
-  if (!user || !["Admin", "Accountant"].includes(user.role)) {
-    return { success: false, error: "Unauthorized" };
+  if (
+    !user ||
+    !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(
+      user.role,
+    )
+  ) {
+    return { success: false, error: "You don't have permission to manage journal entries." };
   }
 
   try {

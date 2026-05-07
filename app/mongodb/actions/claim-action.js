@@ -642,8 +642,12 @@ export async function approveEmployeeClaim(claimId, prevState, formData) {
     const userRole = user.role?.toLowerCase();
 
     // Check permissions
-    if (userRole !== "manager" && userRole !== "admin") {
-      throw new Error("Only managers and admins can approve claims");
+    if (
+      !["manager", "admin", "cfo", "finance manager", "superadmin"].includes(
+        userRole,
+      )
+    ) {
+      throw new Error("You don't have permission to approve claims");
     }
 
     session = await mongoose.startSession();
@@ -720,8 +724,12 @@ export async function rejectEmployeeClaim(claimId, prevState, formData) {
     const userRole = user.role?.toLowerCase();
 
     // Check permissions
-    if (userRole !== "manager" && userRole !== "admin") {
-      throw new Error("Only managers and admins can reject claims");
+    if (
+      !["manager", "admin", "cfo", "finance manager", "superadmin"].includes(
+        userRole,
+      )
+    ) {
+      throw new Error("You don't have permission to reject claims");
     }
 
     const reason = formData.get("reason");
@@ -1282,7 +1290,11 @@ export async function closeSettlementt(settlementId, prevState, formData) {
     const userRole = user.role?.toLowerCase();
 
     // Check permissions
-    if (userRole !== "accountant" && userRole !== "admin") {
+    if (
+      !["accountant", "admin", "cfo", "finance manager", "superadmin"].includes(
+        userRole,
+      )
+    ) {
       throw new Error("Only accountants and admins can close settlements");
     }
 
@@ -1856,7 +1868,11 @@ export async function closeSettlement(settlementId, prevState, formData) {
 
     const userRole = user.role?.toLowerCase();
 
-    if (userRole !== "accountant" && userRole !== "admin") {
+    if (
+      !["accountant", "admin", "cfo", "finance manager", "superadmin"].includes(
+        userRole,
+      )
+    ) {
       return {
         errors: {
           _form: ["Only accountants and admins can close settlements"],
@@ -2210,7 +2226,11 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
 
     const userRole = user.role?.toLowerCase();
 
-    if (userRole !== "accountant" && userRole !== "admin") {
+    if (
+      !["accountant", "admin", "cfo", "finance manager", "superadmin"].includes(
+        userRole,
+      )
+    ) {
       return {
         errors: {
           _form: ["Only accountants and admins can record advance returns"],
@@ -2496,7 +2516,11 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
 
     const userRole = user.role?.toLowerCase();
 
-    if (userRole !== "accountant" && userRole !== "admin") {
+    if (
+      !["accountant", "admin", "cfo", "finance manager", "superadmin"].includes(
+        userRole,
+      )
+    ) {
       return {
         errors: {
           _form: ["Only accountants and admins can make payments"],
@@ -2755,7 +2779,11 @@ export async function payAdvance(claimId, prevState, formData) {
 
     const userRole = user.role?.toLowerCase();
 
-    if (userRole !== "accountant" && userRole !== "admin") {
+    if (
+      !["accountant", "admin", "cfo", "finance manager", "superadmin"].includes(
+        userRole,
+      )
+    ) {
       return {
         errors: {
           _form: ["Only accountants and admins can pay advances"],
@@ -3030,7 +3058,11 @@ export async function payReimbursement(claimId, prevState, formData) {
 
     const userRole = user.role?.toLowerCase();
 
-    if (userRole !== "accountant" && userRole !== "admin") {
+    if (
+      !["accountant", "admin", "cfo", "finance manager", "superadmin"].includes(
+        userRole,
+      )
+    ) {
       return {
         errors: {
           _form: ["Only accountants and admins can pay reimbursements"],

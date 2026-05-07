@@ -65,7 +65,12 @@ export async function searchQuotes(query = "", page = 1, filters = {}) {
   filterQuery = withTenantScope(filterQuery, companyId, isSuperAdmin);
 
   // Scope visibility: non-admin roles only see their own quotes
-  if (!isSuperAdmin && !["Admin", "Accountant"].includes(user.role)) {
+  if (
+    !isSuperAdmin &&
+    !["Admin", "CFO", "Finance Manager", "Accountant", "Sales Manager"].includes(
+      user.role,
+    )
+  ) {
     filterQuery["createdBy.id"] = user.id;
   }
 
@@ -123,7 +128,12 @@ export async function fetchQuotePages(query = "", filters = {}) {
   filterQuery = withTenantScope(filterQuery, companyId, isSuperAdmin);
 
   // Scope visibility: non-admin roles only see their own quotes
-  if (!isSuperAdmin && !["Admin", "Accountant"].includes(user.role)) {
+  if (
+    !isSuperAdmin &&
+    !["Admin", "CFO", "Finance Manager", "Accountant", "Sales Manager"].includes(
+      user.role,
+    )
+  ) {
     filterQuery["createdBy.id"] = user.id;
   }
 
@@ -142,7 +152,12 @@ export async function getQuoteStats(filters = {}) {
   const tenantMatch = isSuperAdmin ? {} : { companyId: new mongoose.Types.ObjectId(companyId) };
 
   // Scope visibility: non-admin roles only see their own quotes
-  if (!isSuperAdmin && !["Admin", "Accountant"].includes(user.role)) {
+  if (
+    !isSuperAdmin &&
+    !["Admin", "CFO", "Finance Manager", "Accountant", "Sales Manager"].includes(
+      user.role,
+    )
+  ) {
     tenantMatch["createdBy.id"] = user.id;
   }
 

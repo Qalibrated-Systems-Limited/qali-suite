@@ -76,9 +76,10 @@ const RejectLoanSchema = z.object({
 // ============================================
 const LOAN_ROLES = {
   CREATE: ["Admin", "HR", "Employee"],
-  APPROVE: ["Admin", "HR"],
-  DISBURSE: ["Admin"],
-  VIEW_ALL: ["Admin", "HR", "Accountant"],
+  APPROVE: ["Admin", "HR", "CFO", "Finance Manager"],
+  // Disbursement releases cash — finance leadership in addition to Admin.
+  DISBURSE: ["Admin", "CFO", "Finance Manager"],
+  VIEW_ALL: ["Admin", "HR", "Accountant", "CFO", "Finance Manager"],
 };
 
 function hasRole(user, roles) {
