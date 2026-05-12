@@ -47,6 +47,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
+  CommandSeparator,
 } from "@/components/ui/command";
 import {
   Popover,
@@ -58,6 +59,7 @@ import {
   createPurchaseOrder,
   updatePurchaseOrder,
 } from "@/app/mongodb/actions/purchase-order-actions";
+import QuickCreatePartyDialog from "@/app/dashboard/invoices/components/QuickCreateCustomerDialog";
 
 // ============================================
 // INITIAL STATE
@@ -72,11 +74,20 @@ const initialState = {
 // ============================================
 // SUPPLIER COMBOBOX COMPONENT
 // ============================================
-function SupplierCombobox({ suppliers, defaultValue, error }) {
+function SupplierCombobox({ suppliers: initialSuppliers, defaultValue, error }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(defaultValue || "");
+  // Local copy so we can append a freshly-created supplier without a
+  // page round-trip.
+  const [supplierList, setSupplierList] = useState(initialSuppliers || []);
 
-  const selectedSupplier = suppliers.find((s) => s._id === value);
+  const selectedSupplier = supplierList.find((s) => s._id === value);
+
+  const handlePartyCreated = (party) => {
+    setSupplierList((prev) => [party, ...prev]);
+    setValue(party._id);
+    setOpen(false);
+  };
 
   return (
     <div className="space-y-2">
@@ -111,9 +122,25 @@ function SupplierCombobox({ suppliers, defaultValue, error }) {
           <Command>
             <CommandInput placeholder="Search suppliers..." />
             <CommandList>
-              <CommandEmpty>No supplier found.</CommandEmpty>
+              <CommandEmpty className="py-4 text-center">
+                <p className="text-sm text-muted-foreground mb-2">
+                  No supplier found.
+                </p>
+                <QuickCreatePartyDialog
+                  partyType="supplier"
+                  onPartyCreated={handlePartyCreated}
+                >
+                  <button
+                    type="button"
+                    className="inline-flex items-center text-sm text-yellow-500 hover:text-yellow-600 font-medium"
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    Create new supplier
+                  </button>
+                </QuickCreatePartyDialog>
+              </CommandEmpty>
               <CommandGroup>
-                {suppliers.map((supplier) => (
+                {supplierList.map((supplier) => (
                   <CommandItem
                     key={supplier._id}
                     value={`${supplier.name} ${supplier.taxPin || ""}`}
@@ -140,6 +167,25 @@ function SupplierCombobox({ suppliers, defaultValue, error }) {
                 ))}
               </CommandGroup>
             </CommandList>
+
+            {/* Persistent "Create new supplier" footer — always visible
+                outside the CommandList so cmdk's keyboard/click handling
+                doesn't fight with the Dialog trigger. */}
+            <CommandSeparator />
+            <div className="p-1">
+              <QuickCreatePartyDialog
+                partyType="supplier"
+                onPartyCreated={handlePartyCreated}
+              >
+                <button
+                  type="button"
+                  className="w-full inline-flex items-center rounded-sm px-2 py-1.5 text-sm font-medium text-yellow-600 dark:text-yellow-500 hover:bg-accent transition-colors"
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create new supplier
+                </button>
+              </QuickCreatePartyDialog>
+            </div>
           </Command>
         </PopoverContent>
       </Popover>
@@ -401,14 +447,31 @@ function LineItem({
         {/* Account Selection */}
         <div className="space-y-2">
           <Label className="text-sm font-medium">
-            Expense Account
+            GL Account
           </Label>
           <AccountCombobox
+            // Re-mount when the parent's auto-default fires so the new
+            // defaultValue actually applies (AccountCombobox is built
+            // around defaultValue not value).
+            key={
+              line?.accountId
+                ? `acct-${line.accountId}`
+                : `acct-empty-${line.key}`
+            }
             accounts={accounts}
             index={index}
-            defaultValue={line?.account?.id?.toString() || ""}
+            defaultValue={
+              line?.accountId ||
+              line?.account?.id?.toString() ||
+              ""
+            }
             error={lineErrors[`lines.${index}.accountId`]}
           />
+          <p className="text-xs text-muted-foreground">
+            For inventory items, pick the <strong>Inventory</strong> account
+            (asset). For services / consumables, pick the relevant expense
+            account.
+          </p>
         </div>
       </div>
 
@@ -581,6 +644,15 @@ export default function POForm({
     setLines((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // When a line gets a product picked, default the GL account to
+  // Inventory (the asset account) — that's the textbook answer for
+  // stock-bearing purchases. The user can still override if they want
+  // to capitalise as a fixed asset, but they no longer have to hunt
+  // for the right account by hand.
+  const inventoryAccount = accounts.find(
+    (a) => a.systemAccount === "inventory",
+  );
+
   const handleProductChange = (index, productId) => {
     if (!productId) return;
 
@@ -606,6 +678,19 @@ export default function POForm({
       if (unitInput && (!unitInput.value || unitInput.value === "pcs")) {
         unitInput.value = product.unit || "pcs";
       }
+    }
+
+    // Auto-default the account to Inventory if the user hasn't already
+    // picked one. We use lifted line state so the AccountCombobox can
+    // re-mount with the new defaultValue (controlled via its `key`).
+    if (inventoryAccount) {
+      setLines((prev) =>
+        prev.map((line, i) =>
+          i === index && !line.accountId
+            ? { ...line, accountId: inventoryAccount._id }
+            : line,
+        ),
+      );
     }
   };
 

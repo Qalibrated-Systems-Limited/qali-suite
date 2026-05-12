@@ -388,6 +388,15 @@ const billSchema = new Schema(
       },
       postedAt: Date,
       postedBy: { name: String, id: String },
+      // True when bill approval physically moved inventory (legacy mode
+      // OR bill in strict mode with no inventory lines). False when bill
+      // posted to GR/IR clearing — physical receipt happens on GRN
+      // acceptance. Drives the GRN action's source-aware branching.
+      inventoryMoved: { type: Boolean, default: true },
+      // True when JE used GR/IR clearing instead of Inventory account.
+      // Set in strict mode; cleared by the GRN-accept JE (DR Inventory /
+      // CR GR/IR) when the GRN is fully signed off.
+      usedGRNI: { type: Boolean, default: false },
     },
 
     // Tax transactions created (reference only - details in TaxTransaction)
@@ -629,8 +638,18 @@ billSchema.methods.approve = async function (user) {
   const Account = mongoose.model("Account");
   const Product = mongoose.model("Product");
   const StockMovement = mongoose.model("StockMovement");
+  const Company = mongoose.model("Company");
 
   const userInfo = formatUser(user);
+
+  // Industry-standard three-way match toggle. When ON, this bill's
+  // approval credits GR/IR clearing instead of Inventory, and we skip
+  // the stock movement loop — inventory is admitted only when a Goods
+  // Receipt Note is accepted (SOP §10.1).
+  const company = await Company.findById(this.companyId)
+    .select("settings.requireGRN")
+    .lean();
+  const requireGRN = !!company?.settings?.requireGRN;
 
   // ==========================================
   // 1. Find or Create Fiscal Period (auto-create on-the-fly like QuickBooks/Xero)
@@ -699,6 +718,22 @@ billSchema.methods.approve = async function (user) {
     throw new Error("WHT Payable system account not configured");
   }
 
+  // Strict mode requires GR/IR clearing account so the bill can post a
+  // valid pending-receipt liability. If it isn't configured, fail loud
+  // rather than silently falling back to direct-inventory mode (which
+  // would defeat the audit control the tenant just opted into).
+  const hasInventoryLine = (this.lines || []).some(
+    (l) =>
+      l.product?.id &&
+      l.account?.type === "asset" &&
+      !l.weighbridgeRef?.ticketId,
+  );
+  if (requireGRN && hasInventoryLine && !grniAccount) {
+    throw new Error(
+      "Three-way match (requireGRN) is enabled but the GR/IR clearing account (systemAccount: \"grni\") is not configured. Add it to the Chart of Accounts before approving inventory bills.",
+    );
+  }
+
   // ==========================================
   // 3. Build Journal Entry Lines
   // ==========================================
@@ -727,8 +762,23 @@ billSchema.methods.approve = async function (user) {
           credit:      0,
           description: `GR/IR clearing — ${line.product.name || line.description} · WB ${line.weighbridgeRef.ticketNumber}`,
         });
+      } else if (requireGRN && grniAccount) {
+        // Strict three-way-match mode (SOP §10.1):
+        // Bill posts DR GR/IR clearing, CR AP. The actual Inventory
+        // debit + stock movement happen on GRN acceptance.
+        jeLines.push({
+          accountId:   grniAccount._id,
+          accountCode: grniAccount.accountCode,
+          accountName: grniAccount.accountName,
+          accountType: "liability",
+          debit:       line.amount,
+          credit:      0,
+          description: `GR/IR clearing — ${line.product.name || line.description} (pending GRN)`,
+        });
+        // No stock movement queued — admitted on GRN accept.
       } else {
-        // Direct inventory purchase (no weighbridge) — debit Inventory and queue stock movement
+        // Legacy / SMB direct-purchase path: debit Inventory and queue
+        // stock movement.
         jeLines.push({
           accountId:   inventoryAccount._id,
           accountCode: inventoryAccount.accountCode,
@@ -929,6 +979,11 @@ billSchema.methods.approve = async function (user) {
   this.accounting.journalEntryId = journalEntry._id;
   this.accounting.postedAt = new Date();
   this.accounting.postedBy = userInfo;
+  // Track whether physical inventory was actually moved by the bill.
+  // Strict mode (requireGRN) defers it to GRN acceptance — flip the
+  // flags so the GRN actions know to do the inventory work themselves.
+  this.accounting.inventoryMoved = !requireGRN || !hasInventoryLine;
+  this.accounting.usedGRNI = requireGRN && hasInventoryLine;
   this.taxTransactions = taxTransactionIds;
   this.lastModifiedBy = userInfo;
 

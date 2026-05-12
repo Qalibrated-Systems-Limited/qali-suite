@@ -12,9 +12,9 @@ import { requirePlanAccess } from "@/lib/plan-gate";
 // ROLE AUTHORIZATION
 // ============================================
 const DEPT_ROLES = {
-  CREATE: ["Admin", "Manager", "HR"],
-  UPDATE: ["Admin", "Manager", "HR"],
-  DEACTIVATE: ["Admin"],
+  CREATE: ["SuperAdmin", "Admin", "Manager", "HR"],
+  UPDATE: ["SuperAdmin", "Admin", "Manager", "HR"],
+  DEACTIVATE: ["SuperAdmin", "Admin", "HR"],
 };
 
 function hasRole(user, allowedRoles) {

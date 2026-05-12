@@ -22,10 +22,11 @@ import LeaveType from "@/app/models/leaveType";
 // ROLE AUTHORIZATION
 // ============================================
 const EMP_ROLES = {
-  CREATE: ["Admin", "Manager", "HR"],
-  UPDATE: ["Admin", "Manager", "HR"],
-  UPDATE_COMPENSATION: ["Admin", "HR"],     // Salary is sensitive
-  TERMINATE: ["Admin"],
+  CREATE: ["SuperAdmin", "Admin", "Manager", "HR"],
+  UPDATE: ["SuperAdmin", "Admin", "Manager", "HR"],
+  // Compensation is finance-sensitive — finance leadership in addition to HR.
+  UPDATE_COMPENSATION: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR"],
+  TERMINATE: ["SuperAdmin", "Admin", "HR"],
 };
 
 function hasRole(user, allowedRoles) {

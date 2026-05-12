@@ -3,13 +3,16 @@
 import Quote from "@/app/models/quote";
 import Party from "@/app/models/parties";
 import Product from "@/app/models/product";
+import Company from "@/app/models/Company";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import {
   getTenantContext,
   getCompanyIdForCreate,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+import { sendQuoteEmail } from "@/lib/email";
 
 // ============================================
 // HELPER: Format user for audit
@@ -398,12 +401,75 @@ export async function sendQuote(quoteId) {
     return { message: "Quote not found" };
   }
 
+  // Resolve customer email up-front so we don't flip status if we
+  // can't actually email anyone.
+  const customerParty = quote.customer?.partyId
+    ? await Party.findById(quote.customer.partyId)
+        .select("email name")
+        .lean()
+    : null;
+  const customerEmail = customerParty?.email?.trim();
+  if (!customerEmail) {
+    return {
+      message:
+        "Customer has no email on file. Add an email to the customer record, then try again.",
+    };
+  }
+
   try {
     await quote.send(formatUser({ user }));
+    quote.sentTo = customerEmail;
+    await quote.save();
   } catch (error) {
     console.error("Send quote error:", error);
     return { message: error.message || "Failed to send quote" };
   }
+
+  // Defer the PDF render + email send so the UI returns immediately.
+  after(async () => {
+    try {
+      const [{ renderToBuffer }, { QuotePDF }, freshQuote, company] =
+        await Promise.all([
+          import("@react-pdf/renderer"),
+          import("@/lib/pdf"),
+          Quote.findById(quoteId).lean(),
+          Company.findById(quote.companyId)
+            .select("name email phone address bankName accountNumber settings")
+            .lean(),
+        ]);
+      if (!freshQuote) return;
+
+      const pdfBuffer = await renderToBuffer(
+        QuotePDF({ quote: freshQuote, company }),
+      );
+
+      await sendQuoteEmail({
+        to: customerEmail,
+        replyTo: company?.email || undefined,
+        customerName: customerParty?.name || quote.customer?.name,
+        senderCompany: company?.name || "Our Company",
+        quoteNumber: quote.quoteNumber,
+        quoteDate: quote.quoteDate,
+        validUntil: quote.validUntil,
+        total: quote.amounts?.total || 0,
+        currency: company?.settings?.currency || "KES",
+        pdfBuffer,
+      });
+
+      await Quote.findByIdAndUpdate(quoteId, {
+        $set: { deliveredAt: new Date(), lastDeliveryError: null },
+        $inc: { deliveryAttempts: 1 },
+      });
+      revalidatePath(`/dashboard/quotes/${quoteId}`);
+    } catch (err) {
+      console.error("[sendQuote] email dispatch failed:", err);
+      await Quote.findByIdAndUpdate(quoteId, {
+        $set: { lastDeliveryError: err.message || "Email send failed" },
+        $inc: { deliveryAttempts: 1 },
+      });
+      revalidatePath(`/dashboard/quotes/${quoteId}`);
+    }
+  });
 
   revalidatePath("/dashboard/quotes");
   revalidatePath(`/dashboard/quotes/${quoteId}`);

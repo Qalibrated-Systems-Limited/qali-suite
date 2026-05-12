@@ -33,6 +33,8 @@ import {
   Search,
   Plug,
   CheckSquare,
+  ClipboardCheck,
+  ShieldAlert,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -136,6 +138,20 @@ const getNavigationGroups = (user) => {
         label: "Stock Movements",
         id: "movements",
         href: "/dashboard/movements",
+        hidden: !canSeeInventoryNav(user?.role),
+      },
+      {
+        icon: ClipboardCheck,
+        label: "Goods Receipt Notes",
+        id: "grn",
+        href: "/dashboard/grn",
+        hidden: !canSeeInventoryNav(user?.role),
+      },
+      {
+        icon: ShieldAlert,
+        label: "Nonconformance (NCR)",
+        id: "ncr",
+        href: "/dashboard/ncr",
         hidden: !canSeeInventoryNav(user?.role),
       },
       {

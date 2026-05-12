@@ -1413,6 +1413,24 @@ export async function createBillPayment(billId, prevState, formData) {
       };
     }
 
+    // Three-way match (SOP §10.1 / industry standard). If the bill was
+    // approved under strict mode (requireGRN ON), it posted to GR/IR
+    // clearing — payment is blocked until at least one Goods Receipt
+    // Note has been accepted, which is what flips bill.accounting
+    // .inventoryMoved back to true. This is the audit control that
+    // prevents AP from paying for goods nobody received.
+    if (
+      bill.accounting?.usedGRNI === true &&
+      bill.accounting?.inventoryMoved !== true
+    ) {
+      await mongoSession.abortTransaction();
+      return {
+        success: false,
+        error:
+          "This bill is awaiting goods receipt. Create and accept a Goods Receipt Note before recording payment (three-way match).",
+      };
+    }
+
     if (amount > bill.amounts?.balance + 0.01) {
       await mongoSession.abortTransaction();
       return {

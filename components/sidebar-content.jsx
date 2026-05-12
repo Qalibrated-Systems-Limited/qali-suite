@@ -13,6 +13,7 @@ import {
   FileText,
   User,
   FolderKanban,
+  ClipboardCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -71,6 +72,12 @@ export const SidebarContent = ({ onItemClick, user }) => {
       label: "Movements",
       id: "movements",
       href: "/dashboard/movements",
+    },
+    {
+      icon: ClipboardCheck,
+      label: "Goods Receipts",
+      id: "grn",
+      href: "/dashboard/grn",
     },
     {
       icon: Receipt,

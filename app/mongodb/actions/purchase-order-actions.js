@@ -28,6 +28,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { auth } from "@/auth";
 import { z } from "zod";
 import mongoose from "mongoose";
@@ -36,7 +37,9 @@ import PurchaseOrder from "@/app/models/purchaseOrder";
 import Party from "@/app/models/parties";
 import Product from "@/app/models/product";
 import Account from "@/app/models/account";
+import Company from "@/app/models/Company";
 import dbConnect from "@/app/config/dbConnect";
+import { sendPurchaseOrderEmail } from "@/lib/email";
 import {
   getTenantContext,
   withTenantScope,
@@ -46,12 +49,16 @@ import { requirePlanAccess } from "@/lib/plan-gate";
 // ============================================
 // CONSTANTS
 // ============================================
+// CFO / Finance Manager / Procurement Officer added — they were missing
+// even though procurement is a core part of their job. SuperAdmin
+// implicit via the hasRole helper at use sites (or add explicitly when
+// the file's helper does not bypass).
 const PO_ROLES = {
-  CREATE: ["Admin", "Manager", "Accountant", "Store Manager"],
-  SEND: ["Admin", "Manager", "Accountant", "Store Manager"],
-  CONFIRM: ["Admin", "Manager"],
-  CANCEL: ["Admin", "Manager"],
-  CONVERT_TO_BILL: ["Admin", "Manager", "Accountant"],
+  CREATE: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Manager", "Accountant", "Procurement Officer", "Store Manager"],
+  SEND: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Manager", "Accountant", "Procurement Officer", "Store Manager"],
+  CONFIRM: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Manager", "Procurement Officer"],
+  CANCEL: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Manager"],
+  CONVERT_TO_BILL: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Manager", "Accountant"],
 };
 
 // ============================================
@@ -679,15 +686,85 @@ export async function sendPurchaseOrder(poId) {
       };
     }
 
-    // Use schema method
+    // Resolve the supplier email. We require it before flipping the
+    // status — if there's no email on file, "send" is meaningless.
+    const supplierParty = po.supplier?.partyId
+      ? await Party.findById(po.supplier.partyId).select("email name").lean()
+      : null;
+    const supplierEmail = supplierParty?.email?.trim();
+    if (!supplierEmail) {
+      return {
+        success: false,
+        error:
+          "Supplier has no email on file. Add an email to the supplier record, then try again.",
+      };
+    }
+
+    // Flip status synchronously so the UI reflects the user's action
+    // immediately. The actual outbound email is dispatched via after()
+    // so a slow Resend call doesn't block the page response.
     await po.send(formatUser(session));
+    po.sentTo = supplierEmail;
+    await po.save();
 
     revalidatePath("/dashboard/purchase-orders");
     revalidatePath(`/dashboard/purchase-orders/${poId}`);
 
+    after(async () => {
+      try {
+        // Render the PO PDF via the existing reusable component, then
+        // hand it to Resend as an attachment. Pulled inline so we don't
+        // pay the @react-pdf import cost on the hot path.
+        const [{ renderToBuffer }, { PurchaseOrderPDF }, freshPO, company] =
+          await Promise.all([
+            import("@react-pdf/renderer"),
+            import("@/lib/pdf"),
+            PurchaseOrder.findById(poId).lean(),
+            Company.findById(po.companyId)
+              .select("name email phone address bankName accountNumber settings")
+              .lean(),
+          ]);
+        if (!freshPO) return;
+
+        const pdfBuffer = await renderToBuffer(
+          PurchaseOrderPDF({ purchaseOrder: freshPO, company }),
+        );
+
+        await sendPurchaseOrderEmail({
+          to: supplierEmail,
+          replyTo: company?.email || undefined,
+          supplierName: supplierParty?.name || po.supplier?.name,
+          senderCompany: company?.name || "Our Company",
+          poNumber: po.poNumber,
+          poDate: po.poDate,
+          expectedDeliveryDate: po.expectedDeliveryDate,
+          total: po.amounts?.total || 0,
+          currency: company?.settings?.currency || "KES",
+          pdfBuffer,
+        });
+
+        // Success — stamp delivery confirmation.
+        await PurchaseOrder.findByIdAndUpdate(poId, {
+          $set: {
+            deliveredAt: new Date(),
+            lastDeliveryError: null,
+          },
+          $inc: { deliveryAttempts: 1 },
+        });
+        revalidatePath(`/dashboard/purchase-orders/${poId}`);
+      } catch (err) {
+        console.error("[sendPurchaseOrder] email dispatch failed:", err);
+        await PurchaseOrder.findByIdAndUpdate(poId, {
+          $set: { lastDeliveryError: err.message || "Email send failed" },
+          $inc: { deliveryAttempts: 1 },
+        });
+        revalidatePath(`/dashboard/purchase-orders/${poId}`);
+      }
+    });
+
     return {
       success: true,
-      message: `PO ${po.poNumber} sent to supplier`,
+      message: `PO ${po.poNumber} sent to ${supplierEmail}`,
     };
   } catch (error) {
     console.error("Send purchase order error:", error);

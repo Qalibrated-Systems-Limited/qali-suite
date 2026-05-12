@@ -27,12 +27,14 @@ function revalidateProject(projectId) {
 // ROLE-BASED ACCESS
 // ============================================
 const EXPENSE_ROLES = {
-  CREATE: ["Employee", "Accountant", "Manager", "Admin"],
-  PAY: ["Accountant", "Manager", "Admin"],
-  DELETE: ["Admin"],
+  CREATE: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager", "Employee"],
+  PAY: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"],
+  DELETE: ["SuperAdmin", "Admin", "CFO"],
 };
 
 function hasRole(user, allowedRoles) {
+  // SuperAdmin acts cross-tenant; admin everything is implicit.
+  if (user?.role === "SuperAdmin") return true;
   return allowedRoles.includes(user?.role);
 }
 

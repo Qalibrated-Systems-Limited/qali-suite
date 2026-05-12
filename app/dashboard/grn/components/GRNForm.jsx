@@ -1,0 +1,454 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Loader2,
+  AlertCircle,
+  Trash2,
+  Plus,
+  CheckCircle2,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { createGRN } from "@/app/mongodb/actions/grn-actions";
+
+const PACKAGING = ["good", "damaged", "moisture", "tampered"];
+const PHYSICAL = ["good", "broken", "deformed", "defective"];
+
+const emptyLine = () => ({
+  productId: "",
+  description: "",
+  sku: "",
+  expectedQty: 0,
+  receivedQty: 0,
+  unit: "pcs",
+  packagingCondition: "good",
+  physicalCondition: "good",
+  inspectionNotes: "",
+  storageLocation: "",
+});
+
+export default function GRNForm({ prefill, availablePOs = [] }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const [form, setForm] = useState(() => ({
+    sourceType: prefill?.sourceType || "unscheduled",
+    billId: prefill?.billId || "",
+    purchaseOrderId: prefill?.purchaseOrderId || "",
+    proformaInvoiceNumber: "",
+    packingListNumber: "",
+    supplierPartyId: prefill?.supplierPartyId || "",
+    supplierName: prefill?.supplierName || "",
+    receivedDate:
+      prefill?.receivedDate || new Date().toISOString().slice(0, 10),
+    notes: "",
+    lines: prefill?.lines?.length ? prefill.lines : [emptyLine()],
+  }));
+
+  // Pre-fill lines + supplier when the user picks a PO from the in-form
+  // picker (industry-standard "create GRN, then reference a PO" path).
+  // Mirrors the server-side prefill we do when arriving with ?fromPO=.
+  const handleSelectPO = (poId) => {
+    if (!poId) {
+      setForm((f) => ({
+        ...f,
+        purchaseOrderId: "",
+        supplierPartyId: "",
+        supplierName: "",
+        lines: [emptyLine()],
+      }));
+      return;
+    }
+    const po = availablePOs.find((p) => p._id?.toString() === poId);
+    if (!po) return;
+    const lines = (po.availableLines || [])
+      .filter((l) => l.product?.id && l.availableQuantity > 0)
+      .map((l) => ({
+        productId: l.product.id,
+        description: l.description || l.product.name || "",
+        sku: l.product.sku || "",
+        expectedQty: l.availableQuantity,
+        receivedQty: l.availableQuantity,
+        unit: l.unit || "pcs",
+        packagingCondition: "good",
+        physicalCondition: "good",
+        inspectionNotes: "",
+        storageLocation: "",
+      }));
+    setForm((f) => ({
+      ...f,
+      sourceType: "purchase_order",
+      purchaseOrderId: poId,
+      supplierPartyId:
+        po.supplier?.partyId?.toString?.() || po.supplier?.partyId || "",
+      supplierName: po.supplier?.name || "",
+      lines: lines.length > 0 ? lines : [emptyLine()],
+    }));
+  };
+
+  const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const setLine = (i, patch) =>
+    setForm((f) => ({
+      ...f,
+      lines: f.lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
+    }));
+  const removeLine = (i) =>
+    setForm((f) => ({
+      ...f,
+      lines: f.lines.filter((_, idx) => idx !== i),
+    }));
+  const addLine = () =>
+    setForm((f) => ({ ...f, lines: [...f.lines, emptyLine()] }));
+
+  const handleSubmit = (e) => {
+    e?.preventDefault();
+    setError("");
+    setSuccess("");
+
+    // Surface validation errors before round-tripping to the server.
+    if (!form.lines.length) {
+      setError("Add at least one line.");
+      return;
+    }
+    for (const [i, l] of form.lines.entries()) {
+      if (!l.productId) {
+        setError(`Line ${i + 1}: product is required.`);
+        return;
+      }
+      if (!l.description) {
+        setError(`Line ${i + 1}: description is required.`);
+        return;
+      }
+      if (l.receivedQty == null || l.receivedQty < 0) {
+        setError(`Line ${i + 1}: received qty must be ≥ 0.`);
+        return;
+      }
+    }
+
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.append(
+        "payload",
+        JSON.stringify({
+          ...form,
+          lines: form.lines.map((l) => ({
+            ...l,
+            expectedQty: Number(l.expectedQty) || 0,
+            receivedQty: Number(l.receivedQty) || 0,
+          })),
+        }),
+      );
+      const res = await createGRN(null, fd);
+      if (res?.success) {
+        setSuccess("GRN created");
+        router.push(`/dashboard/grn/${res.grnId}`);
+      } else {
+        setError(res?.error || "Failed to create GRN");
+      }
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Source */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Source">
+          <select
+            value={form.sourceType}
+            onChange={(e) => {
+              const next = e.target.value;
+              setField("sourceType", next);
+              // Switching away from PO clears the PO selection.
+              if (next !== "purchase_order") {
+                setField("purchaseOrderId", "");
+              }
+            }}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="bill">From Bill</option>
+            <option value="purchase_order">From Purchase Order</option>
+            <option value="unscheduled">Unscheduled receipt</option>
+          </select>
+        </Field>
+        <Field label="Received date">
+          <input
+            type="date"
+            value={form.receivedDate}
+            onChange={(e) => setField("receivedDate", e.target.value)}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            required
+          />
+        </Field>
+
+        {/* PO picker — shown when sourceType is purchase_order. Mirrors
+            the SAP/NetSuite/Odoo "select PO to receive against" pattern
+            so Storekeepers who land on the GRN form directly can find a
+            PO without leaving the page. */}
+        {form.sourceType === "purchase_order" && (
+          <Field label="Purchase Order" full>
+            <select
+              value={form.purchaseOrderId}
+              onChange={(e) => handleSelectPO(e.target.value)}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">
+                {availablePOs.length === 0
+                  ? "No open POs available"
+                  : "Select a purchase order to receive against..."}
+              </option>
+              {availablePOs.map((p) => {
+                const outstanding = (p.availableLines || []).reduce(
+                  (sum, l) => sum + (l.availableQuantity || 0),
+                  0,
+                );
+                return (
+                  <option key={p._id} value={p._id}>
+                    {p.poNumber} — {p.supplier?.name || "—"}
+                    {outstanding > 0 ? ` · ${outstanding} units outstanding` : ""}
+                  </option>
+                );
+              })}
+            </select>
+            {availablePOs.length === 0 && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Only sent / confirmed / partially-received POs with
+                outstanding lines appear here.
+              </p>
+            )}
+          </Field>
+        )}
+        <Field label="Supplier name">
+          <input
+            type="text"
+            value={form.supplierName}
+            onChange={(e) => setField("supplierName", e.target.value)}
+            placeholder="Supplier"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </Field>
+        <Field label="Proforma Invoice #">
+          <input
+            type="text"
+            value={form.proformaInvoiceNumber}
+            onChange={(e) => setField("proformaInvoiceNumber", e.target.value)}
+            placeholder="(Optional)"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </Field>
+        <Field label="Packing List #" full>
+          <input
+            type="text"
+            value={form.packingListNumber}
+            onChange={(e) => setField("packingListNumber", e.target.value)}
+            placeholder="(Optional — for SOP cross-reference)"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </Field>
+      </div>
+
+      {/* Lines */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium">
+            Items received & inspection
+          </label>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addLine}
+            className="gap-1.5"
+          >
+            <Plus className="h-4 w-4" /> Add line
+          </Button>
+        </div>
+
+        {form.lines.map((l, i) => (
+          <div
+            key={i}
+            className="rounded-lg border border-border bg-muted/20 p-3 space-y-3"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1">
+                <p className="text-sm font-medium">
+                  Line {i + 1}
+                  {l.sku && (
+                    <span className="ml-2 text-xs font-mono text-muted-foreground">
+                      {l.sku}
+                    </span>
+                  )}
+                </p>
+              </div>
+              {form.lines.length > 1 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeLine(i)}
+                  className="text-red-600 hover:text-red-700"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {/* When prefilled from a bill, productId is fixed; otherwise
+                  the user types the product ID. (A picker is a follow-up.) */}
+              <Field label="Product ID" full={!l.productId}>
+                <input
+                  type="text"
+                  value={l.productId}
+                  onChange={(e) => setLine(i, { productId: e.target.value })}
+                  placeholder="Product ObjectId"
+                  className="input font-mono text-xs"
+                  required
+                  readOnly={!!prefill?.lines?.[i]?.productId}
+                />
+              </Field>
+              <Field label="Description">
+                <input
+                  type="text"
+                  value={l.description}
+                  onChange={(e) => setLine(i, { description: e.target.value })}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  required
+                />
+              </Field>
+              <Field label="Expected qty">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={l.expectedQty}
+                  onChange={(e) => setLine(i, { expectedQty: e.target.value })}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </Field>
+              <Field label="Received qty">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={l.receivedQty}
+                  onChange={(e) => setLine(i, { receivedQty: e.target.value })}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  required
+                />
+              </Field>
+              <Field label="Unit">
+                <input
+                  type="text"
+                  value={l.unit}
+                  onChange={(e) => setLine(i, { unit: e.target.value })}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </Field>
+              <Field label="Storage location">
+                <input
+                  type="text"
+                  value={l.storageLocation}
+                  onChange={(e) =>
+                    setLine(i, { storageLocation: e.target.value })
+                  }
+                  placeholder="Bin / shelf"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </Field>
+              <Field label="Packaging condition">
+                <select
+                  value={l.packagingCondition}
+                  onChange={(e) =>
+                    setLine(i, { packagingCondition: e.target.value })
+                  }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {PACKAGING.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Physical condition">
+                <select
+                  value={l.physicalCondition}
+                  onChange={(e) =>
+                    setLine(i, { physicalCondition: e.target.value })
+                  }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {PHYSICAL.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Inspection notes" full>
+                <input
+                  type="text"
+                  value={l.inspectionNotes}
+                  onChange={(e) =>
+                    setLine(i, { inspectionNotes: e.target.value })
+                  }
+                  placeholder="Defects, damage, anomalies"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </Field>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Field label="Notes">
+        <textarea
+          value={form.notes}
+          onChange={(e) => setField("notes", e.target.value)}
+          rows={2}
+          placeholder="Any additional remarks for the consignment as a whole"
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </Field>
+
+      {error && (
+        <div className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-700 dark:text-red-400 inline-flex items-start gap-2">
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+          {error}
+        </div>
+      )}
+      {success && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4" />
+          {success}
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2 pt-2 border-t border-border">
+        <Button type="submit" disabled={isPending} className="gap-1.5">
+          {isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <CheckCircle2 className="h-4 w-4" />
+          )}
+          Save as draft
+        </Button>
+      </div>
+
+    </form>
+  );
+}
+
+function Field({ label, full, children }) {
+  return (
+    <div className={full ? "sm:col-span-2" : undefined}>
+      <label className="block text-xs font-medium text-muted-foreground mb-1">
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}

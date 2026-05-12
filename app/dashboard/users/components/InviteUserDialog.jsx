@@ -12,20 +12,43 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Send, Loader2, AlertCircle, CheckCircle2, Mail, Building2 } from "lucide-react";
+import {
+  Send,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+  Mail,
+  Building2,
+  Check,
+  ChevronDown,
+} from "lucide-react";
 import { sendInvite } from "@/app/mongodb/actions/invite-actions";
-import { userRolesMapping } from "@/lib/utils";
+import { userRolesMapping, cn } from "@/lib/utils";
 
 export default function InviteUserDialog({ isSuperAdmin = false, companies = [] }) {
   const [open, setOpen] = useState(false);
   const [state, dispatch, isPending] = useActionState(sendInvite, {});
+
+  // Role + Company are now searchable comboboxes (Popover + Command),
+  // so their value lives in local state and is submitted via a hidden
+  // <input> rather than the Select's native form integration.
+  const [role, setRole] = useState("User");
+  const [rolePopoverOpen, setRolePopoverOpen] = useState(false);
+  const [companyId, setCompanyId] = useState("");
+  const [companyPopoverOpen, setCompanyPopoverOpen] = useState(false);
 
   // Filter roles: Admin can't invite Admin/SuperAdmin
   const availableRoles = isSuperAdmin
@@ -33,6 +56,9 @@ export default function InviteUserDialog({ isSuperAdmin = false, companies = [] 
     : userRolesMapping.filter(
         (r) => r.value !== "SuperAdmin" && r.value !== "Admin"
       );
+
+  const selectedRole = availableRoles.find((r) => r.value === role);
+  const selectedCompany = companies.find((c) => c._id === companyId);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -103,54 +129,138 @@ export default function InviteUserDialog({ isSuperAdmin = false, companies = [] 
               </div>
             </div>
 
-            {/* Role */}
+            {/* Role — searchable combobox so the 13-item list is fast
+                to navigate. Hidden input below carries the selected
+                value into the form action. */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">
                 Role
               </label>
-              <Select name="role" defaultValue="User" required>
-                <SelectTrigger className="bg-background border-border text-foreground">
-                  <SelectValue placeholder="Select a role" />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border">
-                  {availableRoles.map(({ label, value }) => (
-                    <SelectItem
-                      key={value}
-                      value={value}
-                      className="text-foreground"
-                    >
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <input type="hidden" name="role" value={role} />
+              <Popover
+                open={rolePopoverOpen}
+                onOpenChange={setRolePopoverOpen}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={rolePopoverOpen}
+                    className={cn(
+                      "w-full justify-between font-normal bg-background border-border text-foreground",
+                      !selectedRole && "text-muted-foreground",
+                    )}
+                  >
+                    {selectedRole?.label || "Select a role"}
+                    <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="w-[--radix-popover-trigger-width] p-0"
+                  align="start"
+                >
+                  <Command>
+                    <CommandInput placeholder="Search roles..." />
+                    <CommandList>
+                      <CommandEmpty>No role found.</CommandEmpty>
+                      <CommandGroup>
+                        {availableRoles.map(({ label, value }) => (
+                          <CommandItem
+                            key={value}
+                            value={label}
+                            onSelect={() => {
+                              setRole(value);
+                              setRolePopoverOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                role === value ? "opacity-100" : "opacity-0",
+                              )}
+                            />
+                            <span className="text-sm">{label}</span>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
 
-            {/* Company — SuperAdmin only */}
+            {/* Company — SuperAdmin only. Searchable so a SuperAdmin
+                with many tenants can find the right one fast. */}
             {isSuperAdmin && companies.length > 0 && (
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">
                   Company
                 </label>
-                <Select name="companyId" required>
-                  <SelectTrigger className="bg-background border-border text-foreground">
-                    <SelectValue placeholder="Select a company" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-card border-border">
-                    {companies.map((company) => (
-                      <SelectItem
-                        key={company._id}
-                        value={company._id}
-                        className="text-foreground"
-                      >
+                <input type="hidden" name="companyId" value={companyId} />
+                <Popover
+                  open={companyPopoverOpen}
+                  onOpenChange={setCompanyPopoverOpen}
+                >
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={companyPopoverOpen}
+                      className={cn(
+                        "w-full justify-between font-normal bg-background border-border text-foreground",
+                        !selectedCompany && "text-muted-foreground",
+                      )}
+                    >
+                      {selectedCompany ? (
                         <span className="flex items-center gap-2">
                           <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                          {company.name}
+                          {selectedCompany.name}
                         </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                      ) : (
+                        "Select a company"
+                      )}
+                      <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    className="w-[--radix-popover-trigger-width] p-0"
+                    align="start"
+                  >
+                    <Command>
+                      <CommandInput placeholder="Search companies..." />
+                      <CommandList>
+                        <CommandEmpty>No company found.</CommandEmpty>
+                        <CommandGroup>
+                          {companies.map((company) => (
+                            <CommandItem
+                              key={company._id}
+                              value={company.name}
+                              onSelect={() => {
+                                setCompanyId(company._id);
+                                setCompanyPopoverOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  companyId === company._id
+                                    ? "opacity-100"
+                                    : "opacity-0",
+                                )}
+                              />
+                              <span className="flex items-center gap-2 text-sm">
+                                <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                                {company.name}
+                              </span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
                 <p className="text-xs text-muted-foreground">
                   The invited user will be assigned to this company
                 </p>

@@ -46,7 +46,27 @@ export async function importBankStatement(formData) {
     );
 
     if (parsedLines.length === 0) {
-      return { success: false, error: "No valid transactions found in CSV" };
+      // Tell the user which check rejected everything — generic
+      // "no transactions" sends people down the column-mapping rabbit hole
+      // when the real problem is usually a date-format mismatch.
+      const diag = parsedLines.diagnostics || {};
+      if (diag.droppedDateInvalid > 0 && diag.droppedDateInvalid === diag.totalDataRows) {
+        return {
+          success: false,
+          error: `Could not parse any dates. Your file uses a date format that doesn't match "${dateFormat}". Sample value: try changing the Date Format on the previous step.`,
+        };
+      }
+      if (diag.droppedZeroAmount > 0 && diag.droppedZeroAmount === diag.totalDataRows) {
+        return {
+          success: false,
+          error:
+            "Every row has a zero amount. Check your debit/credit column mapping — they may be pointing at the wrong columns.",
+        };
+      }
+      return {
+        success: false,
+        error: "No valid transactions found in CSV. Check the date format and column mapping.",
+      };
     }
 
     // Determine statement period from data

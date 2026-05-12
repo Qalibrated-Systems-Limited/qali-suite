@@ -570,6 +570,45 @@ export default function CompanyForm({ company = null, isSuperAdmin = false }) {
                   </p>
                 )}
               </div>
+
+              {/* Three-way match (SOP §10.1) */}
+              <div className="space-y-2 sm:col-span-2 rounded-lg border border-border bg-muted/30 p-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    id="requireGRN"
+                    name="requireGRN"
+                    type="checkbox"
+                    defaultChecked={!!company?.settings?.requireGRN}
+                    value="true"
+                    className="mt-1 h-4 w-4 rounded border-input"
+                  />
+                  <div className="space-y-1">
+                    <Label htmlFor="requireGRN" className="font-medium">
+                      Require Goods Receipt Note for inventory
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Industry-standard three-way match (SOP §10.1). When ON,
+                      bill approval no longer credits inventory directly —
+                      it posts a GR/IR clearing liability instead. Inventory
+                      is admitted only when a Goods Receipt Note is created
+                      and accepted by Sales + Finance. Recommended for
+                      ISO-audited or industrial operations. Existing approved
+                      bills are unaffected; this applies to new approvals
+                      going forward.
+                    </p>
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      Requires the GR/IR clearing account
+                      (systemAccount: <code>grni</code>) to exist in your
+                      Chart of Accounts.
+                    </p>
+                  </div>
+                </div>
+                {state.errors?.requireGRN && (
+                  <p className="text-sm text-destructive">
+                    {state.errors.requireGRN[0]}
+                  </p>
+                )}
+              </div>
             </div>
 
             {!isEdit && (

@@ -272,6 +272,13 @@ const purchaseOrderSchema = new Schema(
     sentAt: Date,
     sentBy: { name: String, id: String },
 
+    // Email-delivery tracking. `sentAt` = the user clicked "send"; these
+    // record what happened with the actual outbound email.
+    sentTo: String,                   // Supplier email address used
+    deliveredAt: Date,                // Resend confirmed accepted-for-delivery
+    deliveryAttempts: { type: Number, default: 0 },
+    lastDeliveryError: String,        // Surfaced on the PO detail page if non-empty
+
     confirmedAt: Date,
     confirmedBy: { name: String, id: String },
 

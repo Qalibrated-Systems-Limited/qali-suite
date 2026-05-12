@@ -274,16 +274,34 @@ const CancelDepreciationSchema = z.object({
 // ============================================
 // ROLE AUTHORIZATION
 // ============================================
+// Asset authority. CFO and Finance Manager are senior finance roles and
+// should be able to do everything Accountant can do (and more); they were
+// missing previously, blocking capitalization-from-bill and asset CRUD
+// for those users. SuperAdmin still bypasses via hasRole().
 const ASSET_ROLES = {
-  CREATE: ["Admin", "Accountant"],
-  UPDATE: ["Admin", "Accountant"],
-  POST_DEPRECIATION: ["Admin", "Accountant"],
-  DISPOSE: ["Admin"],
-  CANCEL_DEPRECIATION: ["Admin"],
-  TRANSFER: ["Admin", "Accountant", "Manager"],
-  IMPAIR: ["Admin", "Accountant"],
-  RECORD_USAGE: ["Admin", "Accountant", "Manager", "Employee"],
-  VIEW_ALL: ["Admin", "Accountant", "Manager"],
+  CREATE: ["Admin", "CFO", "Finance Manager", "Accountant"],
+  UPDATE: ["Admin", "CFO", "Finance Manager", "Accountant"],
+  POST_DEPRECIATION: ["Admin", "CFO", "Finance Manager", "Accountant"],
+  // Disposal removes the asset and books gain/loss — finance leadership only.
+  DISPOSE: ["Admin", "CFO", "Finance Manager"],
+  CANCEL_DEPRECIATION: ["Admin", "CFO", "Finance Manager"],
+  TRANSFER: ["Admin", "CFO", "Finance Manager", "Accountant", "Manager"],
+  IMPAIR: ["Admin", "CFO", "Finance Manager", "Accountant"],
+  RECORD_USAGE: [
+    "Admin",
+    "CFO",
+    "Finance Manager",
+    "Accountant",
+    "Manager",
+    "Employee",
+  ],
+  VIEW_ALL: [
+    "Admin",
+    "CFO",
+    "Finance Manager",
+    "Accountant",
+    "Manager",
+  ],
 };
 
 function hasRole(user, roles) {
@@ -434,6 +452,7 @@ export async function createAsset(_prevState, formData) {
       const firstError = Object.values(fieldErrors).flat()[0];
       return {
         success: false,
+        
         error: firstError || "Invalid input",
         fieldErrors,
       };

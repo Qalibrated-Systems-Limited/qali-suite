@@ -451,6 +451,8 @@ export async function updateCompany(prevState, formData) {
       company.settings.defaultPaymentTermsDays = data.defaultPaymentTermsDays;
     if (data.capitalizationThreshold !== undefined)
       company.settings.capitalizationThreshold = data.capitalizationThreshold;
+    if (data.requireGRN !== undefined)
+      company.settings.requireGRN = !!data.requireGRN;
 
     // Audit
     company.lastModifiedBy = {

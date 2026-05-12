@@ -51,6 +51,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
+  CommandSeparator,
 } from "@/components/ui/command";
 import {
   Popover,
@@ -159,6 +160,29 @@ function SupplierCombobox({ suppliers: initialSuppliers, defaultValue, error }) 
                 ))}
               </CommandGroup>
             </CommandList>
+
+            {/* Persistent "Create new supplier" footer — always visible
+                outside the CommandList so cmdk's keyboard/click handling
+                doesn't fight with the Dialog trigger. */}
+            <CommandSeparator />
+            <div className="p-1">
+              <QuickCreatePartyDialog
+                partyType="supplier"
+                onPartyCreated={(party) => {
+                  setSupplierList((prev) => [party, ...prev]);
+                  setValue(party._id);
+                  setOpen(false);
+                }}
+              >
+                <button
+                  type="button"
+                  className="w-full inline-flex items-center rounded-sm px-2 py-1.5 text-sm font-medium text-yellow-600 dark:text-yellow-500 hover:bg-accent transition-colors"
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create new supplier
+                </button>
+              </QuickCreatePartyDialog>
+            </div>
           </Command>
         </PopoverContent>
       </Popover>

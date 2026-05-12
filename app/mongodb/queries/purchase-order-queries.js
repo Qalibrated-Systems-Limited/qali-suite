@@ -119,6 +119,9 @@ export const fetchPurchaseAccounts = async () => {
     name: account.accountName,
     type: account.accountType,
     subType: account.subType,
+    // Surfaced so the PO form can auto-pick "Inventory" when a product
+    // is selected on a line (systemAccount === "inventory").
+    systemAccount: account.systemAccount || null,
     fullName: `${account.accountCode} - ${account.accountName}`,
   }));
 };

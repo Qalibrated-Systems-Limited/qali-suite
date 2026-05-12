@@ -212,6 +212,19 @@ const companySchema = new Schema(
         default: 5, // 5% WHT
       },
 
+      // ── Inventory / Receiving (SOP §10.1) ─────────────────────────────
+      // Industry-standard three-way match: when ON, Bill approval no
+      // longer credits inventory — instead it posts to the GR/IR clearing
+      // account. Goods are admitted to physical stock only when a Goods
+      // Receipt Note is created and accepted by Sales + Finance. The GRN
+      // accept clears GR/IR with DR Inventory / CR GR/IR.
+      // Default OFF for backward compatibility with existing tenants;
+      // new audited / industrial tenants should turn this ON.
+      requireGRN: {
+        type: Boolean,
+        default: false,
+      },
+
       // Fiscal Year
       fiscalYearStart: {
         type: Number, // Month (1-12)

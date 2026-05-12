@@ -152,15 +152,18 @@ export function PODetailActions({ purchaseOrder, userRole }) {
         </Button>
       )}
 
-      {/* Receive Items - Sent, Confirmed, or Partial */}
+      {/* Receive Items — route into the GRN inspection workflow. SOP
+          §10.1 wants every receipt to go through the inspection +
+          Sales/Finance acceptance gate; the GRN page pre-fills from
+          this PO via ?fromPO=. */}
       {["sent", "confirmed", "partial"].includes(po.status) && canManage && (
         <Button
           variant="outline"
           className="w-full border-emerald-500 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950"
-          onClick={() => router.push(`/dashboard/purchase-orders/${po._id}?receive=true`)}
+          onClick={() => router.push(`/dashboard/grn/create?fromPO=${po._id}`)}
         >
           <Package className="mr-2 h-4 w-4" />
-          Receive Items
+          Receive Goods (GRN)
         </Button>
       )}
 

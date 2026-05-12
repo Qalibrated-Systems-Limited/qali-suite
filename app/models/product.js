@@ -76,7 +76,16 @@ const productSchema =
           type: Number,
           default: 0,
           min: [0, "Available quantity cannot be negative"],
-          // = quantityOnHand - quantityCommitted
+          // = quantityOnHand - quantityCommitted - quantityOnHold
+        },
+
+        // Items physically received but not yet admitted to usable stock
+        // (pending Sales + Finance acceptance via Goods Receipt Note workflow).
+        // SOP requirement: stock isn't issuable while in HOLD.
+        quantityOnHold: {
+          type: Number,
+          default: 0,
+          min: [0, "Hold quantity cannot be negative"],
         },
 
         reorderLevel: {
@@ -473,10 +482,12 @@ productSchema.pre("save", function () {
     this.inventory = {};
   }
 
-  // Calculate available quantity
+  // Calculate available quantity. Items in HOLD are physically present
+  // but pending Sales+Finance acceptance and not issuable.
   this.inventory.quantityAvailable =
     (this.inventory.quantityOnHand || 0) -
-    (this.inventory.quantityCommitted || 0);
+    (this.inventory.quantityCommitted || 0) -
+    (this.inventory.quantityOnHold || 0);
 
   // Initialize costing with sellingPrice as default if not set
   if (!this.costing?.costPrice && this.pricing?.sellingPrice) {
@@ -623,7 +634,9 @@ productSchema.methods.increaseInventory = async function (
   this.inventory.quantityOnHand =
     (this.inventory.quantityOnHand || 0) + quantity;
   this.inventory.quantityAvailable =
-    this.inventory.quantityOnHand - (this.inventory.quantityCommitted || 0);
+    this.inventory.quantityOnHand -
+    (this.inventory.quantityCommitted || 0) -
+    (this.inventory.quantityOnHold || 0);
 
   // Update lifetime totals
   if (!this.lifetimeTotals) {
@@ -665,7 +678,9 @@ productSchema.methods.decreaseInventory = async function (quantity, _reason, ses
   this.inventory.quantityOnHand =
     (this.inventory.quantityOnHand || 0) - quantity;
   this.inventory.quantityAvailable =
-    this.inventory.quantityOnHand - (this.inventory.quantityCommitted || 0);
+    this.inventory.quantityOnHand -
+    (this.inventory.quantityCommitted || 0) -
+    (this.inventory.quantityOnHold || 0);
 
   await this.save(session ? { session } : undefined);
 
@@ -732,7 +747,9 @@ productSchema.methods.commitInventory = async function (quantity) {
   this.inventory.quantityCommitted =
     (this.inventory.quantityCommitted || 0) + quantity;
   this.inventory.quantityAvailable =
-    (this.inventory.quantityOnHand || 0) - this.inventory.quantityCommitted;
+    (this.inventory.quantityOnHand || 0) -
+    this.inventory.quantityCommitted -
+    (this.inventory.quantityOnHold || 0);
 
   await this.save();
   return this;
@@ -760,7 +777,9 @@ productSchema.methods.releaseInventory = async function (quantity) {
 
   this.inventory.quantityCommitted = committed - quantity;
   this.inventory.quantityAvailable =
-    (this.inventory.quantityOnHand || 0) - this.inventory.quantityCommitted;
+    (this.inventory.quantityOnHand || 0) -
+    this.inventory.quantityCommitted -
+    (this.inventory.quantityOnHold || 0);
 
   await this.save();
   return this;
@@ -1025,6 +1044,48 @@ productSchema.statics.getReleaseInventoryUpdate = function (quantity) {
     $inc: {
       "inventory.quantityCommitted": -quantity,
       "inventory.quantityAvailable": quantity,
+    },
+  };
+};
+
+// ============================================
+// HOLD bucket — Goods Receipt Note (SOP §10.1)
+// ============================================
+// Items are physically on premises (counted in quantityOnHand) but pending
+// Sales+Finance acceptance. While in HOLD, they don't count toward
+// quantityAvailable so they can't be issued.
+//
+// Lifecycle:
+//   onReceiveToHold   →  onHand += qty,  onHold += qty,  available unchanged
+//   onAcceptFromHold  →  onHold -= qty                  (becomes available)
+//   onRejectFromHold  →  onHand -= qty,  onHold -= qty  (return to supplier)
+// ============================================
+
+productSchema.statics.getReceiveToHoldUpdate = function (quantity) {
+  return {
+    $inc: {
+      "inventory.quantityOnHand": quantity,
+      "inventory.quantityOnHold": quantity,
+      // available NOT changed — onHold cancels onHand
+    },
+  };
+};
+
+productSchema.statics.getAcceptFromHoldUpdate = function (quantity) {
+  return {
+    $inc: {
+      "inventory.quantityOnHold": -quantity,
+      "inventory.quantityAvailable": quantity,
+    },
+  };
+};
+
+productSchema.statics.getRejectFromHoldUpdate = function (quantity) {
+  return {
+    $inc: {
+      "inventory.quantityOnHand": -quantity,
+      "inventory.quantityOnHold": -quantity,
+      // available NOT changed
     },
   };
 };

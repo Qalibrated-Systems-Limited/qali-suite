@@ -287,6 +287,8 @@ export class BankFeedService {
     }
 
     const parsedLines = [];
+    let droppedDateInvalid = 0;
+    let droppedZeroAmount = 0;
 
     for (let i = 1; i < lines.length; i++) {
       const values = this.parseCSVLine(lines[i]);
@@ -321,14 +323,31 @@ export class BankFeedService {
         line.credit = Math.abs(rawCredit) || 0;
       }
 
-      // Skip lines with no amounts
-      if (line.debit === 0 && line.credit === 0) continue;
+      // Skip lines with invalid dates — but track the count so we can give
+      // a useful error if it happens to every row (almost always means the
+      // user's selected dateFormat doesn't match the actual file).
+      if (!line.date || isNaN(line.date.getTime())) {
+        droppedDateInvalid++;
+        continue;
+      }
 
-      // Skip lines with invalid dates
-      if (!line.date || isNaN(line.date.getTime())) continue;
+      // Skip zero-amount rows — typically "BALANCE B/FWD" entries that
+      // some banks include as the first line.
+      if (line.debit === 0 && line.credit === 0) {
+        droppedZeroAmount++;
+        continue;
+      }
 
       parsedLines.push(line);
     }
+
+    // Attach diagnostics so the caller can build a meaningful error
+    // instead of a generic "No valid transactions" message.
+    parsedLines.diagnostics = {
+      totalDataRows: lines.length - 1,
+      droppedDateInvalid,
+      droppedZeroAmount,
+    };
 
     return parsedLines;
   }
@@ -366,12 +385,17 @@ export class BankFeedService {
 
     dateStr = dateStr.trim();
 
-    // Try common formats
+    // Try common formats. The wizard exposes DD.MM.YYYY (and auto-detects
+    // it client-side) — keep this list in sync, otherwise every row gets
+    // dropped server-side as "invalid date".
     const formats = [
       { regex: /^(\d{2})\/(\d{2})\/(\d{4})$/, parse: (m) => new Date(m[3], m[2] - 1, m[1]) }, // DD/MM/YYYY
       { regex: /^(\d{2})-(\d{2})-(\d{4})$/, parse: (m) => new Date(m[3], m[2] - 1, m[1]) }, // DD-MM-YYYY
+      { regex: /^(\d{2})\.(\d{2})\.(\d{4})$/, parse: (m) => new Date(m[3], m[2] - 1, m[1]) }, // DD.MM.YYYY
       { regex: /^(\d{4})-(\d{2})-(\d{2})$/, parse: (m) => new Date(m[1], m[2] - 1, m[3]) }, // YYYY-MM-DD
+      { regex: /^(\d{4})\/(\d{2})\/(\d{2})$/, parse: (m) => new Date(m[1], m[2] - 1, m[3]) }, // YYYY/MM/DD
       { regex: /^(\d{2})\/(\d{2})\/(\d{2})$/, parse: (m) => new Date(2000 + parseInt(m[3]), m[2] - 1, m[1]) }, // DD/MM/YY
+      { regex: /^(\d{2})\.(\d{2})\.(\d{2})$/, parse: (m) => new Date(2000 + parseInt(m[3]), m[2] - 1, m[1]) }, // DD.MM.YY
     ];
 
     for (const { regex, parse } of formats) {

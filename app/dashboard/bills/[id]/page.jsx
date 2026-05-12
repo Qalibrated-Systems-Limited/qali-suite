@@ -232,6 +232,22 @@ export default async function BillDetailsPage({ params }) {
                 </Link>
               </Button>
             )}
+            {bill.status === "approved" &&
+              (bill.lines || []).some((l) => l.product?.id) &&
+              [
+                "SuperAdmin",
+                "Admin",
+                "Manager",
+                "Store Manager",
+                "Storekeeper",
+              ].includes(user.role) && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/dashboard/grn/create?fromBill=${bill._id}`}>
+                    <Edit className="mr-2 h-4 w-4" />
+                    Receive Goods (GRN)
+                  </Link>
+                </Button>
+              )}
             <Button variant="outline" size="sm">
               <Download className="mr-2 h-4 w-4" />
               PDF
@@ -263,6 +279,31 @@ export default async function BillDetailsPage({ params }) {
           </div>
         </div>
       )}
+
+      {/* Three-way match: payment is blocked until goods are received & accepted */}
+      {bill.status === "approved" &&
+        bill.accounting?.usedGRNI === true &&
+        bill.accounting?.inventoryMoved !== true && (
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-medium text-amber-700 dark:text-amber-400">
+                Awaiting goods receipt
+              </p>
+              <p className="text-sm text-amber-700/80 dark:text-amber-400/80 mt-1">
+                This bill posted to GR/IR clearing — inventory will be admitted
+                and payment will unlock once a Goods Receipt Note is created
+                and accepted by Sales + Finance.
+              </p>
+              <Link
+                href={`/dashboard/grn/create?fromBill=${bill._id}`}
+                className="text-xs text-amber-700 dark:text-amber-400 underline mt-2 inline-block"
+              >
+                Create Goods Receipt Note →
+              </Link>
+            </div>
+          </div>
+        )}
 
       {bill.status === "cancelled" && (
         <div className="bg-muted border rounded-lg p-4 flex items-start gap-3">

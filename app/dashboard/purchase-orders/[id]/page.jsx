@@ -391,8 +391,8 @@ export default async function PurchaseOrderDetailPage({ params }) {
                               line.receivedQuantity >= line.quantity
                                 ? "text-green-600 dark:text-green-400"
                                 : line.receivedQuantity > 0
-                                ? "text-amber-600 dark:text-amber-400"
-                                : ""
+                                  ? "text-amber-600 dark:text-amber-400"
+                                  : ""
                             }
                           >
                             {line.receivedQuantity || 0}
@@ -585,7 +585,7 @@ export default async function PurchaseOrderDetailPage({ params }) {
                     <span className="font-medium text-red-600 dark:text-red-400">
                       -
                       {formatCurrency(
-                        (po.amounts?.subtotal || 0) * (po.whtRate / 100)
+                        (po.amounts?.subtotal || 0) * (po.whtRate / 100),
                       )}
                     </span>
                   </div>

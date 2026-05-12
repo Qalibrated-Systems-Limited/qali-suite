@@ -66,6 +66,8 @@ const PAGES = [
   { label: "Projects", href: "/dashboard/projects", icon: FolderKanban },
   { label: "Expenses", href: "/dashboard/expenses", icon: Wallet },
   { label: "Approvals", href: "/dashboard/approvals", icon: CheckSquare },
+  { label: "Goods Receipt Notes", href: "/dashboard/grn", icon: ClipboardList, aliases: ["grn", "receiving", "inspection"] },
+  { label: "Nonconformance Register", href: "/dashboard/ncr", icon: ClipboardList, aliases: ["ncr", "discrepancy", "nonconformance", "quality"] },
   { label: "Users", href: "/dashboard/users", icon: Users },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 

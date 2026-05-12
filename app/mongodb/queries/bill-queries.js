@@ -109,6 +109,9 @@ function serializeBill(bill) {
       journalEntryId: bill.accounting?.journalEntryId?.toString() || null,
       reversalEntryId: bill.accounting?.reversalEntryId?.toString() || null,
       postedAt: bill.accounting?.postedAt?.toISOString() || null,
+      // Three-way match flags — true once an accepted GRN has cleared GR/IR.
+      inventoryMoved: bill.accounting?.inventoryMoved ?? true,
+      usedGRNI: bill.accounting?.usedGRNI || false,
     },
 
     description: bill.description || "",

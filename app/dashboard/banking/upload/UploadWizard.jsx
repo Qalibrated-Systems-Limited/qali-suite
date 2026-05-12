@@ -14,6 +14,7 @@ import {
   AlertCircle,
   X,
   Building2,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { importBankStatement } from "@/app/mongodb/actions/bank-feed-actions";
@@ -109,13 +110,15 @@ const AUTO_MAP_RULES = [
  * so we treat that pair as the strong signal.
  */
 function findHeaderRow(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+
   let bestIndex = -1;
   let bestScore = 0;
   const scanLimit = Math.min(rows.length, 50);
 
   for (let i = 0; i < scanLimit; i++) {
     const row = rows[i];
-    if (!row || row.length < 2) continue;
+    if (!Array.isArray(row) || row.length < 2) continue;
 
     // Stringify each cell once.
     const cells = [];
@@ -244,6 +247,79 @@ function autoMapColumns(headers) {
   return mapping;
 }
 
+// ============================================
+// TEMPLATE DOWNLOAD
+// ============================================
+/**
+ * Generate and download a sample bank-statement Excel file. Column names
+ * match the auto-mapping rules so users can paste their bank's data into
+ * the same shape and the wizard's auto-detection will pick everything up
+ * on first try. Two sample rows demonstrate the expected format
+ * (one debit, one credit, with running balance).
+ */
+async function downloadBankFeedTemplate() {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Bank Statement");
+
+  sheet.columns = [
+    { header: "Transaction Date", key: "date", width: 18 },
+    { header: "Description", key: "description", width: 40 },
+    { header: "Reference", key: "reference", width: 18 },
+    { header: "Money Out", key: "debit", width: 14 },
+    { header: "Money In", key: "credit", width: 14 },
+    { header: "Balance", key: "balance", width: 16 },
+  ];
+
+  // Sample rows — DD/MM/YYYY date format (the wizard's default).
+  sheet.addRow({
+    date: "01/02/2026",
+    description: "Office rent — Feb",
+    reference: "RENT-FEB",
+    debit: 50000,
+    credit: "",
+    balance: 350000,
+  });
+  sheet.addRow({
+    date: "03/02/2026",
+    description: "Customer payment — INV-2025-0042",
+    reference: "MPESA-RKL2X9",
+    debit: "",
+    credit: 120000,
+    balance: 470000,
+  });
+  sheet.addRow({
+    date: "05/02/2026",
+    description: "Bank charges",
+    reference: "FEE-0205",
+    debit: 250,
+    credit: "",
+    balance: 469750,
+  });
+
+  // Bold the header row so it's obvious to the user where their data goes.
+  sheet.getRow(1).font = { bold: true };
+  sheet.getRow(1).alignment = { vertical: "middle" };
+
+  // Number format for amount columns — KES, no currency symbol so it
+  // imports cleanly back into the wizard.
+  ["D", "E", "F"].forEach((col) => {
+    sheet.getColumn(col).numFmt = "#,##0.00;-#,##0.00";
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "bank-statement-template.xlsx";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /**
  * Detect date format from sample values
  */
@@ -359,7 +435,7 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
     const isExcel = fileName.endsWith(".xlsx") || fileName.endsWith(".xls");
 
     if (isExcel) {
-      // Handle Excel file
+      // Handle Excel file we 
       const reader = new FileReader();
       reader.onload = async (e) => {
         try {
@@ -370,37 +446,47 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
           const worksheet = workbook.worksheets[0];
 
           // Convert to array of arrays. ExcelJS returns `row.values` as a
-          // 1-indexed sparse array (leading empty cells are HOLES, not
-          // undefined). `.map` skips holes — and downstream `row.filter`
-          // skips them too — which under-counts header keyword matches when
-          // a bank pads with leading empty columns. Densify to a flat array
-          // of strings here so every column position is represented.
-          const jsonData = [];
-          const widestColumn = worksheet.actualColumnCount || worksheet.columnCount || 0;
-          worksheet.eachRow({ includeEmpty: true }, (row) => {
-            const rawValues = row.values; // 1-indexed
-            const lastCol = Math.max(rawValues.length - 1, widestColumn);
-            const dense = new Array(lastCol);
-            for (let c = 0; c < lastCol; c++) {
-              const cell = rawValues[c + 1]; // skip 1-indexed slot 0
-              if (cell == null) {
-                dense[c] = "";
-              } else if (
-                typeof cell === "object" &&
-                cell.result !== undefined
-              ) {
-                dense[c] = cell.result;
-              } else if (
-                typeof cell === "object" &&
-                cell.richText !== undefined
-              ) {
-                dense[c] = cell.richText.map((t) => t.text || "").join("");
-              } else {
-                dense[c] = cell;
-              }
+          // 1-indexed sparse array (leading empty cells are HOLES). Build a
+          // dense, defensively-typed string array per row so downstream
+          // `.map` / `.filter` / `.length` checks don't trip on holes or on
+          // hyperlink/formula/richText cell objects.
+          const cellToValue = (cell) => {
+            if (cell == null) return "";
+            if (typeof cell !== "object") return cell;
+            // Date stays a Date — date-format detection needs raw values.
+            if (cell instanceof Date) return cell;
+            // Formula cell: { formula, result }
+            if (cell.result !== undefined) return cell.result == null ? "" : cell.result;
+            // Rich text: { richText: [{ text }, ...] }
+            if (Array.isArray(cell.richText)) {
+              return cell.richText.map((t) => t.text || "").join("");
             }
+            // Hyperlink cell: { text, hyperlink }
+            if (cell.text !== undefined) return cell.text;
+            // Shared string / inline string variants
+            if (cell.value !== undefined) return cell.value;
+            return "";
+          };
+
+          const jsonData = [];
+          let widest = 0;
+          worksheet.eachRow({ includeEmpty: true }, (row) => {
+            const rawValues = Array.isArray(row.values) ? row.values : [];
+            const dense = [];
+            // 1-indexed: skip slot 0; iterate up to length, push for each
+            // column position so holes become "".
+            for (let c = 1; c < rawValues.length; c++) {
+              dense.push(cellToValue(rawValues[c]));
+            }
+            if (dense.length > widest) widest = dense.length;
             jsonData.push(dense);
           });
+
+          // Pad every row to the widest column count so column positions
+          // line up across the file.
+          for (const row of jsonData) {
+            while (row.length < widest) row.push("");
+          }
 
           // Filter out completely empty rows
           const allRows = jsonData.filter((row) =>
@@ -595,9 +681,26 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
 
       {/* File Upload */}
       <div>
-        <label className="block text-sm font-medium mb-2">
-          Bank Statement File <span className="text-red-500">*</span>
-        </label>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <label className="block text-sm font-medium">
+            Bank Statement File <span className="text-red-500">*</span>
+          </label>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={downloadBankFeedTemplate}
+            className="gap-1.5"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download template
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground mb-2">
+          Don&apos;t have a bank-export file handy? Download the template,
+          paste your transactions in, and upload it back — the wizard will
+          auto-detect every column.
+        </p>
         <div
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}

@@ -294,6 +294,22 @@ export async function approveLeaveRequest(leaveId) {
     );
     if (!leave) return { success: false, error: "Leave request not found" };
 
+    // Segregation of Duties: an employee — including an Admin — cannot
+    // approve their own leave request. The SOP and every standard HR
+    // policy require a second person to sign off. Solo-admin tenants
+    // must add a second approver (HR or Manager) before they can take
+    // leave.
+    if (
+      leave.employee?.userId &&
+      leave.employee.userId.toString() === user.id
+    ) {
+      return {
+        success: false,
+        error:
+          "You can't approve your own leave request — ask another approver (HR, Manager, or Admin).",
+      };
+    }
+
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
 
@@ -361,6 +377,21 @@ export async function rejectLeaveRequest(_prevState, formData) {
       withTenantScope({ _id: leaveId }, companyId, isSuperAdmin)
     );
     if (!leave) return { success: false, error: "Leave request not found" };
+
+    // Same SoD rule as approval — you can't reject your own request
+    // either (it would let an Admin silently cancel inconvenient
+    // requests they themselves raised without leaving an audit trail
+    // of a second approver having denied it).
+    if (
+      leave.employee?.userId &&
+      leave.employee.userId.toString() === user.id
+    ) {
+      return {
+        success: false,
+        error:
+          "You can't reject your own leave request — ask another approver.",
+      };
+    }
 
     mongoSession = await mongoose.startSession();
     mongoSession.startTransaction();
