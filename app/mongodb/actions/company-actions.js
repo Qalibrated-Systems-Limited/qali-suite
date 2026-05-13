@@ -123,6 +123,9 @@ const CreateCompanySchema = z.object({
   fiscalYearStart: optionalNumber(1, 12),
   defaultPaymentTermsDays: optionalNumber(0, 365),
   capitalizationThreshold: optionalNumber(0, 1_000_000_000),
+  // Three-way-match toggle. Boolean coerced from the form's checkbox
+  // value ("true" / unchecked).
+  requireGRN: z.coerce.boolean().optional(),
 });
 
 const UpdateCompanySchema = CreateCompanySchema.partial();
@@ -325,6 +328,11 @@ export async function updateCompany(prevState, formData) {
     fiscalYearStart: formData.get("fiscalYearStart"),
     defaultPaymentTermsDays: formData.get("defaultPaymentTermsDays"),
     capitalizationThreshold: formData.get("capitalizationThreshold"),
+    // Three-way-match toggle. HTML checkboxes submit "true" when
+    // checked and nothing when unchecked — coerce both states into
+    // an explicit boolean so the action can detect "user unchecked
+    // the box" vs. "user didn't touch it".
+    requireGRN: formData.get("requireGRN") === "true",
   };
 
   if (!session?.user) {

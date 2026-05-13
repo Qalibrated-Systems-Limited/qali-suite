@@ -58,7 +58,7 @@ export default async function NCRDetailPage({ params }) {
   const currentUser = session?.user || null;
 
   return (
-    <div className="space-y-6 p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto">
+    <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div className="flex items-start gap-3">
           <Button variant="outline" size="icon" asChild>

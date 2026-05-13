@@ -804,20 +804,35 @@ function LineItem({
           </p>
         </div>
 
-        {/* Account Selection */}
+        {/* Account Selection — defaults to Inventory when a stock
+            product is picked on the line. Re-mounts the combobox via
+            `key` so the new defaultValue actually takes effect (the
+            combobox stores its own internal state). */}
         <div className="space-y-2">
           <Label className="text-sm font-medium">
-            Account <span className="text-destructive">*</span>
+            GL Account <span className="text-destructive">*</span>
           </Label>
           <AccountCombobox
+            key={
+              line?.accountId
+                ? `acct-${line.accountId}`
+                : line?.account?.id
+                ? `acct-${line.account.id}`
+                : `acct-empty-${index}`
+            }
             accounts={accounts}
             index={index}
-            defaultValue={line?.account?.id?.toString() || ""}
+            defaultValue={
+              line?.accountId ||
+              line?.account?.id?.toString() ||
+              ""
+            }
             error={lineErrors[`lines.${index}.accountId`]}
           />
           <p className="text-xs text-muted-foreground">
-            Expense for services, Inventory for stock, Fixed Asset for
-            acquisitions
+            Auto-picks <strong>Inventory</strong> for stock products.
+            Override to Expense (services / consumables) or Fixed Asset
+            (capital purchases) as needed.
           </p>
           {lineErrors[`lines.${index}.accountId`] && (
             <p className="text-xs text-destructive">
@@ -1038,6 +1053,14 @@ export default function BillForm({
     setLines((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Find the tenant's Inventory system account once — used to default
+  // the bill line's GL account when the user picks a stock product.
+  // Industry-standard pattern: SAP/NetSuite/Xero/Odoo all auto-derive
+  // the inventory posting account from the product on every line.
+  const inventoryAccount = accounts.find(
+    (a) => a.systemAccount === "inventory",
+  );
+
   const handleProductChange = (index, productId) => {
     if (!productId || productId === "none") return;
 
@@ -1063,6 +1086,20 @@ export default function BillForm({
       if (unitInput && (!unitInput.value || unitInput.value === "pcs")) {
         unitInput.value = product.unit || "pcs";
       }
+    }
+
+    // Auto-default the GL account to Inventory when the user hasn't
+    // already picked one. We lift this into line state so the
+    // AccountCombobox can re-mount with the new defaultValue (the
+    // combobox stores its own state internally — controlled via key).
+    if (inventoryAccount) {
+      setLines((prev) =>
+        prev.map((line, i) =>
+          i === index && !line.accountId && !line.account?.id
+            ? { ...line, accountId: inventoryAccount._id }
+            : line,
+        ),
+      );
     }
   };
 

@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Building2,
   FileText,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -74,7 +75,7 @@ export default async function GRNDetailPage({ params }) {
   const currentUser = session?.user || null;
 
   return (
-    <div className="space-y-6 p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div className="flex items-start gap-3">
@@ -102,7 +103,23 @@ export default async function GRNDetailPage({ params }) {
             </div>
           </div>
         </div>
-        <GRNActions grn={grn} currentUser={currentUser} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" asChild>
+            {/* Route returns Content-Disposition: attachment, so this
+                triggers a real download rather than a new-tab preview.
+                The `download` attribute is a redundant hint for browsers
+                that don't honour the server header (rare). */}
+            <a
+              href={`/api/grn/${grn._id}/pdf`}
+              download={`${grn.grnNumber}.pdf`}
+              className="gap-1.5"
+            >
+              <Download className="h-4 w-4" />
+              Download PDF
+            </a>
+          </Button>
+          <GRNActions grn={grn} currentUser={currentUser} />
+        </div>
       </div>
 
       {/* Summary card */}

@@ -46,7 +46,7 @@ async function getBillFormData() {
     isActive: { $ne: false },
     canPost: true,
   })
-    .select("_id accountCode accountName accountType subType")
+    .select("_id accountCode accountName accountType subType systemAccount")
     .sort({ accountType: -1, accountCode: 1 }) // expense first, then asset
     .lean();
 
@@ -86,6 +86,10 @@ async function getBillFormData() {
     accountName: a.accountName,
     accountType: a.accountType,
     subType: a.subType || null,
+    // Surfaced so the bill form can auto-pick Inventory when a product
+    // is selected on a line (systemAccount === "inventory"), same UX
+    // pattern as the PO form.
+    systemAccount: a.systemAccount || null,
   }));
 
   const serializedProducts = products.map((p) => ({

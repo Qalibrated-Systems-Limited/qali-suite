@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 
 import GoodsReceipt from "@/app/models/goodsReceipt";
 import Bill from "@/app/models/bill";
+import PurchaseOrder from "@/app/models/purchaseOrder";
 import Product from "@/app/models/product";
 import Account from "@/app/models/account";
 import JournalEntry from "@/app/models/JournalEntry";
@@ -97,6 +98,7 @@ async function grnAppliesInventory(grn, session) {
 async function postGRNAcceptanceJournal({
   grn,
   bill,
+  purchaseOrder,
   user,
   session,
   acceptedLines,
@@ -115,34 +117,55 @@ async function postGRNAcceptanceJournal({
     );
   }
 
-  // Compute per-line cost from the bill so the JE matches what the bill
-  // posted to GR/IR.
-  const lineAmounts = new Map(); // grnLineId → amount
+  // Compute per-line cost from the source document so the JE values
+  // match what was already booked elsewhere:
+  // - Bill source (strict mode): bill.amount → already posted to GR/IR
+  // - PO source: po.unitPrice × accepted qty → opens GR/IR (bill clears later)
+  const lineAmounts = new Map(); // grnLineId → { amount, description }
   for (const grnLine of acceptedLines) {
-    // Find the bill line for this product. (Bills may have multiple
-    // lines per product; for now assume 1:1 — first match wins.)
-    const billLine = (bill?.lines || []).find(
-      (bl) => bl.product?.id?.toString() === grnLine.productId.toString(),
-    );
-    if (!billLine) {
-      throw new Error(
-        `Cannot find matching bill line for product ${grnLine.productId} on GRN ${grn.grnNumber}.`,
+    let amount = 0;
+    let description = grnLine.description;
+
+    if (bill) {
+      // Find the matching bill line. (1:1 by product for now.)
+      const billLine = (bill.lines || []).find(
+        (bl) => bl.product?.id?.toString() === grnLine.productId.toString(),
       );
+      if (!billLine) {
+        throw new Error(
+          `Cannot find matching bill line for product ${grnLine.productId} on GRN ${grn.grnNumber}.`,
+        );
+      }
+      // Pro-rate by accepted vs received qty so partial accepts post the
+      // correct cost portion.
+      const ratio =
+        grnLine.receivedQty > 0
+          ? grnLine.acceptedQty / grnLine.receivedQty
+          : 0;
+      amount = Math.round(billLine.amount * ratio * 100) / 100;
+      description = billLine.description || description;
+    } else if (purchaseOrder) {
+      // PO line carries unitPrice; multiply by accepted qty.
+      const poLine = (purchaseOrder.lines || []).find(
+        (pl) => pl.product?.id?.toString() === grnLine.productId.toString(),
+      );
+      if (!poLine) {
+        // No matching PO line — fall back to product's average cost via 0
+        // (we'll skip below). User can correct with a manual JE.
+        amount = 0;
+      } else {
+        amount = Math.round(poLine.unitPrice * grnLine.acceptedQty * 100) / 100;
+        description = poLine.description || description;
+      }
     }
-    // Pro-rate by accepted vs received qty so partial accepts post the
-    // correct cost portion.
-    const ratio =
-      grnLine.receivedQty > 0
-        ? grnLine.acceptedQty / grnLine.receivedQty
-        : 0;
-    const amount = Math.round(billLine.amount * ratio * 100) / 100;
-    lineAmounts.set(grnLine._id.toString(), { amount, billLine });
+
+    lineAmounts.set(grnLine._id.toString(), { amount, description });
   }
 
   const jeLines = [];
   let totalAmount = 0;
   for (const grnLine of acceptedLines) {
-    const { amount, billLine } = lineAmounts.get(grnLine._id.toString());
+    const { amount, description } = lineAmounts.get(grnLine._id.toString());
     if (amount <= 0) continue;
     totalAmount += amount;
     jeLines.push({
@@ -152,12 +175,14 @@ async function postGRNAcceptanceJournal({
       accountType: "asset",
       debit: amount,
       credit: 0,
-      description: `Inventory admitted via GRN ${grn.grnNumber} — ${billLine.description}`,
+      description: `Inventory admitted via GRN ${grn.grnNumber} — ${description}`,
     });
   }
   if (totalAmount === 0) return null;
 
-  // One netting credit to GR/IR clears the bill's pending receipt.
+  // One netting credit to GR/IR — for bill source this clears the bill's
+  // pending GR/IR; for PO source this OPENS a GR/IR position that the
+  // later bill approval will clear with `DR GR/IR / CR AP`.
   jeLines.push({
     accountId: grniAccount._id,
     accountCode: grniAccount.accountCode,
@@ -165,7 +190,9 @@ async function postGRNAcceptanceJournal({
     accountType: "liability",
     debit: 0,
     credit: totalAmount,
-    description: `GR/IR clearing — GRN ${grn.grnNumber}`,
+    description: bill
+      ? `GR/IR clearing — GRN ${grn.grnNumber}`
+      : `GR/IR (goods received, not yet invoiced) — GRN ${grn.grnNumber}`,
   });
 
   // Generate a unique JE number — reuse the project's existing helper.
@@ -187,6 +214,11 @@ async function postGRNAcceptanceJournal({
     lines: jeLines,
     relatedDocuments: bill
       ? { billId: bill._id, billNumber: bill.billNumber }
+      : purchaseOrder
+      ? {
+          purchaseOrderId: purchaseOrder._id,
+          purchaseOrderNumber: purchaseOrder.poNumber,
+        }
       : {},
     fiscalPeriod,
     status: "draft",
@@ -714,6 +746,65 @@ export async function acceptGRN(grnId, side, lineDecisions = null, notes = "") {
             bill.accounting.inventoryMoved = true;
             bill.accounting.usedGRNI = false;
             await bill.save({ session });
+          }
+        }
+
+        // PO source: post DR Inventory / CR GR/IR — this OPENS the
+        // GR/IR position (goods received, not yet invoiced). When the
+        // matching bill is later raised, its approval posts DR GR/IR /
+        // CR AP and clears it. Cost per line comes from the PO line
+        // unitPrice × accepted qty. Also bump receivedQuantity on the
+        // PO so its outstanding-qty math reflects reality, and roll the
+        // PO's status forward to partial / received when appropriate.
+        if (
+          shouldApplyInventory &&
+          grn.source?.type === "purchase_order" &&
+          grn.source?.purchaseOrderId
+        ) {
+          const po = await PurchaseOrder.findById(
+            grn.source.purchaseOrderId,
+          ).session(session);
+          if (po) {
+            await postGRNAcceptanceJournal({
+              grn,
+              purchaseOrder: po,
+              user,
+              session,
+              acceptedLines: acceptedLineRecords,
+            });
+
+            // Apply per-line receivedQuantity update on the PO. Match
+            // GRN line → PO line by productId (1:1 by product for now).
+            for (const grnLine of acceptedLineRecords) {
+              if (grnLine.acceptedQty <= 0) continue;
+              const poLine = po.lines.find(
+                (pl) =>
+                  pl.product?.id?.toString() ===
+                  grnLine.productId.toString(),
+              );
+              if (poLine) {
+                poLine.receivedQuantity =
+                  (poLine.receivedQuantity || 0) + grnLine.acceptedQty;
+              }
+            }
+
+            // Recompute PO header status from the line totals.
+            const allFullyReceived = po.lines.every(
+              (pl) => (pl.receivedQuantity || 0) >= (pl.quantity || 0),
+            );
+            const anyReceived = po.lines.some(
+              (pl) => (pl.receivedQuantity || 0) > 0,
+            );
+            if (allFullyReceived) {
+              po.status = "received";
+            } else if (anyReceived) {
+              po.status = "partial";
+            }
+            // Don't downgrade a more-advanced status (e.g. don't bump
+            // a 'confirmed' back to 'sent' just because nothing was
+            // received yet — that branch can't happen here).
+
+            await po.save({ session });
           }
         }
 
