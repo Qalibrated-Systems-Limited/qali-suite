@@ -3,6 +3,7 @@ import PurchaseOrder from "../../models/purchaseOrder";
 import Party from "../../models/parties";
 import Product from "../../models/product";
 import Account from "../../models/account";
+import GoodsReceipt from "../../models/goodsReceipt";
 import { serializeBsonType } from "@/lib/utils";
 import {
   getTenantContext,
@@ -347,29 +348,74 @@ export const getOpenPurchaseOrders = async (supplierId = null) => {
     .sort({ expectedDeliveryDate: 1, poDate: -1 })
     .lean();
 
+  // In-flight GRNs (draft / pending_acceptance) have already reserved
+  // units against these POs but haven't bumped PO.lines.receivedQuantity
+  // yet (that only happens on accept). Subtract their qty here so the
+  // same units don't appear available twice.
+  const poIds = pos.map((p) => p._id);
+  const inFlightGRNs = poIds.length
+    ? await GoodsReceipt.find(
+        withTenantScope(
+          {
+            "source.type": "purchase_order",
+            "source.purchaseOrderId": { $in: poIds },
+            status: { $in: ["draft", "pending_acceptance"] },
+          },
+          companyId,
+          isSuperAdmin,
+        ),
+      ).lean()
+    : [];
+
+  // Map: poId → productId → reserved qty
+  const reserved = new Map();
+  for (const grn of inFlightGRNs) {
+    const poKey = grn.source?.purchaseOrderId?.toString();
+    if (!poKey) continue;
+    if (!reserved.has(poKey)) reserved.set(poKey, new Map());
+    const byProduct = reserved.get(poKey);
+    for (const line of grn.lines || []) {
+      const pid = line.productId?.toString();
+      if (!pid) continue;
+      const qty = Number(line.receivedQty) || 0;
+      byProduct.set(pid, (byProduct.get(pid) || 0) + qty);
+    }
+  }
+
   // Filter to only POs with available items
   return pos
-    .map((po) => ({
-      ...serializeBsonType(po),
-      availableLines: po.lines
-        .filter((line) => line.receivedQuantity < line.quantity)
-        .map((line) => ({
-          lineId: line._id.toString(),
-          product: line.product
-            ? {
-                id: line.product.id?.toString(),
-                sku: line.product.sku,
-                name: line.product.name,
-              }
-            : null,
-          description: line.description,
-          unit: line.unit,
-          unitPrice: line.unitPrice,
-          orderedQuantity: line.quantity,
-          receivedQuantity: line.receivedQuantity,
-          availableQuantity: line.quantity - line.receivedQuantity,
-        })),
-    }))
+    .map((po) => {
+      const poReserved = reserved.get(po._id.toString()) || new Map();
+      return {
+        ...serializeBsonType(po),
+        availableLines: po.lines
+          .map((line) => {
+            const pid = line.product?.id?.toString();
+            const inFlight = (pid && poReserved.get(pid)) || 0;
+            const available =
+              (line.quantity || 0) -
+              (line.receivedQuantity || 0) -
+              inFlight;
+            return {
+              lineId: line._id.toString(),
+              product: line.product
+                ? {
+                    id: line.product.id?.toString(),
+                    sku: line.product.sku,
+                    name: line.product.name,
+                  }
+                : null,
+              description: line.description,
+              unit: line.unit,
+              unitPrice: line.unitPrice,
+              orderedQuantity: line.quantity,
+              receivedQuantity: line.receivedQuantity,
+              availableQuantity: available,
+            };
+          })
+          .filter((line) => line.availableQuantity > 0),
+      };
+    })
     .filter((po) => po.availableLines.length > 0);
 };
 

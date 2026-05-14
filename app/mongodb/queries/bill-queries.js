@@ -421,6 +421,36 @@ export async function getBillsBySupplier(supplierId, options = {}) {
 }
 
 // ============================================
+// GET BILLS AWAITING GOODS RECEIPT
+// ============================================
+// Used by the GRN create form's in-form picker for sourceType="bill".
+// Returns approved strict-mode bills (usedGRNI=true, inventoryMoved=false)
+// — i.e., bills that posted to GR/IR clearing and still need a GRN
+// accepted to admit inventory and unlock payment.
+export async function getBillsAwaitingGRN() {
+  try {
+    await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    let query = {
+      status: "approved",
+      "accounting.usedGRNI": true,
+      "accounting.inventoryMoved": { $ne: true },
+    };
+    query = withTenantScope(query, companyId, isSuperAdmin);
+
+    const bills = await Bill.find(query)
+      .sort({ billDate: -1 })
+      .lean();
+
+    return bills.map(serializeBill).filter(Boolean);
+  } catch (error) {
+    console.error("Error fetching bills awaiting GRN:", error);
+    return [];
+  }
+}
+
+// ============================================
 // GET UNPAID BILLS (For payment module)
 // ============================================
 export async function getUnpaidBills(supplierId = null) {

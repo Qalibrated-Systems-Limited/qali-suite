@@ -225,14 +225,33 @@ async function postGRNAcceptanceJournal({
     createdBy: userInfo,
   });
   await je.save({ session });
-  await je.post(userInfo, { session });
+  await je.post(userInfo, session);
 
-  // Create posted stock movements alongside the JE.
+  // Quantity-on-hand was already bumped at submit time (HOLD bucket
+  // holds it). Set previousStock = currentOnHand - acceptedQty,
+  // newStock = currentOnHand so the audit trail attributes this
+  // consignment correctly.
+  const movProducts = await Product.find({
+    _id: { $in: acceptedLines.map((l) => l.productId) },
+  })
+    .select("_id inventory.quantityOnHand")
+    .session(session)
+    .lean();
+  const onHandByProductId = new Map(
+    movProducts.map((p) => [
+      p._id.toString(),
+      p.inventory?.quantityOnHand || 0,
+    ]),
+  );
+
   for (const grnLine of acceptedLines) {
     if (grnLine.acceptedQty <= 0) continue;
     const { amount } = lineAmounts.get(grnLine._id.toString());
     const unitCost =
       grnLine.acceptedQty > 0 ? amount / grnLine.acceptedQty : 0;
+    const newStock =
+      onHandByProductId.get(grnLine.productId.toString()) || 0;
+    const previousStock = newStock - grnLine.acceptedQty;
     const movementNumber = await StockMovement.generateMovementNumber(
       grn.companyId,
     );
@@ -250,6 +269,8 @@ async function postGRNAcceptanceJournal({
           movementType: "purchase",
           direction: "in",
           quantity: grnLine.acceptedQty,
+          previousStock,
+          newStock,
           costing: { unitCost, totalCost: amount },
           relatedDocuments: {
             billId: bill?._id,
@@ -257,6 +278,189 @@ async function postGRNAcceptanceJournal({
             // grnId not yet a typed ref on StockMovement — recorded in notes.
           },
           notes: `Admitted via GRN ${grn.grnNumber}`,
+          status: "posted",
+          postedAt: new Date(),
+          postedBy: userInfo,
+          performedBy: userInfo,
+        },
+      ],
+      { session },
+    );
+  }
+
+  return je._id;
+}
+
+// Unscheduled receipts have no source bill or PO, so cost can't be sourced
+// from a line item. We use the product's current average cost (costing.costPrice)
+// and credit a suspense account that finance reclasses each period to the
+// right home (Accrued Liabilities / Inventory Gain / Other Income / etc.).
+async function postUnscheduledGRNJournal({
+  grn,
+  user,
+  session,
+  acceptedLines,
+}) {
+  if (!acceptedLines.length) return null;
+
+  const filter = { companyId: grn.companyId };
+  const [inventoryAccount, suspenseAccount] = await Promise.all([
+    Account.findOne({ ...filter, systemAccount: "inventory" }).session(session),
+    Account.findOne({ ...filter, systemAccount: "inventory_suspense" }).session(
+      session,
+    ),
+  ]);
+  if (!inventoryAccount || !suspenseAccount) {
+    throw new Error(
+      "Inventory or Inventory-Adjustments-Suspense system account not configured — cannot post the unscheduled GRN journal.",
+    );
+  }
+
+  // Cost per line = product.costing.costPrice × acceptedQty.
+  // Zero-cost products are skipped (no JE) — user can post a manual JE
+  // once cost is known.
+  const productIds = acceptedLines.map((l) => l.productId);
+  const products = await Product.find({ _id: { $in: productIds } })
+    .select("_id costing.costPrice inventory.quantityOnHand")
+    .session(session)
+    .lean();
+  const costByProductId = new Map(
+    products.map((p) => [p._id.toString(), p.costing?.costPrice || 0]),
+  );
+  const onHandByProductId = new Map(
+    products.map((p) => [
+      p._id.toString(),
+      p.inventory?.quantityOnHand || 0,
+    ]),
+  );
+
+  const lineAmounts = new Map();
+  let totalAmount = 0;
+  const jeLines = [];
+  for (const grnLine of acceptedLines) {
+    if (grnLine.acceptedQty <= 0) continue;
+    const unitCost = costByProductId.get(grnLine.productId.toString()) || 0;
+    const amount = Math.round(unitCost * grnLine.acceptedQty * 100) / 100;
+    if (amount <= 0) {
+      lineAmounts.set(grnLine._id.toString(), { amount: 0, unitCost: 0 });
+      continue;
+    }
+    lineAmounts.set(grnLine._id.toString(), { amount, unitCost });
+    totalAmount += amount;
+    jeLines.push({
+      accountId: inventoryAccount._id,
+      accountCode: inventoryAccount.accountCode,
+      accountName: inventoryAccount.accountName,
+      accountType: "asset",
+      debit: amount,
+      credit: 0,
+      description: `Inventory admitted (unscheduled) via GRN ${grn.grnNumber} — ${grnLine.description}`,
+    });
+  }
+
+  if (totalAmount === 0) {
+    // Still create stock movements (qty moved) but no JE — cost unknown.
+    for (const grnLine of acceptedLines) {
+      if (grnLine.acceptedQty <= 0) continue;
+      const newStock =
+        onHandByProductId.get(grnLine.productId.toString()) || 0;
+      const previousStock = newStock - grnLine.acceptedQty;
+      const movementNumber = await StockMovement.generateMovementNumber(
+        grn.companyId,
+      );
+      await StockMovement.create(
+        [
+          {
+            companyId: grn.companyId,
+            movementNumber,
+            productId: grnLine.productId,
+            productSnapshot: {
+              name: grnLine.description,
+              SKU: grnLine.sku,
+              unit: grnLine.unit,
+            },
+            movementType: "adjustment",
+            direction: "in",
+            quantity: grnLine.acceptedQty,
+            previousStock,
+            newStock,
+            costing: { unitCost: 0, totalCost: 0 },
+            relatedDocuments: {},
+            notes: `Unscheduled receipt via GRN ${grn.grnNumber} (no cost — manual JE required)`,
+            status: "posted",
+            postedAt: new Date(),
+            postedBy: { id: user.id, name: user.name },
+            performedBy: { id: user.id, name: user.name },
+          },
+        ],
+        { session },
+      );
+    }
+    return null;
+  }
+
+  jeLines.push({
+    accountId: suspenseAccount._id,
+    accountCode: suspenseAccount.accountCode,
+    accountName: suspenseAccount.accountName,
+    accountType: "liability",
+    debit: 0,
+    credit: totalAmount,
+    description: `Unscheduled receipt suspense — GRN ${grn.grnNumber} (reclass each period)`,
+  });
+
+  const fiscalPeriod = `${new Date(grn.receivedDate).getFullYear()}-${String(
+    new Date(grn.receivedDate).getMonth() + 1,
+  ).padStart(2, "0")}`;
+  const userInfo = { id: user.id, name: user.name };
+  const entryNumber =
+    (await JournalEntry.generateEntryNumber?.(grn.companyId, "GRN")) ??
+    `GRN-JE-${grn.grnNumber}`;
+
+  const je = new JournalEntry({
+    companyId: grn.companyId,
+    entryNumber,
+    entryDate: grn.acceptedAt || new Date(),
+    entryType: "purchase",
+    description: `Goods Receipt Note ${grn.grnNumber} — unscheduled admit to inventory`,
+    lines: jeLines,
+    relatedDocuments: {},
+    fiscalPeriod,
+    status: "draft",
+    createdBy: userInfo,
+  });
+  await je.save({ session });
+  await je.post(userInfo, session);
+
+  for (const grnLine of acceptedLines) {
+    if (grnLine.acceptedQty <= 0) continue;
+    const { amount, unitCost } =
+      lineAmounts.get(grnLine._id.toString()) || { amount: 0, unitCost: 0 };
+    const newStock =
+      onHandByProductId.get(grnLine.productId.toString()) || 0;
+    const previousStock = newStock - grnLine.acceptedQty;
+    const movementNumber = await StockMovement.generateMovementNumber(
+      grn.companyId,
+    );
+    await StockMovement.create(
+      [
+        {
+          companyId: grn.companyId,
+          movementNumber,
+          productId: grnLine.productId,
+          productSnapshot: {
+            name: grnLine.description,
+            SKU: grnLine.sku,
+            unit: grnLine.unit,
+          },
+          movementType: "adjustment",
+          direction: "in",
+          quantity: grnLine.acceptedQty,
+          previousStock,
+          newStock,
+          costing: { unitCost, totalCost: amount },
+          relatedDocuments: { journalEntryId: je._id },
+          notes: `Unscheduled receipt via GRN ${grn.grnNumber}`,
           status: "posted",
           postedAt: new Date(),
           postedBy: userInfo,
@@ -806,6 +1010,22 @@ export async function acceptGRN(grnId, side, lineDecisions = null, notes = "") {
 
             await po.save({ session });
           }
+        }
+
+        // Unscheduled source: no PO, no bill — credit the suspense
+        // account ("Inventory Adjustments — Unscheduled Receipts").
+        // Finance reclasses to the right home each period.
+        if (
+          shouldApplyInventory &&
+          grn.source?.type === "unscheduled" &&
+          acceptedLineRecords.length > 0
+        ) {
+          await postUnscheduledGRNJournal({
+            grn,
+            user,
+            session,
+            acceptedLines: acceptedLineRecords,
+          });
         }
 
         if (rejectedLines === 0) grn.status = "accepted";

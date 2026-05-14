@@ -8,8 +8,24 @@ import {
   Trash2,
   Plus,
   CheckCircle2,
+  Check,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import { createGRN } from "@/app/mongodb/actions/grn-actions";
 
 const PACKAGING = ["good", "damaged", "moisture", "tampered"];
@@ -28,11 +44,17 @@ const emptyLine = () => ({
   storageLocation: "",
 });
 
-export default function GRNForm({ prefill, availablePOs = [] }) {
+export default function GRNForm({
+  prefill,
+  availablePOs = [],
+  availableBills = [],
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [poPickerOpen, setPoPickerOpen] = useState(false);
+  const [billPickerOpen, setBillPickerOpen] = useState(false);
 
   const [form, setForm] = useState(() => ({
     sourceType: prefill?.sourceType || "unscheduled",
@@ -47,6 +69,47 @@ export default function GRNForm({ prefill, availablePOs = [] }) {
     notes: "",
     lines: prefill?.lines?.length ? prefill.lines : [emptyLine()],
   }));
+
+  // Pre-fill lines + supplier when the user picks a bill from the
+  // in-form picker. Mirrors the server-side prefill for ?fromBill=.
+  // Only bills awaiting GRN (strict mode, GR/IR open) are passed in.
+  const handleSelectBill = (billId) => {
+    if (!billId) {
+      setForm((f) => ({
+        ...f,
+        billId: "",
+        supplierPartyId: "",
+        supplierName: "",
+        lines: [emptyLine()],
+      }));
+      return;
+    }
+    const bill = availableBills.find((b) => b._id?.toString() === billId);
+    if (!bill) return;
+    const lines = (bill.lines || [])
+      .filter((l) => l.product?.id)
+      .map((l) => ({
+        productId: l.product.id?.toString?.() || l.product.id,
+        description: l.description || l.product.name || "",
+        sku: l.product.sku || "",
+        expectedQty: l.quantity || 0,
+        receivedQty: l.quantity || 0,
+        unit: l.unit || "pcs",
+        packagingCondition: "good",
+        physicalCondition: "good",
+        inspectionNotes: "",
+        storageLocation: "",
+      }));
+    setForm((f) => ({
+      ...f,
+      sourceType: "bill",
+      billId,
+      supplierPartyId:
+        bill.supplier?.partyId?.toString?.() || bill.supplier?.partyId || "",
+      supplierName: bill.supplier?.name || "",
+      lines: lines.length > 0 ? lines : [emptyLine()],
+    }));
+  };
 
   // Pre-fill lines + supplier when the user picks a PO from the in-form
   // picker (industry-standard "create GRN, then reference a PO" path).
@@ -161,9 +224,11 @@ export default function GRNForm({ prefill, availablePOs = [] }) {
             onChange={(e) => {
               const next = e.target.value;
               setField("sourceType", next);
-              // Switching away from PO clears the PO selection.
               if (next !== "purchase_order") {
                 setField("purchaseOrderId", "");
+              }
+              if (next !== "bill") {
+                setField("billId", "");
               }
             }}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -183,35 +248,164 @@ export default function GRNForm({ prefill, availablePOs = [] }) {
           />
         </Field>
 
-        {/* PO picker — shown when sourceType is purchase_order. Mirrors
-            the SAP/NetSuite/Odoo "select PO to receive against" pattern
-            so Storekeepers who land on the GRN form directly can find a
-            PO without leaving the page. */}
+        {form.sourceType === "bill" && (
+          <Field label="Bill (awaiting receipt)" full>
+            <Popover open={billPickerOpen} onOpenChange={setBillPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={billPickerOpen}
+                  className={cn(
+                    "w-full justify-between font-normal",
+                    !form.billId && "text-muted-foreground",
+                  )}
+                  disabled={availableBills.length === 0}
+                >
+                  {(() => {
+                    const b = availableBills.find(
+                      (x) => x._id?.toString() === form.billId,
+                    );
+                    if (b) {
+                      return `${b.billNumber} — ${b.supplier?.name || "—"}`;
+                    }
+                    return availableBills.length === 0
+                      ? "No bills awaiting receipt"
+                      : "Select a bill to receive against...";
+                  })()}
+                  <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search bills..." />
+                  <CommandList>
+                    <CommandEmpty>No bill matches.</CommandEmpty>
+                    <CommandGroup>
+                      {availableBills.map((b) => {
+                        const label = `${b.billNumber} ${b.supplier?.name || ""}`;
+                        return (
+                          <CommandItem
+                            key={b._id}
+                            value={label}
+                            onSelect={() => {
+                              handleSelectBill(b._id?.toString());
+                              setBillPickerOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                form.billId === b._id?.toString()
+                                  ? "opacity-100"
+                                  : "opacity-0",
+                              )}
+                            />
+                            <div className="flex flex-col">
+                              <span className="font-medium">{b.billNumber}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {b.supplier?.name || "—"}
+                              </span>
+                            </div>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            {availableBills.length === 0 && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Only strict-mode bills posted to GR/IR clearing and not yet
+                received appear here.
+              </p>
+            )}
+          </Field>
+        )}
+
         {form.sourceType === "purchase_order" && (
           <Field label="Purchase Order" full>
-            <select
-              value={form.purchaseOrderId}
-              onChange={(e) => handleSelectPO(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">
-                {availablePOs.length === 0
-                  ? "No open POs available"
-                  : "Select a purchase order to receive against..."}
-              </option>
-              {availablePOs.map((p) => {
-                const outstanding = (p.availableLines || []).reduce(
-                  (sum, l) => sum + (l.availableQuantity || 0),
-                  0,
-                );
-                return (
-                  <option key={p._id} value={p._id}>
-                    {p.poNumber} — {p.supplier?.name || "—"}
-                    {outstanding > 0 ? ` · ${outstanding} units outstanding` : ""}
-                  </option>
-                );
-              })}
-            </select>
+            <Popover open={poPickerOpen} onOpenChange={setPoPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={poPickerOpen}
+                  className={cn(
+                    "w-full justify-between font-normal",
+                    !form.purchaseOrderId && "text-muted-foreground",
+                  )}
+                  disabled={availablePOs.length === 0}
+                >
+                  {(() => {
+                    const p = availablePOs.find(
+                      (x) => x._id?.toString() === form.purchaseOrderId,
+                    );
+                    if (p) {
+                      const outstanding = (p.availableLines || []).reduce(
+                        (sum, l) => sum + (l.availableQuantity || 0),
+                        0,
+                      );
+                      return `${p.poNumber} — ${p.supplier?.name || "—"}${
+                        outstanding > 0 ? ` · ${outstanding} outstanding` : ""
+                      }`;
+                    }
+                    return availablePOs.length === 0
+                      ? "No open POs available"
+                      : "Select a purchase order to receive against...";
+                  })()}
+                  <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search purchase orders..." />
+                  <CommandList>
+                    <CommandEmpty>No PO matches.</CommandEmpty>
+                    <CommandGroup>
+                      {availablePOs.map((p) => {
+                        const outstanding = (p.availableLines || []).reduce(
+                          (sum, l) => sum + (l.availableQuantity || 0),
+                          0,
+                        );
+                        const label = `${p.poNumber} ${p.supplier?.name || ""}`;
+                        return (
+                          <CommandItem
+                            key={p._id}
+                            value={label}
+                            onSelect={() => {
+                              handleSelectPO(p._id?.toString());
+                              setPoPickerOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                form.purchaseOrderId === p._id?.toString()
+                                  ? "opacity-100"
+                                  : "opacity-0",
+                              )}
+                            />
+                            <div className="flex flex-col">
+                              <span className="font-medium">{p.poNumber}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {p.supplier?.name || "—"}
+                                {outstanding > 0
+                                  ? ` · ${outstanding} units outstanding`
+                                  : ""}
+                              </span>
+                            </div>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
             {availablePOs.length === 0 && (
               <p className="text-xs text-muted-foreground mt-1">
                 Only sent / confirmed / partially-received POs with

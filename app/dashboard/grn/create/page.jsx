@@ -2,7 +2,10 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { getBillById } from "@/app/mongodb/queries/bill-queries";
+import {
+  getBillById,
+  getBillsAwaitingGRN,
+} from "@/app/mongodb/queries/bill-queries";
 import {
   getPurchaseOrderById,
   getOpenPurchaseOrders,
@@ -19,11 +22,15 @@ export default async function GRNCreatePage(props) {
   let prefill = null;
   let prefillError = null;
 
-  // Always fetch the open-PO list so the form can offer a picker for
-  // Storekeepers who arrive on the GRN form directly (no fromPO= query).
-  // Limited to receivable status + filtered to those with outstanding qty
-  // by getOpenPurchaseOrders().
-  const openPOs = await getOpenPurchaseOrders();
+  // Fetch open POs + bills-awaiting-GRN in parallel so the form can
+  // offer in-form pickers for both source types. Limited to receivable
+  // POs (sent/confirmed/partial with outstanding lines) and strict-mode
+  // bills that haven't been received yet (usedGRNI=true,
+  // inventoryMoved=false).
+  const [openPOs, awaitingBills] = await Promise.all([
+    getOpenPurchaseOrders(),
+    getBillsAwaitingGRN(),
+  ]);
 
   if (fromBillId) {
     const bill = await getBillById(fromBillId);
@@ -157,7 +164,11 @@ export default async function GRNCreatePage(props) {
 
       <Card className="bg-card border-border">
         <CardContent className="p-4 sm:p-6">
-          <GRNForm prefill={prefill} availablePOs={openPOs} />
+          <GRNForm
+            prefill={prefill}
+            availablePOs={openPOs}
+            availableBills={awaitingBills}
+          />
         </CardContent>
       </Card>
     </div>

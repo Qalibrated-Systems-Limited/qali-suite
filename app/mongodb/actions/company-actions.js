@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import Company from "../../models/Company";
+import Account from "../../models/account";
 import connectDB from "../../config/dbConnect";
 import { updateSubscription } from "@/lib/subscription-helpers";
 import { getPlanLimits } from "@/lib/plans";
@@ -459,8 +460,55 @@ export async function updateCompany(prevState, formData) {
       company.settings.defaultPaymentTermsDays = data.defaultPaymentTermsDays;
     if (data.capitalizationThreshold !== undefined)
       company.settings.capitalizationThreshold = data.capitalizationThreshold;
-    if (data.requireGRN !== undefined)
+    if (data.requireGRN !== undefined) {
+      const turningOn = !!data.requireGRN && !company.settings.requireGRN;
       company.settings.requireGRN = !!data.requireGRN;
+
+      // When strict mode is being turned ON, auto-provision the GR/IR
+      // Clearing account if the tenant doesn't already have one — saves
+      // the user from a "GR/IR account not configured" guard-error on
+      // their next bill approval.
+      if (turningOn) {
+        const existing = await Account.findOne({
+          companyId: company._id,
+          systemAccount: "grni",
+        }).lean();
+        if (!existing) {
+          try {
+            await Account.create({
+              companyId: company._id,
+              accountCode: "2175",
+              accountName: "GR/IR Clearing",
+              accountType: "liability",
+              subType: "accrual",
+              canPost: true,
+              isActive: true,
+              parentCode: "2100",
+              systemAccount: "grni",
+            });
+          } catch (err) {
+            // If account code 2175 collides with an existing account on
+            // this tenant, fall back to a unique code by appending a
+            // suffix. Better than failing the toggle save.
+            console.warn(
+              "[updateCompany] GR/IR auto-create at 2175 failed, retrying with suffix:",
+              err.message,
+            );
+            await Account.create({
+              companyId: company._id,
+              accountCode: `2175-GRNI-${Date.now().toString().slice(-4)}`,
+              accountName: "GR/IR Clearing",
+              accountType: "liability",
+              subType: "accrual",
+              canPost: true,
+              isActive: true,
+              parentCode: "2100",
+              systemAccount: "grni",
+            });
+          }
+        }
+      }
+    }
 
     // Audit
     company.lastModifiedBy = {

@@ -263,6 +263,31 @@ export class CompanyOnboardingService {
         parentCode: "2100",
       },
       {
+        // GR/IR Clearing — required for the three-way match flow.
+        // Holds the supplier-billed-but-not-yet-received liability
+        // (and the inverse). Cleared by GRN acceptance.
+        accountCode: "2175",
+        accountName: "GR/IR Clearing",
+        accountType: "liability",
+        subType: "accrual",
+        canPost: true,
+        parentCode: "2100",
+        systemAccount: "grni",
+      },
+      {
+        // Suspense credit for unscheduled receipts (walk-in deliveries,
+        // found stock, samples) — no PO/bill, so cost has no source
+        // document. Finance reclasses each period to the right account
+        // (Accrued Liabilities / Inventory Gain / Other Income).
+        accountCode: "2178",
+        accountName: "Inventory Adjustments — Unscheduled Receipts",
+        accountType: "liability",
+        subType: "accrual",
+        canPost: true,
+        parentCode: "2100",
+        systemAccount: "inventory_suspense",
+      },
+      {
         accountCode: "2180",
         accountName: "Unearned Revenue",
         accountType: "liability",
