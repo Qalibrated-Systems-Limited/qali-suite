@@ -5,12 +5,10 @@ import {
   getStockStats,
   searchStock,
   fetchStockPages,
-  fetchStockData,
   getProductCategories,
 } from "@/app/mongodb/queries/product-queries";
 import { ResponsiveInventoryTable } from "../table";
 import Pagination from "@/components/pagination";
-import { GenerateStockPDF } from "../export-to-pdf";
 import { StockCategoryFilter } from "@/components/custom-filters";
 import { auth } from "@/auth";
 import { canSeePricing } from "@/lib/permissions";
@@ -240,20 +238,6 @@ export async function StockPaginationServer({ query, filters }) {
       <Pagination totalPages={totalPages} />
     </div>
   );
-}
-
-// ============================================
-// PDF EXPORT BUTTON (Async - loads all stock data)
-// ============================================
-
-export async function StockPDFExportServer() {
-  const stockData = await fetchStockData();
-
-  return <GenerateStockPDF stockData={stockData} />;
-}
-
-export function PDFExportSkeleton() {
-  return <Skeleton className="h-10 w-32" />;
 }
 
 // ============================================

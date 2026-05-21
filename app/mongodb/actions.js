@@ -12,7 +12,6 @@ import {
   validateInvoiceUpdate,
   validateNewUser,
   validateSettings,
-  ValidateStock,
   validateUpdateAccount,
   validateUpdateUser,
 } from "./validators";
@@ -27,7 +26,6 @@ import User from "../models/user";
 import BridgeConfig from "../models/bridgeConfigs";
 import { toTitle } from "../utils/validators";
 import Product from "../models/product";
-import { generateMovementNo } from "./requests-actions";
 
 import Invoice from "../models/invoice";
 import DeliveryNote from "../models/dnote";
@@ -37,7 +35,6 @@ import { StockRequest } from "../models/requests";
 import mongoose from "mongoose";
 import { format } from "date-fns";
 import dbConnect from "../config/dbConnect";
-import { StockMovement } from "../models/stockmovement";
 
 export async function logout(params) {
   return await signOut({ redirectTo: "/" });
@@ -222,232 +219,6 @@ export async function createAccount(state, formData) {
   redirect("/dashboard/customers");
 }
 
-export async function addStock(prevState, formData) {
-  await dbConnect();
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const authSession = await auth();
-    const user = authSession?.user;
-
-    if (!user) {
-      return { message: "Unauthorized", errors: {} };
-    }
-
-    const rawFormData = Object.fromEntries(formData.entries());
-    const validatedFields = ValidateStock(rawFormData);
-
-    if (!validatedFields.success) {
-      await session.abortTransaction();
-      return {
-        errors: validatedFields.error.flatten().fieldErrors,
-        message: "Missing Fields. Failed to add stock.",
-      };
-    }
-
-    const data = validatedFields.data;
-
-    // 1. Create the product
-    const product = await Product.create(
-      [
-        {
-          name: toTitle(data.name),
-          price: data.price,
-          SKU: data.SKU,
-          description: data.description,
-          category: data.category,
-          stock: data.stock,
-          unit: data.unit,
-        },
-      ],
-      { session }
-    );
-
-    const createdProduct = product[0];
-
-    // 2. Create initial stock movement
-    const movementNumber = await generateMovementNo(session);
-    const unitPrice = Number(data.price);
-    const quantity = Number(data.stock);
-    const totalValue = quantity * unitPrice;
-
-    await StockMovement.create(
-      [
-        {
-          movementNumber,
-          productId: createdProduct._id,
-          productSnapshot: {
-            name: createdProduct.name,
-            SKU: createdProduct.SKU,
-            category: createdProduct.category,
-            unit: createdProduct.unit,
-          },
-          movementType: "initial", // Initial stock entry
-          direction: "in",
-          quantity: quantity,
-          previousStock: 0, // New product, previous stock is 0
-          newStock: quantity,
-          costing: {
-            unitCost: Number(data.costPrice || data.price || 0),
-            totalCost: quantity * Number(data.costPrice || data.price || 0),
-            unitPrice: unitPrice,
-            totalValue: totalValue,
-          },
-          performedBy: {
-            name: user.name,
-            id: user.id,
-            role: user.role,
-          },
-          notes: "Initial stock entry - Product created",
-          reason: "New product added to inventory",
-        },
-      ],
-      { session }
-    );
-
-    await session.commitTransaction();
-    revalidatePath("/dashboard/stocks");
-
-    return {
-      message: "Stock added successfully",
-      errors: {},
-    };
-  } catch (error) {
-    await session.abortTransaction();
-    console.error("Add stock error:", error);
-    return {
-      message: "Database error: failed to add stock",
-      errors: {},
-    };
-  } finally {
-    session.endSession();
-  }
-}
-
-// ============================================
-// UPDATE STOCK WITH MOVEMENT TRACKING
-// ============================================
-export async function updateStock(productId, prevState, formData) {
-  await dbConnect();
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const authSession = await auth();
-    const user = authSession?.user;
-
-    if (!user) {
-      await session.abortTransaction();
-      return { message: "Unauthorized", errors: {} };
-    }
-
-    const rawFormData = Object.fromEntries(formData.entries());
-    const validatedFields = ValidateStock(rawFormData);
-
-    if (!validatedFields.success) {
-      await session.abortTransaction();
-      return {
-        errors: validatedFields.error.flatten().fieldErrors,
-        message: "Missing Fields. Failed to update stock.",
-      };
-    }
-
-    const data = validatedFields.data;
-
-    // 1. Get current product
-    const currentProduct = await Product.findById(productId).session(session);
-
-    if (!currentProduct) {
-      await session.abortTransaction();
-      return { message: "Product not found", errors: {} };
-    }
-
-    const oldStock = currentProduct.stock;
-    const newStock = Number(data.stock);
-    const stockDifference = newStock - oldStock;
-
-    // 2. Update product
-    const updatedProduct = await Product.findByIdAndUpdate(
-      productId,
-      {
-        $set: {
-          name: toTitle(data.name),
-          price: data.price,
-          SKU: data.SKU,
-          description: data.description,
-          category: data.category,
-          stock: newStock, // Use $set, not $inc!
-          unit: data.unit,
-        },
-      },
-      {
-        new: true,
-        session,
-        runValidators: true,
-      }
-    );
-
-    // 3. Create stock movement if stock changed
-    if (stockDifference !== 0) {
-      const movementNumber = await generateMovementNo(session);
-      const direction = stockDifference > 0 ? "in" : "out";
-      const quantity = Math.abs(stockDifference);
-      const unitPrice = Number(data.price);
-      const totalValue = quantity * unitPrice;
-
-      await StockMovement.create(
-        [
-          {
-            movementNumber,
-            productId: updatedProduct._id,
-            productSnapshot: {
-              name: updatedProduct.name,
-              SKU: updatedProduct.SKU,
-              category: updatedProduct.category,
-              unit: updatedProduct.unit,
-            },
-            movementType: "adjustment",
-            direction: direction,
-            quantity: quantity,
-            previousStock: oldStock,
-            newStock: newStock,
-            costing: {
-              unitCost: Number(currentProduct.costing?.costPrice || data.price || 0),
-              totalCost: quantity * Number(currentProduct.costing?.costPrice || data.price || 0),
-              unitPrice: unitPrice,
-              totalValue: totalValue,
-            },
-            performedBy: {
-              name: user.name,
-              id: user.id,
-              role: user.role,
-            },
-            notes: "Stock adjustment via product update",
-            reason: `Manual stock ${
-              direction === "in" ? "increase" : "decrease"
-            } from ${oldStock} to ${newStock}`,
-          },
-        ],
-        { session }
-      );
-    }
-
-    await session.commitTransaction();
-  } catch (error) {
-    await session.abortTransaction();
-    console.error("Update stock error:", error);
-    return {
-      message: "Database error: failed to update stock",
-      errors: {},
-    };
-  } finally {
-    session.endSession();
-  }
-  revalidatePath("/dashboard/stocks");
-  redirect("/dashboard/stocks");
-}
-
 export async function updateAccount(id, prevState, formData) {
   await dbConnect();
   const rawFormData = Object.fromEntries(formData.entries());
@@ -479,48 +250,6 @@ export async function updateAccount(id, prevState, formData) {
   revalidatePath("/dashboard/customers");
   redirect("/dashboard/customers");
 }
-
-// export async function updateStock(id, prevState, formData) {
-//   const rawFormData = Object.fromEntries(formData.entries());
-
-//   try {
-//     const validatedFields = ValidateStock(rawFormData);
-//     if (!validatedFields.success) {
-//       return {
-//         errors: validatedFields.error.flatten().fieldErrors,
-//         message: "Missing Fields. Failed to update stock.",
-//       };
-//     }
-//     const product = await Product.findById(id);
-//     const oldStock = product.stock;
-//     if (product) {
-//       product.name = toTitle(validatedFields.data.name);
-//       product.SKU = validatedFields.data.SKU;
-//       product.price = validatedFields.data.price;
-//       product.stock = validatedFields.data.stock;
-//       product.category = validatedFields.data.category;
-//       product.description = validatedFields.data.description;
-//       product.unit = validatedFields.data.unit;
-//       const result = await product.save();
-//       if (result) {
-//         const addedProducts = Number(validatedFields.data.stock) - oldStock;
-//         if (addedProducts > 0) {
-//           const amount = Number(validatedFields.data.price) * addedProducts;
-//           await StockTransaction.create({
-//             SKU: validatedFields.data.SKU,
-//             amount: amount,
-//             transactionType: "Purchase",
-//             quantity: addedProducts,
-//           });
-//         }
-//       }
-//     }
-//   } catch (e) {
-//     return { message: "Database Error: Failed to Update stock." };
-//   }
-//   revalidatePath("/dashboard/stocks");
-//   redirect("/dashboard/stocks");
-// }
 
 export const deleteAccount = async (id) => {
   try {

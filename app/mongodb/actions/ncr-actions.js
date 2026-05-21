@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import mongoose from "mongoose";
 
 import Nonconformance from "@/app/models/nonconformance";
+import GoodsReceipt from "@/app/models/goodsReceipt";
+import Product from "@/app/models/product";
 import dbConnect from "@/app/config/dbConnect";
 import {
   getTenantContext,
@@ -324,23 +326,119 @@ export async function authorizeDisposition(ncrId, notes = "") {
 // ============================================
 // CLOSE NCR (after execution)
 // ============================================
+// When a GRN-sourced NCR is closed, items the GRN parked on HOLD must
+// physically leave HOLD according to the disposition. Without this they
+// sit in `inventory.quantityOnHold` forever (a real data integrity bug
+// pre-fix). The per-line `inventoryApplied` flag on the GRN makes this
+// idempotent with the GRN.accept path — whichever side runs first wins,
+// the other no-ops on those lines.
+//
+// Disposition → inventory move:
+//   return_to_supplier / scrap   → getRejectFromHoldUpdate (items leave)
+//   accept_as_is   / downgrade   → getAcceptFromHoldUpdate (HOLD → available)
+//   repair                       → no-op (stays on HOLD until repair workflow completes)
+//
+// NOTE: journal-entry posting for return/scrap (supplier debit-note /
+// write-off) is intentionally out of scope here — separate ledger work.
+function inventoryActionForDisposition(dispositionType) {
+  switch (dispositionType) {
+    case "return_to_supplier":
+    case "scrap":
+      return "reject";
+    case "accept_as_is":
+    case "downgrade":
+      return "accept";
+    case "repair":
+    default:
+      return "none";
+  }
+}
+
 export async function closeNCR(ncrId, executionNotes = "") {
+  const sessionRoot = await mongoose.startSession();
+  sessionRoot.startTransaction();
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     if (!hasRole(user, NCR_ROLES.PROPOSE)) {
+      await sessionRoot.abortTransaction();
       return { success: false, error: "You don't have permission to close NCRs." };
     }
 
     await dbConnect();
     const ncr = await Nonconformance.findOne(
       withTenantScope({ _id: ncrId }, companyId, isSuperAdmin),
-    );
-    if (!ncr) return { success: false, error: "NCR not found" };
+    ).session(sessionRoot);
+    if (!ncr) {
+      await sessionRoot.abortTransaction();
+      return { success: false, error: "NCR not found" };
+    }
     if (ncr.status !== "authorized") {
+      await sessionRoot.abortTransaction();
       return {
         success: false,
         error: "NCR must be authorized before it can be closed.",
       };
+    }
+
+    // Release HOLD inventory per disposition (GRN-sourced NCRs only).
+    const action = inventoryActionForDisposition(ncr.disposition?.type);
+    if (action !== "none" && ncr.source?.type === "goods_receipt" && ncr.source.grnId) {
+      const grn = await GoodsReceipt.findOne({
+        _id: ncr.source.grnId,
+        companyId: ncr.companyId,
+      }).session(sessionRoot);
+
+      if (grn?.lines?.length) {
+        // Map productId → NCR line (which carries actualQty == GRN receivedQty
+        // for the discrepant lines this NCR covers).
+        const ncrByProduct = new Map();
+        for (const nl of ncr.lines || []) {
+          if (nl.productId) {
+            ncrByProduct.set(nl.productId.toString(), nl);
+          }
+        }
+
+        let grnDirty = false;
+        for (const gline of grn.lines) {
+          if (gline.inventoryApplied) continue;
+          if (gline.lineStatus !== "hold") continue;
+          const nl = gline.productId
+            ? ncrByProduct.get(gline.productId.toString())
+            : null;
+          if (!nl) continue; // GRN line wasn't on the NCR — leave for acceptGRN
+
+          const qty = gline.receivedQty || 0;
+          if (qty <= 0) continue;
+
+          if (action === "accept") {
+            await Product.findByIdAndUpdate(
+              gline.productId,
+              Product.getAcceptFromHoldUpdate(qty),
+              { session: sessionRoot },
+            );
+            gline.lineStatus = "accepted";
+            gline.acceptedQty = qty;
+          } else {
+            // reject path: items leave the system
+            await Product.findByIdAndUpdate(
+              gline.productId,
+              Product.getRejectFromHoldUpdate(qty),
+              { session: sessionRoot },
+            );
+            gline.lineStatus = "rejected";
+            gline.rejectReason =
+              ncr.disposition?.type === "scrap"
+                ? "Scrapped via NCR"
+                : "Returned to supplier via NCR";
+          }
+          gline.inventoryApplied = true;
+          grnDirty = true;
+        }
+
+        if (grnDirty) {
+          await grn.save({ session: sessionRoot });
+        }
+      }
     }
 
     ncr.disposition.executedAt = new Date();
@@ -348,14 +446,25 @@ export async function closeNCR(ncrId, executionNotes = "") {
     ncr.disposition.executionNotes = executionNotes;
     ncr.status = "closed";
     ncr.lastModifiedBy = { id: user.id, name: user.name };
-    await ncr.save();
+    await ncr.save({ session: sessionRoot });
+
+    await sessionRoot.commitTransaction();
 
     revalidatePath("/dashboard/ncr");
     revalidatePath(`/dashboard/ncr/${ncrId}`);
+    if (action !== "none") {
+      revalidatePath("/dashboard/stocks");
+      if (ncr.source?.grnId) {
+        revalidatePath(`/dashboard/grn/${ncr.source.grnId}`);
+      }
+    }
     return { success: true };
   } catch (error) {
+    if (sessionRoot.inTransaction()) await sessionRoot.abortTransaction();
     console.error("closeNCR error:", error);
     return { success: false, error: error.message || "Failed to close NCR" };
+  } finally {
+    sessionRoot.endSession();
   }
 }
 

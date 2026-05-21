@@ -80,6 +80,7 @@ const PAGES = [
   { label: "Leave Requests", href: "/dashboard/hr/leave", icon: CalendarDays, category: "HR" },
   { label: "My Leave", href: "/dashboard/hr/my-leave", icon: CalendarDays, category: "HR" },
   { label: "Leave Calendar", href: "/dashboard/hr/leave/calendar", icon: CalendarDays, category: "HR" },
+  { label: "Leave Types", href: "/dashboard/hr/leave-types", icon: CalendarDays, category: "HR", aliases: ["entitlement", "days", "config"] },
   { label: "Attendance", href: "/dashboard/hr/attendance", icon: Clock, category: "HR", aliases: ["clock-in", "timesheet"] },
   { label: "My Attendance", href: "/dashboard/hr/my-attendance", icon: Clock, category: "HR" },
   { label: "Loans", href: "/dashboard/hr/loans", icon: HandCoins, category: "HR", aliases: ["advance", "salary advance"] },

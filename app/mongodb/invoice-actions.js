@@ -673,6 +673,63 @@ export async function createInvoice(prevState, formData) {
       stockProducts.map((p) => [p._id.toString(), p]),
     );
 
+    // ============================================
+    // PRICING POLICY ENFORCEMENT
+    // ============================================
+    // Two policy bounds at invoice creation, both per industry-standard
+    // ERP convention (SAP / Odoo / NetSuite):
+    //   1. Per-product minimum price (floor) — no line below it.
+    //   2. Invoice-level discount cap — no discount above the company's
+    //      configured threshold.
+    // Both can be overridden by pricing-policy roles (finance leadership)
+    // — they explicitly authorise the exception by being the one who saves.
+    // Everyone else gets a hard reject with a clear message; later this
+    // can route to approval, but a clean rejection is the audit baseline.
+    const PRICING_POLICY_ROLES = new Set([
+      "SuperAdmin",
+      "Admin",
+      "CFO",
+      "Finance Manager",
+    ]);
+    const canOverridePricing = PRICING_POLICY_ROLES.has(user.role);
+
+    if (!canOverridePricing) {
+      // Load the company's configured caps. Tolerant defaults if the
+      // settings sub-doc isn't seeded yet (treat as "no cap").
+      const companyDoc = await Company.findById(companyId)
+        .select("settings.approvalThresholds")
+        .session(mongoSession)
+        .lean();
+      const thresholds = companyDoc?.settings?.approvalThresholds || {};
+      const discountCap = thresholds.discountCapPercent ?? 100;
+
+      const requestedDiscount = data.discountPercentage || 0;
+      if (requestedDiscount > discountCap) {
+        await mongoSession.abortTransaction();
+        return {
+          message: `Discount ${requestedDiscount}% exceeds the ${discountCap}% cap for your role. Reduce the discount or have finance approve the invoice.`,
+          success: false,
+        };
+      }
+
+      // Per-line floor enforcement (stock items only — services don't
+      // have a product master to floor against).
+      for (const item of data.stockItems || []) {
+        const product = item.productId
+          ? stockProductMap.get(item.productId.toString())
+          : null;
+        if (!product) continue; // existing missing-product handling kicks in below
+        const floor = product.pricing?.minimumPrice ?? 0;
+        if (floor > 0 && Number(item.sellingPrice) < floor) {
+          await mongoSession.abortTransaction();
+          return {
+            message: `Price ${item.sellingPrice} for "${product.name}" is below the minimum ${floor}. Increase the price or have finance authorise the override.`,
+            success: false,
+          };
+        }
+      }
+    }
+
     // Process stock items (products)
     for (const item of data.stockItems) {
       const product = item.productId

@@ -429,6 +429,12 @@ productSchema.index({ companyId: 1, name: 1 });
 productSchema.index({ companyId: 1, category: 1, status: 1 });
 productSchema.index({ companyId: 1, status: 1, isActive: 1 });
 productSchema.index({ companyId: 1, barcode: 1 }, { sparse: true });
+// Stock stats + quantity-bucket filter on the products list. Without this
+// the in-stock / low-stock / out-of-stock counts COLLSCAN every product.
+productSchema.index({ companyId: 1, "inventory.quantityOnHand": 1 });
+// List sort (newest-first) + pagination on /dashboard/stocks. Without this
+// Mongo does an in-memory sort of all matched docs before slicing 20.
+productSchema.index({ companyId: 1, createdAt: -1 });
 
 // ============================================
 // VIRTUALS

@@ -18,14 +18,19 @@ function sanitizeSearchTerm(term) {
 // ============================================
 
 /**
- * Build role-based filter for request visibility
+ * Build role-based filter for request visibility.
+ *
+ * Canonical role names are capitalised. Earlier lowercase comparisons
+ * meant `Manager`, `Admin`, `Storekeeper` etc. silently fell through to
+ * the "own requests only" branch — managers couldn't see their team's
+ * queue, storekeepers couldn't see approved requests waiting to fulfil.
  */
 function buildRoleFilter(userRole, userId) {
-  if (userRole === "admin" || userRole === "manager") {
+  if (["SuperAdmin", "Admin", "Manager"].includes(userRole)) {
     return {};
   }
 
-  if (userRole === "Store Manager" || userRole === "storekeeper") {
+  if (["Store Manager", "Storekeeper"].includes(userRole)) {
     return {
       $or: [
         { status: { $in: ["approved", "fulfilled", "partially_fulfilled"] } },

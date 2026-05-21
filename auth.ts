@@ -16,12 +16,17 @@ type UserType = {
   avatar?: string;
   companyId?: string;
   companyCode?: string;
+  tokenVersion?: number;
 };
 
 async function getUser(email: string) {
   try {
     await dbConnect();
-    const user = await User.findOne({ email }).select("+password");
+    // `tokenVersion` is `select: false` on the schema; explicitly pull
+    // it so we can mint the JWT with the current version stamp.
+    const user = await User.findOne({ email }).select(
+      "+password +tokenVersion",
+    );
     return user;
   } catch (error) {
     console.error("Failed to fetch user:", error);
@@ -31,6 +36,20 @@ async function getUser(email: string) {
 
 export const { auth, signIn, signOut, handlers } = NextAuth({
   ...authConfig,
+  // Session lifetime (was NextAuth's 30-day default).
+  // - maxAge: absolute upper bound. 8h matches a typical work session,
+  //   so role / status changes by an admin take effect within at most
+  //   8h even without active revocation. Combined with the tokenVersion
+  //   check below, effective stale window drops to "next privileged
+  //   request" (seconds) — the audit-grade behaviour.
+  // - updateAge: how often NextAuth re-issues the session cookie when
+  //   the user is active. 1h gives a rolling 8h window without
+  //   over-issuing cookies.
+  session: {
+    strategy: "jwt",
+    maxAge: 8 * 60 * 60,
+    updateAge: 60 * 60,
+  },
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
@@ -47,9 +66,16 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           const user = await getUser(email);
           if (!user) return null;
 
-          // Google OAuth users cannot sign in with credentials
-          if (user.authProvider === "google") return null;
+          // Deactivated users cannot start a new session. (The Google
+          // OAuth path also enforces this in the signIn callback.)
+          if (user.status === "Inactive") return null;
 
+          // Note: we used to early-reject `authProvider === "google"`
+          // here. Removed because (a) it forced Google-signed-up users
+          // to stay locked to Google even from a kiosk PC without their
+          // Google account, and (b) comparePassword now safely returns
+          // false when no password is set — so the result is the same
+          // ("invalid credentials") without leaking the auth method.
           const passwordsMatch = await user.comparePassword(password);
 
           if (passwordsMatch) {
@@ -85,6 +111,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
               trialEndsAt,
               currentPeriodEnd,
               maxUsers,
+              tokenVersion: user.tokenVersion ?? 0,
             } as UserType;
           }
         }
@@ -246,6 +273,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
         token.trialEndsAt = user.trialEndsAt;
         token.currentPeriodEnd = user.currentPeriodEnd;
         token.maxUsers = user.maxUsers;
+        token.tokenVersion = user.tokenVersion ?? 0;
         token.planRefreshedAt = Date.now();
         token.user = user;
       }
@@ -255,7 +283,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
         await dbConnect();
         const dbUser = await User.findOne({
           email: user.email?.toLowerCase(),
-        });
+        }).select("+tokenVersion");
         if (dbUser) {
           let companyCode: string | undefined;
           let companyPlan: string = "free";
@@ -286,6 +314,7 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           token.trialEndsAt = trialEndsAt;
           token.currentPeriodEnd = currentPeriodEnd;
           token.maxUsers = maxUsers;
+          token.tokenVersion = (dbUser as any).tokenVersion ?? 0;
           token.planRefreshedAt = Date.now();
           token.user = {
             id: dbUser._id.toString(),
@@ -324,6 +353,9 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           trialEndsAt: token.trialEndsAt || null,
           currentPeriodEnd: token.currentPeriodEnd || null,
           maxUsers: token.maxUsers || 5,
+          // Carried through so the freshness check (requireFreshSession)
+          // can compare against the User document's current value.
+          tokenVersion: token.tokenVersion ?? 0,
         };
       }
       return session;

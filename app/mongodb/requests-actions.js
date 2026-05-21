@@ -396,11 +396,12 @@ export async function cancelRequest(requestId, prevState, formData) {
       return { message: "Access denied to this request" };
     }
 
-    // Check permissions
+    // Check permissions. Canonical role names are capitalised; the prior
+    // lowercase comparison silently denied Manager/Admin so only the
+    // requester could ever cancel.
     const canCancel =
-      request.requester.id === user.id || // Requester can cancel their own
-      user.role === "manager" ||
-      user.role === "admin";
+      request.requester.id === user.id ||
+      ["SuperAdmin", "Admin", "Manager", "Store Manager"].includes(user.role);
 
     if (!canCancel) {
       await session.abortTransaction();
@@ -741,13 +742,10 @@ export async function returnItemCheckout(checkoutId, prevState, formData) {
     }
 
     const user = userSession.user;
-    const userRole =
-      user.role === "Store Manager"
-        ? "Store Manager"
-        : user.role?.toLowerCase();
 
-    // Only Store Manager can process returns
-    if (userRole !== "Store Manager" && userRole !== "admin") {
+    // Only Store Manager / Admin / SuperAdmin can process returns. Prior
+    // lowercase-compare missed SuperAdmin entirely and was fragile.
+    if (!["Store Manager", "Admin", "SuperAdmin"].includes(user.role)) {
       throw new Error("Only store managers can process returns.");
     }
 
@@ -1251,13 +1249,9 @@ export async function fulfillRequest(requestId, prevState, formData) {
     }
 
     const user = userSession.user;
-    const userRole =
-      user.role === "Store Manager"
-        ? "Store Manager"
-        : user.role?.toLowerCase();
 
-    // Check permissions
-    if (userRole !== "Store Manager" && userRole !== "admin") {
+    // Check permissions. Same canonical-role fix as the returns path.
+    if (!["Store Manager", "Admin", "SuperAdmin"].includes(user.role)) {
       throw new Error("Only store managers can fulfill requests.");
     }
 

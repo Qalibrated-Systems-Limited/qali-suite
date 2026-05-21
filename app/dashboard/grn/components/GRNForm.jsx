@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Loader2,
@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   Check,
   ChevronDown,
+  Package,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,10 +46,124 @@ const emptyLine = () => ({
   storageLocation: "",
 });
 
+/**
+ * Per-line product picker. Matches the POForm / BillForm pattern so the
+ * UX stays consistent. Filters client-side over a pre-fetched product
+ * list to avoid per-keystroke server hits. On select, the parent line
+ * gets productId AND sensible defaults (description, sku, unit) wired
+ * from the product so operators don't re-type what we already know.
+ */
+function ProductPickerCell({
+  products,
+  value,
+  selectedProduct,
+  onSelect,
+  onClear,
+  disabled,
+}) {
+  const [open, setOpen] = useState(false);
+  const [searchValue, setSearchValue] = useState("");
+
+  const display = selectedProduct
+    ? `${selectedProduct.SKU} — ${selectedProduct.name}`
+    : null;
+
+  return (
+    <div>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            disabled={disabled}
+            className={cn(
+              "w-full justify-between font-normal text-sm h-9",
+              !display && "text-muted-foreground",
+            )}
+          >
+            {display ? (
+              <span className="truncate flex items-center gap-2">
+                <Package className="h-3 w-3 text-muted-foreground" />
+                {display}
+              </span>
+            ) : (
+              "Search product…"
+            )}
+            <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[320px] p-0" align="start">
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder="Search by name or SKU…"
+              value={searchValue}
+              onValueChange={setSearchValue}
+            />
+            <CommandList>
+              {value && (
+                <CommandGroup>
+                  <CommandItem
+                    onSelect={() => {
+                      onClear?.();
+                      setOpen(false);
+                    }}
+                  >
+                    <X className="mr-2 h-4 w-4 text-muted-foreground" />
+                    Clear selection
+                  </CommandItem>
+                </CommandGroup>
+              )}
+              <CommandEmpty>No products match.</CommandEmpty>
+              <CommandGroup heading="Products">
+                {products
+                  .filter((p) => {
+                    if (!searchValue) return true;
+                    const s = searchValue.toLowerCase();
+                    return (
+                      p.name?.toLowerCase().includes(s) ||
+                      p.SKU?.toLowerCase().includes(s)
+                    );
+                  })
+                  .slice(0, 25)
+                  .map((p) => (
+                    <CommandItem
+                      key={p._id}
+                      value={p._id}
+                      onSelect={() => {
+                        onSelect(p);
+                        setOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          value === p._id ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <div className="flex flex-col min-w-0">
+                        <span className="font-medium truncate">{p.name}</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {p.SKU}
+                        </span>
+                      </div>
+                    </CommandItem>
+                  ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
 export default function GRNForm({
   prefill,
   availablePOs = [],
   availableBills = [],
+  products = [],
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -151,6 +267,14 @@ export default function GRNForm({
       lines: lines.length > 0 ? lines : [emptyLine()],
     }));
   };
+
+  // Build an id→product lookup once per render so each line can resolve
+  // its current selection without scanning the list.
+  const productsById = useMemo(() => {
+    const m = new Map();
+    for (const p of products) m.set(p._id, p);
+    return m;
+  }, [products]);
 
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setLine = (i, patch) =>
@@ -490,18 +614,37 @@ export default function GRNForm({
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              {/* When prefilled from a bill, productId is fixed; otherwise
-                  the user types the product ID. (A picker is a follow-up.) */}
-              <Field label="Product ID" full={!l.productId}>
-                <input
-                  type="text"
+              {/* Searchable picker over the tenant's active products.
+                  When prefilled from a PO / Bill the line's product is
+                  fixed (the prefilled line is a documented commitment
+                  against that source) so the picker is disabled. */}
+              <Field label="Product" full>
+                <ProductPickerCell
+                  products={products}
                   value={l.productId}
-                  onChange={(e) => setLine(i, { productId: e.target.value })}
-                  placeholder="Product ObjectId"
-                  className="input font-mono text-xs"
-                  required
-                  readOnly={!!prefill?.lines?.[i]?.productId}
+                  selectedProduct={productsById.get(l.productId) || null}
+                  disabled={!!prefill?.lines?.[i]?.productId}
+                  onSelect={(p) =>
+                    setLine(i, {
+                      productId: p._id,
+                      sku: p.SKU || "",
+                      // Only fill description/unit if the operator hasn't
+                      // already typed something — don't clobber edits.
+                      description: l.description || p.name || "",
+                      unit: l.unit && l.unit !== "pcs" ? l.unit : p.unit || "pcs",
+                    })
+                  }
+                  onClear={() =>
+                    setLine(i, {
+                      productId: "",
+                      sku: "",
+                    })
+                  }
                 />
+                {/* Hidden submit value — server action reads `productId`
+                    from the lines array via JSON, but kept consistent with
+                    the rest of the line inputs. */}
+                <input type="hidden" value={l.productId} readOnly />
               </Field>
               <Field label="Description">
                 <input

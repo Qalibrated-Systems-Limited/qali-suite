@@ -346,35 +346,53 @@ async function applyStockAdjustment(approval, user) {
     return { success: false, error: "Missing adjustment reference" };
   }
 
-  // Tenant scoping is enforced via companyId on the approval — load the
-  // adjustment from the same tenant.
-  const adjustment = await InventoryAdjustment.findOne({
-    _id: adjustmentId,
-    companyId: approval.companyId,
-  });
-  if (!adjustment) {
-    return { success: false, error: "Adjustment not found" };
-  }
-  if (adjustment.status !== "draft") {
+  // Wrap the whole apply in a transaction so the model's approve() (which
+  // creates a journal entry, posts stock movements, and flips status) runs
+  // atomically. Without this, a partial failure left stock and books out
+  // of sync — this is the high-risk approval queue path.
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    // Tenant scoping is enforced via companyId on the approval — load the
+    // adjustment from the same tenant, in-session for consistency.
+    const adjustment = await InventoryAdjustment.findOne({
+      _id: adjustmentId,
+      companyId: approval.companyId,
+    }).session(session);
+    if (!adjustment) {
+      await session.abortTransaction();
+      return { success: false, error: "Adjustment not found" };
+    }
+    if (adjustment.status !== "draft") {
+      await session.abortTransaction();
+      return {
+        success: false,
+        error: `Adjustment already ${adjustment.status}`,
+      };
+    }
+
+    // The model's approve() method is the single point of truth — pass the
+    // session so its writes (JE, movements, product mutation) join our txn.
+    await adjustment.approve(
+      {
+        name: user.name || user.email || "Approver",
+        id: user.id,
+      },
+      session,
+    );
+
+    await session.commitTransaction();
     return {
-      success: false,
-      error: `Adjustment already ${adjustment.status}`,
+      success: true,
+      appliedAt: new Date(),
+      appliedRef: { kind: "InventoryAdjustment", id: adjustment._id },
     };
+  } catch (e) {
+    await session.abortTransaction();
+    throw e;
+  } finally {
+    session.endSession();
   }
-
-  // The model's approve() method is the single point of truth — it creates
-  // the journal entry, posts stock movements, and flips status. Call it
-  // with the approver as the audit user.
-  await adjustment.approve({
-    name: user.name || user.email || "Approver",
-    id: user.id,
-  });
-
-  return {
-    success: true,
-    appliedAt: new Date(),
-    appliedRef: { kind: "InventoryAdjustment", id: adjustment._id },
-  };
 }
 
 async function applyPriceChange(approval, user) {

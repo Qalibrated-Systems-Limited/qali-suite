@@ -39,6 +39,17 @@ const userSchema = new Schema(
       enum: ["Active", "Inactive"],
       default: "Active",
     },
+    // Session-revocation stamp. Admin actions that change a user's
+    // privileges (role, status, companyId) or credentials (password)
+    // bump this. Each issued JWT carries the version it was minted
+    // with; a freshness check on privileged routes compares the two
+    // and rejects mismatches. Lets us invalidate sessions without
+    // waiting for the JWT's maxAge to expire.
+    tokenVersion: {
+      type: Number,
+      default: 0,
+      select: false,
+    },
     name: {
       type: String,
       required: [true, "Please enter your name"],
@@ -113,8 +124,14 @@ userSchema.pre("save", async function (next) {
   this.password = await bcrypt.hash(this.password, 10);
 });
 
-// Compare user password
+// Compare user password.
+// Returns false (rather than throwing) when no password is set — e.g.,
+// Google-signed-up users who never set a credentials password. Callers
+// in the auth flow treat false as "invalid credentials" without
+// distinguishing it from a wrong-password attempt, so we don't leak
+// which accounts have a password and which don't.
 userSchema.methods.comparePassword = async function (enteredPassword) {
+  if (!this.password) return false;
   return await bcrypt.compare(enteredPassword, this.password);
 };
 

@@ -584,6 +584,14 @@ const getNavigationGroups = (user) => {
         hidden: user?.role === "SuperAdmin",
       },
       {
+        icon: Calendar,
+        label: "Leave Types",
+        id: "hr-leave-types",
+        href: "/dashboard/hr/leave-types",
+        // Config screen — only Admin / HR (matches the action gate).
+        hidden: !["Admin", "HR"].includes(user?.role),
+      },
+      {
         icon: Clock,
         label: "Attendance",
         id: "hr-attendance",

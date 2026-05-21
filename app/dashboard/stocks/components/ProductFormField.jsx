@@ -35,22 +35,28 @@ export const UNIT_OPTIONS = [
 ];
 
 /**
- * Costing method options
+ * Costing method options. Values MUST match the validator enum at
+ * stock-actions.js (`["average", "weighted_average", "fifo", "lifo",
+ * "specific"]`) — earlier "standard" was sent but rejected by validation.
  */
 export const COSTING_METHODS = [
   { value: "weighted_average", label: "Weighted Average" },
+  { value: "average", label: "Moving Average" },
   { value: "fifo", label: "FIFO (First In, First Out)" },
   { value: "lifo", label: "LIFO (Last In, First Out)" },
-  { value: "standard", label: "Standard Costing" },
+  { value: "specific", label: "Specific Identification" },
 ];
 
 /**
- * Product type options
+ * Product type options. Values MUST match the validator enum
+ * (`["product", "service", "kit"]`); labels are the UI-friendly text.
+ * Earlier the UI sent "inventory" / "non-inventory" which always failed
+ * server-side validation.
  */
 export const PRODUCT_TYPES = [
-  { value: "inventory", label: "Inventory Item" },
+  { value: "product", label: "Inventory Item" },
   { value: "service", label: "Service" },
-  { value: "non-inventory", label: "Non-Inventory" },
+  { value: "kit", label: "Kit / Bundle" },
 ];
 
 /**
@@ -198,18 +204,15 @@ export function ProductCategoryField({
   );
 }
 
-export function ProductTypeField({
-  defaultValue = "inventory",
-  error,
-  disabled,
-}) {
+// Controlled select. The wizard owns formData.type and submits via the
+// hidden input mounted in AddProductWizard — this Select is purely UI;
+// the `name="type"` here would otherwise create a stale duplicate, so
+// it's intentionally not set.
+export function ProductTypeField({ value, onChange, error, disabled }) {
+  const selected = value || "product";
   return (
     <FormField label="Product Type" name="productType" required error={error}>
-      <Select
-        name="productType"
-        defaultValue={defaultValue}
-        disabled={disabled}
-      >
+      <Select value={selected} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger className={cn(error && "border-red-500")}>
           <SelectValue placeholder="Select type" />
         </SelectTrigger>
@@ -225,10 +228,11 @@ export function ProductTypeField({
   );
 }
 
-export function ProductUnitField({ defaultValue = "piece", error, disabled }) {
+export function ProductUnitField({ value, onChange, error, disabled }) {
+  const selected = value || "piece";
   return (
     <FormField label="Unit of Measure" name="unit" required error={error}>
-      <Select name="unit" defaultValue={defaultValue} disabled={disabled}>
+      <Select value={selected} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger className={cn(error && "border-red-500")}>
           <SelectValue placeholder="Select unit" />
         </SelectTrigger>
@@ -451,18 +455,11 @@ export function ReorderQuantityField({
   );
 }
 
-export function CostingMethodField({
-  defaultValue = "weighted_average",
-  error,
-  disabled,
-}) {
+export function CostingMethodField({ value, onChange, error, disabled }) {
+  const selected = value || "weighted_average";
   return (
     <FormField label="Costing Method" name="costingMethod" error={error}>
-      <Select
-        name="costingMethod"
-        defaultValue={defaultValue}
-        disabled={disabled}
-      >
+      <Select value={selected} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger className={cn(error && "border-red-500")}>
           <SelectValue placeholder="Select method" />
         </SelectTrigger>
@@ -523,10 +520,15 @@ export function BinNumberField({ defaultValue, error, disabled, onChange }) {
 // TAX FIELDS
 // ============================================
 
-export function TaxRateField({ defaultValue = "16", error, disabled }) {
+export function TaxRateField({ value, onChange, error, disabled }) {
+  const selected = value ?? "16";
   return (
     <FormField label="Tax Rate" name="taxRate" error={error}>
-      <Select name="taxRate" defaultValue={defaultValue} disabled={disabled}>
+      <Select
+        value={String(selected)}
+        onValueChange={onChange}
+        disabled={disabled}
+      >
         <SelectTrigger className={cn(error && "border-red-500")}>
           <SelectValue placeholder="Select rate" />
         </SelectTrigger>

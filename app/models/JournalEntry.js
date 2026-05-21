@@ -406,7 +406,11 @@ journalEntrySchema.methods.post = async function (postedBy, session = null) {
 // ============================================
 // REVERSAL METHOD (WITH CHECKS)
 // ============================================
-journalEntrySchema.methods.reverse = async function (reversedBy, reason) {
+journalEntrySchema.methods.reverse = async function (
+  reversedBy,
+  reason,
+  session = null,
+) {
   if (this.status !== "posted") {
     throw new Error("Can only reverse posted journal entries");
   }
@@ -431,7 +435,9 @@ journalEntrySchema.methods.reverse = async function (reversedBy, reason) {
 
   const JournalEntry = mongoose.model("JournalEntry");
 
-  // Generate reversal entry number
+  // Counter read — outside the txn is fine; the post() below will fail-fast
+  // if a concurrent reversal claimed the same number (unique index on
+  // entryNumber catches it).
   const lastEntry = await JournalEntry.findOne({
     entryNumber: /^JE-REV-/,
   })
@@ -446,7 +452,7 @@ journalEntrySchema.methods.reverse = async function (reversedBy, reason) {
 
   const reversalEntryNumber = `JE-REV-${String(nextNum).padStart(4, "0")}`;
 
-  const reversalEntry = await JournalEntry.create({
+  const reversalEntry = new JournalEntry({
     entryNumber: reversalEntryNumber,
     entryDate: new Date(),
     entryType: "adjustment",
@@ -458,18 +464,19 @@ journalEntrySchema.methods.reverse = async function (reversedBy, reason) {
     originalEntryId: this._id,
     createdBy: reversedBy,
   });
+  await reversalEntry.save({ session });
 
-  // Post the reversal
-  await reversalEntry.post(reversedBy);
+  // Post the reversal inside the same txn
+  await reversalEntry.post(reversedBy, session);
 
   // Mark original as reversed
   this.status = "reversed";
   this.reversedAt = new Date();
   this.reversedBy = reversedBy;
   this.reversalEntryId = reversalEntry._id;
-  await this.save();
+  await this.save({ session });
 
-  // Update account balances
+  // Update account balances (async, deliberately outside txn)
   this.updateAccountBalances().catch(console.error);
 
   return reversalEntry;

@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getHRStats, getExpiringContracts, getTodayAttendanceStats } from "@/app/mongodb/queries/hr-queries";
-import { Users, Building2, Calendar, Banknote, Clock, UserCheck, AlertTriangle, UserX } from "lucide-react";
+import { Users, Building2, Calendar, Banknote, Clock, UserCheck, AlertTriangle, UserX, Settings } from "lucide-react";
 
 export const metadata = { title: "HR | Dashboard" };
 
@@ -74,6 +74,7 @@ function QuickActions() {
     { label: "Add Employee", href: "/dashboard/hr/employees/create", icon: Users },
     { label: "Add Department", href: "/dashboard/hr/departments/create", icon: Building2 },
     { label: "Leave Requests", href: "/dashboard/hr/leave", icon: Calendar },
+    { label: "Leave Types", href: "/dashboard/hr/leave-types", icon: Settings },
     { label: "Run Payroll", href: "/dashboard/hr/payroll/create", icon: Banknote },
   ];
 

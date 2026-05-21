@@ -19,11 +19,10 @@ import {
   StockTableServer,
   StockTableSkeleton,
   StockPaginationServer,
-  StockPDFExportServer,
-  PDFExportSkeleton,
   StockCategoryFilterServer,
   CategoryFilterSkeleton,
 } from "../components/StockServerComponents";
+import { GenerateStockPDF } from "../export-to-pdf";
 import { Plus } from "lucide-react";
 
 // ============================================
@@ -41,9 +40,8 @@ function ActionButtons({ canCreate }) {
           </Link>
         </Button>
       )}
-      <Suspense fallback={<PDFExportSkeleton />}>
-        <StockPDFExportServer />
-      </Suspense>
+      {/* Fetches data only on click — removed from the SSR critical path. */}
+      <GenerateStockPDF />
     </div>
   );
 }

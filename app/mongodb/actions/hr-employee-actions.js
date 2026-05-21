@@ -564,7 +564,12 @@ export async function terminateEmployee(_prevState, formData) {
       lastModifiedBy: { name: user.name, id: user.id },
     });
     if (profile.userId) {
-      await User.findByIdAndUpdate(profile.userId, { status: "Inactive" });
+      // Bump tokenVersion so any active session is killed on next
+      // privileged request — termination shouldn't have an 8h tail.
+      await User.findByIdAndUpdate(profile.userId, {
+        $set: { status: "Inactive" },
+        $inc: { tokenVersion: 1 },
+      });
     }
 
     revalidatePath(`/dashboard/hr/employees/${profileId}`);

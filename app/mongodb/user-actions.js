@@ -13,6 +13,7 @@ import { userRoles } from "@/lib/utils";
 import mongoose from "mongoose";
 import { sendInviteEmail } from "@/lib/email";
 import { checkUserLimit } from "@/lib/check-user-limit";
+import { requireFreshSession } from "@/lib/utils/session-freshness";
 
 // ============================================
 // AUTHORIZATION HELPERS
@@ -75,9 +76,6 @@ const passwordResetSchema = z
 export async function createUser(prevState, formData) {
   await dbConnect();
 
-  const session = await auth();
-  const currentUser = session?.user;
-
   // Extract form values to preserve on error
   const formValues = {
     name: formData.get("name"),
@@ -87,9 +85,15 @@ export async function createUser(prevState, formData) {
     companyId: formData.get("companyId"),
   };
 
-  if (!currentUser) {
-    return { message: "You must be logged in", errors: { _form: ["You must be logged in"] }, values: formValues };
+  const fresh = await requireFreshSession();
+  if (!fresh.ok) {
+    return {
+      message: fresh.message,
+      errors: { _form: [fresh.message] },
+      values: formValues,
+    };
   }
+  const currentUser = fresh.session.user;
 
   if (!ADMIN_ROLES.includes(currentUser.role)) {
     return { message: "Unauthorized", errors: { _form: ["Admin role required"] }, values: formValues };
@@ -228,9 +232,6 @@ export async function createUser(prevState, formData) {
 export async function updateUser(userId, prevState, formData) {
   await dbConnect();
 
-  const session = await auth();
-  const currentUser = session?.user;
-
   // Extract form values to preserve on error
   const formValues = {
     name: formData.get("name"),
@@ -241,9 +242,18 @@ export async function updateUser(userId, prevState, formData) {
     companyId: formData.get("companyId"),
   };
 
-  if (!currentUser) {
-    return { message: "You must be logged in", errors: { _form: ["You must be logged in"] }, values: formValues };
+  // Freshness check: reject if the caller's session is stale (their
+  // own role was changed, they were deactivated, etc.). Replaces the
+  // old `auth()` call — the helper does both.
+  const fresh = await requireFreshSession();
+  if (!fresh.ok) {
+    return {
+      message: fresh.message,
+      errors: { _form: [fresh.message] },
+      values: formValues,
+    };
   }
+  const currentUser = fresh.session.user;
 
   if (!ADMIN_ROLES.includes(currentUser.role)) {
     return { message: "Unauthorized", errors: { _form: ["Admin role required"] }, values: formValues };
@@ -330,6 +340,16 @@ export async function updateUser(userId, prevState, formData) {
       }
     }
 
+    // Bump tokenVersion when any privilege-affecting field changed
+    // (role / status / companyId). The next time this user's session
+    // is checked by requireFreshSession(), it'll be rejected and they
+    // must re-authenticate. Pure name/email/department edits don't
+    // need a re-auth.
+    const privilegeChanged =
+      targetUser.role !== role ||
+      targetUser.status !== status ||
+      targetUser.companyId?.toString() !== (assignedCompanyId?.toString() || null);
+
     await User.findByIdAndUpdate(userId, {
       $set: {
         name,
@@ -339,6 +359,7 @@ export async function updateUser(userId, prevState, formData) {
         status,
         companyId: assignedCompanyId,
       },
+      ...(privilegeChanged && { $inc: { tokenVersion: 1 } }),
     });
 
     revalidatePath("/dashboard/users");
@@ -361,10 +382,13 @@ export async function updateUser(userId, prevState, formData) {
 export async function resetUserPassword(userId, prevState, formData) {
   await dbConnect();
 
-  const session = await auth();
-  const currentUser = session?.user;
+  const fresh = await requireFreshSession();
+  if (!fresh.ok) {
+    return { message: fresh.message, errors: { _form: [fresh.message] } };
+  }
+  const currentUser = fresh.session.user;
 
-  if (!currentUser || !ADMIN_ROLES.includes(currentUser.role)) {
+  if (!ADMIN_ROLES.includes(currentUser.role)) {
     return { message: "Unauthorized", errors: { _form: ["Admin role required"] } };
   }
 
@@ -400,8 +424,12 @@ export async function resetUserPassword(userId, prevState, formData) {
       }
     }
 
-    // Update password (will be hashed by pre-save hook)
+    // Update password (will be hashed by pre-save hook) and bump
+    // tokenVersion so any existing sessions for this user are killed
+    // on next privileged request (per NIST 800-63B — credential change
+    // must invalidate active sessions).
     targetUser.password = validatedFields.data.newPassword;
+    targetUser.tokenVersion = (targetUser.tokenVersion || 0) + 1;
     await targetUser.save();
 
     revalidatePath("/dashboard/users");
@@ -419,12 +447,11 @@ export async function resetUserPassword(userId, prevState, formData) {
 export async function deleteUser(userId) {
   await dbConnect();
 
-  const session = await auth();
-  const currentUser = session?.user;
-
-  if (!currentUser) {
-    return { message: "You must be logged in", success: false };
+  const fresh = await requireFreshSession();
+  if (!fresh.ok) {
+    return { message: fresh.message, success: false };
   }
+  const currentUser = fresh.session.user;
 
   // Only SuperAdmin and Admin can delete users
   if (!ADMIN_ROLES.includes(currentUser.role)) {
@@ -480,10 +507,13 @@ export async function deleteUser(userId) {
 export async function toggleUserStatus(userId) {
   await dbConnect();
 
-  const session = await auth();
-  const currentUser = session?.user;
+  const fresh = await requireFreshSession();
+  if (!fresh.ok) {
+    return { message: fresh.message, success: false };
+  }
+  const currentUser = fresh.session.user;
 
-  if (!currentUser || !ADMIN_ROLES.includes(currentUser.role)) {
+  if (!ADMIN_ROLES.includes(currentUser.role)) {
     return { message: "Unauthorized", success: false };
   }
 
@@ -508,8 +538,12 @@ export async function toggleUserStatus(userId) {
 
     const newStatus = targetUser.status === "Active" ? "Inactive" : "Active";
 
+    // Status change is privilege-affecting — bump tokenVersion so any
+    // existing session for this user is rejected on next privileged
+    // request (matches Stripe / NetSuite "instant deactivation" UX).
     await User.findByIdAndUpdate(userId, {
       $set: { status: newStatus },
+      $inc: { tokenVersion: 1 },
     });
 
     revalidatePath("/dashboard/users");
@@ -530,12 +564,11 @@ export async function toggleUserStatus(userId) {
 export async function assignUserToCompany(userId, companyId) {
   await dbConnect();
 
-  const session = await auth();
-  const currentUser = session?.user;
-
-  if (!currentUser) {
-    return { message: "You must be logged in", success: false };
+  const fresh = await requireFreshSession();
+  if (!fresh.ok) {
+    return { message: fresh.message, success: false };
   }
+  const currentUser = fresh.session.user;
 
   if (!SUPER_ADMIN_ROLES.includes(currentUser.role)) {
     return { message: "Unauthorized - SuperAdmin only", success: false };
@@ -555,8 +588,11 @@ export async function assignUserToCompany(userId, companyId) {
       }
     }
 
+    // Tenant change is privilege-affecting (multi-tenant data scope
+    // changes immediately). Bump tokenVersion to force re-auth.
     await User.findByIdAndUpdate(userId, {
       $set: { companyId: companyId || null },
+      $inc: { tokenVersion: 1 },
     });
 
     revalidatePath("/dashboard/admin/users");
@@ -577,12 +613,11 @@ export async function assignUserToCompany(userId, companyId) {
 export async function bulkAssignUsersToCompany(userIds, companyId) {
   await dbConnect();
 
-  const session = await auth();
-  const currentUser = session?.user;
-
-  if (!currentUser) {
-    return { message: "You must be logged in", success: false };
+  const fresh = await requireFreshSession();
+  if (!fresh.ok) {
+    return { message: fresh.message, success: false };
   }
+  const currentUser = fresh.session.user;
 
   if (!SUPER_ADMIN_ROLES.includes(currentUser.role)) {
     return { message: "Unauthorized - SuperAdmin only", success: false };
@@ -601,9 +636,14 @@ export async function bulkAssignUsersToCompany(userIds, companyId) {
       }
     }
 
+    // Tenant move is privilege-affecting — bump tokenVersion across
+    // the moved users so their sessions are killed on next request.
     await User.updateMany(
       { _id: { $in: userIds } },
-      { $set: { companyId: companyId || null } }
+      {
+        $set: { companyId: companyId || null },
+        $inc: { tokenVersion: 1 },
+      },
     );
 
     revalidatePath("/dashboard/admin/users");

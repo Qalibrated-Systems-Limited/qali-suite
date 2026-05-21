@@ -561,7 +561,7 @@ export async function createGRN(prevState, formData) {
         _id: { $in: productIds },
         ...(isSuperAdmin ? {} : { companyId: tenantCompanyId }),
       })
-        .select("_id name sku unit")
+        .select("_id name SKU unit")
         .session(session)
         .lean();
       const byId = new Map(products.map((p) => [p._id.toString(), p]));
@@ -575,7 +575,7 @@ export async function createGRN(prevState, formData) {
         }
         return {
           productId: p._id,
-          sku: p.sku,
+          sku: p.SKU,
           description: l.description || p.name,
           expectedQty: l.expectedQty,
           receivedQty: l.receivedQty,

@@ -65,6 +65,7 @@ const inventoryAdjustmentSchema = new Schema(
           "correction", // Data entry error correction
           "write_off", // Obsolete inventory write-off
           "found", // Unexpected inventory found
+          "opening_balance", // Initial stock seeded at product create / data migration
           "other",
         ],
         message: "{VALUE} is not a valid adjustment type",
@@ -345,8 +346,15 @@ inventoryAdjustmentSchema.methods.calculateTotals = function () {
 
 /**
  * Validate before approval
+ *
+ * Accepts an optional session so the product lookups participate in the
+ * caller's transaction. Without this, callers that create a product +
+ * opening-balance adjustment in one txn would throw "Product not found"
+ * because the newly-created product isn't visible to a non-session read.
  */
-inventoryAdjustmentSchema.methods.validateBeforeApproval = async function () {
+inventoryAdjustmentSchema.methods.validateBeforeApproval = async function (
+  session = null,
+) {
   this.validateLines();
   this.calculateTotals();
 
@@ -354,7 +362,9 @@ inventoryAdjustmentSchema.methods.validateBeforeApproval = async function () {
   const Product = mongoose.model("Product");
 
   for (const line of this.lines) {
-    const product = await Product.findById(line.productId);
+    const product = await Product.findById(line.productId).session(
+      session || null,
+    );
 
     if (!product) {
       throw new Error(`Product not found: ${line.productId}`);
@@ -381,8 +391,8 @@ inventoryAdjustmentSchema.methods.approve = async function (approvedBy, session 
 
   const userInfo = formatUserForAudit(approvedBy);
 
-  // Validate
-  await this.validateBeforeApproval();
+  // Validate (pass session so it sees in-txn writes)
+  await this.validateBeforeApproval(session);
 
   // Calculate totals from lines
   this.calculateTotals();
@@ -492,24 +502,31 @@ inventoryAdjustmentSchema.methods.approve = async function (approvedBy, session 
 
     return this;
   } catch (error) {
-    // Rollback stock movements
-    for (const movement of stockMovements) {
-      const product = await Product.findById(movement.productId);
-      if (product) {
-        if (movement.direction === "in") {
-          await product.decreaseInventory(
-            movement.quantity,
-            "Rollback: Adjustment approval failed"
-          );
-        } else {
-          await product.increaseInventory(
-            movement.quantity,
-            movement.costing.unitCost,
-            "Rollback: Adjustment approval failed"
-          );
+    // If a caller-owned session was passed, the outer transaction will
+    // abort and roll back every write we made inside it — no manual
+    // compensation needed (and running compensating writes here would
+    // double-revert, because they'd execute outside the aborting txn).
+    if (!session) {
+      // Non-transactional path: best-effort rollback of any movements
+      // we already wrote before the failure.
+      for (const movement of stockMovements) {
+        const product = await Product.findById(movement.productId);
+        if (product) {
+          if (movement.direction === "in") {
+            await product.decreaseInventory(
+              movement.quantity,
+              "Rollback: Adjustment approval failed",
+            );
+          } else {
+            await product.increaseInventory(
+              movement.quantity,
+              movement.costing.unitCost,
+              "Rollback: Adjustment approval failed",
+            );
+          }
         }
+        await StockMovement.findByIdAndDelete(movement._id);
       }
-      await StockMovement.findByIdAndDelete(movement._id);
     }
 
     throw new Error(`Adjustment approval failed: ${error.message}`);
@@ -531,10 +548,24 @@ inventoryAdjustmentSchema.methods.createJournalEntry = async function (user, ses
     companyId: this.companyId,
     systemAccount: "inventory",
   }).session(session || null);
-  const adjustmentAccount = await Account.findOne({
-    companyId: this.companyId,
-    systemAccount: "inventory_adjustments",
-  }).session(session || null);
+
+  // For opening_balance, the offsetting credit should land in Opening
+  // Balance Equity if the tenant's CoA has it (per QuickBooks / Zoho /
+  // Odoo convention). If not seeded, fall back to inventory_adjustments
+  // so the JE still posts — the tenant can reclassify later.
+  let adjustmentAccount = null;
+  if (this.adjustmentType === "opening_balance") {
+    adjustmentAccount = await Account.findOne({
+      companyId: this.companyId,
+      systemAccount: "opening_balance_equity",
+    }).session(session || null);
+  }
+  if (!adjustmentAccount) {
+    adjustmentAccount = await Account.findOne({
+      companyId: this.companyId,
+      systemAccount: "inventory_adjustments",
+    }).session(session || null);
+  }
 
   if (!inventoryAccount) {
     throw new Error("Inventory account not configured");
@@ -613,8 +644,9 @@ inventoryAdjustmentSchema.methods.createJournalEntry = async function (user, ses
     );
   }
 
-  // Generate entry number
-  const entryNumber = await this.generateUniqueEntryNumber();
+  // Generate entry number (in-session so the uniqueness check sees other
+  // entries from this txn, e.g. multiple adjustments in a bulk create).
+  const entryNumber = await this.generateUniqueEntryNumber(session);
 
   // Create journal entry (with tenant scoping)
   const [journalEntry] = await JournalEntry.create([{

@@ -50,23 +50,55 @@ export async function getStockStats() {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
 
-  const [totalItems, lowStock, outOfStock, inStock] = await Promise.all([
-    Product.countDocuments(tenantMatch),
-    Product.countDocuments({
-      ...tenantMatch,
-      "inventory.quantityOnHand": { $gte: 1, $lte: 9 },
-    }),
-    Product.countDocuments({
-      ...tenantMatch,
-      "inventory.quantityOnHand": { $lte: 0 },
-    }),
-    Product.countDocuments({
-      ...tenantMatch,
-      "inventory.quantityOnHand": { $gte: 10 },
-    }),
+  // Single pass over the tenant's products, four conditional counts —
+  // replaces four parallel countDocuments calls (= four round trips and
+  // three COLLSCANs on the schema's older indexes). With the new
+  // (companyId, inventory.quantityOnHand) index, the planner can satisfy
+  // this from a single index scan.
+  const [result] = await Product.aggregate([
+    { $match: tenantMatch },
+    {
+      $group: {
+        _id: null,
+        totalItems: { $sum: 1 },
+        lowStock: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $gte: ["$inventory.quantityOnHand", 1] },
+                  { $lte: ["$inventory.quantityOnHand", 9] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        outOfStock: {
+          $sum: {
+            $cond: [
+              { $lte: [{ $ifNull: ["$inventory.quantityOnHand", 0] }, 0] },
+              1,
+              0,
+            ],
+          },
+        },
+        inStock: {
+          $sum: {
+            $cond: [{ $gte: ["$inventory.quantityOnHand", 10] }, 1, 0],
+          },
+        },
+      },
+    },
   ]);
 
-  return { totalItems, lowStock, outOfStock, inStock };
+  return {
+    totalItems: result?.totalItems || 0,
+    lowStock: result?.lowStock || 0,
+    outOfStock: result?.outOfStock || 0,
+    inStock: result?.inStock || 0,
+  };
 }
 
 // ============================================

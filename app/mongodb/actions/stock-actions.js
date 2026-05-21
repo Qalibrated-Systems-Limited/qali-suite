@@ -6,9 +6,11 @@ import { z } from "zod";
 
 import Product from "@/app/models/product";
 import { StockMovement } from "../../models/stockmovement";
+import InventoryAdjustment from "@/app/models/inventoryAdjustment";
 import dbConnect from "@/app/config/dbConnect";
 import Category from "@/app/models/category";
 import mongoose from "mongoose";
+import { fetchStockData } from "@/app/mongodb/queries/product-queries";
 import {
   getTenantContext,
   getCompanyIdForCreate,
@@ -19,10 +21,10 @@ import {
 // AUTH HELPERS
 // ============================================
 
-// Default product/inventory write authority. SuperAdmin, Admin, CFO,
-// Finance Manager included so finance can correct mis-priced or
-// mis-categorised items without escalation. Lowercase comparison removed
-// — use canonical role names only.
+// Default product/inventory write authority — who can create/edit the
+// product master at all. Store Manager included so they can register
+// new items they handle; cost / price gating is a separate concern
+// below (split from this list to match standard ERP SoD).
 const DEFAULT_PRODUCT_ROLES = [
   "SuperAdmin",
   "Admin",
@@ -30,6 +32,41 @@ const DEFAULT_PRODUCT_ROLES = [
   "Finance Manager",
   "Manager",
   "Store Manager",
+];
+
+// Who can set / update purchase cost (touches COGS + GL via opening
+// balance + landed cost flows). Operational + finance roles.
+// Excludes Sales Manager — they shouldn't touch cost (SoD: same
+// person shouldn't set both their own cost and their selling price).
+const COST_ROLES = [
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Procurement Officer",
+];
+
+// Who can set / update selling price (commercial decision). Sales
+// Manager included; Manager kept here (typical SMB "GM" interpretation)
+// but excluded from COST_ROLES.
+const PRICE_ROLES = [
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Sales Manager",
+  "Manager",
+];
+
+// Pricing policy — minimum price floor, costing method, discount caps.
+// Tightest set: changing these re-prices history or moves the margin
+// floor, so finance leadership only.
+// eslint-disable-next-line no-unused-vars
+const PRICING_POLICY_ROLES = [
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
 ];
 
 function checkPermission(user, allowedRoles = DEFAULT_PRODUCT_ROLES) {
@@ -188,39 +225,62 @@ export async function addProduct(prevState, formData) {
     };
   }
 
-  // Only admins/managers can set pricing
-
-  // Pricing edit authority — finance leadership + sales/operations management.
-  const canSetPricing = [
-    "SuperAdmin",
-    "Admin",
-    "CFO",
-    "Finance Manager",
-    "Sales Manager",
-    "Manager",
-  ].includes(user.role);
-  if (!canSetPricing) {
+  // Split pricing authority by SoD: cost vs selling are different
+  // decisions made by different people. See COST_ROLES / PRICE_ROLES
+  // declarations at the top of this file.
+  const canSetCost = COST_ROLES.includes(user.role);
+  const canSetPrice = PRICE_ROLES.includes(user.role);
+  if (!canSetCost) {
     data.costPrice = 0;
+  }
+  if (!canSetPrice) {
     data.sellingPrice = 0;
   }
 
-  // Create product
+  // Guard: a non-cost-setter cannot register opening stock — the
+  // resulting opening-balance adjustment would have zero value and
+  // skip the GL post, leaving inventory off the books. Force them to
+  // either create with zero stock (so a manager can backfill cost
+  // first) or hand the create over to someone with cost rights.
+  if (data.initialStock > 0 && !canSetCost) {
+    return {
+      error: {
+        initialStock: [
+          "Cost price must be set before adding initial stock. Save with zero stock and ask a manager with cost-pricing rights to add stock via Adjustments, or have them create the product.",
+        ],
+      },
+    };
+  }
+
+  // Even when the user CAN set cost, refuse zero-cost initial stock —
+  // the opening-balance JE would be skipped and the balance sheet
+  // wouldn't reflect the inventory value.
+  if (data.initialStock > 0 && (!data.costPrice || data.costPrice <= 0)) {
+    return {
+      error: {
+        initialStock: [
+          "Initial stock requires a non-zero cost price. The opening-balance journal entry cannot post without a valuation.",
+        ],
+      },
+    };
+  }
+
+  // Create product + (optionally) post the opening-balance adjustment in a
+  // single transaction. Industry standard: opening stock must hit the GL
+  // through a journaled adjustment so the balance sheet's Inventory
+  // account always agrees with physical quantity × cost. The product
+  // itself is created with quantityOnHand = 0 — the adjustment.approve()
+  // path is the only thing that mutates inventory and posts the JE.
+  const session = await mongoose.startSession();
+  session.startTransaction();
   let product;
   try {
     const costing = {
-      costPrice: canSetPricing ? data.costPrice || 0 : 0,
+      costPrice: canSetCost ? data.costPrice || 0 : 0,
       costingMethod: data.costingMethod,
     };
     const pricing = {
-      sellingPrice: canSetPricing ? data.sellingPrice || 0 : 0,
-    };
-
-    const inventory = {
-      quantityOnHand: data.initialStock || 0,
-      quantityCommitted: 0,
-      quantityOnOrder: 0,
-      reorderLevel: data.reorderLevel,
-      reorderQuantity: data.reorderQuantity,
+      sellingPrice: canSetPrice ? data.sellingPrice || 0 : 0,
     };
     const storeInfo = {
       location: data.location || "",
@@ -228,99 +288,114 @@ export async function addProduct(prevState, formData) {
       trackInventory: data.trackInventory,
       allowNegativeStock: data.allowNegativeStock,
     };
-    product = await Product.create({
-      companyId: tenantCompanyId,
-      name: data.name,
-      SKU: data.sku,
-      description: data.description || "",
-      category: category.name,
-      type: data.type,
-      unit: data.unit,
-      taxRate: data.taxRate,
-      isActive: data.isActive,
-      // Costing & Pricing
-      costing,
-      pricing,
-      // Inventory with reorder settings
-      inventory: {
-        quantityOnHand: data.initialStock || 0,
-        quantityAvailable: data.initialStock || 0,
-        quantityCommitted: 0,
-        reorderLevel: data.reorderLevel || 0,
-        reorderQuantity: data.reorderQuantity || 0,
-      },
-      // Store info
-      storeInfo,
-      // Audit
-      createdBy: {
-        id: user.id,
-        name: user.name,
-      },
-    });
+
+    const [createdProduct] = await Product.create(
+      [
+        {
+          companyId: tenantCompanyId,
+          name: data.name,
+          SKU: data.sku,
+          description: data.description || "",
+          category: category.name,
+          type: data.type,
+          unit: data.unit,
+          taxRate: data.taxRate,
+          isActive: data.isActive,
+          costing,
+          pricing,
+          inventory: {
+            quantityOnHand: 0,
+            quantityAvailable: 0,
+            quantityCommitted: 0,
+            reorderLevel: data.reorderLevel || 0,
+            reorderQuantity: data.reorderQuantity || 0,
+          },
+          storeInfo,
+          createdBy: { id: user.id, name: user.name },
+        },
+      ],
+      { session },
+    );
+    product = createdProduct;
+
+    // Opening balance: route through InventoryAdjustment.approve() so the
+    // inventory mutation, the StockMovement audit row, and the journal
+    // entry (DR Inventory / CR Opening Balance Equity || Inventory
+    // Adjustment) all happen atomically inside our session.
+    if (data.initialStock > 0 && data.trackInventory) {
+      // canSetCost is guaranteed true here — guarded above. Falling back
+      // to the raw value rather than zero so the guard remains the
+      // single source of truth.
+      const unitCost = data.costPrice || 0;
+      // Counter generation is intentionally non-transactional — the Counter
+      // model auto-increments outside our session so concurrent products
+      // don't deadlock on the same counter doc.
+      const adjustmentNumber =
+        await InventoryAdjustment.generateAdjustmentNumber(tenantCompanyId);
+
+      const [adjustment] = await InventoryAdjustment.create(
+        [
+          {
+            companyId: tenantCompanyId,
+            adjustmentNumber,
+            adjustmentDate: new Date(),
+            adjustmentType: "opening_balance",
+            description: `Opening balance for ${product.SKU}`,
+            notes:
+              "Initial stock seeded at product creation. Posts DR Inventory / CR Opening Balance Equity.",
+            lines: [
+              {
+                productId: product._id,
+                productSKU: product.SKU,
+                productName: product.name,
+                productUnit: product.unit,
+                systemQuantity: 0,
+                physicalQuantity: data.initialStock,
+                adjustmentQuantity: data.initialStock,
+                unitCost,
+                adjustmentValue: unitCost * data.initialStock,
+                reason: "Opening balance",
+              },
+            ],
+            status: "draft",
+            createdBy: { id: user.id, name: user.name },
+          },
+        ],
+        { session },
+      );
+
+      // Opening balance is an explicit, industry-accepted SoD exception:
+      // the creator IS the approver since this is a setup/migration step
+      // (mirrors Odoo, QuickBooks, Zoho). The adjustment number provides
+      // the audit trail.
+      await adjustment.approve(
+        { name: user.name, id: user.id },
+        session,
+      );
+    }
+
+    await session.commitTransaction();
   } catch (error) {
+    if (session.inTransaction()) await session.abortTransaction();
     console.error("Failed to create product:", error);
     return {
       error: {
-        _form: ["Failed to create product. Please try again."],
+        _form: [
+          `Failed to create product${
+            error?.message ? `: ${error.message}` : ""
+          }. Please try again.`,
+        ],
       },
     };
+  } finally {
+    session.endSession();
   }
 
-  // Create initial stock movement if there's initial stock
-  if (data.initialStock > 0 && data.trackInventory) {
-    try {
-      const movementNumber = await generateMovementNumber(tenantCompanyId);
-      const productSnapshot = {
-        name: product.name,
-        SKU: product.SKU,
-        category: product.category,
-        unit: product.unit,
-      };
-      const unitCost = canSetPricing ? data.costPrice || 0 : 0;
-      const unitPrice = canSetPricing ? data.sellingPrice || data.costPrice || 0 : 0;
-
-      await StockMovement.create({
-        companyId: tenantCompanyId,
-        movementNumber,
-        movementType: "initial",
-        direction: "in",
-        previousStock: 0,
-        newStock: data.initialStock,
-        costing: {
-          unitCost: unitCost,
-          totalCost: unitCost * data.initialStock,
-          unitPrice: unitPrice,
-          totalValue: unitPrice * data.initialStock,
-        },
-        productId: product._id,
-        productSnapshot,
-        quantity: data.initialStock,
-        status: "posted",
-        performedBy: {
-          id: user.id,
-          name: user.name,
-        },
-        postedAt: new Date(),
-        notes: `Initial stock for ${product.SKU}`,
-      });
-    } catch (error) {
-      console.error("Failed to create initial stock movement:", error);
-      return {
-        error: {
-          _form: ["Failed to create initial stock movement:", error],
-        },
-      };
-
-      // Don't fail the whole operation - product is already created
-    }
-  }
-
-  // Success - revalidate and redirect with success message
   revalidatePath("/dashboard/stocks");
   redirect(
     `/dashboard/stocks?success=${encodeURIComponent(
-      `Product "${data.name}" created successfully`
-    )}`
+      `Product "${data.name}" created successfully`,
+    )}`,
   );
 }
 
@@ -495,18 +570,17 @@ export async function updateProduct(productId, prevState, formData) {
     },
   };
 
-  // Pricing edit authority — finance leadership + sales/operations management.
-  const canSetPricing = [
-    "SuperAdmin",
-    "Admin",
-    "CFO",
-    "Finance Manager",
-    "Sales Manager",
-    "Manager",
-  ].includes(user.role);
-  if (canSetPricing) {
-    updateData.pricing = pricing;
+  // Split: cost edits and selling-price edits go through different
+  // role gates (same SoD as create). A Sales Manager can change
+  // selling price but not cost; a Procurement Officer can change cost
+  // but not selling price.
+  const canSetCost = COST_ROLES.includes(user.role);
+  const canSetPrice = PRICE_ROLES.includes(user.role);
+  if (canSetCost) {
     updateData.costing = costing;
+  }
+  if (canSetPrice) {
+    updateData.pricing = pricing;
   }
 
   // Update supplier info if provided
@@ -1037,6 +1111,29 @@ export async function updateProductPricing(productId, prevState, formData) {
     return {
       success: false,
       error: error.message || "Failed to update pricing",
+    };
+  }
+}
+
+// ============================================
+// STOCK PDF DATA (lazy — invoked on user click)
+// ============================================
+//
+// Previously fetchStockData() was called inside StockPDFExportServer on
+// every /dashboard/stocks render so a button could be "ready" with the
+// data baked in. That meant a full-collection projection on every page
+// load. This action lets the client fetch the data only when the user
+// actually clicks "Export PDF", removing the heaviest query from the
+// SSR critical path.
+export async function getStockPdfData() {
+  try {
+    const data = await fetchStockData();
+    return { success: true, data };
+  } catch (error) {
+    console.error("getStockPdfData error:", error);
+    return {
+      success: false,
+      error: error?.message || "Failed to load stock data",
     };
   }
 }

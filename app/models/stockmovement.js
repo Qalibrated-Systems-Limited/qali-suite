@@ -599,8 +599,18 @@ stockMovementSchema.methods.createJournalEntry = async function (user) {
 
 /**
  * Reverse this movement (create opposite movement)
+ *
+ * Atomic: product mutation, reversal movement, JE reversal, and the
+ * "original is now reversed" flip all happen inside a single transaction.
+ * Accepts an optional external session — if the caller already has a txn
+ * open (e.g. when voiding a multi-document operation), pass it through
+ * to participate in their unit of work. Otherwise we start our own.
  */
-stockMovementSchema.methods.reverse = async function (reversedBy, reason) {
+stockMovementSchema.methods.reverse = async function (
+  reversedBy,
+  reason,
+  externalSession = null,
+) {
   if (this.isReversed) {
     throw new Error("Movement is already reversed");
   }
@@ -608,106 +618,130 @@ stockMovementSchema.methods.reverse = async function (reversedBy, reason) {
   const StockMovement = mongoose.model("StockMovement");
   const Product = mongoose.model("Product");
 
-  // Get product
-  const product = await Product.findById(this.productId);
-  if (!product) {
-    throw new Error("Product not found");
-  }
+  const ownsSession = !externalSession;
+  const session = externalSession || (await mongoose.startSession());
+  if (ownsSession) session.startTransaction();
 
-  // Check stock availability for reversal
-  const currentStock = product.inventory?.quantityOnHand ?? 0;
-  if (this.direction === "in") {
-    // Original was IN, reversal is OUT
-    if (currentStock < this.quantity) {
-      throw new Error(
-        `Insufficient stock to reverse. Need ${this.quantity}, have ${currentStock}`
-      );
+  try {
+    // Get product (in-session so we read its current value consistently)
+    const product = await Product.findById(this.productId).session(session);
+    if (!product) {
+      throw new Error("Product not found");
     }
-  }
 
-  // Create reversal movement
-  const reversalNumber = await generateReversalNumber();
-  const oppositeDirection = this.direction === "in" ? "out" : "in";
-
-  const reversalMovement = await StockMovement.create({
-    movementNumber: reversalNumber,
-    productId: this.productId,
-    productSnapshot: this.productSnapshot,
-    movementType: this.movementType,
-    direction: oppositeDirection,
-    quantity: this.quantity,
-    previousStock: currentStock,
-    newStock:
-      oppositeDirection === "in"
-        ? currentStock + this.quantity
-        : currentStock - this.quantity,
-    costing: {
-      unitCost: this.costing?.unitCost || 0,
-      totalCost: this.costing?.totalCost || 0,
-      unitPrice: this.costing?.unitPrice,
-      totalValue: this.costing?.totalValue,
-    },
-    performedBy: {
-      name: reversedBy.name,
-      id: reversedBy.id,
-      role: reversedBy.role || "system",
-    },
-    notes: `Reversal of ${this.movementNumber}: ${reason}`,
-    reason: reason,
-    originalMovementId: this._id,
-    status: "posted",
-    postedAt: new Date(),
-    postedBy: {
-      name: reversedBy.name,
-      id: reversedBy.id,
-    },
-  });
-
-  // Update product stock
-  if (oppositeDirection === "in") {
-    await Product.findByIdAndUpdate(this.productId, {
-      $inc: { "inventory.quantityOnHand": this.quantity, "inventory.quantityAvailable": this.quantity },
-    });
-  } else {
-    await Product.findByIdAndUpdate(this.productId, {
-      $inc: { "inventory.quantityOnHand": -this.quantity, "inventory.quantityAvailable": -this.quantity },
-    });
-  }
-
-  // Reverse journal entry if exists
-  if (this.accounting?.journalEntryId) {
-    const JournalEntry = mongoose.model("JournalEntry");
-    const je = await JournalEntry.findById(this.accounting.journalEntryId);
-
-    if (je && je.status === "posted") {
-      await je.reverse(reversedBy, reason);
-
-      reversalMovement.accounting = {
-        journalEntryId: je.reversalEntryId,
-        affectsAccounting: true,
-        accountingPosted: true,
-        accountingPostedAt: new Date(),
-      };
-      await reversalMovement.save();
+    // Check stock availability for reversal
+    const currentStock = product.inventory?.quantityOnHand ?? 0;
+    if (this.direction === "in") {
+      // Original was IN, reversal is OUT
+      if (currentStock < this.quantity) {
+        throw new Error(
+          `Insufficient stock to reverse. Need ${this.quantity}, have ${currentStock}`,
+        );
+      }
     }
+
+    // Counter read is outside the txn; the unique index on movementNumber
+    // catches any concurrent collisions on insert below.
+    const reversalNumber = await generateReversalNumber();
+    const oppositeDirection = this.direction === "in" ? "out" : "in";
+
+    // Model.create with a session requires array form
+    const [reversalMovement] = await StockMovement.create(
+      [
+        {
+          movementNumber: reversalNumber,
+          productId: this.productId,
+          productSnapshot: this.productSnapshot,
+          movementType: this.movementType,
+          direction: oppositeDirection,
+          quantity: this.quantity,
+          previousStock: currentStock,
+          newStock:
+            oppositeDirection === "in"
+              ? currentStock + this.quantity
+              : currentStock - this.quantity,
+          costing: {
+            unitCost: this.costing?.unitCost || 0,
+            totalCost: this.costing?.totalCost || 0,
+            unitPrice: this.costing?.unitPrice,
+            totalValue: this.costing?.totalValue,
+          },
+          performedBy: {
+            name: reversedBy.name,
+            id: reversedBy.id,
+            role: reversedBy.role || "system",
+          },
+          notes: `Reversal of ${this.movementNumber}: ${reason}`,
+          reason: reason,
+          originalMovementId: this._id,
+          status: "posted",
+          postedAt: new Date(),
+          postedBy: {
+            name: reversedBy.name,
+            id: reversedBy.id,
+          },
+          companyId: this.companyId,
+        },
+      ],
+      { session },
+    );
+
+    // Update product stock
+    const delta = oppositeDirection === "in" ? this.quantity : -this.quantity;
+    await Product.findByIdAndUpdate(
+      this.productId,
+      {
+        $inc: {
+          "inventory.quantityOnHand": delta,
+          "inventory.quantityAvailable": delta,
+        },
+      },
+      { session },
+    );
+
+    // Reverse journal entry if exists — propagate session so the JE
+    // reversal joins our atomic unit.
+    if (this.accounting?.journalEntryId) {
+      const JournalEntry = mongoose.model("JournalEntry");
+      const je = await JournalEntry.findById(
+        this.accounting.journalEntryId,
+      ).session(session);
+
+      if (je && je.status === "posted") {
+        await je.reverse(reversedBy, reason, session);
+
+        reversalMovement.accounting = {
+          journalEntryId: je.reversalEntryId,
+          affectsAccounting: true,
+          accountingPosted: true,
+          accountingPostedAt: new Date(),
+        };
+        await reversalMovement.save({ session });
+      }
+    }
+
+    // Mark original as reversed
+    this.isReversed = true;
+    this.status = "reversed";
+    this.reversedBy = {
+      movementId: reversalMovement._id,
+      reason: reason,
+      reversedAt: new Date(),
+      performedBy: {
+        name: reversedBy.name,
+        id: reversedBy.id,
+      },
+    };
+    await this.save({ session });
+
+    if (ownsSession) await session.commitTransaction();
+    return reversalMovement;
+  } catch (e) {
+    if (ownsSession) await session.abortTransaction();
+    throw e;
+  } finally {
+    if (ownsSession) session.endSession();
   }
-
-  // Mark original as reversed
-  this.isReversed = true;
-  this.status = "reversed";
-  this.reversedBy = {
-    movementId: reversalMovement._id,
-    reason: reason,
-    reversedAt: new Date(),
-    performedBy: {
-      name: reversedBy.name,
-      id: reversedBy.id,
-    },
-  };
-
-  await this.save();
-
-  return reversalMovement;
 };
 
 // ============================================

@@ -9,6 +9,7 @@ import {
 import {
   getPurchaseOrderById,
   getOpenPurchaseOrders,
+  fetchAllProducts,
 } from "@/app/mongodb/queries/purchase-order-queries";
 import GRNForm from "../components/GRNForm";
 
@@ -27,9 +28,13 @@ export default async function GRNCreatePage(props) {
   // POs (sent/confirmed/partial with outstanding lines) and strict-mode
   // bills that haven't been received yet (usedGRNI=true,
   // inventoryMoved=false).
-  const [openPOs, awaitingBills] = await Promise.all([
+  // Parallel: source pickers (POs / bills) + product catalogue for the
+  // line picker. Same pattern POForm uses — pre-fetch once, filter on
+  // the client. Avoids per-keystroke server hits on the GRN form.
+  const [openPOs, awaitingBills, products] = await Promise.all([
     getOpenPurchaseOrders(),
     getBillsAwaitingGRN(),
+    fetchAllProducts(),
   ]);
 
   if (fromBillId) {
@@ -37,9 +42,10 @@ export default async function GRNCreatePage(props) {
     if (bill) {
       prefill = {
         sourceType: "bill",
-        billId: bill._id,
+        billId: bill._id?.toString?.() || bill._id,
         billNumber: bill.billNumber,
-        supplierPartyId: bill.supplier?.partyId,
+        supplierPartyId:
+          bill.supplier?.partyId?.toString?.() || bill.supplier?.partyId,
         supplierName: bill.supplier?.name,
         receivedDate: new Date().toISOString().slice(0, 10),
         // Only stock-bearing lines (those tied to a product) are receivable;
@@ -47,9 +53,9 @@ export default async function GRNCreatePage(props) {
         lines: (bill.lines || [])
           .filter((l) => l.product?.id)
           .map((l) => ({
-            productId: l.product.id,
+            productId: l.product.id?.toString?.() || l.product.id,
             description: l.description || l.product.name || "",
-            sku: l.product.sku || "",
+            sku: l.product.SKU || l.product.sku || "",
             expectedQty: l.quantity || 0,
             receivedQty: l.quantity || 0,
             unit: l.unit || "pcs",
@@ -78,7 +84,7 @@ export default async function GRNCreatePage(props) {
           return {
             productId: l.product.id?.toString?.() || l.product.id,
             description: l.description || l.product.name || "",
-            sku: l.product.sku || "",
+            sku: l.product.SKU || l.product.sku || "",
             expectedQty: outstanding,
             receivedQty: outstanding,
             unit: l.unit || "pcs",
@@ -168,6 +174,7 @@ export default async function GRNCreatePage(props) {
             prefill={prefill}
             availablePOs={openPOs}
             availableBills={awaitingBills}
+            products={products}
           />
         </CardContent>
       </Card>

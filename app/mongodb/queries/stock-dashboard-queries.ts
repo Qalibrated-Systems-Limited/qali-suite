@@ -1,14 +1,36 @@
+import mongoose from "mongoose";
 import dbConnect from "../../config/dbConnect";
 import Product from "../../models/product";
 import { StockRequest } from "../../models/requests";
 import { StockMovement } from "../../models/stockmovement";
 import { ItemCheckout } from "../../models/checkouts";
+import {
+  getTenantContext,
+  withTenantScope,
+} from "../../../lib/utils/tenant-utils";
+
+const ObjectId = mongoose.Types.ObjectId;
+
+// Build a `$match` doc for aggregation pipelines that respects SuperAdmin
+// cross-tenant access. Returns the matcher you can spread into a `$match`
+// stage or merge with other criteria. Casts companyId to ObjectId so the
+// composite indexes (companyId, ...) are hit.
+function aggTenantMatch(
+  companyId: string | null,
+  isSuperAdmin: boolean,
+): Record<string, unknown> {
+  if (isSuperAdmin) return {};
+  if (!companyId) throw new Error("companyId required for non-SuperAdmin user");
+  return { companyId: new ObjectId(companyId) };
+}
 
 // ============================================
 // STOCK STATS
 // ============================================
 export async function getStockStats() {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = aggTenantMatch(companyId, isSuperAdmin);
 
   const [
     totalProducts,
@@ -17,24 +39,29 @@ export async function getStockStats() {
     pendingRequests,
     overdueCheckouts,
   ] = await Promise.all([
-    // Total products count
-    Product.countDocuments({ isActive: true }),
+    Product.countDocuments(
+      withTenantScope({ isActive: true }, companyId, isSuperAdmin),
+    ),
 
-    // Low stock count (at or below reorder level)
-    Product.countDocuments({
-      isActive: true,
-      "inventory.reorderLevel": { $gt: 0 },
-      $expr: {
-        $lte: [
-          { $ifNull: ["$inventory.quantityOnHand", 0] },
-          "$inventory.reorderLevel",
-        ],
-      },
-    }),
+    Product.countDocuments(
+      withTenantScope(
+        {
+          isActive: true,
+          "inventory.reorderLevel": { $gt: 0 },
+          $expr: {
+            $lte: [
+              { $ifNull: ["$inventory.quantityOnHand", 0] },
+              "$inventory.reorderLevel",
+            ],
+          },
+        },
+        companyId,
+        isSuperAdmin,
+      ),
+    ),
 
-    // Total stock value
     Product.aggregate([
-      { $match: { isActive: true } },
+      { $match: { ...tenantMatch, isActive: true } },
       {
         $group: {
           _id: null,
@@ -50,14 +77,20 @@ export async function getStockStats() {
       },
     ]),
 
-    // Pending requests
-    StockRequest.countDocuments({ status: "pending" }),
+    StockRequest.countDocuments(
+      withTenantScope({ status: "pending" }, companyId, isSuperAdmin),
+    ),
 
-    // Overdue checkouts
-    ItemCheckout.countDocuments({
-      status: "checked_out",
-      expectedReturnDate: { $lt: new Date() },
-    }),
+    ItemCheckout.countDocuments(
+      withTenantScope(
+        {
+          status: "checked_out",
+          expectedReturnDate: { $lt: new Date() },
+        },
+        companyId,
+        isSuperAdmin,
+      ),
+    ),
   ]);
 
   return {
@@ -74,6 +107,8 @@ export async function getStockStats() {
 // ============================================
 export async function getMovementTrend(days = 7) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = aggTenantMatch(companyId, isSuperAdmin);
 
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
@@ -82,6 +117,7 @@ export async function getMovementTrend(days = 7) {
   const data = await StockMovement.aggregate([
     {
       $match: {
+        ...tenantMatch,
         createdAt: { $gte: startDate },
       },
     },
@@ -89,7 +125,7 @@ export async function getMovementTrend(days = 7) {
       $group: {
         _id: {
           date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-          type: "$type",
+          direction: "$direction",
         },
         total: { $sum: "$quantity" },
       },
@@ -97,7 +133,6 @@ export async function getMovementTrend(days = 7) {
     { $sort: { "_id.date": 1 } },
   ]);
 
-  // Build date range
   const dates: string[] = [];
   for (let i = days - 1; i >= 0; i--) {
     const date = new Date();
@@ -105,21 +140,13 @@ export async function getMovementTrend(days = 7) {
     dates.push(date.toISOString().split("T")[0]);
   }
 
-  // Map data to dates
   return dates.map((date) => {
     const stockIn =
-      data.find(
-        (d) =>
-          d._id.date === date &&
-          (d._id.type === "in" || d._id.type === "stock_in")
-      )?.total || 0;
+      data.find((d) => d._id.date === date && d._id.direction === "in")
+        ?.total || 0;
     const stockOut =
-      data.find(
-        (d) =>
-          d._id.date === date &&
-          (d._id.type === "out" || d._id.type === "stock_out")
-      )?.total || 0;
-
+      data.find((d) => d._id.date === date && d._id.direction === "out")
+        ?.total || 0;
     return { date, stockIn, stockOut };
   });
 }
@@ -129,9 +156,11 @@ export async function getMovementTrend(days = 7) {
 // ============================================
 export async function getCategoryDistribution() {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = aggTenantMatch(companyId, isSuperAdmin);
 
   const data = await Product.aggregate([
-    { $match: { isActive: true } },
+    { $match: { ...tenantMatch, isActive: true } },
     {
       $group: {
         _id: "$category",
@@ -162,12 +191,16 @@ export async function getCategoryDistribution() {
 // ============================================
 export async function getRecentMovements(limit = 5) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  const movements = await StockMovement.find()
+  const movements = await StockMovement.find(
+    withTenantScope({}, companyId, isSuperAdmin),
+  )
     .sort({ createdAt: -1 })
     .limit(limit)
-    .populate("productId", "name sku")
-    .populate("performedBy", "name")
+    .select(
+      "movementNumber productId productSnapshot movementType direction quantity createdAt performedBy",
+    )
     .lean();
 
   return movements;
@@ -178,8 +211,11 @@ export async function getRecentMovements(limit = 5) {
 // ============================================
 export async function getRecentRequests(limit = 5) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  const requests = await StockRequest.find()
+  const requests = await StockRequest.find(
+    withTenantScope({}, companyId, isSuperAdmin),
+  )
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();
@@ -192,17 +228,24 @@ export async function getRecentRequests(limit = 5) {
 // ============================================
 export async function getLowStockProducts(limit = 10) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  const products = await Product.find({
-    isActive: true,
-    "inventory.reorderLevel": { $gt: 0 },
-    $expr: {
-      $lte: [
-        { $ifNull: ["$inventory.quantityOnHand", 0] },
-        "$inventory.reorderLevel",
-      ],
-    },
-  })
+  const products = await Product.find(
+    withTenantScope(
+      {
+        isActive: true,
+        "inventory.reorderLevel": { $gt: 0 },
+        $expr: {
+          $lte: [
+            { $ifNull: ["$inventory.quantityOnHand", 0] },
+            "$inventory.reorderLevel",
+          ],
+        },
+      },
+      companyId,
+      isSuperAdmin,
+    ),
+  )
     .sort({ "inventory.quantityOnHand": 1 })
     .limit(limit)
     .select("name SKU inventory.quantityOnHand inventory.reorderLevel category")
@@ -216,14 +259,21 @@ export async function getLowStockProducts(limit = 10) {
 // ============================================
 export async function getOverdueCheckouts(limit = 10) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
-  const checkouts = await ItemCheckout.find({
-    status: "checked_out",
-    expectedReturnDate: { $lt: new Date() },
-  })
+  const checkouts = await ItemCheckout.find(
+    withTenantScope(
+      {
+        status: "checked_out",
+        expectedReturnDate: { $lt: new Date() },
+      },
+      companyId,
+      isSuperAdmin,
+    ),
+  )
     .sort({ expectedReturnDate: 1 })
     .limit(limit)
-    .populate("product", "name sku")
+    .populate("product", "name SKU")
     .populate("checkedOutBy", "name")
     .lean();
 
@@ -235,6 +285,8 @@ export async function getOverdueCheckouts(limit = 10) {
 // ============================================
 export async function getTopMovedProducts(limit = 5) {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = aggTenantMatch(companyId, isSuperAdmin);
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -242,12 +294,13 @@ export async function getTopMovedProducts(limit = 5) {
   const data = await StockMovement.aggregate([
     {
       $match: {
+        ...tenantMatch,
         createdAt: { $gte: thirtyDaysAgo },
       },
     },
     {
       $group: {
-        _id: "$product",
+        _id: "$productId",
         totalQuantity: { $sum: "$quantity" },
         movements: { $sum: 1 },
       },
@@ -260,6 +313,7 @@ export async function getTopMovedProducts(limit = 5) {
         localField: "_id",
         foreignField: "_id",
         as: "product",
+        pipeline: [{ $project: { name: 1, SKU: 1 } }],
       },
     },
     { $unwind: "$product" },
@@ -267,7 +321,7 @@ export async function getTopMovedProducts(limit = 5) {
 
   return data.map((item) => ({
     name: item.product.name,
-    sku: item.product.sku,
+    sku: item.product.SKU,
     quantity: item.totalQuantity,
   }));
 }
@@ -277,8 +331,11 @@ export async function getTopMovedProducts(limit = 5) {
 // ============================================
 export async function getRequestStatusDistribution() {
   await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = aggTenantMatch(companyId, isSuperAdmin);
 
   const data = await StockRequest.aggregate([
+    ...(Object.keys(tenantMatch).length ? [{ $match: tenantMatch }] : []),
     {
       $group: {
         _id: "$status",
@@ -295,7 +352,7 @@ export async function getRequestStatusDistribution() {
   };
 
   data.forEach((item) => {
-    if (statusMap.hasOwnProperty(item._id)) {
+    if (Object.prototype.hasOwnProperty.call(statusMap, item._id)) {
       statusMap[item._id] = item.count;
     }
   });
