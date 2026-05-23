@@ -78,7 +78,7 @@ export async function AlertsStrip({
       key: "lowStockCount",
       label: "Low stock items",
       icon: Package,
-      href: "/dashboard/stocks?filter=low",
+      href: "/dashboard/stocks?quantity=low-stock",
       tone: alerts.lowStockCount > 0 ? "warn" : "neutral",
       value: alerts.lowStockCount || 0,
     },

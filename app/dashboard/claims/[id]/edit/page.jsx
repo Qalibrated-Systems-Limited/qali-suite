@@ -37,7 +37,7 @@ export default async function EditClaimPage({ params }) {
 
   // Only owner and managers can edit
   if (!isOwner && !isManager) {
-    redirect("/dashboard/claims/my-claims");
+    redirect("/dashboard/my-claims");
   }
 
   // Can only edit draft or rejected claims

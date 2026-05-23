@@ -197,10 +197,12 @@ export const getClaimStats = async (userId = null, userRole = null) => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
 
-  // Build base filter for user role
+  // Scope to a specific employee whenever caller passed userId
+  // (my-claims view), regardless of role. Match the same condition the
+  // list query uses so stats and list never diverge.
   let baseFilter = { ...tenantMatch };
-  if (userRole === "employee" || userRole === "user") {
-    baseFilter["employee.userId"] = userId;
+  if (userId) {
+    baseFilter["employee.userId"] = new mongoose.Types.ObjectId(userId);
   }
 
   const [total, pending, approved, paid, rejected] = await Promise.all([

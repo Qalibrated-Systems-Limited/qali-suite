@@ -379,7 +379,7 @@ export async function createAdvanceRequest(prevState, formData) {
     await session.commitTransaction();
 
     revalidatePath("/dashboard/claims");
-    revalidatePath("/dashboard/claims/my-claims");
+    revalidatePath("/dashboard/my-claims");
     revalidateProject(claim[0].projectId);
 
     return {
@@ -580,7 +580,7 @@ export async function createReimbursement(prevState, formData) {
     await session.commitTransaction();
 
     revalidatePath("/dashboard/claims");
-    revalidatePath("/dashboard/claims/my-claims");
+    revalidatePath("/dashboard/my-claims");
     revalidateProject(claim[0].projectId);
 
     return {
@@ -816,7 +816,7 @@ export async function recallEmployeeClaim(claimId) {
     await session.commitTransaction();
 
     revalidatePath("/dashboard/claims");
-    revalidatePath("/dashboard/claims/my-claims");
+    revalidatePath("/dashboard/my-claims");
     revalidatePath("/dashboard/claims/pending");
     revalidatePath(`/dashboard/claims/${claimId}`);
     revalidateProject(claim.projectId);
@@ -873,7 +873,7 @@ export async function resubmitEmployeeClaim(claimId) {
     await session.commitTransaction();
 
     revalidatePath("/dashboard/claims");
-    revalidatePath("/dashboard/claims/my-claims");
+    revalidatePath("/dashboard/my-claims");
     revalidatePath("/dashboard/claims/pending");
     revalidatePath(`/dashboard/claims/${claimId}`);
     revalidateProject(claim.projectId);
@@ -1203,7 +1203,7 @@ export async function settleAdvance(advanceClaimId, prevState, formData) {
     // 15. REVALIDATE PATHS
     // ============================================
     revalidatePath("/dashboard/claims");
-    revalidatePath("/dashboard/claims/my-claims");
+    revalidatePath("/dashboard/my-claims");
     revalidatePath(`/dashboard/claims/${advanceClaimId}`);
     revalidatePath(`/dashboard/claims/${settlementClaim[0]._id}`);
     revalidateProject(advanceClaim.projectId);
@@ -1739,7 +1739,7 @@ export async function updateClaim(claimId, prevState, formData) {
     await session.commitTransaction();
 
     revalidatePath("/dashboard/claims");
-    revalidatePath("/dashboard/claims/my-claims");
+    revalidatePath("/dashboard/my-claims");
     revalidatePath("/dashboard/claims/pending");
     revalidatePath(`/dashboard/claims/${claimId}`);
     revalidateProject(claim.projectId);

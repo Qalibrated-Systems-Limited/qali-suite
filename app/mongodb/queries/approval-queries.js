@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import mongoose from "mongoose";
 
 import dbConnect from "@/app/config/dbConnect";
 import {
@@ -9,38 +10,157 @@ import {
 import ApprovalRequest, {
   APPROVER_MATRIX,
 } from "@/app/models/approvalRequest";
+import Bill from "@/app/models/bill";
+import LeaveRequest from "@/app/models/leaveRequest";
+import Loan from "@/app/models/loan";
+import EmployeeClaim from "@/app/models/employeesClaims";
+import Nonconformance from "@/app/models/nonconformance";
+import Expense from "@/app/models/expenses";
+import { StockRequest } from "@/app/models/requests";
+
+// Per-domain approver allowlists. Mirror the gates enforced inside
+// /dashboard/approvals so the dashboard tile counts exactly what the
+// approvals page will actually surface for this user.
+const STOCK_REQUEST_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "Manager",
+  "Store Manager",
+]);
+const BILL_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Manager",
+]);
+const LEAVE_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "Manager",
+  "HR",
+]);
+const LOAN_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "HR",
+  "CFO",
+  "Finance Manager",
+]);
+const CLAIM_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Accountant",
+  "Manager",
+]);
+const NCR_AUTHORIZER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+]);
+const OPERATING_EXPENSE_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Accountant",
+  "Manager",
+]);
 
 // ============================================
 // APPROVAL QUERIES — cached, request-scoped
 // ============================================
 
 /**
- * Count approvals the caller can act on (submitted + their role is in the
- * approver matrix for that type). Used to drive the AlertsStrip badge and
- * the bottom-nav indicator.
+ * Count approvals the caller can act on. Aggregates across every
+ * collection /dashboard/approvals surfaces, gated by the same role
+ * matrices used on that page, so the dashboard tile and the approvals
+ * page never disagree.
  */
 export const cMyPendingApprovals = cache(async () => {
   try {
     await dbConnect();
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const role = user?.role;
+    if (!role) return 0;
 
-    // Which types can this role decide on?
-    const types = Object.entries(APPROVER_MATRIX)
+    const tenantMatch = isSuperAdmin
+      ? {}
+      : { companyId: new mongoose.Types.ObjectId(companyId) };
+
+    // Generic approval engine — gated by APPROVER_MATRIX
+    const engineTypes = Object.entries(APPROVER_MATRIX)
       .filter(([, roles]) =>
         role === "SuperAdmin" ? true : roles.includes(role),
       )
       .map(([k]) => k);
 
-    if (types.length === 0) return 0;
+    const tasks = [];
 
-    return ApprovalRequest.countDocuments(
-      withTenantScope(
-        { status: "submitted", type: { $in: types } },
-        companyId,
-        isSuperAdmin,
-      ),
-    );
+    if (engineTypes.length > 0) {
+      tasks.push(
+        ApprovalRequest.countDocuments(
+          withTenantScope(
+            { status: "submitted", type: { $in: engineTypes } },
+            companyId,
+            isSuperAdmin,
+          ),
+        ),
+      );
+    }
+
+    if (STOCK_REQUEST_APPROVER_ROLES.has(role)) {
+      tasks.push(
+        StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
+      );
+    }
+    if (BILL_APPROVER_ROLES.has(role)) {
+      tasks.push(
+        Bill.countDocuments({ ...tenantMatch, status: "submitted" }),
+      );
+    }
+    if (LEAVE_APPROVER_ROLES.has(role)) {
+      tasks.push(
+        LeaveRequest.countDocuments({ ...tenantMatch, status: "submitted" }),
+      );
+    }
+    if (LOAN_APPROVER_ROLES.has(role)) {
+      tasks.push(
+        Loan.countDocuments({
+          ...tenantMatch,
+          status: "pending_approval",
+        }),
+      );
+    }
+    if (CLAIM_APPROVER_ROLES.has(role)) {
+      tasks.push(
+        EmployeeClaim.countDocuments({
+          ...tenantMatch,
+          status: "submitted",
+          claimType: { $in: ["advance_request", "reimbursement"] },
+        }),
+      );
+    }
+    if (NCR_AUTHORIZER_ROLES.has(role)) {
+      tasks.push(
+        Nonconformance.countDocuments({
+          ...tenantMatch,
+          status: "disposition_proposed",
+        }),
+      );
+    }
+    if (OPERATING_EXPENSE_APPROVER_ROLES.has(role)) {
+      tasks.push(
+        Expense.countDocuments({ ...tenantMatch, status: "pending" }),
+      );
+    }
+
+    if (tasks.length === 0) return 0;
+
+    const counts = await Promise.all(tasks);
+    return counts.reduce((sum, n) => sum + (n || 0), 0);
   } catch (error) {
     console.error("cMyPendingApprovals error:", error);
     return 0;

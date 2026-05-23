@@ -12,11 +12,16 @@ export async function getSalesByCustomerReport(startDate, endDate) {
 
   const { companyId, isSuperAdmin } = await getTenantContext();
 
+  // Note: include status "completed" plus any post-draft state that
+  // represents recognised revenue (the prior version restricted to
+  // "completed" only, which silently undercounted in tenants whose
+  // workflow ends at "paid"/"approved"). Drafts and cancelled are still
+  // excluded.
   const result = await Invoice.aggregate([
     {
       $match: withTenantScope(
         {
-          status: "completed",
+          status: { $nin: ["draft", "cancelled"] },
           invoiceDate: {
             $gte: new Date(startDate),
             $lte: new Date(endDate),
@@ -32,8 +37,10 @@ export async function getSalesByCustomerReport(startDate, endDate) {
           customerId: "$customer.id",
           customerName: "$customer.name",
         },
+        customerEmail: { $first: "$customer.email" },
         invoiceCount: { $sum: 1 },
         totalSales: { $sum: "$total" },
+        totalCOGS: { $sum: "$totalCOGS" },
         totalPaid: { $sum: "$amountPaid" },
         avgInvoiceValue: { $avg: "$total" },
         firstInvoice: { $min: "$invoiceDate" },
@@ -45,8 +52,28 @@ export async function getSalesByCustomerReport(startDate, endDate) {
         _id: 0,
         customerId: "$_id.customerId",
         customerName: "$_id.customerName",
+        customerEmail: 1,
         invoiceCount: 1,
         totalSales: 1,
+        totalCOGS: 1,
+        grossProfit: { $subtract: ["$totalSales", "$totalCOGS"] },
+        grossMarginPct: {
+          $cond: [
+            { $gt: ["$totalSales", 0] },
+            {
+              $multiply: [
+                {
+                  $divide: [
+                    { $subtract: ["$totalSales", "$totalCOGS"] },
+                    "$totalSales",
+                  ],
+                },
+                100,
+              ],
+            },
+            0,
+          ],
+        },
         totalPaid: 1,
         totalOutstanding: { $subtract: ["$totalSales", "$totalPaid"] },
         avgInvoiceValue: 1,
@@ -57,18 +84,42 @@ export async function getSalesByCustomerReport(startDate, endDate) {
     { $sort: { totalSales: -1 } },
   ]);
 
+  const totalSales = result.reduce((sum, c) => sum + (c.totalSales || 0), 0);
+  const totalCOGS = result.reduce((sum, c) => sum + (c.totalCOGS || 0), 0);
+  const topCustomerShare =
+    totalSales > 0 && result.length > 0
+      ? (result[0].totalSales / totalSales) * 100
+      : 0;
+  const topFiveShare =
+    totalSales > 0
+      ? (result.slice(0, 5).reduce((s, r) => s + (r.totalSales || 0), 0) /
+          totalSales) *
+        100
+      : 0;
+
+  // Decorate each row with its share of total revenue.
+  const customers = result.map((r) => ({
+    ...r,
+    revenueShare: totalSales > 0 ? (r.totalSales / totalSales) * 100 : 0,
+  }));
+
   const summary = {
     totalCustomers: result.length,
-    totalSales: result.reduce((sum, c) => sum + c.totalSales, 0),
-    totalPaid: result.reduce((sum, c) => sum + c.totalPaid, 0),
-    totalOutstanding: result.reduce((sum, c) => sum + c.totalOutstanding, 0),
-    totalInvoices: result.reduce((sum, c) => sum + c.invoiceCount, 0),
+    totalSales,
+    totalCOGS,
+    grossProfit: totalSales - totalCOGS,
+    grossMarginPct: totalSales > 0 ? ((totalSales - totalCOGS) / totalSales) * 100 : 0,
+    totalPaid: result.reduce((sum, c) => sum + (c.totalPaid || 0), 0),
+    totalOutstanding: result.reduce((sum, c) => sum + (c.totalOutstanding || 0), 0),
+    totalInvoices: result.reduce((sum, c) => sum + (c.invoiceCount || 0), 0),
+    topCustomerShare,
+    topFiveShare,
   };
 
   return {
     reportName: "Sales by Customer",
     period: { startDate: new Date(startDate), endDate: new Date(endDate) },
-    customers: result,
+    customers,
     summary,
   };
 }

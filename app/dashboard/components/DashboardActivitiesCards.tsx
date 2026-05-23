@@ -123,7 +123,7 @@ export async function AlertsCard() {
     {
       label: "Low Stock Items",
       value: alerts.lowStockCount,
-      href: "/dashboard/stocks?filter=low",
+      href: "/dashboard/stocks?quantity=low-stock",
       icon: Package,
       show: alerts.lowStockCount > 0,
     },

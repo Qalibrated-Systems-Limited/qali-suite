@@ -25,8 +25,9 @@ import {
   getPendingReimbursements,
   getPendingAdvances,
   getPendingNCRs,
+  getPendingOperatingExpenses,
 } from "@/app/mongodb/queries/pending-approvals-queries";
-import { Banknote, CalendarDays, Coins, HandCoins, FileWarning } from "lucide-react";
+import { Banknote, CalendarDays, Coins, HandCoins, FileWarning, Wallet } from "lucide-react";
 import ApprovalDecisionForm from "./components/ApprovalDecisionForm";
 
 // Per-domain approver allowlists. Each mirrors the gate enforced by
@@ -71,6 +72,14 @@ const NCR_AUTHORIZER_ROLES = new Set([
   "SuperAdmin",
   "Admin",
   "CFO",
+]);
+const OPERATING_EXPENSE_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Accountant",
+  "Manager",
 ]);
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -653,6 +662,18 @@ async function PendingReimbursements({ role }: { role: string }) {
   );
 }
 
+async function PendingOperatingExpensesSection({ role }: { role: string }) {
+  if (!OPERATING_EXPENSE_APPROVER_ROLES.has(role)) return null;
+  const rows = await getPendingOperatingExpenses(50);
+  return (
+    <PendingSectionShell
+      title="Pending operating expenses"
+      Icon={Wallet}
+      rows={rows}
+    />
+  );
+}
+
 async function PendingNCRsSection({ role }: { role: string }) {
   if (!NCR_AUTHORIZER_ROLES.has(role)) return null;
   const rows = await getPendingNCRs(50);
@@ -803,6 +824,10 @@ export default async function ApprovalsPage() {
 
       <Suspense fallback={null}>
         <PendingReimbursements role={role} />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <PendingOperatingExpensesSection role={role} />
       </Suspense>
 
       <Suspense fallback={null}>

@@ -293,40 +293,24 @@ const getNavigationGroups = (user) => {
     items: [
       {
         icon: Receipt,
-        label: "My Claims", // ← Employee view
+        label: "My Expenses",
         id: "my-claims",
         href: "/dashboard/my-claims",
-        // Everyone can see their own
       },
 
       {
         icon: Wallet,
-        label: "All Claims", // ← Admin/Accountant view
+        label: "Employee Expenses",
         id: "all-claims",
         href: "/dashboard/claims",
         hidden: !canReviewClaims(user?.role) || !hasMod("all-claims"),
       },
       {
         icon: Receipt,
-        label: "All Expenses",
+        label: "Operating Expenses",
         id: "expenses",
         href: "/dashboard/expenses",
         hidden: !canReviewClaims(user?.role) || !hasMod("all-claims"),
-      },
-      {
-        icon: FileText,
-        label: "Pending Approval",
-        id: "expenses-pending",
-        href: "/dashboard/expenses/pending",
-        hidden: !canReviewClaims(user?.role) || !hasMod("all-claims"),
-      },
-      {
-        icon: CreditCard,
-        label: "Reimbursements",
-        id: "reimbursements",
-        href: "/dashboard/expenses/reimbursements",
-        hidden: !canReviewClaims(user?.role) || !hasMod("all-claims"),
-        badge: "Soon",
       },
     ],
   },
@@ -349,11 +333,10 @@ const getNavigationGroups = (user) => {
   // ============================================
   {
     type: "group",
-    label: "Finance ",
+    label: "Finance",
     icon: DollarSign,
     id: "finance",
     defaultOpen: false,
-    badge: "New",
     hidden: !canSeeFinanceNav(user?.role) || !hasMod("finance"),
     items: [
       {
@@ -529,17 +512,10 @@ const getNavigationGroups = (user) => {
       },
       {
         icon: ShoppingCart,
-        label: "Purchase Reports",
-        id: "purchase-reports",
+        label: "Purchase Report",
+        id: "purchase-report",
         href: "/dashboard/reports/purchases",
-        hidden: !canSeePurchasesNav(user?.role) || !hasMod("purchase-reports"),
-      },
-      {
-        icon: Users,
-        label: "Customer Reports",
-        id: "customer-reports",
-        href: "/dashboard/reports/customers",
-        hidden: !canSeeSalesNav(user?.role) || !hasMod("customer-reports"),
+        hidden: !canSeePurchasesNav(user?.role),
       },
     ],
   },

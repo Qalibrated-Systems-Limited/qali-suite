@@ -126,7 +126,6 @@ export async function CheckoutsTableServer({
   page,
   filters,
   canManageCheckouts,
-  userId,
 }) {
   const [checkouts, expenseAccounts] = await Promise.all([
     searchCheckouts(query, page, filters),
@@ -137,7 +136,6 @@ export async function CheckoutsTableServer({
     <CheckoutsTable
       checkouts={checkouts}
       canManageCheckouts={canManageCheckouts}
-      userId={userId}
       expenseAccounts={expenseAccounts}
     />
   );

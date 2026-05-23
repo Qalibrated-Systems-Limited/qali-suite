@@ -245,7 +245,7 @@ export async function LowStockAlertsCard({}) {
         </div>
         <Button variant="ghost" size="sm" asChild>
           <Link
-            href="/dashboard/stocks?quantity=low"
+            href="/dashboard/stocks?quantity=low-stock"
             className="text-muted-foreground hover:text-foreground"
           >
             View all

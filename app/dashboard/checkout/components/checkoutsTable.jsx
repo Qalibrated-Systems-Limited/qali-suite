@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Table,
@@ -24,13 +25,11 @@ import {
   Eye,
   RotateCcw,
   AlertTriangle,
-  Clock,
   Package,
   Receipt,
   ShoppingCart,
 } from "lucide-react";
 import { ReturnDialog } from "./ReturnDialog";
-import { ViewCheckoutDialog } from "./ViewCheckoutDialog";
 import { EscalateDialog } from "./EscalateDialog";
 import { ExpenseInternalDialog } from "./ExpenseInternalDialog";
 
@@ -72,10 +71,9 @@ const statusConfig = {
   },
 };
 
-export function CheckoutsTable({ checkouts, canManageCheckouts, userId, expenseAccounts = [] }) {
+export function CheckoutsTable({ checkouts, canManageCheckouts, expenseAccounts = [] }) {
   const [selectedCheckout, setSelectedCheckout] = useState(null);
   const [returnDialogOpen, setReturnDialogOpen] = useState(false);
-  const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [escalateDialogOpen, setEscalateDialogOpen] = useState(false);
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
 
@@ -215,7 +213,7 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId, expenseA
                         </TableCell>
 
                         <TableCell>
-                          {checkout.status === "checked_out" && (
+                          {["checked_out", "overdue"].includes(checkout.status) ? (
                             <div className="flex items-center gap-1">
                               {checkout.isOverdue ? (
                                 <Badge
@@ -224,19 +222,29 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId, expenseA
                                 >
                                   {checkout.daysOverdue}d overdue
                                 </Badge>
-                              ) : checkout.daysUntilDue <= 3 ? (
+                              ) : checkout.daysUntilDue !== null &&
+                                checkout.daysUntilDue <= 3 ? (
                                 <Badge
                                   variant="outline"
                                   className="bg-orange-500/10 text-orange-500 border-orange-500/20 text-xs"
                                 >
                                   {checkout.daysUntilDue}d left
                                 </Badge>
-                              ) : (
+                              ) : checkout.daysUntilDue !== null ? (
                                 <span className="text-sm text-muted-foreground">
                                   {checkout.daysUntilDue}d left
                                 </span>
+                              ) : (
+                                <span className="text-sm text-muted-foreground">—</span>
                               )}
                             </div>
+                          ) : checkout.daysHeld !== null &&
+                            checkout.daysHeld !== undefined ? (
+                            <span className="text-sm text-muted-foreground">
+                              Held {checkout.daysHeld}d
+                            </span>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">—</span>
                           )}
                         </TableCell>
 
@@ -259,14 +267,13 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId, expenseA
                               className="bg-card border-border"
                             >
                               <DropdownMenuItem
-                                onClick={() => {
-                                  setSelectedCheckout(checkout);
-                                  setViewDialogOpen(true);
-                                }}
+                                asChild
                                 className="text-foreground focus:bg-accent focus:text-accent-foreground cursor-pointer"
                               >
-                                <Eye className="mr-2 h-4 w-4" />
-                                View Details
+                                <Link href={`/dashboard/checkout/${checkout._id}`}>
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  View Details
+                                </Link>
                               </DropdownMenuItem>
 
                               {canReturn(checkout) && (
@@ -400,38 +407,45 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId, expenseA
                         </p>
                       </div>
                       <div>
-                        <p className="text-muted-foreground text-xs">Status</p>
-                        {checkout.status === "checked_out" &&
-                          checkout.isOverdue && (
+                        <p className="text-muted-foreground text-xs">Days</p>
+                        {["checked_out", "overdue"].includes(checkout.status) ? (
+                          checkout.isOverdue ? (
                             <Badge
                               variant="outline"
                               className="bg-red-500/10 text-red-500 border-red-500/20 text-xs"
                             >
                               {checkout.daysOverdue}d overdue
                             </Badge>
-                          )}
-                        {checkout.status === "checked_out" &&
-                          !checkout.isOverdue && (
+                          ) : checkout.daysUntilDue !== null ? (
                             <span className="text-sm text-foreground">
                               {checkout.daysUntilDue}d left
                             </span>
-                          )}
+                          ) : (
+                            <span className="text-sm text-muted-foreground">—</span>
+                          )
+                        ) : checkout.daysHeld !== null &&
+                          checkout.daysHeld !== undefined ? (
+                          <span className="text-sm text-foreground">
+                            Held {checkout.daysHeld}d
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">—</span>
+                        )}
                       </div>
                     </div>
 
                     {/* Actions */}
                     <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
                       <Button
+                        asChild
                         variant="outline"
                         size="sm"
-                        onClick={() => {
-                          setSelectedCheckout(checkout);
-                          setViewDialogOpen(true);
-                        }}
                         className="flex-1 border-border text-foreground hover:bg-accent"
                       >
-                        <Eye className="mr-2 h-4 w-4" />
-                        View
+                        <Link href={`/dashboard/checkout/${checkout._id}`}>
+                          <Eye className="mr-2 h-4 w-4" />
+                          View
+                        </Link>
                       </Button>
 
                       {canReturn(checkout) && (
@@ -490,12 +504,6 @@ export function CheckoutsTable({ checkouts, canManageCheckouts, userId, expenseA
       {/* Dialogs */}
       {selectedCheckout && (
         <>
-          <ViewCheckoutDialog
-            checkout={selectedCheckout}
-            open={viewDialogOpen}
-            onOpenChange={setViewDialogOpen}
-          />
-
           <ReturnDialog
             checkout={selectedCheckout}
             open={returnDialogOpen}

@@ -470,7 +470,7 @@ export function ReimbursementForm({ claim = null, expenseAccounts = [], projects
               asChild
               className="h-12 text-base font-medium"
             >
-              <Link href="/dashboard/claims/my-claims">Cancel</Link>
+              <Link href="/dashboard/my-claims">Cancel</Link>
             </Button>
             <SubmitButton isEdit={isEdit} pending={pending} />
           </div>

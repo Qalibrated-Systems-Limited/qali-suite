@@ -3,29 +3,17 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
-import {
-  searchUserClaims,
-  fetchUserClaimPages,
-  getClaimStats,
-} from "@/app/mongodb/queries/claimQueries";
+import { fetchUserClaimPages } from "@/app/mongodb/queries/claimQueries";
 import Pagination from "@/components/pagination";
-import {
-  ClaimsListSkeleton,
-  ClaimsListWithFilters,
-} from "../claims/components/ClaimListWithFilter";
-import { Card } from "@/components/ui/card";
-import { DollarSign, Clock, CheckCircle2, XCircle } from "lucide-react";
+import { ClaimsListSkeleton } from "../claims/components/ClaimListWithFilter";
 import { Suspense } from "react";
 import ClaimStats from "../claims/components/ClaimStats";
-import {
-  StatsCardSkeleton,
-  StatsCardsSkeleton,
-} from "../claims/components/ClaimsSkeleton";
+import { StatsCardsSkeleton } from "../claims/components/ClaimsSkeleton";
 import ClaimListWithFiltersServerComp from "../claims/components/ClaimListWithFiltersServerComp";
 
 export const metadata = {
-  title: "My Claims | ERP System",
-  description: "View and manage your expense claims",
+  title: "My Expenses | ERP System",
+  description: "Your cash advances, reimbursements, and settlements",
 };
 
 export default async function MyClaimsPage({ searchParams }) {
@@ -57,10 +45,15 @@ export default async function MyClaimsPage({ searchParams }) {
   );
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold tracking-tight">My Claims</h1>
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">My Expenses</h1>
+          <p className="text-xs text-muted-foreground">
+            Your cash advances, reimbursements, and settlements
+          </p>
+        </div>
         <Button asChild size="sm">
           <Link href="/dashboard/claims/create">
             <Plus className="h-3.5 w-3.5 mr-1.5" />

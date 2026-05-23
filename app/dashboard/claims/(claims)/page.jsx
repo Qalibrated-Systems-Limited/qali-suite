@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { canReviewClaims } from "@/lib/permissions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
@@ -13,8 +14,8 @@ import ClaimStats from "../components/ClaimStats";
 import ClaimListWithFiltersServerComp from "../components/ClaimListWithFiltersServerComp";
 
 export const metadata = {
-  title: "All Claims | ERP System",
-  description: "View and manage all employee claims",
+  title: "Employee Expenses | ERP System",
+  description: "Cash advances, reimbursements, and settlements",
 };
 
 // Async pagination component - streams in after data loads
@@ -40,10 +41,12 @@ export default async function AllClaimsPage({ searchParams }) {
 
   const { user } = session;
 
-  // Check if user is accountant or admin
-  const userRole = user.role?.toLowerCase();
-  if (userRole !== "accountant" && userRole !== "admin") {
-    redirect("/dashboard/claims/my-claims");
+  // Single source of truth — same gate the sidebar uses to show the link.
+  // Previously this checked only lowercased "accountant"/"admin", which
+  // bounced CFO and Finance Manager away from a page the sidebar exposed
+  // to them.
+  if (!canReviewClaims(user.role)) {
+    redirect("/dashboard/my-claims");
   }
 
   const query = params?.query || "";
@@ -52,10 +55,17 @@ export default async function AllClaimsPage({ searchParams }) {
   const filters = { status, claimType };
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold tracking-tight">All Claims</h1>
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">
+            Employee Expenses
+          </h1>
+          <p className="text-xs text-muted-foreground">
+            Cash advances, reimbursements, and settlements
+          </p>
+        </div>
         <Button asChild size="sm">
           <Link href="/dashboard/claims/create">
             <Plus className="h-3.5 w-3.5 mr-1.5" />

@@ -35,7 +35,7 @@ export default async function CreateClaimPage() {
           asChild
           className="hover:bg-accent flex-shrink-0"
         >
-          <Link href="/dashboard/claims/my-claims">
+          <Link href="/dashboard/my-claims">
             <ArrowLeft className="w-5 h-5" />
           </Link>
         </Button>

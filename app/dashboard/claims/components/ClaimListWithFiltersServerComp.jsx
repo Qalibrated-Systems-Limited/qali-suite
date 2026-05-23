@@ -8,12 +8,8 @@ import { ClaimsListWithFilters } from "./ClaimListWithFilter";
 import { serializeBsonType } from "@/lib/utils";
 
 async function ClaimListWithFiltersServerComp({ AreMyclaims = true, params }) {
-  console.log("searchParams in ClaimListWithFiltersServerComp:", params);
   const session = await auth();
-
-  if (!session?.user) {
-    redirect("/login");
-  }
+  if (!session?.user) return null;
 
   const query = params?.query || "";
   const status = params?.status || "all";

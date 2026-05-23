@@ -370,7 +370,7 @@ async function ReorderList() {
           Items to reorder
         </h2>
         <Link
-          href="/dashboard/stocks?filter=low"
+          href="/dashboard/stocks?quantity=low-stock"
           className="inline-flex items-center gap-0.5 text-xs text-primary hover:underline"
         >
           All low
@@ -434,7 +434,7 @@ function QuickActions() {
     },
     {
       label: "Low stock",
-      href: "/dashboard/stocks?filter=low",
+      href: "/dashboard/stocks?quantity=low-stock",
       icon: AlertTriangle,
     },
   ];

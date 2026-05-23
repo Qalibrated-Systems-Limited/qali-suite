@@ -128,7 +128,7 @@ export default async function ClaimDetailPage({ params }) {
           asChild
           className="hover:bg-accent shrink-0"
         >
-          <Link href="/dashboard/claims/my-claims">
+          <Link href="/dashboard/my-claims">
             <ArrowLeft className="w-5 h-5" />
           </Link>
         </Button>

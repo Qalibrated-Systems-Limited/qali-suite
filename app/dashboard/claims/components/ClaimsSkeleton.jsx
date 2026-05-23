@@ -96,14 +96,18 @@ export function StatsCardSkeleton() {
 
 export function StatsCardsSkeleton() {
   return (
-    <>
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <StatsCardSkeleton key={i} />
-        ))}
-      </div>
-      <AmountSummarySkeleton />
-    </>
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div
+          key={i}
+          className="rounded-md border border-border bg-card px-3 py-2 space-y-1"
+        >
+          <Skeleton className="h-3 w-12" />
+          <Skeleton className="h-5 w-10" />
+          <Skeleton className="h-3 w-16" />
+        </div>
+      ))}
+    </div>
   );
 }
 

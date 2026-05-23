@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useActionState } from "react";
+import { useState, useActionState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -24,23 +24,16 @@ import { RotateCcw, Loader2 } from "lucide-react";
 
 export function ReturnDialog({ checkout, open, onOpenChange }) {
   const [returnCondition, setReturnCondition] = useState("");
-  const [state, formAction] = useActionState(
+  const [state, formAction, isPending] = useActionState(
     returnCheckout.bind(null, checkout._id),
-    {
-      message: "",
-    }
+    { message: "" }
   );
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async (formData) => {
-    setIsSubmitting(true);
-    await formAction(formData);
-    setIsSubmitting(false);
-
+  useEffect(() => {
     if (state.message === "success") {
       onOpenChange(false);
     }
-  };
+  }, [state, onOpenChange]);
 
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
@@ -64,7 +57,7 @@ export function ReturnDialog({ checkout, open, onOpenChange }) {
           </DialogDescription>
         </DialogHeader>
 
-        <form action={handleSubmit}>
+        <form action={formAction}>
           <div className="space-y-4 py-4">
             {/* Item Info */}
             <div className="space-y-2 p-3 bg-muted/50 rounded-lg border border-border">
@@ -204,17 +197,17 @@ export function ReturnDialog({ checkout, open, onOpenChange }) {
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
-              disabled={isSubmitting}
+              disabled={isPending}
               className="border-border text-gray-300 hover:bg-[#1f2937] hover:text-foreground"
             >
               Cancel
             </Button>
             <Button
               type="submit"
-              disabled={isSubmitting || !returnCondition}
+              disabled={isPending || !returnCondition}
               className="bg-green-500 text-foreground hover:bg-green-600"
             >
-              {isSubmitting ? (
+              {isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Processing...

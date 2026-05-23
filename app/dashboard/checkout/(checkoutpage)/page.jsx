@@ -28,7 +28,6 @@ async function CheckoutsPage(props) {
   const currentPage = Number(searchParams.page) || 1;
 
   const { user } = session;
-  const userId = user.id;
   let userRole = user.role || "user";
   if (userRole && userRole !== "Store Manager") {
     userRole = userRole.toLowerCase();
@@ -110,7 +109,6 @@ async function CheckoutsPage(props) {
           page={currentPage}
           filters={filters}
           canManageCheckouts={canManageCheckouts}
-          userId={userId}
         />
       </Suspense>
 

@@ -38,7 +38,7 @@ export default async function SettleAdvancePage({ params }) {
   // Verify user is the owner
   const isOwner = claim.employee.userId === user.id;
   if (!isOwner) {
-    redirect("/dashboard/claims/my-claims");
+    redirect("/dashboard/my-claims");
   }
 
   // Verify advance is paid (can only settle paid advances)

@@ -181,14 +181,24 @@ export const searchCheckouts = async (searchTerm, page = 1, filters = {}) => {
     const now = new Date();
     let daysOverdue = 0;
     let daysUntilDue = null;
+    let daysHeld = null;
 
-    if (checkout.status === "checked_out" && checkout.expectedReturnDate) {
+    if (
+      ["checked_out", "overdue"].includes(checkout.status) &&
+      checkout.expectedReturnDate
+    ) {
       const diff = now - new Date(checkout.expectedReturnDate);
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       daysOverdue = days > 0 ? days : 0;
       daysUntilDue = Math.ceil(
         (new Date(checkout.expectedReturnDate) - now) / (1000 * 60 * 60 * 24),
       );
+    } else if (checkout.returnedDate && checkout.checkoutDate) {
+      // Closed checkouts (returned / lost / damaged / expensed / sold) —
+      // how long did the borrower hold it?
+      const diff =
+        new Date(checkout.returnedDate) - new Date(checkout.checkoutDate);
+      daysHeld = Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
     }
 
     return {
@@ -203,6 +213,7 @@ export const searchCheckouts = async (searchTerm, page = 1, filters = {}) => {
       updatedAt: checkout.updatedAt?.toISOString() || null,
       daysOverdue,
       daysUntilDue,
+      daysHeld,
       isOverdue: daysOverdue > 0,
       // Transform nested documents
       relatedDocuments: {
@@ -276,7 +287,10 @@ export const getCheckoutById = async (checkoutId) => {
   let daysOverdue = 0;
   let daysUntilDue = null;
 
-  if (checkout.status === "checked_out" && checkout.expectedReturnDate) {
+  if (
+    ["checked_out", "overdue"].includes(checkout.status) &&
+    checkout.expectedReturnDate
+  ) {
     const diff = now - new Date(checkout.expectedReturnDate);
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
     daysOverdue = days > 0 ? days : 0;
@@ -286,15 +300,7 @@ export const getCheckoutById = async (checkoutId) => {
   }
 
   return {
-    ...checkout,
-    _id: checkout._id.toString(),
-    productId: checkout.productId.toString(),
-    checkoutDate: checkout.checkoutDate.toISOString(),
-    expectedReturnDate: checkout.expectedReturnDate?.toISOString() || null,
-    actualReturnDate: checkout.actualReturnDate?.toISOString() || null,
-    returnedDate: checkout.returnedDate?.toISOString() || null,
-    createdAt: checkout.createdAt?.toISOString() || null,
-    updatedAt: checkout.updatedAt?.toISOString() || null,
+    ...serializeBsonType(checkout),
     daysOverdue,
     daysUntilDue,
     isOverdue: daysOverdue > 0,

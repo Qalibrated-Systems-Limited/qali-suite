@@ -24,19 +24,15 @@ export default async function AdjustmentsPage({ searchParams }) {
 
   if (!hasPermission) {
     return (
-      <div className="container mx-auto px-4 py-6 max-w-7xl">
-        <div className="space-y-4">
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
-            Stock Adjustments
-          </h1>
-          <Alert className="bg-destructive/10 border-destructive/20">
-            <Info className="h-4 w-4 text-destructive" />
-            <AlertDescription className="text-destructive text-xs sm:text-sm">
-              You don't have permission to access stock adjustments. Contact
-              your administrator.
-            </AlertDescription>
-          </Alert>
-        </div>
+      <div className="space-y-4">
+        <h1 className="text-lg font-semibold tracking-tight">Stock Adjustments</h1>
+        <Alert className="bg-destructive/10 border-destructive/20">
+          <Info className="h-4 w-4 text-destructive" />
+          <AlertDescription className="text-destructive text-xs sm:text-sm">
+            You don't have permission to access stock adjustments. Contact
+            your administrator.
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }
@@ -48,9 +44,9 @@ export default async function AdjustmentsPage({ searchParams }) {
   const search = params?.search || "";
 
   return (
-    <div className="container mx-auto px-4 py-6 max-w-7xl">
+    <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold tracking-tight">Stock Adjustments</h1>
         <Button asChild size="sm">
           <Link href="/dashboard/adjustments/create">
@@ -61,11 +57,9 @@ export default async function AdjustmentsPage({ searchParams }) {
       </div>
 
       {/* Stats Cards - Stream independently */}
-      <div className="mb-6">
-        <Suspense fallback={<AdjustmentStatsSkeleton />}>
-          <AdjustmentStatsCards />
-        </Suspense>
-      </div>
+      <Suspense fallback={<AdjustmentStatsSkeleton />}>
+        <AdjustmentStatsCards />
+      </Suspense>
 
       {/* Filters */}
       <AdjustmentsFilters

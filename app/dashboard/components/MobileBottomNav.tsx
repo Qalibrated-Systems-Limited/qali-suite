@@ -133,7 +133,7 @@ const ROLE_NAVS: Record<string, NavItem[]> = {
 // Personal default: claims, leave, checkouts.
 const DEFAULT_NAV: NavItem[] = [
   { label: "Home", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Claims", href: "/dashboard/my-claims", icon: Receipt },
+  { label: "Expenses", href: "/dashboard/my-claims", icon: Receipt },
   { label: "Leave", href: "/dashboard/hr/my-leave", icon: Calendar },
   { label: "Checkouts", href: "/dashboard/checkout", icon: Package },
   { label: "Stock", href: "/dashboard/stocks", icon: Package },

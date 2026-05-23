@@ -1,4 +1,6 @@
 import { auth } from "@/auth";
+import { redirect } from "next/navigation";
+import { canSeeSalesNav } from "@/lib/permissions";
 import {
   getSalesByCustomerReport,
   getSalesByProductReport,
@@ -12,22 +14,12 @@ export const metadata = {
 
 export default async function SalesReportsPage({ searchParams }) {
   const session = await auth();
+  if (!session?.user) redirect("/login");
   const { user } = session;
 
-  // Check permission
-  if (!["Admin", "Accountant", "Sales"].includes(user?.role)) {
-    return (
-      <div className="container mx-auto px-4 py-6 max-w-7xl">
-        <div className="text-center py-12">
-          <h1 className="text-2xl font-bold text-foreground mb-2">
-            Access Denied
-          </h1>
-          <p className="text-muted-foreground">
-            You don't have permission to view this report.
-          </p>
-        </div>
-      </div>
-    );
+  // Single source of truth — same gate the sidebar uses to surface the link.
+  if (!canSeeSalesNav(user.role)) {
+    redirect("/dashboard");
   }
 
   const params = await searchParams;

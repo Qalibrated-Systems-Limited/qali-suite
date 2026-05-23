@@ -90,7 +90,7 @@ async function InventoryKPIs() {
       bgColor:
         stats.lowStockCount > 0 ? "bg-amber-500/10" : "bg-emerald-500/10",
       alert: stats.lowStockCount > 0,
-      href: "/dashboard/stocks?filter=low",
+      href: "/dashboard/stocks?quantity=low-stock",
     },
     {
       label: "Overdue",
@@ -190,7 +190,7 @@ async function StockHealthCard() {
             </Badge>
           </div>
           <Button variant="ghost" size="sm" asChild className="h-7 text-xs">
-            <Link href="/dashboard/stocks?filter=low">
+            <Link href="/dashboard/stocks?quantity=low-stock">
               View all <ChevronRight className="w-3 h-3 ml-1" />
             </Link>
           </Button>

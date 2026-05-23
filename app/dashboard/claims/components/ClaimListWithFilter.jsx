@@ -1,15 +1,41 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ClaimCard, ClaimCardSkeleton } from "./ClaimCard";
-import { Badge } from "@/components/ui/badge";
+import { ClaimStatusBadge, ClaimTypeBadge } from "./ClaimStatusBadge";
+import { formatDistanceToNow } from "date-fns";
+import { Skeleton } from "@/components/ui/skeleton";
 
-/**
- * Claims List Component with Filters
- * Matches your Party List pattern with tabs for filtering
- */
+function formatCurrency(amount) {
+  return new Intl.NumberFormat("en-KE", {
+    style: "currency",
+    currency: "KES",
+    minimumFractionDigits: 0,
+  }).format(amount || 0);
+}
+
+function formatWhen(date) {
+  if (!date) return "—";
+  return formatDistanceToNow(new Date(date), { addSuffix: true });
+}
+
+function balanceLabel(claim) {
+  if (claim.claimType !== "advance_return" || !claim.returnDetails) return null;
+  const b = claim.returnDetails.balance;
+  if (b > 0)
+    return {
+      text: `Employee owes ${formatCurrency(b)}`,
+      tone: "text-red-600 dark:text-red-400",
+    };
+  if (b < 0)
+    return {
+      text: `Company owes ${formatCurrency(Math.abs(b))}`,
+      tone: "text-green-600 dark:text-green-400",
+    };
+  return { text: "Settled", tone: "text-muted-foreground" };
+}
+
 export function ClaimsListWithFilters({
   claims,
   currentStatus = "all",
@@ -24,165 +50,224 @@ export function ClaimsListWithFilters({
 
   const handleFilterChange = (filterType, value) => {
     const params = new URLSearchParams(searchParams);
-
-    if (filterType === "status") {
-      if (value === "all") {
-        params.delete("status");
-      } else {
-        params.set("status", value);
-      }
-    } else if (filterType === "type") {
-      if (value === "all") {
-        params.delete("type");
-      } else {
-        params.set("type", value);
-      }
-    }
-
-    // Reset to page 1 when filters change
+    const key = filterType === "type" ? "type" : filterType;
+    if (value === "all") params.delete(key);
+    else params.set(key, value);
     params.set("page", "1");
-
     router.push(`${pathname}?${params.toString()}`);
   };
 
-  // Status filter options
   const statusFilters = [
     { value: "all", label: "All" },
-    { value: "submitted", label: "Pending Approval" },
+    { value: "submitted", label: "Pending" },
     { value: "approved", label: "Approved" },
     { value: "paid", label: "Paid" },
-    { value: "pending_return", label: "Pending Return" }, // NEW
-    { value: "pending_payment", label: "Pending Payment" }, // NEW
+    { value: "pending_return", label: "Pending Settlement" },
+    { value: "pending_payment", label: "Pending Payment" },
     { value: "rejected", label: "Rejected" },
     { value: "closed", label: "Closed" },
   ];
 
-  // Type filter options
   const typeFilters = [
     { value: "all", label: "All Types" },
-    { value: "advance_request", label: "Advances" },
+    { value: "advance_request", label: "Cash Advances" },
     { value: "reimbursement", label: "Reimbursements" },
     { value: "advance_return", label: "Settlements" },
   ];
 
   return (
-    <div className="space-y-6">
-      {/* Filters - Responsive Tabs */}
-      {showStatusFilter && (
-        <div className="space-y-3">
-          <p className="text-sm font-semibold text-foreground">
-            Filter by Status
-          </p>
-          <Tabs
-            value={currentStatus}
-            onValueChange={(value) => handleFilterChange("status", value)}
-          >
-            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 h-auto gap-1.5 p-1 bg-muted">
-              {statusFilters.map((filter) => (
-                <TabsTrigger
-                  key={filter.value}
-                  value={filter.value}
-                  className="text-xs sm:text-sm font-medium py-2 px-2 data-[state=active]:bg-yellow-500 data-[state=active]:text-black data-[state=active]:shadow-sm"
-                >
-                  {filter.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        </div>
-      )}
-
+    <div className="space-y-3">
+      {/* Filters — compact strip */}
       {showTypeFilter && (
-        <div className="space-y-3">
-          <p className="text-sm font-semibold text-foreground">
-            Filter by Type
-          </p>
-          <Tabs
-            value={currentType}
-            onValueChange={(value) => handleFilterChange("type", value)}
-          >
-            <TabsList className="grid w-full grid-cols-2 lg:grid-cols-4 h-auto gap-2 p-1 bg-muted">
-              {typeFilters.map((filter) => (
-                <TabsTrigger
-                  key={filter.value}
-                  value={filter.value}
-                  className="text-sm font-medium py-2.5 px-3 data-[state=active]:bg-yellow-500 data-[state=active]:text-black data-[state=active]:shadow-sm"
-                >
-                  {filter.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        </div>
+        <Tabs
+          value={currentType}
+          onValueChange={(value) => handleFilterChange("type", value)}
+        >
+          <TabsList className="grid w-full grid-cols-4 h-8 gap-1 p-1 bg-muted">
+            {typeFilters.map((f) => (
+              <TabsTrigger
+                key={f.value}
+                value={f.value}
+                className="text-xs h-6 px-2 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
+                {f.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
       )}
 
-      {/* Results Count */}
-      <div className="flex items-center justify-between pt-2">
-        <p className="text-sm sm:text-base text-muted-foreground">
-          {claims.length > 0 ? (
-            <>
-              Showing{" "}
-              <span className="font-semibold text-foreground">
-                {claims.length}
-              </span>{" "}
-              claim{claims.length !== 1 ? "s" : ""}
-            </>
-          ) : (
-            "No claims found"
-          )}
+      {showStatusFilter && (
+        <Tabs
+          value={currentStatus}
+          onValueChange={(value) => handleFilterChange("status", value)}
+        >
+          <TabsList className="grid w-full grid-cols-4 sm:grid-cols-8 h-8 gap-1 p-1 bg-muted">
+            {statusFilters.map((f) => (
+              <TabsTrigger
+                key={f.value}
+                value={f.value}
+                className="text-xs h-6 px-2 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
+                {f.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
+
+      {/* Count row */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          {claims.length > 0
+            ? `${claims.length} claim${claims.length !== 1 ? "s" : ""}`
+            : "No claims"}
         </p>
       </div>
 
-      {/* Claims Grid */}
-      {claims.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
-          {claims.map((claim) => (
-            <ClaimCard key={claim._id} claim={claim} />
-          ))}
-        </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center py-16 sm:py-20 text-center px-4">
-          <div className="w-20 h-20 sm:w-24 sm:h-24 mb-6 rounded-full bg-muted flex items-center justify-center">
-            <span className="text-4xl sm:text-5xl">📋</span>
-          </div>
-          <h3 className="text-lg sm:text-xl font-semibold text-foreground mb-2">
-            {emptyMessage}
-          </h3>
-          <p className="text-sm sm:text-base text-muted-foreground max-w-md">
+      {/* Empty */}
+      {claims.length === 0 ? (
+        <div className="rounded-md border border-dashed border-border bg-card py-12 text-center">
+          <p className="text-sm font-medium text-foreground">{emptyMessage}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
             {currentStatus !== "all" || currentType !== "all"
-              ? "Try adjusting your filters to see more claims"
-              : "Get started by creating your first expense claim"}
+              ? "Try clearing your filters"
+              : "Submit a claim to get started"}
           </p>
         </div>
+      ) : (
+        <>
+          {/* Desktop dense table */}
+          <div className="hidden md:block rounded-md border border-border bg-card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <tr className="border-b border-border">
+                  <th className="px-3 py-2 text-left font-medium">Claim</th>
+                  <th className="px-3 py-2 text-left font-medium">Employee</th>
+                  <th className="px-3 py-2 text-left font-medium">Type</th>
+                  <th className="px-3 py-2 text-right font-medium">Amount</th>
+                  <th className="px-3 py-2 text-left font-medium">Status</th>
+                  <th className="px-3 py-2 text-left font-medium">Submitted</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {claims.map((claim) => {
+                  const balance = balanceLabel(claim);
+                  return (
+                    <tr
+                      key={claim._id}
+                      className="hover:bg-muted/40 transition-colors"
+                    >
+                      <td className="px-3 py-2">
+                        <Link
+                          href={`/dashboard/claims/${claim._id}`}
+                          className="font-mono text-xs text-foreground hover:text-yellow-600"
+                        >
+                          {claim.claimNumber}
+                        </Link>
+                        {claim.description && (
+                          <p className="mt-0.5 truncate max-w-[28ch] text-xs text-muted-foreground">
+                            {claim.description}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-foreground">
+                        <span className="truncate">{claim.employee?.name}</span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <ClaimTypeBadge claimType={claim.claimType} />
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-foreground">
+                        {formatCurrency(claim.totalAmount)}
+                        {balance && (
+                          <p className={`mt-0.5 text-[11px] ${balance.tone}`}>
+                            {balance.text}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <ClaimStatusBadge status={claim.status} />
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                        {formatWhen(claim.claimDate)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile slim card list */}
+          <div className="md:hidden divide-y divide-border rounded-md border border-border bg-card">
+            {claims.map((claim) => {
+              const balance = balanceLabel(claim);
+              return (
+                <Link
+                  key={claim._id}
+                  href={`/dashboard/claims/${claim._id}`}
+                  className="block p-3 hover:bg-muted/40 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-mono text-xs text-foreground">
+                        {claim.claimNumber}
+                      </p>
+                      <p className="mt-0.5 truncate text-sm text-foreground">
+                        {claim.employee?.name}
+                      </p>
+                      {claim.description && (
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                          {claim.description}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className="font-mono text-sm font-medium text-foreground">
+                        {formatCurrency(claim.totalAmount)}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        {formatWhen(claim.claimDate)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <ClaimTypeBadge claimType={claim.claimType} />
+                    <ClaimStatusBadge status={claim.status} />
+                    {balance && (
+                      <span className={`text-[11px] ${balance.tone}`}>
+                        {balance.text}
+                      </span>
+                    )}
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );
 }
 
-/**
- * Claims List Skeleton
- */
 export function ClaimsListSkeleton() {
   return (
-    <div className="space-y-4">
-      {/* Filter skeletons */}
-      <div className="space-y-2">
-        <div className="h-4 w-16 bg-muted rounded animate-pulse" />
-        <div className="h-10 w-full bg-muted rounded animate-pulse" />
-      </div>
-
-      <div className="space-y-2">
-        <div className="h-4 w-16 bg-muted rounded animate-pulse" />
-        <div className="h-10 w-full bg-muted rounded animate-pulse" />
-      </div>
-
-      {/* Count skeleton */}
-      <div className="h-4 w-32 bg-muted rounded animate-pulse" />
-
-      {/* Cards skeleton */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <ClaimCardSkeleton key={i} />
+    <div className="space-y-3">
+      <Skeleton className="h-8 w-full" />
+      <Skeleton className="h-8 w-full" />
+      <Skeleton className="h-3 w-24" />
+      <div className="rounded-md border border-border bg-card">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className="flex items-center justify-between gap-3 border-b border-border px-3 py-2 last:border-0"
+          >
+            <div className="space-y-1">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-3 w-40" />
+            </div>
+            <Skeleton className="h-4 w-20" />
+          </div>
         ))}
       </div>
     </div>

@@ -173,7 +173,7 @@ async function ReorderCard() {
           Reorder soon
         </h2>
         <Link
-          href="/dashboard/stocks?filter=low"
+          href="/dashboard/stocks?quantity=low-stock"
           className="inline-flex items-center gap-0.5 text-xs text-primary hover:underline"
         >
           All low

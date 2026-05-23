@@ -76,11 +76,25 @@ export function SalesReportClient({
         p.invoiceCount,
       ]);
     } else {
-      headers = ["Customer", "Invoices", "Total Sales", "Paid", "Outstanding"];
+      headers = [
+        "Customer",
+        "Invoices",
+        "Total Sales",
+        "% share",
+        "Margin %",
+        "COGS",
+        "Gross Profit",
+        "Paid",
+        "Outstanding",
+      ];
       rows = data.customers.map((c) => [
         c.customerName,
         c.invoiceCount,
         c.totalSales.toFixed(2),
+        (c.revenueShare || 0).toFixed(1),
+        (c.grossMarginPct || 0).toFixed(1),
+        (c.totalCOGS || 0).toFixed(2),
+        (c.grossProfit || 0).toFixed(2),
         c.totalPaid.toFixed(2),
         c.totalOutstanding.toFixed(2),
       ]);
@@ -218,14 +232,25 @@ export function SalesReportClient({
             <Card className="p-3 sm:p-0">
               <CardHeader className="p-0 sm:p-4 sm:pb-2 flex flex-row items-center justify-between space-y-0">
                 <CardTitle className="text-[10px] sm:text-sm font-medium text-muted-foreground">
-                  Collected
+                  Gross Margin
                 </CardTitle>
                 <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-green-600 hidden sm:block" />
               </CardHeader>
               <CardContent className="p-0 sm:p-4 sm:pt-0 mt-1 sm:mt-0">
-                <div className="text-base sm:text-xl lg:text-2xl font-bold text-green-600">
-                  {formatCurrency(data?.summary?.totalPaid || 0)}
+                <div
+                  className={`text-base sm:text-xl lg:text-2xl font-bold ${
+                    (data?.summary?.grossMarginPct || 0) < 0
+                      ? "text-red-600"
+                      : (data?.summary?.grossMarginPct || 0) < 10
+                        ? "text-amber-600"
+                        : "text-green-600"
+                  }`}
+                >
+                  {(data?.summary?.grossMarginPct || 0).toFixed(1)}%
                 </div>
+                <p className="text-[10px] sm:text-xs text-muted-foreground">
+                  {formatCurrency(data?.summary?.grossProfit || 0)} profit
+                </p>
               </CardContent>
             </Card>
 
@@ -240,21 +265,36 @@ export function SalesReportClient({
                 <div className="text-base sm:text-xl lg:text-2xl font-bold text-orange-600">
                   {formatCurrency(data?.summary?.totalOutstanding || 0)}
                 </div>
+                <a
+                  href="/dashboard/reports/ar-aging"
+                  className="text-[10px] sm:text-xs text-muted-foreground hover:underline"
+                >
+                  View AR aging →
+                </a>
               </CardContent>
             </Card>
 
             <Card className="p-3 sm:p-0">
               <CardHeader className="p-0 sm:p-4 sm:pb-2 flex flex-row items-center justify-between space-y-0">
                 <CardTitle className="text-[10px] sm:text-sm font-medium text-muted-foreground">
-                  Customers
+                  Top 5 share
                 </CardTitle>
                 <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground hidden sm:block" />
               </CardHeader>
               <CardContent className="p-0 sm:p-4 sm:pt-0 mt-1 sm:mt-0">
-                <div className="text-base sm:text-xl lg:text-2xl font-bold text-foreground">
-                  {data?.summary?.totalCustomers || 0}
+                <div
+                  className={`text-base sm:text-xl lg:text-2xl font-bold ${
+                    (data?.summary?.topFiveShare || 0) >= 70
+                      ? "text-red-600"
+                      : (data?.summary?.topFiveShare || 0) >= 50
+                        ? "text-amber-600"
+                        : "text-foreground"
+                  }`}
+                >
+                  {(data?.summary?.topFiveShare || 0).toFixed(1)}%
                 </div>
                 <p className="text-[10px] sm:text-xs text-muted-foreground">
+                  {data?.summary?.totalCustomers || 0} customers ·{" "}
                   {data?.summary?.totalInvoices || 0} invoices
                 </p>
               </CardContent>
@@ -405,6 +445,12 @@ export function SalesReportClient({
                           Total Sales
                         </th>
                         <th className="text-right p-4 text-xs font-medium text-muted-foreground">
+                          % share
+                        </th>
+                        <th className="text-right p-4 text-xs font-medium text-muted-foreground">
+                          Margin
+                        </th>
+                        <th className="text-right p-4 text-xs font-medium text-muted-foreground">
                           Paid
                         </th>
                         <th className="text-right p-4 text-xs font-medium text-muted-foreground">
@@ -425,12 +471,31 @@ export function SalesReportClient({
                             <span className="text-sm font-medium text-foreground">
                               {customer.customerName}
                             </span>
+                            {customer.customerEmail && (
+                              <span className="block text-[11px] text-muted-foreground">
+                                {customer.customerEmail}
+                              </span>
+                            )}
                           </td>
                           <td className="p-4 text-center text-sm text-muted-foreground">
                             {customer.invoiceCount}
                           </td>
                           <td className="p-4 text-right text-sm font-medium tabular-nums">
                             {formatCurrency(customer.totalSales)}
+                          </td>
+                          <td className="p-4 text-right text-xs tabular-nums text-muted-foreground">
+                            {(customer.revenueShare || 0).toFixed(1)}%
+                          </td>
+                          <td
+                            className={`p-4 text-right text-sm tabular-nums ${
+                              (customer.grossMarginPct || 0) < 0
+                                ? "text-red-600"
+                                : (customer.grossMarginPct || 0) < 10
+                                  ? "text-amber-600"
+                                  : "text-green-600"
+                            }`}
+                          >
+                            {(customer.grossMarginPct || 0).toFixed(1)}%
                           </td>
                           <td className="p-4 text-right text-sm tabular-nums text-green-600">
                             {formatCurrency(customer.totalPaid)}
@@ -458,6 +523,18 @@ export function SalesReportClient({
                         </td>
                         <td className="p-4 text-right text-sm tabular-nums">
                           {formatCurrency(data.summary.totalSales)}
+                        </td>
+                        <td className="p-4"></td>
+                        <td
+                          className={`p-4 text-right text-sm tabular-nums ${
+                            (data.summary.grossMarginPct || 0) < 0
+                              ? "text-red-600"
+                              : (data.summary.grossMarginPct || 0) < 10
+                                ? "text-amber-600"
+                                : "text-green-600"
+                          }`}
+                        >
+                          {(data.summary.grossMarginPct || 0).toFixed(1)}%
                         </td>
                         <td className="p-4 text-right text-sm tabular-nums text-green-600">
                           {formatCurrency(data.summary.totalPaid)}
