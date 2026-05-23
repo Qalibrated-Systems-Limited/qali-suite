@@ -17,10 +17,42 @@ function buildQuantityFilter(quantity) {
 
   switch (quantity) {
     case "in-stock":
-      return { "inventory.quantityOnHand": { $gte: 10 } };
+      // On-hand AND above the reorder threshold (or no threshold set).
+      // Active products only — matches the dashboard alert definition.
+      return {
+        status: "active",
+        "inventory.quantityOnHand": { $gt: 0 },
+        $expr: {
+          $or: [
+            { $lte: [{ $ifNull: ["$inventory.reorderLevel", 0] }, 0] },
+            {
+              $gt: [
+                { $ifNull: ["$inventory.quantityOnHand", 0] },
+                { $ifNull: ["$inventory.reorderLevel", 0] },
+              ],
+            },
+          ],
+        },
+      };
     case "low-stock":
-      return { "inventory.quantityOnHand": { $gte: 1, $lte: 9 } };
+      // Industry standard: active products with qty on hand > 0 AND at
+      // or below the item's reorder level (which must be configured > 0).
+      // Mirrors getDashboardAlerts so the dashboard tile and this filter
+      // always agree.
+      return {
+        status: "active",
+        "inventory.quantityOnHand": { $gt: 0 },
+        "inventory.reorderLevel": { $gt: 0 },
+        $expr: {
+          $lte: [
+            "$inventory.quantityOnHand",
+            "$inventory.reorderLevel",
+          ],
+        },
+      };
     case "out-of-stock":
+      // qty <= 0 (regardless of status — a soft-deleted out-of-stock
+      // product is still worth flagging in the list).
       return { "inventory.quantityOnHand": { $lte: 0 } };
     default:
       return {};
@@ -58,16 +90,26 @@ export async function getStockStats() {
   const [result] = await Product.aggregate([
     { $match: tenantMatch },
     {
+      $addFields: {
+        _qty: { $ifNull: ["$inventory.quantityOnHand", 0] },
+        _reorder: { $ifNull: ["$inventory.reorderLevel", 0] },
+      },
+    },
+    {
       $group: {
         _id: null,
         totalItems: { $sum: 1 },
+        // Active products at or below reorder level (qty > 0). Matches
+        // the dashboard "Low stock" alert tile definition.
         lowStock: {
           $sum: {
             $cond: [
               {
                 $and: [
-                  { $gte: ["$inventory.quantityOnHand", 1] },
-                  { $lte: ["$inventory.quantityOnHand", 9] },
+                  { $eq: ["$status", "active"] },
+                  { $gt: ["$_qty", 0] },
+                  { $gt: ["$_reorder", 0] },
+                  { $lte: ["$_qty", "$_reorder"] },
                 ],
               },
               1,
@@ -76,17 +118,27 @@ export async function getStockStats() {
           },
         },
         outOfStock: {
+          $sum: { $cond: [{ $lte: ["$_qty", 0] }, 1, 0] },
+        },
+        // Active products with stock above reorder (or no reorder set).
+        inStock: {
           $sum: {
             $cond: [
-              { $lte: [{ $ifNull: ["$inventory.quantityOnHand", 0] }, 0] },
+              {
+                $and: [
+                  { $eq: ["$status", "active"] },
+                  { $gt: ["$_qty", 0] },
+                  {
+                    $or: [
+                      { $lte: ["$_reorder", 0] },
+                      { $gt: ["$_qty", "$_reorder"] },
+                    ],
+                  },
+                ],
+              },
               1,
               0,
             ],
-          },
-        },
-        inStock: {
-          $sum: {
-            $cond: [{ $gte: ["$inventory.quantityOnHand", 10] }, 1, 0],
           },
         },
       },

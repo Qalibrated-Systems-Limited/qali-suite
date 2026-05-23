@@ -1201,7 +1201,11 @@ export async function getDashboardAlerts() {
       status: { $ne: "cancelled" },
     }),
 
-    // Low stock (using aggregation for proper comparison)
+    // Low stock — active products with qty > 0 AND qty <= reorderLevel
+    // (and a reorderLevel actually configured). Out-of-stock (qty <= 0)
+    // is a separate tier, not counted here. Mirrors buildQuantityFilter
+    // in product-queries.js so /dashboard/stocks?quantity=low-stock and
+    // this tile always agree.
     Product.aggregate([
       { $match: { ...baseMatch, status: "active" } },
       {
@@ -1212,6 +1216,7 @@ export async function getDashboardAlerts() {
       },
       {
         $match: {
+          currentQty: { $gt: 0 },
           reorderAt: { $gt: 0 },
           $expr: { $lte: ["$currentQty", "$reorderAt"] },
         },

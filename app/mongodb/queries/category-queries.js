@@ -18,15 +18,36 @@ export async function getCategoryStats() {
 
   const baseMatch = { ...tenantMatch, isDeleted: false };
 
-  const [total, active, inactive, withProducts, rootCategories] = await Promise.all([
-    Category.countDocuments(baseMatch),
-    Category.countDocuments({ ...baseMatch, isActive: true }),
-    Category.countDocuments({ ...baseMatch, isActive: false }),
-    Category.countDocuments({ ...baseMatch, productCount: { $gt: 0 } }),
-    Category.countDocuments({ ...baseMatch, parent: null }),
+  // Single round-trip aggregation — one index scan over the tenant's
+  // non-deleted categories, all 5 counts computed inline. Beats five
+  // parallel countDocuments which each open their own cursor and hit the
+  // (companyId, isDeleted) index five times.
+  const [stats = {}] = await Category.aggregate([
+    { $match: baseMatch },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        active: { $sum: { $cond: [{ $eq: ["$isActive", true] }, 1, 0] } },
+        inactive: { $sum: { $cond: [{ $eq: ["$isActive", false] }, 1, 0] } },
+        withProducts: {
+          $sum: { $cond: [{ $gt: [{ $ifNull: ["$productCount", 0] }, 0] }, 1, 0] },
+        },
+        rootCategories: {
+          $sum: { $cond: [{ $eq: ["$parent", null] }, 1, 0] },
+        },
+      },
+    },
+    { $project: { _id: 0 } },
   ]);
 
-  return { total, active, inactive, withProducts, rootCategories };
+  return {
+    total: stats.total || 0,
+    active: stats.active || 0,
+    inactive: stats.inactive || 0,
+    withProducts: stats.withProducts || 0,
+    rootCategories: stats.rootCategories || 0,
+  };
 }
 
 // ============================================

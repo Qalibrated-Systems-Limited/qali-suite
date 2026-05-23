@@ -1,6 +1,4 @@
-"use client";
-
-import { useState } from "react";
+import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Table,
@@ -13,7 +11,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Eye, ArrowDownCircle, ArrowUpCircle, Package } from "lucide-react";
-import { ViewMovementDialog } from "./viewMovementDialog";
 
 const typeConfig = {
   issue: {
@@ -51,9 +48,6 @@ const typeConfig = {
 };
 
 export function MovementsTable({ movements }) {
-  const [selectedMovement, setSelectedMovement] = useState(null);
-  const [viewDialogOpen, setViewDialogOpen] = useState(false);
-
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     return new Date(dateString).toLocaleDateString("en-US", {
@@ -213,18 +207,17 @@ export function MovementsTable({ movements }) {
 
                         <TableCell className="text-right">
                           <Button
+                            asChild
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              setSelectedMovement(movement);
-                              setViewDialogOpen(true);
-                            }}
                             className="text-muted-foreground hover:text-foreground hover:bg-accent"
                           >
-                            <Eye className="h-4 w-4" />
-                            <span className="sr-only">
-                              View movement details
-                            </span>
+                            <Link href={`/dashboard/movements/${movement._id}`}>
+                              <Eye className="h-4 w-4" />
+                              <span className="sr-only">
+                                View movement details
+                              </span>
+                            </Link>
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -335,16 +328,15 @@ export function MovementsTable({ movements }) {
                         {formatDate(movement.createdAt)}
                       </p>
                       <Button
+                        asChild
                         variant="outline"
                         size="sm"
-                        onClick={() => {
-                          setSelectedMovement(movement);
-                          setViewDialogOpen(true);
-                        }}
                         className="border-border text-foreground hover:bg-accent"
                       >
-                        <Eye className="mr-2 h-4 w-4" />
-                        View
+                        <Link href={`/dashboard/movements/${movement._id}`}>
+                          <Eye className="mr-2 h-4 w-4" />
+                          View
+                        </Link>
                       </Button>
                     </div>
                   </div>
@@ -355,14 +347,6 @@ export function MovementsTable({ movements }) {
         )}
       </div>
 
-      {/* View Dialog */}
-      {selectedMovement && (
-        <ViewMovementDialog
-          movement={selectedMovement}
-          open={viewDialogOpen}
-          onOpenChange={setViewDialogOpen}
-        />
-      )}
     </>
   );
 }

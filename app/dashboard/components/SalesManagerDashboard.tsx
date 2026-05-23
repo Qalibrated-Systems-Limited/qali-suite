@@ -82,58 +82,60 @@ function CardSkeleton({ height = "h-28" }: { height?: string }) {
 // REVENUE + AVG MARGIN METRICS
 // ============================================
 async function CommercialMetrics() {
-  const overview = await cFinancialOverview();
-
-  // Average margin across active products with both cost & selling set.
-  // Single aggregation, one round-trip — kept lean by projecting only the
-  // fields we need.
+  // Three independent reads — run in parallel rather than three sequential
+  // awaits (cuts response time to the slowest single call).
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId };
   await dbConnect();
-  const marginAgg = await Product.aggregate([
-    { $match: { ...tenantMatch, status: "active" } },
-    {
-      $project: {
-        cost: { $ifNull: ["$costing.costPrice", 0] },
-        selling: { $ifNull: ["$pricing.sellingPrice", 0] },
-      },
-    },
-    { $match: { cost: { $gt: 0 }, selling: { $gt: 0 } } },
-    {
-      $group: {
-        _id: null,
-        avgMargin: {
-          $avg: {
-            $multiply: [
-              { $divide: [{ $subtract: ["$selling", "$cost"] }, "$selling"] },
-              100,
-            ],
-          },
+
+  const [overview, marginAgg, belowFloorAgg] = await Promise.all([
+    cFinancialOverview(),
+    // Average margin across active products with both cost & selling set.
+    Product.aggregate([
+      { $match: { ...tenantMatch, status: "active" } },
+      {
+        $project: {
+          cost: { $ifNull: ["$costing.costPrice", 0] },
+          selling: { $ifNull: ["$pricing.sellingPrice", 0] },
         },
-        priced: { $sum: 1 },
       },
-    },
+      { $match: { cost: { $gt: 0 }, selling: { $gt: 0 } } },
+      {
+        $group: {
+          _id: null,
+          avgMargin: {
+            $avg: {
+              $multiply: [
+                { $divide: [{ $subtract: ["$selling", "$cost"] }, "$selling"] },
+                100,
+              ],
+            },
+          },
+          priced: { $sum: 1 },
+        },
+      },
+    ]),
+    // Below-floor count — products where selling < minimumPrice.
+    Product.aggregate([
+      { $match: { ...tenantMatch, status: "active" } },
+      {
+        $project: {
+          selling: { $ifNull: ["$pricing.sellingPrice", 0] },
+          floor: { $ifNull: ["$pricing.minimumPrice", 0] },
+        },
+      },
+      {
+        $match: {
+          floor: { $gt: 0 },
+          $expr: { $lt: ["$selling", "$floor"] },
+        },
+      },
+      { $count: "count" },
+    ]),
   ]);
+
   const avgMargin = marginAgg[0]?.avgMargin || 0;
   const pricedCount = marginAgg[0]?.priced || 0;
-
-  // Below-floor count — products where selling < minimumPrice.
-  const belowFloorAgg = await Product.aggregate([
-    { $match: { ...tenantMatch, status: "active" } },
-    {
-      $project: {
-        selling: { $ifNull: ["$pricing.sellingPrice", 0] },
-        floor: { $ifNull: ["$pricing.minimumPrice", 0] },
-      },
-    },
-    {
-      $match: {
-        floor: { $gt: 0 },
-        $expr: { $lt: ["$selling", "$floor"] },
-      },
-    },
-    { $count: "count" },
-  ]);
   const belowFloor = belowFloorAgg[0]?.count || 0;
 
   const cards = [

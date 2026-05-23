@@ -375,9 +375,15 @@ export const getActiveCheckouts = async () => {
     .filter(c => c.relatedDocuments?.requestId)
     .map(c => c.relatedDocuments.requestId.toString()))];
 
+  // Tenant scope this sub-query — the _id $in list is sourced from
+  // already-scoped checkouts, but cross-tenant ID collisions shouldn't be
+  // possible to construct via crafted IDs.
   const requests = await StockRequest.find({
+    ...tenantMatch,
     _id: { $in: requestIds },
-  }).select("_id customer").lean();
+  })
+    .select("_id customer")
+    .lean();
 
   // Create a map of requestId -> customer
   const requestCustomerMap = new Map();

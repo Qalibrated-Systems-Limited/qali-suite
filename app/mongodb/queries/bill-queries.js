@@ -11,12 +11,15 @@
 // ✅ Efficient queries with lean()
 // ============================================
 
+import mongoose from "mongoose";
 import Bill from "@/app/models/bill";
 import dbConnect from "@/app/config/dbConnect";
 import {
   getTenantContext,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+
+const { ObjectId } = mongoose.Types;
 
 // ============================================
 // SERIALIZATION HELPER
@@ -291,7 +294,12 @@ export async function getBillsStats() {
 
     // Get tenant context
     const { companyId, isSuperAdmin } = await getTenantContext();
-    const tenantMatch = isSuperAdmin ? {} : { companyId };
+    // Cast to ObjectId for aggregate $match — Mongoose auto-casts find()
+    // queries but NOT aggregate pipelines, so a string companyId here
+    // silently bypasses the (companyId, billDate, status) compound index.
+    const tenantMatch = isSuperAdmin
+      ? {}
+      : { companyId: new ObjectId(companyId) };
 
     const stats = await Bill.aggregate([
       { $match: tenantMatch },

@@ -271,7 +271,7 @@ export const searchInvoices = async (
 
   let pipeline = [baseFilterStage, sortStage, ...paginationStage];
 
-  if (searchTerm && searchTerm.length > 0) {
+  if (searchTerm && searchTerm.length >= 2) {
     pipeline = [searchStage, sortStage, ...paginationStage];
   }
 
@@ -364,7 +364,7 @@ export const fetchInvoicePages = async (searchTerm = "", filters = {}) => {
 
   let pipeline = [baseFilterStage, countStage];
 
-  if (searchTerm && searchTerm.length > 0) {
+  if (searchTerm && searchTerm.length >= 2) {
     pipeline = [searchStage, countStage];
   }
 
@@ -504,12 +504,20 @@ export const getInvoiceStats = async (filters = {}) => {
 // GET FULFILLED REQUESTS FOR CUSTOMER (for linking to invoices)
 // ============================================
 export const getFulfilledRequestsForCustomer = async (customerId) => {
-  const StockRequest = (await import("../../models/requests")).default;
+  await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const { StockRequest } = await import("../../models/requests");
 
-  const requests = await StockRequest.find({
-    customer: customerId,
-    status: { $in: ["fulfilled", "partially_fulfilled"] },
-  })
+  const requests = await StockRequest.find(
+    withTenantScope(
+      {
+        "customer.id": customerId,
+        status: { $in: ["fulfilled", "partially_fulfilled"] },
+      },
+      companyId,
+      isSuperAdmin,
+    ),
+  )
     .sort({ updatedAt: -1 })
     .lean();
 

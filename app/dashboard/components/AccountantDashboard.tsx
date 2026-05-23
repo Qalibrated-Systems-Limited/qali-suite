@@ -295,6 +295,7 @@ async function OverdueInvoicesCard() {
   })
     .sort({ dueDate: 1 })
     .limit(5)
+    .select("_id invoiceNumber dueDate amountDue customer.name paymentStatus")
     .lean();
 
   const getDaysOverdue = (dueDate: Date) => {
@@ -350,6 +351,7 @@ async function ClaimsToPayCard() {
   })
     .sort({ approvedAt: -1 })
     .limit(5)
+    .select("_id claimNumber claimType approvedAt totalAmount status employee.name")
     .lean();
 
   const formatDate = (date: Date) => {

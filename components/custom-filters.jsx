@@ -31,9 +31,9 @@ export const CATEGORIES = [
 
 const QUANTITY_OPTIONS = [
   { value: "all", label: "All Stock Levels", icon: null },
-  { value: "in-stock", label: "In Stock (10+)", icon: "green" },
-  { value: "low-stock", label: "Low Stock (1-9)", icon: "orange" },
-  { value: "out-of-stock", label: "Out of Stock (0)", icon: "red" },
+  { value: "in-stock", label: "In Stock", icon: "green" },
+  { value: "low-stock", label: "Low Stock (≤ reorder level)", icon: "orange" },
+  { value: "out-of-stock", label: "Out of Stock", icon: "red" },
 ];
 
 // ============================================

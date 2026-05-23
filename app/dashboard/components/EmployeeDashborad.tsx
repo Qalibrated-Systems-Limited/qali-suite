@@ -27,6 +27,7 @@ import MyHRStrip from "./MyHRStrip";
 import { MyAlertsStrip, MyAlertsStripSkeleton } from "./MyAlertsStrip";
 import EmployeeClaim from "../../models/employeesClaims";
 import { StockRequest } from "../../models/requests";
+import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 
 // Utils
 import { formatCurrency } from "@/lib/utils";
@@ -216,9 +217,15 @@ async function EmployeeStatsCards({ userId }: { userId: string }) {
 // MY RECENT CLAIMS
 // ============================================
 async function MyRecentClaimsCard({ userId }: { userId: string }) {
-  const claims = await EmployeeClaim.find({ "employee.userId": userId })
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const claims = await EmployeeClaim.find(
+    withTenantScope({ "employee.userId": userId }, companyId, isSuperAdmin),
+  )
     .sort({ createdAt: -1 })
     .limit(5)
+    .select(
+      "claimNumber claimType status totalAmount createdAt employee.name advanceDetails.destination",
+    )
     .lean();
 
   const getStatusColor = (status: string) => {
@@ -297,9 +304,13 @@ async function MyRecentClaimsCard({ userId }: { userId: string }) {
 // MY RECENT REQUESTS
 // ============================================
 async function MyRecentRequestsCard({ userId }: { userId: string }) {
-  const requests = await StockRequest.find({ "requester.userId": userId })
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const requests = await StockRequest.find(
+    withTenantScope({ "requester.userId": userId }, companyId, isSuperAdmin),
+  )
     .sort({ createdAt: -1 })
     .limit(5)
+    .select("requestNumber status priority requestType items totalValue createdAt customer.name")
     .lean();
 
   const getStatusColor = (status: string) => {

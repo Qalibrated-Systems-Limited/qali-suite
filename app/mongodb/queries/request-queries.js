@@ -95,7 +95,8 @@ function buildSearchMatch(searchTerm, tenantMatch, roleFilter, additionalFilters
     (f) => f && Object.keys(f).length > 0,
   );
 
-  if (safeSearchTerm) {
+  // Require ≥2 chars before triggering the 5-field $regex OR scan.
+  if (safeSearchTerm && safeSearchTerm.length >= 2) {
     clauses.push({
       $or: [
         { "requester.name": { $regex: safeSearchTerm, $options: "i" } },

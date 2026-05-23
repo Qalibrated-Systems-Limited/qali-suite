@@ -104,7 +104,9 @@ export const fetchMovementPages = async (
 
   let pipeline = [baseFilterStage, countStage];
 
-  if (safeSearchTerm && safeSearchTerm.length > 0) {
+  // Require at least 2 chars before triggering 6-field $regex OR scan
+  // (each field would otherwise do a full COLLSCAN with a single char).
+  if (safeSearchTerm && safeSearchTerm.length >= 2) {
     pipeline = [transactionSearchStage, countStage];
   }
 
@@ -215,7 +217,9 @@ export const searchMovements = async (
 
   let pipeline = [baseFilterStage, sortStage, ...paginationStage];
 
-  if (safeSearchTerm && safeSearchTerm.length > 0) {
+  // Require at least 2 chars before triggering 6-field $regex OR scan
+  // (each field would otherwise do a full COLLSCAN with a single char).
+  if (safeSearchTerm && safeSearchTerm.length >= 2) {
     pipeline = [searchStage, sortStage, ...paginationStage];
   }
 
@@ -357,7 +361,7 @@ export const getMovementStats = async (
 // GET MOVEMENT BY ID
 // ============================================
 export const getMovementById = async (movementId) => {
-  // Get tenant context
+  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
@@ -372,14 +376,13 @@ export const getMovementById = async (movementId) => {
     return null;
   }
 
+  // Use the same full BSON round-trip as the rest of the codebase —
+  // hand-serializing only top-level fields leaves nested ObjectIds
+  // (companyId, relatedDocuments.*) un-stringified and triggers
+  // "Only plain objects can be passed to Client Components" errors
+  // when the result is forwarded to a client subtree.
   return {
-    ...movement,
-    _id: movement._id.toString(),
-    productId: movement.productId.toString(),
-    createdAt: movement.createdAt.toISOString(),
-    updatedAt: movement.updatedAt?.toISOString() || null,
-    expectedReturnDate: movement.expectedReturnDate?.toISOString() || null,
-    actualReturnDate: movement.actualReturnDate?.toISOString() || null,
+    ...serializeBsonType(movement),
     totalValue:
       movement.totalValue || movement.quantity * (movement.unitPrice || 0),
   };

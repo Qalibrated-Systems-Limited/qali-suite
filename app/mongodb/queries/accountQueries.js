@@ -390,53 +390,56 @@ export async function getAccountsWithBalances(
   query = withTenantScope(query, companyId, isSuperAdmin);
 
   const accounts = await Account.find(query).lean();
+  if (accounts.length === 0) return [];
 
-  const accountsWithBalances = await Promise.all(
-    accounts.map(async (account) => {
-      let jeQuery = {
-        status: "posted",
-        "lines.accountId": account._id,
-      };
+  // Previously: per-account aggregation in Promise.all → N round trips
+  // and N $unwind+$group passes over JournalEntry.lines. Now one pipeline:
+  // match all posted JEs in range whose lines touch any of these accounts,
+  // unwind, filter to those accountIds, group by accountId.
+  const accountIds = accounts.map((a) => a._id);
 
-      if (startDate || endDate) {
-        jeQuery.entryDate = {};
-        if (startDate) jeQuery.entryDate.$gte = new Date(startDate);
-        if (endDate) jeQuery.entryDate.$lte = new Date(endDate);
-      }
+  let jeQuery = {
+    status: "posted",
+    "lines.accountId": { $in: accountIds },
+  };
+  if (startDate || endDate) {
+    jeQuery.entryDate = {};
+    if (startDate) jeQuery.entryDate.$gte = new Date(startDate);
+    if (endDate) jeQuery.entryDate.$lte = new Date(endDate);
+  }
+  jeQuery = withTenantScope(jeQuery, companyId, isSuperAdmin);
 
-      // Apply tenant scoping to journal entries query
-      jeQuery = withTenantScope(jeQuery, companyId, isSuperAdmin);
+  const totalsByAccount = await JournalEntry.aggregate([
+    { $match: jeQuery },
+    { $unwind: "$lines" },
+    { $match: { "lines.accountId": { $in: accountIds } } },
+    {
+      $group: {
+        _id: "$lines.accountId",
+        totalDebit: { $sum: "$lines.debit" },
+        totalCredit: { $sum: "$lines.credit" },
+      },
+    },
+  ]);
 
-      const result = await JournalEntry.aggregate([
-        { $match: jeQuery },
-        { $unwind: "$lines" },
-        { $match: { "lines.accountId": account._id } },
-        {
-          $group: {
-            _id: null,
-            totalDebit: { $sum: "$lines.debit" },
-            totalCredit: { $sum: "$lines.credit" },
-          },
-        },
-      ]);
-
-      if (result.length === 0) {
-        return { ...account, balance: 0 };
-      }
-
-      const { totalDebit, totalCredit } = result[0];
-      const normalSide = ["asset", "expense"].includes(account.accountType)
-        ? "debit"
-        : "credit";
-
-      const balance =
-        normalSide === "debit"
-          ? totalDebit - totalCredit
-          : totalCredit - totalDebit;
-
-      return { ...account, balance };
-    }),
+  const totalsMap = new Map(
+    totalsByAccount.map((t) => [t._id.toString(), t]),
   );
+
+  const accountsWithBalances = accounts.map((account) => {
+    const totals = totalsMap.get(account._id.toString());
+    if (!totals) return { ...account, balance: 0 };
+
+    const { totalDebit = 0, totalCredit = 0 } = totals;
+    const normalSide = ["asset", "expense"].includes(account.accountType)
+      ? "debit"
+      : "credit";
+    const balance =
+      normalSide === "debit"
+        ? totalDebit - totalCredit
+        : totalCredit - totalDebit;
+    return { ...account, balance };
+  });
 
   return accountsWithBalances.filter((acc) => Math.abs(acc.balance) > 0.01);
 }

@@ -435,6 +435,17 @@ productSchema.index({ companyId: 1, "inventory.quantityOnHand": 1 });
 // List sort (newest-first) + pagination on /dashboard/stocks. Without this
 // Mongo does an in-memory sort of all matched docs before slicing 20.
 productSchema.index({ companyId: 1, createdAt: -1 });
+// Low-stock filter — (companyId, status, reorderLevel, quantityOnHand)
+// covers the "active AND qty > 0 AND reorder > 0 AND qty <= reorder"
+// predicate used by getDashboardAlerts and buildQuantityFilter
+// (low-stock). Without this the dashboard low-stock alert COLLSCANs
+// every active product on every dashboard render.
+productSchema.index({
+  companyId: 1,
+  status: 1,
+  "inventory.reorderLevel": 1,
+  "inventory.quantityOnHand": 1,
+});
 
 // ============================================
 // VIRTUALS
