@@ -1,7 +1,6 @@
 "use client";
 
 import { UpdateButton } from "@/components/buttons";
-import { AddToCartButton } from "./addToCartForm";
 
 // This type is used to define the shape of our data.
 //
@@ -74,49 +73,10 @@ export const getColumns = () => [
     header: "",
     cell: ({ row }) => {
       const id = row.getValue("_id");
-      const stock = row.getValue("stock");
-      const isOutOfStock = stock === 0;
 
       return (
         <div className="flex items-center justify-end gap-1">
-          {/* Add to Cart - Disabled if out of stock */}
-          <div className={isOutOfStock ? "opacity-50 cursor-not-allowed" : ""}>
-            <AddToCartButton id={id} disabled={isOutOfStock} />
-          </div>
-
-          {/* Edit Button */}
           <UpdateButton path={`/dashboard/stocks/${id}/update`} />
-
-          {/* Optional: More Actions Dropdown */}
-          {/* Uncomment if you need more actions */}
-          {/*
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <MoreHorizontal className="h-4 w-4" />
-                <span className="sr-only">More actions</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem asChild>
-                <Link href={`/dashboard/stocks/${id}`}>
-                  <IconEye className="mr-2 h-4 w-4" />
-                  View Details
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href={`/dashboard/stocks/${id}/update`}>
-                  <IconEdit className="mr-2 h-4 w-4" />
-                  Edit
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive">
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          */}
         </div>
       );
     },

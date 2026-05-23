@@ -3,7 +3,6 @@
 import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { auth } from "@/auth";
 import { StockRequest } from "../models/requests";
 import Product from "../models/product";
 import Counter from "../models/counter";
@@ -21,6 +20,18 @@ import {
 } from "@/lib/utils/tenant-utils";
 import { stockRequestTypes, stockRequestTypeConfig } from "@/lib/utils";
 import Project from "../models/project";
+import Company from "../models/Company";
+import { requireFreshSession } from "@/lib/utils/session-freshness";
+
+// Senior approval roles — bypass value threshold + department routing.
+// Includes finance leadership so they can approve cross-department
+// requests without escalation.
+const SENIOR_APPROVAL_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+]);
 
 function revalidateProject(projectId) {
   if (projectId) {
@@ -58,14 +69,14 @@ export async function approveRequest(requestId, prevState, formData) {
     const comments = rawFormData.comments || "";
     const conditions = rawFormData.conditions || "";
 
-    // Get authenticated user
-    const userSession = await auth();
-    if (!userSession?.user) {
+    // Freshness check — reject if approver's session is stale (their
+    // role may have been changed mid-flight).
+    const fresh = await requireFreshSession();
+    if (!fresh.ok) {
       await session.abortTransaction();
-      return { message: "Unauthorized. Please log in." };
+      return { message: fresh.message };
     }
-
-    const user = userSession.user;
+    const user = fresh.session.user;
 
     // Check if user has permission to approve
     if (
@@ -100,6 +111,50 @@ export async function approveRequest(requestId, prevState, formData) {
     if (!request.canApprove(user.id)) {
       await session.abortTransaction();
       return { message: "This request cannot be approved" };
+    }
+
+    // ========================================
+    // VALUE THRESHOLD + DEPARTMENT ROUTING
+    // ========================================
+    // Senior roles (Admin / CFO / Finance Manager / SuperAdmin) can
+    // approve any request regardless of value or department — they ARE
+    // the escalation path. Manager / Store Manager are bounded:
+    //   - Value: requests above `stockRequestValue` need senior approval
+    //   - Department: must match the requester's department
+    // Without these, a Sales Manager could approve a 5M KES Technical
+    // request they have no context for.
+    const isSenior = SENIOR_APPROVAL_ROLES.has(user.role);
+    if (!isSenior) {
+      const companyDoc = await Company.findById(request.companyId)
+        .select("settings.approvalThresholds")
+        .session(session)
+        .lean();
+      const threshold =
+        companyDoc?.settings?.approvalThresholds?.stockRequestValue ?? 100_000;
+
+      const requestValue = request.totalValue || 0;
+      if (requestValue > threshold) {
+        await session.abortTransaction();
+        return {
+          message: `Request value (${requestValue.toLocaleString("en-KE")}) exceeds the ${threshold.toLocaleString("en-KE")} threshold for your role. A senior approver (Admin / CFO / Finance Manager) must sign this off.`,
+        };
+      }
+
+      // Department routing — Manager / Store Manager can only approve
+      // their own department's requests. (`user.department` lives in
+      // the session per the JWT.)
+      const approverDept = user.department;
+      const requesterDept = request.requester?.department;
+      if (
+        approverDept &&
+        requesterDept &&
+        approverDept !== requesterDept
+      ) {
+        await session.abortTransaction();
+        return {
+          message: `This request is from the ${requesterDept} department. You can only approve requests from your own department (${approverDept}). Ask a senior approver to handle cross-department requests.`,
+        };
+      }
     }
 
     // ========================================
@@ -254,14 +309,12 @@ export async function rejectRequest(requestId, prevState, formData) {
       };
     }
 
-    // Get authenticated user
-    const userSession = await auth();
-    if (!userSession?.user) {
+    const fresh = await requireFreshSession();
+    if (!fresh.ok) {
       await session.abortTransaction();
-      return { message: "Unauthorized. Please log in." };
+      return { message: fresh.message };
     }
-
-    const user = userSession.user;
+    const user = fresh.session.user;
 
     // Check if user has permission to reject (lowercase comparison was a bug —
     // canonical role names are capitalised, so this used to always fail).
@@ -366,14 +419,12 @@ export async function cancelRequest(requestId, prevState, formData) {
       };
     }
 
-    // Get authenticated user
-    const userSession = await auth();
-    if (!userSession?.user) {
+    const fresh = await requireFreshSession();
+    if (!fresh.ok) {
       await session.abortTransaction();
-      return { message: "Unauthorized. Please log in." };
+      return { message: fresh.message };
     }
-
-    const user = userSession.user;
+    const user = fresh.session.user;
 
     // Get tenant context
     const { companyId, isSuperAdmin } = await getTenantContext();
@@ -508,17 +559,15 @@ export async function createStockRequest(prevState, formData) {
     session = await mongoose.startSession();
     session.startTransaction();
 
-    // Get authenticated user
-    const userSession = await auth();
-    if (!userSession?.user) {
+    const fresh = await requireFreshSession();
+    if (!fresh.ok) {
       return {
         success: false,
-        error: "Unauthorized. Please log in.",
+        error: fresh.message,
         values: rawData,
       };
     }
-
-    const user = userSession.user;
+    const user = fresh.session.user;
 
     // Get tenant context
     const { companyId, isSuperAdmin } = await getTenantContext();
@@ -538,9 +587,25 @@ export async function createStockRequest(prevState, formData) {
       fieldErrors.requestType = "Please select a valid request type";
     }
 
-    // Get type config to check if customer is required
+    // Get type config to check if customer is required + role gating
     const typeConfig = stockRequestTypeConfig[rawData.requestType];
     const requiresCustomer = typeConfig?.requiresCustomer ?? true;
+
+    // SoD gate: only roles in the type's `allowedRequesterRoles` may
+    // create requests of this kind. Closes the audit gap where any
+    // authenticated user could mint a "sale" worth millions.
+    if (typeConfig?.allowedRequesterRoles) {
+      const allowed = typeConfig.allowedRequesterRoles;
+      const isSuperAdmin = user.role === "SuperAdmin";
+      if (!isSuperAdmin && !allowed.includes(user.role)) {
+        await session.abortTransaction();
+        return {
+          success: false,
+          error: `Your role (${user.role}) cannot create "${typeConfig.label || rawData.requestType}" requests. Ask a ${allowed.slice(0, 3).join(" / ")} to raise it.`,
+          values: rawData,
+        };
+      }
+    }
 
     // Validate customer (conditionally based on request type)
     if (requiresCustomer && (!rawData.customerId || !rawData.customerName?.trim())) {
@@ -735,13 +800,9 @@ export async function returnItemCheckout(checkoutId, prevState, formData) {
 
     const rawFormData = Object.fromEntries(formData.entries());
 
-    // Get authenticated user
-    const userSession = await auth();
-    if (!userSession?.user) {
-      throw new Error("Unauthorized. Please log in.");
-    }
-
-    const user = userSession.user;
+    const fresh = await requireFreshSession();
+    if (!fresh.ok) throw new Error(fresh.message);
+    const user = fresh.session.user;
 
     // Only Store Manager / Admin / SuperAdmin can process returns. Prior
     // lowercase-compare missed SuperAdmin entirely and was fragile.
@@ -836,7 +897,7 @@ export async function returnItemCheckout(checkoutId, prevState, formData) {
           performedBy: {
             name: user.name,
             id: user.id,
-            role: userRole,
+            role: user.role,
           },
           returnedFrom: {
             name: checkout.checkedOutTo.name,
@@ -1241,14 +1302,12 @@ export async function fulfillRequest(requestId, prevState, formData) {
 
     const rawFormData = Object.fromEntries(formData.entries());
 
-    // Get authenticated user
-    const userSession = await auth();
-    if (!userSession?.user) {
+    const fresh = await requireFreshSession();
+    if (!fresh.ok) {
       await session.abortTransaction();
-      return { message: "Unauthorized. Please log in." };
+      return { message: fresh.message };
     }
-
-    const user = userSession.user;
+    const user = fresh.session.user;
 
     // Check permissions. Same canonical-role fix as the returns path.
     if (!["Store Manager", "Admin", "SuperAdmin"].includes(user.role)) {
@@ -1411,7 +1470,7 @@ export async function fulfillRequest(requestId, prevState, formData) {
             performedBy: {
               name: user.name,
               id: user.id,
-              role: userRole,
+              role: user.role,
             },
             issuedTo: {
               name: isSale ? request.customer?.name : request.requester.name,
@@ -1528,7 +1587,7 @@ export async function fulfillRequest(requestId, prevState, formData) {
               checkedOutBy: {
                 name: user.name,
                 id: user.id,
-                role: userRole,
+                role: user.role,
               },
               purpose: request.requestType,
               purposeDetails: typeConfig?.description || request.requestType,

@@ -7,9 +7,20 @@ import { clockIn, clockOut, getMyTodayAttendance } from "@/app/mongodb/actions/h
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+// Pin to Africa/Nairobi so the displayed time matches the Kenyan
+// business's wall clock even when an employee logs in from another
+// timezone (and matches what the server-rendered list shows). Without
+// this option the browser falls back to local TZ.
+const TZ = "Africa/Nairobi";
+
 function fmtTime(iso) {
   if (!iso) return null;
-  return new Date(iso).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", hour12: true });
+  return new Date(iso).toLocaleTimeString("en-KE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: TZ,
+  });
 }
 
 function ElapsedTime({ since }) {

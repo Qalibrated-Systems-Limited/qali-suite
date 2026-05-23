@@ -322,6 +322,17 @@ const companySchema = new Schema(
           min: [0, "Threshold cannot be negative"],
         },
 
+        // Stock requests at or below this KES value can be approved by
+        // any approver (Manager / Store Manager / Admin / SuperAdmin).
+        // Above this, only senior approval is accepted (Admin / CFO /
+        // SuperAdmin). Default tracks `billPaymentValue` — same audit
+        // weight as cutting a cheque.
+        stockRequestValue: {
+          type: Number,
+          default: 100_000,
+          min: [0, "Threshold cannot be negative"],
+        },
+
         // Adjustment types ALWAYS routed through approval engine
         // regardless of value. These are audit-sensitive and irreversible.
         stockHighRiskTypes: {

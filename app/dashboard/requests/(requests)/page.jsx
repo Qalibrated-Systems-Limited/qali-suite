@@ -41,15 +41,17 @@ const RequestsPage = async (props) => {
   }
 
   const userId = user.id;
-  let userRole = user.role || "user";
-  if (userRole && userRole !== "Store Manager") {
-    userRole = userRole.toLowerCase();
-  }
+  // Pass the canonical (capitalised) role straight through. The earlier
+  // lowercase coercion broke buildRoleFilter — Admin / SuperAdmin /
+  // Manager would silently fall through to "own requests only" because
+  // the filter compares against canonical names.
+  const userRole = user.role || "User";
   const canOnlyViewOwn = ![
-    "store clerk",
-    "warehouse staff",
-    "admin",
+    "SuperAdmin",
+    "Admin",
+    "Manager",
     "Store Manager",
+    "Storekeeper",
   ].includes(userRole);
 
   const currentPage = Number(searchParams.page) || 1;

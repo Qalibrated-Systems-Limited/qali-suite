@@ -317,7 +317,7 @@ export default async function PaymentDetailPage({ params }) {
                 <div>
                   <p className="text-sm text-muted-foreground">Journal Entry</p>
                   <Link
-                    href={`/dashboard/journal-entries/${payment.journalEntryId}`}
+                    href={`/dashboard/journal/${payment.journalEntryId}`}
                     className="text-primary hover:underline font-medium"
                   >
                     View Entry

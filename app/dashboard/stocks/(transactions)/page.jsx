@@ -3,7 +3,6 @@ import Link from "next/link";
 import { auth } from "@/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import User from "@/app/models/user";
 import { SiteHeader } from "@/components/site-header";
 import {
   StockQuantityFilter,
@@ -12,7 +11,6 @@ import {
 } from "@/components/custom-filters";
 import { FormBanner } from "@/components/ui/form-banner";
 import Search from "@/components/search";
-import dbConnect from "@/app/config/dbConnect";
 import {
   StockStatsCards,
   StockStatsSkeleton,
@@ -61,19 +59,6 @@ async function StockPage(props) {
   const currentPage = Number(searchParams.page) || 1;
 
   const { user } = session;
-  const userId = user.id;
-
-  // Get user cart (needed for request action)
-  await dbConnect();
-  const userCart = await User.findById(userId).select("cart").lean();
-
-  // Serialize cart data for client component
-  const cart =
-    userCart?.cart?.map((item) => ({
-      ...item,
-      _id: item._id?.toString(),
-      productId: item.productId?.toString(),
-    })) ?? [];
 
   // Build filters object
   const filters = {
@@ -91,7 +76,7 @@ async function StockPage(props) {
         title={action === "request" ? "Select Items" : "Stock"}
         description={
           action === "request"
-            ? "Add items to your request cart"
+            ? "Add items to your stock request"
             : "Manage inventory and stock levels"
         }
         Action={() => (
@@ -164,7 +149,6 @@ async function StockPage(props) {
           query={query}
           page={currentPage}
           filters={filters}
-          cart={cart}
           action={action}
         />
       </Suspense>

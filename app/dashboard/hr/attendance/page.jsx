@@ -35,13 +35,29 @@ function StatusBadge({ status }) {
   );
 }
 
+// Server-rendered times need an explicit timeZone — without it the
+// formatter uses the server's local TZ (UTC on Vercel/Docker), so a
+// 09:00 Africa/Nairobi check-in displays as 06:00. Pin to Nairobi.
+const TZ = "Africa/Nairobi";
+
 function fmtTime(iso) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", hour12: true });
+  return new Date(iso).toLocaleTimeString("en-KE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: TZ,
+  });
 }
 
 function fmtDate(iso) {
-  return new Date(iso).toLocaleDateString("en-KE", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  return new Date(iso).toLocaleDateString("en-KE", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: TZ,
+  });
 }
 
 function SummaryCard({ label, value, icon: Icon, color }) {

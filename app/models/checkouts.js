@@ -104,10 +104,20 @@ const itemCheckoutSchema = new Schema(
         ref: "StockMovement",
       },
     },
-    // Request type from parent request (for tracking flow)
+    // Request type from parent request (for tracking flow).
+    // Mirrors `stockRequestTypes` in lib/utils.js — when a new type is
+    // added there it also needs adding here, or fulfillment will throw
+    // an enum validation error.
     requestType: {
       type: String,
-      enum: ["sale", "demo", "installation", "repair", "internal"],
+      enum: [
+        "sale",
+        "demo",
+        "installation",
+        "repair",
+        "internal",
+        "employee_borrow",
+      ],
       index: true,
     },
     // Conversion to sale tracking (customer info fetched from parent request)

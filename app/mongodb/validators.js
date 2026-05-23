@@ -1,12 +1,6 @@
 import { z } from "zod";
 import { roles } from "../utils/roles";
 import { units } from "../utils/units";
-import {
-  departments,
-  priority,
-  stockRequestTypes,
-} from "@/lib/utils";
-import { de } from "date-fns/locale";
 
 export const accountForm = z.object({
   name: z.string().max(100).min(4),
@@ -14,24 +8,6 @@ export const accountForm = z.object({
 
   phoneNumber: z.string().min(10).max(12),
   email: z.string().email().optional(),
-});
-
-export const createRequestFromCartSchema = z.object({
-  customer: z.string().min(1, "Customer is required"),
-  requestType: z.enum(stockRequestTypes, {
-    required_error: "Please select a request type",
-  }),
-  priority: z.enum(priority, {
-    required_error: "Please select priority",
-  }),
-  department: z.enum(departments, {
-    required_error: "Please select your department",
-  }),
-  requiredByDate: z.string().optional(),
-  notes: z
-    .string()
-    .min(10, "Please provide more details (at least 10 characters)")
-    .max(500),
 });
 
 const ruimbursementPaymentSchema = z.object({
@@ -183,13 +159,6 @@ export const deliveryNoteZodSchema = z.object({
   customerId: z.string().min(1),
   techId: z.string().min(1),
   reason: z.enum(["Selling", "Borrrowing", "Giving out for tests "]),
-});
-
-export const cartItemForm = z.object({
-  quantity: z.string().min(1).max(5).refine(
-    (val) => Number.isInteger(Number(val)) && Number(val) > 0,
-    { message: "Quantity must be a positive whole number" }
-  ),
 });
 
 export const invoiceItemForm = z.object({
@@ -344,8 +313,6 @@ export const ValidateStock = (rawData) => stockForm.safeParse(rawData);
 export const validateInvoice = (rawData) => invoiceForm.safeParse(rawData);
 export const validateInvoiceItem = (rawData) =>
   invoiceItemForm.safeParse(rawData);
-export const validateCartItem = (rawData) => cartItemForm.safeParse(rawData);
-
 export const validateInvoiceUpdate = (rawData) =>
   updateInvoiceForm.safeParse(rawData);
 
@@ -353,8 +320,6 @@ export const validateInvoiceWithId = (rawData) =>
   updatedInvoiceWithIdSchema.safeParse(rawData);
 export const validateDNote = (rawData) =>
   deliveryNoteZodSchema.safeParse(rawData);
-export const validateCreateRequestFromCart = (rawData) =>
-  createRequestFromCartSchema.safeParse(rawData);
 
 export const validateAdvanceRequest = (rawData) =>
   advanceRequestSchema.safeParse(rawData);

@@ -1106,7 +1106,7 @@ export async function approveBill(billId) {
 
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
-    revalidatePath("/dashboard/journal-entries");
+    revalidatePath("/dashboard/journal");
     revalidatePath("/dashboard/stocks");
     revalidateProject(bill.projectId);
 
@@ -1242,7 +1242,7 @@ export async function cancelBill(billId, prevState, formData) {
 
     revalidatePath("/dashboard/bills");
     revalidatePath(`/dashboard/bills/${billId}`);
-    revalidatePath("/dashboard/journal-entries");
+    revalidatePath("/dashboard/journal");
     revalidateProject(bill.projectId);
 
     return {

@@ -1,9 +1,4 @@
 import { Pencil, Package, AlertTriangle, XCircle, Eye } from "lucide-react";
-import {
-  AddSingleItem,
-  AddToCartButton,
-  RemoveSingleItem,
-} from "./addToCartForm";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 // ============================================
 // DESKTOP TABLE VIEW
 // ============================================
-export function InventoryTable({ cart = [], stock, action, showPricing = true }) {
+export function InventoryTable({ stock, action, showPricing = true }) {
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-KE", {
       style: "currency",
@@ -73,9 +68,6 @@ export function InventoryTable({ cart = [], stock, action, showPricing = true })
               </TableRow>
             ) : (
               stock.map((item) => {
-                const cartItem = cart.find(
-                  (cartItem) => cartItem.id === item.SKU
-                );
                 const onHand = item.inventory?.quantityOnHand ?? 0;
                 const committed = item.inventory?.quantityCommitted ?? 0;
                 const available = item.inventory?.quantityAvailable ?? (onHand - committed);
@@ -203,21 +195,6 @@ export function InventoryTable({ cart = [], stock, action, showPricing = true })
                           </Button>
                         )}
 
-                        {/* Cart Controls */}
-                        {cartItem ? (
-                          <div className="flex items-center gap-1 border border-border rounded-lg px-2 py-1 bg-background ml-1">
-                            <RemoveSingleItem id={item.SKU} />
-                            <span className="px-2 text-sm font-semibold text-yellow-500 min-w-[2ch] text-center">
-                              {cartItem.quantity}
-                            </span>
-                            <AddSingleItem id={item.SKU} />
-                          </div>
-                        ) : (
-                          <AddToCartButton
-                            id={item._id}
-                            disabled={isOutOfStock}
-                          />
-                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -234,7 +211,7 @@ export function InventoryTable({ cart = [], stock, action, showPricing = true })
 // ============================================
 // MOBILE CARD VIEW
 // ============================================
-export function InventoryTableMobile({ cart = [], stock, action, showPricing = true }) {
+export function InventoryTableMobile({ stock, action, showPricing = true }) {
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-KE", {
       style: "currency",
@@ -257,7 +234,6 @@ export function InventoryTableMobile({ cart = [], stock, action, showPricing = t
         </Card>
       ) : (
         stock.map((item) => {
-          const cartItem = cart.find((cartItem) => cartItem.id === item.SKU);
           const onHand = item.inventory?.quantityOnHand ?? 0;
           const committed = item.inventory?.quantityCommitted ?? 0;
           const available = item.inventory?.quantityAvailable ?? (onHand - committed);
@@ -387,22 +363,6 @@ export function InventoryTableMobile({ cart = [], stock, action, showPricing = t
                       </Button>
                     )}
 
-                    {cartItem ? (
-                      <div className="flex items-center gap-1 border border-border rounded-lg px-3 py-1.5 bg-background ml-auto">
-                        <RemoveSingleItem id={item.SKU} />
-                        <span className="px-2 text-sm font-semibold text-yellow-500 min-w-[2ch] text-center">
-                          {cartItem.quantity}
-                        </span>
-                        <AddSingleItem id={item.SKU} />
-                      </div>
-                    ) : (
-                      <div className="ml-auto">
-                        <AddToCartButton
-                          id={item._id}
-                          disabled={isOutOfStock}
-                        />
-                      </div>
-                    )}
                   </div>
                 </div>
               </CardContent>
@@ -417,13 +377,12 @@ export function InventoryTableMobile({ cart = [], stock, action, showPricing = t
 // ============================================
 // RESPONSIVE WRAPPER (Auto-switches based on screen size)
 // ============================================
-export function ResponsiveInventoryTable({ cart = [], stock, action, showPricing = true }) {
+export function ResponsiveInventoryTable({ stock, action, showPricing = true }) {
   return (
     <>
       {/* Desktop Table */}
       <div className="hidden md:block">
         <InventoryTable
-          cart={cart}
           stock={stock}
           action={action}
           showPricing={showPricing}
@@ -433,7 +392,6 @@ export function ResponsiveInventoryTable({ cart = [], stock, action, showPricing
       {/* Mobile Cards */}
       <div className="block md:hidden">
         <InventoryTableMobile
-          cart={cart}
           stock={stock}
           action={action}
           showPricing={showPricing}

@@ -33,6 +33,24 @@ const ATTENDANCE_COLOR: Record<string, string> = {
   "not-clocked-in": "text-muted-foreground",
 };
 
+// This widget renders server-side, where `Date#toLocaleTimeString`
+// without an explicit `timeZone` uses the server's local TZ — usually
+// UTC on Vercel/Docker. That's why a 09:00 Africa/Nairobi check-in was
+// rendering as 06:00. Pin the formatter to Africa/Nairobi so the
+// displayed time matches the operator's wall clock regardless of where
+// the server runs.
+const TIME_ZONE = "Africa/Nairobi";
+
+function formatTime(input: string | Date | null | undefined): string {
+  if (!input) return "";
+  return new Date(input).toLocaleTimeString("en-KE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: TIME_ZONE,
+  });
+}
+
 async function HRStripContent() {
   const [profile, { payslips }, attendance] = await Promise.all([
     getMyEmployeeProfile(),
@@ -83,9 +101,9 @@ async function HRStripContent() {
           </p>
           {attendance?.checkIn && (
             <p className="text-xs text-muted-foreground mt-0.5">
-              {new Date(attendance.checkIn).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", hour12: true })}
+              {formatTime(attendance.checkIn)}
               {attendance.checkOut && (
-                <> → {new Date(attendance.checkOut).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", hour12: true })}</>
+                <> → {formatTime(attendance.checkOut)}</>
               )}
             </p>
           )}

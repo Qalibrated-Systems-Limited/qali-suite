@@ -17,7 +17,72 @@ import {
 
 import { canSeeApprovalsNav } from "@/lib/permissions";
 import { cApprovalQueue, cMySubmittedApprovals } from "@/app/mongodb/queries/approval-queries";
+import { getPendingApprovalRequests } from "@/app/mongodb/queries/request-queries";
+import {
+  getPendingBills,
+  getPendingLeaveRequests,
+  getPendingLoans,
+  getPendingReimbursements,
+  getPendingAdvances,
+  getPendingNCRs,
+} from "@/app/mongodb/queries/pending-approvals-queries";
+import { Banknote, CalendarDays, Coins, HandCoins, FileWarning } from "lucide-react";
 import ApprovalDecisionForm from "./components/ApprovalDecisionForm";
+
+// Per-domain approver allowlists. Each mirrors the gate enforced by
+// that domain's server action — adding/removing a role here doesn't
+// change what they can do, only what's visible. Domains share this
+// page; nothing else.
+const STOCK_REQUEST_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "Manager",
+  "Store Manager",
+]);
+const BILL_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Manager",
+]);
+const LEAVE_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "Manager",
+  "HR",
+]);
+const LOAN_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "HR",
+  "CFO",
+  "Finance Manager",
+]);
+const CLAIM_APPROVER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Accountant",
+  "Manager",
+]);
+const NCR_AUTHORIZER_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+]);
+
+const PRIORITY_STYLES: Record<string, string> = {
+  urgent:
+    "bg-red-500/10 text-red-700 ring-red-500/20 dark:text-red-400",
+  high:
+    "bg-orange-500/10 text-orange-700 ring-orange-500/20 dark:text-orange-400",
+  normal:
+    "bg-blue-500/10 text-blue-700 ring-blue-500/20 dark:text-blue-400",
+  low:
+    "bg-muted text-muted-foreground ring-border",
+};
 
 export const metadata = { title: "Approvals | ERP System" };
 
@@ -325,17 +390,11 @@ function ApprovalRow({
 async function PendingQueue({ canDecide }: { canDecide: boolean }) {
   const rows = await cApprovalQueue("submitted");
 
-  if (rows.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed border-border bg-card/50 px-6 py-12 text-center">
-        <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
-        <p className="font-medium text-foreground">Nothing pending</p>
-        <p className="mt-0.5 text-sm text-muted-foreground">
-          All caught up. New approvals will appear here.
-        </p>
-      </div>
-    );
-  }
+  // Render nothing when this domain has nothing — other domain
+  // sections render below independently and may have items. A page-
+  // level "Nothing pending" card is rendered separately at the page
+  // root after ALL sections resolve to empty.
+  if (rows.length === 0) return null;
 
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
@@ -354,6 +413,255 @@ async function PendingQueue({ canDecide }: { canDecide: boolean }) {
         ))}
       </ul>
     </section>
+  );
+}
+
+// ============================================
+// PENDING STOCK REQUESTS (cross-flow inbox)
+// ============================================
+// Surfaces stock requests waiting on approver decisions. Lives outside
+// the generic ApprovalRequest engine so we have to query it separately,
+// but to the user it's part of the same "things I need to decide on"
+// view.
+async function PendingStockRequests({ role }: { role: string }) {
+  if (!STOCK_REQUEST_APPROVER_ROLES.has(role)) return null;
+
+  const rows = await getPendingApprovalRequests(50);
+  if (rows.length === 0) return null;
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-card">
+      <header className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-2.5">
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
+          <Package className="h-4 w-4 text-muted-foreground" />
+          Pending stock requests
+        </h2>
+        <span className="text-xs text-muted-foreground">
+          {rows.length} item{rows.length === 1 ? "" : "s"}
+        </span>
+      </header>
+      <ul className="divide-y divide-border">
+        {rows.map((r: any) => {
+          const priority = r.priority || "normal";
+          const priorityClass =
+            PRIORITY_STYLES[priority] || PRIORITY_STYLES.normal;
+          const itemCount = r.items?.length || 0;
+          const totalValue = Number(r.totalValue) || 0;
+          return (
+            <li key={r._id}>
+              <Link
+                href={`/dashboard/requests/${r._id}`}
+                className="block px-4 py-3 transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {r.requestNumber}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${priorityClass}`}
+                      >
+                        {priority}
+                      </span>
+                      {r.requestType && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium capitalize text-muted-foreground">
+                          {r.requestType.replace(/_/g, " ")}
+                        </span>
+                      )}
+                    </div>
+                    <p className="truncate text-sm font-medium">
+                      {r.requester?.name || "—"}
+                      {r.requester?.department && (
+                        <span className="text-muted-foreground">
+                          {" "}· {r.requester.department}
+                        </span>
+                      )}
+                    </p>
+                    {r.customer?.name && (
+                      <p className="truncate text-xs text-muted-foreground">
+                        Customer: {r.customer.name}
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-right text-[11px] text-muted-foreground">
+                    <p className="font-semibold text-foreground tabular-nums">
+                      KES {formatCurrency(totalValue)}
+                    </p>
+                    <p>
+                      {itemCount} item{itemCount === 1 ? "" : "s"}
+                    </p>
+                    <p className="text-muted-foreground/80">
+                      {formatRelative(r.createdAt)}
+                    </p>
+                  </div>
+                </div>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+// ============================================
+// SHARED ROW + SECTION RENDERERS
+// ============================================
+// Every cross-domain pending row has the same shape (per
+// pending-approvals-queries normalisation), so one helper renders all
+// of them. Kept narrow on purpose — sections with bespoke fields
+// (stock requests, generic engine) still get their own.
+function PendingRow({ row, accent }: { row: any; accent?: string }) {
+  return (
+    <li>
+      <Link
+        href={row.href}
+        className="block px-4 py-3 transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs text-muted-foreground">
+                {row.ref}
+              </span>
+              {row.subtitle && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium capitalize text-muted-foreground">
+                  {row.subtitle.replace(/_/g, " ")}
+                </span>
+              )}
+            </div>
+            <p className="truncate text-sm font-medium">{row.title}</p>
+            {row.meta && (
+              <p className="truncate text-xs text-muted-foreground">
+                {row.meta}
+              </p>
+            )}
+          </div>
+          <div className="text-right text-[11px] text-muted-foreground">
+            {row.amount > 0 && (
+              <p
+                className={`font-semibold tabular-nums ${accent || "text-foreground"}`}
+              >
+                KES {formatCurrency(row.amount)}
+              </p>
+            )}
+            <p>{row.submittedBy}</p>
+            <p className="text-muted-foreground/80">
+              {formatRelative(row.submittedAt)}
+            </p>
+          </div>
+        </div>
+      </Link>
+    </li>
+  );
+}
+
+function PendingSectionShell({
+  title,
+  Icon,
+  rows,
+  accent,
+}: {
+  title: string;
+  Icon: React.ComponentType<{ className?: string }>;
+  rows: any[];
+  accent?: string;
+}) {
+  if (!rows || rows.length === 0) return null;
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-card">
+      <header className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-2.5">
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
+          <Icon className="h-4 w-4 text-muted-foreground" />
+          {title}
+        </h2>
+        <span className="text-xs text-muted-foreground">
+          {rows.length} item{rows.length === 1 ? "" : "s"}
+        </span>
+      </header>
+      <ul className="divide-y divide-border">
+        {rows.map((r: any) => (
+          <PendingRow key={r._id} row={r} accent={accent} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// ============================================
+// DOMAIN SECTIONS — one async server component each
+// ============================================
+async function PendingBills({ role }: { role: string }) {
+  if (!BILL_APPROVER_ROLES.has(role)) return null;
+  const rows = await getPendingBills(50);
+  return (
+    <PendingSectionShell
+      title="Pending bills"
+      Icon={Receipt}
+      rows={rows}
+      accent="text-foreground"
+    />
+  );
+}
+
+async function PendingLeave({ role }: { role: string }) {
+  if (!LEAVE_APPROVER_ROLES.has(role)) return null;
+  const rows = await getPendingLeaveRequests(50);
+  return (
+    <PendingSectionShell
+      title="Pending leave requests"
+      Icon={CalendarDays}
+      rows={rows}
+    />
+  );
+}
+
+async function PendingLoansSection({ role }: { role: string }) {
+  if (!LOAN_APPROVER_ROLES.has(role)) return null;
+  const rows = await getPendingLoans(50);
+  return (
+    <PendingSectionShell
+      title="Pending loans"
+      Icon={Banknote}
+      rows={rows}
+    />
+  );
+}
+
+async function PendingAdvances({ role }: { role: string }) {
+  if (!CLAIM_APPROVER_ROLES.has(role)) return null;
+  const rows = await getPendingAdvances(50);
+  return (
+    <PendingSectionShell
+      title="Pending advance requests"
+      Icon={HandCoins}
+      rows={rows}
+    />
+  );
+}
+
+async function PendingReimbursements({ role }: { role: string }) {
+  if (!CLAIM_APPROVER_ROLES.has(role)) return null;
+  const rows = await getPendingReimbursements(50);
+  return (
+    <PendingSectionShell
+      title="Pending reimbursements"
+      Icon={Coins}
+      rows={rows}
+    />
+  );
+}
+
+async function PendingNCRsSection({ role }: { role: string }) {
+  if (!NCR_AUTHORIZER_ROLES.has(role)) return null;
+  const rows = await getPendingNCRs(50);
+  return (
+    <PendingSectionShell
+      title="Pending NCR authorisations"
+      Icon={FileWarning}
+      rows={rows}
+    />
   );
 }
 
@@ -467,6 +775,39 @@ export default async function ApprovalsPage() {
           <PendingQueue canDecide={canDecide} />
         </Suspense>
       )}
+
+      {/* Cross-domain pending sections. Each streams independently —
+          a slow query in one domain won't block the others. Empty
+          sections hide entirely; role-gating happens inside each
+          component so the query isn't called when the user can't see
+          it. */}
+      <Suspense fallback={null}>
+        <PendingStockRequests role={role} />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <PendingBills role={role} />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <PendingLeave role={role} />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <PendingLoansSection role={role} />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <PendingAdvances role={role} />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <PendingReimbursements role={role} />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <PendingNCRsSection role={role} />
+      </Suspense>
 
       <Suspense fallback={null}>
         <MySubmissions />

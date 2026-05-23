@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   IconClipboardList,
   IconEye,
@@ -43,7 +44,6 @@ import {
   FulfillDialog,
   CancelDialog,
 } from "./../../components/requestsActionsDialogs";
-import { ViewRequestDialog } from "./../../components/viewDialog";
 
 const statusConfig = {
   pending: {
@@ -85,9 +85,8 @@ const priorityConfig = {
   urgent: { label: "Urgent", color: "bg-red-500" },
 };
 
-export function RequestsListWithActions({ requests, userRole, userId, company }) {
+export function RequestsListWithActions({ requests, userRole, userId }) {
   const [selectedRequest, setSelectedRequest] = useState(null);
-  const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [approveDialogOpen, setApproveDialogOpen] = useState(false);
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [fulfillDialogOpen, setFulfillDialogOpen] = useState(false);
@@ -95,9 +94,16 @@ export function RequestsListWithActions({ requests, userRole, userId, company })
 
   const filteredRequests = requests ?? [];
 
+  // Canonical role names. Earlier the checks used lowercase
+  // ("manager"/"admin") which never matched against the session's
+  // canonical roles — the action buttons silently disappeared.
+  const APPROVE_ROLES = ["SuperAdmin", "Admin", "Manager", "Store Manager"];
+  const FULFILL_ROLES = ["SuperAdmin", "Admin", "Store Manager"];
+  const CANCEL_ROLES = ["SuperAdmin", "Admin", "Manager", "Store Manager"];
+
   const canApprove = (request) => {
     return (
-      (userRole === "manager" || userRole === "admin") &&
+      APPROVE_ROLES.includes(userRole) &&
       request.status === "pending" &&
       request.requester.id !== userId
     );
@@ -105,7 +111,7 @@ export function RequestsListWithActions({ requests, userRole, userId, company })
 
   const canFulfill = (request) => {
     return (
-      (userRole === "Store Manager" || userRole === "admin") &&
+      FULFILL_ROLES.includes(userRole) &&
       (request.status === "approved" ||
         request.status === "partially_fulfilled")
     );
@@ -113,9 +119,7 @@ export function RequestsListWithActions({ requests, userRole, userId, company })
 
   const canCancel = (request) => {
     return (
-      (request.requester.id === userId ||
-        userRole === "manager" ||
-        userRole === "admin") &&
+      (request.requester.id === userId || CANCEL_ROLES.includes(userRole)) &&
       (request.status === "pending" || request.status === "approved")
     );
   };
@@ -284,14 +288,14 @@ export function RequestsListWithActions({ requests, userRole, userId, company })
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setSelectedRequest(request);
-                                setViewDialogOpen(true);
-                              }}
-                            >
-                              <IconEye className="mr-2 h-4 w-4" />
-                              View Details
+                            <DropdownMenuItem asChild>
+                              <Link
+                                href={`/dashboard/requests/${request._id}`}
+                                className="flex w-full cursor-pointer items-center"
+                              >
+                                <IconEye className="mr-2 h-4 w-4" />
+                                View Details
+                              </Link>
                             </DropdownMenuItem>
 
                             {canApprove(request) && (
@@ -463,13 +467,12 @@ export function RequestsListWithActions({ requests, userRole, userId, company })
                         variant="outline"
                         size="sm"
                         className="flex-1"
-                        onClick={() => {
-                          setSelectedRequest(request);
-                          setViewDialogOpen(true);
-                        }}
+                        asChild
                       >
-                        <IconEye className="mr-2 h-4 w-4" />
-                        View
+                        <Link href={`/dashboard/requests/${request._id}`}>
+                          <IconEye className="mr-2 h-4 w-4" />
+                          View
+                        </Link>
                       </Button>
 
                       {canApprove(request) && (
@@ -541,16 +544,11 @@ export function RequestsListWithActions({ requests, userRole, userId, company })
         )}
       </div>
 
-      {/* Dialogs */}
+      {/* Action dialogs — View was promoted to a full page at
+          /dashboard/requests/[id]; approve/reject/fulfill/cancel remain
+          inline so users can act without leaving the list. */}
       {selectedRequest && (
         <>
-          <ViewRequestDialog
-            request={selectedRequest}
-            open={viewDialogOpen}
-            onOpenChange={setViewDialogOpen}
-            company={company}
-          />
-
           <ApproveDialog
             request={selectedRequest}
             open={approveDialogOpen}

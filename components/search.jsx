@@ -27,7 +27,7 @@ const SEARCH_CONFIG = {
   "/dashboard/bills": "Search bills...",
   "/dashboard/expenses": "Search expenses...",
   "/dashboard/accounts": "Search accounts...",
-  "/dashboard/journal-entries": "Search journal entries...",
+  "/dashboard/journal": "Search journal entries...",
   "/dashboard/users": "Search users by name or email...",
   "/dashboard/quotes": "Search quotes...",
 };

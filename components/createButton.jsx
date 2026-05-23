@@ -13,7 +13,6 @@ export function CreateButton({ title = "New", role }) {
     "/dashboard/checkout",
     "/dashboard/movement",
     "/dashboard",
-    "/dashboard/cart",
   ].includes(pathname);
 
   return (

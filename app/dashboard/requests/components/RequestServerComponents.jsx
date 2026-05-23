@@ -13,9 +13,6 @@ import {
   fetchRequestPages,
   getRequestStats,
 } from "@/app/mongodb/queries/request-queries";
-import { getCompanyById } from "@/app/mongodb/queries/company-queries";
-import { auth } from "@/auth";
-import { serializeBsonType } from "@/lib/utils";
 import { RequestsListWithActions } from "./request";
 import Pagination from "@/components/pagination";
 
@@ -155,23 +152,16 @@ export async function RequestsTableServer({
   userId,
   userRole,
 }) {
-  const [requests, session] = await Promise.all([
-    searchRequests(query, page, userId, userRole, filters),
-    auth(),
-  ]);
-
-  let company = null;
-  if (session?.user?.companyId) {
-    company = await getCompanyById(session.user.companyId);
-    if (company) company = serializeBsonType(company);
-  }
+  // Company fetch was for the (now-promoted-to-page) view dialog's PDF
+  // button. The detail page loads its own company doc; this list path
+  // no longer needs one — saves a round-trip per list render.
+  const requests = await searchRequests(query, page, userId, userRole, filters);
 
   return (
     <RequestsListWithActions
       requests={requests}
       userId={userId}
       userRole={userRole}
-      company={company}
     />
   );
 }

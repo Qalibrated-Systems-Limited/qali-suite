@@ -33,13 +33,27 @@ function StatusBadge({ status }) {
   );
 }
 
+// Server-side TZ pin — see same fix in hr/attendance/page.jsx.
+const TZ = "Africa/Nairobi";
+
 function fmtTime(iso) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", hour12: true });
+  return new Date(iso).toLocaleTimeString("en-KE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: TZ,
+  });
 }
 
 function fmtDate(iso) {
-  return new Date(iso).toLocaleDateString("en-KE", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  return new Date(iso).toLocaleDateString("en-KE", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: TZ,
+  });
 }
 
 async function AttendanceHistory({ profileId, searchParams }) {

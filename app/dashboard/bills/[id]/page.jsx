@@ -397,7 +397,7 @@ export default async function BillDetailsPage({ params }) {
                       <span className="text-sm text-muted-foreground">Journal Entry</span>
                     </div>
                     <Link
-                      href={`/dashboard/journal-entries/${bill.accounting.journalEntryId}`}
+                      href={`/dashboard/journal/${bill.accounting.journalEntryId}`}
                       className="font-medium text-primary hover:underline"
                     >
                       View Journal Entry

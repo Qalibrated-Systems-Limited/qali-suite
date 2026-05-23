@@ -123,7 +123,7 @@ export function StockStatsSkeleton() {
 // STOCK TABLE (Async Server Component)
 // ============================================
 
-export async function StockTableServer({ query, page, filters, cart, action }) {
+export async function StockTableServer({ query, page, filters, action }) {
   const [stock, session] = await Promise.all([
     searchStock(query, page, filters),
     auth(),
@@ -133,7 +133,6 @@ export async function StockTableServer({ query, page, filters, cart, action }) {
   return (
     <ResponsiveInventoryTable
       stock={stock}
-      cart={cart}
       action={action}
       showPricing={showPricing}
     />

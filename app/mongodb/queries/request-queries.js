@@ -87,32 +87,29 @@ function buildAdditionalFilters(filters = {}) {
 function buildSearchMatch(searchTerm, tenantMatch, roleFilter, additionalFilters) {
   const safeSearchTerm = sanitizeSearchTerm(searchTerm);
 
-  if (!safeSearchTerm) {
-    return {
-      $match: {
-        $and: [tenantMatch, roleFilter, additionalFilters].filter(f => Object.keys(f).length > 0),
-      },
-    };
+  // Build the list of non-empty clauses. SuperAdmin with no role
+  // restriction and no filters can produce zero clauses — Mongo
+  // rejects `$and: []`, so drop the `$and` wrapper entirely in that
+  // case and match everything via `$match: {}`.
+  const clauses = [tenantMatch, roleFilter, additionalFilters].filter(
+    (f) => f && Object.keys(f).length > 0,
+  );
+
+  if (safeSearchTerm) {
+    clauses.push({
+      $or: [
+        { "requester.name": { $regex: safeSearchTerm, $options: "i" } },
+        { "requester.department": { $regex: safeSearchTerm, $options: "i" } },
+        { requestNumber: { $regex: safeSearchTerm, $options: "i" } },
+        { "customer.name": { $regex: safeSearchTerm, $options: "i" } },
+        { "items.productName": { $regex: safeSearchTerm, $options: "i" } },
+      ],
+    });
   }
 
-  return {
-    $match: {
-      $and: [
-        tenantMatch,
-        roleFilter,
-        additionalFilters,
-        {
-          $or: [
-            { "requester.name": { $regex: safeSearchTerm, $options: "i" } },
-            { "requester.department": { $regex: safeSearchTerm, $options: "i" } },
-            { requestNumber: { $regex: safeSearchTerm, $options: "i" } },
-            { "customer.name": { $regex: safeSearchTerm, $options: "i" } },
-            { "items.productName": { $regex: safeSearchTerm, $options: "i" } },
-          ],
-        },
-      ].filter(f => Object.keys(f).length > 0),
-    },
-  };
+  if (clauses.length === 0) return { $match: {} };
+  if (clauses.length === 1) return { $match: clauses[0] };
+  return { $match: { $and: clauses } };
 }
 
 // ============================================
