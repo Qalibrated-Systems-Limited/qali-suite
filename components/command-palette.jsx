@@ -52,24 +52,43 @@ import { globalSearch } from "@/app/mongodb/actions/global-search-action";
 // typing "PAYE" surfaces Payroll, "P&L" surfaces the Profit & Loss report.
 const PAGES = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Products", href: "/dashboard/stocks", icon: Boxes },
-  { label: "Invoices", href: "/dashboard/invoices", icon: Receipt },
-  { label: "Quotes", href: "/dashboard/quotes", icon: FileText },
-  { label: "Bills", href: "/dashboard/bills", icon: Receipt },
-  { label: "Customers", href: "/dashboard/customers", icon: Users },
-  { label: "Suppliers", href: "/dashboard/suppliers", icon: Building2 },
-  { label: "Purchase Orders", href: "/dashboard/purchase-orders", icon: FileText },
-  { label: "Stock Requests", href: "/dashboard/requests", icon: List },
-  { label: "Categories", href: "/dashboard/categories", icon: List },
-  { label: "Employee Expenses", href: "/dashboard/claims", icon: HandCoins, aliases: ["claims", "advances", "reimbursements"] },
-  { label: "My Expenses", href: "/dashboard/my-claims", icon: ClipboardList, aliases: ["my claims"] },
-  { label: "Projects", href: "/dashboard/projects", icon: FolderKanban },
-  { label: "Expenses", href: "/dashboard/expenses", icon: Wallet },
   { label: "Approvals", href: "/dashboard/approvals", icon: CheckSquare },
-  { label: "Goods Receipt Notes", href: "/dashboard/grn", icon: ClipboardList, aliases: ["grn", "receiving", "inspection"] },
-  { label: "Nonconformance Register", href: "/dashboard/ncr", icon: ClipboardList, aliases: ["ncr", "discrepancy", "nonconformance", "quality"] },
-  { label: "Users", href: "/dashboard/users", icon: Users },
-  { label: "Settings", href: "/dashboard/settings", icon: Settings },
+
+  // ── Inventory ──────────────────────────────────────
+  { label: "Products", href: "/dashboard/stocks", icon: Boxes, category: "Inventory" },
+  { label: "Categories", href: "/dashboard/categories", icon: List, category: "Inventory" },
+  { label: "Stock Movements", href: "/dashboard/movements", icon: List, category: "Inventory", aliases: ["movements", "stock history", "ledger"] },
+  { label: "Stock Adjustments", href: "/dashboard/adjustments", icon: ClipboardList, category: "Inventory", aliases: ["adjustment", "writeoff", "physical count"] },
+  { label: "Item Checkouts", href: "/dashboard/checkout", icon: Package, category: "Inventory", aliases: ["checkout", "borrow", "issue"] },
+  { label: "Stock Requests", href: "/dashboard/requests", icon: List, category: "Inventory" },
+  { label: "Goods Receipt Notes", href: "/dashboard/grn", icon: ClipboardList, category: "Inventory", aliases: ["grn", "receiving", "inspection"] },
+  { label: "Nonconformance Register", href: "/dashboard/ncr", icon: ClipboardList, category: "Inventory", aliases: ["ncr", "discrepancy", "nonconformance", "quality"] },
+
+  // ── Sales ──────────────────────────────────────────
+  { label: "Quotes", href: "/dashboard/quotes", icon: FileText, category: "Sales" },
+  { label: "Invoices", href: "/dashboard/invoices", icon: Receipt, category: "Sales" },
+  { label: "Credit Notes", href: "/dashboard/credit-notes", icon: Receipt, category: "Sales", aliases: ["refund", "return"] },
+  { label: "Customers", href: "/dashboard/customers", icon: Users, category: "Sales" },
+
+  // ── Purchases ──────────────────────────────────────
+  { label: "Purchase Orders", href: "/dashboard/purchase-orders", icon: FileText, category: "Purchases", aliases: ["po"] },
+  { label: "Bills", href: "/dashboard/bills", icon: Receipt, category: "Purchases" },
+  { label: "Suppliers", href: "/dashboard/suppliers", icon: Building2, category: "Purchases", aliases: ["vendors"] },
+
+  // ── Expenses ───────────────────────────────────────
+  { label: "Employee Expenses", href: "/dashboard/claims", icon: HandCoins, category: "Expenses", aliases: ["claims", "advances", "reimbursements"] },
+  { label: "My Expenses", href: "/dashboard/my-claims", icon: ClipboardList, category: "Expenses", aliases: ["my claims"] },
+  { label: "Operating Expenses", href: "/dashboard/expenses", icon: Wallet, category: "Expenses", aliases: ["expenses", "utilities", "rent"] },
+
+  // ── Projects ───────────────────────────────────────
+  { label: "Projects", href: "/dashboard/projects", icon: FolderKanban },
+
+  // ── Admin ──────────────────────────────────────────
+  { label: "Users", href: "/dashboard/users", icon: Users, category: "Admin" },
+  { label: "Companies", href: "/dashboard/admin/companies", icon: Building2, category: "Admin", aliases: ["tenants"] },
+  { label: "Company Settings", href: "/dashboard/company", icon: Building2, category: "Admin" },
+  { label: "Integrations", href: "/dashboard/integrations", icon: Settings, category: "Admin" },
+  { label: "Settings", href: "/dashboard/settings", icon: Settings, category: "Admin" },
 
   // ── HR ─────────────────────────────────────────────
   { label: "HR Overview", href: "/dashboard/hr", icon: Briefcase, category: "HR" },
@@ -86,21 +105,25 @@ const PAGES = [
   { label: "Loans", href: "/dashboard/hr/loans", icon: HandCoins, category: "HR", aliases: ["advance", "salary advance"] },
 
   // ── Finance / Accounting ───────────────────────────
-  { label: "Banking", href: "/dashboard/banking", icon: Landmark, category: "Finance", aliases: ["bank", "statements", "reconcile"] },
+  { label: "Parties", href: "/dashboard/parties", icon: Briefcase, category: "Finance", aliases: ["contacts", "people", "customer supplier"] },
+  { label: "Chart of Accounts", href: "/dashboard/accounts", icon: BookOpen, category: "Finance", aliases: ["coa"] },
+  { label: "Journal Entries", href: "/dashboard/journal", icon: FileSpreadsheet, category: "Finance", aliases: ["je", "manual entry"] },
+  { label: "Banking", href: "/dashboard/banking", icon: Landmark, category: "Finance", aliases: ["bank feed", "reconcile"] },
   { label: "Bank Statement Upload", href: "/dashboard/banking/upload", icon: Landmark, category: "Finance", aliases: ["import statement"] },
   { label: "Unallocated Transactions", href: "/dashboard/banking/unallocated", icon: Landmark, category: "Finance" },
-  { label: "Chart of Accounts", href: "/dashboard/accounts", icon: BookOpen, category: "Finance", aliases: ["coa"] },
-  { label: "Journal Entries", href: "/dashboard/journal", icon: FileSpreadsheet, category: "Finance" },
+  { label: "Fixed Assets", href: "/dashboard/assets", icon: Package, category: "Finance", aliases: ["capital", "depreciation"] },
   { label: "Payments", href: "/dashboard/payments", icon: Wallet, category: "Finance" },
   { label: "Payments Received", href: "/dashboard/payments/received", icon: Wallet, category: "Finance", aliases: ["customer payments", "ar"] },
   { label: "Payments Made", href: "/dashboard/payments/made", icon: Wallet, category: "Finance", aliases: ["supplier payments", "ap"] },
   { label: "Customer Statements", href: "/dashboard/statements", icon: FileText, category: "Finance" },
   { label: "Supplier Statements", href: "/dashboard/supplier-statements", icon: FileText, category: "Finance" },
-  { label: "Tax Transactions", href: "/dashboard/tax/transactions", icon: PiggyBank, category: "Finance" },
-  { label: "VAT", href: "/dashboard/tax/vat", icon: PiggyBank, category: "Finance" },
-  { label: "Withholding Tax (WHT)", href: "/dashboard/tax/wht", icon: PiggyBank, category: "Finance", aliases: ["wht"] },
-  { label: "KRA Filings", href: "/dashboard/tax/kra", icon: PiggyBank, category: "Finance", aliases: ["paye", "kra"] },
   { label: "Fiscal Periods", href: "/dashboard/settings/fiscal-periods", icon: CalendarDays, category: "Finance", aliases: ["close period"] },
+
+  // ── Tax ────────────────────────────────────────────
+  { label: "VAT Returns", href: "/dashboard/tax/vat", icon: PiggyBank, category: "Tax", aliases: ["vat", "value added tax"] },
+  { label: "Withholding Tax (WHT)", href: "/dashboard/tax/wht", icon: PiggyBank, category: "Tax", aliases: ["wht"] },
+  { label: "Tax Transactions", href: "/dashboard/tax/transactions", icon: PiggyBank, category: "Tax" },
+  { label: "KRA Filings", href: "/dashboard/tax/kra", icon: PiggyBank, category: "Tax", aliases: ["paye", "kra"] },
 
   // ── Reports ────────────────────────────────────────
   { label: "Profit & Loss", href: "/dashboard/reports/profit-loss", icon: TrendingUp, category: "Reports", aliases: ["p&l", "income statement"] },
@@ -265,8 +288,25 @@ export function CommandPalette({ open, setOpen }) {
     acc[cat].push(item);
     return acc;
   }, {});
-  const CATEGORY_ORDER = ["General", "HR", "Finance", "Reports"];
-  const orderedCategories = CATEGORY_ORDER.filter((c) => pagesByCategory[c]);
+  // Category render order. Anything not listed falls back to the end so
+  // a newly added category still appears (avoids the silent-drop bug
+  // where palette entries were invisible until added here).
+  const CATEGORY_ORDER = [
+    "General",
+    "Inventory",
+    "Sales",
+    "Purchases",
+    "Expenses",
+    "Finance",
+    "Tax",
+    "HR",
+    "Reports",
+    "Admin",
+  ];
+  const orderedCategories = [
+    ...CATEGORY_ORDER.filter((c) => pagesByCategory[c]),
+    ...Object.keys(pagesByCategory).filter((c) => !CATEGORY_ORDER.includes(c)),
+  ];
 
   // Show "no results" only when both nav filtering AND server search return nothing
   const showEmpty =
