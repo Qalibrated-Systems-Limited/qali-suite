@@ -763,15 +763,25 @@ const NavGroup = ({ group, user, onItemClick, collapsed }) => {
         )}
       </button>
 
-      {/* Group Items - Animated collapse */}
+      {/* Group Items - Animated collapse.
+          NOTE: max-height grows with the item count (32px slot per item +
+          small slack). The previous fixed `max-h-96` (384px ≈ 9–10 items)
+          silently clipped tail items in groups with 11+ visible entries
+          — that's why "Purchase Report" never appeared under Reports for
+          Admin/CFO on starter+ plans. */}
       <div
         className={clsx(
           "ml-3 pl-3 border-l-2 border-border space-y-0.5 overflow-hidden transition-all duration-200",
           {
             "max-h-0 opacity-0": !isOpen,
-            "max-h-96 opacity-100": isOpen,
+            "opacity-100": isOpen,
           }
         )}
+        style={
+          isOpen
+            ? { maxHeight: `${Math.max(visibleItems.length, 1) * 40 + 24}px` }
+            : undefined
+        }
       >
         {visibleItems.map((item) => (
           <NavItem key={item.id} item={item} onItemClick={onItemClick} />
