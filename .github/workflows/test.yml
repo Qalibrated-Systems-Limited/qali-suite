@@ -1,0 +1,94 @@
+# ============================================
+# CI — runs the test suite on every push + PR
+# ============================================
+#
+# What this does:
+#   - On every push to main and every pull request, spin up an Ubuntu
+#     VM, install Node + npm deps, then run `npm test`.
+#   - If any test fails, the PR is marked ✗ and (with branch protection
+#     enabled — see README) merging is blocked.
+#
+# Why this file lives in .github/workflows/:
+#   GitHub Actions auto-discovers any YAML file in that directory and
+#   wires it to the events declared under `on:`. You can have multiple
+#   workflows (e.g. a deploy.yml that triggers on tag pushes) — each is
+#   independent.
+#
+# What this DOESN'T do (intentionally):
+#   - No deploy. CI only verifies; CD is separate concern.
+#   - No coverage upload (could add later — see comments at bottom).
+#   - No lint step (eslint-config-next@16 has a known incompatibility
+#     with eslint@10 on this codebase; running it would fail CI for an
+#     unrelated reason. Re-enable once the eslint version is reconciled).
+
+name: Test
+
+# Events that trigger this workflow.
+on:
+  push:
+    branches: [main, jeff-business-suite]
+  pull_request:
+    branches: [main, jeff-business-suite]
+
+# A "job" is a unit of work that runs on its own fresh VM.
+# We have one job called `test`. You can add more (e.g. `build:`, `e2e:`)
+# and they'll run in parallel unless you use `needs:` to chain them.
+jobs:
+  test:
+    name: Vitest suite
+    runs-on: ubuntu-latest  # free Ubuntu runner; ~5s startup
+    timeout-minutes: 10     # hard kill if anything hangs (mongodb-memory-server cold-start safety)
+
+    steps:
+      # ── 1. Pull the repo at the commit being tested ────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── 2. Install Node ────────────────────────────────────────────
+      # Node 22 LTS — minimum supported by Next.js 16. Cache npm so
+      # subsequent runs skip the network round-trip for unchanged deps.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      # ── 3. Cache the mongodb-memory-server binary ──────────────────
+      # Without this, every CI run re-downloads ~65MB of Mongo binary
+      # (the first-test-run pain you saw locally). With it, the binary
+      # is cached and pulled from GitHub's cache backend in ~2 seconds.
+      - name: Cache mongodb-memory-server binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          # Cache key embeds the Mongo version we pinned in setup.global.mjs.
+          # If we bump that version, the cache invalidates and re-downloads.
+          key: mongo-binaries-7.0.14-${{ runner.os }}
+
+      # ── 4. Install dependencies ────────────────────────────────────
+      # `npm ci` is strict — it requires a lockfile and refuses to
+      # update it. Faster + more deterministic than `npm install` in CI.
+      - name: Install dependencies
+        run: npm ci
+
+      # ── 5. Run the test suite ──────────────────────────────────────
+      # If any test fails, the step exits non-zero and the job fails.
+      # GitHub then surfaces a ✗ on the commit / PR.
+      - name: Run tests
+        run: npm test
+        env:
+          # Some Mongoose features check NODE_ENV. Keep it explicit.
+          NODE_ENV: test
+
+      # ── (Optional) Upload coverage ─────────────────────────────────
+      # Uncomment once you decide where to send coverage. Codecov is
+      # free for open-source; for private repos consider running
+      # `npm run test:coverage` and uploading the report as an artifact.
+      #
+      # - name: Run coverage
+      #   run: npm run test:coverage
+      # - name: Upload coverage to artifacts
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: coverage
+      #     path: coverage/
