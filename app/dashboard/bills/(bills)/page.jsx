@@ -417,7 +417,7 @@ async function BillsList({ searchParams, userRole }) {
 // ============================================
 export default async function BillsPage({ searchParams }) {
   const session = await auth();
-  const canCreate = ["Admin", "Manager", "Accountant"].includes(
+  const canCreate = ["SuperAdmin", "Admin", "Manager", "Accountant"].includes(
     session?.user?.role,
   );
 

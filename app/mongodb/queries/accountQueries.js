@@ -2,7 +2,7 @@ import Account from "../../models/account";
 import JournalEntry from "../../models/JournalEntry";
 import AccountService from "../services/accountService";
 import dbConnect from "../../config/dbConnect";
-import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { getTenantContext, withTenantScope, buildTenantMatch } from "@/lib/utils/tenant-utils";
 import { serializeBsonType } from "@/lib/utils";
 
 const ITEMS_PER_PAGE = 20;
@@ -284,7 +284,7 @@ export async function getAccountStats() {
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const baseQuery = withTenantScope(
     { isActive: true },

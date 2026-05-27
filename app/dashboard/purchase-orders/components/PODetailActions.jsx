@@ -51,7 +51,7 @@ export function PODetailActions({ purchaseOrder, userRole }) {
   const [showBillDialog, setShowBillDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
 
-  const canManage = ["Admin", "Manager", "Accountant"].includes(userRole);
+  const canManage = ["SuperAdmin", "Admin", "Manager", "Accountant"].includes(userRole);
   const po = purchaseOrder;
 
   // ----------------------------------------

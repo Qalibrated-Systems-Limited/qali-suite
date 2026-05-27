@@ -60,11 +60,15 @@ export default async function SettingsPage() {
   const { role } = session.user;
   const isSuperAdmin = role === "SuperAdmin";
   const isAdmin = role === "Admin" || isSuperAdmin;
-  const isAccountant = role === "Accountant";
+  // Finance roles see accounting settings (fiscal periods, COA, etc).
+  // CFO and Finance Manager were previously excluded — sidebar's
+  // canSeeSettingsNav surfaces the link to them, so the page now matches.
+  const isFinanceUser =
+    role === "Accountant" || role === "CFO" || role === "Finance Manager";
   const isHR = role === "HR";
 
   // At least one settings section must be visible
-  const canSeeGeneralOrAccounting = isAdmin || isAccountant;
+  const canSeeGeneralOrAccounting = isAdmin || isFinanceUser;
   const canSeeHR = isAdmin || isHR;
 
   if (!canSeeGeneralOrAccounting && !canSeeHR) {

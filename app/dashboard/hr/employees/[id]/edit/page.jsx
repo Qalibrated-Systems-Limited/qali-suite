@@ -13,7 +13,7 @@ export async function generateMetadata({ params }) {
   return { title: `Edit ${employee.personalInfo?.firstName} ${employee.personalInfo?.lastName} | HR` };
 }
 
-const EDIT_ROLES = ["Admin", "Manager", "HR"];
+const EDIT_ROLES = ["SuperAdmin", "Admin", "Manager", "HR"];
 
 async function EditFormLoader({ id }) {
   const [{ employee, error }, { departments }] = await Promise.all([

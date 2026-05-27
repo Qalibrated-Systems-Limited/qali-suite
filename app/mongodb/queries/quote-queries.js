@@ -67,7 +67,7 @@ export async function searchQuotes(query = "", page = 1, filters = {}) {
   // Scope visibility: non-admin roles only see their own quotes
   if (
     !isSuperAdmin &&
-    !["Admin", "CFO", "Finance Manager", "Accountant", "Sales Manager"].includes(
+    !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Sales Manager"].includes(
       user.role,
     )
   ) {
@@ -130,7 +130,7 @@ export async function fetchQuotePages(query = "", filters = {}) {
   // Scope visibility: non-admin roles only see their own quotes
   if (
     !isSuperAdmin &&
-    !["Admin", "CFO", "Finance Manager", "Accountant", "Sales Manager"].includes(
+    !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Sales Manager"].includes(
       user.role,
     )
   ) {
@@ -154,7 +154,7 @@ export async function getQuoteStats(filters = {}) {
   // Scope visibility: non-admin roles only see their own quotes
   if (
     !isSuperAdmin &&
-    !["Admin", "CFO", "Finance Manager", "Accountant", "Sales Manager"].includes(
+    !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Sales Manager"].includes(
       user.role,
     )
   ) {

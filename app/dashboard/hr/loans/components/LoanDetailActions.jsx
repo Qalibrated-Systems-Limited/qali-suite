@@ -81,14 +81,14 @@ export function LoanDetailActions({ loan, userRole }) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [disburseOpen, setDisburseOpen] = useState(false);
 
-  const canApprove = loan.status === "pending_approval" && ["Admin", "HR"].includes(userRole);
-  const canReject = loan.status === "pending_approval" && ["Admin", "HR"].includes(userRole);
-  const canDisburse = loan.status === "approved" && ["Admin"].includes(userRole);
+  const canApprove = loan.status === "pending_approval" && ["SuperAdmin", "Admin", "HR"].includes(userRole);
+  const canReject = loan.status === "pending_approval" && ["SuperAdmin", "Admin", "HR"].includes(userRole);
+  const canDisburse = loan.status === "approved" && ["SuperAdmin", "Admin"].includes(userRole);
   const hasDeductions = loan.installments?.some((i) => i.status === "deducted");
   const canCancel =
     ["pending_approval", "approved", "active"].includes(loan.status) &&
     !hasDeductions &&
-    ["Admin", "HR"].includes(userRole);
+    ["SuperAdmin", "Admin", "HR"].includes(userRole);
 
   function handleApprove() {
     startTransition(async () => {

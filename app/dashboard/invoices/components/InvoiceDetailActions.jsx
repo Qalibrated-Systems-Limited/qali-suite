@@ -93,7 +93,7 @@ export function InvoiceDetailActions({
 
   const canIssueCreditNote =
     invoice.status === "completed" &&
-    ["Admin", "Accountant"].includes(userRole) &&
+    ["SuperAdmin", "Admin", "Accountant"].includes(userRole) &&
     remainingCreditable > 0.01;
 
   return (

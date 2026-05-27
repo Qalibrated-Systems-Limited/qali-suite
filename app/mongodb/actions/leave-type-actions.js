@@ -7,7 +7,7 @@ import { requirePlanAccess } from "@/lib/plan-gate";
 import LeaveType from "@/app/models/leaveType";
 import LeaveRequest from "@/app/models/leaveRequest";
 
-const ALLOWED = ["Admin", "HR"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR"];
 
 function guard(user) {
   if (!user) return "Not authenticated";

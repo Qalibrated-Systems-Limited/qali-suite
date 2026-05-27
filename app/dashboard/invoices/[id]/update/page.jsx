@@ -21,7 +21,7 @@ export default async function EditInvoicePage({ params }) {
   const { user } = session;
 
   // Check permissions
-  if (user.role !== "Admin" && user.role !== "Accountant") {
+  if (!["SuperAdmin", "Admin", "Accountant"].includes(user.role)) {
     return (
       <div className="flex min-h-1000 items-center justify-center">
         <div className="text-center">

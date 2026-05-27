@@ -7,7 +7,7 @@ import { getLoans } from "@/app/mongodb/actions/loan-actions";
 
 export const metadata = { title: "Loans & Advances | HR" };
 
-const HR_ROLES = ["Admin", "Manager", "HR", "Accountant", "Employee"];
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR", "Accountant", "Employee"];
 
 function StatusBadge({ status }) {
   const map = {
@@ -271,7 +271,7 @@ export default async function LoansPage({ searchParams }) {
   if (!HR_ROLES.includes(session.user.role)) redirect("/dashboard");
 
   const params = await searchParams;
-  const canAdmin = ["Admin", "Manager", "HR"].includes(session.user.role);
+  const canAdmin = ["SuperAdmin", "Admin", "Manager", "HR"].includes(session.user.role);
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

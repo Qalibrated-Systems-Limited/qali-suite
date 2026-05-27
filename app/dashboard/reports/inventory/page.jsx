@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { canSeeInventoryNav } from "@/lib/permissions";
 import { getStockValuationReport } from "@/app/mongodb/queries/inventory-queries";
 import { StockValuationClient } from "./StockValuationClient";
 
@@ -11,8 +12,11 @@ export default async function InventoryReportsPage({ searchParams }) {
   const session = await auth();
   const { user } = session;
 
-  // Check permission
-  if (!["Admin", "Accountant", "Store Manager"].includes(user?.role)) {
+  // Single source of truth — same gate the sidebar uses for this entry.
+  // Manager, CFO, Finance Manager, Sales Manager, Procurement Officer
+  // and Storekeeper could see the link but the previous inline allowlist
+  // bounced them.
+  if (!canSeeInventoryNav(user?.role)) {
     return (
       <div className="container mx-auto px-4 py-6 max-w-7xl">
         <div className="text-center py-12">

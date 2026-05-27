@@ -10,7 +10,7 @@ import { requirePlanAccess } from "@/lib/plan-gate";
 // ============================================
 // ROLE GUARD
 // ============================================
-const ALLOWED = ["Admin"];
+const ALLOWED = ["SuperAdmin", "Admin"];
 
 function guard(user) {
   if (!user) return "Not authenticated";

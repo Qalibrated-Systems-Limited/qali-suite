@@ -9,6 +9,7 @@ import Bill from "../../models/bill";
 import JournalEntry from "../../models/JournalEntry";
 import Account from "../../models/account";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { LOW_STOCK_MATCH } from "@/lib/business-rules";
 import mongoose from "mongoose";
 
 const ObjectId = mongoose.Types.ObjectId;
@@ -1201,26 +1202,11 @@ export async function getDashboardAlerts() {
       status: { $ne: "cancelled" },
     }),
 
-    // Low stock — active products with qty > 0 AND qty <= reorderLevel
-    // (and a reorderLevel actually configured). Out-of-stock (qty <= 0)
-    // is a separate tier, not counted here. Mirrors buildQuantityFilter
-    // in product-queries.js so /dashboard/stocks?quantity=low-stock and
-    // this tile always agree.
+    // Low stock — see LOW_STOCK_MATCH in @/lib/business-rules for the
+    // canonical definition. Same predicate used by the stocks-page
+    // filter and the StockStats aggregation, so all three KPIs agree.
     Product.aggregate([
-      { $match: { ...baseMatch, status: "active" } },
-      {
-        $addFields: {
-          currentQty: { $ifNull: ["$inventory.quantityOnHand", 0] },
-          reorderAt: { $ifNull: ["$inventory.reorderLevel", 0] },
-        },
-      },
-      {
-        $match: {
-          currentQty: { $gt: 0 },
-          reorderAt: { $gt: 0 },
-          $expr: { $lte: ["$currentQty", "$reorderAt"] },
-        },
-      },
+      { $match: { ...baseMatch, ...LOW_STOCK_MATCH } },
       { $count: "count" },
     ]),
 

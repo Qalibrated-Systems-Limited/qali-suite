@@ -8,7 +8,7 @@ import HolidayClient from "./HolidayClient";
 
 export const metadata = { title: "Public Holidays | Settings" };
 
-const ALLOWED = ["Admin", "HR"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR"];
 
 async function HolidayLoader({ canEdit }) {
   const holidays = await getPublicHolidays();

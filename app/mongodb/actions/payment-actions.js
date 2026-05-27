@@ -15,6 +15,7 @@ import {
   getTenantContext,
   withTenantScope,
   getCompanyIdForCreate,
+  buildTenantMatch,
 } from "@/lib/utils/tenant-utils";
 
 // ============================================
@@ -787,7 +788,7 @@ export async function getPaymentStats() {
 
     // Get tenant context for scoping
     const { companyId, isSuperAdmin } = await getTenantContext();
-    const tenantMatch = isSuperAdmin ? {} : { companyId };
+    const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -898,7 +899,7 @@ export async function getUnpaidDocuments(partyId, documentType) {
 
     // Get tenant context for scoping
     const { companyId, isSuperAdmin } = await getTenantContext();
-    const tenantFilter = isSuperAdmin ? {} : { companyId };
+    const tenantFilter = buildTenantMatch(companyId, isSuperAdmin);
 
     let documents = [];
 

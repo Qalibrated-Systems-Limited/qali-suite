@@ -12,7 +12,7 @@ import { loadBillLineForCapitalization } from "@/app/mongodb/actions/asset-actio
 
 export const metadata = { title: "New Asset | Fixed Assets" };
 
-const CREATE_ROLES = ["Admin", "Accountant"];
+const CREATE_ROLES = ["SuperAdmin", "Admin", "Accountant"];
 
 async function AssetFormLoader({ fromBillLine }) {
   await dbConnect();

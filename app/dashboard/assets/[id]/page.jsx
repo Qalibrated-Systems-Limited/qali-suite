@@ -54,9 +54,9 @@ import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import Account from "@/app/models/account";
 
-const VIEW_ROLES = ["Admin", "Accountant", "Manager"];
-const ADMIN_ROLES = ["Admin"];
-const POST_DEP_ROLES = ["Admin", "Accountant"];
+const VIEW_ROLES = ["SuperAdmin", "Admin", "Accountant", "Manager"];
+const ADMIN_ROLES = ["SuperAdmin", "Admin"];
+const POST_DEP_ROLES = ["SuperAdmin", "Admin", "Accountant"];
 
 const CATEGORY_ICONS = {
   land: MapPin,
@@ -541,10 +541,10 @@ export default async function AssetDetailPage({ params }) {
     POST_DEP_ROLES.includes(session.user.role) ||
     session.user.role === "SuperAdmin";
   const canTransfer =
-    ["Admin", "Accountant", "Manager"].includes(session.user.role) ||
+    ["SuperAdmin", "Admin", "Accountant", "Manager"].includes(session.user.role) ||
     session.user.role === "SuperAdmin";
   const canImpair =
-    ["Admin", "Accountant"].includes(session.user.role) ||
+    ["SuperAdmin", "Admin", "Accountant"].includes(session.user.role) ||
     session.user.role === "SuperAdmin";
 
   let accounts = [];

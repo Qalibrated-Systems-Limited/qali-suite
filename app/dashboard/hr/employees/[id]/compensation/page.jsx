@@ -6,7 +6,7 @@ import { ChevronLeft } from "lucide-react";
 import { getEmployeeById } from "@/app/mongodb/queries/hr-queries";
 import CompensationEditForm from "../../../components/CompensationEditForm";
 
-const COMP_ROLES = ["Admin", "HR"];
+const COMP_ROLES = ["SuperAdmin", "Admin", "HR"];
 
 export async function generateMetadata({ params }) {
   const { id } = await params;

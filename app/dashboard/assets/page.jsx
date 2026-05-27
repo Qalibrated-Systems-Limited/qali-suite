@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { canSeeFinanceNav } from "@/lib/permissions";
 import Link from "next/link";
 import {
   Package,
@@ -29,8 +30,12 @@ import PostDepreciationDialog from "@/app/dashboard/assets/components/PostDeprec
 
 export const metadata = { title: "Fixed Assets" };
 
-const VIEW_ROLES = ["Admin", "Accountant", "Manager"];
-const ADMIN_ROLES = ["Admin", "Accountant"];
+// VIEW_ROLES is no longer hand-maintained — the page now uses
+// canSeeFinanceNav() so it stays in sync with the sidebar. The Fixed
+// Assets sidebar entry lives under Finance and is gated by that helper,
+// so CFO and Finance Manager (previously bounced) now get through.
+// ADMIN_ROLES still gates capital actions (post depreciation etc).
+const ADMIN_ROLES = ["SuperAdmin", "Admin", "Accountant"];
 
 const CATEGORY_OPTIONS = [
   { value: "", label: "All Categories" },
@@ -491,10 +496,7 @@ async function AssetList({ page, status, category, search }) {
 export default async function AssetsPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (
-    !VIEW_ROLES.includes(session.user.role) &&
-    session.user.role !== "SuperAdmin"
-  ) {
+  if (!canSeeFinanceNav(session.user.role)) {
     redirect("/dashboard");
   }
 

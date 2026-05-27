@@ -20,7 +20,7 @@ export default async function UpdateQuotePage({ params }) {
   const { user } = session;
 
   // Check permissions
-  if (!["Admin", "Accountant", "Sales"].includes(user.role)) {
+  if (!["SuperAdmin", "Admin", "Accountant", "Sales"].includes(user.role)) {
     return (
       <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">

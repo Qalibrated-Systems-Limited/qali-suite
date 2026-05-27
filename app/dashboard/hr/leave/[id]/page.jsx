@@ -11,7 +11,7 @@ export async function generateMetadata({ params }) {
   return { title: `${leaveRequest?.leaveNumber || "Leave Request"} | HR` };
 }
 
-const HR_ROLES = ["Admin", "Manager", "HR", "Employee"];
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR", "Employee"];
 
 function StatusBadge({ status }) {
   const map = {

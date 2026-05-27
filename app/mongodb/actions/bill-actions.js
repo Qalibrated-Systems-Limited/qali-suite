@@ -33,6 +33,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { z } from "zod";
 import mongoose from "mongoose";
+import { roleAllowed } from "@/lib/permissions";
 
 import Bill from "@/app/models/bill";
 import Party from "@/app/models/parties";
@@ -155,10 +156,12 @@ function parseFormData(formData) {
 }
 
 /**
- * Check if user has required role
+ * Check if user has required role. Wraps the central `roleAllowed`
+ * helper from lib/permissions — it auto-grants SuperAdmin so the
+ * allowedRoles list doesn't have to mention them explicitly.
  */
 function hasRole(user, allowedRoles) {
-  return allowedRoles.includes(user?.role);
+  return roleAllowed(user?.role, allowedRoles);
 }
 
 /**
@@ -690,7 +693,7 @@ export async function updateBill(billId, prevState, formData) {
 
     // 5. Authorization: Owner, Manager, or Admin
     const canEdit =
-      isOwner(user, bill.createdBy) || hasRole(user, ["Admin", "Manager"]);
+      isOwner(user, bill.createdBy) || hasRole(user, ["SuperAdmin", "Admin", "Manager"]);
 
     if (!canEdit) {
       return {
@@ -1016,7 +1019,7 @@ export async function submitBill(billId) {
     // Authorization: Owner, Manager, Admin, or Accountant
     const canSubmit =
       isOwner(user, bill.createdBy) ||
-      hasRole(user, ["Admin", "Manager", "Accountant"]);
+      hasRole(user, ["SuperAdmin", "Admin", "Manager", "Accountant"]);
 
     if (!canSubmit) {
       return {
@@ -1287,7 +1290,7 @@ export async function deleteBill(billId) {
 
     // Authorization: Owner, Manager, or Admin
     const canDelete =
-      isOwner(user, bill.createdBy) || hasRole(user, ["Admin", "Manager"]);
+      isOwner(user, bill.createdBy) || hasRole(user, ["SuperAdmin", "Admin", "Manager"]);
 
     if (!canDelete) {
       return {
@@ -1599,7 +1602,7 @@ export async function reverseBillPayment(billId, paymentId, amount) {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     // Only Admin can reverse payments
-    if (!hasRole(user, ["Admin"])) {
+    if (!hasRole(user, ["SuperAdmin", "Admin"])) {
       return {
         success: false,
         error: "Only Admins can reverse payments",

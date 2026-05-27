@@ -5,6 +5,7 @@ import dbConnect from "../../config/dbConnect";
 import {
   getTenantContext,
   withTenantScope,
+  buildTenantMatch,
 } from "@/lib/utils/tenant-utils";
 
 const ITEMS_PER_PAGE = 20;
@@ -328,7 +329,7 @@ export async function getEntriesByPeriod(fiscalPeriodId) {
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const [entries, stats] = await Promise.all([
     JournalEntry.find(
@@ -380,7 +381,7 @@ export async function getJournalStatsForDashboard() {
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   // Get current month boundaries
   const now = new Date();

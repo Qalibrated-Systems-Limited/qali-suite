@@ -8,6 +8,7 @@ import { serializeBsonType } from "@/lib/utils";
 import {
   getTenantContext,
   withTenantScope,
+  buildTenantMatch,
 } from "@/lib/utils/tenant-utils";
 
 // ============================================
@@ -139,7 +140,7 @@ export const searchPurchaseOrders = async (
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const ITEMS_PER_PAGE = 10;
   const skip = (page - 1) * ITEMS_PER_PAGE;
@@ -196,7 +197,7 @@ export const fetchPurchaseOrderPages = async (query = "", filters = {}) => {
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const ITEMS_PER_PAGE = 10;
 
@@ -261,7 +262,7 @@ export const getPurchaseOrderStats = async (filters = {}) => {
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   // Build base query - start with tenant filter
   const conditions = [tenantMatch];

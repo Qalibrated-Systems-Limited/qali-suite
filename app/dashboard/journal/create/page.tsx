@@ -63,7 +63,7 @@ export default async function CreateJournalEntryPage() {
   }
 
   // Check role
-  if (!["Admin", "Accountant"].includes(session.user.role as string)) {
+  if (!["SuperAdmin", "Admin", "Accountant"].includes(session.user.role as string)) {
     redirect("/dashboard/journal");
   }
 

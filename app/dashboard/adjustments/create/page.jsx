@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Info } from "lucide-react";
+import { canSeeInventoryNav } from "@/lib/permissions";
 import { CreateAdjustmentForm } from "../components/CreateAdjustmentForm";
 import Product from "@/app/models/product";
 import dbConnect from "@/app/config/dbConnect";
@@ -23,12 +24,8 @@ export default async function CreateAdjustmentPage() {
   const session = await auth();
   const { user } = session;
 
-  // Check if user has permission (Admin, Store Manager, Accountant)
-  const hasPermission = ["Admin", "Store Manager", "Accountant"].includes(
-    user?.role
-  );
-
-  if (!hasPermission) {
+  // Single source of truth — same gate the sidebar uses for inventory.
+  if (!canSeeInventoryNav(user?.role)) {
     return (
       <div className="space-y-4">
         <h1 className="text-lg font-semibold tracking-tight">Create Stock Adjustment</h1>

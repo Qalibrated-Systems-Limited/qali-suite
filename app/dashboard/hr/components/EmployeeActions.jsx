@@ -159,9 +159,9 @@ export function EmployeeActions({ profileId, status, hasLogin, userRole, email }
   const [dialog, setDialog] = useState(null);
   const [dialogError, setDialogError] = useState(null);
 
-  const canConfirm = status === "probation" && ["Admin", "Manager", "HR"].includes(userRole);
+  const canConfirm = status === "probation" && ["SuperAdmin", "Admin", "Manager", "HR"].includes(userRole);
   const canTerminate = status !== "terminated" && userRole === "Admin";
-  const canInvite = !hasLogin && ["Admin", "HR"].includes(userRole);
+  const canInvite = !hasLogin && ["SuperAdmin", "Admin", "HR"].includes(userRole);
 
   function handleConfirm() {
     setDialogError(null);

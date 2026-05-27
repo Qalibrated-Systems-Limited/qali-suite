@@ -10,7 +10,7 @@ import Company from "@/app/models/Company";
 import { PayrollSummaryDocument } from "./PayrollSummaryDocument";
 import { checkPlanAccess } from "@/lib/plan-gate";
 
-const ALLOWED = ["Admin", "HR", "Accountant"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR", "Accountant"];
 
 export async function GET(_req, { params }) {
   try {

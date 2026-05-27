@@ -16,7 +16,7 @@ export default async function CheckoutDetailPage(props) {
   // Visibility gate — non-managers can only see their own checkouts.
   const role = session.user.role;
   const isOwn = checkout.checkedOutTo?.id?.toString() === session.user.id;
-  const canManage = ["Admin", "Store Manager", "Manager"].includes(role);
+  const canManage = ["SuperAdmin", "Admin", "Store Manager", "Manager"].includes(role);
 
   if (!isOwn && !canManage) {
     redirect("/dashboard/checkout");

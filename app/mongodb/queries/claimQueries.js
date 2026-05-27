@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import EmployeeClaim from "../../models/employeesClaims";
 import Account from "../../models/account";
 import dbConnect from "../../config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getTenantContext, buildTenantMatch } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
 import { serializeBsonType } from "@/lib/utils";
 
@@ -195,7 +195,7 @@ export const getUserClaims = async (
 export const getClaimStats = async (userId = null, userRole = null) => {
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   // Scope to a specific employee whenever caller passed userId
   // (my-claims view), regardless of role. Match the same condition the
@@ -252,7 +252,7 @@ export const getClaimById = async (claimId) => {
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const id = new mongoose.Types.ObjectId(claimId);
   const claim = await EmployeeClaim.findOne({
@@ -292,7 +292,7 @@ export const getClaimsByType = async (
 export const getAdvancesNeedingSettlement = async (userId) => {
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const claims = await EmployeeClaim.find({
     ...tenantMatch,

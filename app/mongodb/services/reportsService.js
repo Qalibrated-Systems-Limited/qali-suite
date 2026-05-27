@@ -3,7 +3,7 @@ import JournalEntry from "../../models/JournalEntry";
 import { ObjectId } from "mongodb";
 
 import connectDB from "../../config/dbConnect";
-import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { getTenantContext, withTenantScope, buildTenantMatch } from "@/lib/utils/tenant-utils";
 
 // ============================================
 // REPORT SERVICE - FINANCIAL REPORTS
@@ -555,7 +555,7 @@ export class ReportService {
 
     // Get tenant context
     const { companyId, isSuperAdmin } = await getTenantContext();
-    const tenantMatch = isSuperAdmin ? {} : { companyId };
+    const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
     const Account = (await import("../../models/account")).default;
     const arAccount = await Account.findOne(
@@ -688,7 +688,7 @@ export class ReportService {
 
     // Get tenant context
     const { companyId, isSuperAdmin } = await getTenantContext();
-    const tenantMatch = isSuperAdmin ? {} : { companyId };
+    const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
     const Account = (await import("../../models/account")).default;
     const apAccount = await Account.findOne(

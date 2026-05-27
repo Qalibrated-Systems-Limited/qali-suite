@@ -14,7 +14,7 @@ export default async function EditProjectPage({ params }) {
 
   if (!session?.user) redirect("/login");
 
-  if (!["Admin", "Accountant", "Manager"].includes(session.user.role)) {
+  if (!["SuperAdmin", "Admin", "Accountant", "Manager"].includes(session.user.role)) {
     redirect("/dashboard/projects");
   }
 

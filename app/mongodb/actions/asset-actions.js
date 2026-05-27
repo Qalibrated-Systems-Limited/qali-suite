@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { roleAllowed } from "@/lib/permissions";
 import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
 import dbConnect from "@/app/config/dbConnect";
@@ -279,14 +280,14 @@ const CancelDepreciationSchema = z.object({
 // missing previously, blocking capitalization-from-bill and asset CRUD
 // for those users. SuperAdmin still bypasses via hasRole().
 const ASSET_ROLES = {
-  CREATE: ["Admin", "CFO", "Finance Manager", "Accountant"],
-  UPDATE: ["Admin", "CFO", "Finance Manager", "Accountant"],
-  POST_DEPRECIATION: ["Admin", "CFO", "Finance Manager", "Accountant"],
+  CREATE: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"],
+  UPDATE: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"],
+  POST_DEPRECIATION: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"],
   // Disposal removes the asset and books gain/loss — finance leadership only.
-  DISPOSE: ["Admin", "CFO", "Finance Manager"],
-  CANCEL_DEPRECIATION: ["Admin", "CFO", "Finance Manager"],
-  TRANSFER: ["Admin", "CFO", "Finance Manager", "Accountant", "Manager"],
-  IMPAIR: ["Admin", "CFO", "Finance Manager", "Accountant"],
+  DISPOSE: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
+  CANCEL_DEPRECIATION: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
+  TRANSFER: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"],
+  IMPAIR: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"],
   RECORD_USAGE: [
     "Admin",
     "CFO",
@@ -305,8 +306,7 @@ const ASSET_ROLES = {
 };
 
 function hasRole(user, roles) {
-  if (user.role === "SuperAdmin") return true;
-  return roles.includes(user.role);
+  return roleAllowed(user?.role, roles);
 }
 
 // ============================================

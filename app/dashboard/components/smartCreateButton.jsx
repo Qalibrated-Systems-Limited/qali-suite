@@ -20,18 +20,18 @@ export function CreateButton({ user }) {
     "/dashboard/stocks": {
       href: "/dashboard/stocks/create",
       label: "Product",
-      roles: ["Admin", "Store Manager", "Accountant"],
+      roles: ["SuperAdmin", "Admin", "Store Manager", "Accountant"],
     },
     // Categories
     "/dashboard/categories": {
       href: "/dashboard/categories/create",
       label: "Category",
-      roles: ["Admin", "Manager"],
+      roles: ["SuperAdmin", "Admin", "Manager"],
     },
     "/dashboard/adjustments": {
       href: "/dashboard/adjustments/create",
       label: "Adjustment",
-      roles: ["Admin", "Store Manager", "Accountant"],
+      roles: ["SuperAdmin", "Admin", "Store Manager", "Accountant"],
     },
 
     // Requests (everyone can create)
@@ -50,60 +50,60 @@ export function CreateButton({ user }) {
     "/dashboard/invoices": {
       href: "/dashboard/invoices/create",
       label: "Invoice",
-      roles: ["Admin", "Accountant", "Sales"],
+      roles: ["SuperAdmin", "Admin", "Accountant", "Sales"],
     },
     "/dashboard/quotes": {
       href: "/dashboard/quotes/create",
       label: "Quote",
-      roles: ["Admin", "Accountant", "Sales"],
+      roles: ["SuperAdmin", "Admin", "Accountant", "Sales"],
     },
 
     // Purchases
     "/dashboard/purchase-orders": {
       href: "/dashboard/purchase-orders/create",
       label: "Purchase Order",
-      roles: ["Admin", "Manager", "Accountant"],
+      roles: ["SuperAdmin", "Admin", "Manager", "Accountant"],
     },
     "/dashboard/bills": {
       href: "/dashboard/bills/create",
       label: "Bill",
-      roles: ["Admin", "Accountant"],
+      roles: ["SuperAdmin", "Admin", "Accountant"],
     },
 
     // Parties
     "/dashboard/parties": {
       href: "/dashboard/parties/create",
       label: "Party",
-      roles: ["Admin", "Accountant"],
+      roles: ["SuperAdmin", "Admin", "Accountant"],
     },
     "/dashboard/customers": {
       href: "/dashboard/parties/create?type=customer",
       label: "Customer",
-      roles: ["Admin", "Accountant", "Sales"],
+      roles: ["SuperAdmin", "Admin", "Accountant", "Sales"],
     },
     "/dashboard/suppliers": {
       href: "/dashboard/parties/create?type=supplier",
       label: "Supplier",
-      roles: ["Admin", "Accountant", "Store Manager"],
+      roles: ["SuperAdmin", "Admin", "Accountant", "Store Manager"],
     },
 
     // Expenses
     "/dashboard/expenses": {
       href: "/dashboard/expenses/create",
       label: "Expense",
-      roles: ["Admin", "Accountant"],
+      roles: ["SuperAdmin", "Admin", "Accountant"],
     },
 
     // Finance
     "/dashboard/accounts": {
       href: "/dashboard/accounts/create",
       label: "Account",
-      roles: ["Admin", "Accountant"],
+      roles: ["SuperAdmin", "Admin", "Accountant"],
     },
     "/dashboard/journal": {
       href: "/dashboard/journal/create",
       label: "Journal Entry",
-      roles: ["Admin", "Accountant"],
+      roles: ["SuperAdmin", "Admin", "Accountant"],
     },
 
     // Users

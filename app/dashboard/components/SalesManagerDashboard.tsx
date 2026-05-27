@@ -17,7 +17,7 @@ import {
   History,
 } from "lucide-react";
 import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getTenantContext, buildTenantMatch } from "@/lib/utils/tenant-utils";
 import Product from "@/app/models/product";
 import { AlertsStrip, AlertsStripSkeleton } from "./AlertsStrip";
 import {
@@ -85,7 +85,7 @@ async function CommercialMetrics() {
   // Three independent reads — run in parallel rather than three sequential
   // awaits (cuts response time to the slowest single call).
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
   await dbConnect();
 
   const [overview, marginAgg, belowFloorAgg] = await Promise.all([
@@ -238,7 +238,7 @@ async function CommercialMetrics() {
 // ============================================
 async function RecentPriceChanges() {
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
   await dbConnect();
 
   // Single aggregation — flatten priceHistory across products and pull the

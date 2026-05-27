@@ -13,7 +13,7 @@ export async function generateMetadata({ params }) {
   return { title: `${name} — Attendance | HR` };
 }
 
-const HR_ROLES = ["Admin", "HR", "Manager"];
+const HR_ROLES = ["SuperAdmin", "Admin", "HR", "Manager"];
 
 function StatusBadge({ status }) {
   const map = {
@@ -187,7 +187,7 @@ export default async function EmployeeAttendancePage({ params, searchParams }) {
   const year  = sp.year  || String(now.getFullYear());
 
   const fullName = `${employee.personalInfo?.firstName || ""} ${employee.personalInfo?.lastName || ""}`.trim();
-  const canEdit = ["Admin", "HR"].includes(session.user.role);
+  const canEdit = ["SuperAdmin", "Admin", "HR"].includes(session.user.role);
 
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const currentYear = now.getFullYear();

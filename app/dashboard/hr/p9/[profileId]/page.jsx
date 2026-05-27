@@ -16,7 +16,7 @@ export async function generateMetadata({ params, searchParams }) {
 }
 
 // Roles that can view any employee's P9
-const HR_ROLES = ["Admin", "HR", "Accountant"];
+const HR_ROLES = ["SuperAdmin", "Admin", "HR", "Accountant"];
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",

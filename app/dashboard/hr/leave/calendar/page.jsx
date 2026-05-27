@@ -8,7 +8,7 @@ import LeaveCalendarClient from "./LeaveCalendarClient";
 
 export const metadata = { title: "Leave Calendar | HR" };
 
-const HR_ROLES = ["Admin", "Manager", "HR", "Employee"];
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR", "Employee"];
 
 async function CalendarLoader({ month, year }) {
   const events = await getLeaveCalendarEvents(month, year);

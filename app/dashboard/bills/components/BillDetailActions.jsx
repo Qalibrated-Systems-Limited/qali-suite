@@ -57,10 +57,10 @@ export function BillDetailActions({ bill, userRole, paymentAccounts = [] }) {
 
   const canEdit = bill.canEdit;
   const canSubmit = bill.canSubmit;
-  const canApprove = bill.canApprove && ["Admin", "Manager"].includes(userRole);
-  const canReject = bill.status === "submitted" && ["Admin", "Manager"].includes(userRole);
+  const canApprove = bill.canApprove && ["SuperAdmin", "Admin", "Manager"].includes(userRole);
+  const canReject = bill.status === "submitted" && ["SuperAdmin", "Admin", "Manager"].includes(userRole);
   const canPay = bill.canPay;
-  const canCancel = bill.canCancel && ["Admin", "Manager"].includes(userRole);
+  const canCancel = bill.canCancel && ["SuperAdmin", "Admin", "Manager"].includes(userRole);
   const canDelete = bill.status === "draft";
 
   const handleSimpleAction = async (action) => {

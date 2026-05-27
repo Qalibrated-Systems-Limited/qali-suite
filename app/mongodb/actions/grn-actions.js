@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { roleAllowed } from "@/lib/permissions";
 import { z } from "zod";
 import mongoose from "mongoose";
 
@@ -68,8 +69,7 @@ const GRN_ROLES = {
 };
 
 function hasRole(user, allowedRoles) {
-  if (user?.role === "SuperAdmin") return true;
-  return allowedRoles.includes(user?.role);
+  return roleAllowed(user?.role, allowedRoles);
 }
 
 // Whether THIS GRN should drive the physical-stock side of inventory.

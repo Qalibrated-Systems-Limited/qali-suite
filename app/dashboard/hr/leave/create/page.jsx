@@ -10,8 +10,8 @@ import LeaveRequestForm from "@/app/dashboard/hr/components/LeaveRequestForm";
 
 export const metadata = { title: "New Leave Request | HR" };
 
-const CREATE_ROLES = ["Admin", "Manager", "HR", "Accountant", "Store Manager", "Employee", "Technician", "User", "Viewer"];
-const APPROVER_ROLES = ["Admin", "Manager", "HR"];
+const CREATE_ROLES = ["SuperAdmin", "Admin", "Manager", "HR", "Accountant", "Store Manager", "Employee", "Technician", "User", "Viewer"];
+const APPROVER_ROLES = ["SuperAdmin", "Admin", "Manager", "HR"];
 
 async function LeaveFormLoader({ isApprover, userId }) {
   await dbConnect();

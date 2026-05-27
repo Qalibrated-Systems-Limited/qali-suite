@@ -34,10 +34,10 @@ export default async function BudgetPage({ params }) {
 
   if (!project) notFound();
 
-  const canCreate = ["Admin", "Accountant", "Manager"].includes(
+  const canCreate = ["SuperAdmin", "Admin", "Accountant", "Manager"].includes(
     session.user.role,
   );
-  const canApprove = ["Admin", "Accountant"].includes(session.user.role);
+  const canApprove = ["SuperAdmin", "Admin", "Accountant"].includes(session.user.role);
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">

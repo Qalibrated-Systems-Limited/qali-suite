@@ -41,13 +41,13 @@ export function PaymentActions({ payment, userRole }) {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
 
-  const canManage = ["Admin", "Manager", "Accountant"].includes(userRole);
-  const canDelete = ["Admin", "Manager"].includes(userRole);
+  const canManage = ["SuperAdmin", "Admin", "Manager", "Accountant"].includes(userRole);
+  const canDelete = ["SuperAdmin", "Admin", "Manager"].includes(userRole);
   const isDraft = payment.status === "draft";
   const canConfirm =
     ["draft", "pending_clearance"].includes(payment.status) && canManage;
   const canCancel =
-    payment.status !== "cancelled" && ["Admin", "Manager"].includes(userRole);
+    payment.status !== "cancelled" && ["SuperAdmin", "Admin", "Manager"].includes(userRole);
 
   const handleConfirm = () => {
     startTransition(async () => {

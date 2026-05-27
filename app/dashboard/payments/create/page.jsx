@@ -15,7 +15,7 @@ export default async function CreatePaymentPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const canCreate = ["Admin", "Manager", "Accountant"].includes(session.user.role);
+  const canCreate = ["SuperAdmin", "Admin", "Manager", "Accountant"].includes(session.user.role);
   if (!canCreate) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">

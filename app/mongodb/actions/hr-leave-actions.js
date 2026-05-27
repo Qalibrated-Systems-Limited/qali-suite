@@ -1,6 +1,7 @@
 "use server";
 
 import mongoose from "mongoose";
+import { roleAllowed } from "@/lib/permissions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import dbConnect from "@/app/config/dbConnect";
@@ -14,13 +15,13 @@ import PublicHoliday from "@/app/models/publicHoliday";
 // ROLE AUTHORIZATION
 // ============================================
 const LEAVE_ROLES = {
-  CREATE: ["Admin", "Manager", "HR", "Employee"],
-  APPROVE: ["Admin", "Manager", "HR"],
-  ADMIN_CANCEL: ["Admin", "HR"],   // Cancel an already-approved leave
+  CREATE: ["SuperAdmin", "Admin", "Manager", "HR", "Employee"],
+  APPROVE: ["SuperAdmin", "Admin", "Manager", "HR"],
+  ADMIN_CANCEL: ["SuperAdmin", "Admin", "HR"],   // Cancel an already-approved leave
 };
 
 function hasRole(user, allowedRoles) {
-  return allowedRoles.includes(user?.role);
+  return roleAllowed(user?.role, allowedRoles);
 }
 
 // ============================================

@@ -11,7 +11,7 @@ import EmployeeForm from "../../components/EmployeeForm";
 
 export const metadata = { title: "Add Employee | HR" };
 
-const HR_ROLES = ["Admin", "Manager", "HR"];
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR"];
 
 // ============================================
 // FETCH FORM DEPENDENCIES (server-only)

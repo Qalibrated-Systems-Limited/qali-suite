@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { canSeeSalesNav } from "@/lib/permissions";
 import {
   CreditNoteStatsCards,
   CreditNoteStatsSkeleton,
@@ -22,13 +23,16 @@ export default async function CreditNotesPage({ searchParams }) {
 
   const { user } = session;
 
-  if (!["Admin", "Accountant"].includes(user.role)) {
+  // Single source of truth — same gate the sidebar uses to surface the
+  // link. Sales/Finance Manager and CFO could see the link but the
+  // previous inline allowlist bounced them.
+  if (!canSeeSalesNav(user.role)) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold mb-2">Access Denied</h2>
           <p className="text-muted-foreground">
-            Only Admins and Accountants can view credit notes.
+            You don&apos;t have permission to view credit notes.
           </p>
         </div>
       </div>

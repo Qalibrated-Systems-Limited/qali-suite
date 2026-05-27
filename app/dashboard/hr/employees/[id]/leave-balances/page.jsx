@@ -6,7 +6,7 @@ import { ChevronLeft } from "lucide-react";
 import { getEmployeeById } from "@/app/mongodb/queries/hr-queries";
 import LeaveBalanceForm from "../../../components/LeaveBalanceForm";
 
-const LEAVE_ROLES = ["Admin", "HR"];
+const LEAVE_ROLES = ["SuperAdmin", "Admin", "HR"];
 
 export async function generateMetadata({ params }) {
   const { id } = await params;

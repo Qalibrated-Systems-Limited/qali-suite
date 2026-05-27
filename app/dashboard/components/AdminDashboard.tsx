@@ -42,7 +42,7 @@ export async function AdminDashboardPage() {
   // here, but this component might be rendered directly from another route.
   // If someone lands here without authorization, send them back to the
   // router which knows where they belong.
-  const isAdmin = ["Admin", "Manager", "Store Manager", "Accountant"].includes(
+  const isAdmin = ["SuperAdmin", "Admin", "Manager", "Store Manager", "Accountant"].includes(
     user.role
   );
 

@@ -396,28 +396,13 @@ export const getInvoiceById = async (invoiceId) => {
     return null;
   }
 
-  return {
-    ...invoice,
-    _id: invoice._id.toString(),
-    invoiceDate: invoice.invoiceDate?.toISOString(),
-    dueDate: invoice.dueDate?.toISOString() || null,
-    createdAt: invoice.createdAt?.toISOString(),
-    updatedAt: invoice.updatedAt?.toISOString() || null,
-    // Serialize items array
-    items: invoice.items.map((item) => ({
-      ...item,
-      _id: item._id?.toString(),
-      productId: item.productId?.toString() || null,
-    })),
-    // Serialize related documents
-    relatedDocuments: invoice.relatedDocuments
-      ? {
-          movementIds:
-            invoice.relatedDocuments.movementIds?.map((id) => id.toString()) ||
-            [],
-        }
-      : { movementIds: [] },
-  };
+  // Full BSON round-trip — was hand-serializing only top-level + items +
+  // relatedDocuments, which left companyId, accounting.journalEntryId,
+  // accounting.reversalEntryId, paymentHistory[].paymentId, customer.id
+  // and any other nested ObjectIds as raw BSON. That triggers
+  // "Only plain objects can be passed to Client Components" when the
+  // invoice is forwarded to any client subtree.
+  return serializeBsonType(invoice);
 };
 
 // ============================================

@@ -1,6 +1,7 @@
 "use server";
 
 import mongoose from "mongoose";
+import { roleAllowed } from "@/lib/permissions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import dbConnect from "@/app/config/dbConnect";
@@ -30,7 +31,7 @@ const EMP_ROLES = {
 };
 
 function hasRole(user, allowedRoles) {
-  return allowedRoles.includes(user?.role);
+  return roleAllowed(user?.role, allowedRoles);
 }
 
 // ============================================
@@ -588,7 +589,7 @@ export async function updateLeaveBalance(_prevState, formData) {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "HR"].includes(user?.role)) {
+    if (!["SuperAdmin", "Admin", "HR"].includes(user?.role)) {
       return { success: false, error: "You do not have permission to manage leave balances" };
     }
 
@@ -757,7 +758,7 @@ export async function uploadEmployeePhoto(_prevState, formData) {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "HR", "Manager"].includes(user?.role)) {
+    if (!["SuperAdmin", "Admin", "HR", "Manager"].includes(user?.role)) {
       return { success: false, error: "You do not have permission to upload photos" };
     }
 
@@ -811,7 +812,7 @@ export async function uploadEmployeeDocument(_prevState, formData) {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "HR", "Manager"].includes(user?.role)) {
+    if (!["SuperAdmin", "Admin", "HR", "Manager"].includes(user?.role)) {
       return { success: false, error: "You do not have permission to upload documents" };
     }
 
@@ -874,7 +875,7 @@ export async function deleteEmployeeDocument(profileId, documentId) {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["Admin", "HR"].includes(user?.role)) {
+    if (!["SuperAdmin", "Admin", "HR"].includes(user?.role)) {
       return { success: false, error: "You do not have permission to delete documents" };
     }
 

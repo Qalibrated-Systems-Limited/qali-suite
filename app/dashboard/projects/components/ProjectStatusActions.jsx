@@ -42,7 +42,7 @@ export default function ProjectStatusActions({
 
   // Filter by role
   const availableTransitions = transitions.filter((t) => {
-    if (t.adminOnly && !["Admin", "Accountant"].includes(userRole)) return false;
+    if (t.adminOnly && !["SuperAdmin", "Admin", "Accountant"].includes(userRole)) return false;
     return true;
   });
 

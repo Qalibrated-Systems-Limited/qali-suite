@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { canSeeProjectsNav } from "@/lib/permissions";
 import { fetchProjectPages } from "@/app/mongodb/queries/projectQueries";
 import Pagination from "@/components/pagination";
 import { Suspense } from "react";
@@ -45,7 +46,10 @@ export default async function ProjectsPage({ searchParams }) {
 
   const { user } = session;
 
-  if (!["Admin", "Accountant", "Manager"].includes(user.role)) {
+  // Single source of truth — same gate the sidebar uses. CFO and
+  // Finance Manager could see the link but the previous inline allowlist
+  // bounced them.
+  if (!canSeeProjectsNav(user.role)) {
     return (
       <div className="flex min-h-[400px] items-center justify-center">
         <div className="text-center">

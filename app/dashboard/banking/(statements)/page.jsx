@@ -374,7 +374,7 @@ async function StatementsList({ searchParams }) {
 // ============================================
 export default async function BankingPage({ searchParams }) {
   const session = await auth();
-  const canImport = ["Admin", "Accountant"].includes(session?.user?.role);
+  const canImport = ["SuperAdmin", "Admin", "Accountant"].includes(session?.user?.role);
 
   return (
     <div className="space-y-6 p-4 sm:p-6 lg:p-8">

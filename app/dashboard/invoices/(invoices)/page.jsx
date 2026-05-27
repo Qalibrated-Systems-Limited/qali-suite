@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { canSeeSalesNav } from "@/lib/permissions";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -32,15 +33,10 @@ async function InvoicesPage(props) {
 
   const { user } = session;
 
-  // Check permissions — match the action gate (FINANCE_WRITE_ROLES).
-  const ALLOWED = new Set([
-    "SuperAdmin",
-    "Admin",
-    "CFO",
-    "Finance Manager",
-    "Accountant",
-  ]);
-  if (!ALLOWED.has(user.role)) {
+  // Single source of truth — same gate the sidebar uses to surface the
+  // link. Manager and Sales Manager could see the link but the previous
+  // inline allowlist bounced them.
+  if (!canSeeSalesNav(user.role)) {
     return (
       <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">

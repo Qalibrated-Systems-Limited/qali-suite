@@ -1,6 +1,7 @@
 "use server";
 
 import mongoose from "mongoose";
+import { roleAllowed } from "@/lib/permissions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import dbConnect from "@/app/config/dbConnect";
@@ -15,6 +16,12 @@ import PublicHoliday from "@/app/models/publicHoliday";
 import JournalEntry from "@/app/models/JournalEntry";
 import ErpCounter from "@/app/models/erp-counter";
 import Loan from "@/app/models/loan";
+import {
+  calculatePAYE,
+  calculateNSSF,
+  calculateSHIF,
+  calculateAHL,
+} from "@/lib/payroll/kenya-tax";
 
 // ============================================
 // ROLE AUTHORIZATION (extended)
@@ -34,98 +41,16 @@ const PAYROLL_ROLES = {
 };
 
 function hasRole(user, allowedRoles) {
-  return allowedRoles.includes(user?.role);
+  return roleAllowed(user?.role, allowedRoles);
 }
 
 // ============================================
 // STATUTORY DEDUCTION CALCULATORS
 // ============================================
-// All rates are read from PayrollConfig (DB) — not hardcoded here.
-// These functions receive the active config as a parameter.
-
-/**
- * Calculate PAYE using PAYE brackets from PayrollConfig.
- * Taxable income = grossPay - nssfEmployee (NSSF reduces taxable income).
- * Returns { paye, insuranceRelief } after personal relief and insurance relief.
- *
- * Insurance relief: 15% of SHIF contribution, capped at KES 5,000/month.
- * This is a Kenyan tax incentive — SHIF premiums qualify as insurance premiums,
- * so 15% of the amount (up to the cap) directly reduces PAYE payable.
- */
-function calculatePAYE(taxableMonthly, config, shif = 0) {
-  const annual = taxableMonthly * 12;
-  let annualTax = 0;
-  let remaining = annual;
-
-  const brackets = [...(config.payeBrackets || [])].sort((a, b) => a.from - b.from);
-
-  for (let i = 0; i < brackets.length; i++) {
-    const { from, to, rate } = brackets[i];
-    if (remaining <= 0) break;
-    const bandTop = to != null ? to : Infinity;
-    const bandSize = Math.min(remaining, bandTop - from);
-    if (bandSize <= 0) continue;
-    annualTax += bandSize * rate;
-    remaining -= bandSize;
-  }
-
-  const monthlyTax = annualTax / 12;
-  const personalRelief = config.personalRelief || 0;
-
-  // Insurance relief: percentage of SHIF contribution, subject to monthly cap
-  const insuranceRelief = Math.round(
-    Math.min(
-      shif * (config.insuranceReliefRate || 0.15),
-      config.insuranceReliefCap || 5000
-    )
-  );
-
-  const paye = Math.max(0, Math.round(monthlyTax - personalRelief - insuranceRelief));
-  return { paye, insuranceRelief };
-}
-
-/**
- * Calculate NSSF employee contribution (Tier I + Tier II).
- * Also returns employer share (same amount, for remittance tracking).
- */
-function calculateNSSF(basicSalary, config) {
-  const LEL = config.nssfTierILimit || 0;
-  const UEL = config.nssfTierIILimit || 0;
-  const empRate = config.nssfEmployeeRate || 0;
-
-  const tierI = Math.min(basicSalary, LEL) * empRate;
-  const tierII = basicSalary > LEL
-    ? (Math.min(basicSalary, UEL) - LEL) * empRate
-    : 0;
-  const employee = Math.round(tierI + tierII);
-
-  const emplRate = config.nssfEmployerRate || 0;
-  const tierIEmpl = Math.min(basicSalary, LEL) * emplRate;
-  const tierIIEmpl = basicSalary > LEL
-    ? (Math.min(basicSalary, UEL) - LEL) * emplRate
-    : 0;
-  const employer = Math.round(tierIEmpl + tierIIEmpl);
-
-  return { employee, employer };
-}
-
-/**
- * Calculate SHIF (Social Health Insurance Fund).
- * Flat rate on gross pay — no cap, no minimum.
- */
-function calculateSHIF(grossPay, config) {
-  return Math.round(grossPay * (config.shifRate || 0));
-}
-
-/**
- * Calculate Affordable Housing Levy (AHL).
- * Returns employee and employer amounts separately.
- */
-function calculateAHL(grossPay, config) {
-  const employee = Math.round(grossPay * (config.ahlEmployeeRate || 0));
-  const employer = Math.round(grossPay * (config.ahlEmployerRate || 0));
-  return { employee, employer };
-}
+// Imported from @/lib/payroll/kenya-tax so the math is directly
+// unit-testable (a "use server" file can't export sync helpers). Rates
+// and brackets still come from PayrollConfig at runtime — no behavior
+// change. See lib/payroll/kenya-tax.js for the implementations.
 
 // ============================================
 // WORKING DAYS HELPER

@@ -5,6 +5,7 @@ import dbConnect from "../../config/dbConnect";
 import {
   getTenantContext,
   withTenantScope,
+  buildTenantMatch,
 } from "@/lib/utils/tenant-utils";
 
 // ============================================
@@ -139,7 +140,7 @@ export async function getPeriodSummary(periodId) {
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const period = await FiscalPeriod.findOne(
     withTenantScope({ _id: periodId }, companyId, isSuperAdmin)
@@ -233,7 +234,7 @@ export async function getPeriodClosingChecklist(periodId) {
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const period = await FiscalPeriod.findOne(
     withTenantScope({ _id: periodId }, companyId, isSuperAdmin)
@@ -299,7 +300,7 @@ export async function getFiscalPeriodStats() {
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const [total, open, closed, locked, current] = await Promise.all([
     FiscalPeriod.countDocuments(tenantMatch),

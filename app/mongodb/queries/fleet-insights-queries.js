@@ -24,7 +24,7 @@ import Expense from "@/app/models/expenses";
 // imported by server components directly without going through the
 // Server Action plumbing.
 
-const VIEW_ROLES = ["Admin", "Accountant", "Manager"];
+const VIEW_ROLES = ["SuperAdmin", "Admin", "Accountant", "Manager"];
 const ACTIVE_STATUSES = ["active", "idle", "in_maintenance"];
 
 function authorized(user) {

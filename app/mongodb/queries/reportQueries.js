@@ -1,7 +1,7 @@
 import ReportService from "../services/reportsService";
 import JournalEntry from "../../models/JournalEntry";
 import dbConnect from "../../config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getTenantContext, buildTenantMatch } from "@/lib/utils/tenant-utils";
 
 // ============================================
 // REPORT QUERIES - FINANCIAL REPORTS
@@ -231,7 +231,7 @@ export async function getRevenueByAccount(startDate, endDate) {
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const result = await JournalEntry.aggregate([
     {
@@ -299,7 +299,7 @@ export async function getExpensesByAccount(startDate, endDate) {
 
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const result = await JournalEntry.aggregate([
     {

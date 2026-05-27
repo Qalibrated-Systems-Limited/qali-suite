@@ -9,7 +9,7 @@ import EmployeeProfile from "@/app/models/employeeProfile";
 import Party from "@/app/models/parties";
 import LeaveType from "@/app/models/leaveType";
 
-const ALLOWED = ["Admin", "HR"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR"];
 
 // ============================================
 // BULK EMPLOYEE IMPORT

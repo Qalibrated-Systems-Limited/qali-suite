@@ -453,6 +453,12 @@ journalEntrySchema.methods.reverse = async function (
   const reversalEntryNumber = `JE-REV-${String(nextNum).padStart(4, "0")}`;
 
   const reversalEntry = new JournalEntry({
+    // Carry the tenant scope and fiscal period from the original.
+    // Without this the reversal fails validation (companyId is required)
+    // and silently bails inside bill.cancel(), leaving the bill in a
+    // half-cancelled state. Caught by tests/edge-cases.test.mjs.
+    companyId: this.companyId,
+    fiscalPeriod: this.fiscalPeriod,
     entryNumber: reversalEntryNumber,
     entryDate: new Date(),
     entryType: "adjustment",

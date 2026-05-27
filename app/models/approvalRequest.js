@@ -118,7 +118,7 @@ const approvalRequestSchema = new Schema(
 
     // Who can approve — roles, not specific users. Approver matrix is
     // populated from the type at submission. e.g. "below cost" needs
-    // ["Admin","CFO"] only; smaller variances need broader sets.
+    // ["SuperAdmin", "Admin","CFO"] only; smaller variances need broader sets.
     requiredApproverRoles: [{ type: String }],
 
     // Who raised it
@@ -169,12 +169,12 @@ approvalRequestSchema.index(
 // One source of truth — used by both the model (to populate
 // requiredApproverRoles) and the queue query (to filter for "my queue").
 export const APPROVER_MATRIX = {
-  price_change: ["Admin", "CFO", "Finance Manager"],
-  stock_writeoff: ["Admin", "CFO", "Finance Manager", "Manager"],
-  stock_adjustment: ["Admin", "Manager", "Store Manager"],
-  bill_payment: ["Admin", "CFO", "Finance Manager"],
-  credit_note: ["Admin", "CFO", "Finance Manager", "Sales Manager"],
-  discount: ["Admin", "CFO", "Finance Manager", "Sales Manager"],
+  price_change: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
+  stock_writeoff: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Manager"],
+  stock_adjustment: ["SuperAdmin", "Admin", "Manager", "Store Manager"],
+  bill_payment: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
+  credit_note: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Sales Manager"],
+  discount: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Sales Manager"],
 };
 
 approvalRequestSchema.statics.canApprove = function (role, type) {

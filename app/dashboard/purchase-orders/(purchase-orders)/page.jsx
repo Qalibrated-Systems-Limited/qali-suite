@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { canSeePurchasesNav } from "@/lib/permissions";
 import { getPurchaseOrderStats } from "@/app/mongodb/queries/purchase-order-queries";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
@@ -37,8 +38,10 @@ async function PurchaseOrdersPage(props) {
 
   const { user } = session;
 
-  // Check permissions - Admin, Manager, Accountant can view POs
-  if (!["Admin", "Manager", "Accountant"].includes(user.role)) {
+  // Single source of truth — same gate the sidebar uses. CFO, Finance
+  // Manager, Procurement Officer, and Store Manager could see the link
+  // but the previous inline allowlist bounced them.
+  if (!canSeePurchasesNav(user.role)) {
     return (
       <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">
@@ -46,7 +49,7 @@ async function PurchaseOrdersPage(props) {
             Access Denied
           </h2>
           <p className="text-muted-foreground">
-            Only Admins, Managers, and Accountants can view purchase orders.
+            You don&apos;t have permission to view purchase orders.
           </p>
         </div>
       </div>

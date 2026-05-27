@@ -162,14 +162,10 @@ export async function getPartyById(partyId) {
     return null;
   }
 
-  return {
-    ...party,
-    _id: party._id.toString(),
-    companyId: party.companyId?.toString(),
-    userId: party.userId ? party.userId.toString() : null,
-    createdAt: party.createdAt ? party.createdAt.toISOString() : null,
-    updatedAt: party.updatedAt ? party.updatedAt.toISOString() : null,
-  };
+  // Full BSON round-trip — the previous hand-serialization missed any
+  // nested ObjectId (linked.parties, account references, audit refs, etc.)
+  // and risked client-component boundary errors.
+  return serializeBsonType(party);
 }
 
 /**
@@ -288,11 +284,7 @@ export async function getEmployeeByUserId(userId) {
     return null;
   }
 
-  return {
-    ...employee,
-    _id: employee._id.toString(),
-    userId: employee.userId.toString(),
-  };
+  return serializeBsonType(employee);
 }
 
 /**

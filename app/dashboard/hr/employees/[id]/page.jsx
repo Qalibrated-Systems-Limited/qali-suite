@@ -17,7 +17,7 @@ export async function generateMetadata({ params }) {
   return { title: `${employee.personalInfo?.firstName} ${employee.personalInfo?.lastName} | HR` };
 }
 
-const HR_ROLES = ["Admin", "Manager", "HR"];
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR"];
 
 // ─── Status badge ───
 function StatusBadge({ status }) {
@@ -236,8 +236,8 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
     { key: "documents", label: "Documents", icon: FileText },
   ];
 
-  const canEditCompensation = ["Admin", "HR"].includes(session.user.role);
-  const canManageLeave = ["Admin", "HR"].includes(session.user.role);
+  const canEditCompensation = ["SuperAdmin", "Admin", "HR"].includes(session.user.role);
+  const canManageLeave = ["SuperAdmin", "Admin", "HR"].includes(session.user.role);
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

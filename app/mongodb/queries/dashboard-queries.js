@@ -3,7 +3,7 @@ import { StockRequest } from "../../models/requests";
 import { ItemCheckout } from "../../models/checkouts";
 import { StockMovement } from "../../models/stockmovement";
 import dbConnect from "../../config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getTenantContext, buildTenantMatch } from "@/lib/utils/tenant-utils";
 
 // ============================================
 // DASHBOARD OVERVIEW STATS
@@ -12,7 +12,7 @@ export const getDashboardStats = async () => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
@@ -92,7 +92,7 @@ export const getMovementTrend = async (days = 7) => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
@@ -140,7 +140,7 @@ export const getStockByCategory = async () => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const categoryData = await Product.aggregate([
     { $match: tenantMatch },
@@ -179,7 +179,7 @@ export const getRecentRequests = async (limit = 5) => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const requests = await StockRequest.find(tenantMatch)
     .sort({ createdAt: -1 })
@@ -204,7 +204,7 @@ export const getRecentMovements = async (limit = 10) => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const movements = await StockMovement.find(tenantMatch)
     .sort({ createdAt: -1 })
@@ -230,7 +230,7 @@ export const getLowStockAlerts = async (threshold = 10) => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const lowStockItems = await Product.find({
     ...tenantMatch,
@@ -257,7 +257,7 @@ export const getOverdueCheckouts = async () => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const now = new Date();
 
@@ -293,7 +293,7 @@ export const getTopProducts = async (limit = 5) => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const topProducts = await StockMovement.aggregate([
     { $match: tenantMatch },
@@ -330,7 +330,7 @@ export const getRequestStatusBreakdown = async () => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const breakdown = await StockRequest.aggregate([
     { $match: tenantMatch },

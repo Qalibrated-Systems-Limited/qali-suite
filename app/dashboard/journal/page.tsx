@@ -75,7 +75,7 @@ export default async function JournalPage({
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold tracking-tight">Journal Entries</h1>
-        {["Admin", "Accountant"].includes(session.user.role as string) && (
+        {["SuperAdmin", "Admin", "Accountant"].includes(session.user.role as string) && (
           <Button asChild size="sm">
             <Link href="/dashboard/journal/create">
               <Plus className="h-3.5 w-3.5 mr-1.5" />

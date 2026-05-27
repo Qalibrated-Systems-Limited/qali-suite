@@ -13,7 +13,7 @@ export async function generateMetadata({ params }) {
   return { title: `${department?.name || "Department"} | HR` };
 }
 
-const HR_ROLES = ["Admin", "Manager", "HR"];
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR"];
 
 export default async function DepartmentDetailPage({ params }) {
   const { id } = await params;

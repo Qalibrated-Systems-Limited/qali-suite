@@ -31,7 +31,7 @@ export const metadata = {
   description: "Running-cost analytics across the fleet",
 };
 
-const VIEW_ROLES = ["Admin", "Accountant", "Manager"];
+const VIEW_ROLES = ["SuperAdmin", "Admin", "Accountant", "Manager"];
 
 const CATEGORY_ICONS = {
   land: MapPin,

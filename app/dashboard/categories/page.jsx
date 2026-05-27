@@ -3,6 +3,7 @@
 
 import { Suspense } from "react";
 import { auth } from "@/auth";
+import { canSeeInventoryNav } from "@/lib/permissions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, Plus } from "lucide-react";
@@ -43,15 +44,11 @@ export default async function CategoriesPage({ searchParams }) {
     );
   }
 
-  const ALLOWED = new Set([
-    "SuperAdmin",
-    "Admin",
-    "CFO",
-    "Finance Manager",
-    "Manager",
-    "Store Manager",
-  ]);
-  if (!ALLOWED.has(session.user.role)) {
+  // Single source of truth — sidebar shows this to anyone in
+  // canSeeInventoryNav. Accountant, Sales Manager, Procurement Officer
+  // and Storekeeper could see the link but the previous inline allowlist
+  // bounced them.
+  if (!canSeeInventoryNav(session.user.role)) {
     return (
       <div className="container py-6">
         <Alert variant="destructive">

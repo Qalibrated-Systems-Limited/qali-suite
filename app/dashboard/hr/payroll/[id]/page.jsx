@@ -11,7 +11,7 @@ export async function generateMetadata({ params }) {
   return { title: `${payrollRun?.payrollNumber || "Payroll"} | HR` };
 }
 
-const HR_ROLES = ["Admin", "HR", "Manager"];
+const HR_ROLES = ["SuperAdmin", "Admin", "HR", "Manager"];
 
 function StatusBadge({ status }) {
   const map = {
@@ -54,7 +54,7 @@ export default async function PayrollRunDetailPage({ params }) {
   const { payrollRun: run, entries, error } = await getPayrollRunById(id);
   if (!run || error) notFound();
 
-  const canEditEntries = ["Admin", "HR"].includes(session.user.role) && !["paid", "voided"].includes(run.status);
+  const canEditEntries = ["SuperAdmin", "Admin", "HR"].includes(session.user.role) && !["paid", "voided"].includes(run.status);
 
   const currency = run.currency || "KES";
   const totals = run.totals || {};

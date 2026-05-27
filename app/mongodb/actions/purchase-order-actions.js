@@ -27,6 +27,7 @@
 // ============================================
 
 import { revalidatePath } from "next/cache";
+import { roleAllowed } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { auth } from "@/auth";
@@ -151,7 +152,7 @@ function parseFormData(formData) {
  * Check if user has required role
  */
 function hasRole(user, allowedRoles) {
-  return allowedRoles.includes(user?.role);
+  return roleAllowed(user?.role, allowedRoles);
 }
 
 /**
@@ -453,7 +454,7 @@ export async function updatePurchaseOrder(poId, prevState, formData) {
 
     // 4. Authorization: Owner, Manager, or Admin
     const canEdit =
-      isOwner(user, po.createdBy) || hasRole(user, ["Admin", "Manager"]);
+      isOwner(user, po.createdBy) || hasRole(user, ["SuperAdmin", "Admin", "Manager"]);
 
     if (!canEdit) {
       return {
@@ -670,7 +671,7 @@ export async function sendPurchaseOrder(poId) {
 
     // Authorization: Owner, Manager, or Admin
     const canSend =
-      isOwner(user, po.createdBy) || hasRole(user, ["Admin", "Manager"]);
+      isOwner(user, po.createdBy) || hasRole(user, ["SuperAdmin", "Admin", "Manager"]);
 
     if (!canSend) {
       return {
@@ -940,7 +941,7 @@ export async function deletePurchaseOrder(poId) {
 
     // Authorization: Owner, Manager, or Admin
     const canDelete =
-      isOwner(user, po.createdBy) || hasRole(user, ["Admin", "Manager"]);
+      isOwner(user, po.createdBy) || hasRole(user, ["SuperAdmin", "Admin", "Manager"]);
 
     if (!canDelete) {
       return {

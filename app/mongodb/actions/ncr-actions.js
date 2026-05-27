@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { roleAllowed } from "@/lib/permissions";
 import mongoose from "mongoose";
 
 import Nonconformance from "@/app/models/nonconformance";
@@ -47,8 +48,7 @@ const NCR_ROLES = {
 };
 
 function hasRole(user, allowedRoles) {
-  if (user?.role === "SuperAdmin") return true;
-  return allowedRoles.includes(user?.role);
+  return roleAllowed(user?.role, allowedRoles);
 }
 
 // ============================================

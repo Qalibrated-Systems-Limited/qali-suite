@@ -11,7 +11,7 @@ export default async function IntegrationsLayout({ children }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  if (session.user.role !== "Admin") redirect("/dashboard");
+  if (!["SuperAdmin", "Admin"].includes(session.user.role)) redirect("/dashboard");
 
   if (!planIncludes(session.user.companyPlan, "integration")) {
     redirect("/dashboard/settings?upgrade=integration");

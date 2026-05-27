@@ -12,7 +12,7 @@ export default async function APAgingPage({ searchParams }) {
   const { user } = session;
 
   // Check permission
-  if (!["Admin", "Accountant"].includes(user?.role)) {
+  if (!["SuperAdmin", "Admin", "Accountant"].includes(user?.role)) {
     return (
       <div className="container mx-auto px-4 py-6 max-w-7xl">
         <div className="text-center py-12">

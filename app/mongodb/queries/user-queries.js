@@ -2,6 +2,7 @@ import dbConnect from "../../config/dbConnect";
 import User from "../../models/user";
 import Company from "../../models/Company";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { serializeBsonType } from "@/lib/utils";
 import mongoose from "mongoose";
 
 const ObjectId = mongoose.Types.ObjectId;
@@ -276,15 +277,14 @@ export const getUserById = async (userId) => {
   }
 
   const hasPassword = !!user.password;
+  // Strip the password hash BEFORE serialization — serializeBsonType
+  // doesn't filter fields, so we do it here. Hand-rolled serialization
+  // previously left nested ObjectIds (assignments, audit refs) raw.
+  const { password: _password, ...rest } = user;
 
   return {
-    ...user,
-    password: undefined, // never leak the hash
+    ...serializeBsonType(rest),
     hasPassword,
-    _id: user._id.toString(),
-    companyId: user.companyId?.toString() || null,
-    createdAt: user.createdAt?.toISOString() || null,
-    updatedAt: user.updatedAt?.toISOString() || null,
   };
 };
 

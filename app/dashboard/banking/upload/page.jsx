@@ -12,7 +12,7 @@ export default async function UploadPage() {
   const session = await auth();
 
   // Only Admin and Accountant can import
-  if (!["Admin", "Accountant"].includes(session?.user?.role)) {
+  if (!["SuperAdmin", "Admin", "Accountant"].includes(session?.user?.role)) {
     redirect("/dashboard/banking");
   }
 

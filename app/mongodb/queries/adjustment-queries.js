@@ -3,6 +3,7 @@
 import dbConnect from "@/app/config/dbConnect";
 import InventoryAdjustment from "@/app/models/inventoryAdjustment";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { serializeBsonType } from "@/lib/utils";
 
 /**
  * Get paginated list of adjustments
@@ -60,7 +61,7 @@ export async function getAdjustments({
   ]);
 
   return {
-    adjustments: JSON.parse(JSON.stringify(adjustments)),
+    adjustments: serializeBsonType(adjustments),
     pagination: {
       page,
       limit,
@@ -88,7 +89,7 @@ export async function getAdjustmentById(id) {
 
   if (!adjustment) return null;
 
-  return JSON.parse(JSON.stringify(adjustment));
+  return serializeBsonType(adjustment);
 }
 
 /**
@@ -192,5 +193,5 @@ export async function getRecentAdjustments(limit = 5) {
     .select("adjustmentNumber adjustmentDate adjustmentType status totalAdjustmentValue totalIncreaseValue totalDecreaseValue lines createdBy")
     .lean();
 
-  return JSON.parse(JSON.stringify(adjustments));
+  return serializeBsonType(adjustments);
 }

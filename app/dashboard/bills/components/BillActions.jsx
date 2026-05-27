@@ -44,7 +44,7 @@ export function BillActions({ bill, userRole }) {
   const canEdit = ["draft", "rejected"].includes(bill.status);
   const canSubmit = bill.status === "draft";
   const canApprove =
-    bill.status === "submitted" && ["Admin", "Manager"].includes(userRole);
+    bill.status === "submitted" && ["SuperAdmin", "Admin", "Manager"].includes(userRole);
   const canDelete = bill.status === "draft";
 
   const handleAction = async (action) => {

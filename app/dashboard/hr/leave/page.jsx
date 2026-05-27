@@ -7,7 +7,7 @@ import { Calendar, Plus, Settings2, User } from "lucide-react";
 
 export const metadata = { title: "Leave | HR" };
 
-const HR_ROLES = ["Admin", "Manager", "HR", "Accountant", "Store Manager", "Employee", "Technician", "User", "Viewer"];
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR", "Accountant", "Store Manager", "Employee", "Technician", "User", "Viewer"];
 
 function StatusBadge({ status }) {
   const map = {
@@ -191,8 +191,8 @@ export default async function LeavePage({ searchParams }) {
   if (!HR_ROLES.includes(session.user.role)) redirect("/dashboard");
 
   const params = await searchParams;
-  const isEmployee = !["Admin", "Manager", "HR"].includes(session.user.role);
-  const canAdmin = ["Admin", "Manager", "HR"].includes(session.user.role);
+  const isEmployee = !["SuperAdmin", "Admin", "Manager", "HR"].includes(session.user.role);
+  const canAdmin = ["SuperAdmin", "Admin", "Manager", "HR"].includes(session.user.role);
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

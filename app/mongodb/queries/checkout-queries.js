@@ -1,6 +1,6 @@
 import { ItemCheckout } from "../../models/checkouts";
 import mongoose from "mongoose";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getTenantContext, buildTenantMatch } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
 import { serializeBsonType } from "@/lib/utils";
 import dbConnect from "../../config/dbConnect";
@@ -235,7 +235,7 @@ export const getCheckoutStats = async () => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const now = new Date();
   const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
@@ -272,7 +272,7 @@ export const getCheckoutById = async (checkoutId) => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const checkout = await ItemCheckout.findOne({
     ...tenantMatch,
@@ -314,7 +314,7 @@ export const getUserCheckouts = async (userId, activeOnly = false) => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId };
+  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
   const query = { ...tenantMatch, "checkedOutTo.id": userId };
 

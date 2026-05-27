@@ -9,7 +9,7 @@ import ClockInWidget from "./ClockInWidget";
 
 export const metadata = { title: "Attendance | HR" };
 
-const HR_ROLES = ["Admin", "HR", "Manager"];
+const HR_ROLES = ["SuperAdmin", "Admin", "HR", "Manager"];
 
 function StatusBadge({ status }) {
   const map = {

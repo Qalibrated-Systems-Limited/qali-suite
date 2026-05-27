@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { roleAllowed } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import mongoose from "mongoose";
@@ -33,9 +34,7 @@ const EXPENSE_ROLES = {
 };
 
 function hasRole(user, allowedRoles) {
-  // SuperAdmin acts cross-tenant; admin everything is implicit.
-  if (user?.role === "SuperAdmin") return true;
-  return allowedRoles.includes(user?.role);
+  return roleAllowed(user?.role, allowedRoles);
 }
 
 function formatUser(user) {

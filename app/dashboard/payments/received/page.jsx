@@ -245,7 +245,7 @@ async function PaymentsList({ searchParams, userRole }) {
 // ============================================
 export default async function PaymentsReceivedPage({ searchParams }) {
   const session = await auth();
-  const canCreate = ["Admin", "Manager", "Accountant"].includes(session?.user?.role);
+  const canCreate = ["SuperAdmin", "Admin", "Manager", "Accountant"].includes(session?.user?.role);
   const params = await searchParams;
   const successMessage = params?.success === "true" ? params?.message : null;
 

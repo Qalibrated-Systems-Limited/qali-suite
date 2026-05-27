@@ -11,6 +11,7 @@ import {
   getTenantContext,
   getCompanyIdForCreate,
   withTenantScope,
+  buildTenantMatch,
 } from "@/lib/utils/tenant-utils";
 import { sendQuoteEmail } from "@/lib/email";
 
@@ -743,7 +744,7 @@ export async function getQuoteStats() {
     const sevenDaysAhead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     // Build tenant match condition
-    const tenantMatch = isSuperAdmin ? {} : { companyId };
+    const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
     const [statusCounts, monthlyStats, expiringCount, conversionRate] =
       await Promise.all([

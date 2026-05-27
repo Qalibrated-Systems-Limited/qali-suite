@@ -8,7 +8,7 @@ import PayrollEntry from "@/app/models/payrollEntry";
 import EmployeeProfile from "@/app/models/employeeProfile";
 import { checkPlanAccess } from "@/lib/plan-gate";
 
-const ALLOWED = ["Admin", "HR", "Accountant"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR", "Accountant"];
 
 // ============================================
 // NSSF Monthly Contribution Return (CSV)

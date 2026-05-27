@@ -7,7 +7,7 @@ import { getAssetRollforward } from "@/app/mongodb/actions/asset-actions";
 
 export const metadata = { title: "Asset Rollforward | Reports" };
 
-const VIEW_ROLES = ["Admin", "Accountant", "Manager"];
+const VIEW_ROLES = ["SuperAdmin", "Admin", "Accountant", "Manager"];
 
 function formatCurrency(amount) {
   return (amount || 0).toLocaleString("en-KE", { minimumFractionDigits: 0 });

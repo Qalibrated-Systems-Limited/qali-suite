@@ -17,57 +17,18 @@ import EmployeeClaim from "@/app/models/employeesClaims";
 import Nonconformance from "@/app/models/nonconformance";
 import Expense from "@/app/models/expenses";
 import { StockRequest } from "@/app/models/requests";
-
-// Per-domain approver allowlists. Mirror the gates enforced inside
-// /dashboard/approvals so the dashboard tile counts exactly what the
-// approvals page will actually surface for this user.
-const STOCK_REQUEST_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "Manager",
-  "Store Manager",
-]);
-const BILL_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "Manager",
-]);
-const LEAVE_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "Manager",
-  "HR",
-]);
-const LOAN_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "HR",
-  "CFO",
-  "Finance Manager",
-]);
-const CLAIM_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "Accountant",
-  "Manager",
-]);
-const NCR_AUTHORIZER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-]);
-const OPERATING_EXPENSE_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "Accountant",
-  "Manager",
-]);
+// Approver matrices imported from the central rules module. Single
+// source of truth for these gates — every consumer (this query, the
+// /dashboard/approvals page, the dashboard tile) reads the same Sets.
+import {
+  STOCK_REQUEST_APPROVER_ROLES,
+  BILL_APPROVER_ROLES,
+  LEAVE_APPROVER_ROLES,
+  LOAN_APPROVER_ROLES,
+  CLAIM_APPROVER_ROLES,
+  NCR_AUTHORIZER_ROLES,
+  OPERATING_EXPENSE_APPROVER_ROLES,
+} from "@/lib/business-rules";
 
 // ============================================
 // APPROVAL QUERIES — cached, request-scoped

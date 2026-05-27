@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { auth } from "@/auth";
+import { canSeeInventoryNav } from "@/lib/permissions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -17,12 +18,11 @@ export default async function AdjustmentsPage({ searchParams }) {
   const session = await auth();
   const { user } = session;
 
-  // Check if user has permission
-  const hasPermission = ["Admin", "Store Manager", "Accountant"].includes(
-    user?.role,
-  );
-
-  if (!hasPermission) {
+  // Single source of truth — same gate the sidebar uses. Manager,
+  // CFO, Finance Manager, Sales Manager, Procurement Officer, and
+  // Storekeeper could see the sidebar link but the previous inline
+  // allowlist bounced them.
+  if (!canSeeInventoryNav(user?.role)) {
     return (
       <div className="space-y-4">
         <h1 className="text-lg font-semibold tracking-tight">Stock Adjustments</h1>

@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { roleAllowed } from "@/lib/permissions";
 import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
 import dbConnect from "@/app/config/dbConnect";
@@ -75,16 +76,15 @@ const RejectLoanSchema = z.object({
 // ROLE AUTHORIZATION
 // ============================================
 const LOAN_ROLES = {
-  CREATE: ["Admin", "HR", "Employee"],
-  APPROVE: ["Admin", "HR", "CFO", "Finance Manager"],
+  CREATE: ["SuperAdmin", "Admin", "HR", "Employee"],
+  APPROVE: ["SuperAdmin", "Admin", "HR", "CFO", "Finance Manager"],
   // Disbursement releases cash — finance leadership in addition to Admin.
-  DISBURSE: ["Admin", "CFO", "Finance Manager"],
-  VIEW_ALL: ["Admin", "HR", "Accountant", "CFO", "Finance Manager"],
+  DISBURSE: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
+  VIEW_ALL: ["SuperAdmin", "Admin", "HR", "Accountant", "CFO", "Finance Manager"],
 };
 
 function hasRole(user, roles) {
-  if (user.role === "SuperAdmin") return true;
-  return roles.includes(user.role);
+  return roleAllowed(user?.role, roles);
 }
 
 // ============================================

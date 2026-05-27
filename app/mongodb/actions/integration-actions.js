@@ -20,7 +20,7 @@ import { revalidatePath } from "next/cache";
 // Role-gated: Admin only.
 // ============================================
 
-const ALLOWED_ROLES = ["Admin"];
+const ALLOWED_ROLES = ["SuperAdmin", "Admin"];
 
 // ── Helpers ──────────────────────────────────────────────
 

@@ -19,7 +19,7 @@ import {
 // HR ATTENDANCE ACTIONS
 // ============================================
 
-const ALLOWED_HR = ["Admin", "HR", "Manager"];
+const ALLOWED_HR = ["SuperAdmin", "Admin", "HR", "Manager"];
 
 // Build employee snapshot from profile
 function employeeSnapshot(profile) {

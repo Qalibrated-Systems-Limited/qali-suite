@@ -71,7 +71,7 @@ export default async function UpdatePurchaseOrderPage({ params }) {
   }
 
   // Check permissions
-  if (!["Admin", "Manager", "Accountant"].includes(session.user.role)) {
+  if (!["SuperAdmin", "Admin", "Manager", "Accountant"].includes(session.user.role)) {
     return (
       <div className="flex min-h-[400px] items-center justify-center">
         <div className="text-center">

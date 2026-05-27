@@ -5,7 +5,7 @@ import DeliveryNote from "../../models/dnote";
 
 import { startOfMonth, endOfMonth } from "date-fns";
 import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getTenantContext, buildTenantMatch } from "@/lib/utils/tenant-utils";
 
 // ============================================
 // SEARCH DELIVERY NOTES (WITH PAGINATION)
@@ -20,7 +20,7 @@ export async function searchDeliveryNotes(
   try {
     // Get tenant context
     const { companyId, isSuperAdmin } = await getTenantContext();
-    const tenantMatch = isSuperAdmin ? {} : { companyId };
+    const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
 
     const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 

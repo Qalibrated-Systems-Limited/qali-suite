@@ -54,7 +54,7 @@ export default async function BillDetailsPage({ params }) {
   const { user } = session;
 
   // Check permissions
-  if (!["Admin", "Manager", "Accountant"].includes(user.role)) {
+  if (!["SuperAdmin", "Admin", "Manager", "Accountant"].includes(user.role)) {
     return (
       <div className="flex min-h-[400px] items-center justify-center">
         <div className="text-center">
@@ -470,7 +470,7 @@ export default async function BillDetailsPage({ params }) {
                               </p>
                             )}
                             {line.account?.type === "asset" &&
-                              ["Admin", "Accountant"].includes(user.role) &&
+                              ["SuperAdmin", "Admin", "Accountant"].includes(user.role) &&
                               !["cancelled", "rejected"].includes(
                                 bill.status
                               ) && (

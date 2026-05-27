@@ -17,7 +17,7 @@ import { errorHandlers } from "../../utils/errorHandler";
 export async function POST(req) {
   await isAuth(req);
 
-  if (!["Admin", "Operator"].includes(req.role)) {
+  if (!["SuperAdmin", "Admin", "Operator"].includes(req.role)) {
     return authErrorResponse("Not authorized to add transaction");
   }
 
@@ -43,7 +43,7 @@ export async function POST(req) {
 export async function PUT(req) {
   await isAuth(req);
 
-  if (!["Admin", "Operator"].includes(req.role)) {
+  if (!["SuperAdmin", "Admin", "Operator"].includes(req.role)) {
     return authErrorResponse("Not authorized to add transaction");
   }
 
@@ -69,7 +69,7 @@ export async function PUT(req) {
 export async function PATCH(req) {
   await isAuth(req);
 
-  if (!["Admin", "Operator"].includes(req.role)) {
+  if (!["SuperAdmin", "Admin", "Operator"].includes(req.role)) {
     return authErrorResponse("Not authorized to add transaction");
   }
 

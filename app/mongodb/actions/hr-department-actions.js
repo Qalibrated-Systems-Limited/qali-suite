@@ -1,6 +1,7 @@
 "use server";
 
 import mongoose from "mongoose";
+import { roleAllowed } from "@/lib/permissions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import dbConnect from "@/app/config/dbConnect";
@@ -18,7 +19,7 @@ const DEPT_ROLES = {
 };
 
 function hasRole(user, allowedRoles) {
-  return allowedRoles.includes(user?.role);
+  return roleAllowed(user?.role, allowedRoles);
 }
 
 // ============================================

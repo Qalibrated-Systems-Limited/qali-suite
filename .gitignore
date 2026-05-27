@@ -28,6 +28,9 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# Claude Code local-only settings (project-wide settings.json is fine to commit)
+.claude/settings.local.json
+
 # vercel
 .vercel
 

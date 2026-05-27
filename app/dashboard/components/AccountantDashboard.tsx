@@ -57,7 +57,7 @@ export default async function AccountantDashboardPage() {
   const userRole = (user as { role?: string }).role || "Employee";
 
   // Only accountants and admins
-  if (!["Admin", "Accountant"].includes(userRole)) {
+  if (!["SuperAdmin", "Admin", "Accountant"].includes(userRole)) {
     redirect("/dashboard");
   }
 

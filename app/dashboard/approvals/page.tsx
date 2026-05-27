@@ -30,57 +30,19 @@ import {
 import { Banknote, CalendarDays, Coins, HandCoins, FileWarning, Wallet } from "lucide-react";
 import ApprovalDecisionForm from "./components/ApprovalDecisionForm";
 
-// Per-domain approver allowlists. Each mirrors the gate enforced by
-// that domain's server action — adding/removing a role here doesn't
-// change what they can do, only what's visible. Domains share this
-// page; nothing else.
-const STOCK_REQUEST_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "Manager",
-  "Store Manager",
-]);
-const BILL_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "Manager",
-]);
-const LEAVE_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "Manager",
-  "HR",
-]);
-const LOAN_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "HR",
-  "CFO",
-  "Finance Manager",
-]);
-const CLAIM_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "Accountant",
-  "Manager",
-]);
-const NCR_AUTHORIZER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-]);
-const OPERATING_EXPENSE_APPROVER_ROLES = new Set([
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "Accountant",
-  "Manager",
-]);
+// Per-domain approver allowlists imported from the central rules
+// module. Don't redefine them here — change @/lib/business-rules and
+// every consumer (this page, approval-queries, dashboard tile) picks it
+// up at once.
+import {
+  STOCK_REQUEST_APPROVER_ROLES,
+  BILL_APPROVER_ROLES,
+  LEAVE_APPROVER_ROLES,
+  LOAN_APPROVER_ROLES,
+  CLAIM_APPROVER_ROLES,
+  NCR_AUTHORIZER_ROLES,
+  OPERATING_EXPENSE_APPROVER_ROLES,
+} from "@/lib/business-rules";
 
 const PRIORITY_STYLES: Record<string, string> = {
   urgent:

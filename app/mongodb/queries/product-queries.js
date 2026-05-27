@@ -4,6 +4,14 @@ import Product from "@/app/models/product";
 import { sanitizeSearchTerm } from "@/lib/utils/sanitize";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { serializeBsonType } from "@/lib/utils";
+import {
+  LOW_STOCK_MATCH,
+  IN_STOCK_MATCH,
+  OUT_OF_STOCK_MATCH,
+  lowStockCondExpr,
+  inStockCondExpr,
+  outOfStockCondExpr,
+} from "@/lib/business-rules";
 
 const { ObjectId } = mongoose.Types;
 const ITEMS_PER_PAGE = 20;
@@ -15,45 +23,16 @@ const ITEMS_PER_PAGE = 20;
 function buildQuantityFilter(quantity) {
   if (!quantity) return {};
 
+  // Canonical predicates live in @/lib/business-rules — both the
+  // dashboard alert and this list filter import them so they can't
+  // drift. Don't redefine the conditions here.
   switch (quantity) {
     case "in-stock":
-      // On-hand AND above the reorder threshold (or no threshold set).
-      // Active products only — matches the dashboard alert definition.
-      return {
-        status: "active",
-        "inventory.quantityOnHand": { $gt: 0 },
-        $expr: {
-          $or: [
-            { $lte: [{ $ifNull: ["$inventory.reorderLevel", 0] }, 0] },
-            {
-              $gt: [
-                { $ifNull: ["$inventory.quantityOnHand", 0] },
-                { $ifNull: ["$inventory.reorderLevel", 0] },
-              ],
-            },
-          ],
-        },
-      };
+      return IN_STOCK_MATCH;
     case "low-stock":
-      // Industry standard: active products with qty on hand > 0 AND at
-      // or below the item's reorder level (which must be configured > 0).
-      // Mirrors getDashboardAlerts so the dashboard tile and this filter
-      // always agree.
-      return {
-        status: "active",
-        "inventory.quantityOnHand": { $gt: 0 },
-        "inventory.reorderLevel": { $gt: 0 },
-        $expr: {
-          $lte: [
-            "$inventory.quantityOnHand",
-            "$inventory.reorderLevel",
-          ],
-        },
-      };
+      return LOW_STOCK_MATCH;
     case "out-of-stock":
-      // qty <= 0 (regardless of status — a soft-deleted out-of-stock
-      // product is still worth flagging in the list).
-      return { "inventory.quantityOnHand": { $lte: 0 } };
+      return OUT_OF_STOCK_MATCH;
     default:
       return {};
   }
@@ -87,60 +66,18 @@ export async function getStockStats() {
   // three COLLSCANs on the schema's older indexes). With the new
   // (companyId, inventory.quantityOnHand) index, the planner can satisfy
   // this from a single index scan.
+  // Predicates pulled from @/lib/business-rules so the three KPIs here
+  // share the exact same logic as the dashboard alert and the list
+  // filter — single source of truth for "what does low stock mean".
   const [result] = await Product.aggregate([
     { $match: tenantMatch },
-    {
-      $addFields: {
-        _qty: { $ifNull: ["$inventory.quantityOnHand", 0] },
-        _reorder: { $ifNull: ["$inventory.reorderLevel", 0] },
-      },
-    },
     {
       $group: {
         _id: null,
         totalItems: { $sum: 1 },
-        // Active products at or below reorder level (qty > 0). Matches
-        // the dashboard "Low stock" alert tile definition.
-        lowStock: {
-          $sum: {
-            $cond: [
-              {
-                $and: [
-                  { $eq: ["$status", "active"] },
-                  { $gt: ["$_qty", 0] },
-                  { $gt: ["$_reorder", 0] },
-                  { $lte: ["$_qty", "$_reorder"] },
-                ],
-              },
-              1,
-              0,
-            ],
-          },
-        },
-        outOfStock: {
-          $sum: { $cond: [{ $lte: ["$_qty", 0] }, 1, 0] },
-        },
-        // Active products with stock above reorder (or no reorder set).
-        inStock: {
-          $sum: {
-            $cond: [
-              {
-                $and: [
-                  { $eq: ["$status", "active"] },
-                  { $gt: ["$_qty", 0] },
-                  {
-                    $or: [
-                      { $lte: ["$_reorder", 0] },
-                      { $gt: ["$_qty", "$_reorder"] },
-                    ],
-                  },
-                ],
-              },
-              1,
-              0,
-            ],
-          },
-        },
+        lowStock: { $sum: { $cond: [lowStockCondExpr(), 1, 0] } },
+        outOfStock: { $sum: { $cond: [outOfStockCondExpr(), 1, 0] } },
+        inStock: { $sum: { $cond: [inStockCondExpr(), 1, 0] } },
       },
     },
   ]);

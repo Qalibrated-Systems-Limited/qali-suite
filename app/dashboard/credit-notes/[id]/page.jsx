@@ -33,7 +33,7 @@ export default async function CreditNoteDetailPage({ params }) {
 
   const { user } = session;
 
-  if (!["Admin", "Accountant"].includes(user.role)) {
+  if (!["SuperAdmin", "Admin", "Accountant"].includes(user.role)) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
         <div className="text-center">
