@@ -3,7 +3,8 @@
     "allow": [
       "Bash(perl -ne 'print if s/\\\\[\"Admin\"\\(?![^\\\\]]*\"SuperAdmin\"\\)/[\"SuperAdmin\", \"Admin\"/g' /Users/oongo/projects/inventory/app/dashboard/hr/page.jsx)",
       "Bash(perl -ne 'BEGIN{$c=0} if \\(s/\\\\[\"Admin\"\\(?![^\\\\]]*\"SuperAdmin\"\\)/[\"SuperAdmin\", \"Admin\"/g\\) { $c++; print \"$.: $_\"; } END{print STDERR \"Changed $c line\\(s\\)\\\\n\"}' /Users/oongo/projects/inventory/app/mongodb/actions/hr-leave-actions.js)",
-      "Bash(xargs perl -i -pe 's/\\\\[\"Admin\"\\(?![^\\\\]]*\"SuperAdmin\"\\)/[\"SuperAdmin\", \"Admin\"/g')"
+      "Bash(xargs perl -i -pe 's/\\\\[\"Admin\"\\(?![^\\\\]]*\"SuperAdmin\"\\)/[\"SuperAdmin\", \"Admin\"/g')",
+      "Bash(npm run *)"
     ]
   }
 }

@@ -8,6 +8,7 @@ import { roleAllowed } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import KpiListCards from "./components/KpiListCards";
+import KpiTemplatesDialog from "./components/KpiTemplatesDialog";
 
 export const metadata = { title: "KPIs" };
 
@@ -29,11 +30,14 @@ async function KpiListLoader({ canManage }) {
             </p>
           </div>
           {canManage && (
-            <Button asChild>
-              <Link href="/dashboard/kpis/create">
-                <Plus className="h-4 w-4" /> Create your first KPI
-              </Link>
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <KpiTemplatesDialog triggerLabel="Use starter templates" triggerVariant="default" triggerSize="default" />
+              <Button asChild variant="outline">
+                <Link href="/dashboard/kpis/create">
+                  <Plus className="h-4 w-4" /> Create from scratch
+                </Link>
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -52,7 +56,7 @@ export default async function KpisIndex() {
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">KPIs</h1>
           <p className="text-sm text-muted-foreground">
@@ -60,12 +64,15 @@ export default async function KpisIndex() {
           </p>
         </div>
         {canManage && (
-          <Button asChild size="sm">
-            <Link href="/dashboard/kpis/create">
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              New KPI
-            </Link>
-          </Button>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+            <KpiTemplatesDialog triggerLabel="Templates" />
+            <Button asChild size="sm">
+              <Link href="/dashboard/kpis/create">
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                New KPI
+              </Link>
+            </Button>
+          </div>
         )}
       </div>
 

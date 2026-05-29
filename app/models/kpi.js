@@ -43,13 +43,16 @@ const kpiSchema = new Schema(
     },
 
     // Where the actual value comes from.
-    //   manual               — user enters per period
-    //   monthly_revenue      — Cr-Dr on revenue accounts (posted JEs in period)
-    //   monthly_payroll_cost — gross payroll + employer contributions for runs paid in period
-    //   ar_days_outstanding  — open AR balance ÷ recent daily revenue
-    //   cash_position        — balance of cash/bank/mpesa accounts at period end
-    //   active_headcount     — count of employees with active/probation status
-    //   gross_margin_percent — (revenue - COGS) ÷ revenue × 100
+    //   manual                    — user enters per period
+    //   monthly_revenue           — Cr-Dr on revenue accounts (posted JEs in period)
+    //   monthly_payroll_cost      — gross payroll + employer contributions for runs paid in period
+    //   ar_days_outstanding       — open AR balance ÷ recent daily revenue
+    //   cash_position             — balance of cash/bank/mpesa accounts at period end
+    //   active_headcount          — count of employees with active/probation status
+    //   gross_margin_percent      — (revenue - COGS) ÷ revenue × 100
+    //   opex_ratio                — non-COGS expenses ÷ revenue × 100
+    //   payroll_to_revenue_ratio  — payroll cost ÷ revenue × 100
+    //   avg_order_value           — revenue ÷ count of completed invoices in period
     source: {
       type: String,
       required: true,
@@ -61,6 +64,9 @@ const kpiSchema = new Schema(
         "cash_position",
         "active_headcount",
         "gross_margin_percent",
+        "opex_ratio",
+        "payroll_to_revenue_ratio",
+        "avg_order_value",
       ],
       default: "manual",
     },

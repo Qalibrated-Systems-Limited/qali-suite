@@ -2,6 +2,7 @@
 
 import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import dbConnect from "@/app/config/dbConnect";
 import {
   getTenantContext,
@@ -15,6 +16,8 @@ import Account from "@/app/models/account";
 import JournalEntry from "@/app/models/JournalEntry";
 import EmployeeProfile from "@/app/models/employeeProfile";
 import PayrollRun from "@/app/models/payrollRun";
+import Invoice from "@/app/models/invoice";
+import { KPI_TEMPLATES } from "@/app/dashboard/kpis/lib/kpi-templates";
 
 const ObjectId = mongoose.Types.ObjectId;
 
@@ -46,6 +49,9 @@ const SOURCES = [
   "cash_position",
   "active_headcount",
   "gross_margin_percent",
+  "opex_ratio",
+  "payroll_to_revenue_ratio",
+  "avg_order_value",
 ];
 const UNITS = ["currency", "percentage", "days", "count", "ratio"];
 const DIRECTIONS = ["higher_is_better", "lower_is_better"];
@@ -178,7 +184,12 @@ async function buildOwnerSubdoc(companyId, isSuperAdmin, parsed) {
 // ============================================
 // CREATE KPI
 // ============================================
+// On success the action does a server-side redirect to the new KPI's detail
+// page — Next 16 pattern. `redirect()` lives outside the try/catch because
+// it works by throwing NEXT_REDIRECT, which Next's framework catches; if
+// we caught it here we'd swallow the navigation.
 export async function createKpi(_prev, formData) {
+  let newKpiId = null;
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const err = guard(user, KPI_ROLES.MANAGE);
@@ -221,16 +232,20 @@ export async function createKpi(_prev, formData) {
     });
 
     revalidatePath("/dashboard/kpis");
-    return { success: true, kpiId: kpi._id.toString() };
+    newKpiId = kpi._id.toString();
   } catch (error) {
     console.error("createKpi:", error);
     return { success: false, error: error.message || "Failed to create KPI" };
   }
+  redirect(`/dashboard/kpis/${newKpiId}`);
 }
 
 // ============================================
 // UPDATE KPI
 // ============================================
+// Same redirect-from-action pattern as createKpi — Next 16 idiom. On any
+// validation/DB error we return state; on success we fall through to the
+// redirect at the bottom (which throws NEXT_REDIRECT, hence outside the try).
 export async function updateKpi(kpiId, _prev, formData) {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
@@ -273,11 +288,46 @@ export async function updateKpi(kpiId, _prev, formData) {
 
     revalidatePath("/dashboard/kpis");
     revalidatePath(`/dashboard/kpis/${kpiId}`);
-    return { success: true };
   } catch (error) {
     console.error("updateKpi:", error);
     return { success: false, error: error.message || "Failed to update KPI" };
   }
+  redirect(`/dashboard/kpis/${kpiId}`);
+}
+
+// ============================================
+// UPDATE TARGET ONLY
+// ============================================
+// Lightweight action for the inline "edit target" affordance on the detail
+// page. Doesn't touch any other field — historical snapshots keep the
+// targetAtTime they were recorded against; only future snapshots use the
+// new value.
+export async function updateKpiTarget(kpiId, newTarget) {
+  try {
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const err = guard(user, KPI_ROLES.MANAGE);
+    if (err) return { success: false, error: err };
+
+    const target = parseFloat(newTarget);
+    if (!Number.isFinite(target)) {
+      return { success: false, error: "Target must be a number" };
+    }
+
+    await dbConnect();
+    const kpi = await Kpi.findOne(withTenantScope({ _id: kpiId }, companyId, isSuperAdmin));
+    if (!kpi) return { success: false, error: "KPI not found" };
+
+    kpi.target = target;
+    kpi.lastModifiedBy = { name: user.name, id: user.id };
+    await kpi.save();
+
+    revalidatePath(`/dashboard/kpis/${kpiId}`);
+    revalidatePath("/dashboard/kpis");
+  } catch (error) {
+    console.error("updateKpiTarget:", error);
+    return { success: false, error: error.message || "Failed to update target" };
+  }
+  redirect(`/dashboard/kpis/${kpiId}`);
 }
 
 // ============================================
@@ -299,11 +349,11 @@ export async function setKpiActive(kpiId, isActive) {
 
     revalidatePath("/dashboard/kpis");
     revalidatePath(`/dashboard/kpis/${kpiId}`);
-    return { success: true };
   } catch (error) {
     console.error("setKpiActive:", error);
     return { success: false, error: error.message || "Failed to update KPI status" };
   }
+  redirect(`/dashboard/kpis/${kpiId}`);
 }
 
 // ============================================
@@ -367,11 +417,11 @@ export async function recordKpiSnapshot(kpiId, _prev, formData) {
 
     revalidatePath(`/dashboard/kpis/${kpiId}`);
     revalidatePath("/dashboard/kpis");
-    return { success: true };
   } catch (error) {
     console.error("recordKpiSnapshot:", error);
     return { success: false, error: error.message || "Failed to record snapshot" };
   }
+  redirect(`/dashboard/kpis/${kpiId}`);
 }
 
 // ============================================
@@ -613,6 +663,98 @@ async function computeGrossMarginPercent(ctx) {
   return ((revenue - cogs) / revenue) * 100;
 }
 
+// ============================================
+// AUTO FORMULAS — defensive twins
+// ============================================
+
+async function computeOpexRatio(ctx) {
+  // Operating expense ratio = non-COGS expenses ÷ revenue × 100.
+  // The defensive twin of Revenue — if both go up together, you're not
+  // actually getting more efficient; if OpEx outpaces revenue you're
+  // burning cash to grow. COGS is excluded because Gross Margin already
+  // covers that side.
+  const { start, end } = getPeriodBounds(ctx.periodicity, ctx.periodYear, ctx.periodMonth);
+  const baseMatch = buildBaseMatch(ctx.companyId, ctx.isSuperAdmin);
+
+  const [revenueAccounts, expenseAccounts, cogsAccounts] = await Promise.all([
+    Account.find(buildAccountFilter(ctx.companyId, ctx.isSuperAdmin, { accountType: "revenue" }))
+      .select("_id")
+      .lean(),
+    Account.find(buildAccountFilter(ctx.companyId, ctx.isSuperAdmin, { accountType: "expense" }))
+      .select("_id")
+      .lean(),
+    Account.find(
+      buildAccountFilter(ctx.companyId, ctx.isSuperAdmin, {
+        systemAccount: { $in: ["cogs", "cost_of_sales"] },
+      })
+    )
+      .select("_id")
+      .lean(),
+  ]);
+
+  const revenue = await sumJournalAggregate({
+    baseMatch,
+    accountIds: revenueAccounts.map((a) => a._id),
+    start,
+    end,
+  });
+  if (revenue <= 0) return 0;
+
+  const cogsIdSet = new Set(cogsAccounts.map((a) => a._id.toString()));
+  const opexAccountIds = expenseAccounts
+    .filter((a) => !cogsIdSet.has(a._id.toString()))
+    .map((a) => a._id);
+
+  const opex = await sumJournalAggregate({
+    baseMatch,
+    accountIds: opexAccountIds,
+    start,
+    end,
+    side: "debit_minus_credit",
+  });
+  return (opex / revenue) * 100;
+}
+
+async function computePayrollToRevenueRatio(ctx) {
+  // Payroll-as-share-of-revenue. For service-heavy SMBs payroll is the
+  // single biggest fixed cost; this metric exposes overstaffing or
+  // revenue contraction faster than either number alone.
+  const [payroll, revenue] = await Promise.all([
+    computeMonthlyPayrollCost(ctx),
+    computeMonthlyRevenue(ctx),
+  ]);
+  if (revenue <= 0) return 0;
+  return (payroll / revenue) * 100;
+}
+
+async function computeAvgOrderValue(ctx) {
+  // AOV = total revenue ÷ count of completed invoices in period. Watching
+  // only revenue masks discount-led growth — if AOV drifts down while
+  // revenue is up, you're winning more deals at worse prices.
+  const { start, end } = getPeriodBounds(ctx.periodicity, ctx.periodYear, ctx.periodMonth);
+  const tenantMatch = ctx.isSuperAdmin ? {} : { companyId: new ObjectId(ctx.companyId) };
+
+  const result = await Invoice.aggregate([
+    {
+      $match: {
+        ...tenantMatch,
+        status: { $in: ["sent", "completed"] },
+        invoiceDate: { $gte: start, $lt: end },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        revenue: { $sum: "$total" },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  if (!result[0] || result[0].count === 0) return 0;
+  return result[0].revenue / result[0].count;
+}
+
 // Source → compute function map
 const AUTO_COMPUTERS = {
   monthly_revenue: computeMonthlyRevenue,
@@ -621,6 +763,9 @@ const AUTO_COMPUTERS = {
   cash_position: computeCashPosition,
   active_headcount: computeActiveHeadcount,
   gross_margin_percent: computeGrossMarginPercent,
+  opex_ratio: computeOpexRatio,
+  payroll_to_revenue_ratio: computePayrollToRevenueRatio,
+  avg_order_value: computeAvgOrderValue,
 };
 
 // ============================================
@@ -693,17 +838,18 @@ export async function computeKpiSnapshot(kpiId, periodYear, periodMonth) {
 
     revalidatePath(`/dashboard/kpis/${kpiId}`);
     revalidatePath("/dashboard/kpis");
-    return { success: true, actualValue };
   } catch (error) {
     console.error("computeKpiSnapshot:", error);
     return { success: false, error: error.message || "Failed to compute KPI snapshot" };
   }
+  redirect(`/dashboard/kpis/${kpiId}`);
 }
 
 // ============================================
 // DELETE SNAPSHOT (admin-only; undoes a recorded actual)
 // ============================================
 export async function deleteKpiSnapshot(snapshotId) {
+  let kpiIdForRedirect = null;
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const err = guard(user, KPI_ROLES.MANAGE);
@@ -713,13 +859,86 @@ export async function deleteKpiSnapshot(snapshotId) {
     const snap = await KpiSnapshot.findOne(withTenantScope({ _id: snapshotId }, companyId, isSuperAdmin));
     if (!snap) return { success: false, error: "Snapshot not found" };
 
-    const kpiId = snap.kpiId.toString();
+    kpiIdForRedirect = snap.kpiId.toString();
     await snap.deleteOne();
 
-    revalidatePath(`/dashboard/kpis/${kpiId}`);
-    return { success: true };
+    revalidatePath(`/dashboard/kpis/${kpiIdForRedirect}`);
   } catch (error) {
     console.error("deleteKpiSnapshot:", error);
     return { success: false, error: error.message || "Failed to delete snapshot" };
   }
+  redirect(`/dashboard/kpis/${kpiIdForRedirect}`);
+}
+
+// ============================================
+// SEED STARTER KPIs (from the curated template library)
+// ============================================
+// Idempotent: skips templates whose `name` already exists for this company
+// so re-running doesn't create duplicates. Returns lists of what was created
+// vs skipped so the UI can give an honest summary.
+//
+// `selectedKeys` is an array of template `key`s. If null/undefined, all
+// templates are seeded.
+export async function seedStarterKpis(selectedKeys = null) {
+  try {
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const err = guard(user, KPI_ROLES.MANAGE);
+    if (err) return { success: false, error: err };
+
+    await dbConnect();
+
+    const tenantId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+
+    const toSeed = Array.isArray(selectedKeys) && selectedKeys.length > 0
+      ? KPI_TEMPLATES.filter((t) => selectedKeys.includes(t.key))
+      : KPI_TEMPLATES;
+
+    if (toSeed.length === 0) {
+      return { success: false, error: "No templates selected" };
+    }
+
+    // Single round-trip: find any KPIs that already match the names we'd create.
+    const names = toSeed.map((t) => t.name);
+    const existing = await Kpi.find(
+      withTenantScope({ name: { $in: names } }, companyId, isSuperAdmin)
+    )
+      .select("name")
+      .lean();
+    const existingNames = new Set(existing.map((k) => k.name));
+
+    const created = [];
+    const skipped = [];
+
+    for (const t of toSeed) {
+      if (existingNames.has(t.name)) {
+        skipped.push(t.name);
+        continue;
+      }
+      const doc = await Kpi.create({
+        companyId: tenantId,
+        name: t.name,
+        description: t.description || "",
+        category: t.category,
+        source: t.source,
+        unit: t.unit,
+        periodicity: t.periodicity,
+        target: t.target,
+        targetDirection: t.targetDirection,
+        // Templates don't carry custom thresholds / labels — use defaults.
+        customThresholds: { onTargetThreshold: null, nearTargetThreshold: null },
+        statusLabels: { onTarget: null, nearTarget: null, offTarget: null },
+        isActive: true,
+        createdBy: { name: user.name, id: user.id },
+      });
+      created.push({ _id: doc._id.toString(), name: doc.name });
+    }
+
+    revalidatePath("/dashboard/kpis");
+  } catch (error) {
+    console.error("seedStarterKpis:", error);
+    return { success: false, error: error.message || "Failed to seed KPIs" };
+  }
+  // Navigate to the populated list. The dialog unmounts as the page
+  // re-renders, so no client-side state management needed for closing.
+  redirect("/dashboard/kpis");
 }

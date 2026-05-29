@@ -1,9 +1,8 @@
 "use client";
 
-import { useActionState, useState, useEffect, useMemo } from "react";
+import { useActionState, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, AlertCircle } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { createKpi, updateKpi } from "@/app/mongodb/actions/kpi-actions";
@@ -69,6 +68,24 @@ const SOURCE_ITEMS = [
     value: "gross_margin_percent",
     label: "Gross Margin %",
     description: "(Revenue − COGS) ÷ Revenue × 100",
+    group: "Auto-computed",
+  },
+  {
+    value: "opex_ratio",
+    label: "Operating Expense Ratio",
+    description: "Non-COGS expenses ÷ revenue × 100",
+    group: "Auto-computed",
+  },
+  {
+    value: "payroll_to_revenue_ratio",
+    label: "Payroll as % of Revenue",
+    description: "Payroll cost (gross + employer) ÷ revenue × 100",
+    group: "Auto-computed",
+  },
+  {
+    value: "avg_order_value",
+    label: "Average Order Value",
+    description: "Revenue ÷ count of completed invoices in the period",
     group: "Auto-computed",
   },
 ];
@@ -140,17 +157,9 @@ export default function KpiForm({ mode = "create", kpi = null, ownerCandidates =
       }));
   }, [ownerCandidates]);
 
-  useEffect(() => {
-    if (state.success) {
-      toast.success(mode === "create" ? "KPI created" : "KPI updated");
-      if (mode === "create" && state.kpiId) {
-        router.push(`/dashboard/kpis/${state.kpiId}`);
-      } else {
-        router.refresh();
-      }
-    }
-  }, [state.success, state.kpiId, mode, router]);
-
+  // No useEffect / toast — createKpi and updateKpi server-actions call
+  // `redirect()` on success, so a successful submit navigates away rather
+  // than firing client-side notifications. Errors render inline below.
   const fieldErrors = state.fieldErrors || {};
 
   return (
@@ -313,11 +322,17 @@ export default function KpiForm({ mode = "create", kpi = null, ownerCandidates =
         </CardContent>
       </Card>
 
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={() => router.back()} disabled={isPending}>
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => router.back()}
+          disabled={isPending}
+          className="w-full sm:w-auto"
+        >
           Cancel
         </Button>
-        <Button type="submit" disabled={isPending}>
+        <Button type="submit" disabled={isPending} className="w-full sm:w-auto">
           {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
           {mode === "create" ? "Create KPI" : "Save changes"}
         </Button>
