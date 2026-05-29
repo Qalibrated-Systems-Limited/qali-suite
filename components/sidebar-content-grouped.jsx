@@ -35,6 +35,7 @@ import {
   CheckSquare,
   ClipboardCheck,
   ShieldAlert,
+  Target,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -106,6 +107,16 @@ const getNavigationGroups = (user) => {
     id: "approvals",
     href: "/dashboard/approvals",
     hidden: !canSeeApprovalsNav(user?.role),
+  },
+
+  // KPIs (ungrouped — executive scorecard, same audience as Reports)
+  {
+    type: "single",
+    icon: Target,
+    label: "KPIs",
+    id: "kpis",
+    href: "/dashboard/kpis",
+    hidden: !canSeeReportsNav(user?.role),
   },
 
   // ============================================

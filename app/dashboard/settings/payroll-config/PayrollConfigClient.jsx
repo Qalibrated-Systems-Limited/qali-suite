@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, CheckCircle2, ChevronDown, ChevronUp, Loader2, AlertCircle, Trash2, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { createPayrollConfig, activatePayrollConfig, savePayrollGlMapping } from "@/app/mongodb/actions/hr-settings-actions";
+import { createPayrollConfig, activatePayrollConfig, savePayrollGlMapping, backfillStatutoryAccounts } from "@/app/mongodb/actions/hr-settings-actions";
 
 // ─── Kenya default PAYE brackets (annual taxable income, KES) ───
 const KENYA_DEFAULT_BRACKETS = [
@@ -289,12 +289,26 @@ const GL_FIELDS = [
 function GlMappingForm({ config, accounts }) {
   const [state, formAction, isPending] = useActionState(savePayrollGlMapping, { success: false, error: null });
   const [open, setOpen] = useState(false);
+  const router = useRouter();
+  const [isBackfilling, startBackfill] = useTransition();
 
   useEffect(() => {
     if (state.success) toast.success("GL mapping saved");
   }, [state.success]);
 
   const glMapping = config.glMapping || {};
+
+  function handleBackfill() {
+    startBackfill(async () => {
+      const res = await backfillStatutoryAccounts();
+      if (res.success) {
+        toast.success(res.message);
+        router.refresh();
+      } else {
+        toast.error(res.error || "Could not backfill statutory accounts");
+      }
+    });
+  }
 
   return (
     <div className="border-t border-border">
@@ -314,6 +328,25 @@ function GlMappingForm({ config, accounts }) {
             Map payroll line items to GL accounts. When payroll is approved, the accrual journal is posted automatically.
             When marked paid, the clearing journal is posted. All fields are optional — posting is skipped if an account is not mapped.
           </p>
+
+          <div className="flex items-start gap-3 rounded-md border border-border bg-muted/30 px-3 py-2">
+            <div className="flex-1 text-xs">
+              <p className="font-medium text-foreground">Missing accounts?</p>
+              <p className="text-muted-foreground">
+                Older tenants may be missing AHL Payable, Salaries Payable, or Employer AHL. Run backfill to add them — safe to click repeatedly.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleBackfill}
+              disabled={isBackfilling}
+            >
+              {isBackfilling && <Loader2 className="h-3 w-3 animate-spin" />}
+              {isBackfilling ? "Backfilling..." : "Backfill statutory accounts"}
+            </Button>
+          </div>
 
           {state.error && (
             <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-500/5 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:text-red-400">

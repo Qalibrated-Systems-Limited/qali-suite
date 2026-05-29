@@ -199,3 +199,145 @@ export async function activatePayrollConfig(configId) {
     return { success: false, error: error.message || "Failed to activate configuration" };
   }
 }
+
+// ============================================
+// BACKFILL STATUTORY ACCOUNTS
+// Creates the payroll accounts that were added after this company was onboarded
+// (AHL Payable, Salaries Payable, Employer AHL). Idempotent — skips anything
+// already present (keyed by systemAccount marker, not accountCode).
+// Also tags an existing untagged "Employer NSSF" (6110) with its systemAccount
+// so backfills/lookups can find it reliably.
+// ============================================
+const STATUTORY_ACCOUNTS_TO_BACKFILL = [
+  {
+    systemAccount: "ahl_payable",
+    accountCode: "2155",
+    accountName: "Affordable Housing Levy Payable",
+    accountType: "liability",
+    subType: "payroll",
+    parentCode: "2100",
+    description: "Employee + employer AHL — remit to KRA",
+  },
+  {
+    systemAccount: "salaries_payable",
+    accountCode: "2185",
+    accountName: "Salaries Payable",
+    accountType: "liability",
+    subType: "payroll",
+    parentCode: "2100",
+    description: "Net pay accrued on payroll approve; cleared when bank disbursement posts",
+  },
+  {
+    systemAccount: "employer_ahl_expense",
+    accountCode: "6115",
+    accountName: "Employer AHL",
+    accountType: "expense",
+    subType: "payroll",
+    parentCode: "6000",
+    description: "Employer share of Affordable Housing Levy",
+  },
+];
+
+export async function backfillStatutoryAccounts() {
+  try {
+    await requirePlanAccess("hr");
+    const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const err = guard(user);
+    if (err) return { success: false, error: err };
+
+    await dbConnect();
+
+    const Account = mongoose.model("Account");
+    const tenantFilter = withTenantScope({}, companyId, isSuperAdmin);
+    const tenantId = getCompanyIdForCreate(null, companyId, isSuperAdmin);
+
+    const desiredSystemAccounts = STATUTORY_ACCOUNTS_TO_BACKFILL.map((s) => s.systemAccount);
+
+    const existing = await Account.find({
+      ...tenantFilter,
+      systemAccount: { $in: [...desiredSystemAccounts, "employer_nssf_expense"] },
+    })
+      .select("systemAccount accountCode")
+      .lean();
+    const existingMarkers = new Set(existing.map((a) => a.systemAccount));
+
+    const parentCodes = [...new Set(STATUTORY_ACCOUNTS_TO_BACKFILL.map((s) => s.parentCode))];
+    const parents = await Account.find({
+      ...tenantFilter,
+      accountCode: { $in: parentCodes },
+    }).lean();
+    const parentByCode = new Map(parents.map((p) => [p.accountCode, p]));
+
+    const created = [];
+    const collisions = [];
+
+    for (const spec of STATUTORY_ACCOUNTS_TO_BACKFILL) {
+      if (existingMarkers.has(spec.systemAccount)) continue;
+
+      const codeCollision = await Account.findOne({
+        ...tenantFilter,
+        accountCode: spec.accountCode,
+      })
+        .select("_id accountName")
+        .lean();
+      if (codeCollision) {
+        collisions.push(`${spec.accountCode} (${codeCollision.accountName})`);
+        continue;
+      }
+
+      const parent = parentByCode.get(spec.parentCode);
+      const ancestors = parent ? [...(parent.ancestors || []), parent._id] : [];
+      const level = parent ? (parent.level || 0) + 1 : 0;
+      const path = parent?.path ? `${parent.path}/${spec.accountCode}` : spec.accountCode;
+
+      await Account.create({
+        companyId: tenantId,
+        accountCode: spec.accountCode,
+        accountName: spec.accountName,
+        accountType: spec.accountType,
+        subType: spec.subType,
+        canPost: true,
+        isActive: true,
+        systemAccount: spec.systemAccount,
+        parentAccount: parent?._id || null,
+        ancestors,
+        level,
+        path,
+        description: spec.description,
+        balance: 0,
+        createdBy: { name: user.name, id: user.id },
+      });
+
+      created.push(`${spec.accountCode} — ${spec.accountName}`);
+    }
+
+    let taggedNssf = false;
+    if (!existingMarkers.has("employer_nssf_expense")) {
+      const nssfDoc = await Account.findOne({
+        ...tenantFilter,
+        accountCode: "6110",
+        systemAccount: { $in: [null, undefined] },
+      });
+      if (nssfDoc) {
+        nssfDoc.systemAccount = "employer_nssf_expense";
+        await nssfDoc.save();
+        taggedNssf = true;
+      }
+    }
+
+    revalidatePath("/dashboard/settings/payroll-config");
+
+    const parts = [];
+    if (created.length > 0) parts.push(`Created: ${created.join(", ")}`);
+    if (taggedNssf) parts.push("Tagged Employer NSSF (6110) with systemAccount marker");
+    if (collisions.length > 0) {
+      parts.push(`Skipped due to code collision: ${collisions.join(", ")} — rename existing accounts or use a different code`);
+    }
+    const message = parts.length > 0 ? parts.join(". ") : "All statutory accounts already present";
+
+    return { success: true, message, created, taggedNssf, collisions };
+  } catch (error) {
+    console.error("backfillStatutoryAccounts:", error);
+    return { success: false, error: error.message || "Failed to backfill statutory accounts" };
+  }
+}
