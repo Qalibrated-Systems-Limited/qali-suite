@@ -57,8 +57,9 @@ This document is a module-by-module audit of what's shipped, what's partial, and
 | Payments Received | ✅ | Matches invoices, AR clearing, multi-method |
 | Payments Made | ✅ | Bill payment, AP clearing |
 | Banking — Bank accounts | ✅ | |
-| Banking — Bank feeds | 🔧 | Model exists; full ingestion + reconciliation UI weak |
-| Banking — Reconciliation | ⚠️ | Likely no end-to-end matching UI — accountants still on Excel |
+| Banking — Bank feeds | ✅ | Full CSV import wizard, line allocation UI, auto-match with confidence scoring; OFX/MT940 not supported (see [plan](BANK-RECONCILIATION-PLAN.md)) |
+| Banking — Reconciliation closure | ⬜ | Lines can be allocated, but no "lock period" concept, no balance verification, no Bank Reconciliation Statement report — see [BANK-RECONCILIATION-PLAN.md](BANK-RECONCILIATION-PLAN.md) |
+| Banking — M-Pesa C2B / STK | ⬜ | Mpesa is a payment method enum value, but no Daraja webhook for inbound nor STK push for invoice collection |
 | Tax — VAT | ✅ | Output VAT on sales, input on bills, returns |
 | Tax — WHT | ✅ | Withholding payable + reports |
 | Tax — Payroll statutory | ✅ | P10, P9A, NSSF/SHIF/AHL CSV exports |
@@ -71,7 +72,7 @@ This document is a module-by-module audit of what's shipped, what's partial, and
 | Reports — Custom builder | ⬜ | No drag/drop or saved custom views |
 | Reports — Drill-down to source | ⬜ | Can't click P&L total → see contributing JEs |
 | KPIs | ✅ | Just shipped — 11 templates, 9 auto formulas, sparkline + chart, vs-prior + YoY, custom thresholds, inline target edit |
-| Approvals workflow | 🔧 | Engine present (`approvalRequest` model); coverage across transaction types is partial |
+| Approvals workflow | 🔧 | Engine + atomic claim flow solid; only 3 of 6 enum types actually wired (price changes, stock adjustments, write-offs). Bills, credit notes, discounts, manual journals all auto-post with no gate — see [APPROVALS-PLAN.md](APPROVALS-PLAN.md) |
 | Assets (Fixed Assets) | ✅ | Acquisition + depreciation; rollforward report |
 | Expenses | ✅ | |
 | Employee Claims / Reimbursements | ✅ | Workflow with approval chain |
@@ -231,9 +232,9 @@ VAT, WHT, PAYE all functional. Annual filings supported. **eTIMS is the gap** �
 
 ## ⚠️ Weakly implemented (skeleton, needs flesh)
 
-1. **Bank reconciliation** — `bankFeed` model exists, no full matching UI. Accountants almost certainly still using Excel for this.
+1. **Bank reconciliation closure** — full import + allocation UI exists; reconciliation *closure* (period lock, balance verification, Bank Reconciliation Statement report) does not. Accountants can match lines but can't produce the audit-grade reconciliation deliverable. Full gap analysis in [BANK-RECONCILIATION-PLAN.md](BANK-RECONCILIATION-PLAN.md).
 2. **Attendance reporting at the company level** — works for office staff, blind to field staff. Reports built on top of it are misleading until a "field staff" tag excludes them.
-3. **Approval workflow coverage** — engine works; only some transaction types route through it. Should be every >threshold transaction.
+3. **Approval workflow coverage** — engine works; only 3 of 6 enum types actually fire approvals (stock-side only). AR/AP/Finance transactions (bills, payments, credit notes, manual journals) all bypass approvals entirely. Full gap analysis in [APPROVALS-PLAN.md](APPROVALS-PLAN.md).
 4. **Audit log** — per-entity `createdBy` / `lastModifiedBy` only. No central change-history log queryable by entity / time / user.
 5. **Document attachments** — uniform on EmployeeProfile; ad-hoc or absent on most other entities (invoices, bills, expenses, contracts). Real-world workflow needs PDFs attached to every transaction.
 6. **Project costing** — Projects exist; not clear if material/labour costs feed into per-project P&L.
@@ -268,20 +269,23 @@ These are the gaps that meaningfully block adoption or daily use:
 
 ## Suggested next sprints (ranked by impact)
 
-**Sprint 1 — Kenyan compliance**  
-KRA eTIMS integration (real production blocker)
+**Sprint 1 — Approvals tightening (in flight)**  
+See [APPROVALS-PLAN.md](APPROVALS-PLAN.md) — 6 phases over ~5 days, wires bills/credit notes/journals/etc. into the existing approval engine, adds inline approve/reject + notifications + multi-step.
 
-**Sprint 2 — Daily-use grind killers**  
-Recurring transactions + Bank reconciliation flow
+**Sprint 2 — Bank reconciliation completion**  
+See [BANK-RECONCILIATION-PLAN.md](BANK-RECONCILIATION-PLAN.md) — 7 phases over ~6.5 days, adds reconciliation closure, the Bank Rec Statement report, M-Pesa C2B + STK, reviewer step, OFX, multi-currency.
 
-**Sprint 3 — Telling people things**  
-In-app notifications (extends what HR roadmap Phase 9 already lists)
+**Sprint 3 — Kenyan compliance**  
+KRA eTIMS integration ([ETIMS-PLAN.md](ETIMS-PLAN.md)) — production blocker for VAT-registered customers; can be done in parallel with Sprints 1-2 since it's isolated to invoice flow.
 
-**Sprint 4 — HR Phase 7.5**  
-`remitStatutory()` action + remittance UI on payroll runs
+**Sprint 4 — Recurring transactions**  
+Templates for recurring invoices, bills, journal entries. Kills the #1 monthly grind.
 
-**Sprint 5 — HR Phase 9 (pick one)**  
-Performance management, OR Recruitment pipeline — depends on customer ask
+**Sprint 5 — HR Phase 7.5**  
+`remitStatutory()` action + remittance UI on payroll runs.
+
+**Sprint 6 — HR Phase 9 (pick one)**  
+Performance management OR Recruitment pipeline — depends on customer ask.
 
 ---
 
@@ -301,6 +305,9 @@ Performance management, OR Recruitment pipeline — depends on customer ask
 | Dashboard routes | [app/dashboard/](../app/dashboard/) — 47 route groups |
 | Sidebar nav | [components/sidebar-content-grouped.jsx](../components/sidebar-content-grouped.jsx) |
 | HR roadmap (authoritative) | [app/dashboard/hr/HR-ROADMAP.md](../app/dashboard/hr/HR-ROADMAP.md) |
+| Approvals plan | [APPROVALS-PLAN.md](APPROVALS-PLAN.md) |
+| Bank reconciliation plan | [BANK-RECONCILIATION-PLAN.md](BANK-RECONCILIATION-PLAN.md) |
+| eTIMS plan | [ETIMS-PLAN.md](ETIMS-PLAN.md) |
 | Earlier ERP roadmap | [erp-dev-roadmap.md](../erp-dev-roadmap.md) (Feb 2026 — partly stale) |
 
 ---

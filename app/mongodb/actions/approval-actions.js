@@ -17,6 +17,8 @@ import ApprovalRequest, {
 import ErpCounter from "@/app/models/erp-counter";
 import Product from "@/app/models/product";
 import InventoryAdjustment from "@/app/models/inventoryAdjustment";
+import Payment from "@/app/models/payment";
+import CreditNote from "@/app/models/creditNote";
 
 // ============================================
 // APPROVAL ENGINE — SERVER ACTIONS
@@ -213,6 +215,16 @@ export async function approveApproval(approvalId, _prevState, formData) {
     if (claimed.targetRef?.kind === "InventoryAdjustment") {
       revalidatePath("/dashboard/adjustments");
     }
+    if (claimed.targetRef?.kind === "Payment") {
+      revalidatePath("/dashboard/payments");
+      revalidatePath(`/dashboard/payments/${claimed.targetRef.id}`);
+      revalidatePath("/dashboard/bills");
+    }
+    if (claimed.targetRef?.kind === "CreditNote") {
+      revalidatePath("/dashboard/credit-notes");
+      revalidatePath(`/dashboard/credit-notes/${claimed.targetRef.id}`);
+      revalidatePath("/dashboard/invoices");
+    }
 
     return { success: true };
   } catch (error) {
@@ -332,6 +344,10 @@ async function applyApprovalPayload(approval, user) {
     case "stock_adjustment":
     case "stock_writeoff":
       return applyStockAdjustment(approval, user);
+    case "bill_payment":
+      return applyBillPayment(approval, user);
+    case "credit_note":
+      return applyCreditNote(approval, user);
     default:
       return {
         success: false,
@@ -393,6 +409,78 @@ async function applyStockAdjustment(approval, user) {
   } finally {
     session.endSession();
   }
+}
+
+// ============================================
+// BILL PAYMENT — applies a pending payment.confirm()
+// ============================================
+// The payment was created in draft state; confirmation posts to GL via
+// payment.confirm(). On approval we run that confirm with the approver
+// as the user — preserves the audit trail (the payment shows it was
+// confirmed by the approver, not the requester).
+async function applyBillPayment(approval, user) {
+  const paymentId = approval.targetRef?.id;
+  if (!paymentId) {
+    return { success: false, error: "Missing payment reference" };
+  }
+
+  const payment = await Payment.findOne({
+    _id: paymentId,
+    companyId: approval.companyId,
+  });
+  if (!payment) return { success: false, error: "Payment not found" };
+
+  if (payment.status !== "draft") {
+    return {
+      success: false,
+      error: `Payment is already ${payment.status}; cannot re-confirm.`,
+    };
+  }
+
+  await payment.confirm(user);
+
+  return {
+    success: true,
+    appliedAt: new Date(),
+    appliedRef: { kind: "Payment", id: payment._id },
+  };
+}
+
+// ============================================
+// CREDIT NOTE — applies the draft credit note's issue()
+// ============================================
+// Issuance posts to GL (reduces AR, recognises the credit) via the
+// model's issue() method. Same pattern as bill_payment — the approver
+// is recorded as the issuer.
+async function applyCreditNote(approval, user) {
+  const creditNoteId = approval.targetRef?.id;
+  if (!creditNoteId) {
+    return { success: false, error: "Missing credit note reference" };
+  }
+
+  const creditNote = await CreditNote.findOne({
+    _id: creditNoteId,
+    companyId: approval.companyId,
+  });
+  if (!creditNote) return { success: false, error: "Credit note not found" };
+
+  if (creditNote.status !== "draft") {
+    return {
+      success: false,
+      error: `Credit note is already ${creditNote.status}; cannot re-issue.`,
+    };
+  }
+
+  await creditNote.issue({
+    name: user.name || user.email || "Approver",
+    id: user.id,
+  });
+
+  return {
+    success: true,
+    appliedAt: new Date(),
+    appliedRef: { kind: "CreditNote", id: creditNote._id },
+  };
 }
 
 async function applyPriceChange(approval, user) {

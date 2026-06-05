@@ -85,6 +85,7 @@ const approvalRequestSchema = new Schema(
           "Bill",
           "Invoice",
           "CreditNote",
+          "Payment", // bill_payment approvals reference the draft Payment
         ],
         required: true,
       },

@@ -8,6 +8,7 @@ import Bill from "@/app/models/bill";
 import Invoice from "@/app/models/invoice";
 import Party from "@/app/models/parties";
 import Account from "@/app/models/account";
+import ApprovalRequest from "@/app/models/approvalRequest";
 import { auth } from "@/auth";
 import dbConnect from "@/app/config/dbConnect";
 import { serializeBsonType } from "@/lib/utils";
@@ -17,6 +18,8 @@ import {
   getCompanyIdForCreate,
   buildTenantMatch,
 } from "@/lib/utils/tenant-utils";
+import { getCompanyThresholds } from "@/app/mongodb/queries/threshold-queries";
+import { submitApproval } from "@/app/mongodb/actions/approval-actions";
 
 // ============================================
 // VALIDATION SCHEMAS
@@ -573,6 +576,73 @@ export async function confirmPayment(id) {
     // Validate tenant access
     if (!isSuperAdmin && payment.companyId?.toString() !== companyId) {
       return { success: false, error: "Payment not found" };
+    }
+
+    // ============================================
+    // APPROVAL GATE — Outbound bill payments above threshold
+    // ============================================
+    // Per-company threshold; finance leadership (Admin/CFO/Finance Manager)
+    // bypass since they're the eventual approvers anyway. Inbound (received)
+    // payments are revenue — no need to gate.
+    const APPROVER_ROLES_BYPASS = new Set([
+      "SuperAdmin",
+      "Admin",
+      "CFO",
+      "Finance Manager",
+    ]);
+    const userRole = user?.role;
+    const isOutbound = payment.paymentType === "made";
+    const amount = Number(payment.amount) || 0;
+    const userBypasses = APPROVER_ROLES_BYPASS.has(userRole);
+
+    if (isOutbound && amount > 0 && !userBypasses) {
+      const thresholds = await getCompanyThresholds(
+        (companyId || payment.companyId)?.toString?.() || null,
+      );
+      const threshold = Number(thresholds.billPaymentValue) || 0;
+
+      if (threshold > 0 && amount > threshold) {
+        // Already pending? Don't create a duplicate request.
+        const existing = await ApprovalRequest.findOne({
+          companyId: payment.companyId,
+          type: "bill_payment",
+          status: "submitted",
+          "targetRef.kind": "Payment",
+          "targetRef.id": payment._id,
+        }).select("_id requestNumber").lean();
+
+        if (existing) {
+          return {
+            success: false,
+            error: `Approval ${existing.requestNumber} is already pending for this payment.`,
+            pendingApprovalId: existing._id.toString(),
+          };
+        }
+
+        const result = await submitApproval({
+          type: "bill_payment",
+          targetRef: {
+            kind: "Payment",
+            id: payment._id,
+            label: `${payment.paymentNumber} — ${payment.party?.name || "Supplier"} — KES ${amount.toLocaleString()}`,
+          },
+          payload: { paymentId: payment._id.toString() },
+          reason: `Bill payment of KES ${amount.toLocaleString()} exceeds threshold of KES ${threshold.toLocaleString()}`,
+          context: { amount, threshold },
+        });
+
+        if (!result.success) {
+          return { success: false, error: result.error };
+        }
+
+        revalidatePath(`/payments/${id}`);
+        return {
+          success: false,
+          error: `Payment exceeds the KES ${threshold.toLocaleString()} approval threshold. Approval ${result.approval.requestNumber} has been submitted.`,
+          pendingApprovalId: result.approval._id,
+          pendingApprovalNumber: result.approval.requestNumber,
+        };
+      }
     }
 
     await payment.confirm(user);

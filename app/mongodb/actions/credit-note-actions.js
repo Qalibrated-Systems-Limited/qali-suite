@@ -6,10 +6,13 @@ import mongoose from "mongoose";
 
 import CreditNote from "@/app/models/creditNote";
 import Invoice from "@/app/models/invoice";
+import ApprovalRequest from "@/app/models/approvalRequest";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { generateUniqueEntryNumber } from "@/lib/utils/server-utils";
 import { FINANCE_WRITE_ROLES, hasRole } from "@/lib/utils/role-gates";
+import { getCompanyThresholds } from "@/app/mongodb/queries/threshold-queries";
+import { submitApproval } from "@/app/mongodb/actions/approval-actions";
 
 // ============================================
 // VALIDATION SCHEMA
@@ -226,6 +229,72 @@ export async function issueCreditNote(creditNoteId) {
 
     if (!creditNote) {
       return { success: false, error: "Credit note not found" };
+    }
+
+    // ============================================
+    // APPROVAL GATE — credit notes above threshold
+    // ============================================
+    // Issuance posts to GL and reduces AR; we want a sign-off when the
+    // amount is material. Finance leadership bypasses since they're the
+    // ones who'd approve it anyway.
+    const APPROVER_ROLES_BYPASS = new Set([
+      "SuperAdmin",
+      "Admin",
+      "CFO",
+      "Finance Manager",
+    ]);
+    const userRole = user?.role;
+    const amount = Number(creditNote.total) || 0;
+    const userBypasses = APPROVER_ROLES_BYPASS.has(userRole);
+
+    if (!userBypasses && amount > 0) {
+      const thresholds = await getCompanyThresholds(
+        (companyId || creditNote.companyId)?.toString?.() || null,
+      );
+      const threshold = Number(thresholds.creditNoteValue) || 0;
+
+      if (threshold > 0 && amount > threshold) {
+        // Already pending? Don't create a duplicate.
+        const existing = await ApprovalRequest.findOne({
+          companyId: creditNote.companyId,
+          type: "credit_note",
+          status: "submitted",
+          "targetRef.kind": "CreditNote",
+          "targetRef.id": creditNote._id,
+        }).select("_id requestNumber").lean();
+
+        if (existing) {
+          return {
+            success: false,
+            error: `Approval ${existing.requestNumber} is already pending for this credit note.`,
+            pendingApprovalId: existing._id.toString(),
+          };
+        }
+
+        const result = await submitApproval({
+          type: "credit_note",
+          targetRef: {
+            kind: "CreditNote",
+            id: creditNote._id,
+            label: `${creditNote.creditNoteNumber || creditNote._id} — ${creditNote.customer?.name || "Customer"} — KES ${amount.toLocaleString()}`,
+          },
+          payload: { creditNoteId: creditNote._id.toString() },
+          reason: `Credit note of KES ${amount.toLocaleString()} exceeds threshold of KES ${threshold.toLocaleString()}`,
+          context: { amount, threshold, reason: creditNote.reason },
+        });
+
+        if (!result.success) {
+          return { success: false, error: result.error };
+        }
+
+        revalidatePath(`/dashboard/credit-notes/${creditNoteId}`);
+        return {
+          success: false,
+          error: `Credit note exceeds the KES ${threshold.toLocaleString()} approval threshold. Approval ${result.approval.requestNumber} has been submitted.`,
+          pendingApprovalId: result.approval._id,
+          pendingApprovalNumber: result.approval.requestNumber,
+        };
+      }
     }
 
     await creditNote.issue({ name: user.name, id: user.id });
