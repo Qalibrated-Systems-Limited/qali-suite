@@ -192,6 +192,30 @@ const getNavigationGroups = (user) => {
   // ============================================
   {
     type: "group",
+    label: "CRM",
+    icon: Target,
+    id: "crm",
+    defaultOpen: false,
+    hidden: !canSeeSalesNav(user?.role),
+    items: [
+      {
+        icon: Users,
+        label: "Leads",
+        id: "leads",
+        href: "/dashboard/leads",
+        hidden: !canSeeSalesNav(user?.role),
+      },
+      {
+        icon: Briefcase,
+        label: "Pipeline",
+        id: "opportunities",
+        href: "/dashboard/opportunities",
+        hidden: !canSeeSalesNav(user?.role),
+      },
+    ],
+  },
+  {
+    type: "group",
     label: "Sales",
     icon: ShoppingBag,
     id: "sales",

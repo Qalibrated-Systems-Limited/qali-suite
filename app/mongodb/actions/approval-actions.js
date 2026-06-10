@@ -41,6 +41,44 @@ function userInfo(user) {
   };
 }
 
+// When an approval that gated a draft document is rejected or cancelled,
+// the underlying draft (Payment / CreditNote / InventoryAdjustment) was
+// already created and would otherwise linger in "draft" forever — cluttering
+// lists and re-submittable. Void it via the model's own method so audit
+// fields are populated and any reversal is handled (here none — drafts were
+// never posted). price_change targets a Product that was never edited, so
+// it's a no-op there. Best-effort: cleanup failure must never block the
+// decision the approver/submitter just made.
+async function voidApprovalTarget(approval, user, action) {
+  const ref = approval.targetRef;
+  if (!ref?.kind || !ref?.id) return;
+  const reason = `Approval ${approval.requestNumber} ${action}`;
+  const by = userInfo(user);
+  try {
+    if (ref.kind === "Payment") {
+      const doc = await Payment.findOne({
+        _id: ref.id,
+        companyId: approval.companyId,
+      });
+      if (doc?.status === "draft") await doc.cancel(by, reason);
+    } else if (ref.kind === "CreditNote") {
+      const doc = await CreditNote.findOne({
+        _id: ref.id,
+        companyId: approval.companyId,
+      });
+      if (doc?.status === "draft") await doc.void(by, reason);
+    } else if (ref.kind === "InventoryAdjustment") {
+      const doc = await InventoryAdjustment.findOne({
+        _id: ref.id,
+        companyId: approval.companyId,
+      });
+      if (doc?.status === "draft") await doc.cancel(by, reason);
+    }
+  } catch (e) {
+    console.error("voidApprovalTarget error:", e);
+  }
+}
+
 async function generateRequestNumber(companyId, session) {
   const seq = await ErpCounter.getNextSequence("approval", companyId, session);
   return `APR-${String(seq).padStart(4, "0")}`;
@@ -273,6 +311,10 @@ export async function rejectApproval(approvalId, _prevState, formData) {
     };
     await approval.save();
 
+    // Void the orphaned draft (payment / credit note / adjustment) the
+    // rejected request was gating, so it doesn't linger or get re-submitted.
+    await voidApprovalTarget(approval, user, "rejected");
+
     revalidatePath("/dashboard/approvals");
     revalidatePath(`/dashboard/approvals/${approvalId}`);
     return { success: true };
@@ -322,6 +364,10 @@ export async function cancelApproval(approvalId) {
       note: "",
     };
     await approval.save();
+
+    // Void the orphaned draft the cancelled request was gating.
+    await voidApprovalTarget(approval, user, "cancelled");
+
     revalidatePath("/dashboard/approvals");
     return { success: true };
   } catch (error) {
@@ -495,6 +541,23 @@ async function applyPriceChange(approval, user) {
   const cost = Number(product.costing?.costPrice) || 0;
   const previousPrice = Number(product.pricing?.sellingPrice) || 0;
   const previousMarkup = Number(product.pricing?.markupPercentage) || 0;
+
+  // The request tripped the floor/margin checks against the cost at
+  // submission time, and (in markup mode) the new selling price is derived
+  // from cost. If cost moved since — a GRN, a landed-cost correction — the
+  // approver is greenlighting a number that no longer holds. Refuse rather
+  // than silently write a now-wrong price; the requester can resubmit.
+  const submittedCost = Number(approval.context?.cost);
+  if (
+    Number.isFinite(submittedCost) &&
+    submittedCost > 0 &&
+    Math.abs(cost - submittedCost) > 0.005
+  ) {
+    return {
+      success: false,
+      error: `Cost changed since submission (was ${submittedCost}, now ${cost}). Please resubmit the price change.`,
+    };
+  }
 
   const p = approval.payload || {};
   const mode = p.priceMode || product.pricing?.priceMode || "manual";

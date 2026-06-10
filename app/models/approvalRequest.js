@@ -163,6 +163,14 @@ approvalRequestSchema.index(
   { companyId: 1, requestNumber: 1 },
   { unique: true },
 );
+// Reaper index: only "applying" leases are indexed (partial), keyed by
+// updatedAt so the stale-lease sweeper (GET /api/cron/reap-approvals) can
+// find docs stuck mid-apply after a crash without scanning the collection.
+// "applying" is a tiny, short-lived set so the write cost is negligible.
+approvalRequestSchema.index(
+  { updatedAt: 1 },
+  { partialFilterExpression: { status: "applying" } },
+);
 
 // ============================================
 // CONFIG: who can approve what

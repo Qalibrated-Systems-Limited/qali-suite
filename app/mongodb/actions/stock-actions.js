@@ -1015,6 +1015,30 @@ export async function updateProductPricing(productId, prevState, formData) {
     if (needsApproval) {
       // Submit an approval request and DO NOT apply the change yet.
       const { submitApproval } = await import("./approval-actions");
+
+      // Already pending? Don't stack competing requests for the same product —
+      // approving two would apply the price change twice. (Mirrors the guard
+      // on bill_payment / credit_note.) Include "applying" so an in-flight
+      // lease also blocks a fresh submission.
+      const { default: ApprovalRequest } = await import(
+        "@/app/models/approvalRequest"
+      );
+      const existingApproval = await ApprovalRequest.findOne({
+        companyId,
+        type: "price_change",
+        status: { $in: ["submitted", "applying"] },
+        "targetRef.kind": "Product",
+        "targetRef.id": product._id,
+      })
+        .select("_id requestNumber")
+        .lean();
+      if (existingApproval) {
+        return {
+          success: false,
+          error: `Approval ${existingApproval.requestNumber} is already pending for this product.`,
+        };
+      }
+
       const reasonParts = [];
       if (belowCost) reasonParts.push("Selling price below cost");
       if (belowFloor)

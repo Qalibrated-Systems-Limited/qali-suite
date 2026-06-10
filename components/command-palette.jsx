@@ -64,6 +64,10 @@ const PAGES = [
   { label: "Goods Receipt Notes", href: "/dashboard/grn", icon: ClipboardList, category: "Inventory", aliases: ["grn", "receiving", "inspection"] },
   { label: "Nonconformance Register", href: "/dashboard/ncr", icon: ClipboardList, category: "Inventory", aliases: ["ncr", "discrepancy", "nonconformance", "quality"] },
 
+  // ── CRM ────────────────────────────────────────────
+  { label: "Leads", href: "/dashboard/leads", icon: Users, category: "CRM", aliases: ["prospect", "prospects", "lead"] },
+  { label: "Pipeline", href: "/dashboard/opportunities", icon: Briefcase, category: "CRM", aliases: ["opportunities", "opportunity", "deals", "sales pipeline"] },
+
   // ── Sales ──────────────────────────────────────────
   { label: "Quotes", href: "/dashboard/quotes", icon: FileText, category: "Sales" },
   { label: "Invoices", href: "/dashboard/invoices", icon: Receipt, category: "Sales" },
@@ -140,6 +144,7 @@ const PAGES = [
 ];
 
 const ACTIONS = [
+  { label: "New Lead", href: "/dashboard/leads", icon: Plus },
   { label: "Create Invoice", href: "/dashboard/invoices/create", icon: Plus },
   { label: "Create Quote", href: "/dashboard/quotes/create", icon: Plus },
   { label: "Create Bill", href: "/dashboard/bills/create", icon: Plus },
@@ -294,6 +299,7 @@ export function CommandPalette({ open, setOpen }) {
   const CATEGORY_ORDER = [
     "General",
     "Inventory",
+    "CRM",
     "Sales",
     "Purchases",
     "Expenses",
