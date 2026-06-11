@@ -1,6 +1,9 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { auth } from "@/auth";
+import { notFound, redirect } from "next/navigation";
+import { canSeeSalesNav } from "@/lib/permissions";
 import { ArrowLeft } from "lucide-react";
+import AccessDenied from "@/app/dashboard/components/crm/AccessDenied";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cLead } from "@/app/mongodb/queries/lead-queries";
 import { cTimeline } from "@/app/mongodb/queries/activity-queries";
@@ -20,6 +23,10 @@ const KES = (n) =>
   `KES ${Number(n || 0).toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
 
 export default async function LeadDetailPage({ params }) {
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  if (!canSeeSalesNav(session.user.role)) return <AccessDenied resource="leads" />;
+
   const { id } = await params;
   const lead = await cLead(id);
   if (!lead) notFound();

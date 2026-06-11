@@ -1,6 +1,9 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { auth } from "@/auth";
+import { notFound, redirect } from "next/navigation";
+import { canSeeSalesNav } from "@/lib/permissions";
 import { ArrowLeft } from "lucide-react";
+import AccessDenied from "@/app/dashboard/components/crm/AccessDenied";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cOpportunity } from "@/app/mongodb/queries/opportunity-queries";
 import { cTimeline } from "@/app/mongodb/queries/activity-queries";
@@ -31,6 +34,11 @@ const fmtDate = (iso) =>
   iso ? new Date(iso).toLocaleDateString("en-KE", { dateStyle: "medium" }) : "—";
 
 export default async function OpportunityDetailPage({ params }) {
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  if (!canSeeSalesNav(session.user.role))
+    return <AccessDenied resource="opportunities" />;
+
   const { id } = await params;
   const opp = await cOpportunity(id);
   if (!opp) notFound();

@@ -12,6 +12,7 @@ import {
 } from "@/lib/utils/tenant-utils";
 import { safeErrorMessage } from "@/lib/safe-error";
 
+import { canSeeSalesNav } from "@/lib/permissions";
 import Lead, { LEAD_SOURCES, LEAD_RATINGS } from "@/app/models/lead";
 import Party from "@/app/models/parties";
 import Opportunity from "@/app/models/opportunity";
@@ -27,6 +28,15 @@ function userInfo(user) {
     name: user?.name || user?.email || "System",
     role: user?.role,
   };
+}
+
+// Server actions are directly invokable endpoints — page-level gating is
+// not enough. Same role set the sidebar/pages use (canSeeSalesNav).
+function salesRoleGate(user) {
+  if (!canSeeSalesNav(user?.role)) {
+    return { success: false, error: "Not authorized for CRM actions." };
+  }
+  return null;
 }
 
 // ============================================
@@ -48,6 +58,8 @@ export async function createLead(prevState, formData) {
   try {
     await dbConnect();
     const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const denied = salesRoleGate(user);
+    if (denied) return denied;
 
     const parsed = CreateLeadSchema.safeParse(
       Object.fromEntries(formData?.entries?.() ?? []),
@@ -115,6 +127,8 @@ export async function updateLead(leadId, prevState, formData) {
     }
     await dbConnect();
     const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const denied = salesRoleGate(user);
+    if (denied) return denied;
 
     const parsed = UpdateLeadSchema.safeParse(
       Object.fromEntries(formData?.entries?.() ?? []),
@@ -164,6 +178,8 @@ export async function setLeadStatus(leadId, status, note = "") {
     }
     await dbConnect();
     const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const denied = salesRoleGate(user);
+    if (denied) return denied;
 
     const lead = await Lead.findOne(
       withTenantScope({ _id: leadId }, companyId, isSuperAdmin),
@@ -217,6 +233,8 @@ export async function convertLead(leadId, formData) {
     }
     await dbConnect();
     const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const denied = salesRoleGate(user);
+    if (denied) return denied;
 
     const parsed = ConvertLeadSchema.safeParse(
       Object.fromEntries(formData?.entries?.() ?? []),

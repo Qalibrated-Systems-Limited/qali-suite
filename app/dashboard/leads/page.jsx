@@ -1,8 +1,12 @@
 import Link from "next/link";
+import { auth } from "@/auth";
+import { redirect } from "next/navigation";
+import { canSeeSalesNav } from "@/lib/permissions";
 import { cLeads, cLeadStats } from "@/app/mongodb/queries/lead-queries";
 import { Card, CardContent } from "@/components/ui/card";
 import LeadCreateForm from "./components/LeadCreateForm";
 import LeadRowActions from "./components/LeadRowActions";
+import AccessDenied from "@/app/dashboard/components/crm/AccessDenied";
 
 export const metadata = {
   title: "Leads | ERP System",
@@ -24,6 +28,12 @@ const KES = (n) =>
   `KES ${Number(n || 0).toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
 
 export default async function LeadsPage() {
+  // Page-level auth (defense in depth — middleware is optimistic) + the
+  // same role gate the sidebar uses, so direct-URL access is refused too.
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  if (!canSeeSalesNav(session.user.role)) return <AccessDenied resource="leads" />;
+
   const [leads, stats] = await Promise.all([cLeads(), cLeadStats()]);
 
   return (

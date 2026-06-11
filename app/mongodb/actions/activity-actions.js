@@ -7,6 +7,7 @@ import mongoose from "mongoose";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, getCompanyIdForCreate } from "@/lib/utils/tenant-utils";
 import { safeErrorMessage } from "@/lib/safe-error";
+import { canSeeSalesNav } from "@/lib/permissions";
 import { ACTIVITY_TYPES, ACTIVITY_TARGETS } from "@/app/models/activity";
 import { recordActivity } from "@/lib/crm/activity-log";
 
@@ -16,6 +17,15 @@ function userInfo(user) {
     name: user?.name || user?.email || "System",
     role: user?.role,
   };
+}
+
+// Server actions are directly invokable endpoints — page-level gating is
+// not enough. Same role set the sidebar/pages use (canSeeSalesNav).
+function salesRoleGate(user) {
+  if (!canSeeSalesNav(user?.role)) {
+    return { success: false, error: "Not authorized for CRM actions." };
+  }
+  return null;
 }
 
 const LogActivitySchema = z.object({
@@ -33,6 +43,8 @@ export async function logActivity(prevState, formData) {
   try {
     await dbConnect();
     const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const denied = salesRoleGate(user);
+    if (denied) return denied;
 
     const parsed = LogActivitySchema.safeParse(
       Object.fromEntries(formData?.entries?.() ?? []),
