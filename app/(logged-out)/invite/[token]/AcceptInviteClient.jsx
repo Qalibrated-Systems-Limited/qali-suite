@@ -82,7 +82,7 @@ export default function AcceptInviteClient({ token, email, companyName }) {
 
   return (
     <Card className="bg-card border-border">
-      <CardHeader className="space-y-1 text-center">
+      <CardHeader className="space-y-1 p-4 text-center sm:p-6">
         <CardTitle className="text-xl text-foreground">
           Accept Invitation
         </CardTitle>
@@ -91,7 +91,7 @@ export default function AcceptInviteClient({ token, email, companyName }) {
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4 p-4 pt-0 sm:p-6 sm:pt-0">
         {/* Error */}
         {error && (
           <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">

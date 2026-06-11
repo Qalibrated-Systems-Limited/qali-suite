@@ -119,7 +119,7 @@ export default function LandingPage() {
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,hsl(var(--primary)/0.08),transparent)]" />
 
-        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 pt-20 sm:pt-32 pb-20 sm:pb-32 text-center">
+        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 pt-14 sm:pt-32 pb-14 sm:pb-32 text-center">
           {/* Badge — fade in */}
           <div className="animate-[fadeInUp_0.5s_ease-out_both] inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-primary/30 bg-primary/8 text-primary text-xs font-medium mb-8">
             <Zap className="w-3 h-3" />
@@ -138,16 +138,17 @@ export default function LandingPage() {
             Track stock, send invoices, run payroll, manage projects — all connected.
           </p>
 
-          {/* CTA */}
-          <div className="animate-[fadeInUp_0.6s_ease-out_0.3s_both] flex flex-wrap justify-center gap-3 mb-8">
+          {/* CTA — stacked full-width on phones (side-by-side wrap looked
+              crowded and off-centre), row from sm up */}
+          <div className="animate-[fadeInUp_0.6s_ease-out_0.3s_both] mx-auto mb-8 flex w-full max-w-xs flex-col justify-center gap-3 sm:max-w-none sm:flex-row">
             <Button
               size="lg"
-              className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 px-8 rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
+              className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 px-8 rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
               asChild
             >
               <Link href="/login">Start free <ArrowRight className="ml-1.5 h-4 w-4" /></Link>
             </Button>
-            <Button variant="outline" size="lg" className="h-12 px-7 rounded-xl font-medium hover:bg-muted/50 transition-all" asChild>
+            <Button variant="outline" size="lg" className="w-full sm:w-auto h-12 px-7 rounded-xl font-medium hover:bg-muted/50 transition-all" asChild>
               <Link href="/login">View demo</Link>
             </Button>
           </div>
@@ -168,7 +169,8 @@ export default function LandingPage() {
       <section className="border-y border-border bg-muted/30 py-10 sm:py-14 px-4 sm:px-6 overflow-hidden">
         <div className="max-w-5xl mx-auto">
           <p className="text-center text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-8">One action. Multiple updates.</p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-0">
+          {/* Wraps into rows on phones instead of one tall column */}
+          <div className="flex flex-row flex-wrap items-start justify-center gap-x-6 gap-y-5 sm:flex-nowrap sm:items-center sm:gap-0">
             {[
               { icon: Receipt,       label: "Invoice created" },
               { icon: Package,       label: "Stock committed" },
@@ -207,11 +209,11 @@ export default function LandingPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
             {MODULES.map((m, i) => (
               <div
                 key={m.name}
-                className="group p-4 sm:p-5 rounded-xl bg-card border border-border hover:border-primary/40 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+                className="group p-3 sm:p-5 rounded-xl bg-card border border-border hover:border-primary/40 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
               >
                 <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/15 group-hover:scale-105 transition-all duration-200">
                   <m.icon className="w-4 h-4 text-primary" />
