@@ -33,16 +33,16 @@ function SettingsCard({ href, icon: Icon, iconColor, iconBg, title, description 
   return (
     <Link
       href={href}
-      className="flex items-center gap-4 rounded-lg border bg-card p-4 hover:bg-muted/50 transition-colors"
+      className="flex items-center gap-3 rounded-lg border bg-card p-3 transition-colors hover:bg-muted/50 sm:gap-4 sm:p-4"
     >
-      <div className={`rounded-lg p-3 ${iconBg}`}>
+      <div className={`shrink-0 rounded-lg p-2 sm:p-3 ${iconBg}`}>
         <Icon className={`h-5 w-5 ${iconColor}`} />
       </div>
       <div className="flex-1 min-w-0">
-        <h3 className="font-medium">{title}</h3>
-        <p className="text-sm text-muted-foreground truncate">{description}</p>
+        <h3 className="text-sm font-medium sm:text-base">{title}</h3>
+        <p className="truncate text-xs text-muted-foreground sm:text-sm">{description}</p>
       </div>
-      <ChevronRight className="h-5 w-5 text-muted-foreground" />
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground sm:h-5 sm:w-5" />
     </Link>
   );
 }
@@ -83,11 +83,15 @@ export default async function SettingsPage() {
   }
 
   return (
-    <div className="space-y-8 p-4 sm:p-6 lg:p-8 max-w-5xl">
-      {/* Header */}
+    // No page-level padding — the dashboard layout already provides it;
+    // stacking both left ~2rem of dead space on phones.
+    <div className="max-w-5xl space-y-5 sm:space-y-8 sm:p-2 lg:p-4">
+      {/* Header — the sticky mobile header already says "Settings" */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground">Manage your company settings and system configuration</p>
+        <h1 className="text-lg font-bold tracking-tight sm:text-2xl">Settings</h1>
+        <p className="hidden text-muted-foreground sm:block">
+          Manage your company settings and system configuration
+        </p>
       </div>
 
       {canSeeGeneralOrAccounting && (

@@ -13,7 +13,13 @@ export default async function IntegrationsLayout({ children }) {
 
   if (!["SuperAdmin", "Admin"].includes(session.user.role)) redirect("/dashboard");
 
-  if (!planIncludes(session.user.companyPlan, "integration")) {
+  // Plan gate applies to tenant Admins only. SuperAdmin is the platform
+  // operator — their companyPlan is a home-tenant UX hint, not a license;
+  // bouncing them to the upgrade page locked them out of platform plumbing.
+  if (
+    session.user.role !== "SuperAdmin" &&
+    !planIncludes(session.user.companyPlan, "integration")
+  ) {
     redirect("/dashboard/settings?upgrade=integration");
   }
 
