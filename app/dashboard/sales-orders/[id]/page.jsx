@@ -107,7 +107,46 @@ export default async function SalesOrderDetailPage({ params }) {
           <CardTitle className="text-sm">Items</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          {/* Mobile: one card per line (house pattern) */}
+          <div className="space-y-3 p-4 md:hidden">
+            {order.items.map((i) => (
+              <div
+                key={i._id}
+                className="rounded-md border border-border/60 p-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-medium leading-snug">
+                      {i.description}
+                    </div>
+                    {i.product && (
+                      <div className="text-xs text-muted-foreground">
+                        {i.product.sku}
+                      </div>
+                    )}
+                  </div>
+                  {i.stockCommitted ? (
+                    <span className="inline-flex shrink-0 items-center gap-1 text-xs text-blue-600">
+                      <Lock className="h-3 w-3" /> reserved
+                    </span>
+                  ) : i.invoicedQuantity > 0 ? (
+                    <span className="shrink-0 text-xs text-emerald-600">
+                      invoiced
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-2 flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    {i.quantity} {i.unit} × {KES(i.unitPrice)}
+                  </span>
+                  <span className="font-semibold">{KES(i.lineTotal)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">

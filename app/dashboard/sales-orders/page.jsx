@@ -86,14 +86,66 @@ export default async function SalesOrdersPage({ searchParams }) {
         ))}
       </div>
 
-      <Card className="bg-card border-border">
-        <CardContent className="p-0">
-          {orders.length === 0 ? (
-            <p className="p-8 text-center text-sm text-muted-foreground">
-              No sales orders{status ? ` with status “${status}”` : ""} yet.
-              Open a sent/accepted quote and choose “Create Sales Order”.
-            </p>
-          ) : (
+      {orders.length === 0 && (
+        <Card className="bg-card border-border">
+          <CardContent className="p-8 text-center text-sm text-muted-foreground">
+            No sales orders{status ? ` with status “${status}”` : ""} yet. Open
+            a sent/accepted quote and choose “Create Sales Order”.
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Mobile: card stack (house pattern — table is hidden md:block) */}
+      {orders.length > 0 && (
+        <div className="space-y-3 md:hidden">
+          {orders.map((o) => (
+            <Link
+              key={o._id}
+              href={`/dashboard/sales-orders/${o._id}`}
+              className="block"
+            >
+              <Card className="bg-card border-border">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium">{o.orderNumber}</div>
+                      <div className="truncate text-sm text-muted-foreground">
+                        {o.customer.name}
+                      </div>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium capitalize ${
+                        STATUS_STYLES[o.status] || "bg-muted"
+                      }`}
+                    >
+                      {o.status}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      {fmtDate(o.orderDate)} · {o.itemCount} item
+                      {o.itemCount === 1 ? "" : "s"}
+                    </span>
+                    <span className="font-semibold">{KES(o.total)}</span>
+                  </div>
+                  {(o.quoteRef || o.invoiceRef) && (
+                    <div className="mt-1.5 text-xs text-muted-foreground">
+                      {o.quoteRef?.quoteNumber}
+                      {o.quoteRef && o.invoiceRef && " · "}
+                      {o.invoiceRef?.invoiceNumber}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {/* Desktop: table */}
+      {orders.length > 0 && (
+        <Card className="hidden bg-card border-border md:block">
+          <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -163,9 +215,9 @@ export default async function SalesOrdersPage({ searchParams }) {
                 </tbody>
               </table>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
