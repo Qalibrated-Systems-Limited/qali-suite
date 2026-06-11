@@ -30,6 +30,7 @@ import {
   HandCoins,
   ScrollText,
   ClipboardCheck,
+  Plug,
 } from "lucide-react";
 import {
   Drawer,
@@ -113,13 +114,13 @@ const ROLE_NAVS: Record<string, NavItem[]> = {
   ],
   "Store Manager": [
     { label: "Home", href: "/dashboard", icon: LayoutDashboard },
-    { label: "Stock", href: "/dashboard/stocks", icon: Package },
+    { label: "Products", href: "/dashboard/stocks", icon: Package },
     { label: "Requests", href: "/dashboard/requests", icon: ClipboardList },
     { label: "Movements", href: "/dashboard/movements", icon: ArrowLeftRight },
   ],
   Storekeeper: [
     { label: "Home", href: "/dashboard", icon: LayoutDashboard },
-    { label: "Stock", href: "/dashboard/stocks", icon: Package },
+    { label: "Products", href: "/dashboard/stocks", icon: Package },
     { label: "Requests", href: "/dashboard/requests", icon: ClipboardList },
     { label: "Checkouts", href: "/dashboard/checkout", icon: Activity },
   ],
@@ -132,20 +133,25 @@ const ROLE_NAVS: Record<string, NavItem[]> = {
   Manager: [
     { label: "Home", href: "/dashboard", icon: LayoutDashboard },
     { label: "Approvals", href: "/dashboard/approvals", icon: CheckSquare },
-    { label: "Stock", href: "/dashboard/stocks", icon: Package },
+    { label: "Products", href: "/dashboard/stocks", icon: Package },
     { label: "Requests", href: "/dashboard/requests", icon: ClipboardList },
   ],
+  // Company admin runs the COMPANY (approvals, oversight, configuration) —
+  // day-to-day inventory belongs to store roles, not here.
   Admin: [
     { label: "Home", href: "/dashboard", icon: LayoutDashboard },
     { label: "Approvals", href: "/dashboard/approvals", icon: CheckSquare },
-    { label: "Stock", href: "/dashboard/stocks", icon: Package },
     { label: "Reports", href: "/dashboard/reports/profit-loss", icon: TrendingUp },
+    { label: "Settings", href: "/dashboard/settings", icon: Settings },
   ],
+  // SuperAdmin is the PLATFORM operator — cross-tenant. A single tenant's
+  // stock is meaningless at this level; their job is companies, users and
+  // platform plumbing.
   SuperAdmin: [
     { label: "Home", href: "/dashboard", icon: LayoutDashboard },
     { label: "Companies", href: "/dashboard/admin/companies", icon: Building2 },
     { label: "Users", href: "/dashboard/users", icon: Users },
-    { label: "Stock", href: "/dashboard/stocks", icon: Package },
+    { label: "Integrations", href: "/dashboard/integrations", icon: Plug },
   ],
 };
 
@@ -245,9 +251,56 @@ const MORE_GROUPS: NavGroup[] = [
       { label: "Users", href: "/dashboard/users", icon: Users },
       { label: "Company", href: "/dashboard/company", icon: Building2 },
       { label: "Settings", href: "/dashboard/settings", icon: Settings },
+      { label: "Integrations", href: "/dashboard/integrations", icon: Plug },
+    ],
+  },
+  // Platform-level (SuperAdmin only) — surfaced FIRST for that role.
+  {
+    label: "Platform",
+    visible: (r) => r === "SuperAdmin",
+    items: [
+      { label: "Companies", href: "/dashboard/admin/companies", icon: Building2 },
+      { label: "Users", href: "/dashboard/users", icon: Users },
+      { label: "Integrations", href: "/dashboard/integrations", icon: Plug },
     ],
   },
 ];
+
+// ============================================
+// ROLE → GROUP PRIORITY (the "More" sheet leads with the user's core
+// function, not a fixed order). Groups not listed for a role keep their
+// declared order, after the listed ones. "Platform" only exists for
+// SuperAdmin (its visible() gate).
+// ============================================
+const ROLE_GROUP_ORDER: Record<string, string[]> = {
+  SuperAdmin: ["Platform", "Admin", "Reports", "Finance"],
+  Admin: ["Admin", "Reports", "Finance", "Sales & CRM", "Inventory"],
+  CFO: ["Finance", "Reports", "Purchases", "Sales & CRM"],
+  "Finance Manager": ["Finance", "Reports", "Purchases", "Sales & CRM"],
+  Accountant: ["Finance", "Purchases", "Sales & CRM", "Reports"],
+  "Sales Manager": ["Sales & CRM", "Reports", "Finance", "Inventory"],
+  "Procurement Officer": ["Purchases", "Inventory", "Finance", "Reports"],
+  "Store Manager": ["Inventory", "Purchases", "Reports"],
+  Storekeeper: ["Inventory", "Purchases", "Personal"],
+  HR: ["Projects & HR", "Personal", "Reports"],
+  Manager: ["Inventory", "Sales & CRM", "Reports", "Projects & HR"],
+};
+// Roles without a tailored map (Employee, Technician, Viewer…) lead with
+// their own stuff.
+const DEFAULT_GROUP_ORDER = ["Personal"];
+
+function orderedGroupsForRole(role?: string): NavGroup[] {
+  const visible = MORE_GROUPS.filter((g) => g.visible(role));
+  const pref = (role && ROLE_GROUP_ORDER[role]) || DEFAULT_GROUP_ORDER;
+  const rank = (g: NavGroup, i: number) => {
+    const idx = pref.indexOf(g.label);
+    return idx === -1 ? pref.length + i : idx; // unlisted keep declared order
+  };
+  return visible
+    .map((g, i) => ({ g, r: rank(g, i) }))
+    .sort((a, b) => a.r - b.r)
+    .map(({ g }) => g);
+}
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === "/dashboard";
@@ -287,7 +340,7 @@ export default function MobileBottomNav({ role }: { role?: string }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   const items = (role && ROLE_NAVS[role]) || DEFAULT_NAV;
-  const groups = MORE_GROUPS.filter((g) => g.visible(role));
+  const groups = orderedGroupsForRole(role);
   // "More" lights up when the current page isn't one of the 4 tabs.
   const onTabbedPage = items.some((i) => isActive(pathname, i.href));
 
