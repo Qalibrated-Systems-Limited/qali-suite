@@ -230,6 +230,13 @@ const getNavigationGroups = (user) => {
         hidden: !canSeeSalesNav(user?.role),
       },
       {
+        icon: ClipboardCheck,
+        label: "Sales Orders",
+        id: "sales-orders",
+        href: "/dashboard/sales-orders",
+        hidden: !canSeeSalesNav(user?.role),
+      },
+      {
         icon: Receipt,
         label: "Invoices",
         id: "invoices",

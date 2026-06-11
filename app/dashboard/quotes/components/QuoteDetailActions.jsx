@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useActionState } from "react";
+import { useState, useActionState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { toast } from "sonner";
 import {
   Send,
   ThumbsUp,
@@ -13,6 +14,7 @@ import {
   XCircle,
   Loader2,
   AlertTriangle,
+  ClipboardList,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +37,7 @@ import {
 } from "@/app/mongodb/actions/quote-actions";
 import { ConvertToInvoiceDialog } from "./ConvertToInvoiceDialog";
 import { QuotePDFDownloadButton } from "./QuotePDFButton";
+import { createSalesOrderFromQuote } from "@/app/mongodb/actions/sales-order-actions";
 
 export function QuoteDetailActions({
   quote,
@@ -43,6 +46,18 @@ export function QuoteDetailActions({
   company,
 }) {
   const router = useRouter();
+  const [isSoPending, startSoTransition] = useTransition();
+
+  const onCreateSalesOrder = () =>
+    startSoTransition(async () => {
+      const res = await createSalesOrderFromQuote(quote._id);
+      if (res?.success) {
+        toast.success(`Sales order ${res.data.orderNumber} created`);
+        router.push(`/dashboard/sales-orders/${res.data.id}`);
+      } else {
+        toast.error(res?.error || "Failed to create sales order");
+      }
+    });
 
   // Dialog states
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
@@ -134,6 +149,23 @@ export function QuoteDetailActions({
         >
           <ThumbsDown className="mr-2 h-4 w-4" />
           Reject
+        </Button>
+      )}
+
+      {/* Create Sales Order — confirmed-commitment path: reserves stock on
+          confirm, then invoices. Same eligibility as direct conversion. */}
+      {canConvert && (
+        <Button
+          variant="outline"
+          onClick={onCreateSalesOrder}
+          disabled={isSoPending}
+        >
+          {isSoPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <ClipboardList className="mr-2 h-4 w-4" />
+          )}
+          Create Sales Order
         </Button>
       )}
 
