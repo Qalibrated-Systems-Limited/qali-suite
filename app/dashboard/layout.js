@@ -1,6 +1,6 @@
 import { AlertCircle, LogOut } from "lucide-react";
 import { auth } from "../../auth";
-import { logout } from "../mongodb/actions";
+import { logout } from "../mongodb/actions/auth-actions";
 
 import { AppSidebar } from "./components/app-sidebar";
 import { CommandPaletteProvider } from "@/components/command-palette-provider";

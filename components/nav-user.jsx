@@ -26,7 +26,7 @@
 // } from "@/components/ui/sidebar";
 
 // import { getInitials } from "@/lib/utils";
-// import { logout } from "@/app/mongodb/actions";
+// import { logout } from "@/app/mongodb/actions/auth-actions";
 // import { LogOut } from "lucide-react";
 
 // export function NavUser({ user }) {

@@ -8,6 +8,9 @@ export const metadata = {
   description: "Open opportunities by stage — the sales pipeline",
 };
 
+// Auth-gated (session headers) — never statically prerendered.
+export const dynamic = "force-dynamic";
+
 const STAGE_LABEL = {
   qualification: "Qualification",
   needs_analysis: "Needs analysis",

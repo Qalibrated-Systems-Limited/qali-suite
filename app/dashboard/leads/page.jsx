@@ -9,6 +9,9 @@ export const metadata = {
   description: "Unqualified prospects — the top of the sales funnel",
 };
 
+// Auth-gated (session headers) — never statically prerendered.
+export const dynamic = "force-dynamic";
+
 const STATUS_STYLES = {
   new: "bg-blue-500/10 text-blue-600",
   contacted: "bg-amber-500/10 text-amber-600",
