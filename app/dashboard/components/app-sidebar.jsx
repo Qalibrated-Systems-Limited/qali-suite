@@ -1,7 +1,10 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { getInitials } from "@/lib/utils";
+import { logout } from "@/app/mongodb/actions/auth-actions";
 import {
   Menu,
   User,
@@ -133,15 +136,20 @@ export function AppSidebar({ children, user, notifications, ...props }) {
                   unread={notifications?.unread || 0}
                 />
 
-                {/* User Menu */}
+                {/* User Menu — visible on ALL breakpoints. On phones this
+                    is the only home for profile / theme / logout (no
+                    hamburger, and the bottom nav is destinations-only). */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="hidden sm:inline-flex text-muted-foreground hover:text-foreground hover:bg-accent h-8 w-8"
+                      className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent"
                     >
-                      <User className="w-4 h-4" />
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-[11px] font-bold text-primary">
+                        {getInitials(user?.name || user?.email || "U")}
+                      </span>
+                      <span className="sr-only">Account menu</span>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent
@@ -154,7 +162,7 @@ export function AppSidebar({ children, user, notifications, ...props }) {
                           {user?.name || "User"}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {user?.email || "user@example.com"}
+                          {user?.email || ""}
                         </p>
                         <p className="text-xs text-yellow-500 font-medium">
                           {user?.role || "User"}
@@ -163,22 +171,48 @@ export function AppSidebar({ children, user, notifications, ...props }) {
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator className="bg-border" />
 
-                    <DropdownMenuItem className="focus:bg-accent focus:text-accent-foreground cursor-pointer">
-                      <User className="mr-2 h-4 w-4" />
-                      <span>Profile</span>
+                    <DropdownMenuItem asChild className="cursor-pointer focus:bg-accent focus:text-accent-foreground">
+                      <Link href="/dashboard/profile">
+                        <User className="mr-2 h-4 w-4" />
+                        <span>My Profile</span>
+                      </Link>
                     </DropdownMenuItem>
 
-                    <DropdownMenuItem className="focus:bg-accent focus:text-accent-foreground cursor-pointer">
-                      <Settings className="mr-2 h-4 w-4" />
-                      <span>Settings</span>
+                    <DropdownMenuItem asChild className="cursor-pointer focus:bg-accent focus:text-accent-foreground">
+                      <Link href="/dashboard/settings">
+                        <Settings className="mr-2 h-4 w-4" />
+                        <span>Settings</span>
+                      </Link>
+                    </DropdownMenuItem>
+
+                    {/* Theme switch lives here on phones — the standalone
+                        header toggle is sm+ only. */}
+                    <DropdownMenuItem
+                      className="cursor-pointer focus:bg-accent focus:text-accent-foreground sm:hidden"
+                      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                    >
+                      {mounted && theme === "dark" ? (
+                        <Sun className="mr-2 h-4 w-4" />
+                      ) : (
+                        <Moon className="mr-2 h-4 w-4" />
+                      )}
+                      <span>{mounted && theme === "dark" ? "Light mode" : "Dark mode"}</span>
                     </DropdownMenuItem>
 
                     <DropdownMenuSeparator className="bg-border" />
 
-                    <DropdownMenuItem className="focus:bg-destructive/10 focus:text-destructive cursor-pointer">
-                      <LogOut className="mr-2 h-4 w-4" />
-                      <span>Log out</span>
-                    </DropdownMenuItem>
+                    <form
+                      action={async () => {
+                        await logout();
+                      }}
+                    >
+                      <DropdownMenuItem asChild className="cursor-pointer focus:bg-destructive/10 focus:text-destructive">
+                        <button type="submit" className="w-full">
+                          <LogOut className="mr-2 h-4 w-4" />
+                          <span>Log out</span>
+                        </button>
+                      </DropdownMenuItem>
+                    </form>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>

@@ -54,11 +54,11 @@ export default async function EditCompanyPage({ params }) {
 
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="p-2 bg-yellow-500/10 rounded-lg">
+        <div className="hidden p-2 bg-yellow-500/10 rounded-lg sm:block">
           <Building2 className="h-6 w-6 text-yellow-600" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold">Edit Company</h1>
+          <h1 className="text-lg font-bold sm:text-2xl">Edit Company</h1>
           <p className="text-muted-foreground">{company.name}</p>
         </div>
       </div>
