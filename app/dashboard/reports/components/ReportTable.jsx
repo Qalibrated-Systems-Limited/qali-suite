@@ -113,7 +113,7 @@ export function ReportSummaryCard({
       )}
     >
       <p className="text-sm text-muted-foreground font-medium">{label}</p>
-      <p className="text-2xl font-bold mt-1 tabular-nums">{value}</p>
+      <p className="mt-1 break-words text-lg font-bold tabular-nums sm:text-2xl">{value}</p>
       {subValue && (
         <p className="text-sm text-muted-foreground mt-1">{subValue}</p>
       )}
@@ -165,6 +165,17 @@ export function formatCurrency(amount, showSign = false) {
     return `+${formatted}`;
   }
   return formatted;
+}
+
+// Compact form for summary KPI cards on small screens — "12.35M" instead
+// of "12,345,678", which overflows a half-width card on phones. Detail
+// rows keep full precision; this is for headlines only.
+export function formatCurrencyCompact(amount) {
+  const formatted = new Intl.NumberFormat("en-KE", {
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(Math.abs(amount || 0));
+  return amount < 0 ? `(${formatted})` : formatted;
 }
 
 export function formatPercent(value) {

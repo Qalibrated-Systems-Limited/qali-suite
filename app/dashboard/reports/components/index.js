@@ -9,6 +9,7 @@ export {
   ReportSummaryCard,
   ReportSectionHeader,
   formatCurrency,
+  formatCurrencyCompact,
   formatPercent,
 } from "./ReportTable";
 export { ReportSkeleton } from "./ReportSkeleton";
