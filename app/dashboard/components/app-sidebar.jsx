@@ -77,12 +77,15 @@ export function AppSidebar({ children, user, notifications, ...props }) {
         <header className="bg-card/80 backdrop-blur-sm border-b border-border sticky top-0 z-10">
           <div className="px-3 sm:px-4 md:px-6 lg:px-8 py-2 sm:py-2.5">
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* Left: Mobile Menu + Logo */}
+              {/* Left: Logo (+ menu on tablets). Phones (<sm) get no
+                  hamburger — the bottom nav's "More" sheet covers full
+                  navigation there; tablets (sm–lg) have no bottom nav,
+                  so they keep the drawer trigger. */}
               <div className="flex items-center gap-1.5 lg:hidden shrink-0">
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="text-foreground hover:bg-accent h-8 w-8"
+                  className="hidden sm:inline-flex text-foreground hover:bg-accent h-8 w-8"
                   onClick={() => setMobileMenuOpen(true)}
                 >
                   <Menu className="w-5 h-5" />

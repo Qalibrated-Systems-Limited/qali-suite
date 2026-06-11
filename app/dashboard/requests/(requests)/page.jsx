@@ -82,8 +82,8 @@ const RequestsPage = async (props) => {
         Action={() => (
           <Button asChild size="sm">
             <Link href="/dashboard/requests/create">
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              New Request
+              <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">New Request</span>
             </Link>
           </Button>
         )}

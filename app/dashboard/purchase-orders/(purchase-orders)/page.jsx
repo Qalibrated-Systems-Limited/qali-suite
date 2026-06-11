@@ -82,8 +82,8 @@ async function PurchaseOrdersPage(props) {
         <h1 className="text-lg font-semibold tracking-tight">Purchase Orders</h1>
         <Button asChild size="sm">
           <Link href="/dashboard/purchase-orders/create">
-            <Plus className="h-3.5 w-3.5 mr-1.5" />
-            New PO
+            <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+            <span className="hidden sm:inline">New PO</span>
           </Link>
         </Button>
       </div>

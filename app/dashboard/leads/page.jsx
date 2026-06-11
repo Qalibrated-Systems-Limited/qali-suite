@@ -49,7 +49,7 @@ export default async function LeadsPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
         <Stat label="Total leads" value={stats.total} />
         <Stat label="Open" value={stats.open} />
         <Stat label="Open pipeline value" value={KES(stats.value)} />
@@ -127,11 +127,11 @@ export default async function LeadsPage() {
 function Stat({ label, value }) {
   return (
     <Card className="bg-card border-border">
-      <CardContent className="p-4">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">
+      <CardContent className="p-3">
+        <div className="truncate text-[11px] uppercase tracking-wide text-muted-foreground">
           {label}
         </div>
-        <div className="mt-1 text-xl font-semibold">{value}</div>
+        <div className="mt-0.5 text-lg font-semibold sm:text-xl">{value}</div>
       </CardContent>
     </Card>
   );

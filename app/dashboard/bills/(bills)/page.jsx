@@ -429,8 +429,8 @@ export default async function BillsPage({ searchParams }) {
         {canCreate && (
           <Button asChild size="sm">
             <Link href="/dashboard/bills/create">
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              New Bill
+              <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">New Bill</span>
             </Link>
           </Button>
         )}

@@ -77,8 +77,8 @@ async function InvoicesPage(props) {
         <h1 className="text-lg font-semibold tracking-tight">Invoices</h1>
         <Button asChild size="sm">
           <Link href="/dashboard/invoices/create">
-            <Plus className="h-3.5 w-3.5 mr-1.5" />
-            New Invoice
+            <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+            <span className="hidden sm:inline">New Invoice</span>
           </Link>
         </Button>
       </div>
