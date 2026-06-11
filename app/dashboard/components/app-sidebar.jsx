@@ -22,14 +22,20 @@ import { MobileNav } from "@/components/mobile-nav";
 import { PcNav } from "@/components/pc-nav";
 import { MobileSearch } from "@/components/search";
 import { useTheme } from "next-themes";
+import { usePathname } from "next/navigation";
 import { QaliSuiteIcon } from "@/components/qalisuite-logo";
 import NotificationBell from "./NotificationBell";
+import { titleForPath } from "@/lib/nav/route-titles";
 
 export function AppSidebar({ children, user, notifications, ...props }) {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [mounted, setMounted] = React.useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
   const { theme, setTheme } = useTheme();
+  const pathname = usePathname();
+  // Current page title for the mobile header — desktop has the sidebar
+  // for context, phones lose the h1 the moment they scroll.
+  const pageTitle = titleForPath(pathname);
 
   // Avoid hydration mismatch & restore collapsed state
   React.useEffect(() => {
@@ -83,6 +89,14 @@ export function AppSidebar({ children, user, notifications, ...props }) {
                 </Button>
                 <QaliSuiteIcon className="w-8 h-8" />
               </div>
+
+              {/* Center: current page title (mobile only — desktop has the
+                  sidebar for context). Truncates rather than wraps. */}
+              {pageTitle && (
+                <span className="min-w-0 flex-1 truncate text-center text-sm font-semibold lg:hidden">
+                  {pageTitle}
+                </span>
+              )}
 
               {/* Right: Action Buttons */}
               <div className="flex items-center gap-0.5 sm:gap-1.5 ml-auto shrink-0">
