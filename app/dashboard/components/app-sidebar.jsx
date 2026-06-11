@@ -3,7 +3,6 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
-  Bell,
   Menu,
   User,
   Settings,
@@ -24,8 +23,9 @@ import { PcNav } from "@/components/pc-nav";
 import { MobileSearch } from "@/components/search";
 import { useTheme } from "next-themes";
 import { QaliSuiteIcon } from "@/components/qalisuite-logo";
+import NotificationBell from "./NotificationBell";
 
-export function AppSidebar({ children, user, ...props }) {
+export function AppSidebar({ children, user, notifications, ...props }) {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [mounted, setMounted] = React.useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
@@ -110,15 +110,11 @@ export function AppSidebar({ children, user, ...props }) {
                   <span className="sr-only">Toggle theme</span>
                 </Button>
 
-                {/* Notifications */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="hidden sm:inline-flex text-muted-foreground hover:text-foreground hover:bg-accent h-8 w-8"
-                >
-                  <Bell className="w-4 h-4" />
-                  <span className="sr-only">Notifications</span>
-                </Button>
+                {/* Notifications — visible on all breakpoints (mobile too) */}
+                <NotificationBell
+                  items={notifications?.items || []}
+                  unread={notifications?.unread || 0}
+                />
 
                 {/* User Menu */}
                 <DropdownMenu>

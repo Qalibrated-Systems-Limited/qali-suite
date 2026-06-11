@@ -5,6 +5,7 @@ import { logout } from "../mongodb/actions/auth-actions";
 import { AppSidebar } from "./components/app-sidebar";
 import { CommandPaletteProvider } from "@/components/command-palette-provider";
 import MobileBottomNav from "./components/MobileBottomNav";
+import { cMyNotifications } from "@/app/mongodb/queries/notification-queries";
 
 export const metadata = {
   title: "QaliSuite Dashboard",
@@ -49,10 +50,15 @@ async function DashboardLayout({ children }) {
     );
   }
 
+  // Bell data — request-scoped (cache()), index-backed, capped. Safe-noop
+  // when there's no session.
+  const notifications = await cMyNotifications();
+
   return (
     <CommandPaletteProvider>
       <AppSidebar
         user={user}
+        notifications={notifications}
         children={
           <div className="p-4 pb-20 md:p-6 md:pb-6">
             {children}
