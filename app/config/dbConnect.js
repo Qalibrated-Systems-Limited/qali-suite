@@ -36,6 +36,13 @@ const dbConnect = async () => {
       connectTimeoutMS: 5000,
       family: 4, // Use IPv4
       bufferCommands: true, // Buffer commands until connection is ready
+      // Index management. Defaults ON (keeps dev/preview indexes in sync as
+      // schemas evolve). In production set MONGO_AUTOINDEX=false to avoid the
+      // boot-time index-build storm across the ~250 schema indexes, and build
+      // them out-of-band instead (e.g. `node scripts/sync-indexes.mjs` at
+      // deploy time, or mongosh createIndex). Disabling without a build step
+      // means new indexes won't exist — so only flip it once that step runs.
+      autoIndex: process.env.MONGO_AUTOINDEX !== "false",
     };
 
     cached.promise = mongoose.connect(uri, opts).then((mongoose) => {
