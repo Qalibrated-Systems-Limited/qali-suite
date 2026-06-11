@@ -90,10 +90,13 @@ export async function getAccountById(accountId, includeTransactions = false) {
   if (!account) return null;
 
   if (includeTransactions) {
-    const recentTransactions = await JournalEntry.find({
-      status: "posted",
-      "lines.accountId": accountId,
-    })
+    const recentTransactions = await JournalEntry.find(
+      withTenantScope(
+        { status: "posted", "lines.accountId": accountId },
+        companyId,
+        isSuperAdmin,
+      ),
+    )
       .sort({ entryDate: -1 })
       .limit(10)
       .select("entryNumber entryDate description lines")
@@ -340,7 +343,9 @@ export async function getAccountsByType(accountType) {
     isSuperAdmin,
   );
 
-  return await Account.find(query).sort({ accountCode: 1 }).lean();
+  // Safety ceiling — a chart of accounts is bounded; cap to avoid an
+  // unbounded scan if data is ever pathological.
+  return await Account.find(query).sort({ accountCode: 1 }).limit(2000).lean();
 }
 
 /**
@@ -358,7 +363,8 @@ export async function getRootAccounts() {
     isSuperAdmin,
   );
 
-  return await Account.find(query).sort({ accountCode: 1 }).lean();
+  // Safety ceiling (root accounts are few; guard against pathological data).
+  return await Account.find(query).sort({ accountCode: 1 }).limit(2000).lean();
 }
 
 /**
