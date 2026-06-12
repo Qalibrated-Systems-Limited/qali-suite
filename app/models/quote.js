@@ -817,6 +817,9 @@ quoteSchema.methods.convertToInvoice = async function (
       quoteId: this._id,
       quoteNumber: this.quoteNumber,
     },
+    salesPerson: this.salesPerson?.employeeId || this.salesPerson?.name
+      ? this.salesPerson
+      : undefined,
     notes: invoiceData.notes || this.notes,
     createdBy: userInfo,
   });

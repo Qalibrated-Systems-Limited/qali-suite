@@ -78,6 +78,19 @@ const invoiceSchema = new Schema(
     costCode: { code: String, name: String },
 
     // Customer Information
+    // Sales attribution — stamped at creation (copied from the quote/SO/
+    // opportunity owner), never recomputed, so per-rep reporting survives
+    // staff changes. Mirrors Quote.salesPerson.
+    salesPerson: {
+      employeeId: { type: Schema.Types.ObjectId, ref: "User", index: true },
+      partyId: { type: Schema.Types.ObjectId, ref: "Party" },
+      name: String,
+      commission: {
+        rate: { type: Number, default: 0 },
+        amount: { type: Number, default: 0 },
+      },
+    },
+
     customer: {
       id: {
         type: String,
@@ -620,6 +633,7 @@ invoiceSchema.index({ companyId: 1, dueDate: 1, paymentStatus: 1 });
 invoiceSchema.index({ companyId: 1, "customer.id": 1, status: 1 });
 invoiceSchema.index({ companyId: 1, paymentStatus: 1, dueDate: 1 });
 invoiceSchema.index({ companyId: 1, status: 1, invoiceDate: -1 });
+invoiceSchema.index({ companyId: 1, "salesPerson.employeeId": 1, status: 1, invoiceDate: -1 });
 invoiceSchema.index({ companyId: 1, "accounting.accountingComplete": 1 });
 invoiceSchema.index({ companyId: 1, fiscalPeriod: 1, status: 1 });
 // Draft expiry index - for finding stale drafts with committed stock

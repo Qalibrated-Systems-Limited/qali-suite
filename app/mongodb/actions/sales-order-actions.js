@@ -120,6 +120,9 @@ export async function createSalesOrderFromQuote(quoteId) {
       orderNumber,
       orderDate: new Date(),
       customer: quote.customer,
+      salesPerson: quote.salesPerson?.employeeId || quote.salesPerson?.name
+        ? quote.salesPerson
+        : undefined,
       quoteRef: { quoteId: quote._id, quoteNumber: quote.quoteNumber },
       items,
       subtotal: quote.subtotal,
@@ -412,6 +415,9 @@ export async function convertSalesOrderToInvoice(orderId) {
           draftExpiresAt,
           quoteRef: so.quoteRef?.quoteId
             ? { quoteId: so.quoteRef.quoteId, quoteNumber: so.quoteRef.quoteNumber }
+            : undefined,
+          salesPerson: so.salesPerson?.employeeId || so.salesPerson?.name
+            ? so.salesPerson
             : undefined,
           notes: `From sales order ${so.orderNumber}${so.notes ? ` — ${so.notes}` : ""}`,
           createdBy: { name: me.name, id: me.id },

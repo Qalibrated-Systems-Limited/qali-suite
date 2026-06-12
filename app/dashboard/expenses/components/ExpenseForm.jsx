@@ -152,6 +152,19 @@ function VendorCombobox({ vendors = [], employees = [], defaultValue, error, onV
         <input type="hidden" name="vendorId" value={vendorId} />
         <input type="hidden" name="vendorType" value={vendorType} />
         <input type="hidden" name="vendorName" value={vendorName} />
+
+        {/* Accounting guard: this form posts to a P&L expense account.
+            A salary ADVANCE is an asset (Employee Advances, recoverable)
+            and must go through the claims flow — booking it here would
+            expense it immediately and lose the recovery tracking. */}
+        {vendorType === "employee" && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            Paying an employee here books a <strong>business expense</strong>{" "}
+            (reimbursement, fuel, airtime…). For <strong>salary advances</strong>{" "}
+            use Employee Expenses → Advance instead — advances post to the
+            recoverable Employee Advances account, not to P&L.
+          </div>
+        )}
         <input type="hidden" name="vendorTaxPin" value={vendorTaxPin} />
         <input type="hidden" name="vendorPhone" value={vendorPhone} />
         <input type="hidden" name="vendorEmail" value={vendorEmail} />
