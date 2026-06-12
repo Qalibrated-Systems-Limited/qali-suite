@@ -52,6 +52,7 @@ import { globalSearch } from "@/app/mongodb/actions/global-search-action";
 // typing "PAYE" surfaces Payroll, "P&L" surfaces the Profit & Loss report.
 const PAGES = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Executive Overview", href: "/dashboard/executive", icon: TrendingUp, aliases: ["ceo", "exec", "overview", "snapshot"] },
   { label: "Approvals", href: "/dashboard/approvals", icon: CheckSquare },
 
   // ── Inventory ──────────────────────────────────────

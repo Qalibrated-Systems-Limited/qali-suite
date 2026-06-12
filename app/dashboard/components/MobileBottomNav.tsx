@@ -20,6 +20,7 @@ import {
   ArrowLeftRight,
   FileSpreadsheet,
   LayoutGrid,
+  BarChart3,
   FileText,
   Target,
   Briefcase,
@@ -82,6 +83,13 @@ type NavItem = {
 
 // 4 primary tabs per role (the 5th slot is "More").
 const ROLE_NAVS: Record<string, NavItem[]> = {
+  // Executive — overview-first, read-oriented
+  CEO: [
+    { label: "Overview", href: "/dashboard/executive", icon: TrendingUp },
+    { label: "Reports", href: "/dashboard/reports/profit-loss", icon: BarChart3 },
+    { label: "Pipeline", href: "/dashboard/opportunities", icon: Briefcase },
+    { label: "Invoices", href: "/dashboard/invoices", icon: Receipt },
+  ],
   CFO: [
     { label: "Home", href: "/dashboard", icon: LayoutDashboard },
     { label: "Approvals", href: "/dashboard/approvals", icon: CheckSquare },
@@ -273,6 +281,7 @@ const MORE_GROUPS: NavGroup[] = [
 // SuperAdmin (its visible() gate).
 // ============================================
 const ROLE_GROUP_ORDER: Record<string, string[]> = {
+  CEO: ["Reports", "Sales & CRM", "Finance", "Purchases"],
   SuperAdmin: ["Platform", "Admin", "Reports", "Finance"],
   Admin: ["Admin", "Reports", "Finance", "Sales & CRM", "Inventory"],
   CFO: ["Finance", "Reports", "Purchases", "Sales & CRM"],
