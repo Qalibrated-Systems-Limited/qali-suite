@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
+import ResetTransactionsCard from "../components/ResetTransactionsCard";
 import { getCompanyById } from "@/app/mongodb/queries/company-queries";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -284,6 +285,12 @@ export default async function CompanyDetailPage({ params }) {
       </div>
 
       {/* Audit Info */}
+      {/* Danger zone — SuperAdmin transactional reset */}
+      <ResetTransactionsCard
+        companyId={company._id.toString()}
+        companyName={company.name}
+      />
+
       <Card>
         <CardContent className="py-4">
           <div className="flex flex-col sm:flex-row sm:justify-between gap-2 text-sm text-muted-foreground">
