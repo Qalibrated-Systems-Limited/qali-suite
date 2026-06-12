@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils";
 
 const EXPENSE_SUB_TYPES = [
   { value: "direct_cost", label: "Direct Project Cost" },
+  { value: "cogs", label: "Cost of Goods Sold" },
   { value: "operating_expense", label: "Operating Expense" },
   { value: "admin", label: "Admin" },
   { value: "transport", label: "Transport" },
@@ -51,6 +52,8 @@ const EXPENSE_SUB_TYPES = [
   { value: "professional", label: "Professional Fees" },
   { value: "insurance", label: "Insurance" },
   { value: "financial", label: "Financial" },
+  { value: "utilities_expense", label: "Utilities" },
+  { value: "depreciation", label: "Depreciation" },
   { value: "other_expense", label: "Other" },
 ];
 
@@ -265,9 +268,8 @@ export default function ExpenseAccountCombobox({
               </Label>
               <Input
                 name="accountCode"
-                placeholder="e.g. 5200, 6550"
-                required
-                pattern="[0-9]+"
+                placeholder="Leave blank to auto-assign"
+                pattern="[0-9]*"
                 className="font-mono"
                 disabled={creating}
                 autoFocus
@@ -275,7 +277,8 @@ export default function ExpenseAccountCombobox({
                 key={`code-${formValues.accountCode}`}
               />
               <p className="text-xs text-muted-foreground">
-                5000–6999 range (5xxx direct costs, 6xxx expenses)
+                Leave blank to auto-assign the next free code (5xxx direct
+                costs/COGS, 6xxx operating expenses)
               </p>
             </div>
 

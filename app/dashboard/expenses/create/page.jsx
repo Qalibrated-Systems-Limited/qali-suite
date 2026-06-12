@@ -20,7 +20,7 @@ async function getFormData() {
   const { companyId } = await getTenantContext();
 
   // Fetch all data in parallel
-  const [expenseAccounts, paymentAccounts, vendors, assets] = await Promise.all(
+  const [expenseAccounts, paymentAccounts, vendors, employees, assets] = await Promise.all(
     [
       // Expense accounts (for expense posting)
       Account.find({
@@ -29,7 +29,7 @@ async function getFormData() {
         isActive: { $ne: false },
         canPost: true,
       })
-        .select("_id accountCode accountName")
+        .select("_id accountCode accountName subType")
         .sort({ accountCode: 1 })
         .lean(),
 
@@ -54,6 +54,16 @@ async function getFormData() {
         .sort({ name: 1 })
         .lean(),
 
+      // Employees — payees for advances/reimbursements booked by accounts
+      Party.find({
+        companyId,
+        type: "employee",
+        isActive: { $ne: false },
+      })
+        .select("_id name phone email")
+        .sort({ name: 1 })
+        .lean(),
+
       // Active fixed assets (optional — for tagging fuel/repairs/maintenance)
       Asset.find({
         companyId,
@@ -70,6 +80,7 @@ async function getFormData() {
       _id: a._id.toString(),
       accountCode: a.accountCode,
       accountName: a.accountName,
+      subType: a.subType || "",
     })),
     paymentAccounts: paymentAccounts.map((a) => ({
       _id: a._id.toString(),
@@ -84,6 +95,12 @@ async function getFormData() {
       phone: v.phone || "",
       email: v.email || "",
     })),
+    employees: employees.map((e) => ({
+      _id: e._id.toString(),
+      name: e.name,
+      phone: e.phone || "",
+      email: e.email || "",
+    })),
     assets: assets.map((a) => ({
       _id: a._id.toString(),
       assetNumber: a.assetNumber,
@@ -94,7 +111,7 @@ async function getFormData() {
 }
 
 export default async function CreateExpensePage() {
-  const [{ accounts, paymentAccounts, vendors, assets }, projects] =
+  const [{ accounts, paymentAccounts, vendors, employees, assets }, projects] =
     await Promise.all([getFormData(), getActiveProjects()]);
   const categories = getExpenseCategories();
 
@@ -133,6 +150,7 @@ export default async function CreateExpensePage() {
           accounts={accounts}
           paymentAccounts={paymentAccounts}
           vendors={vendors}
+          employees={employees}
           categories={categories}
           projects={projects}
           assets={assets}

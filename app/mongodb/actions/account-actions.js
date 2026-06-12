@@ -234,40 +234,61 @@ export async function quickCreateExpenseAccount(formData) {
       return { success: false, error: "You don't have permission to manage accounts.", values };
     }
 
-    if (!accountCode || !/^[0-9]+$/.test(accountCode)) {
+    if (accountCode && !/^[0-9]+$/.test(accountCode)) {
       return { success: false, error: "Account code must be numeric", values };
     }
     if (!accountName) {
       return { success: false, error: "Account name is required", values };
     }
 
-    // Validate account code range based on subType
-    const codeNum = parseInt(accountCode, 10);
-    if (subType === "direct_cost") {
-      // Direct project costs: 5000-5999
-      if (codeNum < 5000 || codeNum > 5999) {
-        return { success: false, error: "Direct cost accounts must be between 5000 and 5999", values };
+    await connectDB();
+
+    // Cost-of-sales family (COGS, direct costs, inventory adjustments)
+    // books to 5xxx; every other expense subtype to 6xxx.
+    const { DIRECT_COST_SUBTYPES, COA_RANGES, nextCodeInRange } = await import(
+      "@/lib/coa-codes"
+    );
+    const range = DIRECT_COST_SUBTYPES.has(subType)
+      ? COA_RANGES.direct_cost
+      : COA_RANGES.expense;
+
+    let finalCode = accountCode;
+    if (!finalCode) {
+      // Auto-assign the next free code in the range — no guessing.
+      const existing = await Account.find(
+        withTenantScope({}, tenantCompanyId, isSuperAdmin),
+      )
+        .select("accountCode")
+        .lean();
+      finalCode = nextCodeInRange(
+        existing.map((a) => a.accountCode),
+        range,
+      );
+      if (!finalCode) {
+        return { success: false, error: "No free codes left in this range — enter one manually.", values };
       }
     } else {
-      // Operating expenses: 6000-6999
-      if (codeNum < 6000 || codeNum > 6999) {
-        return { success: false, error: "Expense account codes must be between 6000 and 6999", values };
+      const codeNum = parseInt(finalCode, 10);
+      if (codeNum < range[0] || codeNum > range[1]) {
+        return {
+          success: false,
+          error: `${DIRECT_COST_SUBTYPES.has(subType) ? "Direct cost/COGS" : "Expense"} account codes must be between ${range[0]} and ${range[1]}`,
+          values,
+        };
       }
     }
 
-    await connectDB();
-
     // Check uniqueness
     const existingCode = await Account.findOne(
-      withTenantScope({ accountCode }, tenantCompanyId, isSuperAdmin),
+      withTenantScope({ accountCode: finalCode }, tenantCompanyId, isSuperAdmin),
     );
     if (existingCode) {
-      return { success: false, error: `Account code ${accountCode} already exists`, values };
+      return { success: false, error: `Account code ${finalCode} already exists`, values };
     }
 
     const account = await Account.create({
       companyId: tenantCompanyId,
-      accountCode,
+      accountCode: finalCode,
       accountName,
       accountType: "expense",
       subType,
