@@ -9,7 +9,7 @@ import KpiDetailView from "./KpiDetailView";
 
 export const metadata = { title: "KPI Detail" };
 
-const VIEW_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR", "Accountant", "Finance Manager"];
+const VIEW_ROLES = ["SuperAdmin", "Admin", "CEO", "Manager", "CFO", "HR", "Accountant", "Finance Manager"];
 const MANAGE_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR"];
 const ENTER_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR", "Accountant"];
 
