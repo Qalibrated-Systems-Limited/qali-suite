@@ -235,8 +235,10 @@ export async function createPayment(prevState, formData) {
       };
     }
 
-    // Get party
-    const party = await Party.findById(data.partyId);
+    // Get party (tenant-scoped — never reference another tenant's party)
+    const party = await Party.findOne(
+      withTenantScope({ _id: data.partyId }, companyId, isSuperAdmin),
+    );
     if (!party) {
       return { success: false, error: "Party not found", formData: rawData };
     }
@@ -259,8 +261,10 @@ export async function createPayment(prevState, formData) {
       return { success: false, error: "Made payments must be to suppliers", formData: rawData };
     }
 
-    // Get account
-    const account = await Account.findById(data.accountId);
+    // Get account (tenant-scoped)
+    const account = await Account.findOne(
+      withTenantScope({ _id: data.accountId }, companyId, isSuperAdmin),
+    );
     if (!account) {
       return { success: false, error: "Payment account not found", formData: rawData };
     }
@@ -447,9 +451,13 @@ export async function updatePayment(id, prevState, formData) {
       }
     }
 
-    // Get party and account
-    const party = await Party.findById(data.partyId);
-    const account = await Account.findById(data.accountId);
+    // Get party and account (tenant-scoped)
+    const party = await Party.findOne(
+      withTenantScope({ _id: data.partyId }, companyId, isSuperAdmin),
+    );
+    const account = await Account.findOne(
+      withTenantScope({ _id: data.accountId }, companyId, isSuperAdmin),
+    );
 
     if (!party || !account) {
       return { success: false, error: "Party or account not found" };

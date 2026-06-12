@@ -50,6 +50,11 @@ export default async function DashboardPage() {
   const userRole =
     (session.user as { role?: string }).role || "Employee";
 
+  // CEO lands on the executive overview — their role centre IS the snapshot.
+  if (userRole === "CEO") {
+    redirect("/dashboard/executive");
+  }
+
   const componentName =
     DASHBOARD_FOR_ROLE[userRole as keyof typeof DASHBOARD_FOR_ROLE] ||
     "EmployeeDashboard";

@@ -31,8 +31,8 @@ export default async function CustomersPage({ searchParams }) {
         <h1 className="text-lg font-semibold tracking-tight">Customers</h1>
         <Button asChild size="sm">
           <Link href="/dashboard/parties/create?type=customer">
-            <Plus className="h-3.5 w-3.5 mr-1.5" />
-            New Customer
+            <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+            <span className="hidden sm:inline">New Customer</span>
           </Link>
         </Button>
       </div>

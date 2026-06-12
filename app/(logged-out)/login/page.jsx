@@ -151,15 +151,16 @@ function LoginContent() {
       {/* ── Right panel: login form ── */}
       <div className="flex-1 flex items-center justify-center px-5 py-8">
         <div className="w-full max-w-[380px]">
-          {/* Mobile header */}
-          <div className="lg:hidden mb-8 animate-[fadeInUp_0.5s_ease-out_both]">
+          {/* Mobile header — centred; left-aligned logo made the page feel
+              lopsided on phones (no left panel to balance it there) */}
+          <div className="lg:hidden mb-8 flex justify-center animate-[fadeInUp_0.5s_ease-out_both]">
             <Link href="/">
               <QaliSuiteMark size="md" />
             </Link>
           </div>
 
-          {/* Heading */}
-          <div className="mb-6 animate-[fadeInUp_0.5s_ease-out_0.05s_both]">
+          {/* Heading — centred on phones, left from lg (matches panel layout) */}
+          <div className="mb-6 text-center lg:text-left animate-[fadeInUp_0.5s_ease-out_0.05s_both]">
             <h1 className="text-xl font-semibold text-foreground tracking-tight">Welcome back</h1>
             <p className="text-[13px] text-muted-foreground mt-1">
               Sign in to your account to continue

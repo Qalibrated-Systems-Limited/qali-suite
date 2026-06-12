@@ -1,13 +1,16 @@
 import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { canSeeReportsNav } from "@/lib/permissions";
 import Link from "next/link";
 import { ChevronLeft, Calendar, AlertTriangle } from "lucide-react";
 import { getAssetRollforward } from "@/app/mongodb/actions/asset-actions";
 
 export const metadata = { title: "Asset Rollforward | Reports" };
 
-const VIEW_ROLES = ["SuperAdmin", "Admin", "Accountant", "Manager"];
+// Single source of truth — same gate that shows the Reports nav link.
+// (The previous inline VIEW_ROLES bounced CFO and Finance Manager to the
+// dashboard.)
 
 function formatCurrency(amount) {
   return (amount || 0).toLocaleString("en-KE", { minimumFractionDigits: 0 });
@@ -285,10 +288,7 @@ function ReportSkeleton() {
 export default async function AssetRollforwardPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (
-    !VIEW_ROLES.includes(session.user.role) &&
-    session.user.role !== "SuperAdmin"
-  ) {
+  if (!canSeeReportsNav(session.user.role)) {
     redirect("/dashboard");
   }
 

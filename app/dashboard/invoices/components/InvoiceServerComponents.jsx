@@ -21,19 +21,19 @@ export async function InvoiceStatsCards({ filters }) {
   const stats = await getInvoiceStats(filters);
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
       <Card className="bg-card border-border">
-        <CardContent className="p-4">
+        <CardContent className="p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">Total Invoices</p>
-              <p className="text-2xl font-bold text-foreground">
+              <p className="text-lg sm:text-xl font-bold text-foreground">
                 {stats.totalInvoices}
               </p>
             </div>
-            <FileText className="w-8 h-8 text-blue-500" />
+            <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" />
           </div>
-          <div className="mt-2 pt-2 border-t border-border">
+          <div className="hidden sm:block mt-2 pt-2 border-t border-border">
             <p className="text-xs text-muted-foreground">Total Revenue</p>
             <p className="text-sm font-semibold text-blue-400">
               {formatCurrency(stats.totalRevenue)}
@@ -43,17 +43,17 @@ export async function InvoiceStatsCards({ filters }) {
       </Card>
 
       <Card className="bg-card border-border">
-        <CardContent className="p-4">
+        <CardContent className="p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">Paid</p>
-              <p className="text-2xl font-bold text-green-500">
+              <p className="text-lg sm:text-xl font-bold text-green-500">
                 {stats.totalPaid}
               </p>
             </div>
-            <CheckCircle className="w-8 h-8 text-green-500" />
+            <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-500" />
           </div>
-          <div className="mt-2 pt-2 border-t border-border">
+          <div className="hidden sm:block mt-2 pt-2 border-t border-border">
             <p className="text-xs text-muted-foreground">Amount Paid</p>
             <p className="text-sm font-semibold text-green-400">
               {formatCurrency(stats.totalAmountPaid)}
@@ -63,17 +63,17 @@ export async function InvoiceStatsCards({ filters }) {
       </Card>
 
       <Card className="bg-card border-border">
-        <CardContent className="p-4">
+        <CardContent className="p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">Unpaid</p>
-              <p className="text-2xl font-bold text-red-500">
+              <p className="text-lg sm:text-xl font-bold text-red-500">
                 {stats.totalUnpaid}
               </p>
             </div>
-            <XCircle className="w-8 h-8 text-red-500" />
+            <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-500" />
           </div>
-          <div className="mt-2 pt-2 border-t border-border">
+          <div className="hidden sm:block mt-2 pt-2 border-t border-border">
             <p className="text-xs text-muted-foreground">Balance Due</p>
             <p className="text-sm font-semibold text-red-400">
               {formatCurrency(stats.balanceDue)}
@@ -83,17 +83,17 @@ export async function InvoiceStatsCards({ filters }) {
       </Card>
 
       <Card className="bg-card border-border">
-        <CardContent className="p-4">
+        <CardContent className="p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">Partial</p>
-              <p className="text-2xl font-bold text-orange-500">
+              <p className="text-lg sm:text-xl font-bold text-orange-500">
                 {stats.totalPartial}
               </p>
             </div>
-            <Clock className="w-8 h-8 text-orange-500" />
+            <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-orange-500" />
           </div>
-          <div className="mt-2 pt-2 border-t border-border">
+          <div className="hidden sm:block mt-2 pt-2 border-t border-border">
             <p className="text-xs text-muted-foreground">Collection Rate</p>
             <p className="text-sm font-semibold text-orange-400">
               {stats.totalRevenue > 0
@@ -114,10 +114,10 @@ export async function InvoiceStatsCards({ filters }) {
 
 export function InvoiceStatsSkeleton() {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
       {[...Array(4)].map((_, index) => (
         <Card key={index} className="bg-card border-border">
-          <CardContent className="p-4">
+          <CardContent className="p-3">
             <div className="flex items-center justify-between">
               <div className="space-y-2">
                 <Skeleton className="h-3 w-20" />
@@ -125,7 +125,7 @@ export function InvoiceStatsSkeleton() {
               </div>
               <Skeleton className="w-8 h-8 rounded" />
             </div>
-            <div className="mt-2 pt-2 border-t border-border">
+            <div className="hidden sm:block mt-2 pt-2 border-t border-border">
               <Skeleton className="h-3 w-16 mb-1" />
               <Skeleton className="h-4 w-24" />
             </div>

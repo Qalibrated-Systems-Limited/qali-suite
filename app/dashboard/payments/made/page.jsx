@@ -19,6 +19,7 @@ import Pagination from "@/components/pagination";
 import { formatCurrency } from "@/lib/utils";
 import { getPayments, getPaymentStats } from "@/app/mongodb/actions/payment-actions";
 import { auth } from "@/auth";
+import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { PaymentActions } from "../components/PaymentActions";
 
 export const metadata = {
@@ -228,7 +229,7 @@ async function PaymentsList({ searchParams, userRole }) {
 
 export default async function PaymentsMadePage({ searchParams }) {
   const session = await auth();
-  const canCreate = ["SuperAdmin", "Admin", "Manager", "Accountant"].includes(session?.user?.role);
+  const canCreate = [...FINANCE_WRITE_ROLES, "Manager"].includes(session?.user?.role);
   const params = await searchParams;
   const successMessage = params?.success === "true" ? params?.message : null;
 

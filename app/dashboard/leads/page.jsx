@@ -1,13 +1,20 @@
 import Link from "next/link";
+import { auth } from "@/auth";
+import { redirect } from "next/navigation";
+import { canSeeSalesNav } from "@/lib/permissions";
 import { cLeads, cLeadStats } from "@/app/mongodb/queries/lead-queries";
 import { Card, CardContent } from "@/components/ui/card";
 import LeadCreateForm from "./components/LeadCreateForm";
 import LeadRowActions from "./components/LeadRowActions";
+import AccessDenied from "@/app/dashboard/components/crm/AccessDenied";
 
 export const metadata = {
   title: "Leads | ERP System",
   description: "Unqualified prospects — the top of the sales funnel",
 };
+
+// Auth-gated (session headers) — never statically prerendered.
+export const dynamic = "force-dynamic";
 
 const STATUS_STYLES = {
   new: "bg-blue-500/10 text-blue-600",
@@ -21,6 +28,12 @@ const KES = (n) =>
   `KES ${Number(n || 0).toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
 
 export default async function LeadsPage() {
+  // Page-level auth (defense in depth — middleware is optimistic) + the
+  // same role gate the sidebar uses, so direct-URL access is refused too.
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  if (!canSeeSalesNav(session.user.role)) return <AccessDenied resource="leads" />;
+
   const [leads, stats] = await Promise.all([cLeads(), cLeadStats()]);
 
   return (
@@ -36,7 +49,7 @@ export default async function LeadsPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
         <Stat label="Total leads" value={stats.total} />
         <Stat label="Open" value={stats.open} />
         <Stat label="Open pipeline value" value={KES(stats.value)} />
@@ -114,11 +127,11 @@ export default async function LeadsPage() {
 function Stat({ label, value }) {
   return (
     <Card className="bg-card border-border">
-      <CardContent className="p-4">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">
+      <CardContent className="p-3">
+        <div className="truncate text-[11px] uppercase tracking-wide text-muted-foreground">
           {label}
         </div>
-        <div className="mt-1 text-xl font-semibold">{value}</div>
+        <div className="mt-0.5 text-lg font-semibold sm:text-xl">{value}</div>
       </CardContent>
     </Card>
   );

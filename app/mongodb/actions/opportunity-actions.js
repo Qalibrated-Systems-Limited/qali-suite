@@ -12,6 +12,7 @@ import {
 } from "@/lib/utils/tenant-utils";
 import { safeErrorMessage } from "@/lib/safe-error";
 
+import { canSeeSalesNav } from "@/lib/permissions";
 import Opportunity, {
   OPPORTUNITY_STAGES,
   LOST_REASONS,
@@ -27,6 +28,15 @@ function userInfo(user) {
     name: user?.name || user?.email || "System",
     role: user?.role,
   };
+}
+
+// Server actions are directly invokable endpoints — page-level gating is
+// not enough. Same role set the sidebar/pages use (canSeeSalesNav).
+function salesRoleGate(user) {
+  if (!canSeeSalesNav(user?.role)) {
+    return { success: false, error: "Not authorized for CRM actions." };
+  }
+  return null;
 }
 
 const DEFAULT_TAX_RATE = 16; // Kenya VAT
@@ -127,6 +137,8 @@ export async function createOpportunity(prevState, formData) {
   try {
     await dbConnect();
     const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const denied = salesRoleGate(user);
+    if (denied) return denied;
 
     const parsed = CreateOpportunitySchema.safeParse(
       Object.fromEntries(formData?.entries?.() ?? []),
@@ -201,6 +213,8 @@ export async function advanceOpportunityStage(opportunityId, stage, note = "") {
     }
     await dbConnect();
     const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const denied = salesRoleGate(user);
+    if (denied) return denied;
 
     const opp = await Opportunity.findOne(
       withTenantScope({ _id: opportunityId }, companyId, isSuperAdmin),
@@ -258,6 +272,8 @@ export async function closeOpportunity(opportunityId, outcome, formData) {
     }
     await dbConnect();
     const { companyId, isSuperAdmin, user } = await getTenantContext();
+    const denied = salesRoleGate(user);
+    if (denied) return denied;
 
     const parsed = CloseSchema.safeParse(
       Object.fromEntries(formData?.entries?.() ?? []),

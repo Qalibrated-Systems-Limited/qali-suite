@@ -33,8 +33,8 @@ function ActionButtons({ canCreate }) {
       {canCreate && (
         <Button asChild size="sm">
           <Link href="/dashboard/stocks/create">
-            <Plus className="h-4 w-4 mr-1" />
-            Add Product
+            <Plus className="h-4 w-4 sm:mr-1.5" />
+            <span className="hidden sm:inline">Add Product</span>
           </Link>
         </Button>
       )}

@@ -50,19 +50,20 @@ export default async function InvitePage({ params }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md space-y-6">
+    <div className="min-h-screen flex items-center justify-center bg-background p-4 py-6">
+      <div className="w-full max-w-md space-y-4 sm:space-y-6">
         <div className="flex justify-center">
           <QaliSuiteMark size="lg" subtitle="ERP System" />
         </div>
 
-        {/* Invite Info */}
-        <div className="rounded-xl border bg-card p-6 space-y-4 text-center">
-          <div className="mx-auto w-14 h-14 rounded-full bg-emerald-500/10 flex items-center justify-center">
-            <CheckCircle2 className="h-7 w-7 text-emerald-500" />
+        {/* Invite Info — compact on phones: this page stacks two cards, so
+            every saved row matters */}
+        <div className="rounded-xl border bg-card p-4 sm:p-6 space-y-3 sm:space-y-4 text-center">
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10 sm:h-14 sm:w-14">
+            <CheckCircle2 className="h-5 w-5 text-emerald-500 sm:h-7 sm:w-7" />
           </div>
           <div>
-            <h2 className="text-xl font-semibold text-foreground">
+            <h2 className="text-lg font-semibold text-foreground sm:text-xl">
               You&apos;re invited!
             </h2>
             <p className="text-sm text-muted-foreground mt-1">

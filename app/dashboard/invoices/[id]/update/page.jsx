@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { redirect, notFound } from "next/navigation";
 import { getInvoiceById } from "@/app/mongodb/queries/invoice-queries";
 import {
@@ -21,7 +22,7 @@ export default async function EditInvoicePage({ params }) {
   const { user } = session;
 
   // Check permissions
-  if (!["SuperAdmin", "Admin", "Accountant"].includes(user.role)) {
+  if (!INVOICE_WRITE_ROLES.includes(user.role)) {
     return (
       <div className="flex min-h-1000 items-center justify-center">
         <div className="text-center">

@@ -465,12 +465,13 @@ export async function getReturnableDeliveryNotes() {
 // ============================================
 export async function getUniqueReasons() {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      throw new Error("Unauthorized");
-    }
-
-    const reasons = await DeliveryNote.distinct("reason");
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    // distinct() doesn't auto-cast — scope via buildTenantMatch (ObjectId-cast)
+    // so it stays tenant-isolated and hits the companyId index.
+    const reasons = await DeliveryNote.distinct(
+      "reason",
+      buildTenantMatch(companyId, isSuperAdmin),
+    );
     return reasons.filter(Boolean); // Remove null/undefined
   } catch (error) {
     console.error("Error fetching unique reasons:", error);
@@ -488,7 +489,11 @@ export async function getUniqueTechnicians() {
       throw new Error("Unauthorized");
     }
 
-    const technicians = await DeliveryNote.distinct("technician.name");
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const technicians = await DeliveryNote.distinct(
+      "technician.name",
+      buildTenantMatch(companyId, isSuperAdmin),
+    );
     return technicians.filter(Boolean); // Remove null/undefined
   } catch (error) {
     console.error("Error fetching unique technicians:", error);

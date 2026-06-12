@@ -295,7 +295,9 @@ export const getDepartments = async () => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
 
-  const query = isSuperAdmin ? {} : { companyId };
+  // distinct() doesn't auto-cast in $match-like filters — cast companyId so
+  // it stays scoped and uses the index rather than a COLLSCAN.
+  const query = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
   const departments = await User.distinct("department", query);
   return departments.filter(Boolean); // Remove null/undefined
 };

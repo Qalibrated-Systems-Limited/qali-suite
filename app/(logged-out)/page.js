@@ -19,9 +19,7 @@ import {
   Phone,
   ExternalLink,
   Check,
-  Zap,
   ArrowUpRight,
-  Clock,
   UserCog,
   Building2,
   Truck,
@@ -36,20 +34,20 @@ import {
 import { QaliSuiteMark } from "@/components/qalisuite-logo";
 
 const MODULES = [
-  { icon: Package,        name: "Inventory",       desc: "Stock tracking, reorder alerts, multi-location" },
-  { icon: Receipt,        name: "Invoicing",       desc: "Quotes, invoices, credit notes, delivery notes" },
-  { icon: Wallet,         name: "Accounting",      desc: "Double-entry ledger, chart of accounts, journals" },
-  { icon: Users,          name: "CRM",             desc: "Customer & supplier management, history" },
-  { icon: CreditCard,     name: "Expenses",        desc: "Advances, petty cash, claims & receipts" },
-  { icon: BarChart3,      name: "Reports",         desc: "P&L, balance sheet, cash flow, analytics" },
-  { icon: Briefcase,      name: "Purchases",       desc: "Purchase orders, bills, supplier reconciliation" },
-  { icon: Shield,         name: "Tax & Compliance", desc: "VAT, WHT, KRA-ready filing" },
-  { icon: FileText,       name: "Requests",        desc: "Stock request workflows with approvals" },
-  { icon: ClipboardCheck, name: "Claims",          desc: "Expense reimbursements with approval chains" },
-  { icon: BookOpen,       name: "Finance",         desc: "Bank feeds, fiscal periods, audit trail" },
-  { icon: FolderKanban,   name: "Projects",        desc: "Budgets, cost codes & financial rollup" },
-  { icon: UserCog,        name: "HR & Payroll",    desc: "Employee records, leave, Kenya payroll" },
-  { icon: CalendarCheck,  name: "Attendance",      desc: "Clock in/out, rosters, overtime tracking" },
+  { icon: Package,        name: "Inventory",       desc: "Products, stock movements, goods receipts, adjustments" },
+  { icon: Receipt,        name: "Sales",           desc: "Quotes, sales orders with stock reservation, invoices, credit notes" },
+  { icon: Users,          name: "CRM",             desc: "Leads, sales pipeline, customer history & follow-ups" },
+  { icon: Briefcase,      name: "Purchases",       desc: "Purchase orders, supplier bills, payments made" },
+  { icon: Wallet,         name: "Accounting",      desc: "Double-entry ledger, chart of accounts, fiscal periods" },
+  { icon: BookOpen,       name: "Banking",         desc: "Statement upload, payment allocation, reconciliation" },
+  { icon: CreditCard,     name: "Expenses",        desc: "Staff advances, reimbursements, operating expenses" },
+  { icon: ClipboardCheck, name: "Approvals",       desc: "Threshold-based approvals for prices, payments & write-offs" },
+  { icon: BarChart3,      name: "Reports",         desc: "P&L, balance sheet, cash flow, AR/AP aging" },
+  { icon: Shield,         name: "Tax",             desc: "VAT, WHT, KRA-ready iTax exports" },
+  { icon: UserCog,        name: "HR & Payroll",    desc: "PAYE, NSSF, SHIF, AHL, payslips, P9 & P10" },
+  { icon: CalendarCheck,  name: "Attendance",      desc: "Clock in/out, leave, overtime tracking" },
+  { icon: FolderKanban,   name: "Projects",        desc: "Budgets, cost tracking, profitability per project" },
+  { icon: FileText,       name: "Stock Requests",  desc: "Internal requisitions with approval flow" },
 ];
 
 const STEPS = [
@@ -119,36 +117,36 @@ export default function LandingPage() {
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,hsl(var(--primary)/0.08),transparent)]" />
 
-        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 pt-20 sm:pt-32 pb-20 sm:pb-32 text-center">
-          {/* Badge — fade in */}
-          <div className="animate-[fadeInUp_0.5s_ease-out_both] inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-primary/30 bg-primary/8 text-primary text-xs font-medium mb-8">
-            <Zap className="w-3 h-3" />
-            All-in-one ERP for growing businesses
+        <div className="relative max-w-5xl mx-auto px-4 sm:px-6 pt-14 sm:pt-32 pb-14 sm:pb-32 text-center">
+          {/* Badge — plain and factual */}
+          <div className="animate-[fadeInUp_0.5s_ease-out_both] inline-flex items-center px-3 py-1 rounded-full border border-border bg-muted/50 text-muted-foreground text-xs font-medium mb-8">
+            Built for Kenyan businesses
           </div>
 
           {/* Headline */}
           <h1 className="animate-[fadeInUp_0.6s_ease-out_0.1s_both] text-[clamp(2rem,5vw,3.5rem)] font-bold tracking-tight leading-[1.08] mb-6 max-w-2xl mx-auto">
-            Inventory, finance &amp; operations —{" "}
-            <span className="text-primary">unified.</span>
+            Run your whole business{" "}
+            <span className="text-primary">from one system.</span>
           </h1>
 
           {/* Subhead */}
           <p className="animate-[fadeInUp_0.6s_ease-out_0.2s_both] text-muted-foreground text-base sm:text-lg leading-relaxed mb-10 max-w-lg mx-auto">
-            Replace disconnected spreadsheets with one platform.
-            Track stock, send invoices, run payroll, manage projects — all connected.
+            Stock, sales, purchases, payroll and accounts in one place.
+            Enter things once — the books update themselves.
           </p>
 
-          {/* CTA */}
-          <div className="animate-[fadeInUp_0.6s_ease-out_0.3s_both] flex flex-wrap justify-center gap-3 mb-8">
+          {/* CTA — stacked full-width on phones (side-by-side wrap looked
+              crowded and off-centre), row from sm up */}
+          <div className="animate-[fadeInUp_0.6s_ease-out_0.3s_both] mx-auto mb-8 flex w-full max-w-xs flex-col justify-center gap-3 sm:max-w-none sm:flex-row">
             <Button
               size="lg"
-              className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 px-8 rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
+              className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 px-8 rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
               asChild
             >
               <Link href="/login">Start free <ArrowRight className="ml-1.5 h-4 w-4" /></Link>
             </Button>
-            <Button variant="outline" size="lg" className="h-12 px-7 rounded-xl font-medium hover:bg-muted/50 transition-all" asChild>
-              <Link href="/login">View demo</Link>
+            <Button variant="outline" size="lg" className="w-full sm:w-auto h-12 px-7 rounded-xl font-medium hover:bg-muted/50 transition-all" asChild>
+              <Link href="/login">Log in</Link>
             </Button>
           </div>
 
@@ -168,7 +166,8 @@ export default function LandingPage() {
       <section className="border-y border-border bg-muted/30 py-10 sm:py-14 px-4 sm:px-6 overflow-hidden">
         <div className="max-w-5xl mx-auto">
           <p className="text-center text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-8">One action. Multiple updates.</p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-0">
+          {/* Wraps into rows on phones instead of one tall column */}
+          <div className="flex flex-row flex-wrap items-start justify-center gap-x-6 gap-y-5 sm:flex-nowrap sm:items-center sm:gap-0">
             {[
               { icon: Receipt,       label: "Invoice created" },
               { icon: Package,       label: "Stock committed" },
@@ -198,20 +197,20 @@ export default function LandingPage() {
           <div className="text-center mb-14">
             <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Modules</p>
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
-              Everything you need.{" "}
-              <span className="text-muted-foreground">Nothing you don&apos;t.</span>
+              What&apos;s inside
             </h2>
             <p className="text-muted-foreground text-sm sm:text-base max-w-lg mx-auto">
-              14 modules that work standalone or together — inventory feeds invoicing,
-              invoicing posts to accounting, payroll generates journals.
+              Fourteen modules that share one database. A sale reserves stock,
+              posts the ledger entries and shows up in your reports — without
+              re-entering anything.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
             {MODULES.map((m, i) => (
               <div
                 key={m.name}
-                className="group p-4 sm:p-5 rounded-xl bg-card border border-border hover:border-primary/40 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+                className="group p-3 sm:p-5 rounded-xl bg-card border border-border hover:border-primary/40 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
               >
                 <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/15 group-hover:scale-105 transition-all duration-200">
                   <m.icon className="w-4 h-4 text-primary" />
@@ -230,7 +229,7 @@ export default function LandingPage() {
           <div className="text-center mb-14">
             <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">How it works</p>
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
-              Three steps to clarity.
+              Getting started
             </h2>
           </div>
 
@@ -260,10 +259,11 @@ export default function LandingPage() {
           <div className="text-center mb-14">
             <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Industries</p>
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
-              Built for how <span className="text-primary">you</span> work.
+              Who uses it
             </h2>
             <p className="text-muted-foreground text-sm sm:text-base max-w-lg mx-auto">
-              Whether you manage a warehouse, run a construction site, or bill professional services.
+              Businesses that hold stock, run projects, or bill for their
+              time — and need the books to keep up.
             </p>
           </div>
 
@@ -331,10 +331,11 @@ export default function LandingPage() {
             <div className="relative z-10 text-center max-w-lg mx-auto">
               <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Get started</p>
               <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight mb-3 leading-tight">
-                Ready to run your business smarter?
+                Try it with your own data.
               </h2>
               <p className="text-slate-400 text-sm sm:text-base mb-8 leading-relaxed">
-                Free to start. No credit card required. Set up in minutes.
+                The free tier is enough to invoice, track stock and see your
+                first reports. Upgrade when you need more.
               </p>
               <div className="flex flex-wrap justify-center gap-3">
                 <Button

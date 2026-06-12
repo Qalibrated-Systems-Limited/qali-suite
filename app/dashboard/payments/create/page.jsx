@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
@@ -15,7 +16,7 @@ export default async function CreatePaymentPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const canCreate = ["SuperAdmin", "Admin", "Manager", "Accountant"].includes(session.user.role);
+  const canCreate = [...FINANCE_WRITE_ROLES, "Manager"].includes(session.user.role);
   if (!canCreate) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">

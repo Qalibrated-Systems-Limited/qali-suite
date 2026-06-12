@@ -18,19 +18,19 @@ export async function QuoteStatsCards({ filters }) {
   const stats = await getQuoteStats(filters);
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
       <Card className="bg-card border-border">
-        <CardContent className="p-4">
+        <CardContent className="p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">Total Quotes</p>
-              <p className="text-2xl font-bold text-foreground">
+              <p className="text-lg sm:text-xl font-bold text-foreground">
                 {stats.total}
               </p>
             </div>
-            <FileText className="w-8 h-8 text-blue-500" />
+            <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" />
           </div>
-          <div className="mt-2 pt-2 border-t border-border">
+          <div className="hidden sm:block mt-2 pt-2 border-t border-border">
             <p className="text-xs text-muted-foreground">Total Value</p>
             <p className="text-sm font-semibold text-blue-400">
               {formatCurrency(stats.totalValue)}
@@ -40,17 +40,17 @@ export async function QuoteStatsCards({ filters }) {
       </Card>
 
       <Card className="bg-card border-border">
-        <CardContent className="p-4">
+        <CardContent className="p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">Open Quotes</p>
-              <p className="text-2xl font-bold text-orange-500">
+              <p className="text-lg sm:text-xl font-bold text-orange-500">
                 {stats.draft + stats.sent}
               </p>
             </div>
-            <Send className="w-8 h-8 text-orange-500" />
+            <Send className="w-5 h-5 sm:w-6 sm:h-6 text-orange-500" />
           </div>
-          <div className="mt-2 pt-2 border-t border-border">
+          <div className="hidden sm:block mt-2 pt-2 border-t border-border">
             <p className="text-xs text-muted-foreground">Open Value</p>
             <p className="text-sm font-semibold text-orange-400">
               {formatCurrency(stats.openValue)}
@@ -60,17 +60,17 @@ export async function QuoteStatsCards({ filters }) {
       </Card>
 
       <Card className="bg-card border-border">
-        <CardContent className="p-4">
+        <CardContent className="p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">Converted</p>
-              <p className="text-2xl font-bold text-green-500">
+              <p className="text-lg sm:text-xl font-bold text-green-500">
                 {stats.converted + stats.accepted}
               </p>
             </div>
-            <CheckCircle className="w-8 h-8 text-green-500" />
+            <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-500" />
           </div>
-          <div className="mt-2 pt-2 border-t border-border">
+          <div className="hidden sm:block mt-2 pt-2 border-t border-border">
             <p className="text-xs text-muted-foreground">Converted Value</p>
             <p className="text-sm font-semibold text-green-400">
               {formatCurrency(stats.convertedValue)}
@@ -80,17 +80,17 @@ export async function QuoteStatsCards({ filters }) {
       </Card>
 
       <Card className="bg-card border-border">
-        <CardContent className="p-4">
+        <CardContent className="p-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">Expiring Soon</p>
-              <p className="text-2xl font-bold text-red-500">
+              <p className="text-lg sm:text-xl font-bold text-red-500">
                 {stats.expiringCount}
               </p>
             </div>
-            <AlertTriangle className="w-8 h-8 text-red-500" />
+            <AlertTriangle className="w-5 h-5 sm:w-6 sm:h-6 text-red-500" />
           </div>
-          <div className="mt-2 pt-2 border-t border-border">
+          <div className="hidden sm:block mt-2 pt-2 border-t border-border">
             <p className="text-xs text-muted-foreground">Conversion Rate</p>
             <p className="text-sm font-semibold text-purple-400">
               {stats.conversionRate}%
@@ -108,10 +108,10 @@ export async function QuoteStatsCards({ filters }) {
 
 export function QuoteStatsSkeleton() {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
       {[...Array(4)].map((_, index) => (
         <Card key={index} className="bg-card border-border">
-          <CardContent className="p-4">
+          <CardContent className="p-3">
             <div className="flex items-center justify-between">
               <div className="space-y-2">
                 <Skeleton className="h-3 w-20" />
@@ -119,7 +119,7 @@ export function QuoteStatsSkeleton() {
               </div>
               <Skeleton className="w-8 h-8 rounded" />
             </div>
-            <div className="mt-2 pt-2 border-t border-border">
+            <div className="hidden sm:block mt-2 pt-2 border-t border-border">
               <Skeleton className="h-3 w-16 mb-1" />
               <Skeleton className="h-4 w-24" />
             </div>

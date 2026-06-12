@@ -1,12 +1,19 @@
 import Link from "next/link";
+import { auth } from "@/auth";
+import { redirect } from "next/navigation";
+import { canSeeSalesNav } from "@/lib/permissions";
 import { cPipeline } from "@/app/mongodb/queries/opportunity-queries";
 import { Card, CardContent } from "@/components/ui/card";
 import StageActions from "./components/StageActions";
+import AccessDenied from "@/app/dashboard/components/crm/AccessDenied";
 
 export const metadata = {
   title: "Pipeline | ERP System",
   description: "Open opportunities by stage — the sales pipeline",
 };
+
+// Auth-gated (session headers) — never statically prerendered.
+export const dynamic = "force-dynamic";
 
 const STAGE_LABEL = {
   qualification: "Qualification",
@@ -19,6 +26,12 @@ const KES = (n) =>
   `KES ${Number(n || 0).toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
 
 export default async function PipelinePage() {
+  // Page-level auth (defense in depth) + role gate — see leads/page.jsx.
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  if (!canSeeSalesNav(session.user.role))
+    return <AccessDenied resource="the sales pipeline" />;
+
   const { columns, totals } = await cPipeline();
 
   return (

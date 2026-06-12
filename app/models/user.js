@@ -6,6 +6,7 @@ import crypto from "crypto";
 export const userRoles = [
   "SuperAdmin", // System-wide admin (manages all companies)
   "Admin", // Company-level admin
+  "CEO", // Executive — read access across the business; no operational writes
   // Finance / accounting tiers (stacked top-down)
   "CFO", // Highest finance authority — large write-offs, price floor, policy
   "Finance Manager", // Mid-tier finance approvals, journal posting oversight

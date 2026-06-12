@@ -50,7 +50,7 @@ import {
   DropdownMenuLabel,
 } from "./ui/dropdown-menu";
 import { getInitials } from "@/lib/utils";
-import { logout } from "@/app/mongodb/actions";
+import { logout } from "@/app/mongodb/actions/auth-actions";
 import { NextThemeToggler } from "./NextThemeToggler";
 import { useState, useEffect } from "react";
 import {
@@ -107,6 +107,16 @@ const getNavigationGroups = (user) => {
     id: "approvals",
     href: "/dashboard/approvals",
     hidden: !canSeeApprovalsNav(user?.role),
+  },
+
+  // Executive overview (ungrouped — the business at a glance)
+  {
+    type: "single",
+    icon: TrendingUp,
+    label: "Executive",
+    id: "executive",
+    href: "/dashboard/executive",
+    hidden: !["SuperAdmin", "Admin", "CEO", "CFO"].includes(user?.role),
   },
 
   // KPIs (ungrouped — executive scorecard, same audience as Reports)
@@ -227,6 +237,13 @@ const getNavigationGroups = (user) => {
         label: "Quotes",
         id: "quotes",
         href: "/dashboard/quotes",
+        hidden: !canSeeSalesNav(user?.role),
+      },
+      {
+        icon: ClipboardCheck,
+        label: "Sales Orders",
+        id: "sales-orders",
+        href: "/dashboard/sales-orders",
         hidden: !canSeeSalesNav(user?.role),
       },
       {

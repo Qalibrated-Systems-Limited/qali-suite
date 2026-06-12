@@ -24,6 +24,7 @@ import {
   ReportTableCell,
   ReportSummaryCard,
   formatCurrency,
+  formatCurrencyCompact,
 } from "../components";
 import { ReportSkeleton } from "../components/ReportSkeleton";
 import { format } from "date-fns";
@@ -182,8 +183,9 @@ export function BalanceSheetClient({
                 Total Assets
               </span>
             </div>
-            <p className="text-2xl font-bold text-blue-700 dark:text-blue-300 tabular-nums">
-              KES {formatCurrency(data?.summary?.totalAssets || 0)}
+            <p className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-300 tabular-nums">
+              <span className="sm:hidden">KES {formatCurrencyCompact(data?.summary?.totalAssets || 0)}</span>
+              <span className="hidden sm:inline">KES {formatCurrency(data?.summary?.totalAssets || 0)}</span>
             </p>
           </Card>
 
@@ -194,8 +196,9 @@ export function BalanceSheetClient({
                 Total Liabilities
               </span>
             </div>
-            <p className="text-2xl font-bold text-red-700 dark:text-red-300 tabular-nums">
-              KES {formatCurrency(data?.summary?.totalLiabilities || 0)}
+            <p className="text-xl sm:text-2xl font-bold text-red-700 dark:text-red-300 tabular-nums">
+              <span className="sm:hidden">KES {formatCurrencyCompact(data?.summary?.totalLiabilities || 0)}</span>
+              <span className="hidden sm:inline">KES {formatCurrency(data?.summary?.totalLiabilities || 0)}</span>
             </p>
           </Card>
 
@@ -206,8 +209,9 @@ export function BalanceSheetClient({
                 Total Equity
               </span>
             </div>
-            <p className="text-2xl font-bold text-green-700 dark:text-green-300 tabular-nums">
-              KES {formatCurrency(data?.summary?.totalEquity || 0)}
+            <p className="text-xl sm:text-2xl font-bold text-green-700 dark:text-green-300 tabular-nums">
+              <span className="sm:hidden">KES {formatCurrencyCompact(data?.summary?.totalEquity || 0)}</span>
+              <span className="hidden sm:inline">KES {formatCurrency(data?.summary?.totalEquity || 0)}</span>
             </p>
           </Card>
 

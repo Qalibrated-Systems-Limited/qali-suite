@@ -41,11 +41,11 @@ export default async function CompanySettingsPage() {
     <div className="container max-w-4xl py-6 space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="p-2 bg-yellow-500/10 rounded-lg">
+        <div className="hidden p-2 bg-yellow-500/10 rounded-lg sm:block">
           <Building2 className="h-6 w-6 text-yellow-600" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold">Company Settings</h1>
+          <h1 className="text-lg font-bold sm:text-2xl">Company Settings</h1>
           <p className="text-muted-foreground">
             {company
               ? "Update your company information"

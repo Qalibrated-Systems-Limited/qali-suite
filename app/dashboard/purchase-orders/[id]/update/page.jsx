@@ -11,6 +11,7 @@ import {
   fetchPurchaseAccounts,
 } from "@/app/mongodb/queries/purchase-order-queries";
 import { auth } from "@/auth";
+import { PROCUREMENT_ROLES } from "@/lib/utils/role-gates";
 
 // ============================================
 // METADATA
@@ -71,7 +72,7 @@ export default async function UpdatePurchaseOrderPage({ params }) {
   }
 
   // Check permissions
-  if (!["SuperAdmin", "Admin", "Manager", "Accountant"].includes(session.user.role)) {
+  if (![...PROCUREMENT_ROLES, "Accountant"].includes(session.user.role)) {
     return (
       <div className="flex min-h-[400px] items-center justify-center">
         <div className="text-center">

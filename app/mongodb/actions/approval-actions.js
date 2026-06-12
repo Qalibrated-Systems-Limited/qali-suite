@@ -14,6 +14,10 @@ import { safeErrorMessage } from "@/lib/safe-error";
 import ApprovalRequest, {
   APPROVER_MATRIX,
 } from "@/app/models/approvalRequest";
+import {
+  notifyApprovalSubmitted,
+  notifyApprovalDecided,
+} from "@/lib/notifications/approval-notify";
 import ErpCounter from "@/app/models/erp-counter";
 import Product from "@/app/models/product";
 import InventoryAdjustment from "@/app/models/inventoryAdjustment";
@@ -125,6 +129,9 @@ export async function submitApproval({
       },
     });
 
+    // Email eligible approvers — best-effort, never blocks the submit.
+    await notifyApprovalSubmitted(req);
+
     revalidatePath("/dashboard/approvals");
 
     return {
@@ -227,6 +234,7 @@ export async function approveApproval(approvalId, _prevState, formData) {
     }
 
     // Finalize: lease → "approved" with the applied snapshot.
+    const decidedBy = userInfo(user);
     await ApprovalRequest.updateOne(
       { _id: approvalId },
       {
@@ -236,13 +244,17 @@ export async function approveApproval(approvalId, _prevState, formData) {
           appliedRef: applyResult.appliedRef,
           decision: {
             action: "approved",
-            by: userInfo(user),
+            by: decidedBy,
             at: new Date(),
             note,
           },
         },
       },
     );
+
+    // Tell the submitter — best-effort, never blocks the approval.
+    claimed.decision = { action: "approved", by: decidedBy, at: new Date(), note };
+    await notifyApprovalDecided(claimed, "approved", decidedBy);
 
     revalidatePath("/dashboard/approvals");
     revalidatePath(`/dashboard/approvals/${approvalId}`);
@@ -314,6 +326,9 @@ export async function rejectApproval(approvalId, _prevState, formData) {
     // Void the orphaned draft (payment / credit note / adjustment) the
     // rejected request was gating, so it doesn't linger or get re-submitted.
     await voidApprovalTarget(approval, user, "rejected");
+
+    // Tell the submitter — best-effort, never blocks the rejection.
+    await notifyApprovalDecided(approval, "rejected", userInfo(user));
 
     revalidatePath("/dashboard/approvals");
     revalidatePath(`/dashboard/approvals/${approvalId}`);
