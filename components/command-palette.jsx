@@ -140,6 +140,7 @@ const PAGES = [
   { label: "AR Aging", href: "/dashboard/reports/ar-aging", icon: TrendingUp, category: "Reports", aliases: ["receivables aging"] },
   { label: "AP Aging", href: "/dashboard/reports/ap-aging", icon: TrendingUp, category: "Reports", aliases: ["payables aging"] },
   { label: "Sales Report", href: "/dashboard/reports/sales", icon: TrendingUp, category: "Reports", aliases: ["sales by customer", "top customers", "sales by product"] },
+  { label: "Sales by Rep", href: "/dashboard/reports/sales-by-rep", icon: TrendingUp, category: "Reports", aliases: ["leaderboard", "salesperson", "rep performance", "commission"] },
   { label: "Purchase Report", href: "/dashboard/reports/purchases", icon: TrendingUp, category: "Reports", aliases: ["spend by supplier", "top suppliers"] },
   { label: "Inventory Report", href: "/dashboard/reports/inventory", icon: Package, category: "Reports" },
   { label: "Asset Rollforward", href: "/dashboard/reports/asset-rollforward", icon: Package, category: "Reports" },

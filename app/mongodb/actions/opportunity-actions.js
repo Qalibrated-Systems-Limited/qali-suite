@@ -72,6 +72,12 @@ async function createDraftQuoteFromOpportunity(opp, user) {
     validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     title: opp.name,
     reference: opp.opportunityNumber,
+    salesPerson:
+      opp.owner?.id && /^[0-9a-fA-F]{24}$/.test(opp.owner.id)
+        ? { employeeId: opp.owner.id, name: opp.owner.name }
+        : opp.owner?.name
+          ? { name: opp.owner.name }
+          : undefined,
     customer: {
       partyId: party?._id || opp.account?.partyId,
       id: (party?._id || opp.account?.partyId)?.toString?.(),

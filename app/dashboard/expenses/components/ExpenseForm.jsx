@@ -70,7 +70,7 @@ const formatCurrency = (amount) => {
 // ============================================
 // VENDOR COMBOBOX - Select from parties or enter manually
 // ============================================
-function VendorCombobox({ vendors = [], defaultValue, error, onVendorCreated }) {
+function VendorCombobox({ vendors = [], employees = [], defaultValue, error, onVendorCreated }) {
   const [open, setOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -81,20 +81,25 @@ function VendorCombobox({ vendors = [], defaultValue, error, onVendorCreated }) 
   const [vendorTaxPin, setVendorTaxPin] = useState(defaultValue?.taxPin || "");
   const [vendorPhone, setVendorPhone] = useState(defaultValue?.phone || "");
   const [vendorEmail, setVendorEmail] = useState(defaultValue?.email || "");
+  // "supplier" | "employee" — employees are valid payees (advances /
+  // reimbursements booked directly by accounts).
+  const [vendorType, setVendorType] = useState(defaultValue?.partyType || "supplier");
 
-  // When vendor is selected, populate fields
-  const handleSelect = (vendor) => {
+  // When a payee is selected, populate fields
+  const handleSelect = (vendor, kind = "supplier") => {
     setVendorId(vendor._id);
     setVendorName(vendor.name);
     setVendorTaxPin(vendor.taxPin || "");
     setVendorPhone(vendor.phone || "");
     setVendorEmail(vendor.email || "");
+    setVendorType(kind);
     setMode("select");
     setOpen(false);
   };
 
   const handleManualEntry = () => {
     setVendorId("");
+    setVendorType("supplier");
     setMode("manual");
     setOpen(false);
   };
@@ -145,7 +150,21 @@ function VendorCombobox({ vendors = [], defaultValue, error, onVendorCreated }) 
       <div className="space-y-4">
         {/* Hidden inputs for form submission */}
         <input type="hidden" name="vendorId" value={vendorId} />
+        <input type="hidden" name="vendorType" value={vendorType} />
         <input type="hidden" name="vendorName" value={vendorName} />
+
+        {/* Accounting guard: this form posts to a P&L expense account.
+            A salary ADVANCE is an asset (Employee Advances, recoverable)
+            and must go through the claims flow — booking it here would
+            expense it immediately and lose the recovery tracking. */}
+        {vendorType === "employee" && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            Paying an employee here books a <strong>business expense</strong>{" "}
+            (reimbursement, fuel, airtime…). For <strong>salary advances</strong>{" "}
+            use Employee Expenses → Advance instead — advances post to the
+            recoverable Employee Advances account, not to P&L.
+          </div>
+        )}
         <input type="hidden" name="vendorTaxPin" value={vendorTaxPin} />
         <input type="hidden" name="vendorPhone" value={vendorPhone} />
         <input type="hidden" name="vendorEmail" value={vendorEmail} />
@@ -201,7 +220,7 @@ function VendorCombobox({ vendors = [], defaultValue, error, onVendorCreated }) 
                         <CommandItem
                           key={vendor._id}
                           value={`${vendor.name} ${vendor.taxPin || ""}`}
-                          onSelect={() => handleSelect(vendor)}
+                          onSelect={() => handleSelect(vendor, "supplier")}
                         >
                           <Check
                             className={cn(
@@ -220,6 +239,30 @@ function VendorCombobox({ vendors = [], defaultValue, error, onVendorCreated }) 
                         </CommandItem>
                       ))}
                     </CommandGroup>
+                    {employees.length > 0 && (
+                      <CommandGroup heading="Employees">
+                        {employees.map((emp) => (
+                          <CommandItem
+                            key={emp._id}
+                            value={`${emp.name} employee`}
+                            onSelect={() => handleSelect(emp, "employee")}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                vendorId === emp._id ? "opacity-100" : "opacity-0"
+                              )}
+                            />
+                            <div className="flex flex-col">
+                              <span className="font-medium">{emp.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                Employee — advance / reimbursement
+                              </span>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    )}
                     <CommandSeparator />
                     <CommandGroup>
                       <CommandItem onSelect={handleManualEntry}>
@@ -709,6 +752,7 @@ export default function ExpenseForm({
   accounts = [],
   paymentAccounts = [],
   vendors = [],
+  employees = [],
   categories = [],
   projects = [],
   assets = [],
@@ -868,6 +912,7 @@ export default function ExpenseForm({
         <CardContent>
           <VendorCombobox
             vendors={allVendors}
+            employees={employees}
             defaultValue={expense?.vendor}
             error={errors?.vendorName?.[0]}
             onVendorCreated={(party) =>

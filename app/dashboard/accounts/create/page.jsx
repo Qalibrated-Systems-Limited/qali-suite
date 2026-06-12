@@ -6,6 +6,7 @@ import AccountForm from "../components/accountForm";
 import connectDB from "@/app/config/dbConnect";
 import Account from "@/app/models/account";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { suggestCodes } from "@/lib/coa-codes";
 
 export const metadata = {
   title: "Create Account | ERP System",
@@ -24,6 +25,13 @@ export default async function CreateAccountPage() {
     .sort({ accountCode: 1 })
     .select("_id accountCode accountName accountType")
     .lean();
+
+  // All codes (cheap projection) → per-range next-code suggestions so the
+  // form can auto-fill instead of making users guess.
+  const allCodes = await Account.find({ companyId })
+    .select("accountCode")
+    .lean();
+  const nextCodes = suggestCodes(allCodes.map((a) => a.accountCode));
 
   // Serialize for client
   const serializedHeaders = headerAccounts.map((acc) => ({
@@ -51,7 +59,7 @@ export default async function CreateAccountPage() {
       </div>
 
       {/* Form */}
-      <AccountForm headerAccounts={serializedHeaders} />
+      <AccountForm headerAccounts={serializedHeaders} nextCodes={nextCodes} />
     </div>
   );
 }

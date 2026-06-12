@@ -7,7 +7,7 @@ import Party from "@/app/models/parties";
 import Asset from "@/app/models/asset";
 import dbConnect from "@/app/config/dbConnect";
 import { getExpenseCategories } from "@/app/mongodb/queries/expense-queries";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getTenantContext, tenantFilter } from "@/lib/utils/tenant-utils";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
 export const metadata = {
@@ -17,25 +17,29 @@ export const metadata = {
 
 async function getFormData() {
   await dbConnect();
-  const { companyId } = await getTenantContext();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  // SuperAdmin: companyId is a UX hint and may be null — { companyId }
+  // would match NOTHING. tenantFilter returns {} for SuperAdmin (sees all),
+  // matching how every other query in the app behaves.
+  const tenant = tenantFilter(companyId, isSuperAdmin);
 
   // Fetch all data in parallel
-  const [expenseAccounts, paymentAccounts, vendors, assets] = await Promise.all(
+  const [expenseAccounts, paymentAccounts, vendors, employees, assets] = await Promise.all(
     [
       // Expense accounts (for expense posting)
       Account.find({
-        companyId,
+        ...tenant,
         accountType: "expense",
         isActive: { $ne: false },
         canPost: true,
       })
-        .select("_id accountCode accountName")
+        .select("_id accountCode accountName subType")
         .sort({ accountCode: 1 })
         .lean(),
 
       // Payment accounts (cash, bank, mpesa)
       Account.find({
-        companyId,
+        ...tenant,
         subType: { $in: ["cash", "bank", "mpesa"] },
         isActive: { $ne: false },
         canPost: true,
@@ -46,7 +50,7 @@ async function getFormData() {
 
       // Vendors (suppliers from parties)
       Party.find({
-        companyId,
+        ...tenant,
         type: { $in: ["supplier", "both"] },
         isActive: { $ne: false },
       })
@@ -54,9 +58,19 @@ async function getFormData() {
         .sort({ name: 1 })
         .lean(),
 
+      // Employees — payees for advances/reimbursements booked by accounts
+      Party.find({
+        ...tenant,
+        type: "employee",
+        isActive: { $ne: false },
+      })
+        .select("_id name phone email")
+        .sort({ name: 1 })
+        .lean(),
+
       // Active fixed assets (optional — for tagging fuel/repairs/maintenance)
       Asset.find({
-        companyId,
+        ...tenant,
         status: { $in: ["active", "idle", "in_maintenance"] },
       })
         .select("_id assetNumber name registrationNumber")
@@ -70,6 +84,7 @@ async function getFormData() {
       _id: a._id.toString(),
       accountCode: a.accountCode,
       accountName: a.accountName,
+      subType: a.subType || "",
     })),
     paymentAccounts: paymentAccounts.map((a) => ({
       _id: a._id.toString(),
@@ -84,6 +99,12 @@ async function getFormData() {
       phone: v.phone || "",
       email: v.email || "",
     })),
+    employees: employees.map((e) => ({
+      _id: e._id.toString(),
+      name: e.name,
+      phone: e.phone || "",
+      email: e.email || "",
+    })),
     assets: assets.map((a) => ({
       _id: a._id.toString(),
       assetNumber: a.assetNumber,
@@ -94,7 +115,7 @@ async function getFormData() {
 }
 
 export default async function CreateExpensePage() {
-  const [{ accounts, paymentAccounts, vendors, assets }, projects] =
+  const [{ accounts, paymentAccounts, vendors, employees, assets }, projects] =
     await Promise.all([getFormData(), getActiveProjects()]);
   const categories = getExpenseCategories();
 
@@ -133,6 +154,7 @@ export default async function CreateExpensePage() {
           accounts={accounts}
           paymentAccounts={paymentAccounts}
           vendors={vendors}
+          employees={employees}
           categories={categories}
           projects={projects}
           assets={assets}

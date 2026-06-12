@@ -58,6 +58,7 @@ const expenseSchema = z.object({
   paymentMethod: z.enum(["cash", "mpesa", "bank_transfer", "cheque", "card", "unpaid"]).default("unpaid"),
   paidFrom: z.string().optional(),
   vendorId: z.string().optional(),
+  vendorType: z.enum(["supplier", "employee"]).optional().default("supplier"),
   vendorName: z.string().min(1, "Vendor name is required"),
   vendorPhone: z.string().optional(),
   vendorEmail: z.string().email().optional().or(z.literal("")),
@@ -227,6 +228,7 @@ export async function createExpense(prevState, formData) {
       paidAt: validatedData.paymentMethod !== "unpaid" ? new Date() : null,
       vendor: {
         id: validatedData.vendorId || null,
+        partyType: validatedData.vendorType || "supplier",
         name: validatedData.vendorName,
         phone: validatedData.vendorPhone,
         email: validatedData.vendorEmail,

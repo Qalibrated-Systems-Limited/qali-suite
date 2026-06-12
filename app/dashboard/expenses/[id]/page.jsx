@@ -32,7 +32,7 @@ import { getExpenseById } from "@/app/mongodb/queries/expense-queries";
 import ExpenseActions from "../components/ExpenseActions";
 import Account from "@/app/models/account";
 import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getTenantContext, tenantFilter } from "@/lib/utils/tenant-utils";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
@@ -138,10 +138,10 @@ const categoryLabels = {
 
 async function getPaymentAccounts() {
   await dbConnect();
-  const { companyId } = await getTenantContext();
+  const { companyId, isSuperAdmin } = await getTenantContext();
 
   const accounts = await Account.find({
-    companyId,
+    ...tenantFilter(companyId, isSuperAdmin),
     subType: { $in: ["cash", "bank", "mpesa"] },
     isActive: { $ne: false },
     canPost: true,

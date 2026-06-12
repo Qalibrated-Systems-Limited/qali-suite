@@ -115,6 +115,17 @@ const salesOrderSchema = new Schema(
       taxPin: { type: String, uppercase: true, trim: true },
     },
 
+    // Sales attribution carried from the quote (and onward to the invoice).
+    salesPerson: {
+      employeeId: { type: Schema.Types.ObjectId, ref: "User" },
+      partyId: { type: Schema.Types.ObjectId, ref: "Party" },
+      name: String,
+      commission: {
+        rate: { type: Number, default: 0 },
+        amount: { type: Number, default: 0 },
+      },
+    },
+
     // Provenance / hand-off references.
     quoteRef: {
       quoteId: { type: Schema.Types.ObjectId, ref: "Quote" },

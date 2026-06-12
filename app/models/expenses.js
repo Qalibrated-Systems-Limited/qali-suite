@@ -160,9 +160,16 @@ const expenseSchema = new Schema(
 
     paidAt: Date,
 
-    // Vendor/Supplier
+    // Payee — a supplier OR an employee (advances/reimbursements booked
+    // directly by accounts). partyType drives the JE party tag so employee
+    // balances aggregate correctly (parties.js matches party.type).
     vendor: {
       id: String,
+      partyType: {
+        type: String,
+        enum: ["supplier", "employee"],
+        default: "supplier",
+      },
       name: {
         type: String,
         required: [true, "Vendor name is required"],
@@ -543,7 +550,7 @@ expenseSchema.methods.post = async function (user) {
     reference:   this.reference,
     lines,
     party: {
-      type: "supplier",
+      type: this.vendor.partyType || "supplier",
       id:   this.vendor.id,
       name: this.vendor.name,
     },

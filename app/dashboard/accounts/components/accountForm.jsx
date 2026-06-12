@@ -79,7 +79,11 @@ const SYSTEM_ACCOUNTS = [
   { value: "employee_payables", label: "Employee Payables" },
 ];
 
-export default function AccountForm({ account = null, headerAccounts = [] }) {
+// Expense subtypes that live in the 5xxx (cost-of-sales) range — must
+// match DIRECT_COST_SUBTYPES in lib/coa-codes.js.
+const DIRECT_COST_SUBTYPES = ["cogs", "direct_cost", "adjustment", "inventory_adjustment"];
+
+export default function AccountForm({ account = null, headerAccounts = [], nextCodes = {} }) {
   const router = useRouter();
   const isEdit = !!account;
 
@@ -90,6 +94,24 @@ export default function AccountForm({ account = null, headerAccounts = [] }) {
   // State for subType combobox
   const [subTypeOpen, setSubTypeOpen] = useState(false);
   const [subTypeValue, setSubTypeValue] = useState(account?.subType || "");
+
+  // Auto-suggest the account code from the selected type (and, for
+  // expenses, the subtype's range). Stops the moment the user types a
+  // code of their own.
+  const [typeValue, setTypeValue] = useState(account?.accountType || "");
+  const [codeValue, setCodeValue] = useState(account?.accountCode || "");
+  const [codeTouched, setCodeTouched] = useState(isEdit);
+
+  useEffect(() => {
+    if (isEdit || codeTouched || !typeValue) return;
+    const key =
+      typeValue === "expense" && DIRECT_COST_SUBTYPES.includes(subTypeValue)
+        ? "direct_cost"
+        : typeValue;
+    const suggestion = nextCodes[key];
+    if (suggestion) setCodeValue(suggestion);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typeValue, subTypeValue, codeTouched, isEdit]);
 
   // Use different action based on mode
   const action = isEdit ? updateAccount.bind(null, account._id) : createAccount;
@@ -145,8 +167,12 @@ export default function AccountForm({ account = null, headerAccounts = [] }) {
               <Input
                 id="accountCode"
                 name="accountCode"
-                defaultValue={account?.accountCode || ""}
-                placeholder="e.g., 1100"
+                value={codeValue}
+                onChange={(e) => {
+                  setCodeValue(e.target.value);
+                  setCodeTouched(true);
+                }}
+                placeholder="Pick a type to auto-suggest"
                 className="font-mono bg-background"
                 disabled={isEdit}
                 required
@@ -157,7 +183,8 @@ export default function AccountForm({ account = null, headerAccounts = [] }) {
                 </p>
               )}
               <p className="text-xs text-muted-foreground">
-                Numeric code (e.g., 1000, 1100, 1110)
+                Suggested from the type (1xxx assets … 4xxx revenue, 5xxx
+                direct costs, 6xxx expenses) — edit freely.
               </p>
             </div>
 
@@ -190,7 +217,8 @@ export default function AccountForm({ account = null, headerAccounts = [] }) {
               </Label>
               <Select
                 name="accountType"
-                defaultValue={account?.accountType || ""}
+                value={typeValue}
+                onValueChange={setTypeValue}
                 disabled={isEdit}
                 required
               >
