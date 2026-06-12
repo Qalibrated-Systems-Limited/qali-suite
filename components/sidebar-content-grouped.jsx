@@ -116,7 +116,7 @@ const getNavigationGroups = (user) => {
     label: "Executive",
     id: "executive",
     href: "/dashboard/executive",
-    hidden: !["SuperAdmin", "Admin", "CEO", "CFO"].includes(user?.role),
+    hidden: !["SuperAdmin", "CEO"].includes(user?.role),
   },
 
   // KPIs (ungrouped — executive scorecard, same audience as Reports)

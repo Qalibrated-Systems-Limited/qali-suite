@@ -24,7 +24,10 @@ export const metadata = {
 
 export const dynamic = "force-dynamic";
 
-const EXEC_ROLES = ["SuperAdmin", "Admin", "CEO", "CFO"];
+// Role-centre exclusivity (industry pattern): CFO/Admin have their own
+// cockpits — the executive overview belongs to the CEO. SuperAdmin kept
+// for platform support.
+const EXEC_ROLES = ["SuperAdmin", "CEO"];
 
 // Compact for phones, full for desktop — same convention as the reports.
 const compact = (n) =>
@@ -96,7 +99,7 @@ export default async function ExecutivePage() {
   const netPrev = s.revenue.prev - s.expenses.prev;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5 sm:space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       <div>
         <h1 className="text-lg font-semibold tracking-tight sm:text-2xl">
           Executive overview
