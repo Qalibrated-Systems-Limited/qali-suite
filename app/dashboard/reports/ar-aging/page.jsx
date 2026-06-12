@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { canSeeReportsNav } from "@/lib/permissions";
 import { getARAgingReport } from "@/app/mongodb/queries/aging-queries";
 import { ARAgingClient } from "./ARAgingClient";
 
@@ -12,7 +13,9 @@ export default async function ARAgingPage({ searchParams }) {
   const { user } = session;
 
   // Check permission
-  if (!["SuperAdmin", "Admin", "Accountant"].includes(user?.role)) {
+  // Single source of truth — same gate that shows the Reports nav link
+  // (the previous inline allowlist bounced CFO and Finance Manager).
+  if (!canSeeReportsNav(user?.role)) {
     return (
       <div className="container mx-auto px-4 py-6 max-w-7xl">
         <div className="text-center py-12">
