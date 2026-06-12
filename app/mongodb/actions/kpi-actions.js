@@ -27,8 +27,8 @@ const ObjectId = mongoose.Types.ObjectId;
 // KPI definition is a managerial concern — restrict to leadership roles.
 // Snapshot entry can be more permissive (anyone with access to the data).
 const KPI_ROLES = {
-  MANAGE: ["SuperAdmin", "Admin", "Manager", "CFO", "HR"],
-  ENTER_SNAPSHOT: ["SuperAdmin", "Admin", "Manager", "CFO", "HR", "Accountant"],
+  MANAGE: ["SuperAdmin", "Admin", "CEO", "Manager", "CFO", "HR"],
+  ENTER_SNAPSHOT: ["SuperAdmin", "Admin", "CEO", "Manager", "CFO", "HR", "Accountant"],
 };
 
 function guard(user, allowed) {

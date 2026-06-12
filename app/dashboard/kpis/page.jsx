@@ -13,7 +13,7 @@ import KpiTemplatesDialog from "./components/KpiTemplatesDialog";
 export const metadata = { title: "KPIs" };
 
 const VIEW_ROLES = ["SuperAdmin", "Admin", "CEO", "Manager", "CFO", "HR", "Accountant", "Finance Manager"];
-const MANAGE_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR"];
+const MANAGE_ROLES = ["SuperAdmin", "Admin", "CEO", "Manager", "CFO", "HR"];
 
 async function KpiListLoader({ canManage }) {
   const kpis = await listKpis({ includeInactive: false });

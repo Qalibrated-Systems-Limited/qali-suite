@@ -8,7 +8,7 @@ import KpiForm from "../../components/KpiForm";
 
 export const metadata = { title: "Edit KPI" };
 
-const MANAGE_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR"];
+const MANAGE_ROLES = ["SuperAdmin", "Admin", "CEO", "Manager", "CFO", "HR"];
 
 export default async function EditKpiPage(props) {
   const session = await auth();
