@@ -893,7 +893,7 @@ invoiceSchema.methods.validateBeforeCompletion = async function () {
 // ============================================
 // COMPLETE INVOICE (CREATE JOURNAL ENTRIES + STOCK MOVEMENTS)
 // ============================================
-invoiceSchema.methods.complete = async function (completedBy) {
+invoiceSchema.methods.complete = async function (completedBy, externalSession = null) {
   if (this.status !== "draft" && this.status !== "sent") {
     throw new Error(
       `Can only complete draft or sent invoices. Current status: ${this.status}`,
@@ -956,59 +956,66 @@ invoiceSchema.methods.complete = async function (completedBy) {
     throw new Error(`Fiscal period ${this.fiscalPeriod} is locked`);
   }
 
-  let revenueJE = null;
-  let cogsJE = null;
-  const stockMovements = [];
+  // ==========================================
+  // ATOMIC COMPLETION — every write below (revenue JE, COGS JE, stock
+  // decrements, movements, VAT transaction, the invoice itself) commits
+  // together or not at all. A crash mid-way can no longer leave revenue
+  // posted without COGS, or stock moved without books. Replaces the old
+  // compensating rollbackCompletion(), which could itself fail half-way.
+  // ==========================================
+  const ownSession = externalSession ? null : await mongoose.startSession();
+  const session = externalSession || ownSession;
 
   try {
-    // 1. Create revenue journal entry
-    revenueJE = await this.createRevenueJournalEntry(userInfo);
-    this.accounting = this.accounting || {};
-    this.accounting.revenueJournalEntryId = revenueJE._id;
+    const run = async () => {
+      // 1. Revenue journal entry (AR / Revenue / VAT Output)
+      const revenueJE = await this.createRevenueJournalEntry(userInfo, session);
+      this.accounting = this.accounting || {};
+      this.accounting.revenueJournalEntryId = revenueJE._id;
 
-    // 2. Create COGS journal entry + stock movements (if products)
-    if (this.hasProducts) {
-      const result = await this.createCOGSJournalEntry(userInfo);
-      cogsJE = result.journalEntry;
-      stockMovements.push(...result.stockMovements);
-      // Only set cogsJournalEntryId if journal entry was created (may be null for zero-cost items)
-      if (cogsJE?._id) {
-        this.accounting.cogsJournalEntryId = cogsJE._id;
+      // 2. COGS journal entry + atomic stock fulfilment + movements
+      if (this.hasProducts) {
+        const result = await this.createCOGSJournalEntry(userInfo, session);
+        if (result.journalEntry?._id) {
+          this.accounting.cogsJournalEntryId = result.journalEntry._id;
+        }
       }
+
+      // 3. Status
+      this.status = "completed";
+      this.completedAt = new Date();
+      this.completedBy = userInfo;
+      this.lastModifiedBy = userInfo;
+      this.accounting.accountingComplete = true;
+      this.accounting.accountingCompletedAt = new Date();
+
+      // 4. VAT Output tax transaction
+      if (this.taxAmount > 0) {
+        const TaxTransaction = mongoose.model("TaxTransaction");
+        await TaxTransaction.createFromInvoice(this, userInfo, session);
+      }
+
+      await this.save({ session });
+    };
+
+    if (ownSession) {
+      await ownSession.withTransaction(run);
+    } else {
+      await run();
     }
-
-    // 3. Update status
-    this.status = "completed";
-    this.completedAt = new Date();
-    this.completedBy = userInfo;
-    this.lastModifiedBy = userInfo;
-    this.accounting.accountingComplete = true;
-    this.accounting.accountingCompletedAt = new Date();
-
-    // 4. Create VAT Output tax transaction (if tax amount > 0)
-    if (this.taxAmount > 0) {
-      const TaxTransaction = mongoose.model("TaxTransaction");
-      await TaxTransaction.createFromInvoice(this, userInfo);
-    }
-
-    await this.save();
 
     return this;
   } catch (error) {
-    // Rollback on error
-    await this.rollbackCompletion(userInfo, {
-      revenueJE,
-      cogsJE,
-      stockMovements,
-    });
     throw new Error(`Invoice completion failed: ${error.message}`);
+  } finally {
+    if (ownSession) ownSession.endSession();
   }
 };
 
 /**
  * Create revenue journal entry (AR + Revenue + VAT Output)
  */
-invoiceSchema.methods.createRevenueJournalEntry = async function (user) {
+invoiceSchema.methods.createRevenueJournalEntry = async function (user, session = null) {
   if (this.accounting?.revenueJournalEntryId) {
     throw new Error("Revenue journal entry already exists");
   }
@@ -1085,7 +1092,7 @@ invoiceSchema.methods.createRevenueJournalEntry = async function (user) {
   const entryNumber = await this.generateUniqueEntryNumber("SALE");
 
   // Create journal entry (with tenant scoping)
-  const journalEntry = await JournalEntry.create({
+  const [journalEntry] = await JournalEntry.create([{
     companyId: this.companyId, // Tenant scoping
     entryNumber,
     entryDate: this.invoiceDate,
@@ -1107,10 +1114,10 @@ invoiceSchema.methods.createRevenueJournalEntry = async function (user) {
     },
     status: "draft",
     createdBy: user,
-  });
+  }], session ? { session } : {});
 
   // Post journal entry
-  await journalEntry.post(user);
+  await journalEntry.post(user, session);
 
   return journalEntry;
 };
@@ -1118,7 +1125,7 @@ invoiceSchema.methods.createRevenueJournalEntry = async function (user) {
 /**
  * Create COGS journal entry + stock movements (COGS + Inventory reduction)
  */
-invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
+invoiceSchema.methods.createCOGSJournalEntry = async function (user, session = null) {
   if (this.accounting?.cogsJournalEntryId) {
     throw new Error("COGS journal entry already exists");
   }
@@ -1147,7 +1154,7 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
     .map((item) => item.productId);
 
   const products = productIds.length > 0
-    ? await Product.find({ _id: { $in: productIds } })
+    ? await Product.find({ _id: { $in: productIds } }).session(session)
     : [];
   const productMap = new Map(products.map((p) => [p._id.toString(), p]));
 
@@ -1193,55 +1200,63 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
     }
 
     // ============================================
-    // FULFILL INVENTORY (only for store inventory items not yet moved by WB)
+    // FULFILL INVENTORY — ATOMIC. The old read-modify-write (hydrate,
+    // mutate, save) let two concurrent completions both read qty=100 and
+    // both write 90: overselling. Now the availability check lives in the
+    // UPDATE FILTER ($gte guard) — only one concurrent completion can win
+    // the last units; the loser aborts the whole transaction.
     // ============================================
+    const lifetimeInc = {
+      "lifetimeTotals.totalQuantitySold": item.quantity,
+      "lifetimeTotals.totalRevenue": item.amount,
+      "lifetimeTotals.totalCOGS": lineCOGS,
+      "lifetimeTotals.totalGrossProfit": item.amount - lineCOGS,
+    };
+
     if (!isFromTechnicianStock && !isWBFulfilled) {
-      const previousOnHand = product.inventory?.quantityOnHand || 0;
+      const guard = isStockCommitted
+        ? { "inventory.quantityOnHand": { $gte: item.quantity } }
+        : { "inventory.quantityAvailable": { $gte: item.quantity } };
+      const stockInc = isStockCommitted
+        ? {
+            "inventory.quantityOnHand": -item.quantity,
+            "inventory.quantityCommitted": -item.quantity,
+          }
+        : {
+            "inventory.quantityOnHand": -item.quantity,
+            "inventory.quantityAvailable": -item.quantity,
+          };
 
-      if (isStockCommitted) {
-        if (item.quantity > (product.inventory?.quantityOnHand || 0)) {
-          throw new Error(
-            `Insufficient physical stock for ${product.name}. ` +
-              `On-hand: ${product.inventory?.quantityOnHand || 0}, Committed: ${item.quantity}`,
-          );
-        }
+      const updated = await Product.findOneAndUpdate(
+        { _id: product._id, ...guard },
+        { $inc: { ...stockInc, ...lifetimeInc } },
+        { new: true, session },
+      );
 
-        product.inventory = product.inventory || {};
-        product.inventory.quantityOnHand = previousOnHand - item.quantity;
-        product.inventory.quantityCommitted =
-          (product.inventory.quantityCommitted || 0) - item.quantity;
-      } else {
-        // LEGACY FLOW: Stock not pre-committed, check availability now
-        const available = product.inventory?.quantityAvailable || 0;
-        if (item.quantity > available) {
-          throw new Error(
-            `Insufficient stock for ${product.name}. ` +
-              `Available: ${available}, Requested: ${item.quantity}`,
-          );
-        }
-
-        product.inventory = product.inventory || {};
-        product.inventory.quantityOnHand =
-          (product.inventory.quantityOnHand || 0) - item.quantity;
-        product.inventory.quantityAvailable =
-          product.inventory.quantityOnHand - (product.inventory.quantityCommitted || 0);
+      if (!updated) {
+        const fresh = await Product.findById(product._id)
+          .select("name inventory")
+          .session(session)
+          .lean();
+        throw new Error(
+          isStockCommitted
+            ? `Insufficient physical stock for ${product.name}. On-hand: ${fresh?.inventory?.quantityOnHand ?? 0}, Committed: ${item.quantity}`
+            : `Insufficient stock for ${product.name}. Available: ${fresh?.inventory?.quantityAvailable ?? 0}, Requested: ${item.quantity}`,
+        );
       }
+
+      // Movements record the post-update stock level.
+      item._newStock = updated.inventory?.quantityOnHand ?? 0;
+    } else {
+      // Tech-stock / WB-fulfilled items: no store-stock change, but
+      // lifetime totals still accrue.
+      await Product.updateOne(
+        { _id: product._id },
+        { $inc: lifetimeInc },
+        { session },
+      );
     }
-
-    // Update product lifetime totals
-    product.lifetimeTotals = product.lifetimeTotals || {};
-    product.lifetimeTotals.totalQuantitySold =
-      (product.lifetimeTotals.totalQuantitySold || 0) + item.quantity;
-    product.lifetimeTotals.totalRevenue =
-      (product.lifetimeTotals.totalRevenue || 0) + item.amount;
-    product.lifetimeTotals.totalCOGS =
-      (product.lifetimeTotals.totalCOGS || 0) + lineCOGS;
-    product.lifetimeTotals.totalGrossProfit =
-      (product.lifetimeTotals.totalGrossProfit || 0) + (item.amount - lineCOGS);
   }
-
-  // Save all modified products in parallel (one save per product)
-  await Promise.all(products.map((p) => p.save()));
 
   // ============================================
   // CREATE STOCK MOVEMENTS (only for direct sales from inventory)
@@ -1252,10 +1267,10 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
     movementNumbers.push(await StockMovement.generateMovementNumber(this.companyId));
   }
 
-  // Create all movements in parallel
+  // Create all movements in parallel (inside the transaction)
   const createdMovements = await Promise.all(
     itemsFromInventory.map(({ item, product, lineCOGS }, idx) =>
-      StockMovement.create({
+      StockMovement.create([{
         companyId: this.companyId,
         movementNumber: movementNumbers[idx],
         productId: product._id,
@@ -1268,8 +1283,9 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
         movementType: "sale",
         direction: "out",
         quantity: item.quantity,
-        previousStock: product.inventory.quantityOnHand + item.quantity,
-        newStock: product.inventory.quantityOnHand,
+        // _newStock captured from the atomic decrement above
+        previousStock: (item._newStock ?? 0) + item.quantity,
+        newStock: item._newStock ?? 0,
         costing: {
           unitCost: product.costing.costPrice,
           totalCost: lineCOGS,
@@ -1294,7 +1310,7 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
           affectsAccounting: true,
           accountingPosted: false,
         },
-      })
+      }], session ? { session } : {}).then((r) => r[0])
     )
   );
   stockMovements.push(...createdMovements);
@@ -1358,7 +1374,7 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
   }
 
   // Create journal entry (with tenant scoping)
-  const journalEntry = await JournalEntry.create({
+  const [journalEntry] = await JournalEntry.create([{
     companyId: this.companyId, // Tenant scoping
     entryNumber,
     entryDate: this.invoiceDate,
@@ -1371,10 +1387,10 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
     },
     status: "draft",
     createdBy: user,
-  });
+  }], session ? { session } : {});
 
   // Post journal entry
-  await journalEntry.post(user);
+  await journalEntry.post(user, session);
 
   // Update stock movements with journal entry ID (parallel)
   await Promise.all(
@@ -1382,7 +1398,7 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
       movement.accounting.journalEntryId = journalEntry._id;
       movement.accounting.accountingPosted = true;
       movement.accounting.accountingPostedAt = new Date();
-      return movement.save();
+      return movement.save({ session });
     })
   );
 
@@ -1406,7 +1422,7 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
   // Fetch all requests in parallel, then update and save in parallel
   const requestIds = Array.from(requestUpdates.keys());
   if (requestIds.length > 0) {
-    const requests = await StockRequest.find({ _id: { $in: requestIds } });
+    const requests = await StockRequest.find({ _id: { $in: requestIds } }).session(session);
 
     for (const request of requests) {
       const items = requestUpdates.get(request._id.toString()) || [];
@@ -1434,7 +1450,7 @@ invoiceSchema.methods.createCOGSJournalEntry = async function (user) {
       }
     }
 
-    await Promise.all(requests.map((r) => r.save()));
+    await Promise.all(requests.map((r) => r.save({ session })));
   }
 
   return { journalEntry, stockMovements };
