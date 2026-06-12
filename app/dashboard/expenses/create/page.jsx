@@ -7,7 +7,7 @@ import Party from "@/app/models/parties";
 import Asset from "@/app/models/asset";
 import dbConnect from "@/app/config/dbConnect";
 import { getExpenseCategories } from "@/app/mongodb/queries/expense-queries";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getTenantContext, tenantFilter } from "@/lib/utils/tenant-utils";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
 export const metadata = {
@@ -17,14 +17,18 @@ export const metadata = {
 
 async function getFormData() {
   await dbConnect();
-  const { companyId } = await getTenantContext();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  // SuperAdmin: companyId is a UX hint and may be null — { companyId }
+  // would match NOTHING. tenantFilter returns {} for SuperAdmin (sees all),
+  // matching how every other query in the app behaves.
+  const tenant = tenantFilter(companyId, isSuperAdmin);
 
   // Fetch all data in parallel
   const [expenseAccounts, paymentAccounts, vendors, employees, assets] = await Promise.all(
     [
       // Expense accounts (for expense posting)
       Account.find({
-        companyId,
+        ...tenant,
         accountType: "expense",
         isActive: { $ne: false },
         canPost: true,
@@ -35,7 +39,7 @@ async function getFormData() {
 
       // Payment accounts (cash, bank, mpesa)
       Account.find({
-        companyId,
+        ...tenant,
         subType: { $in: ["cash", "bank", "mpesa"] },
         isActive: { $ne: false },
         canPost: true,
@@ -46,7 +50,7 @@ async function getFormData() {
 
       // Vendors (suppliers from parties)
       Party.find({
-        companyId,
+        ...tenant,
         type: { $in: ["supplier", "both"] },
         isActive: { $ne: false },
       })
@@ -56,7 +60,7 @@ async function getFormData() {
 
       // Employees — payees for advances/reimbursements booked by accounts
       Party.find({
-        companyId,
+        ...tenant,
         type: "employee",
         isActive: { $ne: false },
       })
@@ -66,7 +70,7 @@ async function getFormData() {
 
       // Active fixed assets (optional — for tagging fuel/repairs/maintenance)
       Asset.find({
-        companyId,
+        ...tenant,
         status: { $in: ["active", "idle", "in_maintenance"] },
       })
         .select("_id assetNumber name registrationNumber")
