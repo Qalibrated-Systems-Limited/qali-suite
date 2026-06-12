@@ -85,7 +85,7 @@ type NavItem = {
 const ROLE_NAVS: Record<string, NavItem[]> = {
   // Executive — overview-first, read-oriented
   CEO: [
-    { label: "Overview", href: "/dashboard/executive", icon: TrendingUp },
+    { label: "Overview", href: "/dashboard", icon: TrendingUp },
     { label: "Reports", href: "/dashboard/reports/profit-loss", icon: BarChart3 },
     { label: "Pipeline", href: "/dashboard/opportunities", icon: Briefcase },
     { label: "Invoices", href: "/dashboard/invoices", icon: Receipt },

@@ -5,6 +5,7 @@ import { DASHBOARD_FOR_ROLE } from "@/lib/permissions";
 
 // Role-specific dashboards
 import { AdminDashboardPage } from "./components/AdminDashboard";
+import ExecutiveOverview from "./executive/ExecutiveOverview";
 import EmployeeDashboard from "./components/EmployeeDashborad";
 import AccountantDashboard from "./components/AccountantDashboard";
 import SuperAdminDashboard from "./components/SuperAdminDashboard";
@@ -38,6 +39,7 @@ const COMPONENT_REGISTRY: Record<string, () => Promise<React.JSX.Element>> = {
   StorekeeperDashboard: async () => <StorekeeperDashboard />,
   ProcurementDashboard: async () => <ProcurementDashboard />,
   EmployeeDashboard: async () => <EmployeeDashboard />,
+  ExecutiveDashboard: async () => <ExecutiveOverview />,
 };
 
 export default async function DashboardPage() {
@@ -49,11 +51,6 @@ export default async function DashboardPage() {
 
   const userRole =
     (session.user as { role?: string }).role || "Employee";
-
-  // CEO lands on the executive overview — their role centre IS the snapshot.
-  if (userRole === "CEO") {
-    redirect("/dashboard/executive");
-  }
 
   const componentName =
     DASHBOARD_FOR_ROLE[userRole as keyof typeof DASHBOARD_FOR_ROLE] ||
