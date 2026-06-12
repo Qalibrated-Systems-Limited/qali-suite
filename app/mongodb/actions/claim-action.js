@@ -25,6 +25,8 @@ import {
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
 import { requirePlanAccess } from "@/lib/plan-gate";
+import User from "../../models/user";
+import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
 const settleAdvanceSchema = z.object({
   items: z
     .array(expenseItemSchema)
@@ -257,8 +259,63 @@ export async function createAdvanceRequest(prevState, formData) {
     session = await mongoose.startSession();
     session.startTransaction();
 
-    // Get or auto-create employee's party record (tenant-scoped)
-    const party = await getOrCreateEmployeeParty(user, tenantCompanyId, isSuperAdmin, session);
+    // ── On-behalf: finance roles may record an advance FOR an employee —
+    // captures "manual" advances at the source instead of off the books.
+    // The claim belongs to the employee; createdBy stays the recorder.
+    let subjectUser = user;
+    const onBehalfUserId = (formData.get("onBehalfUserId") || "").toString().trim();
+    if (onBehalfUserId && onBehalfUserId !== user.id) {
+      if (!FINANCE_WRITE_ROLES.includes(user.role)) {
+        await session.abortTransaction();
+        return { errors: { _form: ["Only finance roles can record an advance on behalf of an employee."] } };
+      }
+      if (!mongoose.Types.ObjectId.isValid(onBehalfUserId)) {
+        await session.abortTransaction();
+        return { errors: { _form: ["Invalid employee selected."] } };
+      }
+      const target = await User.findOne(
+        withTenantScope({ _id: onBehalfUserId, status: "Active" }, tenantCompanyId, isSuperAdmin),
+      )
+        .select("name email")
+        .session(session)
+        .lean();
+      if (!target) {
+        await session.abortTransaction();
+        return { errors: { _form: ["Selected employee not found."] } };
+      }
+      subjectUser = { id: onBehalfUserId, name: target.name, email: target.email };
+    }
+
+    // ── One open advance per employee: a new advance is blocked until the
+    // previous one is settled or closed — unsettled advances are company
+    // assets and must not pile up.
+    const openAdvance = await EmployeeClaim.findOne(
+      withTenantScope(
+        {
+          claimType: "advance_request",
+          "employee.userId": subjectUser.id,
+          status: { $nin: ["rejected", "closed"] },
+        },
+        tenantCompanyId,
+        isSuperAdmin,
+      ),
+    )
+      .select("claimNumber status")
+      .session(session)
+      .lean();
+    if (openAdvance) {
+      await session.abortTransaction();
+      return {
+        errors: {
+          _form: [
+            `${subjectUser.id === user.id ? "You" : subjectUser.name} already ${subjectUser.id === user.id ? "have" : "has"} an open advance (${openAdvance.claimNumber}, ${openAdvance.status}). Settle it before requesting another.`,
+          ],
+        },
+      };
+    }
+
+    // Get or auto-create employee party record (tenant-scoped)
+    const party = await getOrCreateEmployeeParty(subjectUser, tenantCompanyId, isSuperAdmin, session);
 
     // Extract form data early (keep raw values for form persistence on errors)
     const rawValues = {
@@ -353,12 +410,12 @@ export async function createAdvanceRequest(prevState, formData) {
           claimNumber,
           claimDate: new Date(),
           employee: {
-            userId: user.id,
+            userId: subjectUser.id,
             partyId: party._id,
-            name: user.name,
+            name: subjectUser.name,
             employeeNumber: hrSnapshot.employeeNumber,
             department: hrSnapshot.department,
-            email: user.email,
+            email: subjectUser.email,
           },
           claimType: "advance_request",
           advanceDetails,

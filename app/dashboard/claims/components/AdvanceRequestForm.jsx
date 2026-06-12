@@ -86,7 +86,12 @@ function getAdvanceTip(type) {
   }
 }
 
-export function AdvanceRequestForm({ claim = null, projects = [] }) {
+export function AdvanceRequestForm({
+  claim = null,
+  projects = [],
+  onBehalfOptions = [],
+  currentUserId = "",
+}) {
   const router = useRouter();
   const isEdit = !!claim;
 
@@ -188,6 +193,34 @@ export function AdvanceRequestForm({ claim = null, projects = [] }) {
             <div className="p-4 sm:p-5 bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800 rounded-lg">
               <p className="text-sm sm:text-base text-red-800 dark:text-red-300 font-medium">
                 {state.errors._form[0]}
+              </p>
+            </div>
+          )}
+
+          {/* On behalf of — finance roles only (the page sends options only
+              to them). Captures advances that used to be handed out manually
+              and bypass the books. */}
+          {!isEdit && onBehalfOptions.length > 0 && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Recording for</label>
+              <select
+                name="onBehalfUserId"
+                defaultValue=""
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              >
+                <option value="">Myself</option>
+                {onBehalfOptions
+                  .filter((u) => u._id !== currentUserId)
+                  .map((u) => (
+                    <option key={u._id} value={u._id}>
+                      {u.name} — {u.role}
+                    </option>
+                  ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Pick an employee to record an advance on their behalf — it
+                posts to Employee Advances (recoverable) under their name,
+                and they settle it with receipts like any other advance.
               </p>
             </div>
           )}
