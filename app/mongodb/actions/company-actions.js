@@ -1,6 +1,8 @@
 "use server";
 
 import { z } from "zod";
+import mongoose from "mongoose";
+import { resetCompanyData } from "@/lib/company-reset";
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -1069,5 +1071,70 @@ export async function initializeFiscalPeriods(companyId, fiscalYearStart) {
   } catch (error) {
     console.error("Initialize fiscal periods error:", error);
     return { success: false, error: error.message };
+  }
+}
+
+// ============================================
+// RESET TRANSACTIONAL DATA (Danger Zone)
+// ============================================
+// Wipes a company's TRANSACTIONS while keeping its master data — the
+// "clear the test data, go to production" operation. SuperAdmin only,
+// requires typing the exact company name.
+//
+// KEPT (master/config): company, users, invites, chart of accounts,
+// parties, products, categories, employee profiles, KPI definitions,
+// integration configs. Balances/quantities on kept docs are ZEROED so
+// they don't reference deleted transactions.
+//
+// WIPED: everything else carrying this companyId — discovered at
+// runtime from the live collection list, so new transactional models
+// are covered automatically (no hand-list to drift). Counters
+// (erpcounters, _id-prefixed) are cleared so numbering restarts at 1.
+
+export async function resetCompanyTransactions(companyId, prevState, formData) {
+  const session = await auth();
+  if (!session?.user) {
+    return { success: false, error: "You must be logged in" };
+  }
+  if (!SUPER_ADMIN_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Unauthorized: SuperAdmin role required" };
+  }
+
+  try {
+    await connectDB();
+
+    const company = await Company.findById(companyId).select("name").lean();
+    if (!company) return { success: false, error: "Company not found" };
+
+    // Typed confirmation — the exact company name, server-enforced.
+    const confirmName = (formData.get("confirmName") || "").toString().trim();
+    if (confirmName !== company.name) {
+      return {
+        success: false,
+        error: `Confirmation text must match the company name exactly ("${company.name}").`,
+      };
+    }
+
+    const wipeParties = formData.get("wipeParties") === "on";
+    const { summary, totalDeleted } = await resetCompanyData(
+      mongoose.connection.db,
+      companyId,
+      { wipeParties },
+    );
+    console.warn(
+      `[reset-transactions] ${company.name} (${idStr}) by ${session.user.email}: ${totalDeleted} docs across ${Object.keys(summary).length} collections`,
+    );
+
+    revalidatePath("/dashboard/admin/companies");
+    revalidatePath(`/dashboard/admin/companies/${companyId}`);
+
+    return {
+      success: true,
+      message: `Reset complete — ${totalDeleted} documents removed across ${Object.keys(summary).length} collections. Master data kept; balances and stock zeroed; numbering restarts at 1.`,
+      summary,
+    };
+  } catch (error) {
+    console.error("resetCompanyTransactions error:", error);
+    return { success: false, error: "Reset failed — check server logs" };
   }
 }
