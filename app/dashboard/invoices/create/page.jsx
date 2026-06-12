@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { redirect } from "next/navigation";
 import {
   fetchActiveCustomers,
@@ -18,7 +19,7 @@ export default async function CreateInvoicePage() {
   const { user } = session;
 
   // Check permissions
-  if (!["SuperAdmin", "Admin", "Accountant"].includes(user.role)) {
+  if (!INVOICE_WRITE_ROLES.includes(user.role)) {
     return (
       <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">

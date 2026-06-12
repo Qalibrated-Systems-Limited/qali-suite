@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { auth } from "@/auth";
+import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import Account from "@/app/models/account";
@@ -63,7 +64,7 @@ export default async function CreateJournalEntryPage() {
   }
 
   // Check role
-  if (!["SuperAdmin", "Admin", "Accountant"].includes(session.user.role as string)) {
+  if (!FINANCE_WRITE_ROLES.includes(session.user.role as string)) {
     redirect("/dashboard/journal");
   }
 

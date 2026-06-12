@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { auth } from "@/auth";
+import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -75,7 +76,7 @@ export default async function JournalPage({
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold tracking-tight">Journal Entries</h1>
-        {["SuperAdmin", "Admin", "Accountant"].includes(session.user.role as string) && (
+        {FINANCE_WRITE_ROLES.includes(session.user.role as string) && (
           <Button asChild size="sm">
             <Link href="/dashboard/journal/create">
               <Plus className="h-3.5 w-3.5 mr-1.5" />
