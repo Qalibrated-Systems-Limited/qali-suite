@@ -735,6 +735,7 @@ taxTransactionSchema.statics.getWHTReportByParty = async function (
 taxTransactionSchema.statics.createFromInvoice = async function (
   invoice,
   createdBy,
+  session = null,
 ) {
   // Validate invoice object
   if (!invoice || !invoice._id) {
@@ -768,7 +769,7 @@ taxTransactionSchema.statics.createFromInvoice = async function (
     throw new Error("VAT Output account not configured for this company");
   }
 
-  const taxTransaction = await this.create({
+  const [taxTransaction] = await this.create([{
     companyId: invoice.companyId, // Tenant scoping
     transactionNumber: `VAT-OUT-${invoice.invoiceNumber}`,
     transactionDate: invoice.invoiceDate,
@@ -803,7 +804,7 @@ taxTransactionSchema.statics.createFromInvoice = async function (
     accountName: vatAccount.accountName,
     description: `VAT Output on sale to ${invoice.customer.name}`,
     createdBy: userInfo,
-  });
+  }], session ? { session } : {});
 
   return taxTransaction;
 };
