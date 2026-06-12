@@ -1122,7 +1122,7 @@ export async function resetCompanyTransactions(companyId, prevState, formData) {
       { wipeParties },
     );
     console.warn(
-      `[reset-transactions] ${company.name} (${idStr}) by ${session.user.email}: ${totalDeleted} docs across ${Object.keys(summary).length} collections`,
+      `[reset-transactions] ${company.name} (${companyId}) by ${session.user.email}: ${totalDeleted} docs across ${Object.keys(summary).length} collections`,
     );
 
     revalidatePath("/dashboard/admin/companies");
