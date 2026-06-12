@@ -1,34 +1,43 @@
 /**
  * Global test setup — runs ONCE per Vitest worker, before any test file.
  *
- * Spawns an in-memory MongoDB instance (downloads the binary on first
- * run, then caches it under `node_modules/.cache/mongodb-memory-server`)
- * and exposes its URI via `process.env.MONGODB_URI` so the existing
+ * Spawns an in-memory MongoDB REPLICA SET (single node) and exposes its
+ * URI via `process.env.MONGODB_URI` so the existing
  * `app/config/dbConnect.js` picks it up unchanged.
+ *
+ * Why a replica set and not a standalone server: the money paths use
+ * multi-document transactions (invoice.complete, payment.confirm,
+ * adjustment.approve, lead conversion…), and Mongo only allows
+ * transactions on replica sets / mongos — exactly what prod (Atlas) is.
+ * A standalone memory server made every transactional test fail with
+ * "Transaction numbers are only allowed on a replica set member".
  *
  * Returns a teardown function — Vitest calls it after the last test.
  */
-import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
 
-let server;
+let replSet;
 
 export async function setup() {
-  server = await MongoMemoryServer.create({
+  replSet = await MongoMemoryReplSet.create({
+    replSet: { count: 1 }, // single node is enough for transaction support
     binary: {
       // Match a recent prod-style version. Atlas defaults to 7.x; pinning
       // here keeps test behavior deterministic across dev machines.
+      // NOTE: the CI cache key in .github/workflows/test.yml embeds this
+      // version — bump both together.
       version: "7.0.14",
     },
   });
-  process.env.MONGODB_URI = server.getUri();
+  process.env.MONGODB_URI = replSet.getUri();
   // Disable the runtime warning some Mongoose plugins emit when no
   // explicit "global cluster" feature is in use.
   process.env.MONGOMS_DISABLE_POSTINSTALL = "1";
 }
 
 export async function teardown() {
-  if (server) {
-    await server.stop();
-    server = undefined;
+  if (replSet) {
+    await replSet.stop();
+    replSet = undefined;
   }
 }

@@ -968,9 +968,16 @@ invoiceSchema.methods.complete = async function (completedBy, externalSession = 
 
   try {
     const run = async () => {
+      // withTransaction RETRIES this callback on transient errors, but the
+      // in-memory mutations below survive the abort — reset them so a
+      // retry doesn't trip the "journal entry already exists" guards.
+      this.accounting = this.accounting || {};
+      this.accounting.revenueJournalEntryId = undefined;
+      this.accounting.cogsJournalEntryId = undefined;
+      this.accounting.accountingComplete = false;
+
       // 1. Revenue journal entry (AR / Revenue / VAT Output)
       const revenueJE = await this.createRevenueJournalEntry(userInfo, session);
-      this.accounting = this.accounting || {};
       this.accounting.revenueJournalEntryId = revenueJE._id;
 
       // 2. COGS journal entry + atomic stock fulfilment + movements

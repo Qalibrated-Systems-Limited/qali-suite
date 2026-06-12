@@ -116,7 +116,9 @@ const getNavigationGroups = (user) => {
     label: "Executive",
     id: "executive",
     href: "/dashboard/executive",
-    hidden: !["SuperAdmin", "CEO"].includes(user?.role),
+    // CEO reaches this via "Dashboard" (which redirects here) — showing both
+    // was redundant. Only SuperAdmin needs the explicit entry.
+    hidden: user?.role !== "SuperAdmin",
   },
 
   // KPIs (ungrouped — executive scorecard, same audience as Reports)
