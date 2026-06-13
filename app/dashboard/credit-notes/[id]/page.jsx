@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { canSeeSalesNav } from "@/lib/permissions";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getCreditNoteById } from "@/app/mongodb/queries/credit-note-queries";
@@ -33,13 +34,14 @@ export default async function CreditNoteDetailPage({ params }) {
 
   const { user } = session;
 
-  if (!["SuperAdmin", "Admin", "Accountant"].includes(user.role)) {
+  // Same gate that surfaces the Sales nav link (was Admin/Accountant only).
+  if (!canSeeSalesNav(user.role)) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold mb-2">Access Denied</h2>
           <p className="text-muted-foreground">
-            Only Admins and Accountants can view credit notes.
+            You don&apos;t have permission to view credit notes.
           </p>
         </div>
       </div>

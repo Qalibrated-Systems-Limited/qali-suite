@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { canSeeSalesNav } from "@/lib/permissions";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getQuoteById } from "@/app/mongodb/queries/quote-queries";
@@ -33,7 +34,11 @@ export default async function QuoteDetailPage({ params, searchParams }) {
   const { user } = session;
 
   // Check permissions
-  if (!["Admin", "Accountant", "Sales", "SuperAdmin"].includes(user.role)) {
+  // Single source of truth — same gate that surfaces the Sales nav link.
+  // The previous inline ["Admin","Accountant","Sales","SuperAdmin"] both
+  // listed a non-existent "Sales" role AND bounced CEO/CFO/Finance Manager/
+  // Sales Manager who can see the link.
+  if (!canSeeSalesNav(user.role)) {
     return (
       <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">
@@ -41,7 +46,7 @@ export default async function QuoteDetailPage({ params, searchParams }) {
             Access Denied
           </h2>
           <p className="text-muted-foreground">
-            Only Admins, Accountants, and Sales staff can view quotes.
+            You don&apos;t have permission to view quotes.
           </p>
         </div>
       </div>

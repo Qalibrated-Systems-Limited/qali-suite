@@ -50,12 +50,12 @@ export function CreateButton({ user }) {
     "/dashboard/invoices": {
       href: "/dashboard/invoices/create",
       label: "Invoice",
-      roles: ["SuperAdmin", "Admin", "Accountant", "Sales"],
+      roles: ["SuperAdmin", "Admin", "Accountant", "Sales Manager"],
     },
     "/dashboard/quotes": {
       href: "/dashboard/quotes/create",
       label: "Quote",
-      roles: ["SuperAdmin", "Admin", "Accountant", "Sales"],
+      roles: ["SuperAdmin", "Admin", "Accountant", "Sales Manager"],
     },
 
     // Purchases
@@ -79,7 +79,7 @@ export function CreateButton({ user }) {
     "/dashboard/customers": {
       href: "/dashboard/parties/create?type=customer",
       label: "Customer",
-      roles: ["SuperAdmin", "Admin", "Accountant", "Sales"],
+      roles: ["SuperAdmin", "Admin", "Accountant", "Sales Manager"],
     },
     "/dashboard/suppliers": {
       href: "/dashboard/parties/create?type=supplier",

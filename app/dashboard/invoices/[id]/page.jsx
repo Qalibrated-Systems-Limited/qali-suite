@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { canSeeSalesNav } from "@/lib/permissions";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getInvoiceById } from "@/app/mongodb/queries/invoice-queries";
@@ -37,7 +38,8 @@ export default async function InvoiceDetailsPage({ params }) {
   const { user } = session;
 
   // Check permissions
-  if (!["SuperAdmin", "Admin", "Accountant"].includes(user.role)) {
+  // Same gate that surfaces the Sales nav link (was Admin/Accountant only).
+  if (!canSeeSalesNav(user.role)) {
     return (
       <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">
@@ -45,7 +47,7 @@ export default async function InvoiceDetailsPage({ params }) {
             Access Denied
           </h2>
           <p className="text-muted-foreground">
-            Only Admins and Accountants can view invoices.
+            You don&apos;t have permission to view invoices.
           </p>
         </div>
       </div>

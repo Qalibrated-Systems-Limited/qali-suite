@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
+import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { getQuoteById } from "@/app/mongodb/queries/quote-queries";
 import {
   fetchActiveCustomers,
@@ -19,14 +20,17 @@ export default async function UpdateQuotePage({ params }) {
 
   const { user } = session;
 
-  // Check permissions
-  if (!["SuperAdmin", "Admin", "Accountant", "Sales"].includes(user.role)) {
+  // Canonical sales-document write set (same as invoices). The previous
+  // inline list named a non-existent "Sales" role and excluded Sales
+  // Manager / CFO / Finance Manager. CEO is intentionally absent — read
+  // across the business, no operational writes.
+  if (!INVOICE_WRITE_ROLES.includes(user.role)) {
     return (
       <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-foreground mb-2">Access Denied</h2>
           <p className="text-muted-foreground">
-            Only Admins, Accountants, and Sales staff can edit quotes.
+            You don&apos;t have permission to edit quotes.
           </p>
         </div>
       </div>
