@@ -5,8 +5,11 @@ import { canSeeSalesNav } from "@/lib/permissions";
 import { ArrowLeft, Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cSalesOrder } from "@/app/mongodb/queries/sales-order-queries";
+import { getCompanyById } from "@/app/mongodb/queries/company-queries";
+import { serializeBsonType } from "@/lib/utils";
 import AccessDenied from "@/app/dashboard/components/crm/AccessDenied";
 import SalesOrderActions from "../components/SalesOrderActions";
+import { SalesOrderPDFButton } from "../components/SalesOrderPDFButton";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +37,13 @@ export default async function SalesOrderDetailPage({ params }) {
   const { id } = await params;
   const order = await cSalesOrder(id);
   if (!order) notFound();
+
+  // Company header for the PDF (logo, address, PIN).
+  let company = null;
+  if (session.user.companyId) {
+    const c = await getCompanyById(session.user.companyId);
+    if (c) company = serializeBsonType(c);
+  }
 
   return (
     <div className="space-y-6">
@@ -63,8 +73,11 @@ export default async function SalesOrderDetailPage({ params }) {
         </span>
       </div>
 
-      {/* Lifecycle actions */}
-      <SalesOrderActions orderId={order._id} status={order.status} />
+      {/* Lifecycle actions + PDF */}
+      <div className="flex flex-wrap items-center gap-2">
+        <SalesOrderActions orderId={order._id} status={order.status} />
+        <SalesOrderPDFButton order={order} company={company} />
+      </div>
 
       {/* Provenance */}
       {(order.quoteRef || order.invoiceRef) && (

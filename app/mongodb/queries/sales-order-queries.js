@@ -26,6 +26,8 @@ function serializeLine(i) {
     quantity: i.quantity,
     unit: i.unit,
     unitPrice: i.unitPrice,
+    amount: i.amount || 0,
+    taxAmount: i.taxAmount || 0,
     lineTotal: i.lineTotal,
     stockCommitted: !!i.stockCommitted,
     invoicedQuantity: i.invoicedQuantity || 0,
@@ -42,7 +44,12 @@ function serializeOrder(r, withItems = false) {
     customer: {
       partyId: r.customer?.partyId?.toString?.() ?? null,
       name: r.customer?.name || "",
+      email: r.customer?.email || "",
+      phone: r.customer?.phone || "",
+      address: r.customer?.address || "",
+      taxPin: r.customer?.taxPin || "",
     },
+    salesPerson: r.salesPerson?.name ? { name: r.salesPerson.name } : null,
     quoteRef: r.quoteRef?.quoteId
       ? { quoteId: r.quoteRef.quoteId.toString(), quoteNumber: r.quoteRef.quoteNumber || "" }
       : null,
@@ -54,6 +61,7 @@ function serializeOrder(r, withItems = false) {
       : null,
     itemCount: r.items?.length || 0,
     subtotal: r.subtotal || 0,
+    totalDiscount: r.totalDiscount || 0,
     taxAmount: r.taxAmount || 0,
     total: r.total || 0,
     currency: r.currency || "KES",
