@@ -80,7 +80,7 @@ async function PlatformMetricsCards() {
         subtitle={`${metrics.companies.total} total registered`}
         icon="Building2"
         iconColor="text-blue-500"
-        href="/dashboard/settings"
+        href="/dashboard/admin/companies"
       />
       <MetricCard
         title="Total Users"
