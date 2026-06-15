@@ -163,7 +163,7 @@ export async function createCreditNote(prevState, formData) {
         name: invoice.customer.name,
         email: invoice.customer.email,
         phone: invoice.customer.phone,
-        address: invoice.customer.address,
+        address: formatAddress(invoice.customer.address),
         taxPin: invoice.customer.taxPin,
       },
       reason: validated.reason,

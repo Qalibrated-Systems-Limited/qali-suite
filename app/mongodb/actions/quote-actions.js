@@ -71,7 +71,7 @@ export async function createQuote(prevState, formData) {
           name: customer.name,
           email: customer.email,
           phone: customer.phone,
-          address: customer.address,
+          address: formatAddress(customer.address),
           taxPin: customer.taxPin,
         };
       }
@@ -84,7 +84,7 @@ export async function createQuote(prevState, formData) {
         name: data.customer.name,
         email: data.customer.email,
         phone: data.customer.phone,
-        address: data.customer.address,
+        address: formatAddress(data.customer.address),
         taxPin: data.customer.taxPin,
       };
     }
@@ -275,7 +275,7 @@ export async function updateQuote(quoteId, prevState, formData) {
           name: customer.name,
           email: customer.email,
           phone: customer.phone,
-          address: customer.address,
+          address: formatAddress(customer.address),
           taxPin: customer.taxPin,
         };
       }
