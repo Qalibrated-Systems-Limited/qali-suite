@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { formatAddress } from "../../lib/format-address";
 
 const Schema = mongoose.Schema;
 
@@ -800,7 +801,7 @@ quoteSchema.methods.convertToInvoice = async function (
       name: this.customer.name,
       email: this.customer.email,
       phone: this.customer.phone,
-      address: this.customer.address,
+      address: formatAddress(this.customer.address),
       taxPin: this.customer.taxPin,
     },
     items: invoiceItems,

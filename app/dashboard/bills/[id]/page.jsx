@@ -623,7 +623,7 @@ export default async function BillDetailsPage({ params }) {
               {bill.supplier?.address && (
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Address</p>
-                  <p className="text-sm">{bill.supplier.address}</p>
+                  <p className="text-sm">{formatAddress(bill.supplier.address)}</p>
                 </div>
               )}
             </CardContent>

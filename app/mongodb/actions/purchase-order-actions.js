@@ -337,7 +337,7 @@ export async function createPurchaseOrder(prevState, formData) {
       taxPin: supplier.taxPin || "",
       email: supplier.email || "",
       phone: supplier.phone || "",
-      address: supplier.address
+      address: formatAddress(supplier.address)
         ? `${supplier.address.line1 || ""}, ${supplier.address.city || ""}`.trim()
         : "",
     };
@@ -518,7 +518,7 @@ export async function updatePurchaseOrder(poId, prevState, formData) {
         taxPin: supplier.taxPin || "",
         email: supplier.email || "",
         phone: supplier.phone || "",
-        address: supplier.address
+        address: formatAddress(supplier.address)
           ? `${supplier.address.line1 || ""}, ${supplier.address.city || ""}`.trim()
           : "",
       };

@@ -122,7 +122,7 @@ async function CompanyHealthTable() {
             <p className="text-xs text-muted-foreground mt-1">
               Companies will appear here once created
             </p>
-            <Link href="/dashboard/settings" className="mt-4">
+            <Link href="/dashboard/admin/companies/create" className="mt-4">
               <Button size="sm" variant="outline">
                 <Plus className="w-4 h-4 mr-1.5" />
                 Create Company
@@ -216,7 +216,7 @@ async function CompanyHealthTable() {
                       </div>
                     </td>
                     <td className="py-3.5 px-4 text-right">
-                      <Link href="/dashboard/settings">
+                      <Link href={`/dashboard/admin/companies/${company._id}`}>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -236,7 +236,7 @@ async function CompanyHealthTable() {
 
       {/* View All Link */}
       <div className="border-t border-border/50 p-3">
-        <Link href="/dashboard/settings">
+        <Link href="/dashboard/admin/companies">
           <Button variant="ghost" size="sm" className="w-full text-xs gap-1">
             View All Companies
             <ChevronRight className="w-3 h-3" />

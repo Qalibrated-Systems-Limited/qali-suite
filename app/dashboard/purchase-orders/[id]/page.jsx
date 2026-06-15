@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getPurchaseOrderById } from "@/app/mongodb/queries/purchase-order-queries";
 import { getCompanyById } from "@/app/mongodb/queries/company-queries";
-import { serializeBsonType } from "@/lib/utils";
+import { serializeBsonType, formatAddress } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -535,7 +535,7 @@ export default async function PurchaseOrderDetailPage({ params }) {
               {po.supplier?.address && (
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Address</p>
-                  <p className="text-sm">{po.supplier.address}</p>
+                  <p className="text-sm">{formatAddress(po.supplier.address)}</p>
                 </div>
               )}
             </CardContent>

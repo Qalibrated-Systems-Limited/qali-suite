@@ -4,7 +4,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getInvoiceById } from "@/app/mongodb/queries/invoice-queries";
 import { getCompanyById } from "@/app/mongodb/queries/company-queries";
-import { serializeBsonType } from "@/lib/utils";
+import { serializeBsonType, formatAddress } from "@/lib/utils";
 import Account from "@/app/models/account";
 import dbConnect from "@/app/config/dbConnect";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -440,7 +440,7 @@ export default async function InvoiceDetailsPage({ params }) {
               <div>
                 <p className="text-xs text-muted-foreground mb-1">Address</p>
                 <p className="text-sm text-foreground">
-                  {invoice.customer.address}
+                  {formatAddress(invoice.customer.address)}
                 </p>
               </div>
             </CardContent>
