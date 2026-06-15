@@ -58,7 +58,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { cn, formatAddress } from "@/lib/utils";
 import ProjectPicker from "@/components/project-picker";
 
 // Tax rate presets for Kenya
@@ -699,7 +699,7 @@ export default function EditInvoiceFormClient({
               </p>
               <p className="text-sm">
                 <span className="text-muted-foreground">Address:</span>{" "}
-                {selectedCustomerData.address || "N/A"}
+                {formatAddress(selectedCustomerData.address) || "N/A"}
               </p>
             </div>
           )}

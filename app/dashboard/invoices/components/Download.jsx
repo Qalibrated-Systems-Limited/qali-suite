@@ -461,7 +461,7 @@ function InvoicePDFDocument({
             {/* Company Info */}
             <View style={styles.companyInfo}>
               <Text style={styles.companyName}>{companyInfo.name}</Text>
-              <Text style={styles.companyDetails}>{companyInfo.address}</Text>
+              <Text style={styles.companyDetails}>{formatAddress(companyInfo.address)}</Text>
               <Text style={styles.companyDetails}>
                 {companyInfo.phone} • {companyInfo.email}
               </Text>
@@ -507,7 +507,7 @@ function InvoicePDFDocument({
           <View style={styles.partyBox}>
             <Text style={styles.partyTitle}>Bill To</Text>
             <Text style={styles.partyName}>{invoice.customer.name}</Text>
-            <Text style={styles.partyText}>{invoice.customer.address}</Text>
+            <Text style={styles.partyText}>{formatAddress(invoice.customer.address)}</Text>
             {invoice.customer.email && (
               <Text style={styles.partyEmail}>{invoice.customer.email}</Text>
             )}
@@ -519,7 +519,7 @@ function InvoicePDFDocument({
           <View style={styles.partyBox}>
             <Text style={styles.partyTitle}>From</Text>
             <Text style={styles.partyName}>{companyInfo.name}</Text>
-            <Text style={styles.partyText}>{companyInfo.address}</Text>
+            <Text style={styles.partyText}>{formatAddress(companyInfo.address)}</Text>
             <Text style={styles.partyEmail}>{companyInfo.email}</Text>
             <Text style={styles.partyText}>{companyInfo.phone}</Text>
           </View>

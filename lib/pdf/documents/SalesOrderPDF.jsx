@@ -90,11 +90,20 @@ const formatDate = (date) => {
 
 const formatAddress = (address) => {
   if (!address) return "";
-  if (typeof address === "string") return address;
-  if (typeof address === "object") {
-    return [address.line1, address.line2, address.city, address.state, address.postalCode, address.country]
-      .filter(Boolean)
-      .join(", ");
+  const fromObject = (a) =>
+    [a.street || a.line1, a.line2, a.city, a.state, a.postalCode, a.country].filter(Boolean).join(", ");
+  if (typeof address === "object") return fromObject(address);
+  if (typeof address === "string") {
+    const t = address.trim();
+    if (t.startsWith("{") && t.endsWith("}")) {
+      try { return fromObject(JSON.parse(t)); }
+      catch {
+        try {
+          return fromObject(JSON.parse(t.replace(/([{,]\s*)(\w+):/g, '$1"$2":').replace(/'/g, '"')));
+        } catch { return t; }
+      }
+    }
+    return t;
   }
   return "";
 };
