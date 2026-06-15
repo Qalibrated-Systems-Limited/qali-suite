@@ -17,7 +17,7 @@ import {
   Mail,
   Phone,
 } from "lucide-react";
-import { formatCurrency, serializeBsonType } from "@/lib/utils";
+import { formatCurrency, serializeBsonType, formatAddress } from "@/lib/utils";
 import { QuoteDetailActions } from "../components/QuoteDetailActions";
 import { QuoteItemsTable } from "../components/QuoteItemsTable";
 import { getCompanyById } from "@/app/mongodb/queries/company-queries";
@@ -182,7 +182,7 @@ export default async function QuoteDetailPage({ params, searchParams }) {
                   </div>
                   {quote.customer?.address && (
                     <p className="text-sm text-muted-foreground pl-6">
-                      {quote.customer.address}
+                      {formatAddress(quote.customer.address)}
                     </p>
                   )}
                 </div>

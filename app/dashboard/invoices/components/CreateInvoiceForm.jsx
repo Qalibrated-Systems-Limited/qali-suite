@@ -54,7 +54,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { cn, formatAddress } from "@/lib/utils";
 import { createInvoice } from "@/app/mongodb/invoice-actions";
 import QuickCreatePartyDialog from "./QuickCreateCustomerDialog";
 import ProjectPicker from "@/components/project-picker";
@@ -524,7 +524,7 @@ export default function CreateInvoiceFormClient({
                     Address
                   </Label>
                   <p className="text-sm text-foreground mt-1">
-                    {selectedCustomer.address}
+                    {formatAddress(selectedCustomer.address)}
                   </p>
                 </div>
               </div>
