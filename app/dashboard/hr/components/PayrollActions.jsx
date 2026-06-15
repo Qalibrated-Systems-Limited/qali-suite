@@ -172,7 +172,21 @@ export function PayrollActions({ payrollRun, userRole }) {
       if (result?.success === false) {
         toast.error(result.error);
       } else {
-        toast.success(`Entries generated for ${result.employeeCount} employees`);
+        const skipped = result.skipped || [];
+        toast.success(
+          `Entries generated for ${result.processed ?? result.employeeCount} employee${(result.processed ?? result.employeeCount) === 1 ? "" : "s"}`,
+        );
+        // Don't let unresolved employees pass silently — they'd otherwise
+        // be missing from the run with no indication.
+        if (skipped.length > 0) {
+          toast.warning(
+            `${skipped.length} employee${skipped.length === 1 ? "" : "s"} skipped: ${skipped
+              .slice(0, 3)
+              .map((s) => `${s.name || s.employeeNumber} (${s.reason})`)
+              .join("; ")}${skipped.length > 3 ? "…" : ""}`,
+            { duration: 10000 },
+          );
+        }
         router.refresh();
       }
     });

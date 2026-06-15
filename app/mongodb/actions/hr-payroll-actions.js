@@ -186,8 +186,6 @@ export async function createPayrollRun(_prevState, formData) {
 // Idempotent: safe to re-run (updates existing entries, inserts new ones).
 // ============================================
 export async function generatePayrollEntries(payrollRunId) {
-  let mongoSession = null;
-
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
@@ -292,19 +290,37 @@ export async function generatePayrollEntries(payrollRunId) {
       }
     }
 
-    mongoSession = await mongoose.startSession();
-    mongoSession.startTransaction();
-
-    // Update run status
+    // NO multi-document transaction here. Each PayrollEntry is an
+    // IDEMPOTENT upsert keyed by (payrollRunId, partyId), so a re-run
+    // converges and a single employee's failure must NOT roll back the
+    // other 499. Wrapping a whole run in one transaction risked the 60s
+    // limit, snapshot/cache pressure, and one write-conflict retrying the
+    // entire run. (GL posting — the real cross-collection invariant —
+    // stays transactional in its own confirm step.)
     run.status = "processing";
     run.preparedBy = { name: user.name, id: user.id };
     run.preparedAt = new Date();
-    await run.save({ session: mongoSession });
+    await run.save();
 
-    // TODO: Convert to bulkWrite() for better performance with large employee counts
-    // Upsert one PayrollEntry per employee
+    // Employees whose entry could not be produced — surfaced to the caller
+    // instead of silently omitted (a silent skip overpays staff).
+    const skipped = [];
+
     for (const emp of employees) {
       const comp = emp.compensation || {};
+
+      // Guard: the leave/loan deduction joins key on partyId. If it's
+      // missing (legacy data predating the required-partyId schema), the
+      // deductions can't be resolved — flag the employee rather than emit
+      // a wrong payslip.
+      if (!emp.partyId) {
+        skipped.push({
+          employeeNumber: emp.employeeNumber || "(unknown)",
+          name: `${emp.personalInfo?.firstName || ""} ${emp.personalInfo?.lastName || ""}`.trim(),
+          reason: "missing party link",
+        });
+        continue;
+      }
 
       // ── Pro-rata check ──────────────────────────────────────────
       // If employee joined or left mid-month, scale salary proportionally.
@@ -374,6 +390,7 @@ export async function generatePayrollEntries(payrollRunId) {
 
       const fullName = `${emp.personalInfo?.firstName || ""} ${emp.personalInfo?.lastName || ""}`.trim();
 
+      try {
       await PayrollEntry.findOneAndUpdate(
         { payrollRunId: run._id, partyId: emp.partyId },
         {
@@ -420,25 +437,29 @@ export async function generatePayrollEntries(payrollRunId) {
             lastModifiedBy: { name: user.name, id: user.id },
           },
         },
-        { upsert: true, session: mongoSession, new: true }
+        { upsert: true, new: true }
       );
+      } catch (e) {
+        skipped.push({
+          employeeNumber: emp.employeeNumber || "(unknown)",
+          name: fullName,
+          reason: e.message || "entry write failed",
+        });
+      }
     }
 
-    // Sync aggregated totals back to the run
-    await mongoSession.commitTransaction();
-    mongoSession.endSession();
-    mongoSession = null;
-
-    // Re-aggregate totals (outside transaction — read-only aggregate)
+    // Re-aggregate totals from the entries actually written (read-only).
     await syncRunTotals(payrollRunId);
 
     revalidatePath(`/dashboard/hr/payroll/${payrollRunId}`);
-    return { success: true, employeeCount: employees.length };
+    return {
+      success: true,
+      employeeCount: employees.length,
+      processed: employees.length - skipped.length,
+      skipped,
+    };
   } catch (error) {
-    if (mongoSession) await mongoSession.abortTransaction();
     return { success: false, error: error.message || "Failed to generate payroll entries" };
-  } finally {
-    if (mongoSession) mongoSession.endSession();
   }
 }
 
