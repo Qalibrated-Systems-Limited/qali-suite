@@ -26,6 +26,7 @@
 // └─────────────────────┴────────────┴─────────┴───────┘
 // ============================================
 
+import { formatAddress } from "@/lib/format-address";
 import { revalidatePath } from "next/cache";
 import { roleAllowed } from "@/lib/permissions";
 import { redirect } from "next/navigation";
