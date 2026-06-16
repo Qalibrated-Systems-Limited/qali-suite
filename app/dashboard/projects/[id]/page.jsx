@@ -23,9 +23,22 @@ import {
   getProjectBudgetVsActual,
   getProjectTransactions,
   getSubprojects,
+  getProjectAssignments,
 } from "@/app/mongodb/queries/projectQueries";
+import { getEmployees, getSuppliers } from "@/app/mongodb/queries/partyQueries";
 import ProjectStatusActions from "../components/ProjectStatusActions";
+import ProjectTeam from "../components/ProjectTeam";
 import { FormBanner } from "@/components/ui/form-banner";
+
+// Roles allowed to manage the project team — mirrors the server action gate.
+const PROJECT_TEAM_MANAGE_ROLES = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "Accountant",
+  "Manager",
+]);
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
@@ -60,6 +73,32 @@ function formatDate(date) {
     month: "short",
     day: "numeric",
   });
+}
+
+// ============================================
+// TEAM CARD (labor roster)
+// ============================================
+async function TeamCard({ projectId, canManage }) {
+  // The roster + the pool of people who can be assigned (workers + contractors).
+  const [members, employees, suppliers] = await Promise.all([
+    getProjectAssignments(projectId),
+    getEmployees(true),
+    getSuppliers(true),
+  ]);
+
+  const parties = [
+    ...(employees || []).map((p) => ({ _id: p._id, name: p.name, type: "employee" })),
+    ...(suppliers || []).map((p) => ({ _id: p._id, name: p.name, type: "supplier" })),
+  ];
+
+  return (
+    <ProjectTeam
+      projectId={projectId}
+      members={members}
+      parties={parties}
+      canManage={canManage}
+    />
+  );
 }
 
 // ============================================
@@ -592,6 +631,7 @@ export default async function ProjectDetailPage({ params, searchParams }) {
 
   const statusCfg = STATUS_CONFIG[project.status] || STATUS_CONFIG.planning;
   const StatusIcon = statusCfg.icon;
+  const canManageTeam = PROJECT_TEAM_MANAGE_ROLES.has(session.user.role);
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
@@ -807,6 +847,18 @@ export default async function ProjectDetailPage({ params, searchParams }) {
           projectId={id}
           budget={project.budget}
         />
+      </Suspense>
+
+      {/* Team (labor roster) */}
+      <Suspense
+        fallback={
+          <Card className="p-6 animate-pulse">
+            <div className="h-6 w-40 bg-muted rounded mb-4" />
+            <div className="h-20 w-full bg-muted rounded" />
+          </Card>
+        }
+      >
+        <TeamCard projectId={id} canManage={canManageTeam} />
       </Suspense>
 
       {/* Budget vs Actual */}

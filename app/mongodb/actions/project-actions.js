@@ -8,6 +8,7 @@ import dbConnect from "../../config/dbConnect";
 import Project from "../../models/project";
 import ProjectBudget from "../../models/projectBudget";
 import ProjectCostCode from "../../models/projectCostCode";
+import { computeProjectActuals } from "../queries/projectQueries";
 import {
   getTenantContext,
   getCompanyIdForCreate,
@@ -1071,4 +1072,73 @@ export async function updateProjectFinancials(
 
   const opts = session ? { session } : {};
   await Project.findByIdAndUpdate(projectId, { $inc: update }, opts);
+}
+
+// ============================================
+// RECOMPUTE PROJECT FINANCIALS (authoritative rebuild)
+// ============================================
+// Rebuilds the cached financials.* counters from source documents via the
+// single canonical aggregation (computeProjectActuals). This is what makes the
+// counters trustworthy: any mutation that affects a project's economics calls
+// this AFTER it commits, and reversals (credit notes, cancelled bills) are
+// reflected for free because the aggregation nets them.
+//
+// Deliberately sessionless and run post-commit — it reads committed state and
+// issues a single $set. We never wrap a mutation in a transaction just to keep
+// these counters in sync; correctness comes from this rebuild, not from a lock.
+// Safe to call redundantly (idempotent) and to run off the response path.
+export async function recomputeProjectFinancials(projectId) {
+  if (!projectId || !mongoose.Types.ObjectId.isValid(projectId)) return null;
+
+  const project = await Project.findById(projectId).select("companyId").lean();
+  if (!project) return null;
+
+  const actuals = await computeProjectActuals(
+    new mongoose.Types.ObjectId(projectId),
+    { companyId: project.companyId },
+  );
+
+  await Project.findByIdAndUpdate(projectId, {
+    $set: {
+      "financials.totalRevenue": actuals.revenue,
+      "financials.totalCosts": actuals.costs,
+      "financials.totalCommitted": actuals.committed,
+    },
+  });
+
+  return actuals;
+}
+
+// ============================================
+// RECONCILE ALL PROJECT FINANCIALS (admin maintenance)
+// ============================================
+// One-shot repair: rebuild every project's cached counters from source docs.
+// Use this to backfill historical drift (e.g. credit notes that pre-date the
+// reversal-netting fix). Sequential by design — this is a maintenance action,
+// not a hot path, so we trade speed for not hammering the DB.
+export async function reconcileAllProjectFinancials() {
+  const { companyId, isSuperAdmin, user } = await getTenantContext();
+  const ALLOWED = new Set(["SuperAdmin", "Admin", "CFO", "Finance Manager"]);
+  if (!ALLOWED.has(user?.role)) {
+    return { success: false, error: "Not authorized to reconcile project financials" };
+  }
+
+  await dbConnect();
+  const match = isSuperAdmin
+    ? {}
+    : { companyId: new mongoose.Types.ObjectId(companyId) };
+  const projects = await Project.find(match).select("_id").lean();
+
+  let reconciled = 0;
+  for (const p of projects) {
+    try {
+      await recomputeProjectFinancials(p._id.toString());
+      reconciled++;
+    } catch (err) {
+      console.error("Reconcile failed for project", p._id.toString(), err.message);
+    }
+  }
+
+  revalidatePath("/dashboard/projects");
+  return { success: true, reconciled, total: projects.length };
 }

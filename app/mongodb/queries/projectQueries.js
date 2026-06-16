@@ -2,11 +2,14 @@ import mongoose from "mongoose";
 import Project from "../../models/project";
 import ProjectBudget from "../../models/projectBudget";
 import ProjectCostCode from "../../models/projectCostCode";
+import ProjectAssignment from "../../models/projectAssignment";
 import EmployeeClaim from "../../models/employeesClaims";
 import Invoice from "../../models/invoice";
+import CreditNote from "../../models/creditNote";
 import Bill from "../../models/bill";
 import Expense from "../../models/expenses";
 import { StockRequest } from "../../models/requests";
+import { StockMovement } from "../../models/stockmovement";
 import dbConnect from "../../config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
@@ -182,6 +185,28 @@ export const getProjectById = async (projectId) => {
 };
 
 // ============================================
+// GET PROJECT ASSIGNMENTS (the labor roster)
+// ============================================
+// Active + inactive members of a project (excludes soft-removed). Tenant-scoped.
+export const getProjectAssignments = async (projectId) => {
+  if (!projectId || !mongoose.Types.ObjectId.isValid(projectId)) return [];
+
+  await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+
+  const assignments = await ProjectAssignment.find({
+    ...tenantMatch,
+    projectId: new ObjectId(projectId),
+    status: { $ne: "removed" },
+  })
+    .sort({ status: 1, "party.name": 1 })
+    .lean();
+
+  return serializeBsonType(assignments);
+};
+
+// ============================================
 // GET ACTIVE PROJECTS (for picker dropdowns)
 // ============================================
 export const getActiveProjects = async () => {
@@ -210,15 +235,41 @@ export const getProjectFinancialSummary = async (projectId) => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
 
-  const pid = new mongoose.Types.ObjectId(projectId);
+  return computeProjectActuals(
+    new mongoose.Types.ObjectId(projectId),
+    tenantMatch,
+  );
+};
+
+// ============================================
+// COMPUTE PROJECT ACTUALS — single source of truth
+// ============================================
+// The authoritative { revenue, costs, committed } for a project, aggregated
+// live from source documents. Used by the detail view AND by
+// recomputeProjectFinancials() so the displayed numbers and the cached
+// counters can never disagree by construction.
+//
+// `pid` must be an ObjectId; `tenantMatch` is {} for SuperAdmin or
+// { companyId: ObjectId } otherwise.
+export const computeProjectActuals = async (pid, tenantMatch) => {
+  // This project's recognised invoices — needed both for revenue and to net
+  // the credit notes raised against them (credit notes reference the invoice,
+  // not the project, so we match by these ids).
+  const projectInvoiceIds = await Invoice.find({
+    ...tenantMatch,
+    projectId: pid,
+    status: { $in: ["completed", "posted"] },
+  }).distinct("_id");
 
   const [
     claimCosts, claimCommitted,
     revenuePipeline,
+    creditNotes,
     billCosts, billCommitted,
     expenseCosts, expenseCommitted,
     requestCommitted,
     invoiceCOGS,
+    returnedCOGS,
   ] = await Promise.all([
     // Paid claims (actual costs) — exclude settlements (advance_return is reconciliation, cost already counted at advance payment)
     EmployeeClaim.aggregate([
@@ -235,9 +286,15 @@ export const getProjectFinancialSummary = async (projectId) => {
       { $match: { ...tenantMatch, projectId: pid, status: { $in: ["completed", "posted"] } } },
       { $group: { _id: null, total: { $sum: "$total" } } },
     ]),
-    // Bill costs (paid)
+    // Credit notes raised against this project's invoices — REVERSE revenue.
+    // issued + applied are economically real; draft/void are not.
+    CreditNote.aggregate([
+      { $match: { ...tenantMatch, "invoice.id": { $in: projectInvoiceIds }, status: { $in: ["issued", "applied"] } } },
+      { $group: { _id: null, total: { $sum: "$total" } } },
+    ]),
+    // Bill costs (paid) — exclude cancelled bills that were paid before cancellation
     Bill.aggregate([
-      { $match: { ...tenantMatch, projectId: pid, paymentStatus: "paid" } },
+      { $match: { ...tenantMatch, projectId: pid, paymentStatus: "paid", status: { $ne: "cancelled" } } },
       { $group: { _id: null, total: { $sum: "$amounts.netPayable" } } },
     ]),
     // Bill committed (approved but not paid)
@@ -245,7 +302,7 @@ export const getProjectFinancialSummary = async (projectId) => {
       { $match: { ...tenantMatch, projectId: pid, status: "approved", paymentStatus: { $ne: "paid" } } },
       { $group: { _id: null, total: { $sum: "$amounts.netPayable" } } },
     ]),
-    // Expense costs (paid)
+    // Expense costs (paid) — "void" status is naturally excluded by the paid filter
     Expense.aggregate([
       { $match: { ...tenantMatch, projectId: pid, status: "paid" } },
       { $group: { _id: null, total: { $sum: "$total" } } },
@@ -271,12 +328,33 @@ export const getProjectFinancialSummary = async (projectId) => {
       }},
       { $group: { _id: null, total: { $sum: "$items.costing.totalCost" } } },
     ]),
+    // Returned COGS — restoreInventory credit notes record a posted "return"
+    // StockMovement against the original invoice. The returned cost must come
+    // back OUT of project cost (the original COGS is still in invoiceCOGS).
+    StockMovement.aggregate([
+      { $match: { ...tenantMatch, "relatedDocuments.invoiceId": { $in: projectInvoiceIds }, movementType: "return", status: "posted" } },
+      { $group: { _id: null, total: { $sum: "$costing.totalCost" } } },
+    ]),
   ]);
 
+  const revenue = Math.max(
+    0,
+    (revenuePipeline[0]?.total || 0) - (creditNotes[0]?.total || 0),
+  );
+
+  const costs = Math.max(
+    0,
+    (claimCosts[0]?.total || 0) +
+      (billCosts[0]?.total || 0) +
+      (expenseCosts[0]?.total || 0) +
+      (invoiceCOGS[0]?.total || 0) -
+      (returnedCOGS[0]?.total || 0),
+  );
+
   return {
-    costs: (claimCosts[0]?.total || 0) + (billCosts[0]?.total || 0) + (expenseCosts[0]?.total || 0) + (invoiceCOGS[0]?.total || 0),
+    costs,
     committed: (claimCommitted[0]?.total || 0) + (billCommitted[0]?.total || 0) + (expenseCommitted[0]?.total || 0) + (requestCommitted[0]?.total || 0),
-    revenue: revenuePipeline[0]?.total || 0,
+    revenue,
   };
 };
 
