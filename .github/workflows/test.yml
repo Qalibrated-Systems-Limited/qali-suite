@@ -4,9 +4,9 @@
 #
 # What this does:
 #   - On every push to main and every pull request, spin up an Ubuntu
-#     VM, install Node + npm deps, then run `npm test`.
-#   - If any test fails, the PR is marked ✗ and (with branch protection
-#     enabled — see README) merging is blocked.
+#     VM, install Node + npm deps, then lint + run `npm test`.
+#   - If lint finds an ERROR (or any test fails), the PR is marked ✗ and
+#     (with branch protection enabled — see README) merging is blocked.
 #
 # Why this file lives in .github/workflows/:
 #   GitHub Actions auto-discovers any YAML file in that directory and
@@ -17,9 +17,14 @@
 # What this DOESN'T do (intentionally):
 #   - No deploy. CI only verifies; CD is separate concern.
 #   - No coverage upload (could add later — see comments at bottom).
-#   - No lint step (eslint-config-next@16 has a known incompatibility
-#     with eslint@10 on this codebase; running it would fail CI for an
-#     unrelated reason. Re-enable once the eslint version is reconciled).
+#
+# Lint is a BUG GATE, not a style gate (see eslint.config.mjs):
+#   `npm run lint:ci` runs eslint with --quiet, so it fails ONLY on rules
+#   configured as errors — chiefly `no-undef`, which catches the
+#   undefined-reference class (e.g. the formatAddress-not-imported
+#   regression that crashed quote/bill/PO/credit-note creation in prod).
+#   Pre-existing style/purity issues are "warn" and don't block.
+#   Requires eslint@9 — eslint@10 removed an API eslint-config-next@16 calls.
 
 name: Test
 
@@ -71,7 +76,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # ── 5. Run the test suite ──────────────────────────────────────
+      # ── 5. Lint (bug gate) ─────────────────────────────────────────
+      # --quiet => only ERROR-level rules can fail the job. Catches
+      # undefined references (no-undef) like the formatAddress regression.
+      - name: Lint
+        run: npm run lint:ci
+
+      # ── 6. Run the test suite ──────────────────────────────────────
       # If any test fails, the step exits non-zero and the job fails.
       # GitHub then surfaces a ✗ on the commit / PR.
       - name: Run tests

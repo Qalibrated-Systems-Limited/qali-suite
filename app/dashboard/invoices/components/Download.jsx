@@ -11,6 +11,7 @@ import {
 import { useState, useEffect } from "react";
 import { PDFDownloadLink } from "@react-pdf/renderer";
 import { Download } from "lucide-react";
+import { formatAddress } from "@/lib/format-address";
 
 // Smart compact styles - fits most invoices on one page
 const styles = StyleSheet.create({
