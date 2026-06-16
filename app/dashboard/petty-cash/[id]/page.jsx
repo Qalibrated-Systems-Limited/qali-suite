@@ -46,7 +46,7 @@ export default async function PettyCashReturnPage({ params }) {
   const canApprove = APPROVER_ROLES.has(role) && ret.status === "submitted";
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 max-w-5xl mx-auto">
+    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
       <Link href="/dashboard/petty-cash" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4 mr-1" /> Petty cash
       </Link>

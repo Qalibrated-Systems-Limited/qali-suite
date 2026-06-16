@@ -48,8 +48,13 @@ export default function NewPettyCashReturn({ floats = [] }) {
 
   if (!open) {
     return (
-      <Button onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4 mr-1" /> New return
+      <Button
+        onClick={() => setOpen(true)}
+        size="sm"
+        className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold shrink-0 sm:size-default"
+      >
+        <Plus className="h-4 w-4 sm:mr-2" />
+        <span className="hidden sm:inline">New return</span>
       </Button>
     );
   }

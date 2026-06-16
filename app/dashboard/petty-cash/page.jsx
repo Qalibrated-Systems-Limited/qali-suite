@@ -8,7 +8,6 @@ import {
 } from "@/app/mongodb/queries/petty-cash-queries";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Wallet } from "lucide-react";
 import NewPettyCashReturn from "./components/NewPettyCashReturn";
 
 export const metadata = { title: "Petty Cash" };
@@ -36,18 +35,15 @@ export default async function PettyCashPage() {
   ]);
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 max-w-5xl mx-auto">
+    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="rounded-lg p-2.5 bg-emerald-500/10">
-            <Wallet className="h-5 w-5 text-emerald-600" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold">Petty Cash</h1>
-            <p className="text-xs text-muted-foreground">
-              Returns submitted to the MD for approval
-            </p>
-          </div>
+        <div className="space-y-1 sm:space-y-2 min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+            Petty Cash
+          </h1>
+          <p className="text-sm sm:text-base text-muted-foreground hidden sm:block">
+            Returns submitted to the MD for approval
+          </p>
         </div>
         <NewPettyCashReturn floats={floats} />
       </div>
