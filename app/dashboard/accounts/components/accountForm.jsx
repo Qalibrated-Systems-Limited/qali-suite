@@ -35,7 +35,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { InfoIcon, Check, ChevronsUpDown } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, accountSubTypeOptions } from "@/lib/utils";
 
 const ACCOUNT_TYPES = [
   { value: "asset", label: "Asset" },
@@ -45,25 +45,9 @@ const ACCOUNT_TYPES = [
   { value: "expense", label: "Expense" },
 ];
 
-const SUB_TYPES = [
-  { value: "header", label: "Header (Cannot post transactions)" },
-  { value: "employee_expense", label: "Employee Expense" },
-  { value: "employee_payables", label: "Employee Payables" },
-  { value: "employee_advance", label: "Employee Advance" },
-  { value: "operating_expense", label: "Operating Expense" },
-  { value: "cash", label: "Cash" },
-  { value: "bank", label: "Bank" },
-  { value: "mpesa", label: "M-Pesa" },
-  { value: "current_asset", label: "Current Asset" },
-  { value: "fixed_asset", label: "Fixed Asset" },
-  { value: "current_liability", label: "Current Liability" },
-  { value: "long_term_liability", label: "Long-term Liability" },
-  { value: "equity", label: "Equity" },
-  { value: "revenue", label: "Revenue" },
-  { value: "cogs", label: "Cost of Goods Sold" },
-  { value: "expense", label: "Expense" },
-  { value: "inventory_adjustment", label: "Inventory Adjustment" },
-];
+// Rendered from the shared, validated list in @/lib/utils so the dropdown
+// can't offer a sub-type the server rejects (see accountSubTypeOptions).
+const SUB_TYPES = accountSubTypeOptions;
 
 const SYSTEM_ACCOUNTS = [
   { value: "accounts_receivable", label: "Accounts Receivable" },
