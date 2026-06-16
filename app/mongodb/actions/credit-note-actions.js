@@ -1,5 +1,6 @@
 "use server";
 
+import { formatAddress } from "@/lib/format-address";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import mongoose from "mongoose";

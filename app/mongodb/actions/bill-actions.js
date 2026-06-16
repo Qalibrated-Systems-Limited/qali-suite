@@ -28,6 +28,7 @@
 // * Cannot approve own submissions (separation of duties)
 // ============================================
 
+import { formatAddress } from "@/lib/format-address";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
