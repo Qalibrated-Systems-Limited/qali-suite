@@ -21,11 +21,12 @@ import BankAccountCombobox from "@/components/bank-account-combobox";
 import { importBankStatement } from "@/app/mongodb/actions/bank-feed-actions";
 
 // Supported file types
-const SUPPORTED_EXTENSIONS = [".csv", ".xlsx", ".xls"];
+// Legacy .xls is intentionally excluded — ExcelJS can't read the old binary
+// format. Banks all offer CSV or .xlsx; users re-save .xls as .xlsx.
+const SUPPORTED_EXTENSIONS = [".csv", ".xlsx"];
 const SUPPORTED_MIME_TYPES = [
   "text/csv",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
 ];
 
 // ============================================
@@ -423,7 +424,9 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
     const isValidMimeType = SUPPORTED_MIME_TYPES.includes(file.type);
 
     if (!isValidExtension && !isValidMimeType) {
-      setError("Please upload a CSV or Excel file (.csv, .xlsx, .xls)");
+      setError(
+        "Please upload a CSV or .xlsx file. Older .xls isn't supported — re-save it as .xlsx, or export your statement as CSV.",
+      );
       return;
     }
 
@@ -433,7 +436,7 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
       return;
     }
 
-    const isExcel = fileName.endsWith(".xlsx") || fileName.endsWith(".xls");
+    const isExcel = fileName.endsWith(".xlsx");
 
     if (isExcel) {
       // Handle Excel file we 
@@ -756,10 +759,10 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
                 <Upload className="h-6 w-6 text-muted-foreground" />
               </div>
               <p className="font-medium">Drop your file here</p>
-              <p className="text-sm text-muted-foreground">CSV or Excel (.csv, .xlsx, .xls)</p>
+              <p className="text-sm text-muted-foreground">CSV or Excel (.csv, .xlsx)</p>
               <input
                 type="file"
-                accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 onChange={handleFileInput}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
