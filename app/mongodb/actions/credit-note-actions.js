@@ -14,6 +14,25 @@ import { generateUniqueEntryNumber } from "@/lib/utils/server-utils";
 import { FINANCE_WRITE_ROLES, hasRole } from "@/lib/utils/role-gates";
 import { getCompanyThresholds } from "@/app/mongodb/queries/threshold-queries";
 import { submitApproval } from "@/app/mongodb/actions/approval-actions";
+import { recomputeProjectFinancials } from "@/app/mongodb/actions/project-actions";
+
+// A credit note reverses revenue on its originating invoice. When that invoice
+// belongs to a project, rebuild the project's cached financials so the credit
+// is netted from project revenue. Best-effort + post-commit: the canonical
+// project view aggregates live regardless, so a failure here only delays the
+// cached counter, never corrupts a number or breaks the credit note.
+async function recomputeProjectForCreditNote(creditNote) {
+  try {
+    const invoiceId = creditNote?.invoice?.id;
+    if (!invoiceId) return;
+    const inv = await Invoice.findById(invoiceId).select("projectId").lean();
+    if (inv?.projectId) {
+      await recomputeProjectFinancials(inv.projectId.toString());
+    }
+  } catch (err) {
+    console.error("Project recompute after credit note failed:", err.message);
+  }
+}
 
 // ============================================
 // VALIDATION SCHEMA
@@ -185,6 +204,7 @@ export async function createCreditNote(prevState, formData) {
     // Issue immediately if requested
     if (validated.issueImmediately) {
       await creditNote.issue({ name: user.name, id: user.id });
+      await recomputeProjectForCreditNote(creditNote);
     }
 
     revalidatePath("/dashboard/credit-notes");
@@ -299,6 +319,7 @@ export async function issueCreditNote(creditNoteId) {
     }
 
     await creditNote.issue({ name: user.name, id: user.id });
+    await recomputeProjectForCreditNote(creditNote);
 
     revalidatePath("/dashboard/credit-notes");
     revalidatePath(`/dashboard/credit-notes/${creditNoteId}`);
@@ -332,6 +353,8 @@ export async function voidCreditNote(creditNoteId, prevState, formData) {
     }
 
     await creditNote.void({ name: user.name, id: user.id }, reason);
+    // Void un-reverses the credit — restore the project's revenue.
+    await recomputeProjectForCreditNote(creditNote);
 
     revalidatePath("/dashboard/credit-notes");
     revalidatePath(`/dashboard/credit-notes/${creditNoteId}`);
