@@ -12,7 +12,7 @@
  * at the collection level (only the fields the aggregation reads) so the test
  * targets the financial logic, not every model's full validation surface.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import mongoose from "mongoose";
 import Project from "@/app/models/project";
 import "@/app/models/invoice";
@@ -43,12 +43,40 @@ const { recomputeProjectFinancials } = await import(
 
 const { ObjectId } = mongoose.Types;
 
+// Models carry a unique (companyId, <doc>Number) index. Raw collection inserts
+// bypass Mongoose, so stamp a unique number here or the second doc collides on
+// a null key (which is exactly what slipped past local runs but failed in CI,
+// where the index was already built).
+let seq = 0;
+const NUMBER_FIELD = {
+  Invoice: "invoiceNumber",
+  CreditNote: "creditNoteNumber",
+  Bill: "billNumber",
+  StockMovement: "movementNumber",
+};
+
 async function rawInsert(model, docs) {
-  if (docs.length) await mongoose.model(model).collection.insertMany(docs);
+  if (!docs.length) return;
+  const field = NUMBER_FIELD[model];
+  const stamped = docs.map((d) =>
+    field && d[field] == null ? { ...d, [field]: `${field}-${++seq}` } : d,
+  );
+  await mongoose.model(model).collection.insertMany(stamped);
 }
 
 describe("recomputeProjectFinancials", () => {
   let companyId, projectId;
+
+  // Build the unique indexes up front so local runs reproduce CI (where the
+  // index is already built) — otherwise a duplicate-key bug only shows in CI.
+  beforeAll(async () => {
+    await Promise.all([
+      mongoose.model("Invoice").init(),
+      mongoose.model("CreditNote").init(),
+      mongoose.model("Bill").init(),
+      mongoose.model("StockMovement").init(),
+    ]);
+  });
 
   beforeEach(async () => {
     companyId = new ObjectId();
