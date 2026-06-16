@@ -17,6 +17,7 @@ import {
   Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import BankAccountCombobox from "@/components/bank-account-combobox";
 import { importBankStatement } from "@/app/mongodb/actions/bank-feed-actions";
 
 // Supported file types
@@ -658,23 +659,18 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
         <label className="block text-sm font-medium mb-2">
           Bank Account <span className="text-red-500">*</span>
         </label>
-        <select
+        <BankAccountCombobox
           value={data.bankAccountId || ""}
-          onChange={(e) =>
-            setData((prev) => ({ ...prev, bankAccountId: e.target.value }))
+          onValueChange={(v) =>
+            setData((prev) => ({ ...prev, bankAccountId: v }))
           }
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          <option value="">Select bank account...</option>
-          {bankAccounts.map((account) => (
-            <option key={account._id} value={account._id}>
-              {account.accountCode} - {account.accountName}
-            </option>
-          ))}
-        </select>
+          accounts={bankAccounts}
+          placeholder="Select bank account..."
+        />
         {bankAccounts.length === 0 && (
           <p className="text-sm text-amber-600 mt-1">
-            No bank accounts found. Please create a bank account first.
+            No bank or cash accounts found. Create one (Chart of Accounts →
+            sub-type Bank/Cash/M-Pesa) first.
           </p>
         )}
       </div>

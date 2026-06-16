@@ -170,12 +170,23 @@ export async function getBankAccounts() {
 
   const { companyId, isSuperAdmin } = await getTenantContext();
 
+  // Exhaustive list of cash/bank-like accounts to reconcile a statement against.
+  // Match by the cash/bank sub-type family OR a cash/bank system-account tag, so
+  // user-added banks (KCB, Co-op, …) and the petty cash float all appear —
+  // including ones a user tagged with a system account rather than a sub-type.
   const accounts = await Account.find(
     withTenantScope(
       {
-        subType: { $in: ["bank", "cash", "mpesa"] },
         isActive: true,
         canPost: true,
+        $or: [
+          { subType: { $in: ["bank", "cash", "mpesa", "mobile_money"] } },
+          {
+            systemAccount: {
+              $in: ["bank_main", "cash_at_bank", "cash", "mpesa", "petty_cash"],
+            },
+          },
+        ],
       },
       companyId,
       isSuperAdmin
