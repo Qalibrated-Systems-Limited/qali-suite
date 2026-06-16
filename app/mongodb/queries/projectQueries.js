@@ -10,6 +10,7 @@ import Bill from "../../models/bill";
 import Expense from "../../models/expenses";
 import { StockRequest } from "../../models/requests";
 import { StockMovement } from "../../models/stockmovement";
+import PettyCashEntry from "../../models/pettyCashEntry";
 import dbConnect from "../../config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
@@ -270,6 +271,7 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
     requestCommitted,
     invoiceCOGS,
     returnedCOGS,
+    pettyCashCosts,
   ] = await Promise.all([
     // Paid claims (actual costs) — exclude settlements (advance_return is reconciliation, cost already counted at advance payment)
     EmployeeClaim.aggregate([
@@ -335,6 +337,11 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
       { $match: { ...tenantMatch, "relatedDocuments.invoiceId": { $in: projectInvoiceIds }, movementType: "return", status: "posted" } },
       { $group: { _id: null, total: { $sum: "$costing.totalCost" } } },
     ]),
+    // Approved petty cash spend tagged to this project (posted = MD-approved).
+    PettyCashEntry.aggregate([
+      { $match: { ...tenantMatch, "allocation.projectId": pid, direction: "credit", posted: true } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]),
   ]);
 
   const revenue = Math.max(
@@ -347,7 +354,8 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
     (claimCosts[0]?.total || 0) +
       (billCosts[0]?.total || 0) +
       (expenseCosts[0]?.total || 0) +
-      (invoiceCOGS[0]?.total || 0) -
+      (invoiceCOGS[0]?.total || 0) +
+      (pettyCashCosts[0]?.total || 0) -
       (returnedCOGS[0]?.total || 0),
   );
 
