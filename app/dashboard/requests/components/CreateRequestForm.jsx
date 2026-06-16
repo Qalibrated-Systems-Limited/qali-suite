@@ -2,6 +2,7 @@
 
 import { useState, startTransition } from "react";
 import { useActionState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -211,6 +212,7 @@ export function CreateStockRequestForm({
   user,
   createRequestAction,
 }) {
+  const router = useRouter();
   const [state, formAction, isPending] = useActionState(createRequestAction, null);
 
   // Extract errors from state - field errors and form-level error

@@ -149,6 +149,10 @@ export async function createUser(prevState, formData) {
   }
 
   let newUserId = null;
+  // Declared out here (not inside the try) because the post-success redirect
+  // below reads them after the try/catch closes.
+  let emailSent = false;
+  let emailError = null;
 
   try {
     // Check if user already exists
@@ -183,8 +187,6 @@ export async function createUser(prevState, formData) {
     // Admin creating a User here gives them a login only — not an employee record.
 
     // Send invite email so user can set up their account
-    let emailSent = false;
-    let emailError = null;
     try {
       const company = await Company.findById(assignedCompanyId).select("name").lean();
       const { rawToken, hashedToken } = Invite.generateToken();

@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getBillById } from "@/app/mongodb/queries/bill-queries";
+import { formatAddress } from "@/lib/format-address";
 import Account from "@/app/models/account";
 import dbConnect from "@/app/config/dbConnect";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
