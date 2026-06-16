@@ -443,8 +443,16 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
           const workbook = new ExcelJS.Workbook();
           await workbook.xlsx.load(e.target.result);
 
-          // Get the first sheet
+          // Get the first sheet. ExcelJS's xlsx.load only reads .xlsx — a
+          // legacy .xls (or a mislabelled/corrupt file) parses to zero sheets,
+          // so guard before touching it instead of crashing on .eachRow.
           const worksheet = workbook.worksheets[0];
+          if (!worksheet) {
+            setError(
+              "Couldn't read any sheet from this file. If it's an older .xls, open it and re-save as .xlsx — or upload a CSV (or use the template).",
+            );
+            return;
+          }
 
           // Convert to array of arrays. ExcelJS returns `row.values` as a
           // 1-indexed sparse array (leading empty cells are HOLES). Build a
