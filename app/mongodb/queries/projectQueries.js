@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Project from "../../models/project";
 import ProjectBudget from "../../models/projectBudget";
 import ProjectCostCode from "../../models/projectCostCode";
+import ProjectAssignment from "../../models/projectAssignment";
 import EmployeeClaim from "../../models/employeesClaims";
 import Invoice from "../../models/invoice";
 import CreditNote from "../../models/creditNote";
@@ -181,6 +182,28 @@ export const getProjectById = async (projectId) => {
 
   if (!project) return null;
   return serializeBsonType(project);
+};
+
+// ============================================
+// GET PROJECT ASSIGNMENTS (the labor roster)
+// ============================================
+// Active + inactive members of a project (excludes soft-removed). Tenant-scoped.
+export const getProjectAssignments = async (projectId) => {
+  if (!projectId || !mongoose.Types.ObjectId.isValid(projectId)) return [];
+
+  await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+
+  const assignments = await ProjectAssignment.find({
+    ...tenantMatch,
+    projectId: new ObjectId(projectId),
+    status: { $ne: "removed" },
+  })
+    .sort({ status: 1, "party.name": 1 })
+    .lean();
+
+  return serializeBsonType(assignments);
 };
 
 // ============================================
