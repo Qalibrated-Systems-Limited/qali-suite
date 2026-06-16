@@ -21,6 +21,7 @@ import "@/app/models/bill";
 import "@/app/models/expenses";
 import "@/app/models/employeesClaims";
 import "@/app/models/requests";
+import "@/app/models/stockmovement";
 
 // Same Next/request-glue mocks the other action tests use. computeProjectActuals
 // takes (pid, tenantMatch) directly, so no tenant-context mock behaviour is
@@ -89,6 +90,40 @@ describe("recomputeProjectFinancials", () => {
     const project = await Project.findById(projectId).lean();
     expect(project.financials.totalRevenue).toBe(1700);
     expect(project.financials.totalCosts).toBe(500);
+  });
+
+  it("nets returned COGS from cost when a credit note restores inventory", async () => {
+    const inv1 = new ObjectId();
+    await rawInsert("Invoice", [
+      {
+        _id: inv1,
+        companyId,
+        projectId,
+        status: "completed",
+        total: 2000,
+        // a direct-store product line whose COGS counts toward project cost
+        items: [
+          {
+            itemType: "product",
+            costing: { totalCost: 800 },
+          },
+        ],
+      },
+    ]);
+    // Goods worth 300 of COGS returned via a restoreInventory credit note →
+    // a posted "return" movement against the invoice.
+    await rawInsert("StockMovement", [
+      {
+        companyId,
+        movementType: "return",
+        status: "posted",
+        relatedDocuments: { invoiceId: inv1 },
+        costing: { totalCost: 300 },
+      },
+    ]);
+
+    const actuals = await recomputeProjectFinancials(projectId.toString());
+    expect(actuals.costs).toBe(500); // 800 COGS − 300 returned
   });
 
   it("repairs drifted counters (rebuild from source, not increment)", async () => {

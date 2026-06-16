@@ -8,6 +8,7 @@ import CreditNote from "../../models/creditNote";
 import Bill from "../../models/bill";
 import Expense from "../../models/expenses";
 import { StockRequest } from "../../models/requests";
+import { StockMovement } from "../../models/stockmovement";
 import dbConnect from "../../config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
@@ -245,6 +246,7 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
     expenseCosts, expenseCommitted,
     requestCommitted,
     invoiceCOGS,
+    returnedCOGS,
   ] = await Promise.all([
     // Paid claims (actual costs) — exclude settlements (advance_return is reconciliation, cost already counted at advance payment)
     EmployeeClaim.aggregate([
@@ -303,18 +305,31 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
       }},
       { $group: { _id: null, total: { $sum: "$items.costing.totalCost" } } },
     ]),
+    // Returned COGS — restoreInventory credit notes record a posted "return"
+    // StockMovement against the original invoice. The returned cost must come
+    // back OUT of project cost (the original COGS is still in invoiceCOGS).
+    StockMovement.aggregate([
+      { $match: { ...tenantMatch, "relatedDocuments.invoiceId": { $in: projectInvoiceIds }, movementType: "return", status: "posted" } },
+      { $group: { _id: null, total: { $sum: "$costing.totalCost" } } },
+    ]),
   ]);
 
-  // NOTE: COGS on restoreInventory credit notes (goods physically returned) is
-  // recorded as a StockMovement "return" and is NOT yet netted from costs here.
-  // Tracked as the remaining Tier-1 sub-item; second-order vs. revenue netting.
   const revenue = Math.max(
     0,
     (revenuePipeline[0]?.total || 0) - (creditNotes[0]?.total || 0),
   );
 
+  const costs = Math.max(
+    0,
+    (claimCosts[0]?.total || 0) +
+      (billCosts[0]?.total || 0) +
+      (expenseCosts[0]?.total || 0) +
+      (invoiceCOGS[0]?.total || 0) -
+      (returnedCOGS[0]?.total || 0),
+  );
+
   return {
-    costs: (claimCosts[0]?.total || 0) + (billCosts[0]?.total || 0) + (expenseCosts[0]?.total || 0) + (invoiceCOGS[0]?.total || 0),
+    costs,
     committed: (claimCommitted[0]?.total || 0) + (billCommitted[0]?.total || 0) + (expenseCommitted[0]?.total || 0) + (requestCommitted[0]?.total || 0),
     revenue,
   };
