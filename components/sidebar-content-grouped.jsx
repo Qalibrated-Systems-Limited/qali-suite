@@ -422,6 +422,13 @@ const getNavigationGroups = (user) => {
         hidden: !canSeeFinanceNav(user?.role),
       },
       {
+        icon: Wallet,
+        label: "Petty Cash",
+        id: "petty-cash",
+        href: "/dashboard/petty-cash",
+        hidden: !canSeeFinanceNav(user?.role),
+      },
+      {
         icon: Package,
         label: "Fixed Assets",
         id: "assets",
