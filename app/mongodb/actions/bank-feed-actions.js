@@ -132,11 +132,15 @@ export async function allocateToInvoice(lineId, invoiceId) {
       return { success: false, error: "Unauthorized" };
     }
 
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const result = await BankFeedService.allocateToInvoice(
       lineId,
       invoiceId,
       session.user.id,
       session.user.name,
+      companyId,
+      isSuperAdmin,
     );
 
     revalidatePath("/dashboard/banking");
@@ -161,11 +165,15 @@ export async function allocateToBill(lineId, billId) {
       return { success: false, error: "Unauthorized" };
     }
 
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const result = await BankFeedService.allocateToBill(
       lineId,
       billId,
       session.user.id,
       session.user.name,
+      companyId,
+      isSuperAdmin,
     );
 
     revalidatePath("/dashboard/banking");
@@ -190,11 +198,15 @@ export async function allocateToExpense(lineId, allocationData) {
       return { success: false, error: "Unauthorized" };
     }
 
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const result = await BankFeedService.allocateToExpense(
       lineId,
       allocationData,
       session.user.id,
       session.user.name,
+      companyId,
+      isSuperAdmin,
     );
 
     revalidatePath("/dashboard/banking");
@@ -218,11 +230,15 @@ export async function allocateToIncome(lineId, allocationData) {
       return { success: false, error: "Unauthorized" };
     }
 
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const result = await BankFeedService.allocateToIncome(
       lineId,
       allocationData,
       session.user.id,
       session.user.name,
+      companyId,
+      isSuperAdmin,
     );
 
     revalidatePath("/dashboard/banking");
@@ -246,11 +262,15 @@ export async function allocateToLiability(lineId, allocationData) {
       return { success: false, error: "Unauthorized" };
     }
 
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const result = await BankFeedService.allocateToLiability(
       lineId,
       allocationData,
       session.user.id,
       session.user.name,
+      companyId,
+      isSuperAdmin,
     );
 
     revalidatePath("/dashboard/banking");
@@ -274,12 +294,16 @@ export async function excludeBankLine(lineId, reason, note = "") {
       return { success: false, error: "Unauthorized" };
     }
 
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const result = await BankFeedService.excludeLine(
       lineId,
       reason,
       note,
       session.user.id,
       session.user.name,
+      companyId,
+      isSuperAdmin,
     );
 
     revalidatePath("/dashboard/banking");
@@ -303,10 +327,11 @@ export async function undoAllocation(lineId) {
       return { success: false, error: "Unauthorized" };
     }
 
-    const { companyId } = await getTenantContext();
+    const { companyId, isSuperAdmin } = await getTenantContext();
 
     const result = await BankFeedService.undoAllocation(lineId, {
       companyId,
+      isSuperAdmin,
       userId: session.user.id,
       userName: session.user.name,
     });
@@ -420,6 +445,7 @@ export async function bulkAllocate(allocations) {
       return { success: false, error: "Unauthorized" };
     }
 
+    const { companyId, isSuperAdmin } = await getTenantContext();
     const results = [];
 
     for (const allocation of allocations) {
@@ -432,6 +458,8 @@ export async function bulkAllocate(allocations) {
               allocation.documentId,
               session.user.id,
               session.user.name,
+              companyId,
+              isSuperAdmin,
             );
             break;
           case "bill":
@@ -440,6 +468,8 @@ export async function bulkAllocate(allocations) {
               allocation.documentId,
               session.user.id,
               session.user.name,
+              companyId,
+              isSuperAdmin,
             );
             break;
           case "expense":
@@ -448,6 +478,8 @@ export async function bulkAllocate(allocations) {
               allocation.data,
               session.user.id,
               session.user.name,
+              companyId,
+              isSuperAdmin,
             );
             break;
           case "income":
@@ -456,6 +488,8 @@ export async function bulkAllocate(allocations) {
               allocation.data,
               session.user.id,
               session.user.name,
+              companyId,
+              isSuperAdmin,
             );
             break;
           case "exclude":
@@ -465,6 +499,8 @@ export async function bulkAllocate(allocations) {
               allocation.note,
               session.user.id,
               session.user.name,
+              companyId,
+              isSuperAdmin,
             );
             break;
           default:
@@ -510,11 +546,15 @@ export async function allocateToMultipleInvoices(lineId, invoiceAllocations) {
       return { success: false, error: "Unauthorized" };
     }
 
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const result = await BankFeedService.allocateToMultipleInvoices(
       lineId,
       invoiceAllocations,
       session.user.id,
       session.user.name,
+      companyId,
+      isSuperAdmin,
     );
 
     revalidatePath("/dashboard/banking");
@@ -541,11 +581,15 @@ export async function allocateToMultipleBills(lineId, billAllocations) {
       return { success: false, error: "Unauthorized" };
     }
 
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const result = await BankFeedService.allocateToMultipleBills(
       lineId,
       billAllocations,
       session.user.id,
       session.user.name,
+      companyId,
+      isSuperAdmin,
     );
 
     revalidatePath("/dashboard/banking");
@@ -577,12 +621,16 @@ export async function allocateAsTransfer(
       return { success: false, error: "Unauthorized" };
     }
 
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const result = await BankFeedService.allocateAsTransfer(
       lineId,
       targetAccountId,
       description,
       session.user.id,
       session.user.name,
+      companyId,
+      isSuperAdmin,
     );
 
     revalidatePath("/dashboard/banking");
@@ -608,11 +656,15 @@ export async function allocateWithSplit(lineId, splits) {
       return { success: false, error: "Unauthorized" };
     }
 
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
     const result = await BankFeedService.allocateWithSplit(
       lineId,
       splits,
       session.user.id,
       session.user.name,
+      companyId,
+      isSuperAdmin,
     );
 
     revalidatePath("/dashboard/banking");

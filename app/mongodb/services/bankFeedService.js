@@ -5,6 +5,7 @@ import Invoice from "../../models/invoice";
 import Bill from "../../models/bill";
 import connectDB from "../../config/dbConnect";
 import JournalService from "./journalService";
+import { withTenantScope } from "@/lib/utils/tenant-utils";
 import mongoose from "mongoose";
 import crypto from "crypto";
 
@@ -704,18 +705,23 @@ export class BankFeedService {
    * Allocate a bank line to an invoice (payment received)
    * Handles overpayments by recording excess as Customer Advance (liability)
    */
-  static async allocateToInvoice(lineId, invoiceId, userId, userName) {
+  static async allocateToInvoice(lineId, invoiceId, userId, userName, companyId, isSuperAdmin = false) {
     await connectDB();
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const line = await BankFeedLine.findById(lineId).session(session);
+      const line = await BankFeedLine.findOne(
+        withTenantScope({ _id: lineId }, companyId, isSuperAdmin),
+      ).session(session);
       if (!line) throw new Error("Bank feed line not found");
       if (line.status !== "unallocated") throw new Error("Line already allocated");
 
-      const invoice = await Invoice.findById(invoiceId).session(session);
+      const invoice = await Invoice.findOne({
+        _id: invoiceId,
+        companyId: line.companyId,
+      }).session(session);
       if (!invoice) throw new Error("Invoice not found");
 
       // Calculate amounts for overpayment handling
@@ -810,18 +816,23 @@ export class BankFeedService {
    * Allocate a bank line to a bill (payment made)
    * Handles overpayments by recording excess as Supplier Advance (asset)
    */
-  static async allocateToBill(lineId, billId, userId, userName) {
+  static async allocateToBill(lineId, billId, userId, userName, companyId, isSuperAdmin = false) {
     await connectDB();
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const line = await BankFeedLine.findById(lineId).session(session);
+      const line = await BankFeedLine.findOne(
+        withTenantScope({ _id: lineId }, companyId, isSuperAdmin),
+      ).session(session);
       if (!line) throw new Error("Bank feed line not found");
       if (line.status !== "unallocated") throw new Error("Line already allocated");
 
-      const bill = await Bill.findById(billId).session(session);
+      const bill = await Bill.findOne({
+        _id: billId,
+        companyId: line.companyId,
+      }).session(session);
       if (!bill) throw new Error("Bill not found");
 
       // Calculate amounts for overpayment handling
@@ -913,21 +924,23 @@ export class BankFeedService {
   /**
    * Allocate a bank line to an expense account
    */
-  static async allocateToExpense(lineId, allocationData, userId, userName) {
+  static async allocateToExpense(lineId, allocationData, userId, userName, companyId, isSuperAdmin = false) {
     await connectDB();
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const line = await BankFeedLine.findById(lineId).session(session);
+      const line = await BankFeedLine.findOne(
+        withTenantScope({ _id: lineId }, companyId, isSuperAdmin),
+      ).session(session);
       if (!line) throw new Error("Bank feed line not found");
       if (line.status !== "unallocated") throw new Error("Line already allocated");
 
       const { accountId, description, partyId, partyName, taxAmount, taxAccountId } = allocationData;
 
       // Get account details
-      const account = await Account.findById(accountId);
+      const account = await Account.findOne({ _id: accountId, companyId: line.companyId });
       if (!account) throw new Error("Account not found");
 
       // Build journal entry lines
@@ -1023,21 +1036,23 @@ export class BankFeedService {
   /**
    * Allocate a bank line to income account
    */
-  static async allocateToIncome(lineId, allocationData, userId, userName) {
+  static async allocateToIncome(lineId, allocationData, userId, userName, companyId, isSuperAdmin = false) {
     await connectDB();
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const line = await BankFeedLine.findById(lineId).session(session);
+      const line = await BankFeedLine.findOne(
+        withTenantScope({ _id: lineId }, companyId, isSuperAdmin),
+      ).session(session);
       if (!line) throw new Error("Bank feed line not found");
       if (line.status !== "unallocated") throw new Error("Line already allocated");
 
       const { accountId, description, partyId, partyName, taxAmount, taxAccountId } = allocationData;
 
       // Get account details
-      const account = await Account.findById(accountId);
+      const account = await Account.findOne({ _id: accountId, companyId: line.companyId });
       if (!account) throw new Error("Account not found");
 
       // Build journal entry lines
@@ -1134,21 +1149,23 @@ export class BankFeedService {
    * Allocate a bank line to a liability account (statutory payments like HELB, PAYE, loans)
    * Journal entry: Dr Liability, Cr Bank
    */
-  static async allocateToLiability(lineId, allocationData, userId, userName) {
+  static async allocateToLiability(lineId, allocationData, userId, userName, companyId, isSuperAdmin = false) {
     await connectDB();
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const line = await BankFeedLine.findById(lineId).session(session);
+      const line = await BankFeedLine.findOne(
+        withTenantScope({ _id: lineId }, companyId, isSuperAdmin),
+      ).session(session);
       if (!line) throw new Error("Bank feed line not found");
       if (line.status !== "unallocated") throw new Error("Line already allocated");
 
       const { accountId, description, reference } = allocationData;
 
       // Get account details
-      const account = await Account.findById(accountId);
+      const account = await Account.findOne({ _id: accountId, companyId: line.companyId });
       if (!account) throw new Error("Liability account not found");
 
       // Build journal entry lines: Dr Liability, Cr Bank
@@ -1233,14 +1250,16 @@ export class BankFeedService {
    * @param {string} userId - User ID
    * @param {string} userName - User name
    */
-  static async allocateToMultipleInvoices(lineId, invoiceAllocations, userId, userName) {
+  static async allocateToMultipleInvoices(lineId, invoiceAllocations, userId, userName, companyId, isSuperAdmin = false) {
     await connectDB();
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const line = await BankFeedLine.findById(lineId).session(session);
+      const line = await BankFeedLine.findOne(
+        withTenantScope({ _id: lineId }, companyId, isSuperAdmin),
+      ).session(session);
       if (!line) throw new Error("Bank feed line not found");
       if (line.status !== "unallocated") throw new Error("Line already allocated");
 
@@ -1264,7 +1283,10 @@ export class BankFeedService {
 
       // Process each invoice
       for (const allocation of invoiceAllocations) {
-        const invoice = await Invoice.findById(allocation.invoiceId).session(session);
+        const invoice = await Invoice.findOne({
+          _id: allocation.invoiceId,
+          companyId: line.companyId,
+        }).session(session);
         if (!invoice) throw new Error(`Invoice ${allocation.invoiceId} not found`);
 
         // Update invoice payment
@@ -1370,14 +1392,16 @@ export class BankFeedService {
   /**
    * Allocate a bank line to multiple bills (combined payment)
    */
-  static async allocateToMultipleBills(lineId, billAllocations, userId, userName) {
+  static async allocateToMultipleBills(lineId, billAllocations, userId, userName, companyId, isSuperAdmin = false) {
     await connectDB();
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const line = await BankFeedLine.findById(lineId).session(session);
+      const line = await BankFeedLine.findOne(
+        withTenantScope({ _id: lineId }, companyId, isSuperAdmin),
+      ).session(session);
       if (!line) throw new Error("Bank feed line not found");
       if (line.status !== "unallocated") throw new Error("Line already allocated");
 
@@ -1399,7 +1423,10 @@ export class BankFeedService {
       ];
 
       for (const allocation of billAllocations) {
-        const bill = await Bill.findById(allocation.billId).session(session);
+        const bill = await Bill.findOne({
+          _id: allocation.billId,
+          companyId: line.companyId,
+        }).session(session);
         if (!bill) throw new Error(`Bill ${allocation.billId} not found`);
 
         const newAmountPaid = (bill.amountPaid || 0) + allocation.amount;
@@ -1480,18 +1507,23 @@ export class BankFeedService {
   /**
    * Allocate as bank transfer (between accounts)
    */
-  static async allocateAsTransfer(lineId, targetAccountId, description, userId, userName) {
+  static async allocateAsTransfer(lineId, targetAccountId, description, userId, userName, companyId, isSuperAdmin = false) {
     await connectDB();
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const line = await BankFeedLine.findById(lineId).session(session);
+      const line = await BankFeedLine.findOne(
+        withTenantScope({ _id: lineId }, companyId, isSuperAdmin),
+      ).session(session);
       if (!line) throw new Error("Bank feed line not found");
       if (line.status !== "unallocated") throw new Error("Line already allocated");
 
-      const targetAccount = await Account.findById(targetAccountId);
+      const targetAccount = await Account.findOne({
+        _id: targetAccountId,
+        companyId: line.companyId,
+      });
       if (!targetAccount) throw new Error("Target account not found");
 
       const amount = line.debitAmount > 0 ? line.debitAmount : line.creditAmount;
@@ -1564,14 +1596,16 @@ export class BankFeedService {
    * @param {string} lineId - Bank feed line ID
    * @param {Array} splits - Array of { accountId, amount, description }
    */
-  static async allocateWithSplit(lineId, splits, userId, userName) {
+  static async allocateWithSplit(lineId, splits, userId, userName, companyId, isSuperAdmin = false) {
     await connectDB();
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const line = await BankFeedLine.findById(lineId).session(session);
+      const line = await BankFeedLine.findOne(
+        withTenantScope({ _id: lineId }, companyId, isSuperAdmin),
+      ).session(session);
       if (!line) throw new Error("Bank feed line not found");
       if (line.status !== "unallocated") throw new Error("Line already allocated");
 
@@ -1595,7 +1629,10 @@ export class BankFeedService {
       ];
 
       for (const split of splits) {
-        const account = await Account.findById(split.accountId);
+        const account = await Account.findOne({
+          _id: split.accountId,
+          companyId: line.companyId,
+        });
         if (!account) throw new Error(`Account ${split.accountId} not found`);
 
         journalLines.push({
@@ -1661,10 +1698,12 @@ export class BankFeedService {
   /**
    * Exclude a bank line from allocation
    */
-  static async excludeLine(lineId, reason, note, userId, userName) {
+  static async excludeLine(lineId, reason, note, userId, userName, companyId, isSuperAdmin = false) {
     await connectDB();
 
-    const line = await BankFeedLine.findById(lineId);
+    const line = await BankFeedLine.findOne(
+      withTenantScope({ _id: lineId }, companyId, isSuperAdmin),
+    );
     if (!line) throw new Error("Bank feed line not found");
 
     await BankFeedLine.findByIdAndUpdate(lineId, {
@@ -1683,7 +1722,7 @@ export class BankFeedService {
   /**
    * Undo allocation (revert to unallocated)
    */
-  static async undoAllocation(lineId, { companyId, userId, userName } = {}) {
+  static async undoAllocation(lineId, { companyId, userId, userName, isSuperAdmin = false } = {}) {
     await connectDB();
 
     const session = await mongoose.startSession();
@@ -1692,10 +1731,9 @@ export class BankFeedService {
     try {
       // Tenant-scoped lookup — a lineId from another tenant must not be
       // undoable even if upstream auth is bypassed.
-      const line = await BankFeedLine.findOne({
-        _id: lineId,
-        ...(companyId ? { companyId } : {}),
-      }).session(session);
+      const line = await BankFeedLine.findOne(
+        withTenantScope({ _id: lineId }, companyId, isSuperAdmin),
+      ).session(session);
       if (!line) throw new Error("Bank feed line not found");
       if (line.status === "unallocated") throw new Error("Line is not allocated");
 
