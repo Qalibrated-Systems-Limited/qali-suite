@@ -9,6 +9,10 @@ import {
   getProjectBudgets,
 } from "@/app/mongodb/queries/projectQueries";
 import { getExpenseAccountsForCategories } from "@/app/mongodb/queries/claimQueries";
+import {
+  PROJECT_MANAGE_ROLES,
+  FINANCE_WRITE_ROLES,
+} from "@/lib/utils/role-gates";
 import BudgetForm, { BudgetCard } from "../../components/BudgetForm";
 
 export async function generateMetadata({ params }) {
@@ -34,10 +38,8 @@ export default async function BudgetPage({ params }) {
 
   if (!project) notFound();
 
-  const canCreate = ["SuperAdmin", "Admin", "Accountant", "Manager"].includes(
-    session.user.role,
-  );
-  const canApprove = ["SuperAdmin", "Admin", "Accountant"].includes(session.user.role);
+  const canCreate = PROJECT_MANAGE_ROLES.includes(session.user.role);
+  const canApprove = FINANCE_WRITE_ROLES.includes(session.user.role);
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">

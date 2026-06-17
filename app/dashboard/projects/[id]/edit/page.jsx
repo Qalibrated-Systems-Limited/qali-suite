@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import { getProjectById, getProjectsForParentPicker } from "@/app/mongodb/queries/projectQueries";
 import { searchParties, getUsers } from "@/app/mongodb/queries/partyQueries";
+import { PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
 import ProjectForm from "../../components/ProjectForm";
 
 export const metadata = {
@@ -14,7 +15,7 @@ export default async function EditProjectPage({ params }) {
 
   if (!session?.user) redirect("/login");
 
-  if (!["SuperAdmin", "Admin", "Accountant", "Manager"].includes(session.user.role)) {
+  if (!PROJECT_MANAGE_ROLES.includes(session.user.role)) {
     redirect("/dashboard/projects");
   }
 
