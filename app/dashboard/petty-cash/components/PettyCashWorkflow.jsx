@@ -38,11 +38,11 @@ export default function PettyCashWorkflow({ data, company, canSubmit, canApprove
 
       {canSubmit && status === "draft" && (
         <Button
-          onClick={() => run(() => submitPettyCashReturn(returnId), "Submitted to the MD")}
+          onClick={() => run(() => submitPettyCashReturn(returnId), "Submitted for approval")}
           disabled={isPending}
         >
           {isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
-          Submit to MD
+          Submit for approval
         </Button>
       )}
 
