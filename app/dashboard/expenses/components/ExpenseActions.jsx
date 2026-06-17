@@ -129,6 +129,9 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
 
   // Determine which actions to show
   const isLegacy = ["pending", "approved", "rejected"].includes(expense.status);
+  // A draft is normally auto-posted on create; if that failed (e.g. a missing
+  // system account) it's left stranded — offer a manual Post to recover it.
+  const canPostDraft = expense.status === "draft" && !expense.journalEntryId;
   const isUnpaid = expense.paymentStatus === "unpaid" &&
     ["posted", "approved"].includes(expense.status);
   const canDelete = expense.status === "draft";
@@ -142,8 +145,8 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
       )}
 
       <div className="flex items-center gap-2">
-        {/* Legacy migration — post old pending/approved/rejected expenses */}
-        {isLegacy && (
+        {/* Post — legacy statuses OR a draft whose auto-post failed */}
+        {(isLegacy || canPostDraft) && (
           <Button
             size="sm"
             onClick={handlePostLegacy}
