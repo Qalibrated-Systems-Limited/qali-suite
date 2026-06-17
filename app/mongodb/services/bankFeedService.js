@@ -1659,20 +1659,44 @@ export class BankFeedService {
   /**
    * Undo allocation (revert to unallocated)
    */
-  static async undoAllocation(lineId) {
+  static async undoAllocation(lineId, { companyId, userId, userName } = {}) {
     await connectDB();
 
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      const line = await BankFeedLine.findById(lineId).session(session);
+      // Tenant-scoped lookup — a lineId from another tenant must not be
+      // undoable even if upstream auth is bypassed.
+      const line = await BankFeedLine.findOne({
+        _id: lineId,
+        ...(companyId ? { companyId } : {}),
+      }).session(session);
       if (!line) throw new Error("Bank feed line not found");
       if (line.status === "unallocated") throw new Error("Line is not allocated");
 
-      // Delete the journal entry if exists
+      const userInfo = {
+        name: userName || "System",
+        id: userId || "system",
+      };
+
+      // REVERSE the journal entry (don't delete it). Deleting a posted entry
+      // bypasses the closed-period guard, drops the audit trail, and leaves the
+      // account-balance updates it made un-reversed. A draft entry that never
+      // posted has no such effects, so it can be removed outright.
       if (line.journalEntryId) {
-        await JournalEntry.findByIdAndDelete(line.journalEntryId, { session });
+        const je = await JournalEntry.findById(line.journalEntryId).session(session);
+        if (je) {
+          if (je.status === "posted") {
+            await je.reverse(
+              userInfo,
+              `Bank allocation undone (line ${line._id})`,
+              session,
+            );
+          } else {
+            await JournalEntry.findByIdAndDelete(je._id, { session });
+          }
+        }
       }
 
       // Revert invoice/bill payment status if applicable
@@ -1680,31 +1704,32 @@ export class BankFeedService {
         const appliedAmount = line.matchedDocument.appliedAmount || 0;
 
         if (line.allocationType === "invoice_payment" && appliedAmount > 0) {
-          // Revert invoice payment
-          const invoice = await Invoice.findById(line.matchedDocument.documentId).session(session);
+          // Revert invoice payment (tenant-scoped). amountDue uses the
+          // canonical formula — net of credit notes too (see Invoice C6 fix).
+          const invoice = await Invoice.findOne({
+            _id: line.matchedDocument.documentId,
+            ...(companyId ? { companyId } : {}),
+          }).session(session);
           if (invoice) {
-            const newAmountPaid = Math.max(0, (invoice.amountPaid || 0) - appliedAmount);
-            const newAmountDue = (invoice.total || 0) - newAmountPaid;
-            let newPaymentStatus = "unpaid";
-            if (newAmountPaid > 0 && newAmountDue > 0) {
-              newPaymentStatus = "partial";
-            } else if (newAmountDue <= 0) {
-              newPaymentStatus = "paid";
-            }
-
-            await Invoice.findByIdAndUpdate(
-              line.matchedDocument.documentId,
-              {
-                amountPaid: newAmountPaid,
-                amountDue: Math.max(0, newAmountDue),
-                paymentStatus: newPaymentStatus,
-              },
-              { session }
+            invoice.amountPaid = Math.max(0, (invoice.amountPaid || 0) - appliedAmount);
+            invoice.amountDue = Math.max(
+              0,
+              (invoice.total || 0) - invoice.amountPaid - invoice.totalCredited(),
             );
+            invoice.paymentStatus =
+              invoice.amountDue <= 0.01
+                ? "paid"
+                : invoice.amountPaid > 0
+                  ? "partial"
+                  : "unpaid";
+            await invoice.save({ session });
           }
         } else if (line.allocationType === "bill_payment" && appliedAmount > 0) {
-          // Revert bill payment
-          const bill = await Bill.findById(line.matchedDocument.documentId).session(session);
+          // Revert bill payment (tenant-scoped)
+          const bill = await Bill.findOne({
+            _id: line.matchedDocument.documentId,
+            ...(companyId ? { companyId } : {}),
+          }).session(session);
           if (bill) {
             const newAmountPaid = Math.max(0, (bill.amounts?.paid || 0) - appliedAmount);
             const newBalance = (bill.amounts?.netPayable || 0) - newAmountPaid;
