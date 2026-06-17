@@ -25,7 +25,8 @@ export async function getStatementOfAccount(
 
   // Build base query
   const baseQuery = {};
-  if (!isSuperAdmin && companyId) {
+  if (!isSuperAdmin) {
+    if (!companyId) return null; // fail closed — never query unscoped
     baseQuery.companyId = new ObjectId(companyId);
   }
 
@@ -283,7 +284,8 @@ export async function getCustomersWithBalances() {
     type: { $in: ["customer", "both"] },
     isActive: true,
   };
-  if (!isSuperAdmin && companyId) {
+  if (!isSuperAdmin) {
+    if (!companyId) return []; // fail closed
     query.companyId = new ObjectId(companyId);
   }
 
@@ -306,7 +308,10 @@ export async function getAgingSummary() {
     status: { $in: ["completed", "sent"] },
     paymentStatus: { $ne: "paid" },
   };
-  if (!isSuperAdmin && companyId) {
+  if (!isSuperAdmin) {
+    // fail closed — never aggregate across all tenants
+    if (!companyId)
+      return { current: 0, days30: 0, days60: 0, days90: 0, over90: 0, totalOutstanding: 0 };
     matchStage.companyId = new ObjectId(companyId);
   }
 
@@ -413,7 +418,8 @@ export async function getSupplierStatement(
 
   // Build base query
   const baseQuery = {};
-  if (!isSuperAdmin && companyId) {
+  if (!isSuperAdmin) {
+    if (!companyId) return null; // fail closed — never query unscoped
     baseQuery.companyId = new ObjectId(companyId);
   }
 
@@ -619,7 +625,8 @@ export async function getSuppliersWithBalances() {
     type: { $in: ["supplier", "both"] },
     isActive: true,
   };
-  if (!isSuperAdmin && companyId) {
+  if (!isSuperAdmin) {
+    if (!companyId) return []; // fail closed
     query.companyId = new ObjectId(companyId);
   }
 
@@ -642,7 +649,10 @@ export async function getAPAgingSummary() {
     status: "approved",
     paymentStatus: { $ne: "paid" },
   };
-  if (!isSuperAdmin && companyId) {
+  if (!isSuperAdmin) {
+    // fail closed — never aggregate across all tenants
+    if (!companyId)
+      return { current: 0, days30: 0, days60: 0, days90: 0, over90: 0, totalOutstanding: 0 };
     matchStage.companyId = new ObjectId(companyId);
   }
 
