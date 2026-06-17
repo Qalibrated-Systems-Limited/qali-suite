@@ -8,26 +8,25 @@ import { Plus, Loader2 } from "lucide-react";
 import { createPettyCashReturn } from "@/app/mongodb/actions/petty-cash-actions";
 import { toast } from "sonner";
 
-// Opens a new petty cash return for a month against a chosen float, then jumps
-// to the detail page where the custodian records entries.
+// Opens a new petty cash return for a date range against a chosen float, then
+// jumps to the detail page where the custodian records entries.
 export default function NewPettyCashReturn({ floats = [] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [floatAccountId, setFloatAccountId] = useState(floats[0]?._id || "");
-  const [month, setMonth] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
 
   function handleCreate() {
     if (!floatAccountId) return toast.error("Select a petty cash account");
-    if (!month) return toast.error("Select a month");
-    const [y, m] = month.split("-").map(Number);
-    const from = new Date(y, m - 1, 1);
-    const to = new Date(y, m, 0); // last day of the month
+    if (!from || !to) return toast.error("Pick a from and to date");
+    if (new Date(from) > new Date(to)) return toast.error("From date is after to date");
     startTransition(async () => {
       const res = await createPettyCashReturn({
         floatAccountId,
-        from: from.toISOString(),
-        to: to.toISOString(),
+        from: new Date(from).toISOString(),
+        to: new Date(to).toISOString(),
       });
       if (res.success) {
         toast.success(`Opened ${res.documentNumber}`);
@@ -76,12 +75,21 @@ export default function NewPettyCashReturn({ floats = [] }) {
         </select>
       </div>
       <div className="flex flex-col gap-1">
-        <label className="text-xs text-muted-foreground">Month</label>
+        <label className="text-xs text-muted-foreground">From</label>
         <input
-          type="month"
+          type="date"
           className="h-9 rounded-md border bg-background px-2 text-sm"
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
+          value={from}
+          onChange={(e) => setFrom(e.target.value)}
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="text-xs text-muted-foreground">To</label>
+        <input
+          type="date"
+          className="h-9 rounded-md border bg-background px-2 text-sm"
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
         />
       </div>
       <div className="flex gap-2">
