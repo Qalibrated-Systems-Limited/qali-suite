@@ -5,9 +5,7 @@ import { canSeeFinanceNav } from "@/lib/permissions";
 import {
   getPettyCashReturnById,
   getPettyCashFloatAccounts,
-  getPettyCashExpenseAccounts,
 } from "@/app/mongodb/queries/petty-cash-queries";
-import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 import Company from "@/app/models/Company";
 import dbConnect from "@/app/config/dbConnect";
 import { Card } from "@/components/ui/card";
@@ -41,11 +39,7 @@ export default async function PettyCashReturnPage({ params }) {
   const ret = await getPettyCashReturnById(id);
   if (!ret) notFound();
 
-  const [projects, floatAccounts, expenseAccounts] = await Promise.all([
-    getActiveProjects(),
-    getPettyCashFloatAccounts(),
-    getPettyCashExpenseAccounts(),
-  ]);
+  const floatAccounts = await getPettyCashFloatAccounts();
   // Source accounts for funding = cash/bank accounts other than this float.
   const sourceAccounts = floatAccounts.filter((a) => a._id !== ret.floatAccountId);
   await dbConnect();
@@ -111,9 +105,7 @@ export default async function PettyCashReturnPage({ params }) {
         <PettyCashLedger
           returnId={ret._id}
           rows={ret.rows}
-          projects={projects}
           sourceAccounts={sourceAccounts}
-          expenseAccounts={expenseAccounts}
           canEdit={canEdit}
         />
       </Card>

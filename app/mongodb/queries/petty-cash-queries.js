@@ -3,6 +3,8 @@ import PettyCashReturn from "../../models/pettyCashReturn";
 import PettyCashEntry from "../../models/pettyCashEntry";
 import Account from "../../models/account";
 import Project from "../../models/project";
+import Expense from "../../models/expenses";
+import JournalEntry from "../../models/JournalEntry";
 import dbConnect from "../../config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { serializeBsonType } from "@/lib/utils";
@@ -11,6 +13,88 @@ const { ObjectId } = mongoose.Types;
 
 function tenantMatch(companyId, isSuperAdmin) {
   return isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+}
+
+// ============================================
+// PETTY CASH STATEMENT — derived from the GL, not typed
+// ============================================
+// The petty cash account's activity over a date range, like a bank statement:
+// CR = money out (every Expense paid FROM the float), DR = money in (float
+// top-ups / transfers that debit the float in the GL). Because spends are real
+// Expenses, they already post to the GL and feed project cost — the statement
+// only DISPLAYS them, so nothing is double-counted or re-typed.
+//
+// `tm` is the resolved tenant match; `floatId`/`from`/`to` are normalised.
+export async function computePettyCashStatement(tm, floatId, from, to, opening = 0) {
+  const fromD = new Date(from);
+  const toD = new Date(to);
+
+  const [expenses, topupAgg, projects] = await Promise.all([
+    // Spends OUT of the tin — expenses paid from this account.
+    Expense.find({
+      ...tm,
+      paidFrom: floatId,
+      status: { $in: ["posted", "paid"] },
+      expenseDate: { $gte: fromD, $lte: toD },
+    })
+      .select("expenseDate description category projectId accountName vendor total expenseNumber")
+      .lean(),
+    // Money IN — any posted JE that debits the float (float receipts/top-ups).
+    JournalEntry.aggregate([
+      { $match: { ...tm, status: "posted", entryDate: { $gte: fromD, $lte: toD } } },
+      { $unwind: "$lines" },
+      { $match: { "lines.accountId": floatId, "lines.debit": { $gt: 0 } } },
+      { $project: { date: "$entryDate", description: 1, amount: "$lines.debit", entryNumber: 1 } },
+    ]),
+    Project.find({ ...tm }).select("name projectNumber").lean(),
+  ]);
+
+  const projName = new Map(projects.map((p) => [p._id.toString(), p.name]));
+
+  const rows = [
+    ...topupAgg.map((t) => ({
+      kind: "topup",
+      date: t.date,
+      name: "Float received",
+      description: t.description || "Float top-up",
+      projectLabel: "",
+      direction: "debit",
+      amount: t.amount,
+      ref: t.entryNumber,
+    })),
+    ...expenses.map((e) => ({
+      kind: "expense",
+      date: e.expenseDate,
+      name: e.vendor?.name || "",
+      description: e.description || e.accountName || "",
+      projectLabel: e.projectId
+        ? projName.get(e.projectId.toString()) || ""
+        : e.category || "",
+      direction: "credit",
+      amount: e.total,
+      ref: e.expenseNumber,
+      expenseId: e._id,
+    })),
+  ].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  let balance = opening || 0;
+  let debits = 0;
+  let credits = 0;
+  for (const r of rows) {
+    if (r.direction === "debit") {
+      balance += r.amount;
+      debits += r.amount;
+    } else {
+      balance -= r.amount;
+      credits += r.amount;
+    }
+    r.balance = balance;
+  }
+
+  return {
+    rows,
+    totals: { debits, credits, closing: (opening || 0) + debits - credits },
+  };
 }
 
 // ============================================
@@ -91,48 +175,31 @@ export async function getPettyCashReturnById(returnId) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
 
+  const tm = tenantMatch(companyId, isSuperAdmin);
   const ret = await PettyCashReturn.findOne({
-    ...tenantMatch(companyId, isSuperAdmin),
+    ...tm,
     _id: new ObjectId(returnId),
   }).lean();
   if (!ret) return null;
 
-  const entries = await PettyCashEntry.find({ returnId: ret._id })
-    .sort({ date: 1, createdAt: 1 })
-    .lean();
-
-  // Resolve project + float names for display.
-  const projectIds = [
-    ...new Set(
-      entries
-        .map((e) => e.allocation?.projectId?.toString())
-        .filter(Boolean),
+  // The lines are DERIVED from the GL for the float over the return's period —
+  // every expense paid from the tin + any float top-ups. Nothing is typed, so
+  // the statement always reflects the real spend.
+  const [statement, float] = await Promise.all([
+    computePettyCashStatement(
+      tm,
+      ret.floatAccountId,
+      ret.period?.from,
+      ret.period?.to,
+      ret.openingBalance || 0,
     ),
-  ];
-  const [projects, float] = await Promise.all([
-    projectIds.length
-      ? Project.find({ _id: { $in: projectIds } }).select("name projectNumber").lean()
-      : [],
     Account.findById(ret.floatAccountId).select("accountName accountCode").lean(),
   ]);
-  const projName = new Map(projects.map((p) => [p._id.toString(), p]));
-
-  // Compute a running balance for the ledger view (opening + DR − CR).
-  let balance = ret.openingBalance || 0;
-  const rows = entries.map((e) => {
-    if (e.direction === "debit") balance += e.amount;
-    else balance -= e.amount;
-    const proj = projName.get(e.allocation?.projectId?.toString());
-    return {
-      ...e,
-      projectLabel: proj ? proj.name : e.allocation?.purpose || "",
-      balance,
-    };
-  });
 
   return serializeBsonType({
     ...ret,
     float: float || null,
-    rows,
+    rows: statement.rows,
+    totals: statement.totals,
   });
 }
