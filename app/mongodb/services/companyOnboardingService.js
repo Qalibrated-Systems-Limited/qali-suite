@@ -271,6 +271,7 @@ export class CompanyOnboardingService {
         subType: "accrual",
         canPost: true,
         parentCode: "2100",
+        systemAccount: "accrued_expenses", // unpaid-expense credit (expense.post)
       },
       {
         // GR/IR Clearing — required for the three-way match flow.
@@ -404,6 +405,17 @@ export class CompanyOnboardingService {
         canPost: true,
         parentCode: "3000",
         systemAccount: "drawings",
+      },
+      {
+        // Offsets opening balances / unscheduled inventory adjustments so the
+        // ledger stays balanced (inventoryAdjustment.post looks this up).
+        accountCode: "3500",
+        accountName: "Opening Balance Equity",
+        accountType: "equity",
+        subType: "capital",
+        canPost: true,
+        parentCode: "3000",
+        systemAccount: "opening_balance_equity",
       },
 
       // REVENUE (4000-4999)
