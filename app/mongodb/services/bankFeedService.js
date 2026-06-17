@@ -978,6 +978,10 @@ export class BankFeedService {
         line.companyId
       );
 
+      // Post the entry so it hits the ledger and account balances.
+      // createJournalEntry only persists a draft.
+      await JournalService.postJournalEntry(journalEntry._id, user, session);
+
       // Update bank feed line
       await BankFeedLine.findByIdAndUpdate(
         lineId,
@@ -1084,6 +1088,10 @@ export class BankFeedService {
         line.companyId
       );
 
+      // Post the entry so it hits the ledger and account balances.
+      // createJournalEntry only persists a draft.
+      await JournalService.postJournalEntry(journalEntry._id, user, session);
+
       // Update bank feed line
       await BankFeedLine.findByIdAndUpdate(
         lineId,
@@ -1178,6 +1186,10 @@ export class BankFeedService {
         session,
         line.companyId
       );
+
+      // Post the entry so it hits the ledger and account balances.
+      // createJournalEntry only persists a draft.
+      await JournalService.postJournalEntry(journalEntry._id, user, session);
 
       // Update bank feed line
       await BankFeedLine.findByIdAndUpdate(
@@ -1321,6 +1333,9 @@ export class BankFeedService {
         line.companyId
       );
 
+      // Post the entry so it hits the ledger and account balances.
+      await JournalService.postJournalEntry(journalEntry._id, user, session);
+
       // Update bank feed line
       await BankFeedLine.findByIdAndUpdate(
         lineId,
@@ -1434,6 +1449,9 @@ export class BankFeedService {
         line.companyId
       );
 
+      // Post the entry so it hits the ledger and account balances.
+      await JournalService.postJournalEntry(journalEntry._id, user, session);
+
       await BankFeedLine.findByIdAndUpdate(
         lineId,
         {
@@ -1504,6 +1522,9 @@ export class BankFeedService {
         session,
         line.companyId
       );
+
+      // Post the entry so it hits the ledger and account balances.
+      await JournalService.postJournalEntry(journalEntry._id, user, session);
 
       await BankFeedLine.findByIdAndUpdate(
         lineId,
@@ -1608,6 +1629,9 @@ export class BankFeedService {
         session,
         line.companyId
       );
+
+      // Post the entry so it hits the ledger and account balances.
+      await JournalService.postJournalEntry(journalEntry._id, user, session);
 
       await BankFeedLine.findByIdAndUpdate(
         lineId,
