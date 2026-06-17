@@ -467,6 +467,28 @@ function formatUser(user) {
 }
 
 // ============================================
+// METHOD: Reopen an expired PO back to draft
+// ============================================
+// An expired PO was otherwise a dead end — no action applied to it. Reopening
+// returns it to draft so it can be reviewed, re-priced and resent. validUntil
+// MUST be pushed forward here: the pre-save hook re-expires any PO whose
+// validUntil is in the past, so without this the PO would snap straight back
+// to "expired" on save.
+purchaseOrderSchema.methods.reopen = async function (user) {
+  if (this.status !== "expired") {
+    throw new Error(
+      `Only expired purchase orders can be reopened (status: ${this.status})`,
+    );
+  }
+  const userInfo = formatUser(user);
+  this.status = "draft";
+  this.validUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // +30 days
+  this.lastModifiedBy = userInfo;
+  await this.save();
+  return this;
+};
+
+// ============================================
 // METHOD: Send to Supplier
 // ============================================
 purchaseOrderSchema.methods.send = async function (user) {

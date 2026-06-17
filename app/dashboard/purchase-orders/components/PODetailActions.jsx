@@ -31,6 +31,7 @@ import {
   Receipt,
   Loader2,
   Trash2,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -38,6 +39,7 @@ import {
   confirmPurchaseOrder,
   cancelPurchaseOrder,
   deletePurchaseOrder,
+  reopenPurchaseOrder,
 } from "@/app/mongodb/actions/purchase-order-actions";
 import { ConvertToBillDialog } from "./ConvertToBillDialog";
 
@@ -65,6 +67,18 @@ export function PODetailActions({ purchaseOrder, userRole }) {
         router.refresh();
       } else {
         toast.error(result.error || "Failed to send purchase order");
+      }
+    });
+  };
+
+  const handleReopen = () => {
+    startTransition(async () => {
+      const result = await reopenPurchaseOrder(po._id);
+      if (result.success) {
+        toast.success("Purchase order reopened as draft");
+        router.refresh();
+      } else {
+        toast.error(result.error || "Failed to reopen purchase order");
       }
     });
   };
@@ -120,6 +134,23 @@ export function PODetailActions({ purchaseOrder, userRole }) {
   // ----------------------------------------
   return (
     <div className="space-y-3">
+      {/* Reopen - Expired only (otherwise an expired PO is a dead end) */}
+      {po.status === "expired" && canManage && (
+        <Button
+          onClick={handleReopen}
+          disabled={isPending}
+          variant="outline"
+          className="w-full"
+        >
+          {isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <RotateCcw className="mr-2 h-4 w-4" />
+          )}
+          Reopen as Draft
+        </Button>
+      )}
+
       {/* Send to Supplier - Draft only */}
       {po.status === "draft" && canManage && (
         <Button
