@@ -18,11 +18,15 @@ import {
   Wallet,
   X,
   Loader2,
+  RotateCcw,
+  Repeat,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import Pagination from "@/components/pagination";
 import { format } from "date-fns";
 import AllocationDialog from "./AllocationDialog";
+import { undoAllocation } from "@/app/mongodb/actions/bank-feed-actions";
 import { serializeBsonType } from "@/lib/utils";
 
 // ============================================
@@ -146,10 +150,11 @@ function Filters({ filters, onFilterChange }) {
 // ============================================
 // LINE ROW
 // ============================================
-function LineRow({ line, onAllocate }) {
+function LineRow({ line, onAllocate, onUndo, onChange, isPending }) {
   const [expanded, setExpanded] = useState(false);
   const isDebit = line.debitAmount > 0;
   const amount = isDebit ? line.debitAmount : line.creditAmount;
+  const isAllocated = line.status === "allocated" || line.status === "matched";
 
   return (
     <>
@@ -215,7 +220,43 @@ function LineRow({ line, onAllocate }) {
               </Button>
             </div>
           ) : (
-            <div className="flex items-center justify-end">
+            <div className="flex items-center justify-end gap-2">
+              {isAllocated && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onChange?.(line)}
+                    disabled={isPending}
+                    title="Undo and re-allocate to a different target"
+                  >
+                    <Repeat className="h-4 w-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Change</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onUndo?.(line)}
+                    disabled={isPending}
+                    title="Undo allocation — reverse the journal entry and return to pending"
+                  >
+                    <RotateCcw className="h-4 w-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Undo</span>
+                  </Button>
+                </>
+              )}
+              {line.status === "excluded" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onUndo?.(line)}
+                  disabled={isPending}
+                  title="Re-include this line"
+                >
+                  <RotateCcw className="h-4 w-4 sm:mr-1" />
+                  <span className="hidden sm:inline">Re-include</span>
+                </Button>
+              )}
               <Button
                 size="icon"
                 variant="ghost"
@@ -354,10 +395,11 @@ function LineRow({ line, onAllocate }) {
 // ============================================
 // MOBILE CARD
 // ============================================
-function LineCard({ line, onAllocate }) {
+function LineCard({ line, onAllocate, onUndo, onChange, isPending }) {
   const [expanded, setExpanded] = useState(false);
   const isDebit = line.debitAmount > 0;
   const amount = isDebit ? line.debitAmount : line.creditAmount;
+  const isAllocated = line.status === "allocated" || line.status === "matched";
 
   return (
     <div
@@ -415,6 +457,21 @@ function LineCard({ line, onAllocate }) {
         {line.status === "unallocated" && (
           <Button size="sm" onClick={() => onAllocate(line)}>
             Allocate
+          </Button>
+        )}
+        {isAllocated && (
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => onChange?.(line)} disabled={isPending}>
+              <Repeat className="h-4 w-4 mr-1" /> Change
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onUndo?.(line)} disabled={isPending}>
+              <RotateCcw className="h-4 w-4 mr-1" /> Undo
+            </Button>
+          </div>
+        )}
+        {line.status === "excluded" && (
+          <Button size="sm" variant="ghost" onClick={() => onUndo?.(line)} disabled={isPending}>
+            <RotateCcw className="h-4 w-4 mr-1" /> Re-include
           </Button>
         )}
       </div>
@@ -519,6 +576,34 @@ export default function BankFeedLinesTable({
     router.refresh();
   };
 
+  // Deallocate: reverse the allocation (JE reversal + document revert) and
+  // return the line to pending.
+  const handleUndo = (line) => {
+    startTransition(async () => {
+      const result = await undoAllocation(line._id);
+      if (result?.success) {
+        toast.success("Allocation undone — line returned to pending");
+        router.refresh();
+      } else {
+        toast.error(result?.error || "Failed to undo allocation");
+      }
+    });
+  };
+
+  // Change allocation: undo first, then open the allocation dialog so a new
+  // target can be picked (the line is unallocated server-side by then).
+  const handleChange = (line) => {
+    startTransition(async () => {
+      const result = await undoAllocation(line._id);
+      if (result?.success) {
+        setSelectedLine(serializeBsonType(line));
+        setShowAllocationDialog(true);
+      } else {
+        toast.error(result?.error || "Failed to change allocation");
+      }
+    });
+  };
+
   const hasFilters = filters.status || filters.type || filters.search;
 
   return (
@@ -563,6 +648,9 @@ export default function BankFeedLinesTable({
                     key={line._id}
                     line={line}
                     onAllocate={handleAllocate}
+                    onUndo={handleUndo}
+                    onChange={handleChange}
+                    isPending={isPending}
                   />
                 ))}
               </tbody>
@@ -576,6 +664,9 @@ export default function BankFeedLinesTable({
                 key={line._id}
                 line={line}
                 onAllocate={handleAllocate}
+                onUndo={handleUndo}
+                onChange={handleChange}
+                isPending={isPending}
               />
             ))}
           </div>

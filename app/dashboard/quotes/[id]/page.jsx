@@ -53,19 +53,18 @@ export default async function QuoteDetailPage({ params, searchParams }) {
     );
   }
 
-  const quote = await getQuoteById(id);
+  // Independent queries — fetch in parallel so the page render (which is on
+  // the critical path of every action's revalidation) isn't serialized.
+  const [quote, companyRaw] = await Promise.all([
+    getQuoteById(id),
+    user.companyId ? getCompanyById(user.companyId) : Promise.resolve(null),
+  ]);
 
   if (!quote) {
     notFound();
   }
 
-  let company = null;
-  if (user.companyId) {
-    company = await getCompanyById(user.companyId);
-    if (company) {
-      company = serializeBsonType(company);
-    }
-  }
+  const company = companyRaw ? serializeBsonType(companyRaw) : null;
 
   const formatDate = (dateString) => {
     if (!dateString) return "-";

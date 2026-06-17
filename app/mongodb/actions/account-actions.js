@@ -626,7 +626,7 @@ export async function calculateAccountBalance(accountId) {
     }
 
     // Calculate balance
-    await account.calculateBalance();
+    await account.calculateActualBalance();
 
     // Revalidate
     revalidatePath("/dashboard/accounts");
@@ -674,7 +674,7 @@ export async function recalculateAllBalances() {
 
     for (const account of accounts) {
       try {
-        await account.calculateBalance();
+        await account.calculateActualBalance();
         successCount++;
       } catch (error) {
         console.error(

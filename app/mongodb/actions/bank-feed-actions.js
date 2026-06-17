@@ -303,7 +303,13 @@ export async function undoAllocation(lineId) {
       return { success: false, error: "Unauthorized" };
     }
 
-    const result = await BankFeedService.undoAllocation(lineId);
+    const { companyId } = await getTenantContext();
+
+    const result = await BankFeedService.undoAllocation(lineId, {
+      companyId,
+      userId: session.user.id,
+      userName: session.user.name,
+    });
 
     revalidatePath("/dashboard/banking");
 

@@ -473,9 +473,12 @@ export async function sendQuote(quoteId) {
     }
   });
 
+  // revalidatePath already refreshes this page in place; a redirect to the
+  // same URL only adds a second server roundtrip before the button leaves its
+  // pending state. The client closes the dialog on { success }.
   revalidatePath("/dashboard/quotes");
   revalidatePath(`/dashboard/quotes/${quoteId}`);
-  redirect(`/dashboard/quotes/${quoteId}`);
+  return { success: true };
 }
 
 // ============================================
@@ -508,9 +511,12 @@ export async function acceptQuote(quoteId) {
     return { message: error.message || "Failed to accept quote" };
   }
 
+  // revalidatePath already refreshes this page in place; a redirect to the
+  // same URL only adds a second server roundtrip before the button leaves its
+  // pending state (the perceived lag). The client closes the dialog on success.
   revalidatePath("/dashboard/quotes");
   revalidatePath(`/dashboard/quotes/${quoteId}`);
-  redirect(`/dashboard/quotes/${quoteId}`);
+  return { success: true };
 }
 
 // ============================================
@@ -543,9 +549,12 @@ export async function rejectQuote(quoteId, reason = "") {
     return { message: error.message || "Failed to reject quote" };
   }
 
+  // revalidatePath already refreshes this page in place; a redirect to the
+  // same URL only adds a second server roundtrip before the button leaves its
+  // pending state. The client closes the dialog on success.
   revalidatePath("/dashboard/quotes");
   revalidatePath(`/dashboard/quotes/${quoteId}`);
-  redirect(`/dashboard/quotes/${quoteId}`);
+  return { success: true };
 }
 
 // ============================================

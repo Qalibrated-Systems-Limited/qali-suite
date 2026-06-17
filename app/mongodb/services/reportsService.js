@@ -272,14 +272,32 @@ export class ReportService {
       { $sort: { accountCode: 1 } },
     ]);
 
-    const totalDebits = result.reduce((sum, acc) => sum + acc.debit, 0);
-    const totalCredits = result.reduce((sum, acc) => sum + acc.credit, 0);
+    // A trial balance shows each account's NET balance on a single side, not
+    // its gross debit/credit turnover (e.g. a bank with 1M in / 0.9M out shows
+    // 0.1M debit, not both columns). Net per account, then place the result on
+    // the debit column (positive net) or credit column (negative net). This
+    // also keeps the balance check meaningful: totals only stay equal while
+    // every posted line maps to an included (postable, active) account — an
+    // imbalance now flags posting to a filtered-out account or a bad entry.
+    const accounts = result.map((acc) => {
+      const net = (acc.debit || 0) - (acc.credit || 0);
+      return {
+        accountCode: acc.accountCode,
+        accountName: acc.accountName,
+        accountType: acc.accountType,
+        debit: net > 0 ? net : 0,
+        credit: net < 0 ? -net : 0,
+      };
+    });
+
+    const totalDebits = accounts.reduce((sum, acc) => sum + acc.debit, 0);
+    const totalCredits = accounts.reduce((sum, acc) => sum + acc.credit, 0);
     const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
 
     return {
       reportName: "Trial Balance",
       asOfDate: new Date(asOfDate),
-      accounts: result,
+      accounts,
       summary: {
         totalDebits,
         totalCredits,
@@ -494,11 +512,45 @@ export class ReportService {
       .sort({ entryDate: 1, entryNumber: 1 })
       .lean();
 
-    // Calculate running balance
-    let runningBalance = 0;
     const normalSide = ["asset", "expense"].includes(account.accountType)
       ? "debit"
       : "credit";
+
+    // Opening balance = net movement of this account BEFORE the report's start
+    // date. Without it, runningBalance (and therefore closingBalance) reflects
+    // only the period's activity, not the account's true balance — wrong for
+    // any account with prior history (which is every default month-range view).
+    let openingBalance = 0;
+    if (startDate) {
+      const [prior] = await JournalEntry.aggregate([
+        {
+          $match: {
+            status: "posted",
+            "lines.accountId": account._id,
+            entryDate: { $lt: new Date(startDate) },
+            ...buildTenantMatch(companyId, isSuperAdmin),
+          },
+        },
+        { $unwind: "$lines" },
+        { $match: { "lines.accountId": account._id } },
+        {
+          $group: {
+            _id: null,
+            debit: { $sum: "$lines.debit" },
+            credit: { $sum: "$lines.credit" },
+          },
+        },
+      ]);
+      if (prior) {
+        openingBalance =
+          normalSide === "debit"
+            ? prior.debit - prior.credit
+            : prior.credit - prior.debit;
+      }
+    }
+
+    // Calculate running balance, carrying the opening balance forward
+    let runningBalance = openingBalance;
 
     const transactions = [];
 
@@ -540,7 +592,7 @@ export class ReportService {
       period: { startDate, endDate },
       transactions,
       summary: {
-        openingBalance: 0,
+        openingBalance,
         closingBalance: runningBalance,
         transactionCount: transactions.length,
       },
