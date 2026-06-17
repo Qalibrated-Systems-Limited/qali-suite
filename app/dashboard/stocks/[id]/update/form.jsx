@@ -289,7 +289,8 @@ export default function UpdateProductForm({
   const errors = state?.error || {};
 
   return (
-    <div className="space-y-6">
+    // Match the Add wizard's width/centering so Add and Edit align consistently.
+    <div className="max-w-3xl mx-auto space-y-6">
       {/* Form-level Error */}
       {errors._form && (
         <Alert variant="destructive">
