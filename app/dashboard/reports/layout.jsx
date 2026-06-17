@@ -2,7 +2,7 @@
 
 export default function ReportsLayout({ children }) {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-background">
       {children}
     </div>
   );

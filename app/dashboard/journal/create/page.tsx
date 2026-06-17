@@ -71,7 +71,7 @@ export default async function CreateJournalEntryPage() {
   const { accounts, entryTypes } = await getFormData();
 
   return (
-    <div className="flex flex-col min-h-[calc(100vh-4rem)]">
+    <div className="flex flex-col">
       {/* Header */}
       <div className="border-b bg-card/50">
         <div className="container max-w-4xl py-4 sm:py-6">
