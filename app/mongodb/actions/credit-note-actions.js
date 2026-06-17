@@ -624,7 +624,9 @@ export async function issueRefund(creditNoteId, prevState, formData) {
       systemAccount: "accounts_receivable",
     });
 
-    const bankAccount = await Account.findById(bankAccountId);
+    // Tenant-scoped: an unscoped findById would let a foreign account id be
+    // credited by this refund JE (cross-tenant ledger write).
+    const bankAccount = await Account.findOne({ _id: bankAccountId, companyId });
     if (!bankAccount) {
       throw new Error("Bank account not found");
     }

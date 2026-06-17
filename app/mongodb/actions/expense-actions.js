@@ -164,8 +164,12 @@ export async function createExpense(prevState, formData) {
     const validatedData = result.data;
     const receipts = parseReceipts(formData, user);
 
-    // Get expense account details
-    const expenseAccount = await Account.findById(validatedData.accountId);
+    // Get expense account details — tenant-scoped so a crafted/stale
+    // accountId from another company can never be snapshotted onto this
+    // expense and posted against a foreign account's GL.
+    const expenseAccount = await Account.findOne(
+      withTenantScope({ _id: validatedData.accountId }, companyId, isSuperAdmin),
+    );
     if (!expenseAccount) {
       return { errors: { _form: ["Expense account not found"] }, values: rawValues };
     }
@@ -178,7 +182,9 @@ export async function createExpense(prevState, formData) {
       if (!validatedData.paidFrom) {
         return { errors: { _form: ["Payment account is required when expense is paid"] }, values: rawValues };
       }
-      const paymentAccount = await Account.findById(validatedData.paidFrom);
+      const paymentAccount = await Account.findOne(
+        withTenantScope({ _id: validatedData.paidFrom }, companyId, isSuperAdmin),
+      );
       if (!paymentAccount) {
         return { errors: { _form: ["Payment account not found"] }, values: rawValues };
       }
@@ -195,7 +201,9 @@ export async function createExpense(prevState, formData) {
     let projectFields = {};
     const rawProjectId = rawValues.projectId;
     if (rawProjectId) {
-      const project = await Project.findById(rawProjectId)
+      const project = await Project.findOne(
+        withTenantScope({ _id: rawProjectId }, companyId, isSuperAdmin),
+      )
         .select("projectNumber name status")
         .lean();
       if (project && project.status !== "closed") {
@@ -322,8 +330,10 @@ export async function updateExpense(expenseId, prevState, formData) {
     const validatedData = result.data;
     const receipts = parseReceipts(formData, user);
 
-    // Get expense account details
-    const expenseAccount = await Account.findById(validatedData.accountId);
+    // Get expense account details — tenant-scoped (see create path)
+    const expenseAccount = await Account.findOne(
+      withTenantScope({ _id: validatedData.accountId }, companyId, isSuperAdmin),
+    );
     if (!expenseAccount || expenseAccount.accountType !== "expense") {
       return { errors: { _form: ["Invalid expense account"] }, values: rawValues };
     }
@@ -365,7 +375,9 @@ export async function updateExpense(expenseId, prevState, formData) {
     // Update project (optional)
     const updatedProjectId = rawValues.projectId;
     if (updatedProjectId) {
-      const project = await Project.findById(updatedProjectId)
+      const project = await Project.findOne(
+        withTenantScope({ _id: updatedProjectId }, companyId, isSuperAdmin),
+      )
         .select("projectNumber name status")
         .lean();
       if (project && project.status !== "closed") {
@@ -505,6 +517,19 @@ export async function recordExpensePayment(expenseId, prevState, formData) {
           pendingApprovalNumber: result.approval.requestNumber,
         };
       }
+    }
+
+    // Validate the payment account belongs to this tenant before it posts the
+    // payment JE — recordPayment() resolves paidFrom with an unscoped findById,
+    // so a foreign account id would otherwise credit another company's ledger.
+    const payAccount = await Account.findOne(
+      withTenantScope({ _id: paidFrom }, companyId, isSuperAdmin),
+    ).select("_id canPost");
+    if (!payAccount) {
+      return { success: false, error: "Payment account not found" };
+    }
+    if (payAccount.canPost === false) {
+      return { success: false, error: "Selected account cannot be posted to" };
     }
 
     await expense.recordPayment(formatUser(user), {
