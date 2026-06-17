@@ -201,11 +201,7 @@ export function AppSidebar({ children, user, notifications, ...props }) {
 
                     <DropdownMenuSeparator className="bg-border" />
 
-                    <form
-                      action={async () => {
-                        await logout();
-                      }}
-                    >
+                    <form action={logout}>
                       <DropdownMenuItem asChild className="cursor-pointer focus:bg-destructive/10 focus:text-destructive">
                         <button type="submit" className="w-full">
                           <LogOut className="mr-2 h-4 w-4" />

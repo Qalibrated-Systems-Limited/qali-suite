@@ -251,12 +251,7 @@ export const SidebarContent = ({ onItemClick, user }) => {
               className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
               asChild
             >
-              <form
-                action={async () => {
-                  await logout();
-                }}
-                className="w-full"
-              >
+              <form action={logout} className="w-full">
                 <button
                   className="w-full flex items-center text-left"
                   type="submit"
