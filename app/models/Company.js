@@ -366,6 +366,14 @@ const companySchema = new Schema(
           min: [0],
         },
 
+        // Expense payments above this require sign-off; at/below, finance
+        // staff (Accountant/Manager) may pay directly.
+        expensePaymentValue: {
+          type: Number,
+          default: 50_000,
+          min: [0],
+        },
+
         // Discount cap — sales discounts above this % require approval.
         discountCapPercent: {
           type: Number,

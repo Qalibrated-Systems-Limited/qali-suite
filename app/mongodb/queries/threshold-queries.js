@@ -21,6 +21,7 @@ const DEFAULTS = Object.freeze({
   minimumMarginPercent: 8,
   creditNoteValue: 25_000,
   billPaymentValue: 100_000,
+  expensePaymentValue: 50_000, // expense payments above this need sign-off
   discountCapPercent: 15,
 });
 
@@ -43,6 +44,8 @@ export const getCompanyThresholds = cache(async (companyId) => {
         cfg.minimumMarginPercent ?? DEFAULTS.minimumMarginPercent,
       creditNoteValue: cfg.creditNoteValue ?? DEFAULTS.creditNoteValue,
       billPaymentValue: cfg.billPaymentValue ?? DEFAULTS.billPaymentValue,
+      expensePaymentValue:
+        cfg.expensePaymentValue ?? DEFAULTS.expensePaymentValue,
       discountCapPercent:
         cfg.discountCapPercent ?? DEFAULTS.discountCapPercent,
     };

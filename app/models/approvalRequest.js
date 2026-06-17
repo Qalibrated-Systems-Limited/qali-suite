@@ -25,6 +25,7 @@ const APPROVAL_TYPES = [
   "stock_writeoff", // Stock adjustment that decreases quantity above threshold
   "stock_adjustment", // Generic stock count correction (large)
   "bill_payment", // Large bill payment release
+  "expense_payment", // Large expense payment release
   "credit_note", // Customer credit issuance
   "discount", // Sale discount above cap
 ];
@@ -86,6 +87,7 @@ const approvalRequestSchema = new Schema(
           "Invoice",
           "CreditNote",
           "Payment", // bill_payment approvals reference the draft Payment
+          "Expense", // expense_payment approvals reference the Expense
         ],
         required: true,
       },
@@ -182,6 +184,7 @@ export const APPROVER_MATRIX = {
   stock_writeoff: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Manager"],
   stock_adjustment: ["SuperAdmin", "Admin", "Manager", "Store Manager"],
   bill_payment: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
+  expense_payment: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
   credit_note: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Sales Manager"],
   discount: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Sales Manager"],
 };
