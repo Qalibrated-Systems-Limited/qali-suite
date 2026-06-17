@@ -1088,25 +1088,35 @@ export default function ExpenseForm({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Project (Optional) */}
-          {projects.length > 0 && (
-            <div className="space-y-2">
-              <Label>
-                Project{" "}
-                <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <input type="hidden" name="projectId" value={projectId} />
+          {/* Project (Optional) — always shown so it's discoverable; tagging a
+              project makes it project cost, leaving it blank makes it overhead. */}
+          <div className="space-y-2">
+            <Label>
+              Project{" "}
+              <span className="text-muted-foreground font-normal">(optional)</span>
+            </Label>
+            <input type="hidden" name="projectId" value={projectId} />
+            {projects.length > 0 ? (
               <ProjectPicker
                 value={projectId}
                 onValueChange={setProjectId}
                 projects={projects}
                 placeholder="Link to a project..."
               />
-              <p className="text-xs text-muted-foreground">
-                Tag this expense to a project for cost tracking
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No active projects yet.{" "}
+                <a href="/dashboard/projects/create" className="underline">
+                  Create one
+                </a>{" "}
+                to tag expenses to it.
               </p>
-            </div>
-          )}
+            )}
+            <p className="text-xs text-muted-foreground">
+              Tag this expense to a project for cost tracking; leave blank for
+              operating overhead.
+            </p>
+          </div>
 
           {/* Linked Asset (Optional) */}
           {assets.length > 0 && (
