@@ -2,7 +2,11 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { canSeeFinanceNav } from "@/lib/permissions";
-import { getPettyCashReturnById } from "@/app/mongodb/queries/petty-cash-queries";
+import {
+  getPettyCashReturnById,
+  getPettyCashFloatAccounts,
+  getPettyCashExpenseAccounts,
+} from "@/app/mongodb/queries/petty-cash-queries";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 import Company from "@/app/models/Company";
 import dbConnect from "@/app/config/dbConnect";
@@ -37,7 +41,13 @@ export default async function PettyCashReturnPage({ params }) {
   const ret = await getPettyCashReturnById(id);
   if (!ret) notFound();
 
-  const [projects] = await Promise.all([getActiveProjects()]);
+  const [projects, floatAccounts, expenseAccounts] = await Promise.all([
+    getActiveProjects(),
+    getPettyCashFloatAccounts(),
+    getPettyCashExpenseAccounts(),
+  ]);
+  // Source accounts for funding = cash/bank accounts other than this float.
+  const sourceAccounts = floatAccounts.filter((a) => a._id !== ret.floatAccountId);
   await dbConnect();
   const company = await Company.findById(ret.companyId).select("name tagline").lean();
 
@@ -46,7 +56,7 @@ export default async function PettyCashReturnPage({ params }) {
   const canApprove = APPROVER_ROLES.has(role) && ret.status === "submitted";
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 max-w-5xl mx-auto">
+    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
       <Link href="/dashboard/petty-cash" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4 mr-1" /> Petty cash
       </Link>
@@ -98,7 +108,14 @@ export default async function PettyCashReturnPage({ params }) {
 
       {/* Ledger */}
       <Card className="p-5">
-        <PettyCashLedger returnId={ret._id} rows={ret.rows} projects={projects} canEdit={canEdit} />
+        <PettyCashLedger
+          returnId={ret._id}
+          rows={ret.rows}
+          projects={projects}
+          sourceAccounts={sourceAccounts}
+          expenseAccounts={expenseAccounts}
+          canEdit={canEdit}
+        />
       </Card>
     </div>
   );

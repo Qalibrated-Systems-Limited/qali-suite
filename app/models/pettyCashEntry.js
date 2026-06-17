@@ -60,8 +60,18 @@ const pettyCashEntrySchema = new Schema(
       purpose: { type: String, trim: true, default: "", maxlength: 200 },
     },
 
-    // Optional COA expense account (the category the spend posts to).
+    // Optional COA expense account (the category a SPEND posts to — debit side
+    // of DR Expense / CR Petty Cash). Falls back to a default petty-cash
+    // expense account at posting time if unset.
     expenseAccountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+
+    // For a FLOAT-IN (debit): the bank the cash came from — the credit side of
+    // DR Petty Cash / CR Bank. Required to post the funding transfer.
+    sourceAccountId: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+
+    // The posted Journal Entry this row produced (funding transfer, or the
+    // batched spend posting on approval). Links the ledger row to the GL.
+    journalEntryId: { type: Schema.Types.ObjectId, ref: "JournalEntry", default: null },
 
     // debit = cash INTO the tin (float / top-up); credit = spend OUT.
     direction: {

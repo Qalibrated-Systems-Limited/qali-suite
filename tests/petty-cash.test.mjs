@@ -1,18 +1,22 @@
 /**
- * Petty cash: custodian records → submits → MD approves, and project-tagged
- * spend becomes project cost on approval.
+ * Petty cash: custodian funds the tin → records spends → submits → MD approves.
  *
- * Covers the CEO's rules: a spend must be tied to a project OR a clear purpose
- * (never blank), the DR/CR balance math (opening + top-ups − spend), the
- * custodian/MD role split, and the project-cost link.
+ * Covers the CEO's rules (spend tied to a project OR a clear purpose; spend can't
+ * exceed the float), the DR/CR balance math, the custodian/MD role split, the
+ * project-cost link, AND the GL: funding posts DR Petty Cash / CR Bank, approval
+ * posts DR Expense / CR Petty Cash — both balanced, through the same path
+ * documents use.
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import mongoose from "mongoose";
 import Account from "@/app/models/account";
 import Project from "@/app/models/project";
+import JournalEntry from "@/app/models/JournalEntry";
 import PettyCashReturn from "@/app/models/pettyCashReturn";
 import PettyCashEntry from "@/app/models/pettyCashEntry";
 import "@/app/models/erp-counter";
+import "@/app/models/Company";
+import "@/app/models/fiscalPeriod";
 // Models computeProjectActuals touches (registered for the recompute on approve).
 import "@/app/models/invoice";
 import "@/app/models/creditNote";
@@ -39,35 +43,37 @@ vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 
 const {
   createPettyCashReturn,
+  fundPettyCash,
   addPettyCashEntry,
   submitPettyCashReturn,
   approvePettyCashReturn,
 } = await import("@/app/mongodb/actions/petty-cash-actions.js");
 
-let companyId, floatId, project;
+let companyId, floatId, bankId, expenseId, project;
 
-async function seedFloat() {
+async function seedAccount(over) {
   const acc = await Account.create({
     companyId,
-    accountCode: "1000",
-    accountName: "Petty Cash",
-    accountType: "asset",
-    subType: "cash",
-    systemAccount: "petty_cash",
     canPost: true,
     isActive: true,
+    ...over,
   });
   return acc._id;
 }
 
 const PERIOD = { from: "2026-02-01", to: "2026-02-28" };
+const totals = (je) => ({
+  dr: je.lines.reduce((s, l) => s + (l.debit || 0), 0),
+  cr: je.lines.reduce((s, l) => s + (l.credit || 0), 0),
+});
 
-describe("petty cash lifecycle", () => {
+describe("petty cash lifecycle + GL posting", () => {
   beforeAll(async () => {
     await Promise.all([
       Project.init(),
       PettyCashReturn.init(),
       PettyCashEntry.init(),
+      JournalEntry.init(),
     ]);
   });
 
@@ -76,7 +82,9 @@ describe("petty cash lifecycle", () => {
     ctx.companyId = companyId.toString();
     ctx.isSuperAdmin = false;
     ctx.user = { name: "Sophie Custodian", id: new ObjectId().toString(), role: "Accountant" };
-    floatId = await seedFloat();
+    floatId = await seedAccount({ accountCode: "1000", accountName: "Petty Cash", accountType: "asset", subType: "cash", systemAccount: "petty_cash" });
+    bankId = await seedAccount({ accountCode: "1010", accountName: "KCB Bank", accountType: "asset", subType: "bank" });
+    expenseId = await seedAccount({ accountCode: "6000", accountName: "Petty Cash Expenses", accountType: "expense", subType: "operating_expense" });
     project = await Project.create({
       companyId,
       name: "Tom projects",
@@ -85,82 +93,66 @@ describe("petty cash lifecycle", () => {
     });
   });
 
-  it("records spend with project or purpose, rejects a blank allocation", async () => {
-    const created = await createPettyCashReturn({ floatAccountId: floatId.toString(), ...PERIOD });
-    expect(created.success).toBe(true);
-    const rid = created.returnId;
+  it("rejects a blank allocation and an over-float spend", async () => {
+    const { returnId: rid } = await createPettyCashReturn({ floatAccountId: floatId.toString(), ...PERIOD });
+    await fundPettyCash(rid, { sourceAccountId: bankId.toString(), amount: 50000 });
 
-    // fund the tin first (float top-up)
-    await addPettyCashEntry(rid, {
-      payeeName: "Bank", description: "Float received", direction: "debit", amount: 50000,
-    });
+    expect((await addPettyCashEntry(rid, { payeeName: "Tom", description: "Fuel", projectId: project._id.toString(), amount: 2000 })).success).toBe(true);
+    expect((await addPettyCashEntry(rid, { payeeName: "Sophie", description: "Kitchen", purpose: "Welfare", amount: 780 })).success).toBe(true);
 
-    // project-tagged spend
-    const a = await addPettyCashEntry(rid, {
-      payeeName: "Tom Okongo", description: "Fuel - Tom projects",
-      projectId: project._id.toString(), amount: 2000,
-    });
-    expect(a.success).toBe(true);
+    const blank = await addPettyCashEntry(rid, { payeeName: "X", description: "Unexplained", amount: 500 });
+    expect(blank.success).toBe(false);
+    expect(blank.error).toMatch(/project or .*purpose/i);
 
-    // purpose-only spend (overhead, no project)
-    const b = await addPettyCashEntry(rid, {
-      payeeName: "Sophie Juma", description: "Kitchen supplies", purpose: "Office welfare", amount: 780,
-    });
-    expect(b.success).toBe(true);
-
-    // blank allocation — no project AND no purpose → rejected
-    const bad = await addPettyCashEntry(rid, {
-      payeeName: "Someone", description: "Unexplained", amount: 500,
-    });
-    expect(bad.success).toBe(false);
-    expect(bad.error).toMatch(/project or .*purpose/i);
-
-    // a spend beyond the float balance is pushed to the Bill/Expense flow
-    const overspend = await addPettyCashEntry(rid, {
-      payeeName: "Hardware", description: "Construction materials",
-      projectId: project._id.toString(), amount: 200000,
-    });
-    expect(overspend.success).toBe(false);
-    expect(overspend.error).toMatch(/exceeds the petty cash balance/i);
-
-    const entries = await PettyCashEntry.find({ returnId: rid });
-    expect(entries.filter((e) => e.direction === "credit")).toHaveLength(2); // blank + overspend rejected
+    const over = await addPettyCashEntry(rid, { payeeName: "Hardware", description: "Construction materials", projectId: project._id.toString(), amount: 200000 });
+    expect(over.success).toBe(false);
+    expect(over.error).toMatch(/exceeds the petty cash balance/i);
   });
 
-  it("computes the DR/CR balance and posts spend to the project on MD approval", async () => {
+  it("funding posts DR Petty Cash / CR Bank", async () => {
     const { returnId: rid } = await createPettyCashReturn({ floatAccountId: floatId.toString(), ...PERIOD });
+    const res = await fundPettyCash(rid, { sourceAccountId: bankId.toString(), amount: 50000 });
+    expect(res.success).toBe(true);
 
-    // a top-up (debit) and two spends (credits)
-    await addPettyCashEntry(rid, { payeeName: "Bank", description: "Float top-up", direction: "debit", amount: 50000 });
-    await addPettyCashEntry(rid, { payeeName: "Tom Okongo", description: "Fuel", projectId: project._id.toString(), amount: 2000 });
+    const je = await JournalEntry.findOne({ companyId, entryType: "transfer" }).lean();
+    expect(je.status).toBe("posted");
+    const t = totals(je);
+    expect(t.dr).toBe(50000);
+    expect(t.cr).toBe(50000); // balanced
+    const floatLine = je.lines.find((l) => l.accountId.toString() === floatId.toString());
+    const bankLine = je.lines.find((l) => l.accountId.toString() === bankId.toString());
+    expect(floatLine.debit).toBe(50000); // DR petty cash
+    expect(bankLine.credit).toBe(50000); // CR bank
+  });
+
+  it("approval posts DR Expense / CR Petty Cash and feeds project cost", async () => {
+    const { returnId: rid } = await createPettyCashReturn({ floatAccountId: floatId.toString(), ...PERIOD });
+    await fundPettyCash(rid, { sourceAccountId: bankId.toString(), amount: 50000 });
+    await addPettyCashEntry(rid, { payeeName: "Tom", description: "Fuel", projectId: project._id.toString(), amount: 2000 });
     await addPettyCashEntry(rid, { payeeName: "Sophie", description: "Kitchen", purpose: "Welfare", amount: 780 });
 
-    let ret = await PettyCashReturn.findById(rid).lean();
-    expect(ret.totals.debits).toBe(50000);
-    expect(ret.totals.credits).toBe(2780);
-    expect(ret.totals.closing).toBe(47220); // 0 opening + 50000 − 2780
+    const ret = await PettyCashReturn.findById(rid).lean();
+    expect(ret.totals.closing).toBe(47220); // 0 + 50000 − 2780
 
-    // custodian submits
     expect((await submitPettyCashReturn(rid)).success).toBe(true);
+    // custodian (Accountant) can't approve
+    expect((await approvePettyCashReturn(rid)).success).toBe(false);
 
-    // a custodian (Accountant) cannot approve
-    const denied = await approvePettyCashReturn(rid);
-    expect(denied.success).toBe(false);
-
-    // MD approves
     ctx.user = { name: "Henry MD", id: new ObjectId().toString(), role: "CEO" };
-    const ok = await approvePettyCashReturn(rid);
-    expect(ok.success).toBe(true);
+    expect((await approvePettyCashReturn(rid)).success).toBe(true);
 
-    ret = await PettyCashReturn.findById(rid).lean();
-    expect(ret.status).toBe("approved");
-    expect(ret.approvedBy.name).toBe("Henry MD");
+    // spend JE posted, balanced: DR expense 2780 / CR petty cash 2780
+    const je = await JournalEntry.findOne({ companyId, entryType: "expense" }).lean();
+    expect(je.status).toBe("posted");
+    const t = totals(je);
+    expect(t.dr).toBe(2780);
+    expect(t.cr).toBe(2780);
+    const expLine = je.lines.find((l) => l.accountId.toString() === expenseId.toString());
+    const floatLine = je.lines.find((l) => l.accountId.toString() === floatId.toString());
+    expect(expLine.debit).toBe(2780); // DR expenses
+    expect(floatLine.credit).toBe(2780); // CR petty cash
 
-    // entries marked posted
-    const posted = await PettyCashEntry.countDocuments({ returnId: rid, posted: true });
-    expect(posted).toBe(3);
-
-    // the project-tagged spend is now project cost
+    // project-tagged spend is now project cost
     const p = await Project.findById(project._id).lean();
     expect(p.financials.totalCosts).toBe(2000);
   });

@@ -34,6 +34,26 @@ export async function getPettyCashFloatAccounts() {
 }
 
 // ============================================
+// EXPENSE ACCOUNTS — the category a spend posts to (DR side)
+// ============================================
+export async function getPettyCashExpenseAccounts() {
+  await dbConnect();
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const accounts = await Account.find({
+    ...tenantMatch(companyId, isSuperAdmin),
+    accountType: "expense",
+    isActive: true,
+    canPost: true,
+  })
+    .sort({ accountCode: 1 })
+    .select("accountCode accountName")
+    .lean();
+
+  return serializeBsonType(accounts);
+}
+
+// ============================================
 // LIST RETURNS
 // ============================================
 export async function getPettyCashReturns({ status } = {}) {
