@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { BankStatement, BankFeedLine } from "../../models/bankFeed";
@@ -74,6 +75,15 @@ export async function importBankStatement(formData) {
     const startDate = new Date(Math.min(...dates));
     const endDate = new Date(Math.max(...dates));
 
+    // Content hash for duplicate detection. Scoped per bank account so the
+    // same file can't be imported twice, but two different accounts that
+    // happen to share a layout don't false-collide. Computed here (not left
+    // null) — a null hash makes every upload collide on the unique
+    // {companyId, contentHash} index after the first one.
+    const contentHash = createHash("sha256")
+      .update(`${bankAccountId}::${csvContent}`)
+      .digest("hex");
+
     // Create statement
     const statement = await BankFeedService.createStatement({
       companyId,
@@ -82,6 +92,7 @@ export async function importBankStatement(formData) {
       statementPeriod: { startDate, endDate },
       columnMapping,
       dateFormat,
+      contentHash,
       uploadedBy: {
         id: session.user.id,
         name: session.user.name,

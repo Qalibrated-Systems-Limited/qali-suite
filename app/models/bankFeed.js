@@ -114,8 +114,20 @@ const bankStatementSchema = new Schema(
 // Indexes
 bankStatementSchema.index({ companyId: 1, createdAt: -1 });
 bankStatementSchema.index({ companyId: 1, bankAccountId: 1, status: 1 });
-// Unique hash per company to prevent duplicate uploads
-bankStatementSchema.index({ companyId: 1, contentHash: 1 }, { unique: true, sparse: true });
+// Unique hash per company to prevent duplicate uploads.
+// partialFilterExpression (not sparse): a `sparse` compound index still
+// indexes a document that has companyId but is missing contentHash — it
+// records the key as { companyId, null }, so two hashless uploads collide
+// (E11000 dup key contentHash:null). The partial filter restricts the
+// unique constraint to documents whose contentHash is an actual string,
+// so hashless/legacy rows are excluded entirely.
+bankStatementSchema.index(
+  { companyId: 1, contentHash: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { contentHash: { $type: "string" } },
+  },
+);
 
 // ============================================
 // BANK FEED LINE SCHEMA

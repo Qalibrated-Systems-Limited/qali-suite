@@ -15,6 +15,11 @@ import {
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
 import { requirePlanAccess } from "@/lib/plan-gate";
+import {
+  PROJECT_MANAGE_ROLES,
+  FINANCE_WRITE_ROLES,
+  hasRole,
+} from "@/lib/utils/role-gates";
 
 // ============================================
 // HELPERS
@@ -147,10 +152,10 @@ export async function createProject(prevState, formData) {
     }
 
     // Role check
-    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
+    if (!hasRole(user, PROJECT_MANAGE_ROLES)) {
       return {
         errors: {
-          _form: ["Unauthorized: Admin, Accountant, or Manager role required"],
+          _form: ["You don't have permission to create projects."],
         },
         values: rawValues,
       };
@@ -320,7 +325,7 @@ export async function updateProject(projectId, prevState, formData) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
+    if (!hasRole(user, PROJECT_MANAGE_ROLES)) {
       return {
         errors: { _form: ["Unauthorized"] },
         values: rawValues,
@@ -452,14 +457,14 @@ export async function updateProjectStatus(projectId, newStatus) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
+    if (!hasRole(user, PROJECT_MANAGE_ROLES)) {
       return { success: false, error: "Unauthorized" };
     }
 
     // Only Admin/Accountant can close
     if (
       newStatus === "closed" &&
-      !["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(user.role)
+      !hasRole(user, FINANCE_WRITE_ROLES)
     ) {
       return {
         success: false,
@@ -575,7 +580,7 @@ export async function createProjectBudget(prevState, formData) {
       return { errors: { _form: [error.message] } };
     }
 
-    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
+    if (!hasRole(user, PROJECT_MANAGE_ROLES)) {
       return { errors: { _form: ["Unauthorized"] } };
     }
 
@@ -692,7 +697,7 @@ export async function updateProjectBudget(prevState, formData) {
       return { errors: { _form: [error.message] } };
     }
 
-    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
+    if (!hasRole(user, PROJECT_MANAGE_ROLES)) {
       return { errors: { _form: ["Unauthorized"] } };
     }
 
@@ -772,7 +777,7 @@ export async function approveProjectBudget(budgetId) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(user.role)) {
+    if (!hasRole(user, FINANCE_WRITE_ROLES)) {
       return {
         success: false,
         error: "Unauthorized: Admin or Accountant required",
@@ -830,7 +835,7 @@ export async function updateProjectProgress(projectId, progressPercent) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
+    if (!hasRole(user, PROJECT_MANAGE_ROLES)) {
       return { success: false, error: "Unauthorized" };
     }
 
@@ -885,7 +890,7 @@ export async function createCostCode(prevState, formData) {
       return { errors: { _form: [error.message] } };
     }
 
-    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
+    if (!hasRole(user, PROJECT_MANAGE_ROLES)) {
       return { errors: { _form: ["Unauthorized"] } };
     }
 
@@ -953,7 +958,7 @@ export async function updateCostCode(costCodeId, prevState, formData) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant", "Manager"].includes(user.role)) {
+    if (!hasRole(user, PROJECT_MANAGE_ROLES)) {
       return { errors: { _form: ["Unauthorized"] } };
     }
 
@@ -1019,7 +1024,7 @@ export async function toggleCostCodeActive(costCodeId) {
 
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"].includes(user.role)) {
+    if (!hasRole(user, FINANCE_WRITE_ROLES)) {
       return { success: false, error: "Unauthorized" };
     }
 
