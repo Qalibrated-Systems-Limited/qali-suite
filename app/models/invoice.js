@@ -806,13 +806,27 @@ invoiceSchema.methods.validateAmounts = function () {
     );
   }
 
-  // Calculate amount due
-  this.amountDue = this.total - (this.amountPaid || 0);
+  // Calculate amount due — net of both cash received AND credit notes issued
+  // against this invoice. Omitting credits here would resurrect a credited
+  // balance the next time the invoice is saved.
+  this.amountDue = this.total - (this.amountPaid || 0) - this.totalCredited();
   if (this.amountDue < 0) {
     this.amountDue = 0;
   }
 
   return true;
+};
+
+/**
+ * Sum of credit notes issued against this invoice. Single source of truth so
+ * amountDue is computed identically in validateAmounts(), recordPayment(), and
+ * the credit-note issue() flow.
+ */
+invoiceSchema.methods.totalCredited = function () {
+  return (this.creditNotes || []).reduce(
+    (sum, cn) => sum + (cn.amount || 0),
+    0,
+  );
 };
 
 /**
@@ -1595,9 +1609,9 @@ invoiceSchema.methods.recordPayment = async function (
     paymentMethod: paymentMethod,
   });
 
-  // Update amounts
+  // Update amounts — net of credit notes too (see validateAmounts).
   this.amountPaid += amount;
-  this.amountDue = this.total - this.amountPaid;
+  this.amountDue = this.total - this.amountPaid - this.totalCredited();
 
   if (Math.abs(this.amountDue) < 0.01) {
     this.amountDue = 0;
