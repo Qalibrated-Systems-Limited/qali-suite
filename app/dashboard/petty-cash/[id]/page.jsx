@@ -98,6 +98,22 @@ export default async function PettyCashReturnPage({ params }) {
             <p className="text-sm font-semibold">{fmt(ret.totals?.closing)}</p>
           </div>
         </div>
+
+        {/* Reconciliation: the float's GL balance vs what top-ups/receipts
+            account for. Non-zero = cash moved by some route the return doesn't
+            capture (transfer, refund, manual entry) — i.e. over/short. */}
+        {Math.abs(ret.totals?.variance || 0) > 0.01 ? (
+          <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+            <span className="font-semibold">
+              {ret.totals.variance > 0 ? "Over" : "Short"} by{" "}
+              {fmt(Math.abs(ret.totals.variance))}
+            </span>{" "}
+            — the float&apos;s ledger balance ({fmt(ret.totals.glClosing)})
+            doesn&apos;t match what these top-ups and receipts account for (
+            {fmt(ret.totals.closing)}). Check for transfers, refunds or manual
+            entries on this account.
+          </div>
+        ) : null}
       </Card>
 
       {/* Ledger */}

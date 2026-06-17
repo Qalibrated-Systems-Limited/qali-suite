@@ -24,11 +24,12 @@ function tenantMatch(companyId, isSuperAdmin) {
 // only DISPLAYS them, so nothing is double-counted or re-typed.
 //
 // `tm` is the resolved tenant match; `floatId`/`from`/`to` are normalised.
-export async function computePettyCashStatement(tm, floatId, from, to, opening = 0) {
+export async function computePettyCashStatement(tm, floatId, from, to, opening = null) {
   const fromD = new Date(from);
   const toD = new Date(to);
+  const r2 = (n) => Math.round((n || 0) * 100) / 100;
 
-  const [expenses, topupAgg, projects] = await Promise.all([
+  const [expenses, topupAgg, projects, glAgg] = await Promise.all([
     // Spends OUT of the tin — expenses actually PAID from this account.
     // Only "paid" is real cash disbursed: a "posted" expense is an unpaid
     // accrual (the model sets status="posted"/paymentStatus="unpaid" together),
@@ -49,7 +50,33 @@ export async function computePettyCashStatement(tm, floatId, from, to, opening =
       { $project: { date: "$entryDate", description: 1, amount: "$lines.debit", entryNumber: 1 } },
     ]),
     Project.find({ ...tm }).select("name projectNumber").lean(),
+    // GL position of the float — the single source of truth for the balances.
+    // Opening = net of every posted line dated BEFORE `from` (so opening
+    // balances and prior periods are reflected automatically); closing = net
+    // through `to`. One pass, split by date with $cond.
+    JournalEntry.aggregate([
+      { $match: { ...tm, status: "posted", "lines.accountId": floatId, entryDate: { $lte: toD } } },
+      { $unwind: "$lines" },
+      { $match: { "lines.accountId": floatId } },
+      {
+        $group: {
+          _id: null,
+          openDebit: { $sum: { $cond: [{ $lt: ["$entryDate", fromD] }, "$lines.debit", 0] } },
+          openCredit: { $sum: { $cond: [{ $lt: ["$entryDate", fromD] }, "$lines.credit", 0] } },
+          totDebit: { $sum: "$lines.debit" },
+          totCredit: { $sum: "$lines.credit" },
+        },
+      },
+    ]),
   ]);
+
+  const gl = glAgg[0] || { openDebit: 0, openCredit: 0, totDebit: 0, totCredit: 0 };
+  const glOpening = r2(gl.openDebit - gl.openCredit); // float is debit-normal
+  const glClosing = r2(gl.totDebit - gl.totCredit);
+
+  // Opening is GL-derived by default; an explicit value overrides it (kept for
+  // back-compat and inception seeding).
+  const openingBalance = opening != null ? opening : glOpening;
 
   const projName = new Map(projects.map((p) => [p._id.toString(), p.name]));
 
@@ -79,7 +106,7 @@ export async function computePettyCashStatement(tm, floatId, from, to, opening =
     })),
   ].sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  let balance = opening || 0;
+  let balance = openingBalance;
   let debits = 0;
   let credits = 0;
   for (const r of rows) {
@@ -90,12 +117,25 @@ export async function computePettyCashStatement(tm, floatId, from, to, opening =
       balance -= r.amount;
       credits += r.amount;
     }
-    r.balance = balance;
+    r.balance = r2(balance);
   }
+
+  // What the custodian's top-ups/expenses account for vs. what the GL says is
+  // actually in the float. A non-zero variance flags cash movements the expense
+  // list doesn't capture (transfers, refunds, manual corrections) — i.e. over/short.
+  const accountedClosing = r2(openingBalance + debits - credits);
+  const variance = r2(glClosing - accountedClosing);
 
   return {
     rows,
-    totals: { debits, credits, closing: (opening || 0) + debits - credits },
+    openingBalance,
+    totals: {
+      debits: r2(debits),
+      credits: r2(credits),
+      closing: accountedClosing,
+      glClosing,
+      variance,
+    },
   };
 }
 
@@ -188,12 +228,13 @@ export async function getPettyCashReturnById(returnId) {
   // every expense paid from the tin + any float top-ups. Nothing is typed, so
   // the statement always reflects the real spend.
   const [statement, float] = await Promise.all([
+    // Opening is GL-derived inside the statement (reflects opening balances and
+    // prior periods) — no stored override.
     computePettyCashStatement(
       tm,
       ret.floatAccountId,
       ret.period?.from,
       ret.period?.to,
-      ret.openingBalance || 0,
     ),
     Account.findById(ret.floatAccountId).select("accountName accountCode").lean(),
   ]);
@@ -201,6 +242,7 @@ export async function getPettyCashReturnById(returnId) {
   return serializeBsonType({
     ...ret,
     float: float || null,
+    openingBalance: statement.openingBalance,
     rows: statement.rows,
     totals: statement.totals,
   });

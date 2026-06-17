@@ -90,4 +90,49 @@ describe("computePettyCashStatement", () => {
     // running balance ends at the closing figure
     expect(rows[rows.length - 1].balance).toBe(47220);
   });
+
+  it("opens at the float's GL balance (incl. a pre-period opening-balance entry)", async () => {
+    // Opening balance booked BEFORE the period: Dr Petty Cash 10,000.
+    await raw("JournalEntry", [
+      {
+        companyId,
+        status: "posted",
+        entryDate: new Date("2026-01-15"),
+        description: "Opening balance",
+        lines: [
+          { accountId: floatId, debit: 10000, credit: 0, accountType: "asset" },
+          { accountId: bankId, debit: 0, credit: 10000, accountType: "asset" },
+        ],
+      },
+      // In-period top-up of 5,000.
+      {
+        companyId,
+        status: "posted",
+        entryDate: new Date("2026-02-05"),
+        description: "Float top-up",
+        lines: [
+          { accountId: floatId, debit: 5000, credit: 0, accountType: "asset" },
+          { accountId: bankId, debit: 0, credit: 5000, accountType: "asset" },
+        ],
+      },
+    ]);
+    // One spend of 2,000 paid from the float, in period.
+    await raw("Expense", [
+      { companyId, paidFrom: floatId, status: "paid", expenseDate: new Date("2026-02-10"), total: 2000, description: "Fuel", vendor: { name: "Tom" } },
+    ]);
+
+    // No explicit opening passed → GL-derived.
+    const { rows, openingBalance, totals } = await computePettyCashStatement(
+      { companyId },
+      floatId,
+      "2026-02-01",
+      "2026-02-28",
+    );
+
+    expect(openingBalance).toBe(10000); // the Jan opening entry, not zero
+    expect(rows).toHaveLength(2); // only in-period top-up + expense
+    expect(totals.debits).toBe(5000);
+    expect(totals.credits).toBe(2000);
+    expect(totals.closing).toBe(13000); // 10,000 + 5,000 - 2,000
+  });
 });

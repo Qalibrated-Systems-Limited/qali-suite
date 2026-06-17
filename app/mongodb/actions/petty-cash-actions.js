@@ -104,14 +104,15 @@ async function postPettyCashJE({ companyId, user, entryDate, entryType, descript
 // Freeze the statement totals onto the return (called at submit/approve) so the
 // list and the approved record show a stable figure derived from the GL.
 async function snapshotTotals(ret) {
-  const { totals } = await computePettyCashStatement(
+  // Opening is GL-derived inside the statement — don't pass a stored override.
+  const { totals, openingBalance } = await computePettyCashStatement(
     { companyId: ret.companyId },
     ret.floatAccountId,
     ret.period?.from,
     ret.period?.to,
-    ret.openingBalance || 0,
   );
   ret.totals = totals;
+  ret.openingBalance = openingBalance;
 }
 
 // ============================================
@@ -137,17 +138,9 @@ export async function createPettyCashReturn({ floatAccountId, from, to } = {}) {
     ).select("_id subType");
     if (!float) return { success: false, error: "Petty cash account not found" };
 
-    // Opening balance carries forward from the last approved return on this float.
-    const last = await PettyCashReturn.findOne({
-      companyId: tenantCompanyId,
-      floatAccountId,
-      status: "approved",
-    })
-      .sort({ "period.to": -1 })
-      .select("totals.closing")
-      .lean();
-    const openingBalance = last?.totals?.closing || 0;
-
+    // Opening balance is GL-derived from the float as of the period start (set
+    // when totals are snapshotted), so there's no return-to-return carry-forward
+    // to compute here.
     const documentNumber = await generateDocNumber(tenantCompanyId);
     const ret = await PettyCashReturn.create({
       companyId: tenantCompanyId,
@@ -155,7 +148,6 @@ export async function createPettyCashReturn({ floatAccountId, from, to } = {}) {
       floatAccountId,
       custodian: { userId: user?.id, name: user?.name },
       period: { from: new Date(from), to: new Date(to) },
-      openingBalance,
       status: "draft",
     });
 
