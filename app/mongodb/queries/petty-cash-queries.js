@@ -1,6 +1,5 @@
 import mongoose from "mongoose";
 import PettyCashReturn from "../../models/pettyCashReturn";
-import PettyCashEntry from "../../models/pettyCashEntry";
 import Account from "../../models/account";
 import Project from "../../models/project";
 import Expense from "../../models/expenses";
