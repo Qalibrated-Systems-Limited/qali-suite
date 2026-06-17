@@ -23,6 +23,8 @@ import Product from "@/app/models/product";
 import InventoryAdjustment from "@/app/models/inventoryAdjustment";
 import Payment from "@/app/models/payment";
 import CreditNote from "@/app/models/creditNote";
+import Expense from "@/app/models/expenses";
+import Project from "@/app/models/project";
 
 // ============================================
 // APPROVAL ENGINE — SERVER ACTIONS
@@ -407,6 +409,8 @@ async function applyApprovalPayload(approval, user) {
       return applyStockAdjustment(approval, user);
     case "bill_payment":
       return applyBillPayment(approval, user);
+    case "expense_payment":
+      return applyExpensePayment(approval, user);
     case "credit_note":
       return applyCreditNote(approval, user);
     default:
@@ -504,6 +508,51 @@ async function applyBillPayment(approval, user) {
     success: true,
     appliedAt: new Date(),
     appliedRef: { kind: "Payment", id: payment._id },
+  };
+}
+
+// ============================================
+// EXPENSE PAYMENT — releases the held expense payment
+// ============================================
+// The custodian's payment was deferred (over threshold); on approval we run
+// the same recordPayment the direct path would, using the captured payload.
+async function applyExpensePayment(approval, user) {
+  const expenseId = approval.targetRef?.id || approval.payload?.expenseId;
+  if (!expenseId) return { success: false, error: "Missing expense reference" };
+
+  const expense = await Expense.findOne({
+    _id: expenseId,
+    companyId: approval.companyId,
+  });
+  if (!expense) return { success: false, error: "Expense not found" };
+  if (expense.paymentStatus === "paid") {
+    return { success: false, error: "Expense is already paid" };
+  }
+
+  const p = approval.payload || {};
+  await expense.recordPayment(
+    { name: user.name, id: user.id },
+    {
+      paymentMethod: p.paymentMethod,
+      paidFrom: p.paidFrom,
+      paidAt: p.paidAt ? new Date(p.paidAt) : new Date(),
+    },
+  );
+
+  // Payment moves the cost from committed to actual on the project.
+  if (expense.projectId) {
+    await Project.findByIdAndUpdate(expense.projectId, {
+      $inc: {
+        "financials.totalCosts": expense.total,
+        "financials.totalCommitted": -expense.total,
+      },
+    });
+  }
+
+  return {
+    success: true,
+    appliedAt: new Date(),
+    appliedRef: { kind: "Expense", id: expense._id },
   };
 }
 

@@ -16,6 +16,18 @@ import {
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
 import { requirePlanAccess } from "@/lib/plan-gate";
+import ApprovalRequest from "@/app/models/approvalRequest";
+import { getCompanyThresholds } from "@/app/mongodb/queries/threshold-queries";
+import { submitApproval } from "@/app/mongodb/actions/approval-actions";
+
+// Roles that may release a payment of any size without sign-off. Below the
+// threshold, the wider EXPENSE_ROLES.PAY set (incl. Accountant/Manager) pays.
+const PAYMENT_APPROVAL_BYPASS = new Set([
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+]);
 
 function revalidateProject(projectId) {
   if (projectId) {
@@ -438,6 +450,61 @@ export async function recordExpensePayment(expenseId, prevState, formData) {
 
     if (expense.paymentStatus === "paid") {
       return { success: false, error: "Expense is already paid" };
+    }
+
+    // ── Approval threshold ──────────────────────────────────────────
+    // Finance staff can pay small expenses directly; above the configurable
+    // threshold the release is routed for sign-off (CFO / Finance Manager /
+    // Admin) — segregation of duties on larger payments.
+    const amount = Number(expense.total) || 0;
+    if (!PAYMENT_APPROVAL_BYPASS.has(user?.role) && amount > 0) {
+      const thresholds = await getCompanyThresholds(
+        (companyId || expense.companyId)?.toString?.() || null,
+      );
+      const threshold = Number(thresholds.expensePaymentValue) || 0;
+      if (threshold > 0 && amount > threshold) {
+        const existing = await ApprovalRequest.findOne({
+          companyId: expense.companyId,
+          type: "expense_payment",
+          status: { $in: ["submitted", "applying"] },
+          "targetRef.id": expense._id,
+        })
+          .select("_id requestNumber")
+          .lean();
+        if (existing) {
+          return {
+            success: false,
+            error: `Approval ${existing.requestNumber} is already pending for this payment.`,
+            pendingApprovalId: existing._id.toString(),
+          };
+        }
+        const result = await submitApproval({
+          type: "expense_payment",
+          targetRef: {
+            kind: "Expense",
+            id: expense._id,
+            label: `${expense.expenseNumber} — ${expense.vendor?.name || "Payee"} — KES ${amount.toLocaleString()}`,
+          },
+          payload: {
+            expenseId: expense._id.toString(),
+            paymentMethod,
+            paidFrom,
+            paidAt: paidAt || new Date().toISOString(),
+          },
+          reason: `Expense payment of KES ${amount.toLocaleString()} exceeds threshold of KES ${threshold.toLocaleString()}`,
+          context: { amount, threshold },
+        });
+        if (!result.success) {
+          return { success: false, error: result.error };
+        }
+        revalidatePath(`/dashboard/expenses/${expenseId}`);
+        return {
+          success: false,
+          error: `Payment exceeds the KES ${threshold.toLocaleString()} approval threshold. Approval ${result.approval.requestNumber} has been submitted.`,
+          pendingApprovalId: result.approval._id,
+          pendingApprovalNumber: result.approval.requestNumber,
+        };
+      }
     }
 
     await expense.recordPayment(formatUser(user), {
