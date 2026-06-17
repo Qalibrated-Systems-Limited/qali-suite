@@ -69,7 +69,7 @@ export function AppSidebar({ children, user, notifications, ...props }) {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background text-foreground">
+    <div className="flex h-dvh overflow-hidden bg-background text-foreground">
       <PcNav user={user} collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
       <MobileNav
         mobileMenuOpen={mobileMenuOpen}
