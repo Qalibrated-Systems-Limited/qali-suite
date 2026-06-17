@@ -115,7 +115,7 @@ export const PettyCashReturnPDF = ({ data, company }) => {
         {rows.map((r, i) => (
           <View key={r._id || i} style={[styles.tRow, i % 2 ? styles.tRowAlt : null]}>
             <Text style={[styles.cell, styles.cDate]}>{fmtDate(r.date)}</Text>
-            <Text style={[styles.cell, styles.cName]}>{r.payee?.name || "-"}</Text>
+            <Text style={[styles.cell, styles.cName]}>{r.name || "-"}</Text>
             <Text style={[styles.cell, styles.cDesc]}>{r.description}</Text>
             <Text style={[styles.cell, styles.cProj]}>{r.projectLabel || "-"}</Text>
             <Text style={[styles.cell, styles.cDr]}>{r.direction === "debit" ? fmt(r.amount) : "-"}</Text>
