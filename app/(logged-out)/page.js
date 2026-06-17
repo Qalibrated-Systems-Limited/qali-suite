@@ -21,12 +21,6 @@ import {
   Check,
   ArrowUpRight,
   UserCog,
-  Building2,
-  Truck,
-  Wrench,
-  ShoppingBag,
-  Landmark,
-  Globe,
   Lock,
   CalendarCheck,
   ChevronRight,
@@ -50,34 +44,13 @@ const MODULES = [
   { icon: FileText,       name: "Stock Requests",  desc: "Internal requisitions with approval flow" },
 ];
 
-const STEPS = [
-  {
-    n: "01",
-    icon: Package,
-    title: "Set up your business",
-    desc: "Add products, accounts, employees, and team. Invite staff with role-based access.",
-  },
-  {
-    n: "02",
-    icon: Receipt,
-    title: "Run daily operations",
-    desc: "Invoice, purchase, expense, claim — stock and ledger update automatically.",
-  },
-  {
-    n: "03",
-    icon: BarChart3,
-    title: "See the full picture",
-    desc: "P&L, balance sheets, payroll summaries, project profitability — one click.",
-  },
-];
-
 const INDUSTRIES = [
-  { icon: ShoppingBag, name: "Retail & Distribution",       desc: "Multi-location stock, sales, suppliers" },
-  { icon: Building2,   name: "Construction & Engineering",  desc: "Project budgets, cost codes, subcontractors" },
-  { icon: Wrench,      name: "Service Companies",           desc: "T&M billing, expenses, project profitability" },
-  { icon: Truck,       name: "Logistics & Warehousing",     desc: "Stock movements, delivery notes, multi-warehouse" },
-  { icon: Landmark,    name: "Professional Firms",          desc: "Client billing, reimbursements, payroll" },
-  { icon: Globe,       name: "NGOs & SMEs",                 desc: "Budget tracking, donor reporting, compliance" },
+  "Retail & distribution",
+  "Construction & engineering",
+  "Service & consulting firms",
+  "Logistics & warehousing",
+  "Professional practices",
+  "NGOs & SMEs",
 ];
 
 const COMPLIANCE = [
@@ -102,12 +75,15 @@ export default function LandingPage() {
             <a href="#industries" className="hover:text-foreground transition-colors">Industries</a>
             <a href="#compliance" className="hover:text-foreground transition-colors">Compliance</a>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Button variant="ghost" size="sm" className="text-sm text-muted-foreground" asChild>
+          <div className="flex items-center gap-1 sm:gap-1.5">
+            <Button variant="ghost" size="sm" className="px-2 sm:px-3 text-[13px] sm:text-sm text-muted-foreground" asChild>
               <Link href="/login">Log in</Link>
             </Button>
-            <Button size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-8 px-4 text-sm" asChild>
-              <Link href="/login">Get started <ArrowRight className="ml-1 h-3.5 w-3.5" /></Link>
+            <Button size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-8 px-3 sm:px-4 text-[13px] sm:text-sm" asChild>
+              <Link href="/login">
+                Get started
+                <ArrowRight className="ml-1 h-3.5 w-3.5 hidden sm:inline-block" />
+              </Link>
             </Button>
           </div>
         </div>
@@ -118,21 +94,22 @@ export default function LandingPage() {
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,hsl(var(--primary)/0.08),transparent)]" />
 
         <div className="relative max-w-5xl mx-auto px-4 sm:px-6 pt-14 sm:pt-32 pb-14 sm:pb-32 text-center">
-          {/* Badge — plain and factual */}
-          <div className="animate-[fadeInUp_0.5s_ease-out_both] inline-flex items-center px-3 py-1 rounded-full border border-border bg-muted/50 text-muted-foreground text-xs font-medium mb-8">
-            Built for Kenyan businesses
+          {/* Badge — lead with the Kenya statutory angle, the killer differentiator */}
+          <div className="animate-[fadeInUp_0.5s_ease-out_both] inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-primary/30 bg-primary/10 text-primary text-[11px] sm:text-xs font-semibold mb-5 sm:mb-8">
+            <span>🇰🇪</span> PAYE · NSSF · SHIF · VAT — built in
           </div>
 
           {/* Headline */}
-          <h1 className="animate-[fadeInUp_0.6s_ease-out_0.1s_both] text-[clamp(2rem,5vw,3.5rem)] font-bold tracking-tight leading-[1.08] mb-6 max-w-2xl mx-auto">
+          <h1 className="animate-[fadeInUp_0.6s_ease-out_0.1s_both] text-[clamp(1.6rem,6vw,3.5rem)] font-bold tracking-tight leading-[1.1] mb-4 sm:mb-6 max-w-2xl mx-auto">
             Run your whole business{" "}
             <span className="text-primary">from one system.</span>
           </h1>
 
           {/* Subhead */}
-          <p className="animate-[fadeInUp_0.6s_ease-out_0.2s_both] text-muted-foreground text-base sm:text-lg leading-relaxed mb-10 max-w-lg mx-auto">
-            Stock, sales, purchases, payroll and accounts in one place.
-            Enter things once — the books update themselves.
+          <p className="animate-[fadeInUp_0.6s_ease-out_0.2s_both] text-muted-foreground text-sm sm:text-lg leading-relaxed mb-8 sm:mb-10 max-w-lg mx-auto">
+            Stock, sales, purchases, payroll and accounts in one place. Enter
+            things once — the books update themselves, and your KRA, NSSF &amp;
+            SHIF filings are ready when you are.
           </p>
 
           {/* CTA — stacked full-width on phones (side-by-side wrap looked
@@ -140,19 +117,19 @@ export default function LandingPage() {
           <div className="animate-[fadeInUp_0.6s_ease-out_0.3s_both] mx-auto mb-8 flex w-full max-w-xs flex-col justify-center gap-3 sm:max-w-none sm:flex-row">
             <Button
               size="lg"
-              className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 px-8 rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
+              className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-11 sm:h-12 px-6 sm:px-8 text-sm sm:text-base rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
               asChild
             >
               <Link href="/login">Start free <ArrowRight className="ml-1.5 h-4 w-4" /></Link>
             </Button>
-            <Button variant="outline" size="lg" className="w-full sm:w-auto h-12 px-7 rounded-xl font-medium hover:bg-muted/50 transition-all" asChild>
+            <Button variant="outline" size="lg" className="w-full sm:w-auto h-11 sm:h-12 px-6 sm:px-7 text-sm sm:text-base rounded-xl font-medium hover:bg-muted/50 transition-all" asChild>
               <Link href="/login">Log in</Link>
             </Button>
           </div>
 
           {/* Trust line */}
           <div className="animate-[fadeInUp_0.6s_ease-out_0.4s_both] flex flex-wrap justify-center gap-x-6 gap-y-2 text-[13px] text-muted-foreground">
-            {["No credit card", "5-minute setup", "Free tier available"].map((t) => (
+            {["Free to start, no card", "Your data stays yours", "Built & supported in Nairobi"].map((t) => (
               <span key={t} className="flex items-center gap-1.5">
                 <Check className="w-3.5 h-3.5 text-primary shrink-0" />
                 {t}
@@ -165,7 +142,10 @@ export default function LandingPage() {
       {/* ── Connected flow strip ── */}
       <section className="border-y border-border bg-muted/30 py-10 sm:py-14 px-4 sm:px-6 overflow-hidden">
         <div className="max-w-5xl mx-auto">
-          <p className="text-center text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-8">One action. Multiple updates.</p>
+          <p className="text-center text-sm sm:text-base text-muted-foreground max-w-xl mx-auto mb-8">
+            Raise one invoice and the rest follows — stock reserved, ledger
+            posted, project costed, VAT recorded. You only enter it once.
+          </p>
           {/* Wraps into rows on phones instead of one tall column */}
           <div className="flex flex-row flex-wrap items-start justify-center gap-x-6 gap-y-5 sm:flex-nowrap sm:items-center sm:gap-0">
             {[
@@ -192,11 +172,11 @@ export default function LandingPage() {
       </section>
 
       {/* ── Modules grid ── */}
-      <section id="modules" className="py-20 sm:py-28 px-4 sm:px-6 scroll-mt-16">
+      <section id="modules" className="py-14 sm:py-28 px-4 sm:px-6 scroll-mt-16">
         <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-14">
-            <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Modules</p>
-            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
+          <div className="text-center mb-10 sm:mb-14">
+            <p className="text-[13px] font-medium text-primary/80 mb-2">Modules</p>
+            <h2 className="text-xl sm:text-3xl font-bold tracking-tight mb-3">
               What&apos;s inside
             </h2>
             <p className="text-muted-foreground text-sm sm:text-base max-w-lg mx-auto">
@@ -223,73 +203,36 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── How it works ── */}
-      <section className="py-20 sm:py-28 px-4 sm:px-6 border-y border-border bg-muted/20">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-14">
-            <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">How it works</p>
-            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
-              Getting started
-            </h2>
-          </div>
-
-          <div className="grid sm:grid-cols-3 gap-5">
-            {STEPS.map((step, i) => (
-              <div key={step.n} className="relative group">
-                <div className="rounded-xl border border-border bg-card p-6 h-full hover:border-primary/30 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-9 h-9 rounded-xl bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold shrink-0 group-hover:scale-105 transition-transform duration-200">
-                      {step.n}
-                    </div>
-                    <div className="h-px flex-1 bg-border" />
-                    <step.icon className="w-4 h-4 text-muted-foreground shrink-0" />
-                  </div>
-                  <h3 className="text-base font-semibold text-foreground mb-2">{step.title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{step.desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Industries ── */}
-      <section id="industries" className="py-20 sm:py-28 px-4 sm:px-6 scroll-mt-16">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-14">
-            <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Industries</p>
-            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
-              Who uses it
-            </h2>
-            <p className="text-muted-foreground text-sm sm:text-base max-w-lg mx-auto">
-              Businesses that hold stock, run projects, or bill for their
-              time — and need the books to keep up.
-            </p>
-          </div>
-
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {INDUSTRIES.map((ind) => (
-              <div key={ind.name} className="group flex items-start gap-4 p-5 rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/15 group-hover:scale-105 transition-all duration-200">
-                  <ind.icon className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground mb-1">{ind.name}</h3>
-                  <p className="text-xs text-muted-foreground leading-relaxed">{ind.desc}</p>
-                </div>
-              </div>
+      {/* ── Industries — a quiet inline list, not another card wall ── */}
+      <section id="industries" className="py-14 sm:py-28 px-4 sm:px-6 scroll-mt-16 border-y border-border bg-muted/20">
+        <div className="max-w-3xl mx-auto text-center">
+          <h2 className="text-xl sm:text-3xl font-bold tracking-tight mb-4">
+            Who it&apos;s for
+          </h2>
+          <p className="text-muted-foreground text-sm sm:text-base mb-8 max-w-xl mx-auto">
+            Businesses that hold stock, run projects, or bill for their time —
+            and need the books to keep up. In practice that&apos;s mostly:
+          </p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {INDUSTRIES.map((name) => (
+              <span
+                key={name}
+                className="inline-flex items-center px-3 py-1.5 rounded-full border border-border bg-card text-sm text-foreground"
+              >
+                {name}
+              </span>
             ))}
           </div>
         </div>
       </section>
 
       {/* ── Kenya Compliance ── */}
-      <section id="compliance" className="py-20 sm:py-28 px-4 sm:px-6 border-y border-border bg-muted/20 scroll-mt-16">
+      <section id="compliance" className="py-14 sm:py-28 px-4 sm:px-6 border-y border-border bg-muted/20 scroll-mt-16">
         <div className="max-w-5xl mx-auto">
           <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Compliance</p>
-              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-3">
+              <p className="text-[13px] font-medium text-primary/80 mb-2">Compliance</p>
+              <h2 className="text-xl sm:text-3xl font-bold tracking-tight mb-3">
                 Kenya statutory compliance,{" "}
                 <span className="text-primary">built in.</span>
               </h2>
@@ -323,31 +266,31 @@ export default function LandingPage() {
       </section>
 
       {/* ── CTA ── */}
-      <section className="py-20 sm:py-28 px-4 sm:px-6">
+      <section className="py-14 sm:py-28 px-4 sm:px-6">
         <div className="max-w-5xl mx-auto">
           <div className="rounded-2xl bg-slate-900 dark:bg-zinc-900 p-8 sm:p-14 relative overflow-hidden">
             <div className="absolute -top-32 -right-32 w-80 h-80 rounded-full bg-primary/10 blur-[100px]" />
             <div className="absolute -bottom-24 -left-24 w-64 h-64 rounded-full bg-primary/5 blur-[80px]" />
             <div className="relative z-10 text-center max-w-lg mx-auto">
-              <p className="text-xs font-semibold uppercase tracking-widest text-primary mb-3">Get started</p>
-              <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight mb-3 leading-tight">
+              <p className="text-[13px] font-medium text-primary/80 mb-2">Get started</p>
+              <h2 className="text-xl sm:text-3xl font-bold text-white tracking-tight mb-3 leading-tight">
                 Try it with your own data.
               </h2>
-              <p className="text-slate-400 text-sm sm:text-base mb-8 leading-relaxed">
+              <p className="text-slate-400 text-sm sm:text-base mb-7 sm:mb-8 leading-relaxed">
                 The free tier is enough to invoice, track stock and see your
                 first reports. Upgrade when you need more.
               </p>
               <div className="flex flex-wrap justify-center gap-3">
                 <Button
                   size="lg"
-                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 px-8 rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-11 sm:h-12 px-6 sm:px-8 text-sm sm:text-base rounded-xl shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
                   asChild
                 >
                   <Link href="/login">
                     Start free <ArrowUpRight className="ml-1.5 h-4 w-4" />
                   </Link>
                 </Button>
-                <Button variant="outline" size="lg" className="h-12 px-7 rounded-xl font-medium border-white/40 text-white bg-white/10 hover:bg-white/20 hover:text-white transition-all" asChild>
+                <Button variant="outline" size="lg" className="h-11 sm:h-12 px-6 sm:px-7 text-sm sm:text-base rounded-xl font-medium border-white/40 text-white bg-white/10 hover:bg-white/20 hover:text-white transition-all" asChild>
                   <Link href="/login">Log in</Link>
                 </Button>
               </div>
