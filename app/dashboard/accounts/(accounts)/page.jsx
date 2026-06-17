@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AccountStatsCards,
@@ -20,12 +20,20 @@ export default async function AccountsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold tracking-tight">Chart of Accounts</h1>
-        <Button asChild size="sm">
-          <Link href="/dashboard/accounts/create">
-            <Plus className="h-3.5 w-3.5 mr-1.5" />
-            New Account
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild size="sm" variant="outline">
+            <Link href="/dashboard/accounts/opening-balances">
+              <Scale className="h-3.5 w-3.5 mr-1.5" />
+              Opening Balances
+            </Link>
+          </Button>
+          <Button asChild size="sm">
+            <Link href="/dashboard/accounts/create">
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              New Account
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards - Stream independently */}

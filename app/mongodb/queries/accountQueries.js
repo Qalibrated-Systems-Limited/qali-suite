@@ -585,6 +585,79 @@ export async function getExpenseAccountsForDialog() {
   return serializeBsonType(accounts);
 }
 
+/**
+ * Data for the Opening Balances (conversion balances) screen:
+ * - every postable account to fill the trial-balance grid (the Opening
+ *   Balance Equity plug account is flagged so the UI can exclude it),
+ * - whether an opening-balance entry already exists (so we block re-entry),
+ * - the current Opening Balance Equity balance (so the UI can nudge the user
+ *   to reclassify it — "don't leave the drawer full").
+ */
+export async function getOpeningBalanceSetup() {
+  await dbConnect();
+
+  const { companyId, isSuperAdmin } = await getTenantContext();
+
+  const [accounts, existing, obe] = await Promise.all([
+    Account.find(
+      withTenantScope({ canPost: true, isActive: true }, companyId, isSuperAdmin),
+    )
+      .sort({ accountCode: 1 })
+      .select("_id accountCode accountName accountType subType systemAccount")
+      .lean(),
+    JournalEntry.findOne(
+      withTenantScope(
+        { entryType: "opening_balance", status: { $ne: "reversed" } },
+        companyId,
+        isSuperAdmin,
+      ),
+    )
+      .select("entryNumber entryDate")
+      .lean(),
+    Account.findOne(
+      withTenantScope(
+        { systemAccount: "opening_balance_equity" },
+        companyId,
+        isSuperAdmin,
+      ),
+    ).lean(),
+  ]);
+
+  // Live Opening Balance Equity balance (credit-normal): credit − debit
+  // across posted lines that hit it.
+  let openingBalanceEquity = 0;
+  if (obe) {
+    const [agg] = await JournalEntry.aggregate([
+      {
+        $match: {
+          ...buildTenantMatch(companyId, isSuperAdmin),
+          status: "posted",
+          "lines.accountId": obe._id,
+        },
+      },
+      { $unwind: "$lines" },
+      { $match: { "lines.accountId": obe._id } },
+      {
+        $group: {
+          _id: null,
+          debit: { $sum: "$lines.debit" },
+          credit: { $sum: "$lines.credit" },
+        },
+      },
+    ]);
+    if (agg) openingBalanceEquity = Math.round((agg.credit - agg.debit) * 100) / 100;
+  }
+
+  return serializeBsonType({
+    accounts,
+    obeAccountId: obe?._id || null,
+    alreadyPosted: existing
+      ? { entryNumber: existing.entryNumber, entryDate: existing.entryDate }
+      : null,
+    openingBalanceEquity,
+  });
+}
+
 export default {
   getAccounts,
   getChartOfAccounts,
@@ -599,4 +672,5 @@ export default {
   getAccountStats,
   getAccountsWithBalances,
   getExpenseAccountsForDialog,
+  getOpeningBalanceSetup,
 };
