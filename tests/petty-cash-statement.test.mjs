@@ -53,13 +53,15 @@ describe("computePettyCashStatement", () => {
           { accountId: bankId, debit: 0, credit: 50000, accountType: "asset" },
         ] },
     ]);
-    // Two spends paid from the float — one project-tagged, one category overhead.
+    // Two spends actually PAID from the float — one project-tagged, one category overhead.
     await raw("Expense", [
-      { companyId, paidFrom: floatId, status: "posted", expenseDate: inRange, total: 2000, description: "Fuel", projectId: project._id, vendor: { name: "Tom" } },
+      { companyId, paidFrom: floatId, status: "paid", expenseDate: inRange, total: 2000, description: "Fuel", projectId: project._id, vendor: { name: "Tom" } },
       { companyId, paidFrom: floatId, status: "paid", expenseDate: inRange, total: 780, description: "Kitchen", category: "office_supplies", vendor: { name: "Sophie" } },
+      // unpaid accrual against the float (in range) — NOT cash out, must NOT appear
+      { companyId, paidFrom: floatId, status: "posted", expenseDate: inRange, total: 5000, description: "Accrued, unpaid", vendor: { name: "Z" } },
       // out of range / different account — must NOT appear
-      { companyId, paidFrom: floatId, status: "posted", expenseDate: new Date("2026-03-05"), total: 999, description: "Next month", vendor: { name: "X" } },
-      { companyId, paidFrom: bankId, status: "posted", expenseDate: inRange, total: 888, description: "Paid from bank", vendor: { name: "Y" } },
+      { companyId, paidFrom: floatId, status: "paid", expenseDate: new Date("2026-03-05"), total: 999, description: "Next month", vendor: { name: "X" } },
+      { companyId, paidFrom: bankId, status: "paid", expenseDate: inRange, total: 888, description: "Paid from bank", vendor: { name: "Y" } },
     ]);
 
     const { rows, totals } = await computePettyCashStatement(
@@ -70,10 +72,12 @@ describe("computePettyCashStatement", () => {
       0,
     );
 
-    expect(rows).toHaveLength(3); // 1 top-up + 2 in-range float expenses
+    expect(rows).toHaveLength(3); // 1 top-up + 2 in-range PAID float expenses
     expect(totals.debits).toBe(50000);
-    expect(totals.credits).toBe(2780);
+    expect(totals.credits).toBe(2780); // 2000 + 780 — the 5000 unpaid accrual is excluded
     expect(totals.closing).toBe(47220);
+    // The unpaid accrual must not appear as cash out of the tin.
+    expect(rows.some((r) => r.amount === 5000)).toBe(false);
 
     const topup = rows.find((r) => r.direction === "debit");
     expect(topup.amount).toBe(50000);

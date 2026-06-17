@@ -30,11 +30,14 @@ export async function computePettyCashStatement(tm, floatId, from, to, opening =
   const toD = new Date(to);
 
   const [expenses, topupAgg, projects] = await Promise.all([
-    // Spends OUT of the tin — expenses paid from this account.
+    // Spends OUT of the tin — expenses actually PAID from this account.
+    // Only "paid" is real cash disbursed: a "posted" expense is an unpaid
+    // accrual (the model sets status="posted"/paymentStatus="unpaid" together),
+    // so counting it as money out would understate the float balance.
     Expense.find({
       ...tm,
       paidFrom: floatId,
-      status: { $in: ["posted", "paid"] },
+      status: "paid",
       expenseDate: { $gte: fromD, $lte: toD },
     })
       .select("expenseDate description category projectId accountName vendor total expenseNumber")
