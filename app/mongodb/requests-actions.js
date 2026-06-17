@@ -192,12 +192,24 @@ export async function approveRequest(requestId, prevState, formData) {
       })
       .map((item) => item.productId);
 
+    // Tenant-scoped to the request's own company (the request is already
+    // tenant-validated above) so a stray foreign productId can't commit
+    // another company's stock.
     const approveProducts = approvedProductIds.length > 0
-      ? await Product.find({ _id: { $in: approvedProductIds } }).session(session)
+      ? await Product.find({
+          _id: { $in: approvedProductIds },
+          companyId: request.companyId,
+        }).session(session)
       : [];
     const approveProductMap = new Map(approveProducts.map((p) => [p._id.toString(), p]));
 
-    // Reserve stock for each approved item to prevent overselling
+    // Reserve stock for each approved item. The decrement is an ATOMIC
+    // conditional update: it only commits if enough is still available at
+    // write time. This makes overselling structurally impossible under
+    // concurrent approvals (two approvers can't both pass a stale
+    // read-then-check) rather than relying on transaction write-conflict
+    // semantics alone, and it handles the same product appearing on
+    // multiple request lines without a local running cache.
     for (const item of request.items) {
       const approval = itemApprovals[item._id.toString()];
       if (!approval || approval.quantity <= 0) continue;
@@ -207,29 +219,33 @@ export async function approveRequest(requestId, prevState, formData) {
         throw new Error(`Product ${item.productName} not found`);
       }
 
-      const available = product.inventory?.quantityAvailable ?? 0;
-      if (approval.quantity > available) {
-        throw new Error(
-          `Insufficient stock for ${product.name}. Available: ${available}, Approved: ${approval.quantity}`
-        );
-      }
-
-      // COMMIT the inventory (reserve for this request)
-      await Product.findByIdAndUpdate(
-        item.productId,
+      const committed = await Product.findOneAndUpdate(
+        {
+          _id: item.productId,
+          companyId: request.companyId,
+          "inventory.quantityAvailable": { $gte: approval.quantity },
+        },
         {
           $inc: {
             "inventory.quantityCommitted": approval.quantity,
             "inventory.quantityAvailable": -approval.quantity,
           },
         },
-        { session }
+        { session, new: true }
       );
 
-      // Update local cache for subsequent items of same product
-      product.inventory.quantityAvailable = available - approval.quantity;
-      product.inventory.quantityCommitted =
-        (product.inventory.quantityCommitted || 0) + approval.quantity;
+      if (!committed) {
+        // Nothing matched → not enough available right now. Re-read for an
+        // accurate figure in the message (we're inside the failing txn).
+        const current = await Product.findById(item.productId)
+          .select("inventory.quantityAvailable")
+          .session(session)
+          .lean();
+        const available = current?.inventory?.quantityAvailable ?? 0;
+        throw new Error(
+          `Insufficient stock for ${product.name}. Available: ${available}, Approved: ${approval.quantity}`
+        );
+      }
     }
 
     // ========================================
