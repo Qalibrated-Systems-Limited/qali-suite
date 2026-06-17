@@ -20,6 +20,9 @@ import Bill from "@/app/models/bill";
 import Invoice from "@/app/models/invoice";
 import JournalEntry from "@/app/models/JournalEntry";
 import FiscalPeriod from "@/app/models/fiscalPeriod";
+import Product from "@/app/models/product";
+import { StockMovement } from "@/app/models/stockmovement";
+import "@/app/models/counter"; // registers Counter for generateMovementNumber
 import { seedTenant, seedFiscalPeriod } from "./helpers/fixtures.mjs";
 
 // Copy of the makeBill helper from bills.test.mjs (kept local so this
@@ -288,6 +291,62 @@ describe("Edge cases", () => {
       for (const [, net] of netByAccount) {
         expect(net).toBeCloseTo(0, 2);
       }
+    });
+
+    it("restores physical inventory the bill admitted on cancel (H1)", async () => {
+      const tenant = await seedTenant();
+
+      // Product already holding the purchased stock (as if approval admitted 4).
+      const product = await Product.create({
+        companyId: tenant.company._id,
+        name: "Widget",
+        SKU: `SKU-${Date.now()}`,
+        costing: { costPrice: 25 },
+        inventory: {
+          quantityOnHand: 10,
+          quantityCommitted: 0,
+          quantityOnHold: 0,
+          quantityAvailable: 10,
+        },
+      });
+
+      const bill = await makeBill(tenant, { status: "approved" }).save();
+      bill.accounting = { ...bill.accounting, inventoryMoved: true };
+      await bill.save();
+
+      // The "in" movement the approval would have created, tagged to the bill.
+      await StockMovement.create({
+        companyId: tenant.company._id,
+        movementNumber: `MOV-${Date.now()}`,
+        productId: product._id,
+        productSnapshot: { name: product.name, SKU: product.SKU },
+        movementType: "purchase",
+        direction: "in",
+        quantity: 4,
+        previousStock: 6,
+        newStock: 10,
+        costing: { unitCost: 25, totalCost: 100 },
+        relatedDocuments: { billId: bill._id },
+        status: "posted",
+        postedAt: new Date(),
+        performedBy: { name: tenant.user.name, id: tenant.user._id.toString() },
+      });
+
+      await bill.cancel(tenant.user, "Wrong order");
+
+      expect(bill.status).toBe("cancelled");
+
+      // Stock restored: 10 on hand - 4 reversed out = 6.
+      const reloaded = await Product.findById(product._id);
+      expect(reloaded.inventory.quantityOnHand).toBe(6);
+
+      // A reversing "out" movement was recorded for the bill.
+      const reversal = await StockMovement.findOne({
+        "relatedDocuments.billId": bill._id,
+        direction: "out",
+      });
+      expect(reversal).not.toBeNull();
+      expect(reversal.quantity).toBe(4);
     });
 
     it("cannot cancel a bill that has been paid", async () => {

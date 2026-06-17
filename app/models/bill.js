@@ -907,6 +907,7 @@ billSchema.methods.approve = async function (user) {
     try {
       const product = await Product.findById(sm.productId);
       if (product) {
+        const previousStock = product.inventory?.quantityOnHand ?? 0;
         // Update product inventory
         if (typeof product.increaseInventory === "function") {
           await product.increaseInventory(
@@ -915,8 +916,14 @@ billSchema.methods.approve = async function (user) {
             `Purchased via Bill ${this.billNumber}`,
           );
         }
+        const newStock =
+          product.inventory?.quantityOnHand ?? previousStock + sm.quantity;
 
-        // Create stock movement record (with tenant scoping)
+        // Create stock movement record (with tenant scoping). previousStock
+        // and newStock are required by the schema — omitting them threw a
+        // ValidationError that the surrounding try/catch silently swallowed,
+        // so the audit trail (and the basis for cancellation reversal) was
+        // never written.
         const movementNumber = await StockMovement.generateMovementNumber(this.companyId);
         await StockMovement.create({
           companyId: this.companyId, // Tenant scoping
@@ -931,6 +938,8 @@ billSchema.methods.approve = async function (user) {
           movementType: "purchase",
           direction: "in",
           quantity: sm.quantity,
+          previousStock,
+          newStock,
           costing: {
             unitCost: sm.unitCost,
             totalCost: sm.totalCost,
@@ -1039,26 +1048,99 @@ billSchema.methods.cancel = async function (user, reason) {
   }
 
   const JournalEntry = mongoose.model("JournalEntry");
+  const Product = mongoose.model("Product");
+  const StockMovement = mongoose.model("StockMovement");
   const userInfo = formatUser(user);
 
-  // Reverse journal entry if posted
-  if (this.accounting.journalEntryId) {
-    const je = await JournalEntry.findById(this.accounting.journalEntryId);
-    if (je && je.status === "posted") {
-      await je.reverse(
-        userInfo,
-        `Bill ${this.billNumber} cancelled: ${reason}`,
-      );
-    }
+  // Cancelling an approved bill must undo everything its approval did, as one
+  // atomic unit: reverse the GL entry AND restore any physical inventory the
+  // bill admitted. Previously only the JE was reversed, so the stock stayed
+  // on hand as phantom inventory. (Project cost needs no explicit reversal —
+  // computeProjectActuals already excludes cancelled bills.)
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      // 1. Reverse the journal entry if posted.
+      if (this.accounting.journalEntryId) {
+        const je = await JournalEntry.findById(
+          this.accounting.journalEntryId,
+        ).session(session);
+        if (je && je.status === "posted") {
+          await je.reverse(
+            userInfo,
+            `Bill ${this.billNumber} cancelled: ${reason}`,
+            session,
+          );
+        }
+      }
+
+      // 2. Restore physical inventory — but ONLY if the bill itself moved it.
+      // Strict three-way-match bills defer the stock movement to GRN
+      // acceptance (inventoryMoved=false), so there is nothing here to undo.
+      if (this.accounting?.inventoryMoved) {
+        const moves = await StockMovement.find({
+          companyId: this.companyId,
+          "relatedDocuments.billId": this._id,
+          direction: "in",
+          status: "posted",
+        }).session(session);
+
+        for (const mv of moves) {
+          const product = await Product.findById(mv.productId).session(session);
+          if (!product) continue;
+          const previousStock = product.inventory?.quantityOnHand ?? 0;
+          // Throws if the received stock has already been consumed — a real
+          // conflict the user must resolve (you can't cancel a bill whose
+          // goods are gone) rather than letting inventory go negative.
+          await product.decreaseInventory(
+            mv.quantity,
+            `Bill ${this.billNumber} cancelled`,
+            session,
+          );
+          const newStock =
+            product.inventory?.quantityOnHand ?? previousStock - mv.quantity;
+
+          const movementNumber = await StockMovement.generateMovementNumber(
+            this.companyId,
+          );
+          await StockMovement.create(
+            [
+              {
+                companyId: this.companyId,
+                movementNumber,
+                productId: product._id,
+                productSnapshot: mv.productSnapshot,
+                movementType: "adjustment",
+                direction: "out",
+                quantity: mv.quantity,
+                previousStock,
+                newStock,
+                costing: mv.costing,
+                relatedDocuments: { billId: this._id },
+                notes: `Reversal — Bill ${this.billNumber} cancelled: ${reason || ""}`,
+                status: "posted",
+                postedAt: new Date(),
+                postedBy: userInfo,
+                performedBy: userInfo,
+              },
+            ],
+            { session },
+          );
+        }
+      }
+
+      // 3. Mark the bill cancelled.
+      this.status = "cancelled";
+      this.cancelledAt = new Date();
+      this.cancelledBy = userInfo;
+      this.cancellationReason = reason || "No reason provided";
+      this.lastModifiedBy = userInfo;
+      await this.save({ session });
+    });
+  } finally {
+    session.endSession();
   }
 
-  this.status = "cancelled";
-  this.cancelledAt = new Date();
-  this.cancelledBy = userInfo;
-  this.cancellationReason = reason || "No reason provided";
-  this.lastModifiedBy = userInfo;
-
-  await this.save();
   return this;
 };
 
