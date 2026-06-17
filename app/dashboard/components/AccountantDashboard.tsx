@@ -438,7 +438,17 @@ async function BankReconciliationCard() {
           ? `${unallocatedCount} transactions to allocate`
           : "All transactions allocated"
       }
-      href="/dashboard/banking"
+      action={
+        // Not the card-level `href` — that wraps the whole card in a link and
+        // the per-statement rows below are links too (nested <a> = hydration
+        // error). A header action link keeps both without nesting.
+        <a
+          href="/dashboard/banking"
+          className="text-xs font-medium text-primary hover:underline"
+        >
+          View all
+        </a>
+      }
     >
       {!hasStatements ? (
         <div className="py-8 text-center">

@@ -480,16 +480,52 @@ expenseSchema.methods.post = async function (user) {
     creditAccount = await Account.findById(this.paidFrom);
     if (!creditAccount) throw new Error("Payment account not found");
   } else {
-    // Unpaid → credit Accrued Expenses (liability)
+    // Unpaid → credit Accrued Expenses (liability). Self-heal so a STANDARD
+    // account never hard-blocks posting: use the tagged account; else adopt an
+    // existing "Accrued Expenses" account (tagging it — common case: the seeded
+    // 2170 was never tagged); else create it.
     creditAccount = await Account.findOne({
       companyId: this.companyId,
       systemAccount: "accrued_expenses",
     });
     if (!creditAccount) {
-      throw new Error(
-        "Accrued Expenses account not configured. " +
-        "Add an account with system type 'accrued_expenses' to record unpaid expenses."
-      );
+      creditAccount = await Account.findOne({
+        companyId: this.companyId,
+        accountName: { $regex: /^accrued expenses$/i },
+      });
+      if (creditAccount) {
+        creditAccount.systemAccount = "accrued_expenses";
+        await creditAccount.save();
+      } else {
+        const stamp = user && user.id ? user : { name: "System", id: "system" };
+        try {
+          creditAccount = await Account.create({
+            companyId: this.companyId,
+            accountCode: "2170",
+            accountName: "Accrued Expenses",
+            accountType: "liability",
+            subType: "accrual",
+            systemAccount: "accrued_expenses",
+            canPost: true,
+            isActive: true,
+            createdBy: stamp,
+          });
+        } catch (err) {
+          // Code 2170 already taken by another account — adopt it as a last
+          // resort rather than failing the post.
+          if (err?.code === 11000) {
+            creditAccount = await Account.findOne({
+              companyId: this.companyId,
+              accountCode: "2170",
+            });
+            if (creditAccount) {
+              creditAccount.systemAccount = "accrued_expenses";
+              await creditAccount.save();
+            }
+          }
+          if (!creditAccount) throw err;
+        }
+      }
     }
   }
 

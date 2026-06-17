@@ -1019,19 +1019,12 @@ export async function syncChartOfAccounts() {
       existingAccounts.map((a) => a.accountCode)
     );
 
-    // Find missing accounts
+    // Find missing accounts. NB: even when none are missing, we still fall
+    // through to the systemAccount backfill below — a company can have every
+    // account by code yet be missing tags that posting depends on.
     const missing = seedAccounts.filter(
       (a) => !existingCodes.has(a.accountCode)
     );
-
-    if (missing.length === 0) {
-      return {
-        success: true,
-        created: 0,
-        message: "All accounts are up to date",
-        accounts: [],
-      };
-    }
 
     // Create missing accounts in two passes (same as seed logic)
     const accountMap = new Map();
@@ -1095,13 +1088,42 @@ export async function syncChartOfAccounts() {
       }
     }
 
+    // Backfill missing systemAccount tags on accounts that already exist by
+    // code. A company onboarded before a tag was added (e.g. "Accrued Expenses"
+    // 2170 without systemAccount: "accrued_expenses") otherwise keeps failing
+    // posting lookups, and the create-pass above skips it because the code is
+    // present. Only set the tag when the seed defines one and the existing
+    // account lacks it — never clobber a user-set value.
+    let tagged = 0;
+    const seedByCode = new Map(seedAccounts.map((a) => [a.accountCode, a]));
+    const existingTagless = await Account.find(
+      withTenantScope(
+        { accountCode: { $in: [...seedByCode.keys()] }, systemAccount: { $in: [null, ""] } },
+        companyId,
+        isSuperAdmin,
+      ),
+    ).select("accountCode systemAccount");
+    for (const acc of existingTagless) {
+      const seed = seedByCode.get(acc.accountCode);
+      if (seed?.systemAccount) {
+        acc.systemAccount = seed.systemAccount;
+        await acc.save();
+        tagged++;
+      }
+    }
+
     revalidatePath("/dashboard/accounts");
     revalidatePath("/dashboard/settings");
+
+    const parts = [];
+    if (created.length) parts.push(`created ${created.length} account${created.length === 1 ? "" : "s"}`);
+    if (tagged) parts.push(`tagged ${tagged} system account${tagged === 1 ? "" : "s"}`);
 
     return {
       success: true,
       created: created.length,
-      message: `Created ${created.length} missing account${created.length === 1 ? "" : "s"}`,
+      tagged,
+      message: parts.length ? `Sync complete — ${parts.join(", ")}` : "All accounts are up to date",
       accounts: created.map((a) => ({
         accountCode: a.accountCode,
         accountName: a.accountName,

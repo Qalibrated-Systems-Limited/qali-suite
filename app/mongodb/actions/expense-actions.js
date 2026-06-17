@@ -539,8 +539,11 @@ export async function postLegacyExpense(expenseId) {
       return { success: false, error: "Expense not found" };
     }
 
-    // Only handle legacy statuses that don't have a JE yet
-    if (!["pending", "approved", "rejected"].includes(expense.status)) {
+    // Handle statuses that don't have a posted JE yet: legacy (pending/
+    // approved/rejected) AND "draft" — a draft is left stranded when
+    // createExpense's auto-post throws (e.g. a missing system account), so it
+    // must be re-postable once the cause is fixed.
+    if (!["draft", "pending", "approved", "rejected"].includes(expense.status)) {
       return { success: false, error: `Expense is already ${expense.status}` };
     }
 
