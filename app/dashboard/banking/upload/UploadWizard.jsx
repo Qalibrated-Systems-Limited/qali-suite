@@ -17,14 +17,16 @@ import {
   Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import BankAccountCombobox from "@/components/bank-account-combobox";
 import { importBankStatement } from "@/app/mongodb/actions/bank-feed-actions";
 
 // Supported file types
-const SUPPORTED_EXTENSIONS = [".csv", ".xlsx", ".xls"];
+// Legacy .xls is intentionally excluded — ExcelJS can't read the old binary
+// format. Banks all offer CSV or .xlsx; users re-save .xls as .xlsx.
+const SUPPORTED_EXTENSIONS = [".csv", ".xlsx"];
 const SUPPORTED_MIME_TYPES = [
   "text/csv",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
 ];
 
 // ============================================
@@ -422,7 +424,9 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
     const isValidMimeType = SUPPORTED_MIME_TYPES.includes(file.type);
 
     if (!isValidExtension && !isValidMimeType) {
-      setError("Please upload a CSV or Excel file (.csv, .xlsx, .xls)");
+      setError(
+        "Please upload a CSV or .xlsx file. Older .xls isn't supported — re-save it as .xlsx, or export your statement as CSV.",
+      );
       return;
     }
 
@@ -432,7 +436,7 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
       return;
     }
 
-    const isExcel = fileName.endsWith(".xlsx") || fileName.endsWith(".xls");
+    const isExcel = fileName.endsWith(".xlsx");
 
     if (isExcel) {
       // Handle Excel file we 
@@ -442,8 +446,16 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
           const workbook = new ExcelJS.Workbook();
           await workbook.xlsx.load(e.target.result);
 
-          // Get the first sheet
+          // Get the first sheet. ExcelJS's xlsx.load only reads .xlsx — a
+          // legacy .xls (or a mislabelled/corrupt file) parses to zero sheets,
+          // so guard before touching it instead of crashing on .eachRow.
           const worksheet = workbook.worksheets[0];
+          if (!worksheet) {
+            setError(
+              "Couldn't read any sheet from this file. If it's an older .xls, open it and re-save as .xlsx — or upload a CSV (or use the template).",
+            );
+            return;
+          }
 
           // Convert to array of arrays. ExcelJS returns `row.values` as a
           // 1-indexed sparse array (leading empty cells are HOLES). Build a
@@ -658,23 +670,18 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
         <label className="block text-sm font-medium mb-2">
           Bank Account <span className="text-red-500">*</span>
         </label>
-        <select
+        <BankAccountCombobox
           value={data.bankAccountId || ""}
-          onChange={(e) =>
-            setData((prev) => ({ ...prev, bankAccountId: e.target.value }))
+          onValueChange={(v) =>
+            setData((prev) => ({ ...prev, bankAccountId: v }))
           }
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          <option value="">Select bank account...</option>
-          {bankAccounts.map((account) => (
-            <option key={account._id} value={account._id}>
-              {account.accountCode} - {account.accountName}
-            </option>
-          ))}
-        </select>
+          accounts={bankAccounts}
+          placeholder="Select bank account..."
+        />
         {bankAccounts.length === 0 && (
           <p className="text-sm text-amber-600 mt-1">
-            No bank accounts found. Please create a bank account first.
+            No bank or cash accounts found. Create one (Chart of Accounts →
+            sub-type Bank/Cash/M-Pesa) first.
           </p>
         )}
       </div>
@@ -752,10 +759,10 @@ function FileUploadStep({ data, setData, bankAccounts, onNext }) {
                 <Upload className="h-6 w-6 text-muted-foreground" />
               </div>
               <p className="font-medium">Drop your file here</p>
-              <p className="text-sm text-muted-foreground">CSV or Excel (.csv, .xlsx, .xls)</p>
+              <p className="text-sm text-muted-foreground">CSV or Excel (.csv, .xlsx)</p>
               <input
                 type="file"
-                accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 onChange={handleFileInput}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
