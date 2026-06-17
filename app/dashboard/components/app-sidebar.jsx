@@ -76,7 +76,7 @@ export function AppSidebar({ children, user, notifications, ...props }) {
         setMobileMenuOpen={setMobileMenuOpen}
         user={user}
       />
-      <main className="flex-1 overflow-y-auto w-full">
+      <main className="flex-1 overflow-y-auto overscroll-contain w-full">
         <header className="bg-card/80 backdrop-blur-sm border-b border-border sticky top-0 z-10">
           <div className="px-3 sm:px-4 md:px-6 lg:px-8 py-2 sm:py-2.5">
             <div className="flex items-center gap-2 sm:gap-3">
