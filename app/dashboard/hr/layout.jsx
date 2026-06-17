@@ -14,7 +14,7 @@ export default async function HRLayout({ children }) {
   // Admin/Manager users on plans that don't include the HR module.
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex flex-col">
       <HRNav role={role} />
       <main className="flex-1">{children}</main>
     </div>
