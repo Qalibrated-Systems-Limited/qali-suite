@@ -226,11 +226,52 @@ export async function getAccountLedger(
     JournalEntry.countDocuments(query),
   ]);
 
-  // Calculate running balance
-  let runningBalance = 0;
   const normalSide = ["asset", "expense"].includes(account.accountType)
     ? "debit"
     : "credit";
+
+  // Seed the running balance with the OPENING balance for this page — the net
+  // movement of every entry shown on prior pages (same sort order). Without
+  // this, the balance column restarts from zero on page 2+. Page 1 (skip 0)
+  // legitimately opens at zero, so we skip the extra query there.
+  let openingBalance = 0;
+  if (skip > 0) {
+    const priorMatch = {
+      status: "posted",
+      "lines.accountId": account._id,
+      ...buildTenantMatch(companyId, isSuperAdmin),
+    };
+    if (startDate || endDate) {
+      priorMatch.entryDate = {};
+      if (startDate) priorMatch.entryDate.$gte = new Date(startDate);
+      if (endDate) priorMatch.entryDate.$lte = new Date(endDate);
+    }
+
+    const [prior] = await JournalEntry.aggregate([
+      { $match: priorMatch },
+      { $sort: { entryDate: 1, entryNumber: 1 } },
+      { $limit: skip }, // exactly the entries on earlier pages
+      { $unwind: "$lines" },
+      { $match: { "lines.accountId": account._id } },
+      {
+        $group: {
+          _id: null,
+          debit: { $sum: "$lines.debit" },
+          credit: { $sum: "$lines.credit" },
+        },
+      },
+    ]);
+
+    if (prior) {
+      openingBalance =
+        normalSide === "debit"
+          ? prior.debit - prior.credit
+          : prior.credit - prior.debit;
+    }
+  }
+
+  // Calculate running balance, carrying the opening balance across pages
+  let runningBalance = openingBalance;
 
   const transactions = entries
     .map((entry) => {
@@ -268,6 +309,7 @@ export async function getAccountLedger(
       accountType: account.accountType,
       normalBalanceSide: normalSide,
     },
+    openingBalance,
     transactions,
     pagination: {
       page,
