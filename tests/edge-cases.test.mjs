@@ -163,6 +163,45 @@ describe("Edge cases", () => {
       await expect(bill.approve(tenant.user)).rejects.toThrow(/locked/);
     });
 
+    it("a model-created JE with no fiscalPeriodId is still blocked in a closed period (C8)", async () => {
+      // Reversals, credit-note and bill-cancel JEs are built directly via
+      // `new JournalEntry(...)` and never set fiscalPeriodId. Before the fix,
+      // validateFiscalPeriod() short-circuited on the missing id and let them
+      // post INTO a closed period. The guard must now resolve the period from
+      // entryDate + companyId and block them.
+      const tenant = await seedTenant();
+      const now = new Date();
+      await FiscalPeriod.deleteMany({ companyId: tenant.company._id });
+      await seedFiscalPeriod(
+        tenant.company._id,
+        now.getFullYear(),
+        now.getMonth() + 1,
+        "closed",
+      );
+
+      const ar = tenant.accounts.accounts_receivable;
+      const rev = tenant.accounts.sales_revenue;
+      const je = new JournalEntry({
+        companyId: tenant.company._id,
+        entryNumber: `JE-C8-${Date.now()}`,
+        entryDate: now,
+        entryType: "adjustment",
+        description: "Direct model entry in a closed period",
+        lines: [
+          { accountId: ar._id, accountCode: ar.accountCode, accountName: ar.accountName, accountType: "asset", debit: 100, credit: 0 },
+          { accountId: rev._id, accountCode: rev.accountCode, accountName: rev.accountName, accountType: "revenue", debit: 0, credit: 100 },
+        ],
+        status: "draft",
+        createdBy: { name: tenant.user.name, id: tenant.user._id.toString() },
+      });
+      await je.save();
+
+      await expect(je.post(tenant.user)).rejects.toThrow(/closed/);
+
+      const reloaded = await JournalEntry.findById(je._id);
+      expect(reloaded.status).toBe("draft"); // never posted
+    });
+
     it("invoice completion throws when fiscal period is closed", async () => {
       const tenant = await seedTenant();
       const now = new Date();
