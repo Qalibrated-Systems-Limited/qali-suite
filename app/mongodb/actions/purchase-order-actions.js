@@ -836,6 +836,59 @@ export async function confirmPurchaseOrder(poId) {
 }
 
 // ============================================
+// REOPEN PURCHASE ORDER (expired → draft)
+// ============================================
+export async function reopenPurchaseOrder(poId) {
+  try {
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, error: "Please sign in to continue" };
+    }
+
+    const user = session.user;
+    if (!hasRole(user, PO_ROLES.CREATE)) {
+      return {
+        success: false,
+        error: "You don't have permission to reopen purchase orders",
+      };
+    }
+
+    await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const po = await PurchaseOrder.findOne(
+      withTenantScope({ _id: poId }, companyId, isSuperAdmin)
+    );
+    if (!po) {
+      return { success: false, error: "Purchase order not found" };
+    }
+
+    if (po.status !== "expired") {
+      return {
+        success: false,
+        error: `Only expired purchase orders can be reopened (status: ${po.status}).`,
+      };
+    }
+
+    await po.reopen(formatUser(session));
+
+    revalidatePath("/dashboard/purchase-orders");
+    revalidatePath(`/dashboard/purchase-orders/${poId}`);
+
+    return {
+      success: true,
+      message: `PO ${po.poNumber} reopened as draft — review validity and resend`,
+    };
+  } catch (error) {
+    console.error("Reopen purchase order error:", error);
+    return {
+      success: false,
+      error: error.message || "Failed to reopen purchase order",
+    };
+  }
+}
+
+// ============================================
 // CANCEL PURCHASE ORDER
 // ============================================
 export async function cancelPurchaseOrder(poId, prevState, formData) {

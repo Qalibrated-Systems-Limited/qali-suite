@@ -548,7 +548,10 @@ async function postPayrollAccrualJournal(run, glMapping, user) {
     throw new Error(`Payroll journal is unbalanced: debits=${totalDebits}, credits=${totalCredits}. Check GL mapping — all accounts must be configured.`);
   }
 
-  // TODO: Validate fiscal period is open before posting. Currently allows posting to closed periods.
+  // Fiscal period is enforced at post() time: JournalEntry.validateFiscalPeriod
+  // resolves the period from entryDate + companyId and throws on a
+  // closed/locked period (so this je.post() below will reject a payroll run
+  // posted into a closed month).
 
   const seq = await ErpCounter.getNextSequence("je-pay", run.companyId);
   const entryNumber = `JE-PAY-${String(seq).padStart(4, "0")}`;

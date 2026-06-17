@@ -68,7 +68,8 @@ export const cTodayMovementCount = cache(async () => {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
   const filter = { createdAt: { $gte: start } };
-  if (!isSuperAdmin && companyId) {
+  if (!isSuperAdmin) {
+    if (!companyId) return 0; // fail closed
     filter.companyId = new mongoose.Types.ObjectId(companyId);
   }
   return StockMovement.countDocuments(filter);

@@ -20,6 +20,9 @@ import Bill from "@/app/models/bill";
 import Invoice from "@/app/models/invoice";
 import JournalEntry from "@/app/models/JournalEntry";
 import FiscalPeriod from "@/app/models/fiscalPeriod";
+import Product from "@/app/models/product";
+import { StockMovement } from "@/app/models/stockmovement";
+import "@/app/models/counter"; // registers Counter for generateMovementNumber
 import { seedTenant, seedFiscalPeriod } from "./helpers/fixtures.mjs";
 
 // Copy of the makeBill helper from bills.test.mjs (kept local so this
@@ -163,6 +166,45 @@ describe("Edge cases", () => {
       await expect(bill.approve(tenant.user)).rejects.toThrow(/locked/);
     });
 
+    it("a model-created JE with no fiscalPeriodId is still blocked in a closed period (C8)", async () => {
+      // Reversals, credit-note and bill-cancel JEs are built directly via
+      // `new JournalEntry(...)` and never set fiscalPeriodId. Before the fix,
+      // validateFiscalPeriod() short-circuited on the missing id and let them
+      // post INTO a closed period. The guard must now resolve the period from
+      // entryDate + companyId and block them.
+      const tenant = await seedTenant();
+      const now = new Date();
+      await FiscalPeriod.deleteMany({ companyId: tenant.company._id });
+      await seedFiscalPeriod(
+        tenant.company._id,
+        now.getFullYear(),
+        now.getMonth() + 1,
+        "closed",
+      );
+
+      const ar = tenant.accounts.accounts_receivable;
+      const rev = tenant.accounts.sales_revenue;
+      const je = new JournalEntry({
+        companyId: tenant.company._id,
+        entryNumber: `JE-C8-${Date.now()}`,
+        entryDate: now,
+        entryType: "adjustment",
+        description: "Direct model entry in a closed period",
+        lines: [
+          { accountId: ar._id, accountCode: ar.accountCode, accountName: ar.accountName, accountType: "asset", debit: 100, credit: 0 },
+          { accountId: rev._id, accountCode: rev.accountCode, accountName: rev.accountName, accountType: "revenue", debit: 0, credit: 100 },
+        ],
+        status: "draft",
+        createdBy: { name: tenant.user.name, id: tenant.user._id.toString() },
+      });
+      await je.save();
+
+      await expect(je.post(tenant.user)).rejects.toThrow(/closed/);
+
+      const reloaded = await JournalEntry.findById(je._id);
+      expect(reloaded.status).toBe("draft"); // never posted
+    });
+
     it("invoice completion throws when fiscal period is closed", async () => {
       const tenant = await seedTenant();
       const now = new Date();
@@ -249,6 +291,62 @@ describe("Edge cases", () => {
       for (const [, net] of netByAccount) {
         expect(net).toBeCloseTo(0, 2);
       }
+    });
+
+    it("restores physical inventory the bill admitted on cancel (H1)", async () => {
+      const tenant = await seedTenant();
+
+      // Product already holding the purchased stock (as if approval admitted 4).
+      const product = await Product.create({
+        companyId: tenant.company._id,
+        name: "Widget",
+        SKU: `SKU-${Date.now()}`,
+        costing: { costPrice: 25 },
+        inventory: {
+          quantityOnHand: 10,
+          quantityCommitted: 0,
+          quantityOnHold: 0,
+          quantityAvailable: 10,
+        },
+      });
+
+      const bill = await makeBill(tenant, { status: "approved" }).save();
+      bill.accounting = { ...bill.accounting, inventoryMoved: true };
+      await bill.save();
+
+      // The "in" movement the approval would have created, tagged to the bill.
+      await StockMovement.create({
+        companyId: tenant.company._id,
+        movementNumber: `MOV-${Date.now()}`,
+        productId: product._id,
+        productSnapshot: { name: product.name, SKU: product.SKU },
+        movementType: "purchase",
+        direction: "in",
+        quantity: 4,
+        previousStock: 6,
+        newStock: 10,
+        costing: { unitCost: 25, totalCost: 100 },
+        relatedDocuments: { billId: bill._id },
+        status: "posted",
+        postedAt: new Date(),
+        performedBy: { name: tenant.user.name, id: tenant.user._id.toString() },
+      });
+
+      await bill.cancel(tenant.user, "Wrong order");
+
+      expect(bill.status).toBe("cancelled");
+
+      // Stock restored: 10 on hand - 4 reversed out = 6.
+      const reloaded = await Product.findById(product._id);
+      expect(reloaded.inventory.quantityOnHand).toBe(6);
+
+      // A reversing "out" movement was recorded for the bill.
+      const reversal = await StockMovement.findOne({
+        "relatedDocuments.billId": bill._id,
+        direction: "out",
+      });
+      expect(reversal).not.toBeNull();
+      expect(reversal.quantity).toBe(4);
     });
 
     it("cannot cancel a bill that has been paid", async () => {

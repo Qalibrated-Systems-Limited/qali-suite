@@ -605,8 +605,12 @@ creditNoteSchema.methods.issue = async function (issuedBy) {
       date: this.creditNoteDate,
     });
 
-    // Reduce the amount due on the invoice
-    invoice.amountDue = Math.max(0, invoice.amountDue - this.total);
+    // Recompute amount due from the canonical formula (cash paid + credits)
+    // so a later invoice save can't resurrect this credited balance.
+    invoice.amountDue = Math.max(
+      0,
+      invoice.total - (invoice.amountPaid || 0) - invoice.totalCredited(),
+    );
 
     // Update payment status if fully credited
     if (invoice.amountDue <= 0.01) {
@@ -671,7 +675,12 @@ creditNoteSchema.methods.void = async function (voidedBy, reason) {
       (cn) => cn.creditNoteId.toString() !== this._id.toString()
     );
 
-    invoice.amountDue = Math.min(invoice.total, invoice.amountDue + this.total);
+    // Recompute from the canonical formula now that this credit is removed
+    // from creditNotes[] — consistent with validateAmounts()/recordPayment().
+    invoice.amountDue = Math.max(
+      0,
+      invoice.total - (invoice.amountPaid || 0) - invoice.totalCredited(),
+    );
 
     // Recalculate payment status
     if (invoice.amountDue >= invoice.total) {

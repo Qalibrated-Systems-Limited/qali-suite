@@ -341,17 +341,34 @@ journalEntrySchema.methods.validateAccounts = async function (session = null) {
 journalEntrySchema.methods.validateFiscalPeriod = async function (
   session = null,
 ) {
-  if (!this.fiscalPeriodId) return true;
-
   const FiscalPeriod = mongoose.model("FiscalPeriod");
-  // Use session if provided (for transaction support)
-  const period = session
-    ? await FiscalPeriod.findById(this.fiscalPeriodId).session(session)
-    : await FiscalPeriod.findById(this.fiscalPeriodId);
 
-  if (!period) {
-    throw new Error("Fiscal period not found");
+  // Resolve the period: prefer the stored id, else look it up by entryDate +
+  // company. Entries created directly via the model (reversals, credit-note
+  // and bill-cancel JEs) never set fiscalPeriodId, so without this they
+  // silently bypassed the closed/locked-period guard — a reversal could post
+  // INTO a closed period. Backfilling the id also keeps period reports (which
+  // key off fiscalPeriodId) accurate.
+  let period = null;
+  if (this.fiscalPeriodId) {
+    const q = FiscalPeriod.findById(this.fiscalPeriodId);
+    period = session ? await q.session(session) : await q;
+    if (!period) {
+      throw new Error("Fiscal period not found");
+    }
+  } else if (this.entryDate && this.companyId) {
+    const q = FiscalPeriod.findOne({
+      companyId: this.companyId,
+      startDate: { $lte: this.entryDate },
+      endDate: { $gte: this.entryDate },
+    });
+    period = session ? await q.session(session) : await q;
+    if (period) this.fiscalPeriodId = period._id; // backfill
   }
+
+  // No fiscal period configured for this date — nothing to enforce (matches
+  // the prior behaviour for tenants that don't run fiscal periods).
+  if (!period) return true;
 
   if (period.status === "closed") {
     throw new Error(`Cannot post to closed fiscal period: ${period.name}`);
@@ -452,15 +469,22 @@ journalEntrySchema.methods.reverse = async function (
 
   const reversalEntryNumber = `JE-REV-${String(nextNum).padStart(4, "0")}`;
 
+  const reversalDate = new Date();
   const reversalEntry = new JournalEntry({
-    // Carry the tenant scope and fiscal period from the original.
-    // Without this the reversal fails validation (companyId is required)
-    // and silently bails inside bill.cancel(), leaving the bill in a
-    // half-cancelled state. Caught by tests/edge-cases.test.mjs.
+    // Carry the tenant scope from the original — without companyId the
+    // reversal fails validation and silently bails inside bill.cancel(),
+    // leaving the bill half-cancelled. Caught by tests/edge-cases.test.mjs.
+    // The reversal is dated today, so its fiscal period is derived from
+    // reversalDate (NOT copied from the original — the old `fiscalPeriod`
+    // copy referenced a field that doesn't exist on the schema and was
+    // silently dropped, leaving the reversal with no period and bypassing
+    // the closed-period guard). validateFiscalPeriod() resolves and backfills
+    // fiscalPeriodId from this date at post() time.
     companyId: this.companyId,
-    fiscalPeriod: this.fiscalPeriod,
+    fiscalYear: reversalDate.getFullYear(),
+    fiscalMonth: reversalDate.getMonth() + 1,
     entryNumber: reversalEntryNumber,
-    entryDate: new Date(),
+    entryDate: reversalDate,
     entryType: "adjustment",
     description: `Reversal of ${this.entryNumber}: ${
       reason || "No reason provided"

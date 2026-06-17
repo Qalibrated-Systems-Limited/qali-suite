@@ -11,8 +11,9 @@ const Schema = mongoose.Schema;
 // opening float and any top-ups are debits to the tin and belong on the
 // header, not repeated on every row (per the CEO's note).
 //
-// The actual lines are PettyCashEntry rows referencing this return, so the
-// petty cash account detail page can show them as a DR/CR ledger.
+// The lines are NOT stored — they are derived from the GL for the period by
+// computePettyCashStatement (expenses paid from the float = CR, JE debits to
+// the float = DR), so the detail page shows a DR/CR ledger without re-typing.
 //
 // Lifecycle: draft (custodian records) → submitted (returned to MD) →
 // approved (MD signs) | rejected (back to the custodian).

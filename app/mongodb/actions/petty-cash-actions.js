@@ -19,9 +19,9 @@ import { computePettyCashStatement } from "../queries/petty-cash-queries";
 // ============================================
 // PETTY CASH — custodian records, MD approves
 // ============================================
-// Custodian builds a draft return for a period (rows = PettyCashEntry), submits
-// it to the MD, who reviews how the float was used and approves. On approval
-// the spend rows are marked posted and any projects they reference are
+// Custodian builds a draft return for a period (rows derived from the GL),
+// submits it to the MD, who reviews how the float was used and approves. On
+// approval the spend rows are marked posted and any projects they reference are
 // recomputed (project-tagged petty cash becomes project cost).
 
 const CUSTODIAN_ROLES = new Set([

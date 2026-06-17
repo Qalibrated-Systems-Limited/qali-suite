@@ -16,7 +16,11 @@ export async function getCreditNoteById(id) {
   const { companyId, isSuperAdmin } = await getTenantContext();
 
   const query = { _id: new ObjectId(id) };
-  if (!isSuperAdmin && companyId) {
+  if (!isSuperAdmin) {
+    // Fail CLOSED: a non-SuperAdmin with no companyId must match nothing,
+    // never fall through to an unscoped { _id } query that returns another
+    // tenant's credit note.
+    if (!companyId) return null;
     query.companyId = new ObjectId(companyId);
   }
 
@@ -33,7 +37,9 @@ export async function getCreditNotes(filters = {}, limit = 50, cursor = null) {
   const { companyId, isSuperAdmin } = await getTenantContext();
 
   const query = {};
-  if (!isSuperAdmin && companyId) {
+  if (!isSuperAdmin) {
+    // Fail CLOSED — see getCreditNoteById.
+    if (!companyId) return { creditNotes: [], hasMore: false, nextCursor: null };
     query.companyId = new ObjectId(companyId);
   }
 
@@ -109,7 +115,8 @@ export async function getCreditNotesByInvoice(invoiceId) {
     "invoice.id": invoiceId,
     status: { $ne: "void" },
   };
-  if (!isSuperAdmin && companyId) {
+  if (!isSuperAdmin) {
+    if (!companyId) return []; // fail closed
     query.companyId = new ObjectId(companyId);
   }
 
@@ -145,8 +152,18 @@ export async function getCreditNoteStats() {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
 
+  const emptyStats = {
+    draft: { count: 0, total: 0 },
+    issued: { count: 0, total: 0 },
+    applied: { count: 0, total: 0 },
+    void: { count: 0, total: 0 },
+    totalCount: 0,
+    totalValue: 0,
+  };
+
   const matchStage = {};
-  if (!isSuperAdmin && companyId) {
+  if (!isSuperAdmin) {
+    if (!companyId) return emptyStats; // fail closed
     matchStage.companyId = new ObjectId(companyId);
   }
 

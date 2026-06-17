@@ -155,12 +155,16 @@ function deriveCompanyCode(name) {
 // ============================================
 // HELPER: Resolve expense accounts from items by expenseAccountId
 // ============================================
-async function resolveExpenseAccounts(items, session) {
+async function resolveExpenseAccounts(items, session, companyId, isSuperAdmin) {
   const accountMap = {};
   for (const item of items) {
     const accountId = item.expenseAccountId;
     if (accountId && !accountMap[accountId]) {
-      const account = await Account.findById(accountId).session(session);
+      // Tenant-scoped: expenseAccountId comes from user-submitted claim items,
+      // so an unscoped lookup would let a foreign expense account be posted to.
+      const account = await Account.findOne(
+        withTenantScope({ _id: accountId }, companyId, isSuperAdmin),
+      ).session(session);
       if (!account) {
         throw new Error(
           `Expense account not found for "${item.category}". Ask your admin to create it.`,
@@ -393,7 +397,7 @@ export async function createAdvanceRequest(prevState, formData) {
     let projectFields = {};
     const projectId = rawValues.projectId;
     if (projectId) {
-      const project = await Project.findById(projectId).select("projectNumber name status").lean();
+      const project = await Project.findOne(withTenantScope({ _id: projectId }, companyId, isSuperAdmin)).select("projectNumber name status").lean();
       if (project && project.status !== "closed") {
         projectFields = {
           projectId: project._id,
@@ -593,7 +597,7 @@ export async function createReimbursement(prevState, formData) {
     // Look up project if provided (optional)
     let projectFields = {};
     if (rawProjectId) {
-      const project = await Project.findById(rawProjectId).select("projectNumber name status").lean();
+      const project = await Project.findOne(withTenantScope({ _id: rawProjectId }, companyId, isSuperAdmin)).select("projectNumber name status").lean();
       if (project && project.status !== "closed") {
         projectFields = {
           projectId: project._id,
@@ -1377,7 +1381,7 @@ export async function closeSettlementt(settlementId, prevState, formData) {
     }
 
     // Resolve expense accounts by expenseAccountId
-    const expenseAccountMap = await resolveExpenseAccounts(settlement.items, session);
+    const expenseAccountMap = await resolveExpenseAccounts(settlement.items, session, companyId, isSuperAdmin);
 
     // Get system accounts (tenant-scoped)
     const employeeAdvancesAccount = await Account.findOne(
@@ -1611,7 +1615,7 @@ export async function updateClaim(claimId, prevState, formData) {
     // Handle project update (shared across claim types)
     const updatedProjectId = formData.get("projectId") || "";
     if (updatedProjectId) {
-      const project = await Project.findById(updatedProjectId).select("projectNumber name status").lean();
+      const project = await Project.findOne(withTenantScope({ _id: updatedProjectId }, companyId, isSuperAdmin)).select("projectNumber name status").lean();
       if (project && project.status !== "closed") {
         claim.projectId = project._id;
         claim.project = { projectNumber: project.projectNumber, name: project.name };
@@ -1992,7 +1996,7 @@ export async function closeSettlement(settlementId, prevState, formData) {
     // ============================================
     // RESOLVE EXPENSE ACCOUNTS BY ID (tenant-scoped)
     // ============================================
-    const expenseAccountMap = await resolveExpenseAccounts(settlement.items, session);
+    const expenseAccountMap = await resolveExpenseAccounts(settlement.items, session, companyId, isSuperAdmin);
 
     // ============================================
     // GET SYSTEM ACCOUNTS (tenant-scoped)
@@ -2385,7 +2389,9 @@ export async function recordAdvanceReturn(settlementId, prevState, formData) {
     // ============================================
     // GET ACCOUNTS (tenant-scoped)
     // ============================================
-    const paymentAccount = await Account.findById(data.paymentAccountId).session(session);
+    const paymentAccount = await Account.findOne(
+      withTenantScope({ _id: data.paymentAccountId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!paymentAccount) {
       return {
@@ -2656,7 +2662,9 @@ export async function paySettlementBalance(settlementId, prevState, formData) {
     // ============================================
     // GET ACCOUNTS (tenant-scoped)
     // ============================================
-    const paymentAccount = await Account.findById(data.paymentAccountId).session(session);
+    const paymentAccount = await Account.findOne(
+      withTenantScope({ _id: data.paymentAccountId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!paymentAccount) {
       return {
@@ -2931,7 +2939,9 @@ export async function payAdvance(claimId, prevState, formData) {
       };
     }
 
-    const paymentAccount = await Account.findById(data.paymentAccountId).session(session);
+    const paymentAccount = await Account.findOne(
+      withTenantScope({ _id: data.paymentAccountId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!paymentAccount) {
       return {
@@ -3192,7 +3202,7 @@ export async function payReimbursement(claimId, prevState, formData) {
     // ============================================
     // 6. RESOLVE EXPENSE ACCOUNTS BY ID (tenant-scoped)
     // ============================================
-    const expenseAccountMap = await resolveExpenseAccounts(claim.items, session);
+    const expenseAccountMap = await resolveExpenseAccounts(claim.items, session, companyId, isSuperAdmin);
 
     // ============================================
     // 7. GET SYSTEM ACCOUNTS (tenant-scoped)
@@ -3215,7 +3225,9 @@ export async function payReimbursement(claimId, prevState, formData) {
       };
     }
 
-    const paymentAccount = await Account.findById(data.paymentAccountId).session(session);
+    const paymentAccount = await Account.findOne(
+      withTenantScope({ _id: data.paymentAccountId }, companyId, isSuperAdmin),
+    ).session(session);
 
     if (!paymentAccount) {
       return {

@@ -530,6 +530,22 @@ async function applyExpensePayment(approval, user) {
   }
 
   const p = approval.payload || {};
+
+  // Re-validate the payment account against the approval's tenant before
+  // posting — recordPayment() resolves paidFrom with an unscoped findById,
+  // and the payload was captured from user input at submission time.
+  const Account = mongoose.model("Account");
+  const payAccount = await Account.findOne({
+    _id: p.paidFrom,
+    companyId: approval.companyId,
+  }).select("_id canPost");
+  if (!payAccount) {
+    return { success: false, error: "Payment account not found" };
+  }
+  if (payAccount.canPost === false) {
+    return { success: false, error: "Selected account cannot be posted to" };
+  }
+
   await expense.recordPayment(
     { name: user.name, id: user.id },
     {

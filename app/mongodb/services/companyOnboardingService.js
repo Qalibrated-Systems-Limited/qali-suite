@@ -479,6 +479,17 @@ export class CompanyOnboardingService {
         parentCode: "4000",
         systemAccount: "sales_returns",
       },
+      {
+        // Asset disposal above book value (asset-actions.js disposal JE).
+        // Seeded so fixed-asset disposal works out of the box.
+        accountCode: "4700",
+        accountName: "Gain on Asset Disposal",
+        accountType: "revenue",
+        subType: "other",
+        canPost: true,
+        parentCode: "4000",
+        systemAccount: "gain_on_disposal",
+      },
 
       // EXPENSES (5000-5999)
       {
@@ -817,6 +828,17 @@ export class CompanyOnboardingService {
         subType: "other",
         canPost: true,
         parentCode: "6000",
+      },
+      {
+        // Asset disposal below book value (asset-actions.js disposal JE).
+        // Seeded so fixed-asset disposal works out of the box.
+        accountCode: "6995",
+        accountName: "Loss on Asset Disposal",
+        accountType: "expense",
+        subType: "other",
+        canPost: true,
+        parentCode: "6000",
+        systemAccount: "loss_on_disposal",
       },
     ];
   }

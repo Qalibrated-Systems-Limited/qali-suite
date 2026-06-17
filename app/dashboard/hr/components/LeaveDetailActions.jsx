@@ -2,10 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, XCircle, RotateCcw, Loader2, AlertCircle } from "lucide-react";
+import { CheckCircle2, XCircle, RotateCcw, Loader2, AlertCircle, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { approveLeaveRequest, recallLeaveRequest } from "@/app/mongodb/actions/hr-leave-actions";
+import { approveLeaveRequest, recallLeaveRequest, submitLeaveRequest } from "@/app/mongodb/actions/hr-leave-actions";
 import { useActionState } from "react";
 import { rejectLeaveRequest } from "@/app/mongodb/actions/hr-leave-actions";
 
@@ -63,6 +63,21 @@ export function LeaveDetailActions({ leave, userRole }) {
   const canApprove = leave.status === "submitted" && ["SuperAdmin", "Admin", "Manager", "HR"].includes(userRole);
   const canReject = leave.status === "submitted" && ["SuperAdmin", "Admin", "Manager", "HR"].includes(userRole);
   const canRecall = leave.status === "submitted";
+  // A draft can be submitted for approval. The action enforces ownership
+  // (owner, or Admin/HR/Manager) — without this the draft was a dead end.
+  const canSubmit = leave.status === "draft";
+
+  function handleSubmit() {
+    startTransition(async () => {
+      const result = await submitLeaveRequest(leave._id);
+      if (result?.success === false) {
+        toast.error(result.error);
+      } else {
+        toast.success("Leave request submitted for approval");
+        router.refresh();
+      }
+    });
+  }
 
   function handleApprove() {
     startTransition(async () => {
@@ -88,11 +103,17 @@ export function LeaveDetailActions({ leave, userRole }) {
     });
   }
 
-  if (!canApprove && !canReject && !canRecall) return null;
+  if (!canApprove && !canReject && !canRecall && !canSubmit) return null;
 
   return (
     <>
       <div className="flex flex-wrap gap-2">
+        {canSubmit && (
+          <Button onClick={handleSubmit} disabled={isPending} size="sm">
+            {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            <span className="hidden sm:inline">Submit for approval</span>
+          </Button>
+        )}
         {canApprove && (
           <Button onClick={handleApprove} disabled={isPending} size="sm">
             {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}

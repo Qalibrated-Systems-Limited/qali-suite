@@ -371,6 +371,50 @@ describe("Credit note cycle", () => {
     });
   });
 
+  describe("invoice amountDue stays net of credits (C6 regression)", () => {
+    it("a payment recorded AFTER a credit note does not resurrect the credited balance", async () => {
+      // Invoice 1000. Credit note 300. Customer pays the remaining 700.
+      // amountDue must end at 0 (700 paid + 300 credited = 1000 settled),
+      // NOT 300 (which is what `amountDue = total - amountPaid` alone gives).
+      const tenant = await seedTenant();
+      const items = [
+        {
+          itemType: "service",
+          serviceCategory: "consultation",
+          description: "Big job",
+          unit: "hour",
+          quantity: 1,
+          unitPrice: 1000,
+          amount: 1000,
+          taxRate: 0,
+          taxAmount: 0,
+        },
+      ];
+      const invoice = await makeInvoice(tenant, { items }).save();
+      await invoice.complete(tenant.user);
+
+      const cnItems = [
+        { itemType: "service", description: "Partial credit", unit: "hour", quantity: 1, unitPrice: 300, amount: 300, taxRate: 0, taxAmount: 0 },
+      ];
+      const cn = await makeCreditNote(tenant, invoice, { items: cnItems }).save();
+      await cn.issue(tenant.user);
+
+      // Reload the invoice the credit note mutated, then take a payment.
+      const fresh = await Invoice.findById(invoice._id);
+      expect(fresh.amountDue).toBeCloseTo(700, 2); // 1000 - 0 paid - 300 credited
+      expect(fresh.totalCredited()).toBeCloseTo(300, 2);
+
+      await fresh.recordPayment(new mongoose.Types.ObjectId(), 700, {
+        paymentNumber: "PAY-1",
+        paymentMethod: "cash",
+        paymentDate: new Date(),
+      });
+
+      expect(fresh.amountDue).toBeCloseTo(0, 2); // not 300
+      expect(fresh.paymentStatus).toBe("paid");
+    });
+  });
+
   describe("tenant isolation", () => {
     it("credit-note JE posts to the same tenant as the credit note", async () => {
       const tenantA = await seedTenant({ company: { code: "AAA", name: "Co A" } });

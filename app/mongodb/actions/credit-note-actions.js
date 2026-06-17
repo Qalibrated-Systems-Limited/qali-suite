@@ -624,7 +624,9 @@ export async function issueRefund(creditNoteId, prevState, formData) {
       systemAccount: "accounts_receivable",
     });
 
-    const bankAccount = await Account.findById(bankAccountId);
+    // Tenant-scoped: an unscoped findById would let a foreign account id be
+    // credited by this refund JE (cross-tenant ledger write).
+    const bankAccount = await Account.findOne({ _id: bankAccountId, companyId });
     if (!bankAccount) {
       throw new Error("Bank account not found");
     }
@@ -633,8 +635,16 @@ export async function issueRefund(creditNoteId, prevState, formData) {
       throw new Error("Invalid payment account type. Must be bank, cash, or mpesa.");
     }
 
-    // Create refund payment record
-    const paymentNumber = await Payment.generatePaymentNumber(companyId, "made");
+    // Create refund payment record. Field shapes MUST match the Payment
+    // schema: nested `account` (not flat paymentAccount*), `party.partyId`
+    // (not party.id), a required `description`, and a status from the enum
+    // (draft|pending_clearance|confirmed|cancelled). generatePaymentNumber's
+    // signature is (type, companyId).
+    const paymentNumber = await Payment.generatePaymentNumber(
+      "made",
+      companyId,
+      session,
+    );
 
     const payment = await Payment.create([{
       companyId,
@@ -644,24 +654,27 @@ export async function issueRefund(creditNoteId, prevState, formData) {
       amount: refundAmount,
       currency: creditNote.currency,
       paymentMethod,
-      paymentAccountId: bankAccount._id,
-      paymentAccountCode: bankAccount.accountCode,
-      paymentAccountName: bankAccount.accountName,
+      account: {
+        id: bankAccount._id,
+        code: bankAccount.accountCode,
+        name: bankAccount.accountName,
+        subType: bankAccount.subType,
+      },
       party: {
         type: "customer",
-        id: creditNote.customer.id,
+        partyId: creditNote.customer.id,
         name: creditNote.customer.name,
       },
       reference,
-      notes: notes || `Refund for Credit Note ${creditNote.creditNoteNumber}`,
+      description: `Refund for Credit Note ${creditNote.creditNoteNumber}`,
+      notes: notes || "",
       relatedDocuments: {
         creditNoteId: creditNote._id,
         creditNoteNumber: creditNote.creditNoteNumber,
         invoiceId: creditNote.invoice.id,
         invoiceNumber: creditNote.invoice.invoiceNumber,
       },
-      status: "completed",
-      completedAt: new Date(),
+      status: "confirmed",
       createdBy: { name: user.name, id: user.id },
     }], { session });
 
