@@ -75,10 +75,12 @@ async function UsersPage(props) {
     companyId: isSuperAdmin && companyIdFilter !== "all" ? companyIdFilter : "",
   };
 
-  // Fetch data in parallel
-  const [totalPages, users, stats, departments, { invites }, companies] = await Promise.all([
-    fetchUserPages(query, filters),
-    searchUsers(query, currentPage, filters),
+  // Fetch the lightweight shell data (stats, invites, filter options) up front.
+  // The users table + its pagination count are the heaviest queries here and
+  // are unrelated to inviting/cancelling a user — so they're streamed via the
+  // <Suspense> boundary below instead of blocking. This keeps the post-invite
+  // revalidation (which the "Sending…" spinner waits on) fast.
+  const [stats, departments, { invites }, companies] = await Promise.all([
     getUserStats(filters),
     getDepartments(),
     getCompanyInvites(),
@@ -237,18 +239,41 @@ async function UsersPage(props) {
       {/* Pending Invites */}
       <InvitesList invites={invites} />
 
-      {/* Users Table */}
+      {/* Users Table — streamed so its heavy list + count queries don't block
+          the rest of the page (incl. the post-invite revalidation). */}
       <Suspense fallback={<UsersTableSkeleton />}>
-        <UsersTable users={users} currentUser={user} isSuperAdmin={isSuperAdmin} />
+        <UsersTableSection
+          query={query}
+          currentPage={currentPage}
+          filters={filters}
+          user={user}
+          isSuperAdmin={isSuperAdmin}
+        />
       </Suspense>
+    </div>
+  );
+}
 
-      {/* Pagination */}
+// Streamed table section: the table rows and pagination count are the most
+// expensive queries on this page. Isolating them behind Suspense lets the page
+// shell (stats, invites, filters) render immediately and lets revalidatePath
+// refreshes return without waiting on this work.
+async function UsersTableSection({ query, currentPage, filters, user, isSuperAdmin }) {
+  const [totalPages, users] = await Promise.all([
+    fetchUserPages(query, filters),
+    searchUsers(query, currentPage, filters),
+  ]);
+
+  return (
+    <>
+      <UsersTable users={users} currentUser={user} isSuperAdmin={isSuperAdmin} />
+
       {totalPages > 1 && (
         <div className="flex justify-center">
           <Pagination totalPages={totalPages} />
         </div>
       )}
-    </div>
+    </>
   );
 }
 

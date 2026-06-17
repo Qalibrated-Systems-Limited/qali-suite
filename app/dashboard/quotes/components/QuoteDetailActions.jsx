@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useActionState, useTransition } from "react";
+import { useState, useActionState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -93,6 +93,29 @@ export function QuoteDetailActions({
     cancelQuoteWithId,
     null,
   );
+
+  // The accept/reject/send actions no longer redirect (that redirect-to-self
+  // was the source of the click lag). They refresh the page in place via
+  // revalidatePath and return { success }, so close the dialog + toast here
+  // (the remount the redirect used to do is what previously closed them).
+  useEffect(() => {
+    if (sendState?.success) {
+      setSendDialogOpen(false);
+      toast.success("Quote sent");
+    }
+  }, [sendState]);
+  useEffect(() => {
+    if (acceptState?.success) {
+      setAcceptDialogOpen(false);
+      toast.success("Quote accepted");
+    }
+  }, [acceptState]);
+  useEffect(() => {
+    if (rejectState?.success) {
+      setRejectDialogOpen(false);
+      toast.success("Quote rejected");
+    }
+  }, [rejectState]);
 
   // Permission checks
   const canEdit = quote.status === "draft";
