@@ -54,6 +54,22 @@ const formatCurrency = (amount) => {
   }).format(amount || 0);
 };
 
+// Compact currency for the summary stat cards, where horizontal space is tight
+// (2-up on mobile) and large totals would otherwise overflow the card.
+// e.g. 1,234,567 → "KES 1.2M". The exact value is shown on hover via title.
+const formatStatCurrency = (amount) => {
+  const value = amount || 0;
+  if (Math.abs(value) >= 1_000_000) {
+    return new Intl.NumberFormat("en-KE", {
+      style: "currency",
+      currency: "KES",
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(value);
+  }
+  return formatCurrency(value);
+};
+
 const formatDate = (date) => {
   if (!date) return "-";
   return new Date(date).toLocaleDateString("en-KE", {
@@ -125,6 +141,18 @@ export default function ExpenseList({
     router.push(`/dashboard/expenses?${params.toString()}`);
   };
 
+  // Summary card totals — computed once so the compact display and the
+  // full-value tooltip stay in sync.
+  const byStatus = summary?.byStatus || {};
+  const thisMonthTotal = summary?.totals?.totalAmount || 0;
+  const postedTotal =
+    (byStatus.posted?.total || 0) +
+    (byStatus.approved?.total || 0) +
+    (byStatus.pending?.total || 0);
+  const unpaidTotal =
+    (byStatus.posted?.total || 0) + (byStatus.approved?.total || 0);
+  const paidTotal = byStatus.paid?.total || 0;
+
   return (
     <div className="space-y-6">
       {/* Summary Cards */}
@@ -135,8 +163,11 @@ export default function ExpenseList({
               <TrendingUp className="w-4 h-4 text-blue-500" />
               <span className="text-sm text-muted-foreground">This Month</span>
             </div>
-            <p className="text-2xl font-bold tabular-nums">
-              {formatCurrency(summary?.totals?.totalAmount)}
+            <p
+              className="text-2xl font-bold tabular-nums truncate"
+              title={formatCurrency(thisMonthTotal)}
+            >
+              {formatStatCurrency(thisMonthTotal)}
             </p>
             <p className="text-xs text-muted-foreground">
               {summary?.totals?.count || 0} expenses
@@ -150,12 +181,11 @@ export default function ExpenseList({
               <CheckCircle2 className="w-4 h-4 text-green-500" />
               <span className="text-sm text-muted-foreground">Posted</span>
             </div>
-            <p className="text-2xl font-bold tabular-nums">
-              {formatCurrency(
-                (summary?.byStatus?.posted?.total || 0) +
-                (summary?.byStatus?.approved?.total || 0) +
-                (summary?.byStatus?.pending?.total || 0)
-              )}
+            <p
+              className="text-2xl font-bold tabular-nums truncate"
+              title={formatCurrency(postedTotal)}
+            >
+              {formatStatCurrency(postedTotal)}
             </p>
             <p className="text-xs text-muted-foreground">
               {(summary?.byStatus?.posted?.count || 0) +
@@ -172,11 +202,11 @@ export default function ExpenseList({
               <AlertCircle className="w-4 h-4 text-orange-500" />
               <span className="text-sm text-muted-foreground">Unpaid</span>
             </div>
-            <p className="text-2xl font-bold tabular-nums">
-              {formatCurrency(
-                (summary?.byStatus?.posted?.total || 0) +
-                (summary?.byStatus?.approved?.total || 0)
-              )}
+            <p
+              className="text-2xl font-bold tabular-nums truncate"
+              title={formatCurrency(unpaidTotal)}
+            >
+              {formatStatCurrency(unpaidTotal)}
             </p>
             <p className="text-xs text-muted-foreground">
               {(summary?.byStatus?.posted?.count || 0) +
@@ -192,8 +222,11 @@ export default function ExpenseList({
               <Wallet className="w-4 h-4 text-purple-500" />
               <span className="text-sm text-muted-foreground">Paid</span>
             </div>
-            <p className="text-2xl font-bold tabular-nums">
-              {formatCurrency(summary?.byStatus?.paid?.total || 0)}
+            <p
+              className="text-2xl font-bold tabular-nums truncate"
+              title={formatCurrency(paidTotal)}
+            >
+              {formatStatCurrency(paidTotal)}
             </p>
             <p className="text-xs text-muted-foreground">
               {summary?.byStatus?.paid?.count || 0} completed
