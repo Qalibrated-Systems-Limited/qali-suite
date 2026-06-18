@@ -331,26 +331,30 @@ fiscalPeriodSchema.methods.calculateStatistics = async function () {
   const Bill = mongoose.model("Bill");
   const Payment = mongoose.model("Payment");
 
-  // Journal entries
+  // Journal entries (tenant-scoped — counts must not pool other companies)
   const jeCount = await JournalEntry.countDocuments({
+    companyId: this.companyId,
     entryDate: { $gte: this.startDate, $lte: this.endDate },
     status: "posted",
   });
 
   // Invoices
   const invoiceCount = await Invoice.countDocuments({
+    companyId: this.companyId,
     invoiceDate: { $gte: this.startDate, $lte: this.endDate },
     status: { $in: ["completed", "paid"] },
   });
 
   // Bills
   const billCount = await Bill.countDocuments({
+    companyId: this.companyId,
     billDate: { $gte: this.startDate, $lte: this.endDate },
     status: { $in: ["approved", "paid"] },
   });
 
   // Payments
   const paymentCount = await Payment.countDocuments({
+    companyId: this.companyId,
     paymentDate: { $gte: this.startDate, $lte: this.endDate },
     status: "confirmed",
   });
