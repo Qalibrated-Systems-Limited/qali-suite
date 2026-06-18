@@ -156,7 +156,7 @@ export function OpeningBalancesClient({ setup }) {
       </Card>
 
       {/* Section A — trial balance (non-control accounts) */}
-      <TrialBalanceSection setup={setup} />
+      <TrialBalanceSection setup={setup} conversionDate={conversionDate} />
 
       {/* Section B — opening receivables */}
       <OpeningDocsSection
@@ -189,10 +189,11 @@ export function OpeningBalancesClient({ setup }) {
   );
 }
 
-function TrialBalanceSection({ setup }) {
+function TrialBalanceSection({ setup, conversionDate }) {
   const { accounts, obeAccountId, alreadyPosted, openingBalanceEquity } = setup;
 
-  const [date, setDate] = useState("");
+  // Uses the shared conversion date set at the top of the hub.
+  const date = conversionDate ? conversionDate.slice(0, 10) : "";
   const [amounts, setAmounts] = useState({}); // { [id]: "1234.56" }
   const [result, setResult] = useState(null);
   const [isPending, startTransition] = useTransition();
@@ -237,7 +238,7 @@ function TrialBalanceSection({ setup }) {
 
   const onSubmit = () => {
     if (!date) {
-      toast.error("Choose your start (cutover) date first.");
+      toast.error("Set your conversion (cutover) date at the top of the page first.");
       return;
     }
     const lines = Object.entries(amounts)
@@ -341,25 +342,6 @@ function TrialBalanceSection({ setup }) {
       {/* Single bordered panel — consistent px-4 across every section keeps
           edges aligned (GitHub-style box rather than separate floating cards) */}
       <div className="rounded-lg border border-border overflow-hidden">
-        {/* Cutover date */}
-        <div className="flex flex-col sm:flex-row sm:items-end gap-3 p-4 border-b border-border bg-muted/20">
-          <div className="space-y-1">
-            <Label htmlFor="cutover" className="text-sm">
-              Start (cutover) date
-            </Label>
-            <Input
-              id="cutover"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full sm:w-52"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground sm:pb-2">
-            Balances as they stood at the close of this day.
-          </p>
-        </div>
-
         {/* Account groups */}
         {grouped.map(([type, accs], gi) => (
           <div key={type}>
