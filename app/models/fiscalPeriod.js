@@ -515,9 +515,11 @@ fiscalPeriodSchema.methods.close = async function (closedBy) {
     throw new Error(`Cannot close period. Current status: ${this.status}`);
   }
 
-  // Check if there are any draft journal entries
+  // Check if there are any draft journal entries (tenant-scoped — another
+  // company's drafts must not block this company's period close).
   const JournalEntry = mongoose.model("JournalEntry");
   const draftCount = await JournalEntry.countDocuments({
+    companyId: this.companyId,
     entryDate: { $gte: this.startDate, $lte: this.endDate },
     status: "draft",
   });
@@ -779,12 +781,18 @@ fiscalPeriodSchema.methods.reopen = async function (reopenedBy, reason) {
 // STATIC METHODS
 // ============================================
 
+// NOTE: these statics are tenant-scoped — always pass companyId. A null
+// companyId would match documents with no company and is never correct in
+// this multi-tenant app. (Most call sites use fiscalPeriodService /
+// fiscalPeriodQueries, which already apply withTenantScope.)
+
 /**
  * Get current period
  */
-fiscalPeriodSchema.statics.getCurrentPeriod = function () {
+fiscalPeriodSchema.statics.getCurrentPeriod = function (companyId) {
   const now = new Date();
   return this.findOne({
+    companyId,
     startDate: { $lte: now },
     endDate: { $gte: now },
   });
@@ -793,15 +801,16 @@ fiscalPeriodSchema.statics.getCurrentPeriod = function () {
 /**
  * Get open periods
  */
-fiscalPeriodSchema.statics.getOpenPeriods = function () {
-  return this.find({ status: "open" }).sort({ startDate: 1 });
+fiscalPeriodSchema.statics.getOpenPeriods = function (companyId) {
+  return this.find({ companyId, status: "open" }).sort({ startDate: 1 });
 };
 
 /**
  * Get period by date
  */
-fiscalPeriodSchema.statics.getPeriodByDate = function (date) {
+fiscalPeriodSchema.statics.getPeriodByDate = function (companyId, date) {
   return this.findOne({
+    companyId,
     startDate: { $lte: date },
     endDate: { $gte: date },
   });
@@ -810,8 +819,8 @@ fiscalPeriodSchema.statics.getPeriodByDate = function (date) {
 /**
  * Get period by code
  */
-fiscalPeriodSchema.statics.getByCode = function (periodCode) {
-  return this.findOne({ periodCode });
+fiscalPeriodSchema.statics.getByCode = function (companyId, periodCode) {
+  return this.findOne({ companyId, periodCode });
 };
 
 /**

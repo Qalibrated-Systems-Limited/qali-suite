@@ -328,8 +328,8 @@ export async function createPurchaseOrder(prevState, formData) {
       });
     }
 
-    // 7. Generate PO number atomically
-    const poNumber = await PurchaseOrder.generatePONumber(mongoSession);
+    // 7. Generate PO number atomically (tenant-scoped sequence)
+    const poNumber = await PurchaseOrder.generatePONumber(companyId, mongoSession);
 
     // 8. Create supplier snapshot (frozen at creation time)
     const supplierSnapshot = {

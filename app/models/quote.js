@@ -866,11 +866,13 @@ quoteSchema.statics.generateQuoteNumber = async function (companyId = null, sess
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const seq = await ErpCounter.getNextSequence(counterId, session);
+      // Pass companyId in its own arg (was being passed as `session`), so the
+      // counter is tenant-scoped and the session is used as a session.
+      const seq = await ErpCounter.getNextSequence(counterId, companyId, session);
       const quoteNumber = `${prefix}-${String(seq).padStart(4, "0")}`;
 
       // Use .session() method chaining to avoid ClientSession serialization error
-      let existsQuery = this.exists({ quoteNumber });
+      let existsQuery = this.exists(companyId ? { companyId, quoteNumber } : { quoteNumber });
       if (session) existsQuery = existsQuery.session(session);
       const exists = await existsQuery;
 
@@ -886,8 +888,12 @@ quoteSchema.statics.generateQuoteNumber = async function (companyId = null, sess
         counterError.message,
       );
 
-      // Fallback: find last quote number and increment
-      let lastQuoteQuery = this.findOne({ quoteNumber: { $regex: `^${prefix}` } })
+      // Fallback: find last quote number and increment (tenant-scoped)
+      let lastQuoteQuery = this.findOne(
+        companyId
+          ? { companyId, quoteNumber: { $regex: `^${prefix}` } }
+          : { quoteNumber: { $regex: `^${prefix}` } }
+      )
         .sort({ quoteNumber: -1 })
         .lean();
       if (session) lastQuoteQuery = lastQuoteQuery.session(session);
@@ -901,7 +907,7 @@ quoteSchema.statics.generateQuoteNumber = async function (companyId = null, sess
 
       const quoteNumber = `${prefix}-${String(nextNum).padStart(4, "0")}`;
 
-      let existsQuery = this.exists({ quoteNumber });
+      let existsQuery = this.exists(companyId ? { companyId, quoteNumber } : { quoteNumber });
       if (session) existsQuery = existsQuery.session(session);
       const exists = await existsQuery;
 

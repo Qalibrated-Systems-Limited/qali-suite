@@ -756,7 +756,10 @@ purchaseOrderSchema.methods.convertToBill = async function (
 // ============================================
 // STATIC: Generate PO Number
 // ============================================
-purchaseOrderSchema.statics.generatePONumber = async function (session = null) {
+purchaseOrderSchema.statics.generatePONumber = async function (
+  companyId = null,
+  session = null
+) {
   const ErpCounter = mongoose.model("ErpCounter");
   const date = new Date();
   const prefix = `QSL-PO-${date.getFullYear()}${String(
@@ -766,15 +769,18 @@ purchaseOrderSchema.statics.generatePONumber = async function (session = null) {
     date.getMonth() + 1
   ).padStart(2, "0")}`;
   const queryOptions = session ? { session } : {};
+  // Tenant scope for the uniqueness/fallback lookups (poNumber is unique per
+  // {companyId, poNumber}); ErpCounter scopes its own counter by companyId.
+  const scope = companyId ? { companyId } : {};
 
   const maxAttempts = 5;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const seq = await ErpCounter.getNextSequence(counterId, session);
+      const seq = await ErpCounter.getNextSequence(counterId, companyId, session);
       const poNumber = `${prefix}-${String(seq).padStart(4, "0")}`;
 
-      const exists = await this.exists({ poNumber }, queryOptions);
+      const exists = await this.exists({ ...scope, poNumber }, queryOptions);
       if (!exists) {
         return poNumber;
       }
@@ -788,7 +794,7 @@ purchaseOrderSchema.statics.generatePONumber = async function (session = null) {
       );
 
       const lastPO = await this.findOne(
-        { poNumber: { $regex: `^${prefix}` } },
+        { ...scope, poNumber: { $regex: `^${prefix}` } },
         null,
         queryOptions
       )
@@ -803,7 +809,7 @@ purchaseOrderSchema.statics.generatePONumber = async function (session = null) {
 
       const poNumber = `${prefix}-${String(nextNum).padStart(4, "0")}`;
 
-      const exists = await this.exists({ poNumber }, queryOptions);
+      const exists = await this.exists({ ...scope, poNumber }, queryOptions);
       if (!exists) {
         return poNumber;
       }

@@ -554,9 +554,9 @@ export class JournalEntryService {
     const applyToDocument = hasOverpayment ? documentBalance : amount;
     const overpaymentAmount = hasOverpayment ? amount - documentBalance : 0;
 
-    // Get required accounts
+    // Get required accounts (bank account tenant-scoped — never trust a bare id)
     const accountQueries = [
-      Account.findById(bankAccountId),
+      Account.findOne({ _id: bankAccountId, companyId }),
       Account.findOne({ companyId, systemAccount: "accounts_receivable" }),
     ];
 

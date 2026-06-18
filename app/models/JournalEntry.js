@@ -455,7 +455,11 @@ journalEntrySchema.methods.reverse = async function (
   // Counter read — outside the txn is fine; the post() below will fail-fast
   // if a concurrent reversal claimed the same number (unique index on
   // entryNumber catches it).
+  // Tenant-scoped: per-company reversal sequence (entryNumber is unique per
+  // {companyId, entryNumber}, so a global scan both leaks across tenants and
+  // misses the compound index).
   const lastEntry = await JournalEntry.findOne({
+    companyId: this.companyId,
     entryNumber: /^JE-REV-/,
   })
     .sort({ entryNumber: -1 })

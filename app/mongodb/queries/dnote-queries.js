@@ -5,7 +5,7 @@ import DeliveryNote from "../../models/dnote";
 
 import { startOfMonth, endOfMonth } from "date-fns";
 import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext, buildTenantMatch } from "@/lib/utils/tenant-utils";
+import { getTenantContext, buildTenantMatch, withTenantScope } from "@/lib/utils/tenant-utils";
 
 // ============================================
 // SEARCH DELIVERY NOTES (WITH PAGINATION)
@@ -266,7 +266,10 @@ export async function getDeliveryNoteById(id) {
       throw new Error("Unauthorized");
     }
 
-    const deliveryNote = await DeliveryNote.findById(id).lean();
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const deliveryNote = await DeliveryNote.findOne(
+      withTenantScope({ _id: id }, companyId, isSuperAdmin)
+    ).lean();
 
     if (!deliveryNote) {
       return null;
@@ -289,8 +292,13 @@ export async function getDeliveryNotesStats() {
       throw new Error("Unauthorized");
     }
 
-    // Use aggregation for better performance
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    // Use aggregation for better performance. buildTenantMatch casts companyId
+    // to ObjectId so the first $match hits the compound index (no collection
+    // scan) and stats never pool other tenants' delivery notes.
     const statsResult = await DeliveryNote.aggregate([
+      { $match: buildTenantMatch(companyId, isSuperAdmin) },
       {
         $facet: {
           total: [{ $count: "count" }],
@@ -424,9 +432,10 @@ export async function getDeliveryNotesByCustomer(customerId) {
       throw new Error("Unauthorized");
     }
 
-    const deliveryNotes = await DeliveryNote.find({
-      "customer.id": customerId,
-    })
+    const { companyId, isSuperAdmin } = await getTenantContext();
+    const deliveryNotes = await DeliveryNote.find(
+      withTenantScope({ "customer.id": customerId }, companyId, isSuperAdmin)
+    )
       .sort({ date: -1 })
       .lean();
 

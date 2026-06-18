@@ -642,7 +642,7 @@ stockMovementSchema.methods.reverse = async function (
 
     // Counter read is outside the txn; the unique index on movementNumber
     // catches any concurrent collisions on insert below.
-    const reversalNumber = await generateReversalNumber();
+    const reversalNumber = await generateReversalNumber(this.companyId);
     const oppositeDirection = this.direction === "in" ? "out" : "in";
 
     // Model.create with a session requires array form
@@ -984,10 +984,14 @@ stockMovementSchema.statics.getNeedingAccounting = function () {
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
-async function generateReversalNumber() {
+async function generateReversalNumber(companyId) {
   const StockMovement = mongoose.model("StockMovement");
 
+  // Tenant-scoped: movementNumber is unique per {companyId, movementNumber},
+  // so the reversal sequence must be per-company (a global scan leaks across
+  // tenants and misses the compound index).
   const lastReversal = await StockMovement.findOne({
+    companyId,
     movementNumber: /^SMR-/,
   })
     .sort({ movementNumber: -1 })
