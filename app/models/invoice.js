@@ -295,7 +295,9 @@ const invoiceSchema = new Schema(
       ],
       validate: {
         validator: function (items) {
-          return items && items.length > 0;
+          // Opening-balance invoices carry no line items — they exist only to
+          // seed the AR subledger (Dr AR / Cr Opening Balance Equity).
+          return this.isOpeningBalance || (items && items.length > 0);
         },
         message: "Invoice must have at least one item",
       },
@@ -434,6 +436,15 @@ const invoiceSchema = new Schema(
       },
 
       accountingCompletedAt: Date,
+    },
+
+    // Opening-balance invoice: a pre-cutover receivable carried over during
+    // onboarding. Posts only Dr AR / Cr Opening Balance Equity — no revenue,
+    // VAT, COGS, inventory or stock movement. See invoice.completeOpening().
+    isOpeningBalance: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
 
     // ============================================
@@ -1028,6 +1039,142 @@ invoiceSchema.methods.complete = async function (completedBy, externalSession = 
     return this;
   } catch (error) {
     throw new Error(`Invoice completion failed: ${error.message}`);
+  } finally {
+    if (ownSession) ownSession.endSession();
+  }
+};
+
+/**
+ * Complete an OPENING-BALANCE invoice.
+ *
+ * Unlike complete(), this books NO revenue, VAT, COGS, inventory or stock
+ * movement. It posts a single migration entry — Dr Accounts Receivable /
+ * Cr Opening Balance Equity for the full gross outstanding — so the AR
+ * subledger is seeded without touching the new period's P&L.
+ */
+invoiceSchema.methods.completeOpening = async function (completedBy, externalSession = null) {
+  if (!this.isOpeningBalance) {
+    throw new Error("completeOpening() is only for opening-balance invoices");
+  }
+  if (this.status !== "draft" && this.status !== "sent") {
+    throw new Error(
+      `Can only complete draft or sent invoices. Current status: ${this.status}`,
+    );
+  }
+
+  const userInfo = formatUserForAudit(completedBy);
+  const Account = mongoose.model("Account");
+  const JournalEntry = mongoose.model("JournalEntry");
+  const FiscalPeriod = mongoose.model("FiscalPeriod");
+
+  // ── Fiscal period (find or auto-create; must be open) ──────────
+  if (!this.fiscalPeriod && this.invoiceDate) {
+    const d = new Date(this.invoiceDate);
+    this.fiscalPeriod = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+  const periodFilter = { periodCode: this.fiscalPeriod };
+  if (this.companyId) periodFilter.companyId = this.companyId;
+
+  let fiscalPeriod = await FiscalPeriod.findOne(periodFilter);
+  if (!fiscalPeriod) {
+    const [year, month] = this.fiscalPeriod.split("-").map(Number);
+    try {
+      fiscalPeriod = await FiscalPeriod.createMonthPeriod(year, month, userInfo, this.companyId);
+    } catch (createError) {
+      fiscalPeriod = await FiscalPeriod.findOne(periodFilter);
+      if (!fiscalPeriod) {
+        throw new Error(`Failed to create fiscal period: ${createError.message}`);
+      }
+    }
+  }
+  if (fiscalPeriod.status === "closed") throw new Error(`Fiscal period ${this.fiscalPeriod} is closed`);
+  if (fiscalPeriod.status === "locked") throw new Error(`Fiscal period ${this.fiscalPeriod} is locked`);
+
+  const ownSession = externalSession ? null : await mongoose.startSession();
+  const session = externalSession || ownSession;
+
+  try {
+    const run = async () => {
+      // Reset in case withTransaction retries the callback.
+      this.accounting = this.accounting || {};
+      this.accounting.revenueJournalEntryId = undefined;
+      this.accounting.accountingComplete = false;
+
+      const [arAccount, obeAccount] = await Promise.all([
+        Account.findOne({ companyId: this.companyId, systemAccount: "accounts_receivable" }),
+        Account.findOne({ companyId: this.companyId, systemAccount: "opening_balance_equity" }),
+      ]);
+      if (!arAccount) throw new Error("Accounts Receivable account not configured for this company");
+      if (!obeAccount) throw new Error("Opening Balance Equity account not configured for this company");
+
+      const lines = [
+        {
+          accountId: arAccount._id,
+          accountCode: arAccount.accountCode,
+          accountName: arAccount.accountName,
+          accountType: arAccount.accountType,
+          debit: this.total,
+          credit: 0,
+          description: `Opening balance — ${this.customer.name}`,
+        },
+        {
+          accountId: obeAccount._id,
+          accountCode: obeAccount.accountCode,
+          accountName: obeAccount.accountName,
+          accountType: obeAccount.accountType,
+          debit: 0,
+          credit: this.total,
+          description: `Opening balance — Invoice ${this.invoiceNumber}`,
+        },
+      ];
+
+      const entryNumber = await this.generateUniqueEntryNumber("OB-AR", session);
+      const [journalEntry] = await JournalEntry.create([{
+        companyId: this.companyId,
+        entryNumber,
+        entryDate: this.invoiceDate,
+        entryType: "opening_balance",
+        description: `Opening balance — Invoice ${this.invoiceNumber}`,
+        lines,
+        party: {
+          type: "customer",
+          id: this.customer.id,
+          name: this.customer.name,
+          email: this.customer.email,
+          phone: this.customer.phone,
+        },
+        dueDate: this.dueDate,
+        amountOutstanding: this.total,
+        relatedDocuments: {
+          invoiceId: this._id,
+          invoiceNumber: this.invoiceNumber,
+        },
+        status: "draft",
+        createdBy: userInfo,
+      }], session ? { session } : {});
+
+      await journalEntry.post(userInfo, session);
+
+      // Reuse the revenue link field so recordPayment() updates the right JE.
+      this.accounting.revenueJournalEntryId = journalEntry._id;
+      this.accounting.accountingComplete = true;
+      this.accounting.accountingCompletedAt = new Date();
+      this.status = "completed";
+      this.completedAt = new Date();
+      this.completedBy = userInfo;
+      this.lastModifiedBy = userInfo;
+
+      await this.save({ session });
+    };
+
+    if (ownSession) {
+      await ownSession.withTransaction(run);
+    } else {
+      await run();
+    }
+    return this;
+  } catch (error) {
+    throw new Error(`Opening invoice completion failed: ${error.message}`);
   } finally {
     if (ownSession) ownSession.endSession();
   }

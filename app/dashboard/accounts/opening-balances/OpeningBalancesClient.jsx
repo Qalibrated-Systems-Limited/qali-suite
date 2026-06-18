@@ -3,14 +3,22 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Info, Loader2, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, Loader2, Lock, Save } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { formatCurrency } from "@/lib/utils";
-import { postOpeningBalances } from "@/app/mongodb/actions/opening-balance-actions";
+import {
+  postOpeningBalances,
+  setConversionDate,
+  createOpeningInvoice,
+  createOpeningBill,
+  reverseOpeningInvoice,
+  reverseOpeningBill,
+} from "@/app/mongodb/actions/opening-balance-actions";
+import { OpeningDocsSection } from "./OpeningDocsSection";
 
 const TYPE_ORDER = ["asset", "liability", "equity", "revenue", "expense"];
 const TYPE_LABEL = {
@@ -57,6 +65,131 @@ const amt = (v) => {
 };
 
 export function OpeningBalancesClient({ setup }) {
+  const {
+    conversionDate,
+    liveLocked,
+    customers = [],
+    suppliers = [],
+    openingReceivables = [],
+    openingPayables = [],
+    receivablesTotal = 0,
+    payablesTotal = 0,
+  } = setup;
+
+  const [convDate, setConvDate] = useState(conversionDate ? conversionDate.slice(0, 10) : "");
+  const [savingDate, startSaveDate] = useTransition();
+
+  const saveConversionDate = () => {
+    if (!convDate) {
+      toast.error("Choose a conversion date.");
+      return;
+    }
+    startSaveDate(async () => {
+      const res = await setConversionDate({ date: convDate });
+      if (res?.success) toast.success("Conversion date saved.");
+      else toast.error(res?.error || "Failed to save conversion date.");
+    });
+  };
+
+  // Normalise AR/AP docs into the shape OpeningDocsSection expects.
+  const receivables = openingReceivables.map((d) => ({
+    id: d._id,
+    number: d.invoiceNumber,
+    date: d.invoiceDate,
+    dueDate: d.dueDate,
+    amount: d.total,
+    partyName: d.customer?.name,
+    paymentStatus: d.paymentStatus,
+  }));
+  const payables = openingPayables.map((d) => ({
+    id: d._id,
+    number: d.billNumber,
+    date: d.billDate,
+    dueDate: d.dueDate,
+    amount: d.amounts?.netPayable,
+    partyName: d.supplier?.name,
+    paymentStatus: d.paymentStatus,
+  }));
+
+  return (
+    <div className="space-y-6">
+      {liveLocked && (
+        <Alert className="border-amber-500/40">
+          <Lock className="h-4 w-4 text-amber-500" />
+          <AlertDescription className="text-sm">
+            <strong>Opening balances are locked.</strong> Real transactions exist for this
+            company, so the cutover is complete. To change opening figures now, reverse the
+            relevant journal entries from the journal.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Conversion (cutover) date — shared by receivables & payables */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Conversion date</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="conv-date" className="text-sm">
+                Cutover date
+              </Label>
+              <Input
+                id="conv-date"
+                type="date"
+                value={convDate}
+                disabled={liveLocked}
+                onChange={(e) => setConvDate(e.target.value)}
+                className="w-full sm:w-52"
+              />
+            </div>
+            <Button onClick={saveConversionDate} disabled={savingDate || liveLocked} variant="outline">
+              {savingDate ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+              Save date
+            </Button>
+            <p className="text-xs text-muted-foreground sm:pb-2">
+              Opening invoices and bills must be dated on or before this day.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Section A — trial balance (non-control accounts) */}
+      <TrialBalanceSection setup={setup} />
+
+      {/* Section B — opening receivables */}
+      <OpeningDocsSection
+        mode="receivable"
+        parties={customers}
+        docs={receivables}
+        total={receivablesTotal}
+        conversionDate={conversionDate}
+        locked={liveLocked}
+        onCreate={({ partyId, date, dueDate, amount }) =>
+          createOpeningInvoice({ customerId: partyId, invoiceDate: date, dueDate, amount })
+        }
+        onReverse={(id) => reverseOpeningInvoice(id)}
+      />
+
+      {/* Section C — opening payables */}
+      <OpeningDocsSection
+        mode="payable"
+        parties={suppliers}
+        docs={payables}
+        total={payablesTotal}
+        conversionDate={conversionDate}
+        locked={liveLocked}
+        onCreate={({ partyId, date, dueDate, amount }) =>
+          createOpeningBill({ supplierId: partyId, billDate: date, dueDate, amount })
+        }
+        onReverse={(id) => reverseOpeningBill(id)}
+      />
+    </div>
+  );
+}
+
+function TrialBalanceSection({ setup }) {
   const { accounts, obeAccountId, alreadyPosted, openingBalanceEquity } = setup;
 
   const [date, setDate] = useState("");

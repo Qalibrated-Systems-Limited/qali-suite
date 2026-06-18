@@ -400,6 +400,21 @@ const companySchema = new Schema(
     },
 
     // ============================================
+    // CONVERSION / CUTOVER (opening balances)
+    // ============================================
+    // The date the business migrated onto this system. Opening-balance
+    // documents (AR/AP) must be dated on or before this date. Set once during
+    // onboarding and locked once real trading begins.
+    conversion: {
+      date: { type: Date, default: null, index: true },
+      setBy: {
+        name: { type: String },
+        id: { type: String },
+      },
+      setAt: { type: Date },
+    },
+
+    // ============================================
     // STATUS
     // ============================================
     status: {

@@ -268,7 +268,9 @@ const billSchema = new Schema(
       validate: [
         {
           validator: function (lines) {
-            return lines && lines.length > 0;
+            // Opening-balance bills carry no lines — they exist only to seed the
+            // AP subledger (Dr Opening Balance Equity / Cr AP).
+            return this.isOpeningBalance || (lines && lines.length > 0);
           },
           message: "Bill must have at least one line",
         },
@@ -376,6 +378,15 @@ const billSchema = new Schema(
     cancelledAt: Date,
     cancelledBy: { name: String, id: String },
     cancellationReason: String,
+
+    // Opening-balance bill: a pre-cutover payable carried over during
+    // onboarding. Posts only Dr Opening Balance Equity / Cr AP — no expense,
+    // inventory, GRNI, VAT, WHT or stock movement. See bill.approveOpening().
+    isOpeningBalance: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
 
     // ==========================================
     // ACCOUNTING LINKS (References, not embedded)
@@ -547,37 +558,42 @@ billSchema.virtual("lineCount").get(function () {
 // PRE-SAVE: Calculate amounts
 // ============================================
 billSchema.pre("save", function (next) {
-  // Calculate line totals
-  let subtotal = 0;
-  let totalVat = 0;
+  // Opening-balance bills carry no lines; their gross amount is set directly by
+  // the opening action. Skip the line-driven recompute so it isn't zeroed —
+  // but still derive the fiscal period below.
+  if (!this.isOpeningBalance) {
+    // Calculate line totals
+    let subtotal = 0;
+    let totalVat = 0;
 
-  this.lines.forEach((line, index) => {
-    line.lineNumber = index + 1;
-    line.amount = Math.round(line.quantity * line.unitPrice * 100) / 100;
-    line.vat.amount =
-      Math.round(line.amount * (line.vat.rate / 100) * 100) / 100;
-    line.lineTotal = line.amount + line.vat.amount;
+    this.lines.forEach((line, index) => {
+      line.lineNumber = index + 1;
+      line.amount = Math.round(line.quantity * line.unitPrice * 100) / 100;
+      line.vat.amount =
+        Math.round(line.amount * (line.vat.rate / 100) * 100) / 100;
+      line.lineTotal = line.amount + line.vat.amount;
 
-    subtotal += line.amount;
-    totalVat += line.vat.amount;
-  });
+      subtotal += line.amount;
+      totalVat += line.vat.amount;
+    });
 
-  // Set amounts
-  this.amounts.subtotal = Math.round(subtotal * 100) / 100;
-  this.amounts.vat = Math.round(totalVat * 100) / 100;
-  this.amounts.total = this.amounts.subtotal + this.amounts.vat;
+    // Set amounts
+    this.amounts.subtotal = Math.round(subtotal * 100) / 100;
+    this.amounts.vat = Math.round(totalVat * 100) / 100;
+    this.amounts.total = this.amounts.subtotal + this.amounts.vat;
 
-  // Calculate WHT if applicable
-  if (this.whtApplicable && this.whtRate > 0) {
-    this.amounts.wht =
-      Math.round(this.amounts.subtotal * (this.whtRate / 100) * 100) / 100;
-  } else {
-    this.amounts.wht = 0;
+    // Calculate WHT if applicable
+    if (this.whtApplicable && this.whtRate > 0) {
+      this.amounts.wht =
+        Math.round(this.amounts.subtotal * (this.whtRate / 100) * 100) / 100;
+    } else {
+      this.amounts.wht = 0;
+    }
+
+    // Net payable
+    this.amounts.netPayable = this.amounts.total - this.amounts.wht;
+    this.amounts.balance = this.amounts.netPayable - this.amounts.paid;
   }
-
-  // Net payable
-  this.amounts.netPayable = this.amounts.total - this.amounts.wht;
-  this.amounts.balance = this.amounts.netPayable - this.amounts.paid;
 
   // Set fiscal period from bill date if not set
   if (!this.fiscalPeriod && this.billDate) {
@@ -618,6 +634,124 @@ billSchema.methods.submit = async function (user) {
   this.status = "submitted";
   this.submittedAt = new Date();
   this.submittedBy = userInfo;
+  this.lastModifiedBy = userInfo;
+
+  await this.save();
+  return this;
+};
+
+// ============================================
+// METHOD: Approve an OPENING-BALANCE bill
+// ============================================
+// Books NO expense, inventory, GRNI, VAT, WHT or stock movement — only the
+// migration entry Dr Opening Balance Equity / Cr Accounts Payable for the full
+// gross outstanding, so the AP subledger is seeded without distorting the new
+// period. Mirrors the JE create/post tail of approve(), non-transactional.
+billSchema.methods.approveOpening = async function (user) {
+  if (!this.isOpeningBalance) {
+    throw new Error("approveOpening() is only for opening-balance bills");
+  }
+  if (!this.canApprove) {
+    throw new Error(`Cannot approve bill in status: ${this.status}`);
+  }
+
+  const FiscalPeriod = mongoose.model("FiscalPeriod");
+  const JournalEntry = mongoose.model("JournalEntry");
+  const Account = mongoose.model("Account");
+
+  const userInfo = formatUser(user);
+
+  // ── Fiscal period (find or auto-create; must be open) ──────────
+  const periodFilter = { periodCode: this.fiscalPeriod };
+  if (this.companyId) periodFilter.companyId = this.companyId;
+
+  let fiscalPeriod = await FiscalPeriod.findOne(periodFilter);
+  if (!fiscalPeriod) {
+    const [year, month] = this.fiscalPeriod.split("-").map(Number);
+    try {
+      fiscalPeriod = await FiscalPeriod.createMonthPeriod(year, month, userInfo, this.companyId);
+    } catch (createError) {
+      fiscalPeriod = await FiscalPeriod.findOne(periodFilter);
+      if (!fiscalPeriod) {
+        throw new Error(`Failed to create fiscal period: ${createError.message}`);
+      }
+    }
+  }
+  if (fiscalPeriod.status === "closed") throw new Error(`Fiscal period ${this.fiscalPeriod} is closed`);
+  if (fiscalPeriod.status === "locked") throw new Error(`Fiscal period ${this.fiscalPeriod} is locked`);
+
+  // ── Accounts ───────────────────────────────────────────────────
+  const accountFilter = this.companyId ? { companyId: this.companyId } : {};
+  const [apAccount, obeAccount] = await Promise.all([
+    Account.findOne({ ...accountFilter, systemAccount: "accounts_payable" }),
+    Account.findOne({ ...accountFilter, systemAccount: "opening_balance_equity" }),
+  ]);
+  if (!apAccount) throw new Error("Accounts Payable system account not configured");
+  if (!obeAccount) throw new Error("Opening Balance Equity system account not configured");
+
+  const amount = this.amounts.netPayable;
+  const jeLines = [
+    {
+      accountId: obeAccount._id,
+      accountCode: obeAccount.accountCode,
+      accountName: obeAccount.accountName,
+      accountType: obeAccount.accountType,
+      debit: amount,
+      credit: 0,
+      description: `Opening balance — Bill ${this.billNumber}`,
+    },
+    {
+      accountId: apAccount._id,
+      accountCode: apAccount.accountCode,
+      accountName: apAccount.accountName,
+      accountType: apAccount.accountType,
+      debit: 0,
+      credit: amount,
+      description: `Opening balance — ${this.supplier.name}`,
+    },
+  ];
+
+  const { generateUniqueEntryNumber } = await import("@/lib/utils/server-utils");
+  const entryNumber = await generateUniqueEntryNumber("OB-AP", this.companyId);
+
+  const journalEntry = new JournalEntry({
+    companyId: this.companyId,
+    entryNumber,
+    entryDate: this.billDate,
+    entryType: "opening_balance",
+    description: `Opening balance — Bill ${this.billNumber}`,
+    lines: jeLines,
+    party: {
+      type: "supplier",
+      id: this.supplier.partyId.toString(),
+      name: this.supplier.name,
+    },
+    dueDate: this.dueDate,
+    fiscalPeriod: this.fiscalPeriod,
+    relatedDocuments: {
+      billId: this._id,
+      billNumber: this.billNumber,
+    },
+    status: "draft",
+    createdBy: userInfo,
+  });
+
+  await journalEntry.save();
+  try {
+    await journalEntry.post(userInfo);
+  } catch (postError) {
+    await JournalEntry.findByIdAndDelete(journalEntry._id);
+    throw new Error(`Failed to post journal entry: ${postError.message}`);
+  }
+
+  this.status = "approved";
+  this.approvedAt = new Date();
+  this.approvedBy = userInfo;
+  this.accounting.journalEntryId = journalEntry._id;
+  this.accounting.postedAt = new Date();
+  this.accounting.postedBy = userInfo;
+  this.accounting.inventoryMoved = true; // no inventory for opening bills
+  this.accounting.usedGRNI = false;
   this.lastModifiedBy = userInfo;
 
   await this.save();

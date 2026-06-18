@@ -4,10 +4,16 @@ import { revalidatePath } from "next/cache";
 
 import JournalEntry from "@/app/models/JournalEntry";
 import Account from "@/app/models/account";
+import Invoice from "@/app/models/invoice";
+import Bill from "@/app/models/bill";
+import Company from "@/app/models/Company";
+import Party from "@/app/models/parties";
+import ErpCounter from "@/app/models/erp-counter";
 import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getTenantContext, buildTenantMatch } from "@/lib/utils/tenant-utils";
 import { generateUniqueEntryNumber } from "@/lib/utils/server-utils";
 import { requirePlanAccess } from "@/lib/plan-gate";
+import { roleAllowed } from "@/lib/permissions";
 
 // Only finance roles may book opening balances — same gate as manual journals.
 const ALLOWED_ROLES = [
@@ -61,11 +67,16 @@ export async function postOpeningBalances({ entryDate, lines } = {}) {
     }
 
     // Booking opening balances twice would double the books. Block if a
-    // non-reversed opening entry already exists; the user must reverse it first.
+    // non-reversed opening LUMP entry already exists; the user must reverse it
+    // first. The lump is identified by having NO related invoice/bill — that
+    // distinguishes it from opening AR/AP documents (which also use entryType
+    // "opening_balance" but always set relatedDocuments).
     const existing = await JournalEntry.findOne({
       companyId,
       entryType: "opening_balance",
       status: { $ne: "reversed" },
+      "relatedDocuments.invoiceId": { $exists: false },
+      "relatedDocuments.billId": { $exists: false },
     })
       .select("entryNumber")
       .lean();
@@ -163,5 +174,290 @@ export async function postOpeningBalances({ entryDate, lines } = {}) {
   } catch (error) {
     console.error("Post opening balances error:", error);
     return { success: false, error: error.message || "Failed to post opening balances." };
+  }
+}
+
+// ============================================
+// OPENING AR / AP — Xero-style conversion documents
+// ============================================
+// Outstanding customer invoices and supplier bills as of the conversion date
+// are entered one-by-one so each control account (AR/AP) is built up from its
+// subledger. They post ONLY against Opening Balance Equity — never revenue,
+// VAT, COGS, inventory or WHT — see invoice.completeOpening / bill.approveOpening.
+
+// True once the company has posted any REAL trading activity. All opening
+// entries (lump, AR, AP) share entryType "opening_balance" and so are excluded;
+// reversal JEs carry originalEntryId and are excluded too. Once this is true,
+// opening-balance entry is locked (the cutover is over).
+async function hasRealTransactions(companyId, isSuperAdmin) {
+  const match = buildTenantMatch(companyId, isSuperAdmin);
+  return JournalEntry.exists({
+    ...match,
+    status: "posted",
+    entryType: { $nin: ["opening_balance"] },
+    originalEntryId: { $exists: false },
+  });
+}
+
+// Shared guard for every opening-balance write: finance role + plan access +
+// not yet live. Returns { ok:false, error } or { ok:true, ctx }.
+async function guardOpeningEntry() {
+  await dbConnect();
+  const { user, companyId, isSuperAdmin } = await getTenantContext();
+
+  if (!user || !roleAllowed(user.role, ALLOWED_ROLES)) {
+    return { ok: false, error: "You don't have permission to book opening balances." };
+  }
+  try {
+    await requirePlanAccess("finance");
+  } catch (e) {
+    return { ok: false, error: e.message || "Your plan does not include this feature." };
+  }
+  if (await hasRealTransactions(companyId, isSuperAdmin)) {
+    return {
+      ok: false,
+      error: "Opening balances are locked — real transactions already exist for this company.",
+    };
+  }
+  return { ok: true, user, companyId, isSuperAdmin };
+}
+
+// Set / update the company conversion (cutover) date.
+export async function setConversionDate({ date } = {}) {
+  const guard = await guardOpeningEntry();
+  if (!guard.ok) return { success: false, error: guard.error };
+  const { user, companyId } = guard;
+
+  if (!date) return { success: false, error: "A conversion date is required." };
+  const conv = new Date(date);
+  if (Number.isNaN(conv.getTime())) {
+    return { success: false, error: "The conversion date is invalid." };
+  }
+
+  try {
+    await Company.findByIdAndUpdate(companyId, {
+      $set: {
+        "conversion.date": conv,
+        "conversion.setBy": { name: user.name, id: user.id },
+        "conversion.setAt": new Date(),
+      },
+    });
+    revalidatePath("/dashboard/accounts/opening-balances");
+    return { success: true };
+  } catch (error) {
+    console.error("Set conversion date error:", error);
+    return { success: false, error: error.message || "Failed to set conversion date." };
+  }
+}
+
+// Resolve and validate the conversion date + a document date against it.
+async function resolveConversionWindow(companyId, docDateStr, label) {
+  if (!docDateStr) return { error: `A ${label} date is required.` };
+  const docDate = new Date(docDateStr);
+  if (Number.isNaN(docDate.getTime())) return { error: `The ${label} date is invalid.` };
+
+  const company = await Company.findById(companyId).select("conversion").lean();
+  const conversionDate = company?.conversion?.date ? new Date(company.conversion.date) : null;
+  if (!conversionDate) {
+    return { error: "Set your conversion (cutover) date before entering opening documents." };
+  }
+  if (docDate > conversionDate) {
+    return { error: `The ${label} date must be on or before the conversion date.` };
+  }
+  return { docDate };
+}
+
+const fiscalCode = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+const toAmount = (v) => Math.round((Number(v) || 0) * 100) / 100;
+
+// Create + post an opening customer invoice (Dr AR / Cr OBE).
+export async function createOpeningInvoice({ customerId, invoiceDate, dueDate, amount } = {}) {
+  const guard = await guardOpeningEntry();
+  if (!guard.ok) return { success: false, error: guard.error };
+  const { user, companyId, isSuperAdmin } = guard;
+
+  try {
+    const gross = toAmount(amount);
+    if (gross <= 0) return { success: false, error: "Enter an amount greater than zero." };
+
+    const win = await resolveConversionWindow(companyId, invoiceDate, "invoice");
+    if (win.error) return { success: false, error: win.error };
+    const due = dueDate ? new Date(dueDate) : win.docDate;
+
+    const customer = await Party.findOne({
+      _id: customerId,
+      ...(isSuperAdmin ? {} : { companyId }),
+      type: { $in: ["customer", "both"] },
+    }).lean();
+    if (!customer) return { success: false, error: "Customer not found." };
+
+    const seq = await ErpCounter.getNextSequence("ob-inv", companyId);
+    const invoiceNumber = `OB-INV-${String(seq).padStart(4, "0")}`;
+
+    const invoice = new Invoice({
+      companyId,
+      invoiceNumber,
+      invoiceDate: win.docDate,
+      dueDate: due,
+      fiscalPeriod: fiscalCode(win.docDate),
+      isOpeningBalance: true,
+      customer: {
+        id: String(customer._id),
+        name: customer.name,
+        email: customer.email,
+        phone: customer.phone,
+      },
+      items: [],
+      subtotal: gross,
+      taxAmount: 0,
+      total: gross,
+      amountPaid: 0,
+      amountDue: gross,
+      paymentStatus: "unpaid",
+      status: "draft",
+      createdBy: { name: user.name, id: user.id },
+    });
+    await invoice.save();
+    await invoice.completeOpening({ name: user.name, id: user.id });
+
+    revalidatePath("/dashboard/accounts/opening-balances");
+    revalidatePath("/dashboard/reports/trial-balance");
+    return { success: true, invoiceNumber };
+  } catch (error) {
+    console.error("Create opening invoice error:", error);
+    return { success: false, error: error.message || "Failed to create opening invoice." };
+  }
+}
+
+// Create + approve an opening supplier bill (Dr OBE / Cr AP).
+export async function createOpeningBill({ supplierId, billDate, dueDate, amount } = {}) {
+  const guard = await guardOpeningEntry();
+  if (!guard.ok) return { success: false, error: guard.error };
+  const { user, companyId, isSuperAdmin } = guard;
+
+  try {
+    const gross = toAmount(amount);
+    if (gross <= 0) return { success: false, error: "Enter an amount greater than zero." };
+
+    const win = await resolveConversionWindow(companyId, billDate, "bill");
+    if (win.error) return { success: false, error: win.error };
+    const due = dueDate ? new Date(dueDate) : win.docDate;
+
+    const supplier = await Party.findOne({
+      _id: supplierId,
+      ...(isSuperAdmin ? {} : { companyId }),
+      type: { $in: ["supplier", "both"] },
+    }).lean();
+    if (!supplier) return { success: false, error: "Supplier not found." };
+
+    const seq = await ErpCounter.getNextSequence("ob-bill", companyId);
+    const billNumber = `OB-BILL-${String(seq).padStart(4, "0")}`;
+
+    const bill = new Bill({
+      companyId,
+      billNumber,
+      billDate: win.docDate,
+      dueDate: due,
+      fiscalPeriod: fiscalCode(win.docDate),
+      isOpeningBalance: true,
+      supplier: {
+        partyId: supplier._id,
+        name: supplier.name,
+        taxPin: supplier.taxPin,
+        email: supplier.email,
+        phone: supplier.phone,
+      },
+      lines: [],
+      amounts: {
+        subtotal: gross,
+        vat: 0,
+        total: gross,
+        wht: 0,
+        netPayable: gross,
+        paid: 0,
+        balance: gross,
+      },
+      whtApplicable: false,
+      paymentStatus: "unpaid",
+      status: "submitted",
+      createdBy: { name: user.name, id: user.id },
+    });
+    await bill.save();
+    await bill.approveOpening({ name: user.name, id: user.id });
+
+    revalidatePath("/dashboard/accounts/opening-balances");
+    revalidatePath("/dashboard/reports/trial-balance");
+    return { success: true, billNumber };
+  } catch (error) {
+    console.error("Create opening bill error:", error);
+    return { success: false, error: error.message || "Failed to create opening bill." };
+  }
+}
+
+// Reverse an opening invoice/bill (pre-go-live correction). Reverses the linked
+// opening JE and cancels the document, keeping a full audit trail.
+export async function reverseOpeningInvoice(invoiceId) {
+  const guard = await guardOpeningEntry();
+  if (!guard.ok) return { success: false, error: guard.error };
+  const { user, companyId, isSuperAdmin } = guard;
+
+  try {
+    const invoice = await Invoice.findOne({
+      _id: invoiceId,
+      ...(isSuperAdmin ? {} : { companyId }),
+      isOpeningBalance: true,
+    });
+    if (!invoice) return { success: false, error: "Opening invoice not found." };
+
+    const jeId = invoice.accounting?.revenueJournalEntryId;
+    if (jeId) {
+      const je = await JournalEntry.findById(jeId);
+      if (je && je.status === "posted") {
+        await je.reverse({ name: user.name, id: user.id }, "Opening invoice reversed during setup");
+      }
+    }
+    invoice.status = "cancelled";
+    invoice.lastModifiedBy = { name: user.name, id: user.id };
+    await invoice.save();
+
+    revalidatePath("/dashboard/accounts/opening-balances");
+    revalidatePath("/dashboard/reports/trial-balance");
+    return { success: true };
+  } catch (error) {
+    console.error("Reverse opening invoice error:", error);
+    return { success: false, error: error.message || "Failed to reverse opening invoice." };
+  }
+}
+
+export async function reverseOpeningBill(billId) {
+  const guard = await guardOpeningEntry();
+  if (!guard.ok) return { success: false, error: guard.error };
+  const { user, companyId, isSuperAdmin } = guard;
+
+  try {
+    const bill = await Bill.findOne({
+      _id: billId,
+      ...(isSuperAdmin ? {} : { companyId }),
+      isOpeningBalance: true,
+    });
+    if (!bill) return { success: false, error: "Opening bill not found." };
+
+    const jeId = bill.accounting?.journalEntryId;
+    if (jeId) {
+      const je = await JournalEntry.findById(jeId);
+      if (je && je.status === "posted") {
+        await je.reverse({ name: user.name, id: user.id }, "Opening bill reversed during setup");
+      }
+    }
+    bill.status = "cancelled";
+    bill.lastModifiedBy = { name: user.name, id: user.id };
+    await bill.save();
+
+    revalidatePath("/dashboard/accounts/opening-balances");
+    revalidatePath("/dashboard/reports/trial-balance");
+    return { success: true };
+  } catch (error) {
+    console.error("Reverse opening bill error:", error);
+    return { success: false, error: error.message || "Failed to reverse opening bill." };
   }
 }
