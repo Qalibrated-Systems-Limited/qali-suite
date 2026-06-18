@@ -143,57 +143,6 @@ export default function AccountForm({ account = null, headerAccounts = [], nextC
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Account Code */}
-            <div className="space-y-2">
-              <Label htmlFor="accountCode">
-                Account Code <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="accountCode"
-                name="accountCode"
-                value={codeValue}
-                onChange={(e) => {
-                  setCodeValue(e.target.value);
-                  setCodeTouched(true);
-                }}
-                placeholder="Pick a type to auto-suggest"
-                className="font-mono bg-background"
-                disabled={isEdit}
-                required
-              />
-              {state.errors?.accountCode && (
-                <p className="text-sm text-destructive">
-                  {state.errors.accountCode[0]}
-                </p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                Suggested from the type (1xxx assets … 4xxx revenue, 5xxx
-                direct costs, 6xxx expenses) — edit freely.
-              </p>
-            </div>
-
-            {/* Account Name */}
-            <div className="space-y-2">
-              <Label htmlFor="accountName">
-                Account Name <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="accountName"
-                name="accountName"
-                defaultValue={account?.accountName || ""}
-                placeholder="e.g., Cash in Hand"
-                className="bg-background"
-                required
-              />
-              {state.errors?.accountName && (
-                <p className="text-sm text-destructive">
-                  {state.errors.accountName[0]}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Account Type */}
             <div className="space-y-2">
               <Label htmlFor="accountType">
@@ -298,6 +247,57 @@ export default function AccountForm({ account = null, headerAccounts = [], nextC
               <p className="text-xs text-muted-foreground">
                 Header accounts cannot have transactions posted to them
               </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Account Code */}
+            <div className="space-y-2">
+              <Label htmlFor="accountCode">
+                Account Code <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="accountCode"
+                name="accountCode"
+                value={codeValue}
+                onChange={(e) => {
+                  setCodeValue(e.target.value);
+                  setCodeTouched(true);
+                }}
+                placeholder="Pick a type to auto-suggest"
+                className="font-mono bg-background"
+                disabled={isEdit}
+                required
+              />
+              {state.errors?.accountCode && (
+                <p className="text-sm text-destructive">
+                  {state.errors.accountCode[0]}
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Suggested from the type (1xxx assets … 4xxx revenue, 5xxx
+                direct costs, 6xxx expenses) — edit freely.
+              </p>
+            </div>
+
+            {/* Account Name */}
+            <div className="space-y-2">
+              <Label htmlFor="accountName">
+                Account Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="accountName"
+                name="accountName"
+                defaultValue={account?.accountName || ""}
+                placeholder="e.g., Cash in Hand"
+                className="bg-background"
+                required
+              />
+              {state.errors?.accountName && (
+                <p className="text-sm text-destructive">
+                  {state.errors.accountName[0]}
+                </p>
+              )}
             </div>
           </div>
         </CardContent>
