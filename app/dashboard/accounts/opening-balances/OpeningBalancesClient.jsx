@@ -74,6 +74,7 @@ export function OpeningBalancesClient({ setup }) {
     openingPayables = [],
     receivablesTotal = 0,
     payablesTotal = 0,
+    openingBalanceEquity = 0,
   } = setup;
 
   const [convDate, setConvDate] = useState(conversionDate ? conversionDate.slice(0, 10) : "");
@@ -185,6 +186,44 @@ export function OpeningBalancesClient({ setup }) {
         }
         onReverse={(id) => reverseOpeningBill(id)}
       />
+
+      {/* Combined opening position — trial balance, AR and AP all post against
+          Opening Balance Equity, so OBE is the single figure that ties them
+          together. Each entry self-balances; OBE holds the net to reclassify. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Opening position</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p className="text-xs text-muted-foreground">Receivables (AR)</p>
+              <p className="font-semibold tabular-nums">{formatCurrency(receivablesTotal)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Payables (AP)</p>
+              <p className="font-semibold tabular-nums">{formatCurrency(payablesTotal)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Opening Balance Equity (net)</p>
+              <p className="font-semibold tabular-nums">
+                {formatCurrency(Math.abs(openingBalanceEquity))}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                  ({openingBalanceEquity >= 0 ? "Cr" : "Dr"})
+                </span>
+              </p>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The trial balance, every opening invoice (Dr AR / Cr OBE) and every
+            opening bill (Dr OBE / Cr AP) each post a balanced entry, so the
+            ledger is always in balance. Opening Balance Equity above is the net
+            across all three — reclassify it to Owner&apos;s Capital / Retained
+            Earnings to finish.
+          </p>
+          <ObeBanner balance={openingBalanceEquity} />
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -407,7 +446,9 @@ function TrialBalanceSection({ setup, conversionDate }) {
             <p className="font-semibold tabular-nums">{formatCurrency(totals.credit)}</p>
           </div>
           <div className="col-span-2 sm:col-span-1">
-            <p className="text-xs text-muted-foreground">To Opening Balance Equity</p>
+            <p className="text-xs text-muted-foreground">
+              To Opening Balance Equity (trial-balance rows only)
+            </p>
             <p
               className={`font-semibold tabular-nums ${
                 balanced ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"
