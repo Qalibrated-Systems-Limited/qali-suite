@@ -348,23 +348,23 @@ export async function generatePayrollEntries(payrollRunId) {
 
       const grossPay = basic + housing + transport + medical + otherAllowance;
 
-      // NSSF based on basic salary; reduces taxable income for PAYE
-      const nssfResult = calculateNSSF(basic, payConfig);
+      // NSSF on pensionable pay (gross, capped at the UEL) — not basic salary.
+      const nssfResult = calculateNSSF(grossPay, payConfig);
       const nssf = nssfResult.employee;
       const nssfEmployer = nssfResult.employer;
 
-      // SHIF (flat % of gross — calculated before PAYE because it feeds insurance relief)
+      // SHIF — 2.75% of gross (statutory KES 300 minimum applied in the calculator).
       const shif = calculateSHIF(grossPay, payConfig);
 
-      // PAYE on taxable income (gross minus NSSF employee deduction)
-      // Insurance relief (15% of SHIF, capped) is applied inside calculatePAYE
-      const taxableMonthly = Math.max(0, grossPay - nssf);
-      const { paye, insuranceRelief } = calculatePAYE(taxableMonthly, payConfig, shif);
-
-      // Affordable Housing Levy
+      // Affordable Housing Levy — 1.5% employee + employer on gross.
       const ahlResult = calculateAHL(grossPay, payConfig);
       const housingLevy = ahlResult.employee;
       const housingLevyEmployer = ahlResult.employer;
+
+      // PAYE: NSSF, SHIF and AHL are ALL allowable deductions before PAYE per the
+      // Tax Laws (Amendment) Act 2024. The old 15% SHIF insurance relief is gone.
+      const taxableMonthly = Math.max(0, grossPay - nssf - shif - housingLevy);
+      const { paye, insuranceRelief } = calculatePAYE(taxableMonthly, payConfig);
 
       // Loan / SACCO deductions from active loans
       const loanDed = loanDeductionMap.get(pid) || { loanRepayment: 0, saccoDeduction: 0 };
