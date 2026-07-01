@@ -91,6 +91,63 @@ async function grnAppliesInventory(grn, session) {
   return false;
 }
 
+// Stamp the received unit cost (sourced from the PO line / bill line)
+// onto the product master, so inventory valuation, COGS and future stock
+// adjustments read a real cost instead of the 0 a warehouse role leaves
+// at product creation. Without this the atomic HOLD→available bucket
+// updates move quantity but never touch costing.costPrice.
+//
+//   • average / unset costing → weighted-average blend of the pre-receipt
+//     position with this receipt (mirrors Product.updateAverageCost, but
+//     computed against the PRE-receipt qty since quantityOnHand already
+//     includes the received units by acceptance time).
+//   • FIFO / specific → layers carry their own cost; we only seed
+//     costPrice when it's still unset so it's never left at zero, and
+//     always record the last purchase cost.
+//
+// `onHandAfter` is the product's quantityOnHand AFTER this receipt (what
+// we read at acceptance); pre-receipt qty = onHandAfter − acceptedQty.
+async function stampProductCostFromReceipt({
+  productId,
+  costingMethod,
+  oldCostPrice,
+  onHandAfter,
+  acceptedQty,
+  unitCost,
+  session,
+}) {
+  if (unitCost <= 0 || acceptedQty <= 0) return; // nothing to source a cost from
+  const method = costingMethod || "average";
+  const oldCost = oldCostPrice || 0;
+  const preQty = Math.max(0, (onHandAfter || 0) - acceptedQty);
+
+  let newCostPrice = oldCost;
+  if (method === "average") {
+    const denom = preQty + acceptedQty;
+    newCostPrice =
+      denom > 0 ? (preQty * oldCost + acceptedQty * unitCost) / denom : unitCost;
+  } else if (oldCost <= 0) {
+    // FIFO/specific with no cost yet — seed so valuation isn't left at 0.
+    newCostPrice = unitCost;
+  } else {
+    // FIFO/specific that already has a cost — leave costPrice to the
+    // layer logic; only refresh last-purchase metadata below.
+    newCostPrice = oldCost;
+  }
+
+  await Product.updateOne(
+    { _id: productId },
+    {
+      $set: {
+        "costing.costPrice": newCostPrice,
+        "costing.lastPurchaseCost": unitCost,
+        "costing.lastPurchaseDate": new Date(),
+      },
+    },
+    { session },
+  );
+}
+
 // Build and post the inventory-clearing JE for a fully-accepted strict-mode
 // GRN: DR Inventory / CR GR/IR for each accepted line. Also creates the
 // posted stock movements. Called from acceptGRN once both Sales+Finance
@@ -234,13 +291,24 @@ async function postGRNAcceptanceJournal({
   const movProducts = await Product.find({
     _id: { $in: acceptedLines.map((l) => l.productId) },
   })
-    .select("_id inventory.quantityOnHand")
+    .select(
+      "_id inventory.quantityOnHand costing.costPrice costing.costingMethod",
+    )
     .session(session)
     .lean();
   const onHandByProductId = new Map(
     movProducts.map((p) => [
       p._id.toString(),
       p.inventory?.quantityOnHand || 0,
+    ]),
+  );
+  const costInfoByProductId = new Map(
+    movProducts.map((p) => [
+      p._id.toString(),
+      {
+        costPrice: p.costing?.costPrice || 0,
+        costingMethod: p.costing?.costingMethod,
+      },
     ]),
   );
 
@@ -252,6 +320,19 @@ async function postGRNAcceptanceJournal({
     const newStock =
       onHandByProductId.get(grnLine.productId.toString()) || 0;
     const previousStock = newStock - grnLine.acceptedQty;
+
+    // Establish/refresh the product's cost from the source document cost.
+    const costInfo = costInfoByProductId.get(grnLine.productId.toString());
+    await stampProductCostFromReceipt({
+      productId: grnLine.productId,
+      costingMethod: costInfo?.costingMethod,
+      oldCostPrice: costInfo?.costPrice,
+      onHandAfter: newStock,
+      acceptedQty: grnLine.acceptedQty,
+      unitCost,
+      session,
+    });
+
     const movementNumber = await StockMovement.generateMovementNumber(
       grn.companyId,
     );

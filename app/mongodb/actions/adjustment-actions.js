@@ -159,6 +159,18 @@ export async function createStockAdjustment(prevState, formData) {
     // Compute total absolute value — used for the threshold rule below.
     const totalValue = lines.reduce((s, l) => s + (l.adjustmentValue || 0), 0);
 
+    // Zero-cost guard. An increase that admits stock with no cost basis
+    // (unitCost === 0, because the product's costPrice was never set)
+    // posts inventory at zero value: it understates the balance sheet,
+    // wrongs COGS when the item later sells, AND defeats the value-based
+    // approval threshold below (totalValue is always 0, so it would
+    // always auto-approve). SAP/NetSuite block a zero-cost goods receipt
+    // outright; here we never auto-post it — it must go through the
+    // approval engine so finance establishes/confirms a cost first.
+    const hasZeroCostIncrease = lines.some(
+      (l) => l.adjustmentQuantity > 0 && (l.unitCost ?? 0) <= 0,
+    );
+
     // Pull the company's configured thresholds (cached, single read).
     const thresholds = await getCompanyThresholds(tenantCompanyId.toString());
     const highRiskSet = new Set(thresholds.stockHighRiskTypes);
@@ -168,7 +180,7 @@ export async function createStockAdjustment(prevState, formData) {
     const isHighValue = totalValue > thresholds.stockAdjustmentValue;
     const hasFullAuthority = FULL_AUTHORITY_ROLES.has(user.role);
     const canAutoApprove =
-      hasFullAuthority || (!isHighRisk && !isHighValue);
+      !hasZeroCostIncrease && (hasFullAuthority || (!isHighRisk && !isHighValue));
 
     // Create adjustment (draft status)
     const adjustment = await InventoryAdjustment.create(
@@ -226,6 +238,10 @@ export async function createStockAdjustment(prevState, formData) {
     if (isHighValue)
       reasonParts.push(
         `Value KES ${totalValue.toLocaleString("en-KE", { maximumFractionDigits: 0 })} exceeds auto-approve threshold`,
+      );
+    if (hasZeroCostIncrease)
+      reasonParts.push(
+        "Stock increase with no cost basis — set/confirm a unit cost before admitting inventory (or receive via a Purchase Order → GRN)",
       );
     if (reasonParts.length === 0) reasonParts.push("Caller lacks full authority");
 

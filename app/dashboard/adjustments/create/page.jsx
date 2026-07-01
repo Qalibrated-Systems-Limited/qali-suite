@@ -13,7 +13,7 @@ async function getProducts() {
   const { companyId } = await getTenantContext();
 
   const products = await Product.find({ companyId })
-    .select("_id name SKU stock unit costing.costPrice")
+    .select("_id name SKU inventory.quantityOnHand unit costing.costPrice")
     .sort({ name: 1 })
     .lean();
 
