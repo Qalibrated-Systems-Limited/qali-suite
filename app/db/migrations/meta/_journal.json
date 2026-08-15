@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1786643449446,
+      "tag": "0000_accounting_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786643486425,
+      "tag": "0001_rls_and_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786643488653,
+      "tag": "0002_account_balances_view",
+      "breakpoints": true
+    }
+  ]
+}

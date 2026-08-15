@@ -1,0 +1,11 @@
+/**
+ * Accounting-core schema (vertical slice 1).
+ *
+ * See docs/POSTGRES-MIGRATION-PLAN.md for scope. The remaining 64 Mongoose
+ * models are not ported until this slice is proven and measured.
+ */
+export * from "./enums";
+export * from "./companies";
+export * from "./accounts";
+export * from "./fiscalPeriods";
+export * from "./journal";
