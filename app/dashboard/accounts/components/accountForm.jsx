@@ -311,10 +311,13 @@ export default function AccountForm({ account = null, headerAccounts = [], nextC
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              <Label htmlFor="parentId">Parent Account (Optional)</Label>
+              <Label htmlFor="parentAccount">Parent Account (Optional)</Label>
 
-              {/* Hidden input for form submission */}
-              <input type="hidden" name="parentId" value={parentValue} />
+              {/* Hidden input for form submission.
+                  The name must match the schema path on app/models/account.js.
+                  It was `parentId`, which the model has no path for, so
+                  Mongoose dropped it on save and the parent never persisted. */}
+              <input type="hidden" name="parentAccount" value={parentValue} />
 
               {/* Combobox - Exact shadcn pattern */}
               <Popover open={parentOpen} onOpenChange={setParentOpen}>
@@ -377,9 +380,9 @@ export default function AccountForm({ account = null, headerAccounts = [], nextC
                 </PopoverContent>
               </Popover>
 
-              {state.errors?.parentId && (
+              {state.errors?.parentAccount && (
                 <p className="text-sm text-destructive">
-                  {state.errors.parentId[0]}
+                  {state.errors.parentAccount[0]}
                 </p>
               )}
               <p className="text-xs text-muted-foreground">
