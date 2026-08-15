@@ -29,6 +29,13 @@
       "when": 1786802209523,
       "tag": "0003_migration_id_map",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786810663522,
+      "tag": "0004_fix_account_balances_draft_only",
+      "breakpoints": true
     }
   ]
 }
