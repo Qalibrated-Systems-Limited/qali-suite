@@ -33,7 +33,10 @@ const CreateAccountSchema = z.object({
   subType: z.enum(accountSubType, {
     required_error: "Sub-type is required",
   }),
-  parentId: z.string().optional(),
+  // Must match the schema path on app/models/account.js. It was previously
+  // `parentId`, which Mongoose (strict mode) silently dropped on save, so the
+  // selected parent was never persisted and the chart of accounts stayed flat.
+  parentAccount: z.string().optional(),
   systemAccount: z.string().optional(),
   normalBalance: z.enum(["debit", "credit"]).optional(),
   description: z.string().optional(),
@@ -81,7 +84,7 @@ export async function createAccount(prevState, formData) {
       accountName: formData.get("accountName"),
       accountType: formData.get("accountType"),
       subType: formData.get("subType"),
-      parentId: formData.get("parentId") || undefined,
+      parentAccount: formData.get("parentAccount") || undefined,
       systemAccount: formData.get("systemAccount") || undefined,
       normalBalance: formData.get("normalBalance") || undefined,
       description: formData.get("description") || undefined,
@@ -123,23 +126,23 @@ export async function createAccount(prevState, formData) {
     }
 
     // Validate parent account if provided (tenant-scoped)
-    if (data.parentId) {
-      const parentAccount = await Account.findOne(
-        withTenantScope({ _id: data.parentId }, tenantCompanyId, isSuperAdmin)
+    if (data.parentAccount) {
+      const parent = await Account.findOne(
+        withTenantScope({ _id: data.parentAccount }, tenantCompanyId, isSuperAdmin)
       );
-      if (!parentAccount) {
+      if (!parent) {
         return {
           errors: {
-            parentId: ["Parent account not found"],
+            parentAccount: ["Parent account not found"],
           },
         };
       }
 
       // Parent must be a header account
-      if (parentAccount.subType !== "header") {
+      if (parent.subType !== "header") {
         return {
           errors: {
-            parentId: [
+            parentAccount: [
               "Parent account must be a header account (cannot post to it)",
             ],
           },
@@ -147,11 +150,11 @@ export async function createAccount(prevState, formData) {
       }
 
       // Parent and child must have same account type
-      if (parentAccount.accountType !== data.accountType) {
+      if (parent.accountType !== data.accountType) {
         return {
           errors: {
-            parentId: [
-              `Parent account type (${parentAccount.accountType}) must match account type (${data.accountType})`,
+            parentAccount: [
+              `Parent account type (${parent.accountType}) must match account type (${data.accountType})`,
             ],
           },
         };
@@ -486,7 +489,7 @@ export async function deactivateAccount(accountId) {
 
     // Check if account has child accounts (tenant-scoped)
     const childCount = await Account.countDocuments(
-      withTenantScope({ parentId: accountId, isActive: true }, account.companyId, isSuperAdmin)
+      withTenantScope({ parentAccount: accountId, isActive: true }, account.companyId, isSuperAdmin)
     );
 
     if (childCount > 0) {
@@ -556,9 +559,9 @@ export async function activateAccount(accountId) {
     }
 
     // Check if parent account is active (tenant-scoped)
-    if (account.parentId) {
+    if (account.parentAccount) {
       const parent = await Account.findOne(
-        withTenantScope({ _id: account.parentId }, account.companyId, isSuperAdmin)
+        withTenantScope({ _id: account.parentAccount }, account.companyId, isSuperAdmin)
       );
       if (parent && !parent.isActive) {
         return {
@@ -807,7 +810,7 @@ export async function getAccountHierarchy() {
     )
       .sort({ accountCode: 1 })
       .select(
-        "_id accountCode accountName accountType subType parentId canPost"
+        "_id accountCode accountName accountType subType parentAccount canPost"
       )
       .lean();
 
@@ -826,8 +829,8 @@ export async function getAccountHierarchy() {
     // Second pass: build hierarchy
     accounts.forEach((account) => {
       const node = accountMap.get(account._id.toString());
-      if (account.parentId) {
-        const parent = accountMap.get(account.parentId.toString());
+      if (account.parentAccount) {
+        const parent = accountMap.get(account.parentAccount.toString());
         if (parent) {
           parent.children.push(node);
         } else {

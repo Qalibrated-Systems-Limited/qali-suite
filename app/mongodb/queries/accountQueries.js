@@ -512,15 +512,19 @@ export async function getAccountsGrouped() {
   const accounts = await Account.find(query)
     .sort({ accountCode: 1 })
     .select(
-      "_id accountCode accountName accountType subType parentId canPost cachedBalance isActive systemAccount",
+      "_id accountCode accountName accountType subType parentAccount canPost cachedBalance isActive systemAccount",
     )
     .lean();
 
-  // Serialize for client
+  // Serialize for client.
+  // The schema field is `parentAccount` (app/models/account.js); this selected
+  // and read `parentId`, which does not exist on the model, so every account
+  // came back with an undefined parent and the tree rendered completely flat.
+  // The client-facing key stays `parentId` so consumers are unaffected.
   const serialized = accounts.map((acc) => ({
     ...acc,
     _id: acc._id.toString(),
-    parentId: acc.parentId ? acc.parentId.toString() : null,
+    parentId: acc.parentAccount ? acc.parentAccount.toString() : null,
   }));
 
   // Build hierarchy
