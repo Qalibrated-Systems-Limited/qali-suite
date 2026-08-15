@@ -22,6 +22,13 @@
       "when": 1786643488653,
       "tag": "0002_account_balances_view",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786802209523,
+      "tag": "0003_migration_id_map",
+      "breakpoints": true
     }
   ]
 }
