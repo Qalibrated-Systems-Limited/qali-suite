@@ -36,6 +36,20 @@
       "when": 1786810663522,
       "tag": "0004_fix_account_balances_draft_only",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786905600340,
+      "tag": "0005_parties",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786905614279,
+      "tag": "0006_parties_fk_rls_and_balances",
+      "breakpoints": true
     }
   ]
 }

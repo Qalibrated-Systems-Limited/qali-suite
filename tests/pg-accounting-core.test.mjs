@@ -331,6 +331,12 @@ suite("postgres accounting core", () => {
   describe("AR aging", () => {
     it("buckets an overdue receivable", async () => {
       const customer = randomUUID();
+      // Since migration 0006 journal_entries.party_id carries a composite FK,
+      // so the party must exist before an entry can name it.
+      await asTenant(companyA, (tx) => tx`
+        INSERT INTO parties (id, company_id, primary_type, is_customer, name)
+        VALUES (${customer}, ${companyA}, 'customer', true, 'Acme Ltd')
+      `);
       await asTenant(companyA, (tx) =>
         postEntry(tx, {
           companyId: companyA, number: "JE-AR1", date: "2026-05-01",

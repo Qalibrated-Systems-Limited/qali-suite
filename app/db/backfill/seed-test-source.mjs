@@ -23,8 +23,8 @@ await client.connect();
 const db = client.db();
 
 await Promise.all(
-  ["companies", "accounts", "fiscalperiods", "journalentries"].map((c) =>
-    db.collection(c).deleteMany({}),
+  ["companies", "accounts", "fiscalperiods", "journalentries", "parties"].map(
+    (c) => db.collection(c).deleteMany({}),
   ),
 );
 
@@ -32,6 +32,11 @@ const companyId = new ObjectId();
 const cashId = new ObjectId();
 const salesId = new ObjectId();
 const arId = new ObjectId();
+const customerId = new ObjectId();
+// Referenced by JE-00004 but never inserted into `parties` — stands in for a
+// customer deleted from Mongo after entries referenced them. The entry must
+// still migrate, losing only the party attribution.
+const ghostCustomerId = new ObjectId();
 
 await db.collection("companies").insertOne({
   _id: companyId,
@@ -58,6 +63,18 @@ await db.collection("accounts").insertMany([
   },
 ]);
 
+await db.collection("parties").insertOne({
+  _id: customerId,
+  companyId,
+  type: "both", // customer AND supplier — exercises the boolean-role split
+  name: "Acme Ltd",
+  email: "ac@acme.co",
+  taxPin: "P051234567A",
+  address: { line1: "1 Moi Ave", city: "Nairobi", country: "Kenya" },
+  creditTerms: { creditLimit: 500000, paymentTermsDays: 45 },
+  isActive: true,
+});
+
 await db.collection("fiscalperiods").insertOne({
   companyId,
   year: 2026, month: 8,
@@ -83,7 +100,7 @@ await db.collection("journalentries").insertMany([
     companyId, entryNumber: "JE-00002", entryDate: new Date("2026-08-05"),
     entryType: "sale", description: "Credit sale", status: "posted",
     postedAt: new Date("2026-08-05"), dueDate: new Date("2026-06-20"),
-    party: { type: "customer", id: new ObjectId(), name: "Acme Ltd" },
+    party: { type: "customer", id: customerId, name: "Acme Ltd" },
     isFullyPaid: false, amountPaid: 0, amountOutstanding: 12000,
     lines: [
       { accountId: arId, debit: 12000, credit: 0, description: "Receivable" },
@@ -101,6 +118,19 @@ await db.collection("journalentries").insertMany([
       { accountId: salesId, debit: 0, credit: 99.995 },
     ],
   },
+  // References a party that was never migrated — must still migrate, with
+  // party_type and party_id both dropped (the CHECK requires them to agree).
+  {
+    companyId, entryNumber: "JE-00004", entryDate: new Date("2026-08-08"),
+    entryType: "sale", description: "Sale to deleted customer", status: "posted",
+    postedAt: new Date("2026-08-08"), dueDate: new Date("2026-09-08"),
+    party: { type: "customer", id: ghostCustomerId, name: "Gone Ltd" },
+    isFullyPaid: false, amountPaid: 0, amountOutstanding: 300,
+    lines: [
+      { accountId: arId, debit: 300, credit: 0 },
+      { accountId: salesId, debit: 0, credit: 300 },
+    ],
+  },
   // A draft — must migrate without being subject to the balance rule.
   {
     companyId, entryNumber: "JE-DRAFT-00001", entryDate: new Date("2026-08-09"),
@@ -110,7 +140,7 @@ await db.collection("journalentries").insertMany([
 ]);
 
 console.log("Seeded test source:");
-console.log("  1 company, 3 accounts, 1 fiscal period, 4 journal entries");
+console.log("  1 company, 3 accounts, 1 party, 1 fiscal period, 5 journal entries");
 console.log("  (JE-00003 is deliberately off by 0.005)");
 
 await client.close();
