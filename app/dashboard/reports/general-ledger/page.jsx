@@ -1,4 +1,5 @@
 import { getGeneralLedgerData } from "@/app/mongodb/queries/reportQueries";
+import { getGeneralLedgerDataPg } from "@/app/db/actions/report-actions";
 import { getPostableAccounts } from "@/app/mongodb/queries/accountQueries";
 import { GeneralLedgerClient } from "./GeneralLedgerClient";
 
@@ -31,9 +32,16 @@ export default async function GeneralLedgerPage({ searchParams }) {
     // Get list of postable accounts for dropdown
     accounts = await getPostableAccounts();
 
-    // Get report data if account is selected
+    // Get report data if account is selected.
+    // `?source=pg` reads the same ledger out of Postgres for side-by-side
+    // comparison during the migration; MongoDB stays the default. The account
+    // dropdown still comes from Mongo — accounts carry different ids in each
+    // store, so a pg run needs the Postgres account id.
     if (accountId) {
-      reportData = await getGeneralLedgerData(accountId, startDate, endDate);
+      reportData =
+        params?.source === "pg"
+          ? await getGeneralLedgerDataPg(accountId, startDate, endDate)
+          : await getGeneralLedgerData(accountId, startDate, endDate);
     }
   } catch (err) {
     console.error("Error fetching general ledger:", err);
