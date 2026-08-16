@@ -20,7 +20,25 @@ let replSet;
 
 export async function setup() {
   replSet = await MongoMemoryReplSet.create({
-    replSet: { count: 1 }, // single node is enough for transaction support
+    replSet: {
+      count: 1, // single node is enough for transaction support
+      // MongoDB gives a transaction only 5ms by default to acquire each lock
+      // (maxTransactionLockRequestTimeoutMillis). That is fine on an idle
+      // server, but this suite truncates every collection between tests, so a
+      // transaction opening right behind a truncation could miss the window
+      // and fail with:
+      //
+      //   Unable to acquire IX lock on '...bankfeedlines' within 5ms
+      //
+      // which surfaced as an intermittent failure in
+      // tests/bank-feed-tenant-scope.test.mjs at roughly a 1-in-4 rate.
+      //
+      // This raises the window for the TEST server only. It does not change
+      // application behaviour, and deliberately does NOT paper over a real
+      // deadlock: 500ms is still far below any timeout a genuine lock cycle
+      // would blow through.
+      args: ["--setParameter", "maxTransactionLockRequestTimeoutMillis=500"],
+    },
     binary: {
       // Match a recent prod-style version. Atlas defaults to 7.x; pinning
       // here keeps test behavior deterministic across dev machines.
