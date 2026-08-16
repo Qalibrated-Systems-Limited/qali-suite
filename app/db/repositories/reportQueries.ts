@@ -298,3 +298,184 @@ export async function getTrialBalanceReport(
     };
   }
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Shared balance helper — the equivalent of
+// ReportService.calculateAccountBalances(). Returns each account's balance
+// signed to its normal side, over an optional date window.
+//
+// One difference from the Mongo version: it filters on `balance <> 0` rather
+// than `Math.abs(balance) > 0.01`. That tolerance existed because float
+// arithmetic produces residues like 0.000000001; numeric(19,4) does not, so
+// the guard is unnecessary. It also means a genuine 0.005 balance now appears
+// on the report instead of being hidden — which is the point.
+// ────────────────────────────────────────────────────────────────────────────
+export interface AccountBalanceRow {
+  accountCode: string;
+  accountName: string;
+  accountType: string;
+  subType: string | null;
+  balance: number;
+  /** Exact numeric string; use for reconciliation, not the number above. */
+  exactBalance: string;
+}
+
+async function balancesForTypes(
+  tx: Tx,
+  types: string[],
+  startDate: string | null,
+  endDate: string | null,
+): Promise<AccountBalanceRow[]> {
+  const rows = (await tx.execute(sql`
+    SELECT
+      a.account_code AS "accountCode",
+      a.account_name AS "accountName",
+      a.account_type AS "accountType",
+      a.sub_type     AS "subType",
+      (CASE WHEN a.account_type IN ('asset', 'expense')
+            THEN COALESCE(SUM(l.debit), 0) - COALESCE(SUM(l.credit), 0)
+            ELSE COALESCE(SUM(l.credit), 0) - COALESCE(SUM(l.debit), 0)
+       END)::numeric(19,4) AS "balance"
+    FROM accounts a
+    JOIN journal_lines l   ON l.account_id = a.id
+    JOIN journal_entries e ON e.id = l.entry_id
+    WHERE e.status = 'posted'
+      AND a.is_active = true
+      AND a.account_type = ANY(${sql.raw(`ARRAY[${types.map((t) => `'${t}'`).join(",")}]::account_type[]`)})
+      AND (${startDate}::date IS NULL OR e.entry_date >= ${startDate}::date)
+      AND (${endDate}::date   IS NULL OR e.entry_date <= ${endDate}::date)
+    GROUP BY a.id, a.account_code, a.account_name, a.account_type, a.sub_type
+    HAVING (CASE WHEN a.account_type IN ('asset', 'expense')
+                 THEN COALESCE(SUM(l.debit), 0) - COALESCE(SUM(l.credit), 0)
+                 ELSE COALESCE(SUM(l.credit), 0) - COALESCE(SUM(l.debit), 0)
+            END) <> 0
+    ORDER BY a.account_code
+  `)) as unknown as Array<{
+    accountCode: string;
+    accountName: string;
+    accountType: string;
+    subType: string | null;
+    balance: string;
+  }>;
+
+  return rows.map((r) => ({
+    accountCode: r.accountCode,
+    accountName: r.accountName,
+    accountType: r.accountType,
+    subType: r.subType,
+    balance: Number(r.balance),
+    exactBalance: r.balance,
+  }));
+}
+
+const sum = (rows: AccountBalanceRow[]) =>
+  rows.reduce((acc, r) => acc + r.balance, 0);
+
+/** Profit & Loss. Mirrors ReportService.generateProfitLoss(). */
+export async function getProfitLoss(
+  tx: Tx,
+  startDate: string,
+  endDate: string,
+) {
+  const all = await balancesForTypes(tx, ["revenue", "expense"], startDate, endDate);
+
+  const revenue = all.filter((a) => a.accountType === "revenue");
+  const expenses = all.filter((a) => a.accountType === "expense");
+
+  const totalRevenue = sum(revenue);
+  const totalExpenses = sum(expenses);
+  const netIncome = totalRevenue - totalExpenses;
+  const netMargin = totalRevenue > 0 ? (netIncome / totalRevenue) * 100 : 0;
+
+  return {
+    reportName: "Profit & Loss Statement",
+    period: { startDate: new Date(startDate), endDate: new Date(endDate) },
+    revenue: { accounts: revenue, total: totalRevenue },
+    expenses: { accounts: expenses, total: totalExpenses },
+    summary: {
+      grossProfit: totalRevenue,
+      totalExpenses,
+      netIncome,
+      netMargin: netMargin.toFixed(2),
+    },
+    source: "postgres" as const,
+  };
+}
+
+/**
+ * Balance Sheet. Mirrors ReportService.generateBalanceSheet(), including the
+ * synthetic "Current Year Earnings" equity line — revenue less expenses that
+ * has not yet been closed out into Retained Earnings.
+ *
+ * `summary.isBalanced` is decided by comparing exact numeric strings rather
+ * than `Math.abs(totalAssets - totalLiabilitiesAndEquity) < 0.01`. A balance
+ * sheet out by half a cent is out.
+ */
+export async function getBalanceSheet(tx: Tx, asOfDate: string) {
+  const all = await balancesForTypes(
+    tx,
+    ["asset", "liability", "equity", "revenue", "expense"],
+    null,
+    asOfDate,
+  );
+
+  const assets = all.filter((a) => a.accountType === "asset");
+  const liabilities = all.filter((a) => a.accountType === "liability");
+  const equity = all.filter((a) => a.accountType === "equity");
+
+  const currentYearEarnings =
+    sum(all.filter((a) => a.accountType === "revenue")) -
+    sum(all.filter((a) => a.accountType === "expense"));
+
+  if (currentYearEarnings !== 0) {
+    equity.push({
+      accountCode: "CYE",
+      accountName: "Current Year Earnings",
+      accountType: "equity",
+      subType: "earnings",
+      balance: currentYearEarnings,
+      exactBalance: currentYearEarnings.toFixed(4),
+    });
+  }
+
+  const totalAssets = sum(assets);
+  const totalLiabilities = sum(liabilities);
+  const totalEquity = sum(equity);
+  const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
+
+  const CURRENT_ASSET = ["cash", "bank", "accounts_receivable", "inventory"];
+  const FIXED_ASSET = ["fixed_asset"];
+  const CURRENT_LIAB = ["accounts_payable", "tax_payable"];
+  const LONG_TERM_LIAB = ["loan", "long_term_liability"];
+
+  return {
+    reportName: "Balance Sheet",
+    asOfDate: new Date(asOfDate),
+    assets: {
+      current: assets.filter((a) => CURRENT_ASSET.includes(a.subType ?? "")),
+      fixed: assets.filter((a) => FIXED_ASSET.includes(a.subType ?? "")),
+      other: assets.filter(
+        (a) => ![...CURRENT_ASSET, ...FIXED_ASSET].includes(a.subType ?? ""),
+      ),
+      total: totalAssets,
+    },
+    liabilities: {
+      current: liabilities.filter((l) => CURRENT_LIAB.includes(l.subType ?? "")),
+      longTerm: liabilities.filter((l) => LONG_TERM_LIAB.includes(l.subType ?? "")),
+      other: liabilities.filter(
+        (l) => ![...CURRENT_LIAB, ...LONG_TERM_LIAB].includes(l.subType ?? ""),
+      ),
+      total: totalLiabilities,
+    },
+    equity: { accounts: equity, total: totalEquity },
+    summary: {
+      totalAssets,
+      totalLiabilities,
+      totalEquity,
+      totalLiabilitiesAndEquity,
+      isBalanced: totalAssets === totalLiabilitiesAndEquity,
+      difference: totalAssets - totalLiabilitiesAndEquity,
+    },
+    source: "postgres" as const,
+  };
+}

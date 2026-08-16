@@ -1,4 +1,5 @@
 import { getProfitLossData } from "@/app/mongodb/queries/reportQueries";
+import { getProfitLossDataPg } from "@/app/db/actions/report-actions";
 import { ProfitLossClient } from "./ProfitLossClient";
 
 export const metadata = {
@@ -57,7 +58,12 @@ export default async function ProfitLossPage({ searchParams }) {
   let error = null;
 
   try {
-    reportData = await getProfitLossData(startDate, endDate, comparison);
+    // `?source=pg` reads the same statement from Postgres for side-by-side
+    // comparison during the migration; MongoDB stays the default.
+    reportData =
+      params?.source === "pg"
+        ? await getProfitLossDataPg(startDate, endDate, comparison)
+        : await getProfitLossData(startDate, endDate, comparison);
   } catch (err) {
     console.error("Error fetching profit & loss:", err);
     error = err.message;

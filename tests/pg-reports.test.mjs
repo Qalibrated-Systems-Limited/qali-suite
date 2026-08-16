@@ -18,6 +18,8 @@ import { randomUUID } from "node:crypto";
 import {
   getGeneralLedger,
   getTrialBalanceReport,
+  getProfitLoss,
+  getBalanceSheet,
 } from "@/app/db/repositories/reportQueries";
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -209,6 +211,131 @@ suite("postgres reports", () => {
         getTrialBalanceReport(tx, "2026-08-31"),
       );
       expect(report.accounts).toHaveLength(0);
+    });
+  });
+
+  describe("profit & loss", () => {
+    it("nets revenue against expenses over the window", async () => {
+      const rent = randomUUID();
+      await asTenant(companyA, (tx) =>
+        tx.execute(sql`
+          INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type)
+          VALUES (${rent}, ${companyA}, '6100', 'Rent', 'expense', 'operating_expense')
+        `),
+      );
+
+      await postEntry({
+        number: "JE-1", date: "2026-08-05",
+        lines: [{ account: cash, debit: "1000.0000" }, { account: sales, credit: "1000.0000" }],
+      });
+      await postEntry({
+        number: "JE-2", date: "2026-08-10",
+        lines: [{ account: rent, debit: "400.0000" }, { account: cash, credit: "400.0000" }],
+      });
+      // Outside the window — must not appear.
+      await postEntry({
+        number: "JE-3", date: "2026-09-02",
+        lines: [{ account: rent, debit: "999.0000" }, { account: cash, credit: "999.0000" }],
+      });
+
+      const pl = await asTenant(companyA, (tx) =>
+        getProfitLoss(tx, "2026-08-01", "2026-08-31"),
+      );
+
+      expect(pl.revenue.total).toBe(1000);
+      expect(pl.expenses.total).toBe(400);
+      expect(pl.summary.netIncome).toBe(600);
+      expect(pl.summary.netMargin).toBe("60.00");
+    });
+
+    it("omits accounts with no movement", async () => {
+      await postEntry({
+        number: "JE-1", date: "2026-08-05",
+        lines: [{ account: cash, debit: "10.0000" }, { account: sales, credit: "10.0000" }],
+      });
+      const pl = await asTenant(companyA, (tx) =>
+        getProfitLoss(tx, "2026-08-01", "2026-08-31"),
+      );
+      // Only Sales moved; Cash is not a P&L account at all.
+      expect(pl.revenue.accounts).toHaveLength(1);
+      expect(pl.expenses.accounts).toHaveLength(0);
+    });
+  });
+
+  describe("balance sheet", () => {
+    it("satisfies assets = liabilities + equity", async () => {
+      const payable = randomUUID();
+      const rent = randomUUID();
+      await asTenant(companyA, (tx) =>
+        tx.execute(sql`
+          INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type) VALUES
+            (${payable}, ${companyA}, '2100', 'Accounts Payable', 'liability', 'accounts_payable'),
+            (${rent},    ${companyA}, '6100', 'Rent',             'expense',   'operating_expense')
+        `),
+      );
+
+      // Sale on cash, then an expense accrued but unpaid.
+      await postEntry({
+        number: "JE-1", date: "2026-08-05",
+        lines: [{ account: cash, debit: "1000.0000" }, { account: sales, credit: "1000.0000" }],
+      });
+      await postEntry({
+        number: "JE-2", date: "2026-08-06",
+        lines: [{ account: rent, debit: "250.0000" }, { account: payable, credit: "250.0000" }],
+      });
+
+      const bs = await asTenant(companyA, (tx) =>
+        getBalanceSheet(tx, "2026-08-31"),
+      );
+
+      expect(bs.summary.totalAssets).toBe(1000);
+      expect(bs.summary.totalLiabilities).toBe(250);
+      // No real equity accounts, so equity is entirely Current Year Earnings:
+      // revenue 1000 - expenses 250 = 750.
+      expect(bs.summary.totalEquity).toBe(750);
+      expect(bs.summary.totalLiabilitiesAndEquity).toBe(1000);
+      expect(bs.summary.isBalanced).toBe(true);
+      expect(bs.summary.difference).toBe(0);
+    });
+
+    it("adds Current Year Earnings as a synthetic equity line", async () => {
+      await postEntry({
+        number: "JE-1", date: "2026-08-05",
+        lines: [{ account: cash, debit: "300.0000" }, { account: sales, credit: "300.0000" }],
+      });
+
+      const bs = await asTenant(companyA, (tx) =>
+        getBalanceSheet(tx, "2026-08-31"),
+      );
+      const cye = bs.equity.accounts.find((a) => a.accountCode === "CYE");
+      expect(cye).toBeTruthy();
+      expect(cye.balance).toBe(300);
+    });
+
+    it("groups assets by sub-type", async () => {
+      const bank = randomUUID();
+      const vehicle = randomUUID();
+      await asTenant(companyA, (tx) =>
+        tx.execute(sql`
+          INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type) VALUES
+            (${bank},    ${companyA}, '1010', 'Bank',    'asset', 'bank'),
+            (${vehicle}, ${companyA}, '1500', 'Vehicle', 'asset', 'fixed_asset')
+        `),
+      );
+      await postEntry({
+        number: "JE-1", date: "2026-08-05",
+        lines: [{ account: bank, debit: "800.0000" }, { account: sales, credit: "800.0000" }],
+      });
+      await postEntry({
+        number: "JE-2", date: "2026-08-06",
+        lines: [{ account: vehicle, debit: "5000.0000" }, { account: sales, credit: "5000.0000" }],
+      });
+
+      const bs = await asTenant(companyA, (tx) =>
+        getBalanceSheet(tx, "2026-08-31"),
+      );
+      expect(bs.assets.current.map((a) => a.accountCode)).toContain("1010");
+      expect(bs.assets.fixed.map((a) => a.accountCode)).toContain("1500");
     });
   });
 });
