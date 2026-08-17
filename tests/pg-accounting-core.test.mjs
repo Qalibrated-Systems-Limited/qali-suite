@@ -44,24 +44,14 @@ suite("postgres accounting core", () => {
     // isolation over the default `postgres` role would silently pass no matter
     // what the policies said. Production must connect as a restricted role for
     // the same reason.
-    await admin`DROP OWNED BY app_test_user`.catch(() => {});
-    await admin`DROP ROLE IF EXISTS app_test_user`.catch(() => {});
-    await admin`CREATE ROLE app_test_user LOGIN PASSWORD 'app_test'`;
-    await admin`GRANT USAGE ON SCHEMA public TO app_test_user`;
-    await admin`GRANT ALL ON ALL TABLES IN SCHEMA public TO app_test_user`;
-    await admin`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO app_test_user`;
 
-    const url = new URL(DATABASE_URL);
-    url.username = "app_test_user";
-    url.password = "app_test";
-    sql = postgres(url.toString(), { max: 1, onnotice: () => {} });
+    // Restricted role provisioned once by tests/setup.global.mjs.
+    sql = postgres(process.env.PG_TEST_URL ?? DATABASE_URL, { max: 1, onnotice: () => {} });
   });
 
   afterAll(async () => {
     if (sql) await sql.end();
     if (admin) {
-      await admin`DROP OWNED BY app_test_user`.catch(() => {});
-      await admin`DROP ROLE IF EXISTS app_test_user`.catch(() => {});
       await admin.end();
     }
   });

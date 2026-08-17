@@ -38,25 +38,15 @@ suite("postgres invoices", () => {
 
     // A SUPERUSER bypasses RLS even under FORCE ROW LEVEL SECURITY, so an
     // isolation test over the default role would pass regardless of policy.
-    await admin`DROP OWNED BY app_inv_user`.catch(() => {});
-    await admin`DROP ROLE IF EXISTS app_inv_user`.catch(() => {});
-    await admin`CREATE ROLE app_inv_user LOGIN PASSWORD 'app_inv'`;
-    await admin`GRANT USAGE ON SCHEMA public TO app_inv_user`;
-    await admin`GRANT ALL ON ALL TABLES IN SCHEMA public TO app_inv_user`;
-    await admin`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO app_inv_user`;
-
-    const url = new URL(DATABASE_URL);
-    url.username = "app_inv_user";
-    url.password = "app_inv";
-    client = postgres(url.toString(), { max: 1, onnotice: () => {} });
+    // Restricted role provisioned once by tests/setup.global.mjs — a
+    // superuser would bypass RLS and make isolation tests vacuous.
+    client = postgres(process.env.PG_TEST_URL ?? DATABASE_URL, { max: 1, onnotice: () => {} });
     db = drizzle(client);
   });
 
   afterAll(async () => {
     if (client) await client.end();
     if (admin) {
-      await admin`DROP OWNED BY app_inv_user`.catch(() => {});
-      await admin`DROP ROLE IF EXISTS app_inv_user`.catch(() => {});
       await admin.end();
     }
   });

@@ -14,3 +14,4 @@ export * from "./fulfilment";
 export * from "./journal";
 export * from "./invoices";
 export * from "./payments";
+export * from "./stockMovements";

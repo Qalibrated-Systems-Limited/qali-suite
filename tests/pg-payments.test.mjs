@@ -51,25 +51,15 @@ suite("postgres payments", () => {
 
   beforeAll(async () => {
     admin = postgres(DATABASE_URL, { max: 1, onnotice: () => {} });
-    await admin`DROP OWNED BY app_pay_user`.catch(() => {});
-    await admin`DROP ROLE IF EXISTS app_pay_user`.catch(() => {});
-    await admin`CREATE ROLE app_pay_user LOGIN PASSWORD 'app_pay'`;
-    await admin`GRANT USAGE ON SCHEMA public TO app_pay_user`;
-    await admin`GRANT ALL ON ALL TABLES IN SCHEMA public TO app_pay_user`;
-    await admin`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO app_pay_user`;
-
-    const url = new URL(DATABASE_URL);
-    url.username = "app_pay_user";
-    url.password = "app_pay";
-    client = postgres(url.toString(), { max: 1, onnotice: () => {} });
+    // Restricted role provisioned once by tests/setup.global.mjs — a
+    // superuser would bypass RLS and make isolation tests vacuous.
+    client = postgres(process.env.PG_TEST_URL ?? DATABASE_URL, { max: 1, onnotice: () => {} });
     db = drizzle(client);
   });
 
   afterAll(async () => {
     if (client) await client.end();
     if (admin) {
-      await admin`DROP OWNED BY app_pay_user`.catch(() => {});
-      await admin`DROP ROLE IF EXISTS app_pay_user`.catch(() => {});
       await admin.end();
     }
   });

@@ -92,6 +92,20 @@
       "when": 1786942479917,
       "tag": "0012_payments_constraints_and_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786944883792,
+      "tag": "0013_stock_movements",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786944886039,
+      "tag": "0014_stock_movements_constraints_and_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -9,6 +9,7 @@ import {
 } from "../schema";
 import { createJournalEntry } from "./journal";
 import { issueStock, commitStock } from "./products";
+import { recordMovement } from "./stockMovements";
 
 /**
  * Sales invoices and the posting they drive.
@@ -304,9 +305,25 @@ export async function completeInvoice(
   // ── Stock issue + COGS, per line ───────────────────────────────────────
   const cogsSkipped: string[] = [];
   for (const line of lines) {
-    // A weighbridge line's stock left at the gate and was costed there.
+    // A weighbridge line's stock left at the gate and was costed there, so the
+    // movement was recorded by the connector rather than here.
     if (line.fulfilmentSource !== "weighbridge") {
       await issueStock(tx, line.productId, line.quantity);
+
+      // Record what physically moved, linked to the line. This is the last
+      // link in the COGS provenance chain: invoice line -> COGS posting ->
+      // stock movement. Without it a cost figure has no documented basis.
+      await recordMovement(tx, {
+        companyId: invoice.companyId,
+        productId: line.productId,
+        movementType: "sale",
+        direction: "out",
+        quantity: line.quantity,
+        unitCost: line.unitCost,
+        invoiceLineId: line.id,
+        sourceReference: invoice.invoiceNumber,
+        performedById: opts.completedById,
+      });
     }
 
     const posting = await recordCogsPosting(tx, {

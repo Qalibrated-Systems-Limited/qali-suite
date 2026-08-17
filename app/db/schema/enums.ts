@@ -162,3 +162,24 @@ export const allocationDocumentTypeEnum = pgEnum("allocation_document_type", [
   "invoice",
   "bill",
 ]);
+
+// ── Stock movements ──────────────────────────────────────────────────────────
+
+export const movementTypeEnum = pgEnum("movement_type", [
+  "issue",       // internal issue (loan/use)
+  "return",      // return from loan
+  "sale",        // sale to customer
+  "purchase",    // purchase from supplier
+  "adjustment",  // stock adjustment
+  "damage",      // damaged goods write-off
+  "transfer",    // transfer between locations
+  "initial",     // opening balance
+]);
+
+export const movementDirectionEnum = pgEnum("movement_direction", ["in", "out"]);
+
+export const movementStatusEnum = pgEnum("movement_status", [
+  "pending",
+  "completed",
+  "reversed",
+]);

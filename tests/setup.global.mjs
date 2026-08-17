@@ -18,6 +18,56 @@ import { MongoMemoryReplSet } from "mongodb-memory-server";
 
 let replSet;
 
+/**
+ * Postgres integration tests need a NON-SUPERUSER role: a superuser bypasses
+ * RLS even under FORCE ROW LEVEL SECURITY, so isolation tests would pass
+ * vacuously.
+ *
+ * Created ONCE here rather than per test file. Six files each running
+ * CREATE ROLE / DROP OWNED BY / DROP ROLE against the same database produced
+ * intermittent cross-file failures — the churn, not the tests.
+ */
+const PG_TEST_ROLE = "app_test_role";
+const PG_TEST_PASSWORD = "app_test_pw";
+
+/** Same database, restricted role. Integration tests connect on this. */
+export function pgTestUrl() {
+  if (!process.env.DATABASE_URL) return null;
+  const url = new URL(process.env.DATABASE_URL);
+  url.username = PG_TEST_ROLE;
+  url.password = PG_TEST_PASSWORD;
+  return url.toString();
+}
+
+async function setupPostgresRole() {
+  if (!process.env.DATABASE_URL) return;
+  const { default: postgres } = await import("postgres");
+  const admin = postgres(process.env.DATABASE_URL, { max: 1, onnotice: () => {} });
+  try {
+    await admin.unsafe(`DROP OWNED BY ${PG_TEST_ROLE}`).catch(() => {});
+    await admin.unsafe(`DROP ROLE IF EXISTS ${PG_TEST_ROLE}`).catch(() => {});
+    await admin.unsafe(`CREATE ROLE ${PG_TEST_ROLE} LOGIN PASSWORD '${PG_TEST_PASSWORD}'`);
+    await admin.unsafe(`GRANT USAGE ON SCHEMA public TO ${PG_TEST_ROLE}`);
+    await admin.unsafe(`GRANT ALL ON ALL TABLES IN SCHEMA public TO ${PG_TEST_ROLE}`);
+    await admin.unsafe(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${PG_TEST_ROLE}`);
+    process.env.PG_TEST_URL = pgTestUrl();
+  } finally {
+    await admin.end();
+  }
+}
+
+async function teardownPostgresRole() {
+  if (!process.env.DATABASE_URL) return;
+  const { default: postgres } = await import("postgres");
+  const admin = postgres(process.env.DATABASE_URL, { max: 1, onnotice: () => {} });
+  try {
+    await admin.unsafe(`DROP OWNED BY ${PG_TEST_ROLE}`).catch(() => {});
+    await admin.unsafe(`DROP ROLE IF EXISTS ${PG_TEST_ROLE}`).catch(() => {});
+  } finally {
+    await admin.end();
+  }
+}
+
 export async function setup() {
   replSet = await MongoMemoryReplSet.create({
     replSet: {
@@ -51,9 +101,12 @@ export async function setup() {
   // Disable the runtime warning some Mongoose plugins emit when no
   // explicit "global cluster" feature is in use.
   process.env.MONGOMS_DISABLE_POSTINSTALL = "1";
+
+  await setupPostgresRole();
 }
 
 export async function teardown() {
+  await teardownPostgresRole();
   if (replSet) {
     await replSet.stop();
     replSet = undefined;
