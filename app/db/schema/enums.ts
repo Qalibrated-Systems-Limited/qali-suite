@@ -74,3 +74,52 @@ export const sourceDocumentTypeEnum = pgEnum("source_document_type", [
   "stock_movement",
   "weighbridge_ticket",
 ]);
+
+// ── Invoices slice ───────────────────────────────────────────────────────────
+
+export const costingMethodEnum = pgEnum("costing_method", [
+  "average",
+  "fifo",
+  "lifo",
+  "specific",
+  "weighted_average",
+]);
+
+export const invoiceStatusEnum = pgEnum("invoice_status", [
+  "draft",
+  "sent",
+  "completed",
+  "cancelled",
+  "expired",
+]);
+
+export const paymentStatusEnum = pgEnum("payment_status", [
+  "unpaid",
+  "partial",
+  "paid",
+  "overpaid",
+]);
+
+/**
+ * Where an invoice line's stock came from — and therefore which inventory
+ * account COGS credits.
+ *
+ * In Mongo this is inferred from whether a nullable nested field happens to
+ * exist (`!!(item.relatedRequest?.requestId || ...)`), so "not from technician
+ * stock" and "the field did not persist" are the same state, and nothing stops
+ * two sources being set at once. See docs/POSTGRES-MIGRATION-PLAN.md §8.1.
+ * Here it is mandatory and single-valued.
+ */
+export const fulfilmentSourceEnum = pgEnum("fulfilment_source", [
+  "inventory",
+  "stock_request",
+  "checkout",
+  "weighbridge",
+]);
+
+/**
+ * Which system posted COGS for a line. Whichever gets there first wins, and
+ * cogs_postings' primary key makes the second attempt a unique violation
+ * rather than a duplicate posting — see §8.3.
+ */
+export const cogsSourceEnum = pgEnum("cogs_source", ["invoice", "weighbridge"]);

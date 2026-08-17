@@ -9,4 +9,7 @@ export * from "./companies";
 export * from "./accounts";
 export * from "./fiscalPeriods";
 export * from "./parties";
+export * from "./products";
+export * from "./fulfilment";
 export * from "./journal";
+export * from "./invoices";

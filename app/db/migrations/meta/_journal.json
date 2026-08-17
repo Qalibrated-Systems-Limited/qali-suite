@@ -50,6 +50,20 @@
       "when": 1786905614279,
       "tag": "0006_parties_fk_rls_and_balances",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786939092924,
+      "tag": "0007_invoices_slice",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786939103045,
+      "tag": "0008_invoices_constraints_and_rls",
+      "breakpoints": true
     }
   ]
 }
