@@ -565,9 +565,9 @@ eight models.
 
 ### 9.6 Implementation order
 
-1. `payments` + `payment_allocations` — unblocks invoice settlement and AR aging
-2. `stock_movements` — unblocks COGS provenance
-3. `bills` + `credit_notes` — AP side
+1. ~~`payments` + `payment_allocations`~~ — done (migrations 0011–0012)
+2. ~~`stock_movements`~~ — done (migrations 0013–0014)
+3. ~~`bills` + `credit_notes`~~ — done (migrations 0015–0017)
 4. `tax_transactions`
 5. Full `stock_requests` / `item_checkouts` / `weighbridge_tickets`, replacing
    the minimal versions from §8.1
@@ -575,6 +575,54 @@ eight models.
 Before step 2, one complete write path is wired end-to-end through the real UI —
 create invoice, complete it, see it post, see it in the reports. Thirteen tables
 with no write path is where a migration quietly dies.
+
+### 9.7 Notes from step 3
+
+All six float tolerances from §9.2 are now gone; the three in `bill.js` were
+closed by making `net_payable` and `balance` generated columns, so the overpay
+guard is `CHECK (balance >= 0)` rather than `amount > balance + 0.01`.
+
+Three things worth recording because they were decided during the port rather
+than in the sweep:
+
+- **Header totals are trigger-maintained, not computed by the repository.**
+  `subtotal`/`vat_amount`/`wht_amount` on bills and credit notes are derived
+  from the lines by a trigger, the same call §8's note on `invoices.source_type`
+  makes: stored for read cost, maintained so it cannot contradict its inputs.
+  The repositories pass no amounts at all.
+
+- **`amount_paid` is maintained from the allocations, on both sides.** This is
+  the §8.2 correction: Mongo keeps an embedded `payments[]` array on the bill
+  *and* a Payment document with allocations, updated by different code paths.
+  There is now one record of the event and the document follows it.
+
+  Bills got this in 0016. The invoice side was still incrementing by hand in
+  *two* places — `allocateToInvoice` and `applyCreditNote` — so removing an
+  allocation left the invoice still claiming the money (measured: `400.0000
+  partial` against an actual allocated sum of 0), and `+= X` never re-reads the
+  truth, so the error was permanent. Migration 0017 derives it from both its
+  sources, the allocations and the credit applied, under one trigger for both
+  document types.
+
+  0017 also lets `payment_status` reach `overpaid`. Both hand-written versions
+  collapsed `>= total` to `'paid'`; the value has been in the enum since 0007
+  and nothing ever set it. Bills cannot be overpaid — `CHECK (balance >= 0)`
+  refuses it — but invoices have no such constraint, so the state is reachable
+  and naming it beats rounding it down.
+
+- **`creditNote.originalItemIndex` became `original_invoice_line_id`.** An
+  ordinal into an embedded array is not a reference; it silently repoints when a
+  line is removed. This is a translation, not a redesign — there is no array to
+  index into in the relational shape.
+
+**A defect found and fixed outside the AP scope.** `completeInvoice` called
+`issueStock()` before `recordMovement()`, but `recordMovement` reads the
+product's current level as `previous_stock` and derives `new_stock` from it. So
+every sale's provenance record understated both levels by the quantity sold — a
+sale of 10 from 100 was written down as "90 → 80". Inbound movements would not
+even have failed loudly. The ordering is fixed at all four call sites, the
+contract is now stated at `recordMovement`, and both the invoice and bill paths
+assert the levels either side of the movement.
 
 ---
 

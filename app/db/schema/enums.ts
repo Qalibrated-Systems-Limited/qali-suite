@@ -163,6 +163,51 @@ export const allocationDocumentTypeEnum = pgEnum("allocation_document_type", [
   "bill",
 ]);
 
+// ── Bills (accounts payable) ─────────────────────────────────────────────────
+
+export const billStatusEnum = pgEnum("bill_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
+  "cancelled",
+]);
+
+/**
+ * Which account a bill line is charged to. Mongo restricts the line's
+ * `account.type` to these two, and the choice decides the posting: an asset
+ * line for a stocked product debits Inventory (or GR/IR under three-way
+ * match), anything else debits the named account directly.
+ */
+export const billLineAccountTypeEnum = pgEnum("bill_line_account_type", [
+  "expense",
+  "asset",
+]);
+
+// ── Credit notes ─────────────────────────────────────────────────────────────
+
+export const creditNoteStatusEnum = pgEnum("credit_note_status", [
+  "draft",
+  "issued",
+  "applied",
+  "void",
+]);
+
+export const creditNoteReasonEnum = pgEnum("credit_note_reason", [
+  "return",
+  "damaged",
+  "overcharge",
+  "cancellation",
+  "discount",
+  "defective",
+  "other",
+]);
+
+export const creditNoteItemTypeEnum = pgEnum("credit_note_item_type", [
+  "product",
+  "service",
+]);
+
 // ── Stock movements ──────────────────────────────────────────────────────────
 
 export const movementTypeEnum = pgEnum("movement_type", [

@@ -139,6 +139,53 @@ export async function issueStock(tx: Tx, productId: string, quantity: string) {
   return updated;
 }
 
+/**
+ * Receives stock from a supplier: raises the quantity on hand and re-costs the
+ * product on a weighted average.
+ *
+ * The average is computed in one UPDATE, in Postgres:
+ *
+ *     (on_hand × cost_price + received × unit_cost) / (on_hand + received)
+ *
+ * which is the formula `Product.updateAverageCost()` (product.js:594) applies
+ * in float64 across two documents' worth of read-modify-write. Doing it in the
+ * statement means two concurrent receipts cannot both re-cost from the same
+ * starting quantity, and the division is exact decimal rather than binary
+ * floating point — this value is the basis of every COGS figure downstream.
+ *
+ * Costing methods other than average leave `cost_price` alone, as in Mongo.
+ */
+export async function receiveStock(
+  tx: Tx,
+  productId: string,
+  quantity: string,
+  unitCost: string,
+  receivedOn?: string,
+) {
+  const [updated] = await tx
+    .update(products)
+    .set({
+      quantityOnHand: sql`${products.quantityOnHand} + ${quantity}::numeric(19,4)`,
+      costPrice: sql`CASE
+        WHEN ${products.costingMethod} <> 'average' THEN ${products.costPrice}
+        WHEN ${products.quantityOnHand} + ${quantity}::numeric(19,4) > 0
+          THEN ROUND(
+            (${products.quantityOnHand} * ${products.costPrice}
+             + ${quantity}::numeric(19,4) * ${unitCost}::numeric(19,4))
+            / (${products.quantityOnHand} + ${quantity}::numeric(19,4)), 4)
+        ELSE ${products.costPrice}
+      END`,
+      lastPurchaseCost: unitCost,
+      lastPurchaseDate: receivedOn ?? sql`CURRENT_DATE`,
+      updatedAt: new Date(),
+    })
+    .where(eq(products.id, productId))
+    .returning();
+
+  if (!updated) throw new Error("Product not found");
+  return updated;
+}
+
 /** Products at or below their reorder level. */
 export async function getLowStock(tx: Tx, limit = 50) {
   return tx.execute(sql`

@@ -106,6 +106,27 @@
       "when": 1786944886039,
       "tag": "0014_stock_movements_constraints_and_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786976199271,
+      "tag": "0015_bills_and_credit_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786976200271,
+      "tag": "0016_bills_credit_notes_constraints_and_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786976201271,
+      "tag": "0017_invoice_amount_paid_derived",
+      "breakpoints": true
     }
   ]
 }

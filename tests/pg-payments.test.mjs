@@ -280,6 +280,52 @@ suite("postgres payments", () => {
       expect(row.payment_status).toBe("partial");
     });
 
+    it("takes the money back off the invoice when an allocation is removed", async () => {
+      const payment = await makePayment("1000.0000");
+      await asTenant(companyA, (tx) =>
+        paymentRepo.allocateToInvoice(tx, {
+          companyId: companyA,
+          paymentId: payment.id,
+          invoiceId: invoice.id,
+          amount: "400.0000",
+        }),
+      );
+
+      // amount_paid was incremented by hand until migration 0017, so deleting
+      // the allocation left the invoice still claiming 400 had been paid — and
+      // nothing ever repaired it, because the next allocation added to the
+      // wrong number.
+      await asTenant(companyA, (tx) =>
+        tx.execute(sql`DELETE FROM payment_allocations WHERE document_id = ${invoice.id}`),
+      );
+
+      const [row] = await asTenant(companyA, (tx) =>
+        tx.execute(sql`SELECT amount_paid, payment_status FROM invoices WHERE id = ${invoice.id}`),
+      );
+      expect(row.amount_paid).toBe("0.0000");
+      expect(row.payment_status).toBe("unpaid");
+    });
+
+    it("names an overpaid invoice rather than rounding it down to paid", async () => {
+      const payment = await makePayment("1500.0000");
+      await asTenant(companyA, (tx) =>
+        paymentRepo.allocateToInvoice(tx, {
+          companyId: companyA,
+          paymentId: payment.id,
+          invoiceId: invoice.id,
+          amount: "1200.0000",
+        }),
+      );
+
+      const [row] = await asTenant(companyA, (tx) =>
+        tx.execute(sql`SELECT amount_paid, total, payment_status FROM invoices WHERE id = ${invoice.id}`),
+      );
+      expect(row.total).toBe("1000.0000");
+      expect(row.amount_paid).toBe("1200.0000");
+      // Both hand-written versions mapped `>= total` to 'paid'.
+      expect(row.payment_status).toBe("overpaid");
+    });
+
     it("hides another tenant's payments", async () => {
       await makePayment("100.0000");
       const companyB = randomUUID();

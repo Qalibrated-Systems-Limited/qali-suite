@@ -1,6 +1,13 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Tx } from "../client";
-import { payments, paymentAllocations, parties, accounts, invoices } from "../schema";
+import {
+  payments,
+  paymentAllocations,
+  parties,
+  accounts,
+  invoices,
+  bills,
+} from "../schema";
 
 /**
  * Payments received and made, and what they settle.
@@ -123,19 +130,60 @@ export async function allocateToInvoice(
     })
     .returning();
 
-  // Keep the invoice's settlement state in step. amountDue is not stored — it
-  // is total - amount_paid — so only amount_paid moves.
-  await tx.execute(sql`
-    UPDATE invoices
-       SET amount_paid = (amount_paid + ${input.amount}::numeric(19,4))::numeric(19,4),
-           payment_status = CASE
-             WHEN (amount_paid + ${input.amount}::numeric(19,4)) >= total THEN 'paid'
-             WHEN (amount_paid + ${input.amount}::numeric(19,4)) > 0      THEN 'partial'
-             ELSE 'unpaid'
-           END::payment_status,
-           updated_at = now()
-     WHERE id = ${input.invoiceId}
-  `);
+  // The invoice's amount_paid and payment_status follow from this row; a
+  // trigger recomputes them (migration 0017). This function used to increment
+  // them here, which meant removing an allocation left the invoice still
+  // claiming the money, and a second writer — applyCreditNote — was
+  // incrementing the same field from another code path.
+  return allocation;
+}
+
+/**
+ * Applies part or all of a payment to a bill — the AP mirror of
+ * `allocateToInvoice`.
+ *
+ * Unlike the invoice side, nothing here updates the bill's `amount_paid`: a
+ * trigger (migration 0016) maintains it from the allocations themselves, so
+ * "paid according to the bill" and "paid according to the payments" are the
+ * same number by construction rather than by both being updated correctly.
+ * That is the §8.2 correction — two records of one event, kept in step by two
+ * code paths, is the arrangement that drifts.
+ *
+ * Over-payment is refused by CHECK (balance >= 0) on the bill, exactly.
+ * bill.js:1302 allows `amount > balance + 0.01`.
+ */
+export async function allocateToBill(
+  tx: Tx,
+  input: {
+    companyId: string;
+    paymentId: string;
+    billId: string;
+    amount: string;
+  },
+) {
+  const [bill] = await tx
+    .select({
+      number: bills.billNumber,
+      netPayable: bills.netPayable,
+      balance: bills.balance,
+    })
+    .from(bills)
+    .where(eq(bills.id, input.billId));
+  if (!bill) throw new Error("Bill not found");
+
+  const [allocation] = await tx
+    .insert(paymentAllocations)
+    .values({
+      companyId: input.companyId,
+      paymentId: input.paymentId,
+      documentType: "bill",
+      documentId: input.billId,
+      documentNumberAtAllocation: bill.number,
+      originalAmount: bill.netPayable!,
+      balanceBefore: bill.balance!,
+      amountAllocated: input.amount,
+    })
+    .returning();
 
   return allocation;
 }

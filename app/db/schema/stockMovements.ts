@@ -41,7 +41,7 @@ const qty = (name: string) => numeric(name, { precision: 19, scale: 4 });
  * allow-list with "Stock movements are immutable. Create a reversal instead."
  * That is the right rule — a movement records a physical event that either
  * happened or did not — so it is kept and enforced by a trigger (migration
- * 0015) instead of a hook that only fires on document.save().
+ * 0014) instead of a hook that only fires on document.save().
  *
  * Mutable after creation: accounting links, verification, status, reversal.
  * Everything else — product, quantity, direction, costing, stock levels — is
