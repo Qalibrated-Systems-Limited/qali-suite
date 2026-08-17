@@ -482,7 +482,103 @@ column.
 
 ---
 
-## 9. Explicitly out of scope
+## 9. Classification sweep — remaining invoicing models
+
+Done as one pass over the eight models still needed for a working invoicing
+path, rather than model-by-model during implementation. Three reversals earlier
+in this branch (`accountName`, §8.6, §8.2) all came from designing one model at
+a time and only discovering the governing rule on the third. The rules below are
+now fixed; nothing outside them changes.
+
+**The rule that governs most of it:**
+
+> **SNAPSHOT what a document said. DERIVE what the ledger implies.**
+
+Names, numbers and costs at the moment of a transaction are historical facts and
+get frozen. Balances, totals and availability are functions of other data and get
+computed. A *cache* drifts and is a bug; a *snapshot* cannot drift and is the
+point. Collapsing the two is what caused every reversal.
+
+### 9.1 Scope
+
+| Model | Lines | Tolerances | Pre-save derived | Snapshot fields | Money fields |
+|---|---|---|---|---|---|
+| `bill.js` | 1,582 | 3 | 1 | 3 | 12 |
+| `stockmovement.js` | 1,022 | 0 | 1 | 0 | 9 |
+| `taxTransactions.js` | 974 | 0 | 0 | 0 | 9 |
+| `payment.js` | 957 | 3 | 1 | 2 | 5 |
+| `creditNote.js` | 724 | 0 | 0 | 1 | 6 |
+| `requests.js` | 563 | 0 | 0 | 0 | 3 |
+| `checkouts.js` | 384 | 0 | 0 | 0 | 1 |
+| `weighbridgeTicket.js` | 193 | 0 | 0 | 0 | 0 |
+| **Total** | **6,399** | **6** | **3** | **6** | **45** |
+
+### 9.2 FIX — float tolerances
+
+Six, all the same defect: a `0.01` guard compensating for float64, which exact
+decimals do not need. Two of them are worse than cosmetic because they permit a
+real error rather than merely hiding residue:
+
+| Location | Code | Effect |
+|---|---|---|
+| `payment.js:407` | `totalAllocated > amount + 0.01` | **over-allocate a payment by up to a cent** |
+| `bill.js:1302` | `amount > balance + 0.01` | **overpay a bill by up to a cent** |
+| `payment.js:336` | `Math.abs(unappliedAmount) < 0.01` | reports fully-applied when it is not |
+| `payment.js:375` | same, clamps to 0 | hides the remainder |
+| `bill.js:992` | `Math.abs(debits - credits) > 0.01` | posts an unbalanced entry |
+| `bill.js:1324` | `Math.abs(balance) < 0.01` | reports settled when it is not |
+
+Correction: `numeric(19,4)` and exact comparison throughout.
+
+### 9.3 DERIVE — stored values that are functions of other data
+
+| Field | Defined as | Correction |
+|---|---|---|
+| `Payment.totalAllocated` | sum of `allocations[].amountAllocated` | generated / view |
+| `Payment.unappliedAmount` | `Math.max(0, amount - totalAllocated)` | generated / view. The `Math.max(0, …)` clamps over-allocation to zero rather than surfacing it |
+| `Bill.amounts.balance` | `total - amountPaid` | generated |
+
+### 9.4 KEEP — snapshots, explicitly
+
+These read as caches and are not. The models say so themselves:
+
+- `bill.js:234` — *"Cached at bill creation time (won't change if supplier updates)"*
+- `payment.js:201` — *"Cached snapshot"*
+- `creditNote.js:63` — customer *"cached from invoice"*
+- `bill.js:69-70`, `payment.js:175` — code/name *"cached for display"*
+
+All are what the document said at the time. They carry over as immutable
+snapshot columns alongside the foreign key, filled on insert and refused on
+update — the pattern established in migration 0009. **This is the case §8.6 got
+backwards.**
+
+### 9.5 KEEP AS-IS — no change
+
+Everything not listed above. Specifically: the allocation model (embedded 1–10,
+bounded, always read together — becomes a child table with the same shape), the
+tax transaction structure, stock movement types, the request and checkout
+lifecycles, and every business rule not implicated in a defect above.
+
+No "absence decides behaviour" pattern was found outside the invoice-line
+fulfilment case already corrected in §8.1 — that scan came back empty across all
+eight models.
+
+### 9.6 Implementation order
+
+1. `payments` + `payment_allocations` — unblocks invoice settlement and AR aging
+2. `stock_movements` — unblocks COGS provenance
+3. `bills` + `credit_notes` — AP side
+4. `tax_transactions`
+5. Full `stock_requests` / `item_checkouts` / `weighbridge_tickets`, replacing
+   the minimal versions from §8.1
+
+Before step 2, one complete write path is wired end-to-end through the real UI —
+create invoice, complete it, see it post, see it in the reports. Thirteen tables
+with no write path is where a migration quietly dies.
+
+---
+
+## 10. Explicitly out of scope
 
 - Redesigning the posting engine, fiscal periods, or COGS logic beyond the
   corrections in §8
