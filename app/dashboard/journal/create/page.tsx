@@ -8,6 +8,10 @@ import Account from "@/app/models/account";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import JournalEntryForm from "./JournalEntryForm";
+import {
+  createManualJournalEntry as createOnPostgres,
+  getPostableAccountsPg,
+} from "@/app/db/actions/journal-actions";
 
 export const metadata = {
   title: "Create Journal Entry | ERP",
@@ -56,7 +60,11 @@ async function getFormData() {
   };
 }
 
-export default async function CreateJournalEntryPage() {
+export default async function CreateJournalEntryPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | undefined>>;
+}) {
   const session = await auth();
 
   if (!session?.user) {
@@ -68,7 +76,16 @@ export default async function CreateJournalEntryPage() {
     redirect("/dashboard/journal");
   }
 
-  const { accounts, entryTypes } = await getFormData();
+  // `?source=pg` loads the account list from Postgres and submits to the
+  // Postgres action. MongoDB remains the default, so the live path is
+  // untouched. Account ids differ between the two stores, which is why the
+  // list and the action have to come from the same source.
+  const params = (await searchParams) ?? {};
+  const usePostgres = params.source === "pg";
+
+  const { accounts, entryTypes } = usePostgres
+    ? { accounts: await getPostableAccountsPg(), entryTypes: MANUAL_ENTRY_TYPES }
+    : await getFormData();
 
   return (
     <div className="flex flex-col">
@@ -101,7 +118,11 @@ export default async function CreateJournalEntryPage() {
 
       {/* Content */}
       <div className="flex-1 container max-w-4xl py-6 sm:py-8">
-        <JournalEntryForm accounts={accounts} entryTypes={entryTypes} />
+        <JournalEntryForm
+              accounts={accounts}
+              entryTypes={entryTypes}
+              action={usePostgres ? createOnPostgres : null}
+            />
       </div>
     </div>
   );

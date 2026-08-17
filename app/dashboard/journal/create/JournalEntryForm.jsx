@@ -43,7 +43,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { createManualJournalEntry } from "@/app/mongodb/actions/journal-actions";
+import { createManualJournalEntry as createOnMongo } from "@/app/mongodb/actions/journal-actions";
 
 // Group accounts by type for better UX
 function groupAccountsByType(accounts) {
@@ -73,9 +73,15 @@ const emptyLine = () => ({
   description: "",
 });
 
-export default function JournalEntryForm({ accounts = [], entryTypes = [] }) {
+export default function JournalEntryForm({ accounts = [], entryTypes = [], action = null }) {
   const router = useRouter();
-  const [state, formAction, isPending] = useActionState(createManualJournalEntry, null);
+  // `action` lets the page choose the data source. It defaults to the MongoDB
+  // action, so nothing changes unless a caller passes something else — see the
+  // ?source=pg branch in page.tsx.
+  const [state, formAction, isPending] = useActionState(
+    action ?? createOnMongo,
+    null,
+  );
 
   // Form state
   const [entryDate, setEntryDate] = useState(

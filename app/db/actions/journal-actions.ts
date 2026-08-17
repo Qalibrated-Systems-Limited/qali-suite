@@ -5,6 +5,7 @@ import { z } from "zod";
 import { withAuthorizedTenant, FINANCE_ROLES } from "../tenant";
 import * as journal from "../repositories/journal";
 import * as reports from "../repositories/reports";
+import * as accountsRepo from "../repositories/accounts";
 
 /**
  * Postgres-backed journal actions.
@@ -53,9 +54,15 @@ const createSchema = z.object({
   postImmediately: z.boolean().default(false),
 });
 
-export type ActionResult<T = unknown> =
-  | { success: true; data?: T; message?: string }
-  | { success: false; error: string };
+/**
+ * Deliberately identical to the shape app/mongodb/actions/journal-actions.js
+ * returns — the form reads state.success / state.entryId / state.error /
+ * state.fieldErrors. Matching it means the UI can switch data source without
+ * any change to the component.
+ */
+export type ActionResult =
+  | { success: true; entryId?: string; entryNumber?: string; message?: string }
+  | { success: false; error: string; fieldErrors?: Record<string, string[]> };
 
 /**
  * Postgres raises accounting violations as check_violation with a readable
@@ -65,10 +72,17 @@ export type ActionResult<T = unknown> =
 function toActionError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   if (
+    // Accounting violations raised by the database, already phrased for a user.
     message.includes("not balanced") ||
     message.includes("must have at least 2 lines") ||
     message.includes("fiscal period") ||
     message.includes("system account") ||
+    // Authorisation — telling the user they lack permission is the whole point
+    // of the check. Swallowing it into "something went wrong" leaves them
+    // retrying a thing that will never work.
+    message.includes("permission") ||
+    message.includes("Not authenticated") ||
+    // Not surfaced verbatim, but distinguishable in logs from a generic fault.
     message.includes("row-level security")
   ) {
     return message;
@@ -95,7 +109,7 @@ function parseLines(formData: FormData) {
 export async function createManualJournalEntry(
   _prevState: unknown,
   formData: FormData,
-): Promise<ActionResult<{ id: string; entryNumber: string }>> {
+): Promise<ActionResult> {
   const parsed = createSchema.safeParse({
     entryDate: formData.get("entryDate"),
     entryType: formData.get("entryType"),
@@ -107,7 +121,11 @@ export async function createManualJournalEntry(
   });
 
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0].message };
+    return {
+      success: false,
+      error: "Validation failed",
+      fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]>,
+    };
   }
 
   try {
@@ -124,7 +142,8 @@ export async function createManualJournalEntry(
     revalidatePath("/dashboard/journal");
     return {
       success: true,
-      data: { id: entry.id, entryNumber: entry.entryNumber },
+      entryId: entry.id,
+      entryNumber: entry.entryNumber,
       message: `Journal entry ${entry.entryNumber} created`,
     };
   } catch (err) {
@@ -220,4 +239,25 @@ export async function getStatementOfAccount(
   return withAuthorizedTenant(FINANCE_ROLES, (tx) =>
     reports.getStatementOfAccount(tx, partyType, partyId, startDate, endDate),
   );
+}
+
+/**
+ * Postable accounts for the journal entry form, shaped like the Mongo page's
+ * getFormData() so the same component renders either source. Ids are Postgres
+ * uuids, so a form loaded from this source must submit to the Postgres action.
+ */
+export async function getPostableAccountsPg() {
+  return withAuthorizedTenant(FINANCE_ROLES, async (tx) => {
+    const rows = await accountsRepo.listAccounts(tx, {
+      activeOnly: true,
+      postableOnly: true,
+    });
+    return rows.map((a) => ({
+      _id: a.id,
+      accountCode: a.accountCode,
+      accountName: a.accountName,
+      accountType: a.accountType,
+      subType: a.subType ?? "",
+    }));
+  });
 }
