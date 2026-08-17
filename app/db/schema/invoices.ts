@@ -21,6 +21,7 @@ import {
   paymentStatusEnum,
   fulfilmentSourceEnum,
   cogsSourceEnum,
+  invoiceSourceTypeEnum,
 } from "./enums";
 
 const money = (name: string) =>
@@ -32,11 +33,12 @@ const money = (name: string) =>
  * Deliberate omissions from app/models/invoice.js, per
  * docs/POSTGRES-MIGRATION-PLAN.md §8:
  *
- * - `source.{type, requestId, checkoutIds[]}` is NOT stored (§8.2). Header
- *   provenance is derived from the lines, so the two cannot disagree — the
- *   Mongo version keeps both with nothing reconciling them, allowing an invoice
- *   to read source.type = "direct" while its lines post against Technician
- *   Stock.
+ * - `source_type` IS stored, as in Mongo, but a trigger keeps it in step with
+ *   the lines (migration 0010). The earlier decision to derive it removed a
+ *   field the application reads and added an aggregate to every read, to
+ *   prevent a divergence that has not been observed. Storing it and
+ *   maintaining it gives the same guarantee more cheaply. `requestId` and
+ *   `checkoutIds[]` are not duplicated at the header — the lines carry them.
  *
  * - `paymentHistory[]` is not embedded. Payments are their own table with
  *   allocations; an invoice's payment history is a query.
@@ -73,6 +75,13 @@ export const invoices = pgTable(
     paymentTermsDays: integer("payment_terms_days").notNull().default(30),
 
     status: invoiceStatusEnum("status").notNull().default("draft"),
+    /**
+     * Header provenance. Stored (as in Mongo) rather than derived, and kept in
+     * step with the lines by a trigger — so it cannot contradict them without
+     * costing an aggregate on every read. The invoice_provenance view remains
+     * available for spotting drift.
+     */
+    sourceType: invoiceSourceTypeEnum("source_type").notNull().default("direct"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     completedById: uuid("completed_by_id"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
@@ -158,6 +167,21 @@ export const invoiceLines = pgTable(
     stockRequestId: uuid("stock_request_id"),
     checkoutId: uuid("checkout_id"),
     weighbridgeTicketId: uuid("weighbridge_ticket_id"),
+
+    /**
+     * What the document said at the time of sale — immutable snapshots filled
+     * by a trigger (migration 0010), not a cache.
+     *
+     * The FKs above are what make the reference valid; these are what the line
+     * recorded. A technician's name when stock was issued to them is a
+     * historical fact: they leave, records get renamed or anonymised, and a
+     * join would silently relabel a delivery that definitely happened. Keeping
+     * them also avoids three joins per line just to print a name.
+     */
+    stockRequestNumberAtSale: text("stock_request_number_at_sale"),
+    technicianNameAtSale: text("technician_name_at_sale"),
+    checkoutNumberAtSale: text("checkout_number_at_sale"),
+    weighbridgeTicketNumberAtSale: text("weighbridge_ticket_number_at_sale"),
 
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

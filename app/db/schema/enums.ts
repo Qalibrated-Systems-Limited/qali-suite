@@ -123,3 +123,17 @@ export const fulfilmentSourceEnum = pgEnum("fulfilment_source", [
  * rather than a duplicate posting — see §8.3.
  */
 export const cogsSourceEnum = pgEnum("cogs_source", ["invoice", "weighbridge"]);
+
+/**
+ * Header-level provenance, stored on invoices and kept in step with the lines
+ * by a trigger. Mongo stores this and the app reads it; it stays stored rather
+ * than being derived on every read. `mixed` covers an invoice whose lines come
+ * from more than one source, which the Mongo enum could not express.
+ */
+export const invoiceSourceTypeEnum = pgEnum("invoice_source_type", [
+  "direct",
+  "stock_request",
+  "checkout",
+  "weighbridge",
+  "mixed",
+]);
