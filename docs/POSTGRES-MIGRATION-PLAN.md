@@ -319,9 +319,172 @@ Expect step 4 to find discrepancies. That is the point.
 
 ---
 
-## 8. Explicitly out of scope
+## 8. Design corrections made during the port
 
-- Redesigning the posting engine, fiscal periods, or COGS logic
+These are not refactors for their own sake. Each is a defect class the current
+schema permits and Postgres can forbid, and each costs almost nothing while a table is
+being defined for the first time — and a great deal afterwards.
+
+The rule applied throughout: **an invariant the application currently remembers
+to check becomes something the database will not allow to be violated.**
+
+### 8.1 Fulfilment source is decided by the absence of a field
+
+`Invoice.complete()` selects which inventory account COGS credits like this:
+
+```js
+const isFromTechnicianStock = !!(item.relatedRequest?.requestId || item.relatedCheckout?.checkoutId);
+const isWBFulfilled = !!item.weighbridgeTicketId;
+```
+
+- stock request or checkout → credit **Technician Stock**
+- weighbridge → **skip COGS** (already posted at the gate)
+- otherwise → credit **Inventory**
+
+So a nullable nested field decides which GL account is credited. "Not from
+technician stock" and "the `relatedRequest` field did not persist" are the same
+state. That is precisely the `parentAccount` defect (§2 of this document, fixed
+separately) — except the consequence there was a flat dropdown, and here it is
+stock credited to the wrong account in posted books.
+
+Nothing prevents `relatedRequest` and `weighbridgeTicketId` both being set. The
+`if / else if` silently prefers technician stock: precedence encoded as
+statement order.
+
+**Correction.** Fulfilment source becomes explicit, mandatory and enumerated,
+with the reference required to match:
+
+```sql
+fulfilment_source     fulfilment_source_enum NOT NULL,  -- inventory | stock_request
+                                                        -- | checkout | weighbridge
+stock_request_id      uuid REFERENCES stock_requests(id),
+checkout_id           uuid REFERENCES item_checkouts(id),
+weighbridge_ticket_id uuid REFERENCES weighbridge_tickets(id),
+
+CHECK (
+     (fulfilment_source = 'inventory'     AND stock_request_id IS NULL
+                                          AND checkout_id IS NULL
+                                          AND weighbridge_ticket_id IS NULL)
+  OR (fulfilment_source = 'stock_request' AND stock_request_id IS NOT NULL)
+  OR (fulfilment_source = 'checkout'      AND checkout_id IS NOT NULL)
+  OR (fulfilment_source = 'weighbridge'   AND weighbridge_ticket_id IS NOT NULL)
+)
+```
+
+A line cannot be ambiguous, so the precedence question stops existing. A missing
+reference is a hard error at insert rather than a silent switch to a different
+account.
+
+### 8.2 Two sources of truth for provenance
+
+Provenance is recorded twice: `invoice.source.{type, requestId, checkoutIds[]}`
+at the header, and `item.relatedRequest` / `item.relatedCheckout` per line.
+Nothing keeps them consistent, so an invoice can read `source.type = "direct"`
+while its lines post against Technician Stock. Any report grouping by
+`source.type` then disagrees with the ledger.
+
+Note also the shape mismatch: `source.checkoutIds` is an array, while
+`item.relatedCheckout.checkoutId` is singular.
+
+**Correction.** The header value is derived from the lines, not stored. Header
+provenance becomes a query, so the two cannot diverge.
+
+### 8.3 COGS double-posting is prevented by a read-then-check
+
+For a weighbridge sale, cost is recognised at gate crossing on the **weighed**
+quantity, and the invoice posts revenue only. That is deliberate and correct:
+for bulk commodities the weighed quantity is the truth, and the stock physically
+left at that moment.
+
+Both orderings are handled today, by a mutual-exclusion protocol:
+
+- **WB first:** connector posts `goods_dispatch`, stamps
+  `item.weighbridgeTicketId`; the invoice later sees the flag and skips COGS.
+- **Invoice first:** connector reads `linkedInvoice.status === "completed"`, sets
+  `invoiceAlreadyPosted`, and skips both the stock movement and the journal
+  entry.
+
+Two weaknesses:
+
+**It is a TOCTOU race.** The connector reads invoice status, then creates its
+journal entry, with no transaction spanning both and the invoice posting in a
+different process. An invoice posted inside that window produces COGS twice.
+
+**The costed quantity depends on operational timing.** If an invoice bills
+1,800 kg and the bridge weighs 1,750:
+
+| Order | COGS posted on |
+|---|---|
+| WB first | 1,750 — what left |
+| Invoice first | 1,800 — what was billed |
+
+Same shipment, different cost of sales, decided by which system ran first. In
+the invoice-first branch the discrepancy surfaces only as warning text asking an
+accountant to "verify the invoice quantity matches the WB net weight" — a manual
+step with nothing recording whether it happened.
+
+**Correction.** Make "COGS has been posted for this line" a uniqueness
+constraint rather than a flag two systems agree to check:
+
+```sql
+CREATE TABLE cogs_postings (
+  invoice_line_id   uuid PRIMARY KEY REFERENCES invoice_lines(id),
+  posted_by         cogs_source_enum NOT NULL,   -- 'invoice' | 'weighbridge'
+  journal_entry_id  uuid NOT NULL REFERENCES journal_entries(id),
+  quantity          numeric(19,4) NOT NULL,
+  posted_at         timestamptz NOT NULL DEFAULT now()
+);
+```
+
+The primary key does the work: whoever posts first inserts, the second attempt
+takes a unique violation. No read-then-check, therefore no race. It also records
+which quantity was costed and by whom, so the 1,750-vs-1,800 discrepancy becomes
+queryable data instead of a warning string.
+
+### 8.4 Stored derived values
+
+The same pattern already corrected for `Account.currentBalance` (§4.4) and
+`Party.cachedBalance` (§5) recurs:
+
+| Field | Defined as | Problem |
+|---|---|---|
+| `Product.inventory.quantityAvailable` | `quantityOnHand - quantityCommitted - quantityOnHold` | stored, so it can disagree with its own inputs |
+| `Payment.totalAllocated` | sum of `allocations[].amountAllocated` | recomputed in a pre-save hook; a write that bypasses the hook leaves it stale |
+| `Payment.unappliedAmount` | `Math.max(0, amount - totalAllocated)` | as above, and the `Math.max(0, …)` clamps over-allocation to zero rather than showing it |
+
+**Correction.** Generated columns or views. A value that is a function of other
+columns is never stored.
+
+### 8.5 Float tolerances
+
+`0.01` guards appear throughout as compensation for float64 arithmetic —
+`isFullyApplied()` in `payment.js`, the over-allocation guard
+(`totalAllocated > amount + 0.01`, which permits over-allocating by up to a
+cent), the balance check in `JournalEntry`, and the zero-balance filters in the
+report service.
+
+**Correction.** `numeric(19,4)` throughout and exact comparison. The tolerance
+exists to hide float residue; exact decimals do not produce residue. Where a
+tolerance is genuine accounting policy rather than a workaround, it must be
+stated as policy and applied deliberately — not inherited from a workaround.
+
+### 8.6 Denormalised copies
+
+`requestNumber`, `technicianId`, `technicianName`, `checkoutNumber` and
+`weighbridgeTicketNumber` are cached onto invoice lines; `accountCode` /
+`accountName` were cached onto journal lines (already dropped in the accounting
+core).
+
+**Correction.** Foreign key plus join. Cache only where a value must be frozen
+for audit — e.g. the price actually charged — and say so explicitly at the
+column.
+
+---
+
+## 9. Explicitly out of scope
+
+- Redesigning the posting engine, fiscal periods, or COGS logic beyond the
+  corrections in §8
 - Restructuring modules beyond moving DB access behind repositories
 - Migrating the other 64 models (priced after the slice)
 - `jeff-biz` — that branch stays on MongoDB
