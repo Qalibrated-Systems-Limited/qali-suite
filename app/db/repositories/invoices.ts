@@ -10,6 +10,7 @@ import {
 import { createJournalEntry } from "./journal";
 import { issueStock, commitStock } from "./products";
 import { recordMovement } from "./stockMovements";
+import { recordInvoiceVatOutput } from "./taxTransactions";
 
 /**
  * Sales invoices and the posting they drive.
@@ -263,7 +264,18 @@ export async function getCogsPosting(tx: Tx, invoiceLineId: string) {
 export async function completeInvoice(
   tx: Tx,
   invoiceId: string,
-  opts: { arAccountId: string; revenueAccountId: string; completedById: string },
+  opts: {
+    arAccountId: string;
+    revenueAccountId: string;
+    completedById: string;
+    /**
+     * Supply to raise the VAT Output record alongside the posting, as
+     * invoice.js:1025 does. Optional because an invoice carrying no tax has
+     * nothing to file.
+     */
+    vatOutputAccountId?: string | null;
+    vatRate?: string;
+  },
 ) {
   const [invoice] = await tx
     .select()
@@ -358,7 +370,18 @@ export async function completeInvoice(
     .where(eq(invoices.id, invoiceId))
     .returning();
 
-  return { invoice: updated, revenueEntry, cogsSkipped };
+  // VAT Output, in the same transaction as the posting it belongs to.
+  const vatOutput = opts.vatOutputAccountId
+    ? await recordInvoiceVatOutput(tx, {
+        companyId: invoice.companyId,
+        invoiceId: invoice.id,
+        vatOutputAccountId: opts.vatOutputAccountId,
+        taxRate: opts.vatRate,
+        createdById: opts.completedById,
+      })
+    : null;
+
+  return { invoice: updated, revenueEntry, cogsSkipped, vatOutput };
 }
 
 export async function listInvoices(

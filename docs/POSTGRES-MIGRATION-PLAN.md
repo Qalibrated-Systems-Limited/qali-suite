@@ -568,7 +568,7 @@ eight models.
 1. ~~`payments` + `payment_allocations`~~ — done (migrations 0011–0012)
 2. ~~`stock_movements`~~ — done (migrations 0013–0014)
 3. ~~`bills` + `credit_notes`~~ — done (migrations 0015–0017)
-4. `tax_transactions`
+4. ~~`tax_transactions`~~ — done (migrations 0018–0019)
 5. Full `stock_requests` / `item_checkouts` / `weighbridge_tickets`, replacing
    the minimal versions from §8.1
 
@@ -623,6 +623,43 @@ sale of 10 from 100 was written down as "90 → 80". Inbound movements would not
 even have failed loudly. The ordering is fixed at all four call sites, the
 contract is now stated at `recordMovement`, and both the invoice and bill paths
 assert the levels either side of the movement.
+
+### 9.8 Notes from step 4
+
+`tax_transactions` was the faithful port the sweep predicted — no tolerances, no
+pre-save derived values, structure kept per §9.5. What changed is only what the
+migration has already changed everywhere else: `party.id` became a real
+tenant-scoped foreign key rather than a bare `String` with no `ref`; the party
+and account details became immutable snapshots; `refPath` on the source document
+became a validating trigger; and `getVATReturn()`'s two aggregation pipelines
+became the `vat_return` view, reporting `vat_payable` as one signed number
+rather than Mongo's `payable` / `Math.abs(refundable)` pair.
+
+Two things are worth flagging rather than burying:
+
+**`total_amount` does not match its own documentation.** The schema comment says
+`base + tax` for VAT and `base - tax` for WHT (`taxTransactions.js:108-110`).
+For WHT raised from a bill the code stores the bill's `netPayable` —
+`subtotal + vat - wht`, not `subtotal - wht` — so on any bill carrying both VAT
+and WHT the documented formula and the stored value disagree, and neither is
+recoverable from the other two columns. §9.5 keeps the structure as-is, so the
+port stores what the code stores and leaves the column unconstrained. **Deciding
+which of the two is correct is an accounting question and needs an answer before
+cutover**, because it is a figure that goes on a return.
+
+**Filing state is one-way, and that is now enforced.** `markAsRemitted()` and
+`issueCertificate()` check "WHT only", "remitted before certificate" and "once
+only" in JavaScript, so they hold for callers that use the methods. They are
+about a statutory obligation having been discharged, so they moved to triggers.
+Un-filing is refused outright: a return that was wrong is corrected with an
+adjusting transaction, not by editing the record of what was submitted.
+
+**Best-effort statutory records are gone.** `bill.js:1106-1114` wraps tax
+creation in a `try/catch` that logs and continues — *"tax transactions can be
+created manually"* — so an approved bill could leave no record of the VAT it
+claimed or the tax it withheld. It is now in the approval's transaction: it
+fails the approval or it exists. Same change as the stock movements in §9.7, and
+the same reasoning.
 
 ---
 

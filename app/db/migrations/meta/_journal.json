@@ -127,6 +127,20 @@
       "when": 1786976201271,
       "tag": "0017_invoice_amount_paid_derived",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786986642298,
+      "tag": "0018_tax_transactions",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786986643298,
+      "tag": "0019_tax_transactions_constraints_and_rls",
+      "breakpoints": true
     }
   ]
 }

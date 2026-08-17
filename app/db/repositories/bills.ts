@@ -4,6 +4,7 @@ import { bills, billLines, parties, accounts, products } from "../schema";
 import { createJournalEntry, reverseJournalEntry } from "./journal";
 import { receiveStock } from "./products";
 import { recordMovement } from "./stockMovements";
+import { recordBillTaxes } from "./taxTransactions";
 
 /**
  * Bills — accounts payable, and the posting they drive.
@@ -524,7 +525,23 @@ export async function approveBill(
     .where(eq(bills.id, billId))
     .returning();
 
-  return { bill: updated, entry };
+  // VAT Input and WHT records, raised after the header update so they carry the
+  // journal entry id.
+  //
+  // bill.js:1106-1114 wraps this in a try/catch that logs and continues —
+  // "tax transactions can be created manually" — so an approved bill could
+  // leave no record of the VAT it claimed or the tax it withheld, with nothing
+  // but a console line to say so. A statutory record is not best-effort: it
+  // fails the approval or it exists.
+  const taxes = await recordBillTaxes(tx, {
+    companyId: bill.companyId,
+    billId: bill.id,
+    vatInputAccountId: opts.vatInputAccountId,
+    whtPayableAccountId: opts.whtPayableAccountId,
+    createdById: opts.approvedById,
+  });
+
+  return { bill: updated, entry, taxes };
 }
 
 /**

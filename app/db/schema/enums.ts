@@ -208,6 +208,44 @@ export const creditNoteItemTypeEnum = pgEnum("credit_note_item_type", [
   "service",
 ]);
 
+// ── Tax transactions ─────────────────────────────────────────────────────────
+
+/**
+ * Kenyan statutory taxes. Carried over from taxTransactions.js unchanged,
+ * including `nhif` — replaced by SHIF in October 2024, but kept so historical
+ * records still validate. Dropping it would make old rows unreadable, which is
+ * the opposite of what a tax record is for.
+ */
+export const taxTypeEnum = pgEnum("tax_type", [
+  // VAT
+  "vat_input", // VAT on purchases (claimable)
+  "vat_output", // VAT on sales (payable)
+  // Withholding
+  "wht", // withheld on supplier payments
+  "wht_received", // certificate received from a customer
+  // Payroll
+  "paye",
+  "nssf",
+  "shif", // replaced NHIF, Oct 2024
+  "nhif", // legacy, retained for historical records
+  "housing_levy",
+  // Other
+  "excise_duty",
+  "advance_tax",
+  "dst", // Digital Services Tax
+  "turnover_tax",
+  "cgt", // Capital Gains Tax
+  "other",
+]);
+
+/** What a tax transaction was raised from. */
+export const taxSourceDocumentTypeEnum = pgEnum("tax_source_document_type", [
+  "invoice",
+  "bill",
+  "journal_entry",
+  "other",
+]);
+
 // ── Stock movements ──────────────────────────────────────────────────────────
 
 export const movementTypeEnum = pgEnum("movement_type", [
