@@ -64,6 +64,13 @@
       "when": 1786939103045,
       "tag": "0008_invoices_constraints_and_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786939771028,
+      "tag": "0009_journal_line_account_snapshot",
+      "breakpoints": true
     }
   ]
 }

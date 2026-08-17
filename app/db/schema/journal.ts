@@ -177,6 +177,18 @@ export const journalLines = pgTable(
     credit: money("credit").notNull().default("0"),
     description: text("description"),
 
+    /**
+     * The account's code and name AS POSTED — an immutable snapshot, not a
+     * cache. Populated by a trigger on insert and refused on update (migration
+     * 0009), so renaming an account cannot relabel a trial balance printed
+     * years ago.
+     *
+     * Use account_id for all aggregation and any report grouping by the live
+     * chart. Use these only to reproduce a journal document as it was posted.
+     */
+    accountCodeAtPosting: text("account_code_at_posting").notNull().default(""),
+    accountNameAtPosting: text("account_name_at_posting").notNull().default(""),
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

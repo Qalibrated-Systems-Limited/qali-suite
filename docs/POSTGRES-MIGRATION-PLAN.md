@@ -252,6 +252,7 @@ they must be frozen for audit.
 | `_id` (ObjectId) | `id UUID DEFAULT gen_random_uuid()` | See §6.1 for id mapping during backfill |
 | `JournalEntry.lines[]` | `journal_lines` table, FK to `journal_entries` | Cascade delete |
 | `JournalEntry.party.{type,id,name}` | `party_type`, `party_id` FK, no cached name | Name comes from join |
+| `lines[].accountCode` / `accountName` | `account_code_at_posting` / `account_name_at_posting` | **Immutable snapshot**, not a cache — a posted entry is an audit record (§8.7) |
 | `JournalEntry.relatedDocuments.*` | `source_type` + `source_id` polymorphic pair | Replaces 12 nullable id fields |
 | `Account.ancestors[]` + `path` | `parent_id` + `ltree` path | Native hierarchy queries |
 | `debit` / `credit` `Number` | `NUMERIC(19,4) NOT NULL DEFAULT 0 CHECK (>= 0)` | |
