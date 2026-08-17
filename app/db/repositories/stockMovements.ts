@@ -46,6 +46,15 @@ export interface RecordMovementInput {
  * inbound movement must raise the level by exactly its quantity. Mongo records
  * all three numbers and reconciles none of them, so a movement can claim ten
  * units left while the level fell by eight.
+ *
+ * ORDERING: call this BEFORE moving the stock, not after.
+ *
+ * This function records the movement; it does not apply it. It reads
+ * `quantity_on_hand` as `previous_stock` and derives `new_stock` from it, so
+ * calling it after the level has already changed makes both figures describe a
+ * transition that did not happen — a sale of 10 from 100 records "90 -> 80".
+ * Inbound movements do not even fail loudly when this is got wrong, they just
+ * record the wrong provenance, which is the whole point of the record.
  */
 export async function recordMovement(tx: Tx, input: RecordMovementInput) {
   const [product] = await tx

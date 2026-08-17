@@ -308,11 +308,15 @@ export async function completeInvoice(
     // A weighbridge line's stock left at the gate and was costed there, so the
     // movement was recorded by the connector rather than here.
     if (line.fulfilmentSource !== "weighbridge") {
-      await issueStock(tx, line.productId, line.quantity);
-
       // Record what physically moved, linked to the line. This is the last
       // link in the COGS provenance chain: invoice line -> COGS posting ->
       // stock movement. Without it a cost figure has no documented basis.
+      //
+      // BEFORE issueStock, not after: recordMovement reads the product's
+      // current level as `previous_stock` and derives `new_stock` from it.
+      // Issuing first made both figures describe the wrong transition — a
+      // sale of 10 from 100 recorded "90 -> 80" — so every movement
+      // understated the stock either side of it by the quantity that moved.
       await recordMovement(tx, {
         companyId: invoice.companyId,
         productId: line.productId,
@@ -324,6 +328,8 @@ export async function completeInvoice(
         sourceReference: invoice.invoiceNumber,
         performedById: opts.completedById,
       });
+
+      await issueStock(tx, line.productId, line.quantity);
     }
 
     const posting = await recordCogsPosting(tx, {

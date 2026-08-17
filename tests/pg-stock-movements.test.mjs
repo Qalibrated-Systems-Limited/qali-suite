@@ -264,6 +264,19 @@ suite("postgres stock movements", () => {
       expect(chain.total_cost).toBe("100.0000");
       expect(chain.movement_number).toBeTruthy();
       expect(chain.costed_vs_moved_variance).toBe("0.0000");
+
+      // The movement must describe the transition that actually happened.
+      // completeInvoice used to issue the stock first and record afterwards,
+      // so a sale of 10 from 100 was written down as "90 -> 80": both levels
+      // understated by the quantity that moved, on every sale.
+      const [mv] = await asTenant(companyA, (tx) =>
+        tx.execute(sql`
+          SELECT previous_stock, new_stock FROM stock_movements
+           WHERE invoice_line_id = ${full.lines[0].id}
+        `),
+      );
+      expect(mv.previous_stock).toBe("100.0000");
+      expect(mv.new_stock).toBe("90.0000");
     });
 
     it("surfaces a variance when the weighbridge costed a different quantity", async () => {
