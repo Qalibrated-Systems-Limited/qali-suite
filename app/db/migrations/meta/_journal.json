@@ -78,6 +78,20 @@
       "when": 1786941521755,
       "tag": "0010_invoice_line_snapshots_and_source",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786942477663,
+      "tag": "0011_payments",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786942479917,
+      "tag": "0012_payments_constraints_and_rls",
+      "breakpoints": true
     }
   ]
 }

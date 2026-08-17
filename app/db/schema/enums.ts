@@ -137,3 +137,28 @@ export const invoiceSourceTypeEnum = pgEnum("invoice_source_type", [
   "weighbridge",
   "mixed",
 ]);
+
+// ── Payments ─────────────────────────────────────────────────────────────────
+
+export const paymentTypeEnum = pgEnum("payment_type", ["received", "made"]);
+
+export const paymentMethodEnum = pgEnum("payment_method", [
+  "cash",
+  "mpesa",
+  "bank_transfer",
+  "cheque",
+  "card",
+]);
+
+export const paymentRecordStatusEnum = pgEnum("payment_record_status", [
+  "draft",
+  "pending_clearance",
+  "confirmed",
+  "cancelled",
+]);
+
+/** What an allocation settles. */
+export const allocationDocumentTypeEnum = pgEnum("allocation_document_type", [
+  "invoice",
+  "bill",
+]);
