@@ -580,17 +580,7 @@ billSchema.pre("save", function (next) {
     // Set amounts
     this.amounts.subtotal = Math.round(subtotal * 100) / 100;
     this.amounts.vat = Math.round(totalVat * 100) / 100;
-    this.amounts.total = this.amounts.subtotal + this.amounts.vat;
 
-    // Calculate WHT if applicable
-    if (this.whtApplicable && this.whtRate > 0) {
-      this.amounts.wht =
-        Math.round(this.amounts.subtotal * (this.whtRate / 100) * 100) / 100;
-    } else {
-      this.amounts.wht = 0;
-    }
-
-    // Net payable
     this.amounts.netPayable = this.amounts.total - this.amounts.wht;
     this.amounts.balance = this.amounts.netPayable - this.amounts.paid;
   }

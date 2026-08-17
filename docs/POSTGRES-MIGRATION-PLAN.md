@@ -637,15 +637,43 @@ rather than Mongo's `payable` / `Math.abs(refundable)` pair.
 
 Two things are worth flagging rather than burying:
 
-**`total_amount` does not match its own documentation.** The schema comment says
-`base + tax` for VAT and `base - tax` for WHT (`taxTransactions.js:108-110`).
-For WHT raised from a bill the code stores the bill's `netPayable` —
-`subtotal + vat - wht`, not `subtotal - wht` — so on any bill carrying both VAT
-and WHT the documented formula and the stored value disagree, and neither is
-recoverable from the other two columns. §9.5 keeps the structure as-is, so the
-port stores what the code stores and leaves the column unconstrained. **Deciding
-which of the two is correct is an accounting question and needs an answer before
-cutover**, because it is a figure that goes on a return.
+**`total_amount` means different things per tax type, and the Mongo comment
+describing it is wrong.** `taxTransactions.js:108-110` documents it as
+`base + tax` for VAT and `base - tax` for WHT. The WHT branch does not do that:
+it stores the bill's `netPayable`, which is `subtotal + vat - wht`.
+
+The stored value is the correct one. Follow the cash on a bill of 15,050 plus
+16% VAT with 5% withheld:
+
+| | |
+|---|---:|
+| supplier invoices, VAT-exclusive | 15,050.00 |
+| VAT at 16% | 2,408.00 |
+| gross | **17,458.00** |
+| withheld at 5% of the VAT-exclusive base, remitted to KRA | 752.50 |
+| paid to the supplier | **16,705.50** |
+
+VAT is a tax the supplier collects and remits, so the buyer pays it in full;
+WHT is deducted from what the buyer hands over. The supplier receives 16,705.50
+in cash and a certificate for 752.50. A WHT certificate reports gross, rate, tax
+withheld and **net paid** — and the net paid is 16,705.50, which is `netPayable`.
+The documented `base - tax` would be 14,297.50, a figure corresponding to
+nothing: not the payment, not the base, not the gross.
+
+So no schema or data change is needed. What the column actually holds is:
+
+| tax type | `total_amount` | |
+|---|---|---|
+| `vat_input` / `vat_output` | gross document value | `base + tax` |
+| `wht` | net cash paid to the payee | `base + vat - tax` |
+
+Both are "the transaction total from that tax's point of view", but they are not
+the same quantity, and the name does not say which. A stricter design would
+split them or name them `gross_value` / `net_paid`. Carried as-is under §9.5;
+the stale Mongo comment must not be carried into anything new.
+
+The WHT base is handled correctly on both sides — `bill.js` withholds on
+`subtotal`, the VAT-exclusive amount, which is the standard treatment.
 
 **Filing state is one-way, and that is now enforced.** `markAsRemitted()` and
 `issueCertificate()` check "WHT only", "remitted before certificate" and "once

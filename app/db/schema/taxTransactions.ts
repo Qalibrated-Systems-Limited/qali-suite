@@ -79,20 +79,26 @@ export const taxTransactions = pgTable(
     baseAmount: money("base_amount").notNull(),
     taxAmount: money("tax_amount").notNull(),
     /**
-     * NOT derived, deliberately — and this is worth reading before anyone
-     * "fixes" it into a generated column.
+     * NOT derived, and NOT the same quantity for every tax type — worth
+     * reading before anyone "fixes" it into a generated column.
      *
-     * The Mongo schema documents it as `base + tax` for VAT and `base - tax`
-     * for WHT (taxTransactions.js:108-110). The code does not do that: for WHT
-     * raised from a bill it stores the bill's `netPayable`, which is
-     * `subtotal + vat - wht`, not `subtotal - wht`. So on any bill carrying
-     * both VAT and WHT the documented formula and the stored value disagree,
-     * and neither is recoverable from the other two columns alone.
+     *   vat_input / vat_output   gross document value      base + tax
+     *   wht                      net cash paid to the payee base + vat - tax
      *
-     * §9.5 keeps this structure as-is, so the value carries over stored and
-     * unconstrained. The discrepancy is recorded in §9.8 rather than resolved
-     * here — deciding which of the two is correct is an accounting question,
-     * not a schema one.
+     * The Mongo schema comment (taxTransactions.js:108-110) says `base - tax`
+     * for WHT. That comment is wrong, and the code it sits above does not
+     * follow it — the WHT branch stores the bill's `netPayable`.
+     *
+     * `netPayable` is the correct figure. VAT is a tax the supplier collects
+     * and remits, so the buyer pays it in full; WHT is deducted from what the
+     * buyer hands over. On 15,050 + 16% VAT with 5% withheld, the supplier is
+     * paid 16,705.50 and 752.50 goes to KRA — and 16,705.50 is what a WHT
+     * certificate reports as the net paid. `base - tax` would be 14,297.50,
+     * which is neither the payment, the base, nor the gross.
+     *
+     * So it stays stored and unconstrained: no single formula covers both tax
+     * types, and the two cannot be told apart from base and tax alone, because
+     * the VAT that separates them is not a column here. See §9.8.
      */
     totalAmount: money("total_amount").notNull(),
     currency: text("currency").notNull().default("KES"),
