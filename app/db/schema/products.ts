@@ -57,6 +57,17 @@ export const products = pgTable(
     reorderLevel: numeric("reorder_level", { precision: 19, scale: 4 })
       .notNull()
       .default("0"),
+    /**
+     * GENERATED ALWAYS — never written. Created in migration 0008; declared
+     * here so reads include it. See §8.4: the Mongo schema documents the same
+     * formula and then stores the result, which can disagree with its inputs.
+     */
+    quantityAvailable: numeric("quantity_available", {
+      precision: 19,
+      scale: 4,
+    }).generatedAlwaysAs(
+      sql`quantity_on_hand - quantity_committed - quantity_on_hold`,
+    ),
 
     // ── Costing ──────────────────────────────────────────────────────────────
     costPrice: numeric("cost_price", { precision: 19, scale: 4 })
