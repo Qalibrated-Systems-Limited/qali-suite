@@ -12,7 +12,11 @@ export default defineConfig({
   schema: "./app/db/schema/index.ts",
   out: "./app/db/migrations",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "",
+    // Direct endpoint, not the pooled one: drizzle-kit introspects and runs
+    // DDL, which does not survive transaction-mode pooling. Falls back to
+    // DATABASE_URL so a single-database local setup needs only one value.
+    // See the note in app/db/migrate.mjs.
+    url: process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   },
   // The Mongo collections live in the same project during the slice; keep
   // drizzle-kit from ever touching anything it did not create.

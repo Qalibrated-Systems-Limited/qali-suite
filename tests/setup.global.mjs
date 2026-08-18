@@ -69,6 +69,18 @@ async function teardownPostgresRole() {
 }
 
 export async function setup() {
+  // Say so, loudly. The Postgres suites are `DATABASE_URL ? describe :
+  // describe.skip`, so with no URL they skip and the run still reports
+  // "passed" — 130 integration tests excluded, and nothing in the summary
+  // that reads as a problem.
+  if (!process.env.DATABASE_URL) {
+    console.warn(
+      "\n⚠  DATABASE_URL is not set — every Postgres integration suite will SKIP.\n" +
+        "   Set it in .env (vitest.config.mjs loads it from there).\n" +
+        "   Local: postgresql://postgres:postgres@localhost:5433/stockvault\n",
+    );
+  }
+
   replSet = await MongoMemoryReplSet.create({
     replSet: {
       count: 1, // single node is enough for transaction support

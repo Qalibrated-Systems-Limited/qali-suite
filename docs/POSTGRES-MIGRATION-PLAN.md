@@ -737,6 +737,44 @@ Three more corrections of the kind already made elsewhere:
 
 ---
 
+## 9A. The application's database role
+
+Row-level security is the structural fix for §2.2, and it is only as good as the
+role the application connects as. `FORCE ROW LEVEL SECURITY` binds the table
+owner, but nothing binds a role with `BYPASSRLS` — and every superuser has it.
+Measured on this schema, same query, one invoice present, no `app.company_id`:
+
+| connected as | rows visible |
+|---|---|
+| `postgres` (superuser) | **1** — every policy inert |
+| non-superuser with full grants | **0** — fails closed, as designed |
+
+A `DATABASE_URL` pointing at the superuser silently undoes every policy written
+in 0001, 0006, 0008, 0012, 0014, 0016, 0019 and 0022, and puts tenant isolation
+back to depending on the application remembering a `WHERE` clause.
+
+Migration 0023 grants `app_user` the DML it needs — no DDL, and no `TRUNCATE`,
+which ignores RLS entirely and would be a cross-tenant delete. It also adds
+`assert_rls_effective()`, which raises if the current connection would bypass
+RLS, so the requirement is verifiable from a health check rather than
+remembered.
+
+**Two connection strings, for two different jobs:**
+
+| | endpoint | role | why |
+|---|---|---|---|
+| `DATABASE_URL` | pooled | `app_user` | connection limits; must **not** bypass RLS |
+| `DIRECT_DATABASE_URL` | direct | owner | advisory locks and DDL do not survive transaction pooling |
+
+The migration connection stays privileged deliberately. Migrations that touch
+tenant *data* rather than schema — 0017's `amount_paid` reconciliation is the
+live example — scan across companies with no `app.company_id` set. Under RLS
+that returns zero rows, and the reconciliation would find nothing and report
+success. `DIRECT_DATABASE_URL` falls back to `DATABASE_URL`, so a single-database
+local setup still needs only one value.
+
+---
+
 ## 10. Explicitly out of scope
 
 - Redesigning the posting engine, fiscal periods, or COGS logic beyond the
