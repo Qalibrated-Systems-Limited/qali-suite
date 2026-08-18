@@ -22,6 +22,8 @@ import {
   fulfilmentSourceEnum,
   cogsSourceEnum,
   invoiceSourceTypeEnum,
+  lineItemTypeEnum,
+  serviceCategoryEnum,
 } from "./enums";
 
 const money = (name: string) =>
@@ -144,12 +146,25 @@ export const invoiceLines = pgTable(
       .notNull()
       .references(() => companies.id, { onDelete: "restrict" }),
     invoiceId: uuid("invoice_id").notNull(),
-    productId: uuid("product_id")
-      .notNull()
-      .references(() => products.id, { onDelete: "restrict" }),
+
+    /**
+     * A line sells a stocked product or a service. Mongo has carried this since
+     * the beginning — labour, mileage, accommodation, installation fees — and
+     * this table did not, with `product_id NOT NULL`, so no invoice containing
+     * a service line could be represented at all. Found while extending the
+     * backfill; corrected in migration 0025.
+     */
+    itemType: lineItemTypeEnum("item_type").notNull().default("product"),
+    /** Set for service lines; null for products. */
+    serviceCategory: serviceCategoryEnum("service_category"),
+    /** Null for a service — there is no product to point at. */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "restrict",
+    }),
 
     lineNumber: integer("line_number").notNull(),
     description: text("description"),
+    unit: text("unit").notNull().default("pcs"),
 
     quantity: numeric("quantity", { precision: 19, scale: 4 }).notNull(),
     /** Frozen at sale time — see note above. */
@@ -192,6 +207,12 @@ export const invoiceLines = pgTable(
     index("invoice_lines_company_product_idx").on(t.companyId, t.productId),
     index("invoice_lines_invoice_idx").on(t.invoiceId),
     check("invoice_lines_quantity_positive", sql`${t.quantity} > 0`),
+    // A product line names a product; a service line does not. The same rule
+    // credit_note_lines has carried since 0015.
+    check(
+      "invoice_lines_product_matches_item_type",
+      sql`(${t.itemType} = 'product') = (${t.productId} IS NOT NULL)`,
+    ),
     check(
       "invoice_lines_amounts_non_negative",
       sql`${t.unitPrice} >= 0 AND ${t.unitCost} >= 0 AND ${t.discountAmount} >= 0`,

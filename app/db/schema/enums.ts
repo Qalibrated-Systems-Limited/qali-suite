@@ -138,6 +138,31 @@ export const invoiceSourceTypeEnum = pgEnum("invoice_source_type", [
   "mixed",
 ]);
 
+/**
+ * Whether a document line sells a stocked product or a service.
+ *
+ * `credit_note_lines` has carried this since 0015; `invoice_lines` did not,
+ * and had `product_id NOT NULL` — so a service line was expressible on the
+ * credit note that reverses a sale but not on the invoice that makes it. See
+ * migration 0025.
+ */
+export const lineItemTypeEnum = pgEnum("line_item_type", [
+  "product",
+  "service",
+]);
+
+/** Mirrors `serviceCategory` on invoice.js and quote.js. */
+export const serviceCategoryEnum = pgEnum("service_category", [
+  "labor", // hourly rate
+  "mileage", // transport per km
+  "accommodation", // nightouts, hotels
+  "installation",
+  "consultation",
+  "maintenance",
+  "repair",
+  "other",
+]);
+
 // ── Payments ─────────────────────────────────────────────────────────────────
 
 export const paymentTypeEnum = pgEnum("payment_type", ["received", "made"]);

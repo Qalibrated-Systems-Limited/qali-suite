@@ -26,10 +26,23 @@ export type FulfilmentSource =
   | "weighbridge";
 
 export interface InvoiceLineInput {
-  productId: string;
+  /** Required for a product line, omitted for a service. */
+  productId?: string | null;
+  /** Defaults to "product" when a productId is given, "service" otherwise. */
+  itemType?: "product" | "service";
+  serviceCategory?:
+    | "labor"
+    | "mileage"
+    | "accommodation"
+    | "installation"
+    | "consultation"
+    | "maintenance"
+    | "repair"
+    | "other";
   quantity: string;
   unitPrice: string;
   unitCost?: string;
+  unit?: string;
   description?: string | null;
   discountAmount?: string;
   taxAmount?: string;
@@ -85,11 +98,24 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
   // historical fact and must not move when the product is re-costed later.
   const resolved = [];
   for (const line of input.lines) {
-    const [product] = await tx
-      .select()
-      .from(products)
-      .where(eq(products.id, line.productId));
-    if (!product) throw new Error(`Product not found: ${line.productId}`);
+    const itemType = line.itemType ?? (line.productId ? "product" : "service");
+
+    // A service has no product and therefore no inventory cost. Mongo has
+    // always allowed these; this table could not express them until migration
+    // 0025.
+    let product = null;
+    if (itemType === "product") {
+      if (!line.productId) {
+        throw new Error("A product line must name a product");
+      }
+      [product] = await tx
+        .select()
+        .from(products)
+        .where(eq(products.id, line.productId));
+      if (!product) throw new Error(`Product not found: ${line.productId}`);
+    } else if (line.productId) {
+      throw new Error("A service line cannot name a product");
+    }
 
     const [{ line_total }] = (await tx.execute(sql`
       SELECT (${line.quantity}::numeric(19,4) * ${line.unitPrice}::numeric(19,4)
@@ -99,7 +125,8 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
 
     resolved.push({
       ...line,
-      unitCost: line.unitCost ?? product.costPrice,
+      itemType,
+      unitCost: line.unitCost ?? product?.costPrice ?? "0",
       lineTotal: line_total,
     });
   }
@@ -137,9 +164,12 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
     await tx.insert(invoiceLines).values({
       companyId: input.companyId,
       invoiceId: invoice.id,
-      productId: line.productId,
+      itemType: line.itemType,
+      serviceCategory: line.serviceCategory ?? null,
+      productId: line.productId ?? null,
       lineNumber: n,
       description: line.description ?? null,
+      unit: line.unit ?? "pcs",
       quantity: line.quantity,
       unitPrice: line.unitPrice,
       unitCost: line.unitCost,
@@ -152,9 +182,13 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
       weighbridgeTicketId: line.weighbridgeTicketId ?? null,
     });
 
-    // Reserve the stock while the invoice is a draft.
-    if ((line.fulfilmentSource ?? "inventory") === "inventory") {
-      await commitStock(tx, line.productId, line.quantity);
+    // Reserve the stock while the invoice is a draft. A service reserves
+    // nothing — there is no stock behind it.
+    if (
+      line.itemType === "product" &&
+      (line.fulfilmentSource ?? "inventory") === "inventory"
+    ) {
+      await commitStock(tx, line.productId!, line.quantity);
     }
   }
 
@@ -172,10 +206,13 @@ export async function getInvoice(tx: Tx, invoiceId: string) {
     .select({
       id: invoiceLines.id,
       lineNumber: invoiceLines.lineNumber,
+      itemType: invoiceLines.itemType,
+      serviceCategory: invoiceLines.serviceCategory,
       productId: invoiceLines.productId,
       sku: products.sku,
       productName: products.name,
       description: invoiceLines.description,
+      unit: invoiceLines.unit,
       quantity: invoiceLines.quantity,
       unitPrice: invoiceLines.unitPrice,
       unitCost: invoiceLines.unitCost,
@@ -183,7 +220,9 @@ export async function getInvoice(tx: Tx, invoiceId: string) {
       fulfilmentSource: invoiceLines.fulfilmentSource,
     })
     .from(invoiceLines)
-    .innerJoin(products, eq(products.id, invoiceLines.productId))
+    // LEFT: a service line has no product, and an inner join would drop it
+    // from the invoice entirely.
+    .leftJoin(products, eq(products.id, invoiceLines.productId))
     .where(eq(invoiceLines.invoiceId, invoiceId))
     .orderBy(invoiceLines.lineNumber);
 
@@ -317,6 +356,12 @@ export async function completeInvoice(
   // ── Stock issue + COGS, per line ───────────────────────────────────────
   const cogsSkipped: string[] = [];
   for (const line of lines) {
+    // A service moves no stock and has no cost of sale. Nothing to issue,
+    // nothing to record, nothing to cost — invoice.js costs product items
+    // only, and migration 0025 makes posting COGS against a service an error
+    // rather than something to remember not to do.
+    if (line.itemType === "service") continue;
+
     // A weighbridge line's stock left at the gate and was costed there, so the
     // movement was recorded by the connector rather than here.
     if (line.fulfilmentSource !== "weighbridge") {
@@ -331,7 +376,7 @@ export async function completeInvoice(
       // understated the stock either side of it by the quantity that moved.
       await recordMovement(tx, {
         companyId: invoice.companyId,
-        productId: line.productId,
+        productId: line.productId!,
         movementType: "sale",
         direction: "out",
         quantity: line.quantity,
@@ -341,7 +386,7 @@ export async function completeInvoice(
         performedById: opts.completedById,
       });
 
-      await issueStock(tx, line.productId, line.quantity);
+      await issueStock(tx, line.productId!, line.quantity);
     }
 
     const posting = await recordCogsPosting(tx, {

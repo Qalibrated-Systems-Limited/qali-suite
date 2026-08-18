@@ -345,4 +345,126 @@ suite("postgres invoices", () => {
       expect(seen).toHaveLength(0);
     });
   });
+
+  describe("service lines (§0025)", () => {
+    it("invoices a service, which has no product and no stock", async () => {
+      const invoice = await asTenant(companyA, (tx) =>
+        invoiceRepo.createInvoice(tx, {
+          companyId: companyA,
+          customerId: customer,
+          invoiceDate: "2026-08-01",
+          lines: [
+            {
+              itemType: "service",
+              serviceCategory: "installation",
+              description: "Installation of pump",
+              quantity: "3",
+              unitPrice: "2500.0000",
+              unit: "hours",
+            },
+          ],
+        }),
+      );
+      expect(invoice.subtotal).toBe("7500.0000");
+
+      const full = await asTenant(companyA, (tx) =>
+        invoiceRepo.getInvoice(tx, invoice.id),
+      );
+      // A left join, so the service line is present rather than dropped.
+      expect(full.lines).toHaveLength(1);
+      expect(full.lines[0].itemType).toBe("service");
+      expect(full.lines[0].serviceCategory).toBe("installation");
+      expect(full.lines[0].productId).toBeNull();
+      expect(full.lines[0].unit).toBe("hours");
+    });
+
+    it("mixes product and service lines on one invoice", async () => {
+      const invoice = await asTenant(companyA, (tx) =>
+        invoiceRepo.createInvoice(tx, {
+          companyId: companyA,
+          customerId: customer,
+          invoiceDate: "2026-08-01",
+          lines: [
+            { productId: widget, quantity: "2", unitPrice: "100.0000" },
+            {
+              itemType: "service",
+              serviceCategory: "labor",
+              description: "Fitting",
+              quantity: "1",
+              unitPrice: "500.0000",
+            },
+          ],
+        }),
+      );
+      expect(invoice.subtotal).toBe("700.0000");
+
+      // Only the product line reserved stock.
+      const product = await asTenant(companyA, (tx) =>
+        productRepo.getProduct(tx, widget),
+      );
+      expect(product.quantityCommitted).toBe("2.0000");
+    });
+
+    it("completes a service invoice without moving stock or costing it", async () => {
+      const invoice = await asTenant(companyA, (tx) =>
+        invoiceRepo.createInvoice(tx, {
+          companyId: companyA,
+          customerId: customer,
+          invoiceDate: "2026-08-01",
+          lines: [
+            {
+              itemType: "service",
+              serviceCategory: "consultation",
+              description: "Advisory",
+              quantity: "1",
+              unitPrice: "1000.0000",
+            },
+          ],
+        }),
+      );
+
+      await asTenant(companyA, (tx) =>
+        invoiceRepo.completeInvoice(tx, invoice.id, {
+          arAccountId: arAccount,
+          revenueAccountId: salesAccount,
+          completedById: randomUUID(),
+        }),
+      );
+
+      const movements = await asTenant(companyA, (tx) =>
+        tx.execute(sql`SELECT count(*)::int AS n FROM stock_movements`),
+      );
+      expect(movements[0].n).toBe(0);
+      const cogs = await asTenant(companyA, (tx) =>
+        tx.execute(sql`SELECT count(*)::int AS n FROM cogs_postings`),
+      );
+      expect(cogs[0].n).toBe(0);
+    });
+
+    it("refuses a product line with no product, and a service line with one", async () => {
+      await expect(
+        asTenant(companyA, (tx) =>
+          invoiceRepo.createInvoice(tx, {
+            companyId: companyA,
+            customerId: customer,
+            invoiceDate: "2026-08-01",
+            lines: [{ itemType: "product", quantity: "1", unitPrice: "1" }],
+          }),
+        ),
+      ).rejects.toThrow(/product line must name a product/i);
+
+      await expect(
+        asTenant(companyA, (tx) =>
+          invoiceRepo.createInvoice(tx, {
+            companyId: companyA,
+            customerId: customer,
+            invoiceDate: "2026-08-01",
+            lines: [
+              { itemType: "service", productId: widget, quantity: "1", unitPrice: "1" },
+            ],
+          }),
+        ),
+      ).rejects.toThrow(/service line cannot name a product/i);
+    });
+  });
 });
