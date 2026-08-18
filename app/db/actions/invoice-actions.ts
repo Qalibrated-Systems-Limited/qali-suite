@@ -191,6 +191,8 @@ export async function createInvoicePg(
           notes: d.notes ?? null,
           lines,
           createdById: user.id,
+          createdByName: user.name,
+          createdByRole: user.role,
         }),
     );
 
@@ -296,5 +298,12 @@ export async function getInvoicesPg(
 export async function getInvoicePg(invoiceId: string) {
   return withAuthorizedTenant([...INVOICE_WRITE_ROLES], (tx) =>
     invoices.getInvoice(tx, invoiceId),
+  );
+}
+
+/** One invoice, shaped for the detail page. Returns null if not in this tenant. */
+export async function getInvoiceDetailPg(invoiceId: string) {
+  return withAuthorizedTenant([...INVOICE_WRITE_ROLES], (tx) =>
+    invoices.getInvoiceDetail(tx, invoiceId),
   );
 }

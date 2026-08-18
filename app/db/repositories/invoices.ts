@@ -78,6 +78,8 @@ export interface CreateInvoiceInput {
   notes?: string | null;
   lines: InvoiceLineInput[];
   createdById?: string | null;
+  createdByName?: string | null;
+  createdByRole?: string | null;
 }
 
 /** Exact decimal arithmetic on money strings, via Postgres rather than JS. */
@@ -183,6 +185,8 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
       total: subtotal,
       status: "draft",
       createdById: input.createdById ?? null,
+      createdByName: input.createdByName ?? null,
+      createdByRole: input.createdByRole ?? null,
     })
     .returning();
 
@@ -455,6 +459,111 @@ export async function completeInvoice(
     : null;
 
   return { invoice: updated, revenueEntry, cogsSkipped, vatOutput };
+}
+
+/**
+ * One invoice with everything the detail page renders.
+ *
+ * Two queries, not one: joining lines to a header repeats every header column
+ * per line, and the page needs both shapes anyway. Both run inside the caller's
+ * RLS-scoped transaction.
+ *
+ * `items` rather than `lines`, and `type`/`name`/`SKU` rather than the column
+ * names, because that is what the existing page reads — matching the shape is
+ * what lets the data source change without rewriting the markup.
+ */
+export async function getInvoiceDetail(tx: Tx, invoiceId: string) {
+  const [inv] = (await tx.execute(sql`
+    SELECT i.id,
+           i.invoice_number,
+           i.invoice_date,
+           i.due_date,
+           i.status::text          AS status,
+           i.payment_status::text  AS payment_status,
+           i.subtotal::text        AS subtotal,
+           i.discount_total::text  AS discount_total,
+           i.tax_amount::text      AS tax_amount,
+           i.total::text           AS total,
+           i.amount_paid::text     AS amount_paid,
+           i.currency,
+           i.title,
+           i.notes,
+           i.created_by_name,
+           i.created_by_role,
+           p.name    AS customer_name,
+           p.email   AS customer_email,
+           p.phone   AS customer_phone,
+           p.tax_pin AS customer_tax_pin,
+           concat_ws(', ',
+             NULLIF(p.address_line1, ''), NULLIF(p.address_line2, ''),
+             NULLIF(p.city, ''), NULLIF(p.country, '')
+           ) AS customer_address
+      FROM invoices i
+      JOIN parties p ON p.id = i.customer_id
+     WHERE i.id = ${invoiceId}
+  `)) as unknown as Array<Record<string, string | null>>;
+
+  if (!inv) return null;
+
+  const items = (await tx.execute(sql`
+    SELECT l.id,
+           l.item_type::text AS type,
+           l.description,
+           l.unit,
+           l.quantity::text    AS quantity,
+           l.unit_price::text  AS unit_price,
+           l.tax_amount::text  AS tax_amount,
+           l.line_total::text  AS amount,
+           l.service_category::text AS service_category,
+           pr.name AS product_name,
+           pr.sku  AS sku
+      FROM invoice_lines l
+      LEFT JOIN products pr ON pr.id = l.product_id
+     WHERE l.invoice_id = ${invoiceId}
+     ORDER BY l.line_number
+  `)) as unknown as Array<Record<string, string | null>>;
+
+  return {
+    _id: inv.id,
+    id: inv.id,
+    invoiceNumber: inv.invoice_number,
+    invoiceDate: inv.invoice_date,
+    dueDate: inv.due_date,
+    status: inv.status,
+    paymentStatus: inv.payment_status,
+    subtotal: inv.subtotal,
+    discountAmount: inv.discount_total,
+    totalDiscount: inv.discount_total,
+    taxAmount: inv.tax_amount,
+    total: inv.total,
+    amountPaid: inv.amount_paid,
+    currency: inv.currency,
+    title: inv.title,
+    notes: inv.notes,
+    // Snapshotted at creation: there is no users table to join to (0026).
+    createdBy: { name: inv.created_by_name, role: inv.created_by_role },
+    customer: {
+      name: inv.customer_name,
+      email: inv.customer_email,
+      phone: inv.customer_phone,
+      taxPin: inv.customer_tax_pin,
+      address: inv.customer_address || null,
+    },
+    items: items.map((l) => ({
+      _id: l.id,
+      type: l.type,
+      // A service has no product, so its own description is its name.
+      name: l.product_name ?? l.description,
+      SKU: l.sku,
+      description: l.description,
+      unit: l.unit,
+      quantity: l.quantity,
+      unitPrice: l.unit_price,
+      taxAmount: l.tax_amount,
+      amount: l.amount,
+      serviceCategory: l.service_category,
+    })),
+  };
 }
 
 /**

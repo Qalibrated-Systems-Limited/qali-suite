@@ -2,11 +2,12 @@ import { auth } from "@/auth";
 import { canSeeSalesNav } from "@/lib/permissions";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { getInvoiceById } from "@/app/mongodb/queries/invoice-queries";
+import {
+  getInvoiceDetailPg,
+  getPaymentAccountsPg,
+} from "@/app/db/actions/invoice-actions";
 import { getCompanyById } from "@/app/mongodb/queries/company-queries";
 import { serializeBsonType, formatAddress } from "@/lib/utils";
-import Account from "@/app/models/account";
-import dbConnect from "@/app/config/dbConnect";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -54,14 +55,13 @@ export default async function InvoiceDetailsPage({ params }) {
     );
   }
 
-  let invoice = await getInvoiceById(resolvedParams.id);
+  // RLS scopes this: an invoice belonging to another tenant comes back null
+  // rather than forbidden, because it is not visible to this connection at all.
+  const invoice = await getInvoiceDetailPg(resolvedParams.id);
 
   if (!invoice) {
     notFound();
   }
-
-  // Serialize BSON types (ObjectId, Date) for client components
-  invoice = serializeBsonType(invoice);
 
   // Fetch company data for PDF generation
   let company = null;
@@ -72,25 +72,8 @@ export default async function InvoiceDetailsPage({ params }) {
     }
   }
 
-  // Fetch payment accounts for the payment dialog (tenant-scoped)
-  await dbConnect();
-  const paymentAccounts = await Account.find({
-    companyId: user.companyId,
-    accountType: "asset",
-    subType: { $in: ["cash", "bank", "mpesa"] },
-    isActive: true,
-  })
-    .select("_id accountName accountCode subType")
-    .sort({ accountName: 1 })
-    .lean();
-
-  // Serialize for client component
-  const serializedPaymentAccounts = paymentAccounts.map((acc) => ({
-    _id: acc._id.toString(),
-    name: acc.accountName,
-    code: acc.accountCode,
-    subType: acc.subType,
-  }));
+  // Tenant scope comes from RLS, not from a filter passed here.
+  const serializedPaymentAccounts = await getPaymentAccountsPg();
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-KE", {

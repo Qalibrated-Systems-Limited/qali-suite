@@ -244,6 +244,87 @@ suite("invoice actions (end to end)", () => {
     expect(line.checkout_id).toBe(checkoutId);
   });
 
+  it("returns the detail shape the page renders, products and services alike", async () => {
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        title: "August works",
+        notes: "Thanks",
+        stockItems: [
+          { productId: widgetId, quantity: 2, sellingPrice: 100, taxRate: 16 },
+        ],
+        serviceItems: [
+          {
+            name: "Installation",
+            serviceCategory: "installation",
+            unit: "hours",
+            quantity: 3,
+            unitPrice: 500,
+            taxRate: 16,
+          },
+        ],
+      }),
+    );
+    expect(created.success).toBe(true);
+
+    const inv = await invoiceActions.getInvoiceDetailPg(created.invoiceId);
+
+    expect(inv.invoiceNumber).toBe(created.invoiceNumber);
+    expect(inv.title).toBe("August works");
+    expect(inv.customer.name).toBe("Acme Ltd");
+    // Snapshotted at creation — there is no users table to join to (0026).
+    expect(inv.createdBy.name).toBe("Sales User");
+    expect(inv.createdBy.role).toBe("Sales Manager");
+
+    expect(inv.items).toHaveLength(2);
+    const product = inv.items.find((i) => i.type === "product");
+    const service = inv.items.find((i) => i.type === "service");
+
+    expect(product.SKU).toBe("WID-1");
+    expect(product.name).toBe("Widget");
+    expect(product.amount).toBe("232.0000"); // 200 + 16%
+
+    // A service has no product, so its description stands in as its name.
+    expect(service.SKU).toBeNull();
+    expect(service.name).toBe("Installation");
+    expect(service.unit).toBe("hours");
+    expect(service.serviceCategory).toBe("installation");
+    expect(service.amount).toBe("1740.0000"); // 1500 + 16%
+
+    expect(inv.total).toBe("1972.0000");
+  });
+
+  it("returns null for an invoice in another tenant", async () => {
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 1, sellingPrice: 10 }],
+      }),
+    );
+
+    const otherUuid = randomUUID();
+    const otherMongo = randomUUID().replace(/-/g, "").slice(0, 24);
+    await admin`
+      INSERT INTO companies (id, name, slug)
+      VALUES (${otherUuid}, 'Other', ${"o-" + otherUuid.slice(0, 8)})
+    `;
+    await admin`
+      INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
+      VALUES ('companies', ${otherMongo}, ${otherUuid})
+    `;
+    getTenantContext.mockResolvedValue({
+      user: { id: randomUUID(), name: "Other", role: "Sales Manager" },
+      companyId: otherMongo,
+    });
+
+    // Not "forbidden" — invisible. RLS filters it before the query sees it.
+    expect(await invoiceActions.getInvoiceDetailPg(created.invoiceId)).toBeNull();
+  });
+
   it("completes an invoice: posts revenue, issues stock, costs it", async () => {
     const created = await invoiceActions.createInvoicePg(
       null,

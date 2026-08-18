@@ -96,6 +96,13 @@ export const invoices = pgTable(
     ),
 
     createdById: uuid("created_by_id"),
+    /**
+     * Who raised it, as they were named then. There is no users table in
+     * Postgres to join to, and a rename must not relabel a document already
+     * issued — the same call item_checkouts and stock_requests make (§9.4).
+     */
+    createdByName: text("created_by_name"),
+    createdByRole: text("created_by_role"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

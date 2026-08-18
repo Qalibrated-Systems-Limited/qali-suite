@@ -183,6 +183,13 @@
       "when": 1786992302192,
       "tag": "0025_invoice_service_lines",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786992303192,
+      "tag": "0026_invoice_creator_snapshot",
+      "breakpoints": true
     }
   ]
 }
