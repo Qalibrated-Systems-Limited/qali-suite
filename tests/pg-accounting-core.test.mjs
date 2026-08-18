@@ -18,6 +18,12 @@ import postgres from "postgres";
 import { randomUUID } from "node:crypto";
 
 const DATABASE_URL = process.env.DATABASE_URL;
+/**
+ * The privileged connection: CREATE ROLE, GRANT, TRUNCATE. The app's own
+ * DATABASE_URL connects as app_user, which has none of those by design — see
+ * migration 0023. Falls back to DATABASE_URL for a single-role local setup.
+ */
+const ADMIN_URL = process.env.DIRECT_DATABASE_URL || DATABASE_URL;
 const suite = DATABASE_URL ? describe : describe.skip;
 
 suite("postgres accounting core", () => {
@@ -38,7 +44,7 @@ suite("postgres accounting core", () => {
   }
 
   beforeAll(async () => {
-    admin = postgres(DATABASE_URL, { max: 1, onnotice: () => {} });
+    admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
 
     // A SUPERUSER bypasses RLS even with FORCE ROW LEVEL SECURITY, so testing
     // isolation over the default `postgres` role would silently pass no matter
@@ -66,7 +72,9 @@ suite("postgres accounting core", () => {
     sales = randomUUID();
     ar = randomUUID();
 
-    await sql`
+    // Creating a tenant is a platform operation, not a tenant one: companies
+    // is RLS-scoped to app.company_id (migration 0024), so it goes via admin.
+    await admin`
       INSERT INTO companies (id, name, slug) VALUES
         (${companyA}, 'Tenant A', ${"a-" + companyA.slice(0, 8)}),
         (${companyB}, 'Tenant B', ${"b-" + companyB.slice(0, 8)})

@@ -773,6 +773,40 @@ that returns zero rows, and the reconciliation would find nothing and report
 success. `DIRECT_DATABASE_URL` falls back to `DATABASE_URL`, so a single-database
 local setup still needs only one value.
 
+### 9A.1 Coverage audit
+
+Auditing every table in `public` after 0023 found 26 of 29 with RLS enabled and
+forced. The three without were exactly the three with no `company_id` column,
+and each was a gap rather than an exemption — closed in 0024:
+
+- **`companies`** had no policy because the per-table loops key on `company_id`,
+  and its own `id` *is* the tenant. Any application connection could enumerate
+  every tenant on the platform: names, slugs, count. Not the books, but a
+  customer list. It now carries the same rule keyed on `id`. Creating a company
+  is not a tenant operation — a connection scoped to tenant A has no business
+  inserting either B or A — so provisioning moves to the privileged connection,
+  as does tenant creation in the test harness.
+
+- **`_migration_rejects`** stores the payload of every row the backfill could
+  not convert, in a `jsonb` column. During the §6.3 cutover that is real
+  business data with no tenant column to scope by, and nothing in the
+  application reads it. It loses every grant.
+
+- **`_migration_id_map`** is different, and assuming it was not cost a round
+  trip: `app/db/tenant.ts` reads it **on the request path**, resolving the Mongo
+  company id a session still carries into the Postgres UUID. Revoking it
+  outright broke every write, which is how the assumption got caught. It keeps
+  `SELECT` and loses the rest — only the backfill writes it. That leaves a
+  residual disclosure, since any tenant can read the whole map; accepted for the
+  transition on the grounds that it maps identifiers and holds no business data,
+  and **to be revoked entirely once sessions carry UUIDs and cutover is done**.
+
+Each gap existed because a table was added outside the loop that enables the
+policies, and nothing was watching. So 0024 also adds `rls_coverage_gaps`, a
+view listing every table that carries tenant data and is not fully protected.
+**Empty is the passing state**, and it is worth asserting in CI and before
+cutover.
+
 ---
 
 ## 10. Explicitly out of scope

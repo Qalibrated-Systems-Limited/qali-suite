@@ -23,6 +23,12 @@ import postgres from "postgres";
 import { randomUUID } from "node:crypto";
 
 const DATABASE_URL = process.env.DATABASE_URL;
+/**
+ * The privileged connection: CREATE ROLE, GRANT, TRUNCATE. The app's own
+ * DATABASE_URL connects as app_user, which has none of those by design — see
+ * migration 0023. Falls back to DATABASE_URL for a single-role local setup.
+ */
+const ADMIN_URL = process.env.DIRECT_DATABASE_URL || DATABASE_URL;
 const suite = DATABASE_URL ? describe : describe.skip;
 
 // getTenantContext reaches next-auth, which does not load under Vitest.
@@ -35,6 +41,7 @@ const journalActions = await import("@/app/db/actions/journal-actions");
 
 suite("postgres write path (end to end)", () => {
   let sql;
+  let admin; // privileged: TRUNCATE and tenant provisioning
   let companyUuid;
   let mongoCompanyId;
   let cash;
@@ -44,36 +51,48 @@ suite("postgres write path (end to end)", () => {
   const asObjectIdHex = () => randomUUID().replace(/-/g, "").slice(0, 24);
 
   beforeAll(async () => {
-    sql = postgres(DATABASE_URL, { max: 2, onnotice: () => {} });
+    admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
+    // Subject to RLS: a superuser would bypass every policy.
+    sql = postgres(process.env.PG_TEST_URL ?? DATABASE_URL, { max: 2, onnotice: () => {} });
   });
 
   afterAll(async () => {
     if (sql) await sql.end();
+    if (admin) await admin.end();
   });
 
   beforeEach(async () => {
-    await sql`TRUNCATE companies CASCADE`;
-    await sql`TRUNCATE _migration_id_map, entry_counters`;
+    await admin`TRUNCATE companies CASCADE`;
+    await admin`TRUNCATE _migration_id_map, entry_counters`;
 
     companyUuid = randomUUID();
     mongoCompanyId = asObjectIdHex();
     cash = randomUUID();
     sales = randomUUID();
 
-    await sql`
+    // Provisioning a tenant, and the backfill's id map, are both platform
+    // operations: companies is RLS-scoped (0024) and _migration_id_map is not
+    // granted to the application role at all.
+    await admin`
       INSERT INTO companies (id, name, slug)
       VALUES (${companyUuid}, 'Pilot', ${"p-" + companyUuid.slice(0, 8)})
     `;
     // The mapping the backfill would have written.
-    await sql`
+    await admin`
       INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
       VALUES ('companies', ${mongoCompanyId}, ${companyUuid})
     `;
-    await sql`
-      INSERT INTO accounts (id, company_id, account_code, account_name, account_type) VALUES
-        (${cash},  ${companyUuid}, '1000', 'Cash',  'asset'),
-        (${sales}, ${companyUuid}, '4000', 'Sales', 'revenue')
-    `;
+    // A chart of accounts IS tenant data, so it is seeded inside a tenant
+    // scope rather than around RLS. This passed unscoped only while the test
+    // connected as a superuser.
+    await sql.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      await tx`
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type) VALUES
+          (${cash},  ${companyUuid}, '1000', 'Cash',  'asset'),
+          (${sales}, ${companyUuid}, '4000', 'Sales', 'revenue')
+      `;
+    });
 
     getTenantContext.mockResolvedValue({
       user: { id: randomUUID(), name: "Finance User", role: "Accountant" },
@@ -112,9 +131,15 @@ suite("postgres write path (end to end)", () => {
     // The form redirects on state.entryId, so the contract must include it.
     expect(result.entryId).toBeTruthy();
 
-    const [entry] = await sql`
-      SELECT entry_number, status, company_id FROM journal_entries WHERE id = ${result.entryId}
-    `;
+    // Reading it back is a tenant-scoped read like any other. Unscoped, RLS
+    // returns zero rows — which is the correct behaviour, and only looked fine
+    // while this connection was a superuser.
+    const [entry] = await sql.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      return tx`
+        SELECT entry_number, status, company_id FROM journal_entries WHERE id = ${result.entryId}
+      `;
+    });
     expect(entry.status).toBe("posted");
     // Written against the resolved UUID, not the Mongo id from the session.
     expect(entry.company_id).toBe(companyUuid);

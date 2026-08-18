@@ -23,10 +23,17 @@ import {
 } from "@/app/db/repositories/reportQueries";
 
 const DATABASE_URL = process.env.DATABASE_URL;
+/**
+ * The privileged connection: CREATE ROLE, GRANT, TRUNCATE. The app's own
+ * DATABASE_URL connects as app_user, which has none of those by design — see
+ * migration 0023. Falls back to DATABASE_URL for a single-role local setup.
+ */
+const ADMIN_URL = process.env.DIRECT_DATABASE_URL || DATABASE_URL;
 const suite = DATABASE_URL ? describe : describe.skip;
 
 suite("postgres reports", () => {
   let client;
+  let admin; // privileged: TRUNCATE and tenant provisioning
   let db;
   let companyA;
   let cash;
@@ -59,23 +66,26 @@ suite("postgres reports", () => {
   }
 
   beforeAll(async () => {
-    client = postgres(DATABASE_URL, { max: 1, onnotice: () => {} });
+    admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
+    // Subject to RLS: a superuser would bypass every policy.
+    client = postgres(process.env.PG_TEST_URL ?? DATABASE_URL, { max: 1, onnotice: () => {} });
     db = drizzle(client);
   });
 
   afterAll(async () => {
     if (client) await client.end();
+    if (admin) await admin.end();
   });
 
   beforeEach(async () => {
-    await client`TRUNCATE companies CASCADE`;
-    await client`TRUNCATE entry_counters`;
+    await admin`TRUNCATE companies CASCADE`;
+    await admin`TRUNCATE entry_counters`;
 
     companyA = randomUUID();
     cash = randomUUID();
     sales = randomUUID();
 
-    await client`
+    await admin`
       INSERT INTO companies (id, name, slug)
       VALUES (${companyA}, 'Tenant A', ${"a-" + companyA.slice(0, 8)})
     `;

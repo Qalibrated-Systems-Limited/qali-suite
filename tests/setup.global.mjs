@@ -30,19 +30,32 @@ let replSet;
 const PG_TEST_ROLE = "app_test_role";
 const PG_TEST_PASSWORD = "app_test_pw";
 
+/**
+ * The privileged connection. CREATE ROLE, GRANT and TRUNCATE all need
+ * privileges the application's own role does not have — DATABASE_URL connects
+ * as app_user, which migration 0023 deliberately denies TRUNCATE because it
+ * ignores RLS policies and would be a cross-tenant delete.
+ *
+ * Falls back to DATABASE_URL for a single-role local setup.
+ */
+function adminUrl() {
+  return process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
+}
+
 /** Same database, restricted role. Integration tests connect on this. */
 export function pgTestUrl() {
-  if (!process.env.DATABASE_URL) return null;
-  const url = new URL(process.env.DATABASE_URL);
+  const base = adminUrl();
+  if (!base) return null;
+  const url = new URL(base);
   url.username = PG_TEST_ROLE;
   url.password = PG_TEST_PASSWORD;
   return url.toString();
 }
 
 async function setupPostgresRole() {
-  if (!process.env.DATABASE_URL) return;
+  if (!adminUrl()) return;
   const { default: postgres } = await import("postgres");
-  const admin = postgres(process.env.DATABASE_URL, { max: 1, onnotice: () => {} });
+  const admin = postgres(adminUrl(), { max: 1, onnotice: () => {} });
   try {
     await admin.unsafe(`DROP OWNED BY ${PG_TEST_ROLE}`).catch(() => {});
     await admin.unsafe(`DROP ROLE IF EXISTS ${PG_TEST_ROLE}`).catch(() => {});
@@ -57,9 +70,9 @@ async function setupPostgresRole() {
 }
 
 async function teardownPostgresRole() {
-  if (!process.env.DATABASE_URL) return;
+  if (!adminUrl()) return;
   const { default: postgres } = await import("postgres");
-  const admin = postgres(process.env.DATABASE_URL, { max: 1, onnotice: () => {} });
+  const admin = postgres(adminUrl(), { max: 1, onnotice: () => {} });
   try {
     await admin.unsafe(`DROP OWNED BY ${PG_TEST_ROLE}`).catch(() => {});
     await admin.unsafe(`DROP ROLE IF EXISTS ${PG_TEST_ROLE}`).catch(() => {});

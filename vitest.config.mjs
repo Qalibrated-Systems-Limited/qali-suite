@@ -22,6 +22,11 @@ const __dirname = path.dirname(__filename);
  */
 const fileEnv = loadEnv("test", __dirname, "");
 const DATABASE_URL = process.env.DATABASE_URL || fileEnv.DATABASE_URL || "";
+// The privileged connection, used by globalSetup to provision app_test_role
+// and by the suites to TRUNCATE. DATABASE_URL connects as app_user, which
+// has neither privilege by design (migration 0023).
+const DIRECT_DATABASE_URL =
+  process.env.DIRECT_DATABASE_URL || fileEnv.DIRECT_DATABASE_URL || "";
 
 /**
  * Set it on the MAIN process too, not just the workers.
@@ -37,6 +42,7 @@ const DATABASE_URL = process.env.DATABASE_URL || fileEnv.DATABASE_URL || "";
  * §9A describes, and it showed up here first.
  */
 if (DATABASE_URL) process.env.DATABASE_URL = DATABASE_URL;
+if (DIRECT_DATABASE_URL) process.env.DIRECT_DATABASE_URL = DIRECT_DATABASE_URL;
 
 export default defineConfig({
   resolve: {
@@ -47,7 +53,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    env: { DATABASE_URL },
+    env: { DATABASE_URL, DIRECT_DATABASE_URL },
     // Boot mongodb-memory-server + connect Mongoose ONCE per worker, then
     // truncate collections between tests. Setup lives in tests/setup.mjs.
     globalSetup: ["./tests/setup.global.mjs"],

@@ -15,6 +15,12 @@ import * as productRepo from "@/app/db/repositories/products";
 import * as partyRepo from "@/app/db/repositories/parties";
 
 const DATABASE_URL = process.env.DATABASE_URL;
+/**
+ * The privileged connection: CREATE ROLE, GRANT, TRUNCATE. The app's own
+ * DATABASE_URL connects as app_user, which has none of those by design — see
+ * migration 0023. Falls back to DATABASE_URL for a single-role local setup.
+ */
+const ADMIN_URL = process.env.DIRECT_DATABASE_URL || DATABASE_URL;
 const suite = DATABASE_URL ? describe : describe.skip;
 
 async function expectRejection(promise, pattern) {
@@ -47,7 +53,7 @@ suite("postgres credit notes", () => {
   }
 
   beforeAll(async () => {
-    admin = postgres(DATABASE_URL, { max: 1, onnotice: () => {} });
+    admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
     client = postgres(process.env.PG_TEST_URL ?? DATABASE_URL, { max: 1, onnotice: () => {} });
     db = drizzle(client);
   });
@@ -70,7 +76,7 @@ suite("postgres credit notes", () => {
       cogs: randomUUID(),
     };
 
-    await client`
+    await admin`
       INSERT INTO companies (id, name, slug)
       VALUES (${companyA}, 'Tenant A', ${"a-" + companyA.slice(0, 8)})
     `;
@@ -458,7 +464,7 @@ suite("postgres credit notes", () => {
     it("hides another tenant's credit notes", async () => {
       await makeNote();
       const companyB = randomUUID();
-      await client`
+      await admin`
         INSERT INTO companies (id, name, slug)
         VALUES (${companyB}, 'Tenant B', ${"b-" + companyB.slice(0, 8)})
       `;

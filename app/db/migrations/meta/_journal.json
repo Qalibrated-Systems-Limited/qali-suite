@@ -169,6 +169,13 @@
       "when": 1786992300192,
       "tag": "0023_app_role_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786992301192,
+      "tag": "0024_close_rls_gaps",
+      "breakpoints": true
     }
   ]
 }
