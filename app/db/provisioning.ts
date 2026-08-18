@@ -28,6 +28,10 @@ import { getStandardChartOfAccounts } from "@/lib/chart-of-accounts";
 let _client: ReturnType<typeof postgres> | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
+export function privilegedDb() {
+  return privileged();
+}
+
 function privileged() {
   if (_db) return _db;
 
@@ -38,7 +42,11 @@ function privileged() {
   const url = process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL;
   if (!url) throw new Error("DIRECT_DATABASE_URL is not set — see .env.example");
 
-  _client = postgres(url, { max: 2, prepare: false });
+  // Small and short-lived on purpose. This pool exists for provisioning and
+  // company administration — a handful of calls in a tenant's lifetime — so
+  // holding connections open costs a slot on the database for nothing, and an
+  // idle connection here is one that a TRUNCATE or a migration has to wait on.
+  _client = postgres(url, { max: 2, prepare: false, idle_timeout: 20 });
   _db = drizzle(_client, { schema });
   return _db;
 }

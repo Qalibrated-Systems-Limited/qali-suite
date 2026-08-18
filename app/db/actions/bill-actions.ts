@@ -67,6 +67,9 @@ function toActionError(err: unknown): string {
     message.includes("quantity_on_hand") ||
     message.includes("permission") ||
     message.includes("Not authenticated") ||
+    // A deactivated tenant is something the person needs told, not hidden
+    // behind a generic failure.
+    message.includes("not active") ||
     message.includes("approve") ||
     message.includes("has not been migrated")
   ) {

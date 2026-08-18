@@ -2,6 +2,11 @@
 
 import { z } from "zod";
 import { provisionCompany } from "@/app/db/provisioning";
+import {
+  syncCompanyRecord,
+  setCompanyActive,
+  resetCompanyBooks,
+} from "@/app/db/companyAdmin";
 import mongoose from "mongoose";
 import { resetCompanyData } from "@/lib/company-reset";
 import { auth } from "@/auth";
@@ -533,6 +538,16 @@ export async function updateCompany(prevState, formData) {
 
     await company.save();
 
+    // The Postgres tenant row carries the name, slug and base currency, and
+    // nothing was keeping them in step — a renamed company kept its old name
+    // there indefinitely. Only the fields Postgres behaves on; branding and
+    // subscription stay where they are.
+    await syncCompanyRecord(companyId, {
+      name: company.name,
+      slug: company.slug,
+      baseCurrency: company.settings?.currency,
+    });
+
     revalidatePath("/dashboard/admin/companies");
     revalidatePath(`/dashboard/admin/companies/${companyId}`);
     revalidatePath("/dashboard/company");
@@ -582,6 +597,10 @@ export async function updateCompanyStatus(companyId, status) {
     };
 
     await company.save();
+
+    // Only "active" lets the books be touched. Suspended and inactive both
+    // stop at the tenant gate, which is what those statuses are for.
+    await setCompanyActive(companyId, status === "active");
 
     revalidatePath("/dashboard/admin/companies");
 
@@ -721,6 +740,11 @@ export async function deleteCompany(companyId) {
       id: session.user.id,
     };
     await company.save();
+
+    // Deactivate the tenant too, or the company is "deleted" in an admin list
+    // while its books stay readable and writable. withAuthorizedTenant refuses
+    // an inactive tenant, so this is a real stop rather than a label.
+    await setCompanyActive(companyId, false);
 
     // TODO: In production, you might want to:
     // - Archive all company data
@@ -1134,8 +1158,16 @@ export async function resetCompanyTransactions(companyId, prevState, formData) {
       companyId,
       { wipeParties },
     );
+
+    // The Postgres books too, or a reset leaves them untouched while the
+    // reports — which read Postgres — go on showing everything the user just
+    // confirmed they wanted gone. Same keep-policy on both sides.
+    const pg = await resetCompanyBooks(companyId, { wipeParties });
+
     console.warn(
-      `[reset-transactions] ${company.name} (${companyId}) by ${session.user.email}: ${totalDeleted} docs across ${Object.keys(summary).length} collections`,
+      `[reset-transactions] ${company.name} (${companyId}) by ${session.user.email}: ` +
+        `${totalDeleted} docs across ${Object.keys(summary).length} mongo collections, ` +
+        `${pg.totalDeleted} rows across ${Object.keys(pg.summary).length} postgres tables`,
     );
 
     revalidatePath("/dashboard/admin/companies");
@@ -1143,8 +1175,10 @@ export async function resetCompanyTransactions(companyId, prevState, formData) {
 
     return {
       success: true,
-      message: `Reset complete — ${totalDeleted} documents removed across ${Object.keys(summary).length} collections. Master data kept; balances and stock zeroed; numbering restarts at 1.`,
-      summary,
+      message:
+        `Reset complete — ${totalDeleted + pg.totalDeleted} records removed. ` +
+        "Master data kept; balances and stock zeroed; numbering restarts at 1.",
+      summary: { ...summary, ...pg.summary },
     };
   } catch (error) {
     console.error("resetCompanyTransactions error:", error);

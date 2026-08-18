@@ -29,6 +29,11 @@ const { provisionCompany, isCompanyProvisioned } = await import(
   "@/app/db/provisioning"
 );
 const { getStandardChartOfAccounts } = await import("@/lib/chart-of-accounts");
+const {
+  syncCompanyRecord,
+  setCompanyActive,
+  resetCompanyBooks,
+} = await import("@/app/db/companyAdmin");
 const billActions = await import("@/app/db/actions/bill-actions");
 
 /** A Mongo-shaped id, which is what a session carries during the transition. */
@@ -49,6 +54,15 @@ suite("tenant provisioning", () => {
     await admin`TRUNCATE _migration_id_map, entry_counters`;
   });
 
+  /**
+   * Runs a query with the tenant scope set.
+   *
+   * NOTE: `admin` connects as the owner, which BYPASSES row-level security
+   * (§9A). So this sets the scope for anything that reads
+   * current_setting('app.company_id') — triggers, generated columns — but it
+   * does NOT filter rows. Any assertion that counts rows across a fixture with
+   * more than one tenant must say `WHERE company_id = ...` itself.
+   */
   const scoped = (companyId, fn) =>
     admin.begin(async (tx) => {
       await tx`SELECT set_config('app.company_id', ${companyId}, true)`;
@@ -245,5 +259,186 @@ suite("tenant provisioning", () => {
     } finally {
       await app.end();
     }
+  });
+
+  describe("lifecycle", () => {
+    it("keeps the tenant row in step when the company is renamed", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "Old Name",
+        slug: "old",
+        baseCurrency: "KES",
+      });
+
+      // Nothing kept these in step, so a renamed company held its old name in
+      // Postgres indefinitely.
+      await syncCompanyRecord(source, {
+        name: "New Name",
+        slug: "new",
+        baseCurrency: "usd",
+      });
+
+      const [row] = await scoped(
+        companyId,
+        (tx) => tx`SELECT name, slug, base_currency FROM companies WHERE id = ${companyId}`,
+      );
+      expect(row.name).toBe("New Name");
+      expect(row.slug).toBe("new");
+      expect(row.base_currency).toBe("USD");
+    });
+
+    it("refuses a deactivated tenant at the gate", async () => {
+      const source = sourceId();
+      await provisionCompany({ sourceCompanyId: source, name: "Pilot" });
+      getTenantContext.mockResolvedValue({
+        user: { id: "507f1f77bcf86cd799439011", name: "Ada", role: "Manager" },
+        companyId: source,
+        companyCode: "PILOT",
+      });
+
+      // Works while active.
+      await expect(billActions.getBillsStats()).resolves.toBeDefined();
+
+      await setCompanyActive(source, false);
+
+      // is_active existed and NOTHING read it, so "deleting" a company left
+      // its books readable and writable. Reads now refuse outright rather than
+      // returning an empty page — an empty ledger and a closed tenant are very
+      // different statements to make to somebody.
+      await expect(billActions.listBillsForPage({})).rejects.toThrow(/not active/i);
+      const result = await billActions.submitBill(randomUUID());
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/not active/i);
+
+      await setCompanyActive(source, true);
+      await expect(billActions.getBillsStats()).resolves.toBeDefined();
+    });
+
+    it("wipes the Postgres books on reset, and keeps the master data", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "Pilot",
+      });
+
+      const supplierId = randomUUID();
+      const productId = randomUUID();
+      const [expense] = await scoped(
+        companyId,
+        (tx) => tx`SELECT id FROM accounts WHERE account_code = '5100' LIMIT 1`,
+      );
+
+      await scoped(companyId, async (tx) => {
+        await tx`INSERT INTO parties (id, company_id, primary_type, is_supplier, name)
+                 VALUES (${supplierId}, ${companyId}, 'supplier', true, 'Shell')`;
+        await tx`INSERT INTO products (id, company_id, sku, name, quantity_on_hand)
+                 VALUES (${productId}, ${companyId}, 'WID-1', 'Widget', 100)`;
+        await tx`
+          INSERT INTO journal_entries (company_id, entry_number, entry_date, entry_type, description, status)
+          VALUES (${companyId}, 'JE-1', '2026-08-01', 'adjustment', 'Test', 'draft')
+        `;
+        await tx`
+          INSERT INTO entry_counters (company_id, prefix, last_value)
+          VALUES (${companyId}, 'INV', 42)
+          ON CONFLICT DO NOTHING
+        `;
+      });
+
+      const before = await resetCompanyBooks(source, { dryRun: true });
+      expect(before.totalDeleted).toBeGreaterThan(0);
+      // A dry run counts and changes nothing.
+      const [stillThere] = await scoped(
+        companyId,
+        (tx) => tx`SELECT count(*)::int AS n FROM journal_entries`,
+      );
+      expect(stillThere.n).toBe(1);
+
+      const result = await resetCompanyBooks(source);
+      expect(result.totalDeleted).toBeGreaterThan(0);
+
+      const [entries] = await scoped(
+        companyId,
+        (tx) => tx`SELECT count(*)::int AS n FROM journal_entries`,
+      );
+      expect(entries.n).toBe(0);
+
+      // Numbering restarts, matching what the reset tells the user.
+      const [counters] = await scoped(
+        companyId,
+        (tx) => tx`SELECT count(*)::int AS n FROM entry_counters`,
+      );
+      expect(counters.n).toBe(0);
+
+      // Master data survives, and the same keep-policy as the Mongo engine.
+      const [accounts] = await scoped(
+        companyId,
+        (tx) => tx`SELECT count(*)::int AS n FROM accounts`,
+      );
+      expect(accounts.n).toBe(getStandardChartOfAccounts().length);
+      const [periods] = await scoped(
+        companyId,
+        (tx) => tx`SELECT count(*)::int AS n FROM fiscal_periods`,
+      );
+      expect(periods.n).toBe(12);
+      const [parties] = await scoped(
+        companyId,
+        (tx) => tx`SELECT count(*)::int AS n FROM parties`,
+      );
+      expect(parties.n).toBe(1);
+
+      // Catalogue kept, quantities zeroed — as the Mongo engine does.
+      const [product] = await scoped(
+        companyId,
+        (tx) => tx`SELECT quantity_on_hand::text AS q FROM products WHERE id = ${productId}`,
+      );
+      expect(product.q).toBe("0.0000");
+    });
+
+    it("wipes parties too when asked", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({ sourceCompanyId: source, name: "Pilot" });
+      await scoped(companyId, (tx) =>
+        tx`INSERT INTO parties (company_id, primary_type, is_supplier, name)
+           VALUES (${companyId}, 'supplier', true, 'Shell')`);
+
+      await resetCompanyBooks(source, { wipeParties: true });
+
+      const [parties] = await scoped(
+        companyId,
+        (tx) => tx`SELECT count(*)::int AS n FROM parties`,
+      );
+      expect(parties.n).toBe(0);
+    });
+
+    it("leaves another tenant's books alone", async () => {
+      const a = sourceId();
+      const b = sourceId();
+      const A = await provisionCompany({ sourceCompanyId: a, name: "A" });
+      const B = await provisionCompany({ sourceCompanyId: b, name: "B" });
+
+      for (const c of [A.companyId, B.companyId]) {
+        await scoped(c, (tx) =>
+          tx`INSERT INTO journal_entries (company_id, entry_number, entry_date, entry_type, description, status)
+             VALUES (${c}, 'JE-1', '2026-08-01', 'adjustment', 'Test', 'draft')`);
+      }
+
+      await resetCompanyBooks(a);
+
+      // Counted with an EXPLICIT company_id, not by scope. `admin` connects as
+      // the owner and bypasses every policy (§9A), so a scoped count here
+      // returns both tenants' rows and reads as "nothing was deleted" — which
+      // is how this assertion failed first time round, on correct code.
+      const [gone] = await admin`
+        SELECT count(*)::int AS n FROM journal_entries WHERE company_id = ${A.companyId}
+      `;
+      expect(gone.n).toBe(0);
+
+      // TRUNCATE would have taken both — it ignores RLS entirely (§9A.1).
+      const [left] = await admin`
+        SELECT count(*)::int AS n FROM journal_entries WHERE company_id = ${B.companyId}
+      `;
+      expect(left.n).toBe(1);
+    });
   });
 });

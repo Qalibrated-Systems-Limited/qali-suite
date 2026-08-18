@@ -82,6 +82,9 @@ function toActionError(err: unknown): string {
     // retrying a thing that will never work.
     message.includes("permission") ||
     message.includes("Not authenticated") ||
+    // A deactivated tenant is something the person needs told, not hidden
+    // behind a generic failure.
+    message.includes("not active") ||
     // Not surfaced verbatim, but distinguishable in logs from a generic fault.
     message.includes("row-level security")
   ) {

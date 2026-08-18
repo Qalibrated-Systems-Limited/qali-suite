@@ -57,6 +57,18 @@ async function setupPostgresRole() {
   const { default: postgres } = await import("postgres");
   const admin = postgres(adminUrl(), { max: 1, onnotice: () => {} });
   try {
+    // SERIALISED ACROSS WORKERS. This runs once per Vitest WORKER, not once
+    // per run, and role DDL takes exclusive locks on shared catalogue rows —
+    // two workers reaching `GRANT ALL ON ALL TABLES` together deadlock on
+    // pg_class, and the loser fails a test file that has nothing wrong with
+    // it. The symptom is a deadlock reported against GRANT, in a suite whose
+    // own queries are all sequential.
+    //
+    // A session-level advisory lock is the right shape: the work is
+    // idempotent, it just cannot run concurrently. Released in the same
+    // `finally` that closes the connection.
+    await admin`SELECT pg_advisory_lock(hashtext('erp_test_role_setup'))`;
+
     await admin.unsafe(`DROP OWNED BY ${PG_TEST_ROLE}`).catch(() => {});
     await admin.unsafe(`DROP ROLE IF EXISTS ${PG_TEST_ROLE}`).catch(() => {});
     await admin.unsafe(`CREATE ROLE ${PG_TEST_ROLE} LOGIN PASSWORD '${PG_TEST_PASSWORD}'`);
@@ -65,6 +77,11 @@ async function setupPostgresRole() {
     await admin.unsafe(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${PG_TEST_ROLE}`);
     process.env.PG_TEST_URL = pgTestUrl();
   } finally {
+    // Closing the connection drops the advisory lock, but releasing it
+    // explicitly keeps the pairing readable.
+    await admin`SELECT pg_advisory_unlock(hashtext('erp_test_role_setup'))`.catch(
+      () => {},
+    );
     await admin.end();
   }
 }
@@ -74,9 +91,13 @@ async function teardownPostgresRole() {
   const { default: postgres } = await import("postgres");
   const admin = postgres(adminUrl(), { max: 1, onnotice: () => {} });
   try {
+    await admin`SELECT pg_advisory_lock(hashtext('erp_test_role_setup'))`;
     await admin.unsafe(`DROP OWNED BY ${PG_TEST_ROLE}`).catch(() => {});
     await admin.unsafe(`DROP ROLE IF EXISTS ${PG_TEST_ROLE}`).catch(() => {});
   } finally {
+    await admin`SELECT pg_advisory_unlock(hashtext('erp_test_role_setup'))`.catch(
+      () => {},
+    );
     await admin.end();
   }
 }

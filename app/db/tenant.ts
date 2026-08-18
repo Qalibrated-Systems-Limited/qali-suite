@@ -45,6 +45,7 @@ export async function resolveCompanyUuid(
     return rows[0].new_uuid;
   }
 
+
   // Not provisioned. Every company created through onboarding is provisioned
   // as part of being created, so this is a tenant that predates that — and the
   // fix is to provision it, not to tell somebody in accounts payable to run a
@@ -65,6 +66,46 @@ export async function resolveCompanyUuid(
 
   companyUuidCache.set(key, provisioned.companyId);
   return provisioned.companyId;
+}
+
+/**
+ * Refuses a deactivated tenant.
+ *
+ * `companies.is_active` existed and NOTHING read it — not the policies, not a
+ * repository — so deactivating a company greyed it out in an admin list while
+ * its books stayed readable and writable. A flag nothing enforces is worse
+ * than no flag, because it reads like a control.
+ *
+ * Checked here rather than in a policy because RLS decides which rows a tenant
+ * can see, and this is a question about the tenant itself. Cached alongside
+ * the uuid resolution it follows, and invalidated by setCompanyActive.
+ */
+const activeCache = new Map<string, boolean>();
+
+async function assertCompanyActive(companyUuid: string) {
+  if (activeCache.get(companyUuid)) return;
+
+  // Scoped, because since 0024 `companies` is itself under RLS keyed on its
+  // own id. Read on an unscoped connection it returns zero rows and every
+  // tenant looks deactivated — which is how this was first written, and what
+  // the provisioning tests caught.
+  const rows = await withTenant(companyUuid, async (tx) => {
+    return (await tx.execute(sql`
+      SELECT is_active FROM companies WHERE id = ${companyUuid}
+    `)) as unknown as Array<{ is_active: boolean }>;
+  });
+
+  if (!rows.length || !rows[0].is_active) {
+    throw new Error(
+      "This company is not active. Contact your administrator.",
+    );
+  }
+  activeCache.set(companyUuid, true);
+}
+
+/** Called when a tenant is activated or deactivated, so the gate reacts. */
+export function forgetCompanyActive(companyUuid: string) {
+  activeCache.delete(companyUuid);
 }
 
 export interface ActionUser {
@@ -95,6 +136,8 @@ export async function withAuthorizedTenant<T>(
   // The session carries a company CODE, not a name. It is the best label
   // available here, and provisioning only needs one to put on the row.
   const companyUuid = await resolveCompanyUuid(companyId, { code: companyCode });
+
+  await assertCompanyActive(companyUuid);
 
   return withTenant(companyUuid, (tx) =>
     fn(tx, { user: user as ActionUser, companyId: companyUuid }),
