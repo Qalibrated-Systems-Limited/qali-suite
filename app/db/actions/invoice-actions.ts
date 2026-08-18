@@ -126,6 +126,51 @@ function toActionError(err: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
+/**
+ * Maps the form's payload to repository input. Shared by create and update so
+ * an edited invoice is built by exactly the rules that created it.
+ */
+function toRepositoryInput(d: z.infer<typeof invoiceDataSchema>) {
+  return {
+    customerId: d.customerId,
+    invoiceDate: toDateOnly(d.invoiceDate)!,
+    dueDate: toDateOnly(d.dueDate) ?? null,
+    title: d.title ?? null,
+    notes: d.notes ?? null,
+    lines: [
+      ...d.stockItems.map((it) => ({
+        itemType: "product" as const,
+        productId: it.productId,
+        description: it.description || it.name || null,
+        unit: it.unit,
+        quantity: money(it.quantity),
+        unitPrice: money(it.sellingPrice),
+        taxRate: money(it.taxRate),
+        // §8.1: single-valued and mandatory. The form sets at most one.
+        fulfilmentSource: it.weighbridgeTicketId
+          ? ("weighbridge" as const)
+          : it.stockRequestId
+            ? ("stock_request" as const)
+            : it.checkoutId
+              ? ("checkout" as const)
+              : ("inventory" as const),
+        checkoutId: it.checkoutId || null,
+        stockRequestId: it.stockRequestId || null,
+        weighbridgeTicketId: it.weighbridgeTicketId || null,
+      })),
+      ...d.serviceItems.map((it) => ({
+        itemType: "service" as const,
+        serviceCategory: it.serviceCategory,
+        description: it.description || it.name,
+        unit: it.unit,
+        quantity: money(it.quantity),
+        unitPrice: money(it.unitPrice),
+        taxRate: money(it.taxRate),
+      })),
+    ],
+  };
+}
+
 export async function createInvoicePg(
   _prevState: unknown,
   formData: FormData,
@@ -146,41 +191,7 @@ export async function createInvoicePg(
     };
   }
   const d = parsed.data;
-
-  // Products and services become one ordered list of lines. Tax is passed as a
-  // RATE so the repository computes the amount in exact decimal rather than
-  // trusting the float the browser calculated.
-  const lines = [
-    ...d.stockItems.map((it) => ({
-      itemType: "product" as const,
-      productId: it.productId,
-      description: it.description || it.name || null,
-      unit: it.unit,
-      quantity: money(it.quantity),
-      unitPrice: money(it.sellingPrice),
-      taxRate: money(it.taxRate),
-      // §8.1: single-valued and mandatory. The form sets at most one of these.
-      fulfilmentSource: it.weighbridgeTicketId
-        ? ("weighbridge" as const)
-        : it.stockRequestId
-          ? ("stock_request" as const)
-          : it.checkoutId
-            ? ("checkout" as const)
-            : ("inventory" as const),
-      checkoutId: it.checkoutId || null,
-      stockRequestId: it.stockRequestId || null,
-      weighbridgeTicketId: it.weighbridgeTicketId || null,
-    })),
-    ...d.serviceItems.map((it) => ({
-      itemType: "service" as const,
-      serviceCategory: it.serviceCategory,
-      description: it.description || it.name,
-      unit: it.unit,
-      quantity: money(it.quantity),
-      unitPrice: money(it.unitPrice),
-      taxRate: money(it.taxRate),
-    })),
-  ];
+  const lines = toRepositoryInput(d).lines;
 
   try {
     const invoice = await withAuthorizedTenant(
@@ -206,6 +217,51 @@ export async function createInvoicePg(
       invoiceId: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
       message: `Invoice ${invoice.invoiceNumber} created`,
+    };
+  } catch (err) {
+    return { success: false, error: toActionError(err) };
+  }
+}
+
+/**
+ * Replaces a draft invoice's contents.
+ *
+ * Same payload as create — EditInvoiceForm posts the identical invoiceData
+ * blob — and the same rules, because both go through resolveInvoiceLines.
+ */
+export async function updateInvoicePg(
+  invoiceId: string,
+  _prevState: unknown,
+  formData: FormData,
+): Promise<ActionResult> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(String(formData.get("invoiceData") ?? "{}"));
+  } catch {
+    return { success: false, error: "Could not read the invoice data" };
+  }
+
+  const parsed = invoiceDataSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: "Validation failed",
+      fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]>,
+    };
+  }
+
+  try {
+    const invoice = await withAuthorizedTenant(
+      [...INVOICE_WRITE_ROLES],
+      (tx) => invoices.updateInvoice(tx, invoiceId, toRepositoryInput(parsed.data)),
+    );
+    revalidatePath("/dashboard/invoices");
+    revalidatePath(`/dashboard/invoices/${invoiceId}`);
+    return {
+      success: true,
+      invoiceId,
+      invoiceNumber: invoice.invoiceNumber,
+      message: `Invoice ${invoice.invoiceNumber} updated`,
     };
   } catch (err) {
     return { success: false, error: toActionError(err) };

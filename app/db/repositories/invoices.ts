@@ -99,20 +99,17 @@ async function sumNumeric(tx: Tx, values: string[]): Promise<string> {
 }
 
 /**
- * Creates a draft invoice with its lines and commits the stock they reserve.
+ * Resolves a set of line inputs into rows, with every amount computed in
+ * Postgres.
  *
- * Line totals are computed in Postgres, not JavaScript — summing money in JS
- * is what produced the drift the whole migration exists to remove.
+ * Shared by create and update so the two cannot drift: an edited invoice is
+ * priced, costed and taxed by exactly the rules that created it.
  */
-export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
-  const [{ invoice_number }] = (await tx.execute(
-    sql`SELECT next_entry_number(${input.companyId}::uuid, 'INV') AS invoice_number`,
-  )) as unknown as Array<{ invoice_number: string }>;
-
+async function resolveInvoiceLines(tx: Tx, inputs: InvoiceLineInput[]) {
   // Resolve each line's cost from the product now: the cost at sale time is a
   // historical fact and must not move when the product is re-costed later.
   const resolved = [];
-  for (const line of input.lines) {
+  for (const line of inputs) {
     const itemType = line.itemType ?? (line.productId ? "product" : "service");
 
     // A service has no product and therefore no inventory cost. Mongo has
@@ -166,10 +163,7 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
     });
   }
 
-  // subtotal is NET of tax. It used to sum line_total — which is net PLUS tax —
-  // so the invoice's own subtotal was the gross, and completeInvoice then
-  // credited revenue with it. Revenue overstated by the tax, and the VAT
-  // liability never raised.
+
   const subtotal = await sumNumeric(
     tx,
     resolved.map((r) => r.netAmount),
@@ -179,6 +173,23 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
     resolved.map((r) => r.taxAmount ?? "0"),
   );
   const total = await sumNumeric(tx, [subtotal, taxTotal]);
+
+  return { lines: resolved, subtotal, taxTotal, total };
+}
+
+/**
+ * Creates a draft invoice with its lines and commits the stock they reserve.
+ *
+ * Line totals are computed in Postgres, not JavaScript — summing money in JS
+ * is what produced the drift the whole migration exists to remove.
+ */
+export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
+  const [{ invoice_number }] = (await tx.execute(
+    sql`SELECT next_entry_number(${input.companyId}::uuid, 'INV') AS invoice_number`,
+  )) as unknown as Array<{ invoice_number: string }>;
+
+  const { lines: resolved, subtotal, taxTotal, total } =
+    await resolveInvoiceLines(tx, input.lines);
 
   const [invoice] = await tx
     .insert(invoices)
@@ -658,6 +669,128 @@ export async function cancelInvoice(
       cancelledAt: new Date(),
       cancelledById,
       notes: reason ? `${invoice.notes ?? ""}\nCancelled: ${reason}`.trim() : invoice.notes,
+      updatedAt: new Date(),
+    })
+    .where(eq(invoices.id, invoiceId))
+    .returning();
+
+  return updated;
+}
+
+/**
+ * Replaces a draft invoice's lines and header, re-reserving stock by the
+ * difference.
+ *
+ * Ported from app/mongodb/invoice-actions.js:36. Its rules, kept:
+ *
+ *   - refuse if the invoice is PAID          (money has moved)
+ *   - refuse if CANCELLED                    (it is closed)
+ *   - refuse if COMPLETED                    (it has posted; correct it with
+ *                                             a credit note)
+ *   - a customer is required
+ *   - commitments move by the DELTA: stock freed where a line shrank or
+ *     vanished, reserved where it grew or appeared
+ *   - products are read in one query, not per line (Mongo added this to kill
+ *     an N+1 and the note is worth keeping)
+ *
+ * The §8/§9 corrections applied on top, and nothing else: money stays exact
+ * decimal, the tenant filter is RLS rather than a passed companyId,
+ * fulfilment_source is single-valued, services are first-class (0025), and
+ * subtotal is net of tax.
+ *
+ * Commitments are released in full and re-taken rather than adjusted in place.
+ * The net effect is the delta Mongo computes, and doing it in that order never
+ * transiently breaks CHECK (committed + on_hold <= on_hand) — reserving before
+ * freeing could.
+ */
+export async function updateInvoice(
+  tx: Tx,
+  invoiceId: string,
+  input: Omit<CreateInvoiceInput, "companyId" | "createdById">,
+) {
+  const [invoice] = await tx
+    .select()
+    .from(invoices)
+    .where(eq(invoices.id, invoiceId));
+
+  if (!invoice) throw new Error("Invoice not found");
+  if (invoice.paymentStatus === "paid") {
+    throw new Error("A paid invoice cannot be edited");
+  }
+  if (invoice.status === "cancelled") {
+    throw new Error("A cancelled invoice cannot be edited");
+  }
+  if (invoice.status === "completed") {
+    throw new Error(
+      "A completed invoice cannot be edited. Raise a credit note instead.",
+    );
+  }
+  if (input.lines.length === 0) {
+    throw new Error("An invoice must have at least one line");
+  }
+
+  // Free everything this invoice was holding, then take what it now needs.
+  const existing = await tx
+    .select()
+    .from(invoiceLines)
+    .where(eq(invoiceLines.invoiceId, invoiceId));
+
+  for (const line of existing) {
+    if (line.itemType !== "product" || !line.productId) continue;
+    if (line.fulfilmentSource !== "inventory") continue;
+    await releaseStock(tx, line.productId, line.quantity);
+  }
+
+  await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, invoiceId));
+
+  const { lines, subtotal, taxTotal, total } = await resolveInvoiceLines(
+    tx,
+    input.lines,
+  );
+
+  let n = 0;
+  for (const line of lines) {
+    n++;
+    await tx.insert(invoiceLines).values({
+      companyId: invoice.companyId,
+      invoiceId,
+      itemType: line.itemType,
+      serviceCategory: line.serviceCategory ?? null,
+      productId: line.productId ?? null,
+      lineNumber: n,
+      description: line.description ?? null,
+      unit: line.unit ?? "pcs",
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      unitCost: line.unitCost,
+      discountAmount: line.discountAmount ?? "0",
+      taxAmount: line.taxAmount ?? "0",
+      lineTotal: line.lineTotal,
+      fulfilmentSource: line.fulfilmentSource ?? "inventory",
+      stockRequestId: line.stockRequestId ?? null,
+      checkoutId: line.checkoutId ?? null,
+      weighbridgeTicketId: line.weighbridgeTicketId ?? null,
+    });
+
+    if (
+      line.itemType === "product" &&
+      (line.fulfilmentSource ?? "inventory") === "inventory"
+    ) {
+      await commitStock(tx, line.productId!, line.quantity);
+    }
+  }
+
+  const [updated] = await tx
+    .update(invoices)
+    .set({
+      customerId: input.customerId,
+      invoiceDate: input.invoiceDate,
+      dueDate: input.dueDate ?? null,
+      title: input.title ?? null,
+      notes: input.notes ?? null,
+      subtotal,
+      taxAmount: taxTotal,
+      total,
       updatedAt: new Date(),
     })
     .where(eq(invoices.id, invoiceId))

@@ -411,6 +411,73 @@ suite("invoice actions (end to end)", () => {
     expect(rows.je.n).toBeGreaterThan(0);
   });
 
+  it("re-reserves stock by the difference when lines change", async () => {
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 10, sellingPrice: 100 }],
+      }),
+    );
+
+    const committed = async () =>
+      (
+        await admin.begin(async (tx) => {
+          await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+          return tx`SELECT quantity_committed::text AS c FROM products WHERE id = ${widgetId}`;
+        })
+      )[0].c;
+
+    expect(await committed()).toBe("10.0000");
+
+    // Cut to 3 and add a service.
+    const updated = await invoiceActions.updateInvoicePg(
+      created.invoiceId,
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 3, sellingPrice: 100 }],
+        serviceItems: [
+          { name: "Fitting", serviceCategory: "labor", quantity: 1, unitPrice: 250 },
+        ],
+      }),
+    );
+    expect(updated.success).toBe(true);
+
+    // Seven released, three still held — the delta, not a re-reservation of 13.
+    expect(await committed()).toBe("3.0000");
+
+    const inv = await invoiceActions.getInvoiceDetailPg(created.invoiceId);
+    expect(inv.items).toHaveLength(2);
+    expect(inv.total).toBe("550.0000");
+  });
+
+  it("refuses to edit a completed invoice and points at a credit note", async () => {
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 1, sellingPrice: 100 }],
+      }),
+    );
+    await invoiceActions.completeInvoicePg(created.invoiceId);
+
+    const result = await invoiceActions.updateInvoicePg(
+      created.invoiceId,
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 5, sellingPrice: 100 }],
+      }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/credit note/i);
+  });
+
   it("cancels a draft and gives back the reserved stock", async () => {
     const created = await invoiceActions.createInvoicePg(
       null,

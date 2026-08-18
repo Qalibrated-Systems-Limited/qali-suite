@@ -514,7 +514,9 @@ export default function EditInvoiceFormClient({
     startTransition(async () => {
       try {
         // Import the action dynamically
-        const { updateInvoice } = await import("@/app/mongodb/invoice-actions");
+        const { updateInvoicePg: updateInvoice } = await import(
+          "@/app/db/actions/invoice-actions"
+        );
 
         const result = await updateInvoice(invoice._id, {}, formData);
 
