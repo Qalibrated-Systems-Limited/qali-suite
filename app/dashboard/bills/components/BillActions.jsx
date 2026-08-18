@@ -34,7 +34,7 @@ import {
   submitBill,
   approveBill,
   deleteBill,
-} from "@/app/mongodb/actions/bill-actions";
+} from "@/app/db/actions/bill-actions";
 
 export function BillActions({ bill, userRole }) {
   const router = useRouter();

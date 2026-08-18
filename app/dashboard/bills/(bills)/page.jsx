@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import Search from "@/components/search";
 import Pagination from "@/components/pagination";
 import { formatCurrency } from "@/lib/utils";
-import { getBills, getBillsStats } from "@/app/mongodb/queries/bill-queries";
+import { listBillsForPage, getBillsStats } from "@/app/db/actions/bill-actions";
 import { auth } from "@/auth";
 import { BillActions } from "../components/BillActions";
 
@@ -128,13 +128,11 @@ async function StatsCards() {
       iconBg: "bg-amber-500/10",
     },
     {
+      // unpaid + partial, already combined in SQL. Adding the two here would
+      // be adding two numeric(19,4) STRINGS — concatenation, not arithmetic.
       label: "Unpaid Bills",
-      value:
-        (stats.byPaymentStatus?.unpaid?.count || 0) +
-        (stats.byPaymentStatus?.partial?.count || 0),
-      amount:
-        (stats.byPaymentStatus?.unpaid?.balance || 0) +
-        (stats.byPaymentStatus?.partial?.balance || 0),
+      value: stats.outstanding?.count || 0,
+      amount: stats.outstanding?.balance || 0,
       icon: Receipt,
       iconColor: "text-blue-500",
       iconBg: "bg-blue-500/10",
@@ -174,6 +172,30 @@ async function StatsCards() {
     </div>
   );
 }
+
+/**
+ * Overdue means the due DAY has passed.
+ *
+ * Compared as ISO date strings, which sort correctly and carry no time. The
+ * previous `new Date(bill.dueDate) < new Date()` built a UTC midnight from a
+ * date-only value and compared it to the current instant, so a bill due today
+ * read as overdue from early morning onwards. The stats query answers the same
+ * question with `due_date < CURRENT_DATE`; the two now agree.
+ */
+function isBillOverdue(bill) {
+  if (bill.status !== "approved" || bill.paymentStatus === "paid") return false;
+  if (!bill.dueDate) return false;
+  return String(bill.dueDate).slice(0, 10) < new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Show the outstanding balance under the total only when the bill is PARTLY
+ * paid. `balance > 0 && balance < total` was a hand-rolled version of exactly
+ * that, and with money as strings its second half compares lexicographically —
+ * "9.0000" < "10.0000" is false. payment_status is derived and maintained by
+ * the database (0016), so it is both correct and cheaper to read.
+ */
+const isPartlyPaid = (bill) => bill.paymentStatus === "partial";
 
 // ============================================
 // BILLS TABLE (Desktop)
@@ -216,11 +238,7 @@ function BillsTable({ bills, userRole }) {
         </thead>
         <tbody className="divide-y">
           {bills.map((bill) => {
-            const isOverdue =
-              bill.status === "approved" &&
-              bill.paymentStatus !== "paid" &&
-              bill.dueDate &&
-              new Date(bill.dueDate) < new Date();
+            const isOverdue = isBillOverdue(bill);
 
             return (
               <tr
@@ -257,12 +275,11 @@ function BillsTable({ bills, userRole }) {
                   <span className="text-sm font-medium font-mono">
                     {formatCurrency(bill.amounts?.total || 0)}
                   </span>
-                  {bill.amounts?.balance > 0 &&
-                    bill.amounts?.balance < bill.amounts?.total && (
-                      <p className="text-xs text-muted-foreground font-mono">
-                        {formatCurrency(bill.amounts.balance)}
-                      </p>
-                    )}
+                  {isPartlyPaid(bill) && (
+                    <p className="text-xs text-muted-foreground font-mono">
+                      {formatCurrency(bill.amounts.balance)}
+                    </p>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-center">
                   <StatusBadge status={bill.status} />
@@ -311,11 +328,7 @@ function BillsCards({ bills, userRole }) {
   return (
     <div className="md:hidden space-y-3">
       {bills.map((bill) => {
-        const isOverdue =
-          bill.status === "approved" &&
-          bill.paymentStatus !== "paid" &&
-          bill.dueDate &&
-          new Date(bill.dueDate) < new Date();
+        const isOverdue = isBillOverdue(bill);
 
         return (
           <div
@@ -340,12 +353,11 @@ function BillsCards({ bills, userRole }) {
                   <p className="text-sm font-semibold font-mono">
                     {formatCurrency(bill.amounts?.total || 0)}
                   </p>
-                  {bill.amounts?.balance > 0 &&
-                    bill.amounts?.balance < bill.amounts?.total && (
-                      <p className="text-xs text-muted-foreground font-mono">
-                        {formatCurrency(bill.amounts.balance)}
-                      </p>
-                    )}
+                  {isPartlyPaid(bill) && (
+                    <p className="text-xs text-muted-foreground font-mono">
+                      {formatCurrency(bill.amounts.balance)}
+                    </p>
+                  )}
                 </div>
                 <BillActions bill={bill} userRole={userRole} />
               </div>
@@ -386,7 +398,7 @@ async function BillsList({ searchParams, userRole }) {
   const status = params?.status || "";
   const paymentStatus = params?.paymentStatus || "";
 
-  const { bills, pagination } = await getBills({
+  const { bills, pagination } = await listBillsForPage({
     page,
     limit: 10,
     search,

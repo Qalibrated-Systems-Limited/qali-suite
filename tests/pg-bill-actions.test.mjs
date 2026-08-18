@@ -1,0 +1,434 @@
+/**
+ * The bills list and row actions, end to end through the server action.
+ *
+ * The repository has been covered since the AP slice; nothing called it. This
+ * exercises the layer above — session to tenant, role gate, separation of
+ * duties, system-account resolution, posting — and the shapes the list page
+ * actually renders.
+ *
+ * app/mongodb/actions/bill-actions.js is the reference for behaviour. Three
+ * things it gets wrong are asserted here as NOT carried across: a bill due
+ * today counted as overdue, money added as JavaScript values, and a list
+ * ordered by a column the page does not show.
+ *
+ * Skipped unless DATABASE_URL is set.
+ */
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import postgres from "postgres";
+import { randomUUID } from "node:crypto";
+
+const DATABASE_URL = process.env.DATABASE_URL;
+const ADMIN_URL = process.env.DIRECT_DATABASE_URL || DATABASE_URL;
+const suite = DATABASE_URL ? describe : describe.skip;
+
+vi.mock("server-only", () => ({}));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("@/lib/utils/tenant-utils", () => ({ getTenantContext: vi.fn() }));
+
+const { getTenantContext } = await import("@/lib/utils/tenant-utils");
+const billActions = await import("@/app/db/actions/bill-actions");
+const billRepo = await import("@/app/db/repositories/bills");
+const { withTenant } = await import("@/app/db/client");
+
+const iso = (d) => d.toISOString().slice(0, 10);
+const today = () => iso(new Date());
+const daysFromNow = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return iso(d);
+};
+
+suite("bill actions (end to end)", () => {
+  let admin;
+  let companyUuid;
+  let mongoCompanyId;
+  let supplierId;
+  let accounts;
+  let approver;
+
+  beforeAll(async () => {
+    admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
+  });
+  afterAll(async () => {
+    if (admin) await admin.end();
+  });
+
+  /** Creates a bill directly through the repository — createBill is not the surface under test. */
+  async function makeBill(opts = {}) {
+    return withTenant(companyUuid, (tx) =>
+      billRepo.createBill(tx, {
+        companyId: companyUuid,
+        supplierId,
+        billDate: opts.billDate ?? "2026-08-01",
+        // NOT NULL on bills: a payable without a due date cannot be aged.
+        dueDate: opts.dueDate ?? "2026-08-31",
+        supplierInvoiceNumber: opts.supplierInvoiceNumber ?? null,
+        createdById: randomUUID(),
+        lines: opts.lines ?? [
+          {
+            description: "Diesel",
+            accountId: accounts.expense,
+            quantity: "10",
+            unitPrice: "100.0000",
+            vatRate: opts.vatRate ?? "0",
+          },
+        ],
+        ...opts.extra,
+      }),
+    );
+  }
+
+  beforeEach(async () => {
+    await admin`TRUNCATE companies CASCADE`;
+    await admin`TRUNCATE _migration_id_map, entry_counters`;
+
+    companyUuid = randomUUID();
+    mongoCompanyId = randomUUID().replace(/-/g, "").slice(0, 24);
+    supplierId = randomUUID();
+    approver = randomUUID();
+    accounts = {
+      ap: randomUUID(),
+      vatInput: randomUUID(),
+      whtPayable: randomUUID(),
+      inventory: randomUUID(),
+      expense: randomUUID(),
+    };
+
+    await admin`
+      INSERT INTO companies (id, name, slug)
+      VALUES (${companyUuid}, 'Pilot', ${"p-" + companyUuid.slice(0, 8)})
+    `;
+    await admin`
+      INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
+      VALUES ('companies', ${mongoCompanyId}, ${companyUuid})
+    `;
+    await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      await tx`
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, system_account) VALUES
+          (${accounts.ap},         ${companyUuid}, '2000', 'Accounts Payable', 'liability', 'accounts_payable'),
+          (${accounts.vatInput},   ${companyUuid}, '1400', 'VAT Input',        'asset',     'vat_input'),
+          (${accounts.whtPayable}, ${companyUuid}, '2100', 'WHT Payable',      'liability', 'wht_payable'),
+          (${accounts.inventory},  ${companyUuid}, '1300', 'Inventory',        'asset',     'inventory')
+      `;
+      await tx`
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type)
+        VALUES (${accounts.expense}, ${companyUuid}, '5100', 'Fuel', 'expense', 'operating_expense')
+      `;
+      await tx`
+        INSERT INTO parties (id, company_id, primary_type, is_supplier, name)
+        VALUES (${supplierId}, ${companyUuid}, 'supplier', true, 'Shell Kenya')
+      `;
+    });
+
+    getTenantContext.mockResolvedValue({
+      user: { id: approver, name: "Ada Manager", role: "Manager" },
+      companyId: mongoCompanyId,
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Reads — the shapes the list page renders
+  // ───────────────────────────────────────────────────────────────────────────
+
+  describe("list", () => {
+    it("returns the shape the table renders, with money as strings", async () => {
+      const bill = await makeBill({ supplierInvoiceNumber: "SUP-77" });
+
+      const { bills, pagination } = await billActions.listBillsForPage({});
+      expect(pagination).toEqual({ page: 1, total: 1, totalPages: 1 });
+
+      const [row] = bills;
+      expect(row._id).toBe(bill.id);
+      expect(row.billNumber).toMatch(/^BILL-/);
+      expect(row.supplierInvoiceNumber).toBe("SUP-77");
+      // The snapshot taken at the bill, not a join on the party's name today.
+      expect(row.supplier.name).toBe("Shell Kenya");
+      expect(row.amounts.total).toBe("1000.0000");
+      expect(row.amounts.balance).toBe("1000.0000");
+      expect(row.status).toBe("draft");
+      // Dates come back as plain ISO strings so the page never builds a Date
+      // in the server's timezone to decide whether something is overdue.
+      expect(row.billDate).toBe("2026-08-01");
+    });
+
+    it("orders by bill date, not by insertion order", async () => {
+      // Inserted last, dated earliest. The Mongo query sorts on createdAt, so
+      // this bill would head a list whose visible "Date" column says otherwise.
+      await makeBill({ billDate: "2026-08-20" });
+      await makeBill({ billDate: "2026-08-05" });
+
+      const { bills } = await billActions.listBillsForPage({});
+      expect(bills.map((b) => b.billDate)).toEqual(["2026-08-20", "2026-08-05"]);
+    });
+
+    it("filters by status and paginates", async () => {
+      const a = await makeBill({ billDate: "2026-08-02" });
+      await makeBill({ billDate: "2026-08-03" });
+      await withTenant(companyUuid, (tx) =>
+        billRepo.submitBill(tx, a.id, randomUUID()),
+      );
+
+      const submitted = await billActions.listBillsForPage({ status: "submitted" });
+      expect(submitted.bills).toHaveLength(1);
+      expect(submitted.bills[0]._id).toBe(a.id);
+
+      const paged = await billActions.listBillsForPage({ limit: 1 });
+      expect(paged.bills).toHaveLength(1);
+      expect(paged.pagination).toEqual({ page: 1, total: 2, totalPages: 2 });
+    });
+
+    it("searches by bill number, supplier invoice number and supplier name", async () => {
+      const bill = await makeBill({ supplierInvoiceNumber: "SUP-77" });
+
+      const byNumber = await billActions.listBillsForPage({
+        search: bill.billNumber.slice(0, 6),
+      });
+      expect(byNumber.bills).toHaveLength(1);
+
+      const bySupplierInvoice = await billActions.listBillsForPage({ search: "SUP-" });
+      expect(bySupplierInvoice.bills).toHaveLength(1);
+
+      const byName = await billActions.listBillsForPage({ search: "hell" });
+      expect(byName.bills).toHaveLength(1);
+
+      const miss = await billActions.listBillsForPage({ search: "zzz" });
+      expect(miss.bills).toHaveLength(0);
+      expect(miss.pagination.total).toBe(0);
+    });
+
+    it("shows another tenant nothing", async () => {
+      await makeBill();
+      const otherMongoId = randomUUID().replace(/-/g, "").slice(0, 24);
+      const otherUuid = randomUUID();
+      await admin`
+        INSERT INTO companies (id, name, slug)
+        VALUES (${otherUuid}, 'Other', ${"o-" + otherUuid.slice(0, 8)})
+      `;
+      await admin`
+        INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
+        VALUES ('companies', ${otherMongoId}, ${otherUuid})
+      `;
+      getTenantContext.mockResolvedValue({
+        user: { id: randomUUID(), name: "Other", role: "Manager" },
+        companyId: otherMongoId,
+      });
+
+      const { bills, pagination } = await billActions.listBillsForPage({});
+      expect(bills).toHaveLength(0);
+      expect(pagination.total).toBe(0);
+    });
+  });
+
+  describe("stats", () => {
+    it("sums the outstanding balance in SQL, not by adding strings", async () => {
+      // Two approved bills, one part-paid, so unpaid and partial both matter.
+      const a = await makeBill({ dueDate: daysFromNow(30) });
+      const b = await makeBill({ dueDate: daysFromNow(30) });
+      for (const bill of [a, b]) {
+        await withTenant(companyUuid, async (tx) => {
+          await billRepo.submitBill(tx, bill.id, randomUUID());
+          await billRepo.approveBill(tx, bill.id, {
+            apAccountId: accounts.ap,
+            approvedById: approver,
+          });
+        });
+      }
+      await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        await tx`UPDATE bills SET amount_paid = 400 WHERE id = ${b.id}`;
+      });
+
+      const stats = await billActions.getBillsStats();
+      expect(stats.byPaymentStatus.unpaid).toEqual({
+        count: 1,
+        balance: "1000.0000",
+      });
+      expect(stats.byPaymentStatus.partial).toEqual({
+        count: 1,
+        balance: "600.0000",
+      });
+      // The figure the card reads. Adding the two above in JavaScript would
+      // concatenate: "1000.0000" + "600.0000" = "1000.0000600.0000".
+      expect(stats.outstanding).toEqual({ count: 2, balance: "1600.0000" });
+    });
+
+    it("does not count a bill due TODAY as overdue", async () => {
+      const dueToday = await makeBill({ dueDate: today() });
+      const dueYesterday = await makeBill({ dueDate: daysFromNow(-1) });
+      for (const bill of [dueToday, dueYesterday]) {
+        await withTenant(companyUuid, async (tx) => {
+          await billRepo.submitBill(tx, bill.id, randomUUID());
+          await billRepo.approveBill(tx, bill.id, {
+            apAccountId: accounts.ap,
+            approvedById: approver,
+          });
+        });
+      }
+
+      const stats = await billActions.getBillsStats();
+      // The Mongo facet tests `dueDate < new Date()` against a field holding
+      // midnight, so the bill due today would be counted here for all but the
+      // first instant of the day. Overdue means the day has passed.
+      expect(stats.overdue.count).toBe(1);
+      expect(stats.overdue.total).toBe("1000.0000");
+    });
+
+    it("counts submitted bills as pending approval", async () => {
+      const bill = await makeBill();
+      await billActions.submitBill(bill.id);
+
+      const stats = await billActions.getBillsStats();
+      expect(stats.pendingApproval).toEqual({ count: 1, total: "1000.0000" });
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Writes
+  // ───────────────────────────────────────────────────────────────────────────
+
+  describe("submit and approve", () => {
+    it("submits a draft", async () => {
+      const bill = await makeBill();
+      const result = await billActions.submitBill(bill.id);
+      expect(result.success).toBe(true);
+      expect(result.message).toMatch(/submitted for approval/);
+
+      const { bills } = await billActions.listBillsForPage({});
+      expect(bills[0].status).toBe("submitted");
+    });
+
+    it("approves a submitted bill and posts a balanced entry", async () => {
+      const bill = await makeBill({ vatRate: "16" });
+      await withTenant(companyUuid, (tx) =>
+        billRepo.submitBill(tx, bill.id, randomUUID()),
+      );
+
+      const result = await billActions.approveBill(bill.id);
+      expect(result.success).toBe(true);
+      expect(result.message).toMatch(/approved and posted/);
+
+      const rows = await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        return tx`
+          SELECT SUM(l.debit)::text AS dr, SUM(l.credit)::text AS cr
+            FROM journal_lines l
+            JOIN journal_entries e ON e.id = l.entry_id
+           WHERE e.status = 'posted'
+        `;
+      });
+      // 1000 expense + 160 VAT input against 1160 payable.
+      expect(rows[0].dr).toBe("1160.0000");
+      expect(rows[0].cr).toBe("1160.0000");
+    });
+
+    it("refuses to approve a bill the same user submitted", async () => {
+      const bill = await makeBill();
+      // The submitter is the session user, and Manager is not an admin role.
+      await billActions.submitBill(bill.id);
+
+      const result = await billActions.approveBill(bill.id);
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/cannot approve a bill you submitted/i);
+
+      const { bills } = await billActions.listBillsForPage({});
+      expect(bills[0].status).toBe("submitted");
+    });
+
+    it("lets a SuperAdmin approve their own submission, as an Admin can", async () => {
+      // The reference tests `user.role !== "Admin"`, so a SuperAdmin who
+      // submitted is refused while an Admin is not — the only place in the
+      // codebase where SuperAdmin ranks below Admin. Both override here.
+      for (const role of ["SuperAdmin", "Admin"]) {
+        const userId = randomUUID();
+        getTenantContext.mockResolvedValue({
+          user: { id: userId, name: role, role },
+          companyId: mongoCompanyId,
+        });
+        const bill = await makeBill();
+        await billActions.submitBill(bill.id);
+        const result = await billActions.approveBill(bill.id);
+        expect(result.success, `${role} should be able to override`).toBe(true);
+      }
+    });
+
+    it("refuses a role that cannot approve", async () => {
+      const bill = await makeBill();
+      await withTenant(companyUuid, (tx) =>
+        billRepo.submitBill(tx, bill.id, randomUUID()),
+      );
+      getTenantContext.mockResolvedValue({
+        user: { id: randomUUID(), name: "Storekeeper", role: "Storekeeper" },
+        companyId: mongoCompanyId,
+      });
+
+      const result = await billActions.approveBill(bill.id);
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/permission/i);
+    });
+
+    it("names the missing system account rather than failing opaquely", async () => {
+      await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        await tx`UPDATE accounts SET system_account = NULL WHERE id = ${accounts.ap}`;
+      });
+      const bill = await makeBill();
+      await withTenant(companyUuid, (tx) =>
+        billRepo.submitBill(tx, bill.id, randomUUID()),
+      );
+
+      const result = await billActions.approveBill(bill.id);
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/Accounts Payable system account not configured/);
+    });
+  });
+
+  describe("reject and delete", () => {
+    it("rejects a submitted bill with a reason", async () => {
+      const bill = await makeBill();
+      await withTenant(companyUuid, (tx) =>
+        billRepo.submitBill(tx, bill.id, randomUUID()),
+      );
+
+      const result = await billActions.rejectBill(bill.id, "Wrong supplier");
+      expect(result.success).toBe(true);
+
+      const { bills } = await billActions.listBillsForPage({});
+      expect(bills[0].status).toBe("rejected");
+    });
+
+    it("deletes a draft, and its lines with it", async () => {
+      const bill = await makeBill();
+      const result = await billActions.deleteBill(bill.id);
+      expect(result.success).toBe(true);
+
+      const lines = await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        return tx`SELECT 1 FROM bill_lines WHERE bill_id = ${bill.id}`;
+      });
+      expect(lines).toHaveLength(0);
+    });
+
+    it("refuses to delete anything that has been submitted", async () => {
+      const bill = await makeBill();
+      await withTenant(companyUuid, (tx) =>
+        billRepo.submitBill(tx, bill.id, randomUUID()),
+      );
+
+      const result = await billActions.deleteBill(bill.id);
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/Only draft bills can be deleted/);
+
+      const { bills } = await billActions.listBillsForPage({});
+      expect(bills).toHaveLength(1);
+    });
+
+    it("returns a message rather than throwing for a bill in another tenant", async () => {
+      const result = await billActions.deleteBill(randomUUID());
+      expect(result.success).toBe(false);
+      // RLS filters the row out before the repository sees it, so it reads as
+      // absent rather than forbidden — invisible, not leaked.
+      expect(result.error).toMatch(/Bill not found/);
+    });
+  });
+});

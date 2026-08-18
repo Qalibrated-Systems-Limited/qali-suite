@@ -685,3 +685,243 @@ export async function getBillAging(tx: Tx, limit = 200) {
      LIMIT ${Math.min(limit, 500)}
   `);
 }
+
+/**
+ * The bills list page, in one round trip.
+ *
+ * Predicates are COMPOSED rather than made conditional inside the SQL. The
+ * obvious shape — `WHERE ($1 = '' OR b.status::text = $1)` — is wrong twice
+ * over: one cached plan then has to serve every combination of filters, so no
+ * index can be used for a predicate that might not apply, and casting the
+ * COLUMN converts every row before comparing. Casting the PARAMETER instead
+ * lets `bills_company_date_status_idx` serve both the ordering and a status
+ * filter. Same reasoning as searchInvoices, and the same measured difference.
+ *
+ * Ordered by bill_date, not created_at as the Mongo query is. The column the
+ * page shows as "Date" is the bill date, and ordering by insertion order puts
+ * a backdated bill at the top of a list sorted, visibly, by something else.
+ *
+ * `count(*) OVER()` returns the page and its total together; the Mongo path
+ * issues a separate countDocuments over the same filters.
+ *
+ * Search is prefix-anchored on bill_number and supplier_invoice_number so the
+ * (company_id, bill_number) index serves it. Supplier name matches anywhere,
+ * which is a scan of parties — if that becomes hot the fix is a trigram index
+ * on parties.name, not a rewrite of this query.
+ */
+export async function searchBills(
+  tx: Tx,
+  opts: {
+    query?: string;
+    page?: number;
+    perPage?: number;
+    status?: string;
+    paymentStatus?: string;
+    supplierId?: string;
+  } = {},
+) {
+  const perPage = Math.min(opts.perPage ?? 10, 100);
+  const page = Math.max(opts.page ?? 1, 1);
+  const offset = (page - 1) * perPage;
+  const q = (opts.query ?? "").trim();
+
+  const where = [];
+  if (q) {
+    where.push(
+      sql`(b.bill_number ILIKE ${q + "%"}
+           OR b.supplier_invoice_number ILIKE ${q + "%"}
+           OR p.name ILIKE ${"%" + q + "%"})`,
+    );
+  }
+  if (opts.status) where.push(sql`b.status = ${opts.status}::bill_status`);
+  if (opts.paymentStatus) {
+    where.push(sql`b.payment_status = ${opts.paymentStatus}::payment_status`);
+  }
+  if (opts.supplierId) where.push(sql`b.supplier_id = ${opts.supplierId}::uuid`);
+
+  const clause = where.length
+    ? sql`WHERE ${sql.join(where, sql` AND `)}`
+    : sql``;
+
+  const rows = (await tx.execute(sql`
+    SELECT b.id,
+           b.bill_number,
+           b.supplier_invoice_number,
+           b.bill_date::text    AS bill_date,
+           b.due_date::text     AS due_date,
+           b.total::text        AS total,
+           b.net_payable::text  AS net_payable,
+           b.amount_paid::text  AS amount_paid,
+           b.balance::text      AS balance,
+           b.status::text         AS status,
+           b.payment_status::text AS payment_status,
+           b.supplier_name_at_bill,
+           count(*) OVER() AS total_count
+      FROM bills b
+      JOIN parties p ON p.id = b.supplier_id
+      ${clause}
+     ORDER BY b.bill_date DESC, b.bill_number DESC
+     LIMIT ${perPage} OFFSET ${offset}
+  `)) as unknown as Array<Record<string, string>>;
+
+  const total = rows.length ? Number(rows[0].total_count) : 0;
+
+  return {
+    // Shaped for the existing table markup — `amounts.total`, `supplier.name`
+    // and `_id` — so changing the data source does not rewrite the UI. The
+    // supplier name is the SNAPSHOT taken at the bill, not the party's current
+    // name: a rename must not relabel what was already billed (§9.4).
+    bills: rows.map((r) => ({
+      _id: r.id,
+      id: r.id,
+      billNumber: r.bill_number,
+      supplierInvoiceNumber: r.supplier_invoice_number,
+      billDate: r.bill_date,
+      dueDate: r.due_date,
+      status: r.status,
+      paymentStatus: r.payment_status,
+      supplier: { name: r.supplier_name_at_bill },
+      amounts: {
+        total: r.total,
+        netPayable: r.net_payable,
+        amountPaid: r.amount_paid,
+        balance: r.balance,
+      },
+    })),
+    total,
+    totalPages: Math.max(1, Math.ceil(total / perPage)),
+    page,
+  };
+}
+
+/**
+ * The four figures the list page's cards read, in one pass.
+ *
+ * Mongo runs a five-branch $facet for this. Every branch is a filtered
+ * aggregate over the same rows, which is what FILTER expresses directly.
+ *
+ * `overdue` is DERIVED from due_date, not read from a stored status — §9B.2
+ * records why an `overdue` payment status was not carried across: a stored
+ * copy of a function of today's date is wrong for some rows at any moment.
+ *
+ * It compares against CURRENT_DATE, not now(). The Mongo facet tests
+ * `dueDate: { $lt: new Date() }` against a field holding a date at midnight,
+ * so a bill due TODAY reads as overdue for all but the first instant of the
+ * day. Overdue means the day has passed, not the hour.
+ *
+ * The unpaid/partial figures sum `balance`, which is a GENERATED column
+ * (net_payable - amount_paid) rather than a maintained one, so they cannot
+ * report a balance the bill's own numbers do not support.
+ */
+export async function getBillStats(tx: Tx) {
+  const [row] = (await tx.execute(sql`
+    SELECT count(*) FILTER (WHERE status = 'submitted')::int       AS pending_count,
+           COALESCE(SUM(total) FILTER (WHERE status = 'submitted'), 0)::text
+                                                                   AS pending_total,
+
+           count(*) FILTER (
+             WHERE status = 'approved' AND payment_status = 'unpaid'
+           )::int                                                  AS unpaid_count,
+           COALESCE(SUM(balance) FILTER (
+             WHERE status = 'approved' AND payment_status = 'unpaid'
+           ), 0)::text                                             AS unpaid_balance,
+
+           count(*) FILTER (
+             WHERE status = 'approved' AND payment_status = 'partial'
+           )::int                                                  AS partial_count,
+           COALESCE(SUM(balance) FILTER (
+             WHERE status = 'approved' AND payment_status = 'partial'
+           ), 0)::text                                             AS partial_balance,
+
+           count(*) FILTER (
+             WHERE status = 'approved' AND payment_status IN ('unpaid', 'partial')
+           )::int                                                  AS outstanding_count,
+           COALESCE(SUM(balance) FILTER (
+             WHERE status = 'approved' AND payment_status IN ('unpaid', 'partial')
+           ), 0)::text                                             AS outstanding_balance,
+
+           count(*) FILTER (
+             WHERE status = 'approved' AND payment_status IN ('unpaid', 'partial')
+               AND due_date IS NOT NULL AND due_date < CURRENT_DATE
+           )::int                                                  AS overdue_count,
+           COALESCE(SUM(balance) FILTER (
+             WHERE status = 'approved' AND payment_status IN ('unpaid', 'partial')
+               AND due_date IS NOT NULL AND due_date < CURRENT_DATE
+           ), 0)::text                                             AS overdue_total,
+
+           count(*) FILTER (WHERE bill_date >= date_trunc('month', CURRENT_DATE))::int
+                                                                   AS month_count,
+           COALESCE(SUM(total) FILTER (
+             WHERE bill_date >= date_trunc('month', CURRENT_DATE)
+           ), 0)::text                                             AS month_total
+      FROM bills
+  `)) as unknown as Array<Record<string, string>>;
+
+  // Named as the existing cards read them, so the component keeps its markup.
+  return {
+    pendingApproval: {
+      count: Number(row.pending_count),
+      total: row.pending_total,
+    },
+    byPaymentStatus: {
+      unpaid: { count: Number(row.unpaid_count), balance: row.unpaid_balance },
+      partial: { count: Number(row.partial_count), balance: row.partial_balance },
+    },
+    /**
+     * unpaid + partial, summed in SQL.
+     *
+     * The card wants one figure and the Mongo-era markup produced it by adding
+     * the two in JavaScript. That was float arithmetic on money then; with
+     * money as strings it would be string CONCATENATION now — "100.0000" +
+     * "50.0000" giving "100.000050.0000" on the page. Money is added in
+     * numeric(19,4) or not at all.
+     */
+    outstanding: {
+      count: Number(row.outstanding_count),
+      balance: row.outstanding_balance,
+    },
+    overdue: { count: Number(row.overdue_count), total: row.overdue_total },
+    thisMonth: { count: Number(row.month_count), total: row.month_total },
+  };
+}
+
+/**
+ * Deletes a draft bill.
+ *
+ * Only a draft: anything submitted has been seen by an approver, and anything
+ * approved has posted. Those are cancelled, which reverses the entry and the
+ * stock, rather than erased. bill_lines cascade (0016).
+ *
+ * The capitalisation guard is carried across from bill-actions.js:1305. Fixed
+ * assets are not ported, so capitalized_asset_id can only hold a value that
+ * arrived with the backfill — but deleting the bill that a fixed asset was
+ * raised from would orphan the asset either way, so the check moves with the
+ * behaviour rather than being dropped as unreachable.
+ */
+export async function deleteDraftBill(tx: Tx, billId: string) {
+  const [bill] = await tx.select().from(bills).where(eq(bills.id, billId));
+  if (!bill) throw new Error("Bill not found");
+  if (bill.status !== "draft") {
+    throw new Error(
+      `Only draft bills can be deleted. Bill ${bill.billNumber} is ${bill.status} — cancel it instead.`,
+    );
+  }
+
+  const [capitalised] = await tx
+    .select({ id: billLines.id })
+    .from(billLines)
+    .where(
+      and(
+        eq(billLines.billId, billId),
+        sql`${billLines.capitalizedAssetId} IS NOT NULL`,
+      ),
+    );
+  if (capitalised) {
+    throw new Error(
+      "Cannot delete: a line on this bill has been capitalised into a fixed asset. Dispose or write off the asset first.",
+    );
+  }
+
+  await tx.delete(bills).where(eq(bills.id, billId));
+  return { billNumber: bill.billNumber };
+}
