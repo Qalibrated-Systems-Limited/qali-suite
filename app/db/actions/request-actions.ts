@@ -32,6 +32,8 @@ function toActionError(err: unknown): string {
   if (
     message.includes("permission") ||
     message.includes("Not authenticated") ||
+    message.includes("No company selected") ||
+    message.includes("No company has been set up") ||
     message.includes("not active") ||
     message.includes("has not been migrated") ||
     message.includes("Stock request not found") ||

@@ -1,7 +1,11 @@
 import { sql } from "drizzle-orm";
 import { db, withTenant, type Tx } from "./client";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
-import { provisionCompany } from "./provisioning";
+import {
+  provisionCompany,
+  forgetCompanyMapping,
+  listProvisionedTenants,
+} from "./provisioning";
 
 /**
  * Bridge between the Mongo-era session and the Postgres tenant id.
@@ -27,10 +31,21 @@ import { provisionCompany } from "./provisioning";
 const companyUuidCache = new Map<string, string>();
 
 export async function resolveCompanyUuid(
-  mongoCompanyId: string,
+  mongoCompanyId: string | null | undefined,
   /** What the session knows about the tenant, for the provisioning fallback. */
   hint: { name?: string | null; code?: string | null } = {},
 ): Promise<string> {
+  // NEVER INVENT A TENANT FROM A MISSING ID. A SuperAdmin's companyId is a UX
+  // hint and can be absent (lib/utils/tenant-utils.js says so), so this was
+  // reached with null, stringified to "null", and provisioned a company called
+  // "Company null" with slug "null" — a real tenant row, in the tenant list,
+  // created by opening a dashboard page.
+  if (!isUsableCompanyId(mongoCompanyId)) {
+    throw new Error(
+      "No company selected. Choose a company before opening this page.",
+    );
+  }
+
   const key = String(mongoCompanyId);
   const cached = companyUuidCache.get(key);
   if (cached) return cached;
@@ -115,6 +130,11 @@ async function assertCompanyActive(
   if (!rows.length) {
     companyUuidCache.delete(sourceKey);
     activeCache.delete(companyUuid);
+    // The stale entry is in the DATABASE, not just this process. Clearing the
+    // in-process cache alone made the retry resolve the same dead uuid and
+    // fail identically — which is what a developer hit after the company row
+    // went and the mapping stayed.
+    await forgetCompanyMapping(sourceKey);
     throw new StaleTenantMapping(sourceKey);
   }
 
@@ -134,6 +154,54 @@ class StaleTenantMapping extends Error {
 /** Called when a tenant is activated or deactivated, so the gate reacts. */
 export function forgetCompanyActive(companyUuid: string) {
   activeCache.delete(companyUuid);
+}
+
+function isUsableCompanyId(value: unknown): value is string {
+  const s = String(value ?? "").trim();
+  return s !== "" && s !== "null" && s !== "undefined";
+}
+
+/**
+ * Which tenant this request acts as.
+ *
+ * A SUPERADMIN IS NOT AN EXEMPTION FROM TENANCY, IT IS A CHOICE OF TENANT.
+ * Mongo's withTenantScope returns the query UNSCOPED for a SuperAdmin
+ * (tenant-utils.js:116), so they read every tenant's rows mixed together —
+ * which is exactly the §2.2 model row-level security replaces, and giving
+ * them a BYPASSRLS connection would undo §9A along with it.
+ *
+ * So a SuperAdmin acts INSIDE one company, with all the same policies applied.
+ * Their session usually carries which; when it does not:
+ *
+ *   • one tenant exists  → act as it, because there is no choice to make
+ *   • several exist      → refuse, and say so. Picking one silently would show
+ *                          a platform administrator one customer's books while
+ *                          they believed they were looking at another's.
+ *
+ * The lasting answer is a company switcher that writes the choice to the
+ * session. This is what makes the app usable until there is one, and it is
+ * deliberately not a way to see across tenants.
+ */
+async function resolveActingCompanyId(
+  sessionCompanyId: unknown,
+  role: string | undefined,
+): Promise<string> {
+  if (isUsableCompanyId(sessionCompanyId)) return sessionCompanyId;
+
+  if (role !== "SuperAdmin") {
+    throw new Error(
+      "No company selected. Choose a company before opening this page.",
+    );
+  }
+
+  const tenants = await listProvisionedTenants();
+  if (tenants.length === 1) return tenants[0].source_id;
+
+  throw new Error(
+    tenants.length === 0
+      ? "No company has been set up yet. Create one under Admin → Companies."
+      : `No company selected. This account is not tied to one, and there are ${tenants.length}. Choose a company before opening this page.`,
+  );
 }
 
 export interface ActionUser {
@@ -163,18 +231,19 @@ export async function withAuthorizedTenant<T>(
 
   // The session carries a company CODE, not a name. It is the best label
   // available here, and provisioning only needs one to put on the row.
+  const actingCompanyId = await resolveActingCompanyId(companyId, user.role);
   const hint = { code: companyCode };
-  let companyUuid = await resolveCompanyUuid(companyId, hint);
+  let companyUuid = await resolveCompanyUuid(actingCompanyId, hint);
 
   try {
-    await assertCompanyActive(companyUuid, String(companyId), user.role);
+    await assertCompanyActive(companyUuid, actingCompanyId, user.role);
   } catch (err) {
     if (!(err instanceof StaleTenantMapping)) throw err;
     // Resolve again with the caches cleared: the tenant is re-provisioned and
     // the request carries on, rather than failing on a fact about this
     // process's memory that nobody reading the message can act on.
-    companyUuid = await resolveCompanyUuid(companyId, hint);
-    await assertCompanyActive(companyUuid, String(companyId), user.role);
+    companyUuid = await resolveCompanyUuid(actingCompanyId, hint);
+    await assertCompanyActive(companyUuid, actingCompanyId, user.role);
   }
 
   return withTenant(companyUuid, (tx) =>

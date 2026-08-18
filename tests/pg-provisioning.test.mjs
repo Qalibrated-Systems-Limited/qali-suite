@@ -441,4 +441,141 @@ suite("tenant provisioning", () => {
       expect(left.n).toBe(1);
     });
   });
+
+  describe("what a missing or racing tenant does", () => {
+    it("refuses a session with no company rather than inventing one", async () => {
+      for (const companyId of [null, undefined, "", "null", "undefined"]) {
+        getTenantContext.mockResolvedValue({
+          user: { id: "507f1f77bcf86cd799439011", name: "Ada", role: "Manager" },
+          companyId,
+          companyCode: null,
+        });
+
+        await expect(
+          billActions.getBillsStats(),
+          String(companyId),
+        ).rejects.toThrow(/No company selected/i);
+      }
+
+      // This provisioned a tenant called "Company null" with slug "null" — a
+      // real row in the tenant list, created by opening a dashboard page.
+      const [n] = await admin`SELECT count(*)::int AS n FROM companies`;
+      expect(n.n).toBe(0);
+    });
+
+    it("lets a SuperAdmin with no company act as the only one there is", async () => {
+      const source = sourceId();
+      await provisionCompany({ sourceCompanyId: source, name: "Only Tenant" });
+
+      getTenantContext.mockResolvedValue({
+        user: { id: "507f1f77bcf86cd799439011", name: "Root", role: "SuperAdmin" },
+        companyId: null,
+        companyCode: null,
+      });
+
+      // Not an exemption from tenancy — a choice of tenant, with every policy
+      // still applied. Mongo returns the query UNSCOPED for a SuperAdmin
+      // (tenant-utils.js:116), which is the §2.2 model RLS replaces.
+      const stats = await billActions.getBillsStats();
+      expect(stats.pendingApproval.count).toBe(0);
+
+      // And it acted as the existing tenant rather than making a second one.
+      const [n] = await admin`SELECT count(*)::int AS n FROM companies`;
+      expect(n.n).toBe(1);
+    });
+
+    it("refuses to guess when a SuperAdmin could mean either of two tenants", async () => {
+      await provisionCompany({ sourceCompanyId: sourceId(), name: "A" });
+      await provisionCompany({ sourceCompanyId: sourceId(), name: "B" });
+
+      getTenantContext.mockResolvedValue({
+        user: { id: "507f1f77bcf86cd799439011", name: "Root", role: "SuperAdmin" },
+        companyId: null,
+        companyCode: null,
+      });
+
+      // Picking one silently would show a platform administrator one
+      // customer's books while they believed they were reading another's.
+      await expect(billActions.getBillsStats()).rejects.toThrow(
+        /there are 2\. Choose a company/i,
+      );
+    });
+
+    it("tells a SuperAdmin when there is nothing set up at all", async () => {
+      getTenantContext.mockResolvedValue({
+        user: { id: "507f1f77bcf86cd799439011", name: "Root", role: "SuperAdmin" },
+        companyId: null,
+        companyCode: null,
+      });
+      await expect(billActions.getBillsStats()).rejects.toThrow(
+        /No company has been set up/i,
+      );
+    });
+
+    it("provisions once when parallel requests race for the same tenant", async () => {
+      const source = sourceId();
+
+      // Next renders a page's server components in parallel, so the first load
+      // of an unprovisioned tenant fires several of these at once. All of them
+      // missed, all of them inserted, one won and the rest failed on the
+      // slug's unique index.
+      const results = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          provisionCompany({ sourceCompanyId: source, name: "Racer" }),
+        ),
+      );
+
+      const ids = new Set(results.map((r) => r.companyId));
+      expect(ids.size).toBe(1);
+      expect(results.filter((r) => r.created)).toHaveLength(1);
+
+      const [companies] = await admin`SELECT count(*)::int AS n FROM companies`;
+      expect(companies.n).toBe(1);
+      const accounts = await scoped(
+        [...ids][0],
+        (tx) => tx`SELECT count(*)::int AS n FROM accounts`,
+      );
+      // And exactly one chart of accounts, not five overlaid.
+      expect(accounts[0].n).toBe(getStandardChartOfAccounts().length);
+    });
+
+    it("recovers when the company row is gone but the mapping remains", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "Pilot",
+      });
+
+      // Point the mapping at a company that is not there. This is the state a
+      // developer hit after the test suite truncated the dev database, and it
+      // is reproduced this way rather than by deleting the row because a
+      // DELETE cannot produce it: the system-account guard from 0001 refuses
+      // the cascade ("Cannot delete system account Petty Cash"). Only a
+      // TRUNCATE, which does not fire row triggers, gets here — which is
+      // exactly what happened.
+      const vanished = randomUUID();
+      await admin`
+        UPDATE _migration_id_map SET new_uuid = ${vanished}
+         WHERE collection = 'companies' AND old_object_id = ${source}
+      `;
+
+      getTenantContext.mockResolvedValue({
+        user: { id: "507f1f77bcf86cd799439011", name: "Ada", role: "Manager" },
+        companyId: source,
+        companyCode: "PILOT",
+      });
+
+      // An ordinary read has to work.
+      const stats = await billActions.getBillsStats();
+      expect(stats.pendingApproval.count).toBe(0);
+
+      const [row] = await admin`
+        SELECT c.id, c.name FROM companies c
+          JOIN _migration_id_map m ON m.new_uuid = c.id
+         WHERE m.collection = 'companies' AND m.old_object_id = ${source}
+      `;
+      expect(row).toBeDefined();
+      expect(row.id).not.toBe(vanished);
+    });
+  });
 });

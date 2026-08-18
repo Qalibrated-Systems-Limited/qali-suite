@@ -81,7 +81,10 @@ const MONTHS = [
  */
 export async function provisionCompany(input: ProvisionCompanyInput) {
   const db = privileged();
-  const sourceId = String(input.sourceCompanyId);
+  const sourceId = String(input.sourceCompanyId ?? "").trim();
+  if (!sourceId || sourceId === "null" || sourceId === "undefined") {
+    throw new Error("provisionCompany requires a source company id");
+  }
 
   const existing = (await db.execute(sql`
     SELECT new_uuid FROM _migration_id_map
@@ -93,8 +96,37 @@ export async function provisionCompany(input: ProvisionCompanyInput) {
   }
 
   const companyId = crypto.randomUUID();
+  /** Set when another request won the race while this one waited on the lock. */
+  let adopted: string | null = null;
 
   await db.transaction(async (tx) => {
+    /**
+     * SERIALISED PER TENANT, AND RE-CHECKED INSIDE.
+     *
+     * The lookup above is outside this transaction, so "not provisioned yet"
+     * is only true at the moment it was read. Next.js renders a page's server
+     * components in PARALLEL, so the first load of an unprovisioned tenant
+     * fires several of these at once: all of them miss, all of them insert,
+     * one wins and the rest fail on the slug's unique index. Reported from a
+     * dashboard page doing exactly that.
+     *
+     * The advisory lock is keyed on the SOURCE id, so it serialises only the
+     * racers for this tenant, and it is transaction-scoped so it releases on
+     * commit with no unlock to forget.
+     */
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${"provision:" + sourceId}))`,
+    );
+
+    const [again] = (await tx.execute(sql`
+      SELECT new_uuid FROM _migration_id_map
+       WHERE collection = 'companies' AND old_object_id = ${sourceId}
+    `)) as unknown as Array<{ new_uuid: string }>;
+    if (again) {
+      adopted = again.new_uuid;
+      return;
+    }
+
     // Scope FIRST. companies carries a WITH CHECK keyed on its own id, so the
     // tenant root has to be inserted inside its own scope — the same order the
     // backfill uses, and the reason it is not written through `db` directly.
@@ -129,6 +161,7 @@ export async function provisionCompany(input: ProvisionCompanyInput) {
     }
   });
 
+  if (adopted) return { companyId: adopted, created: false };
   return { companyId, created: true };
 }
 
@@ -231,6 +264,47 @@ async function seedFiscalPeriods(
   }
 
   return 12;
+}
+
+/**
+ * Forgets a mapping whose company row is gone.
+ *
+ * Clearing the in-process cache is not enough: the stale row is in
+ * `_migration_id_map`, so re-resolving finds it again and the request fails
+ * the same way twice. Removing it lets the next resolve provision a fresh
+ * tenant, which is what "the company is missing" should mean.
+ *
+ * Only ever called after reading `companies` and finding nothing.
+ */
+export async function forgetCompanyMapping(sourceCompanyId: string) {
+  await privileged().execute(sql`
+    DELETE FROM _migration_id_map
+     WHERE collection = 'companies' AND old_object_id = ${String(sourceCompanyId)}
+       AND NOT EXISTS (SELECT 1 FROM companies c WHERE c.id = new_uuid)
+  `);
+}
+
+/**
+ * The tenants this installation has, newest last.
+ *
+ * Read on the privileged connection because `companies` is under RLS keyed on
+ * its own id (0024): a scoped connection sees exactly one, which is the point,
+ * and something has to be able to ask "which are there" to offer a choice.
+ */
+export async function listProvisionedTenants() {
+  const rows = (await privileged().execute(sql`
+    SELECT m.old_object_id AS source_id, c.id, c.name, c.is_active
+      FROM companies c
+      JOIN _migration_id_map m
+        ON m.new_uuid = c.id AND m.collection = 'companies'
+     ORDER BY c.created_at
+  `)) as unknown as Array<{
+    source_id: string;
+    id: string;
+    name: string;
+    is_active: boolean;
+  }>;
+  return rows;
 }
 
 /** Whether a tenant has been provisioned. Used by operator tooling, not the UI. */
