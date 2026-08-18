@@ -6,14 +6,10 @@ import { redirect, notFound } from "next/navigation";
 import { ChevronLeft, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BillForm from "../../components/BillForm";
-import { getBillById } from "@/app/mongodb/queries/bill-queries";
-import Party from "@/app/models/parties";
-import Account from "@/app/models/account";
-import Product from "@/app/models/product";
+import { getBillById, getBillFormData } from "@/app/db/actions/bill-actions";
 import Asset from "@/app/models/asset";
 import dbConnect from "@/app/config/dbConnect";
 import { auth } from "@/auth";
-import { serializeBsonType } from "@/lib/utils";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
@@ -37,41 +33,13 @@ export async function generateMetadata({ params }) {
 // ============================================
 // DATA FETCHING
 // ============================================
-async function getBillFormData() {
+/**
+ * Fixed assets are not ported (§10) and stay on Mongo; see the create page.
+ */
+async function getMongoOnlyFormData() {
   await dbConnect();
   const { companyId } = await getTenantContext();
 
-  // Fetch suppliers (parties that are suppliers or both) - tenant-scoped
-  const suppliers = await Party.find({
-    companyId,
-    type: { $in: ["supplier", "both"] },
-    isActive: { $ne: false },
-  })
-    .select("_id name taxPin email phone address")
-    .sort({ name: 1 })
-    .lean();
-
-  // Fetch expense and asset accounts for bill lines - tenant-scoped
-  const accounts = await Account.find({
-    companyId,
-    accountType: { $in: ["expense", "asset"] },
-    isActive: { $ne: false },
-    canPost: true, // Filter out header accounts
-  })
-    .select("_id accountCode accountName accountType subType systemAccount")
-    .sort({ accountType: -1, accountCode: 1 })
-    .lean();
-
-  // Fetch products (optional - for inventory purchases) - tenant-scoped
-  const products = await Product.find({
-    companyId,
-    isActive: { $ne: false },
-  })
-    .select("_id SKU name unit costing.costPrice costPrice")
-    .sort({ name: 1 })
-    .lean();
-
-  // Fetch active fixed assets (optional per-line tagging) - tenant-scoped
   const assets = await Asset.find({
     companyId,
     status: { $in: ["active", "idle", "in_maintenance"] },
@@ -80,57 +48,22 @@ async function getBillFormData() {
     .sort({ assetNumber: 1 })
     .lean();
 
-  // Serialize MongoDB objects for client components
-  const serializedSuppliers = suppliers.map((s) => ({
-    _id: s._id.toString(),
-    name: s.name,
-    taxPin: s.taxPin || "",
-    email: s.email || "",
-    phone: s.phone || "",
-    address: s.address
-      ? `${s.address.line1 || ""}, ${s.address.city || ""}`.trim()
-      : "",
-  }));
-
-  const serializedAccounts = accounts.map((a) => ({
-    _id: a._id.toString(),
-    accountCode: a.accountCode,
-    accountName: a.accountName,
-    accountType: a.accountType,
-    subType: a.subType || null,
-    systemAccount: a.systemAccount || null,
-  }));
-
-  const serializedProducts = products.map((p) => ({
-    _id: p._id.toString(),
-    sku: p.SKU,
-    name: p.name,
-    unit: p.unit || "pcs",
-    costPrice: p.costing?.costPrice || p.costPrice || 0,
-  }));
-
-  const serializedAssets = assets.map((a) => ({
+  return assets.map((a) => ({
     _id: a._id.toString(),
     assetNumber: a.assetNumber,
     name: a.name,
     registrationNumber: a.registrationNumber || "",
   }));
-
-  return {
-    suppliers: serializedSuppliers,
-    accounts: serializedAccounts,
-    products: serializedProducts,
-    assets: serializedAssets,
-  };
 }
 
 // ============================================
 // FORM WRAPPER (Server Component)
 // ============================================
 async function BillEditFormWrapper({ billId }) {
-  const [{ bill, error }, formData, projects] = await Promise.all([
+  const [{ bill, error }, formData, assets, projects] = await Promise.all([
     getBillById(billId),
     getBillFormData(),
+    getMongoOnlyFormData(),
     getActiveProjects(),
   ]);
 
@@ -159,11 +92,13 @@ async function BillEditFormWrapper({ billId }) {
     );
   }
 
-  const { suppliers, accounts, products, assets } = formData;
+  const { suppliers, accounts, products } = formData;
 
   return (
     <BillForm
-      bill={serializeBsonType(bill)}
+      // Already plain JSON: the repository returns strings and dates as text,
+      // so there is no BSON left to serialize.
+      bill={bill}
       suppliers={suppliers}
       accounts={accounts}
       products={products}

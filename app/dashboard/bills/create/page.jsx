@@ -5,9 +5,7 @@ import Link from "next/link";
 import { ChevronLeft, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BillForm from "../components/BillForm";
-import Party from "@/app/models/parties";
-import Account from "@/app/models/account";
-import Product from "@/app/models/product";
+import { getBillFormData } from "@/app/db/actions/bill-actions";
 import Asset from "@/app/models/asset";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
@@ -24,42 +22,16 @@ export const metadata = {
 // ============================================
 // DATA FETCHING
 // ============================================
-async function getBillFormData() {
+/**
+ * Fixed assets are NOT ported (§10), so this stays on Mongo while the bill
+ * itself is written to Postgres. Bill lines keep asset_id as a deferred
+ * reference with the asset number and name snapshotted beside it, so the tag
+ * survives whether or not `assets` ever lands in Postgres.
+ */
+async function getMongoOnlyFormData() {
   await dbConnect();
   const { companyId } = await getTenantContext();
 
-  // Fetch suppliers (parties that are suppliers or both) - tenant-scoped
-  const suppliers = await Party.find({
-    companyId,
-    type: { $in: ["supplier", "both"] },
-    isActive: { $ne: false },
-  })
-    .select("_id name taxPin email phone address")
-    .sort({ name: 1 })
-    .lean();
-
-  // Fetch expense and asset accounts for bill lines (covers services,
-  // inventory purchases, and fixed asset acquisitions) - tenant-scoped
-  const accounts = await Account.find({
-    companyId,
-    accountType: { $in: ["expense", "asset"] },
-    isActive: { $ne: false },
-    canPost: true,
-  })
-    .select("_id accountCode accountName accountType subType systemAccount")
-    .sort({ accountType: -1, accountCode: 1 }) // expense first, then asset
-    .lean();
-
-  // Fetch products (optional - for inventory purchases) - tenant-scoped
-  const products = await Product.find({
-    companyId,
-    isActive: { $ne: false },
-  })
-    .select("_id SKU name unit costing.costPrice costPrice")
-    .sort({ name: 1 })
-    .lean();
-
-  // Fetch active fixed assets (optional per-line tagging) - tenant-scoped
   const assets = await Asset.find({
     companyId,
     status: { $in: ["active", "idle", "in_maintenance"] },
@@ -68,51 +40,12 @@ async function getBillFormData() {
     .sort({ assetNumber: 1 })
     .lean();
 
-  // Serialize MongoDB objects for client components
-  const serializedSuppliers = suppliers.map((s) => ({
-    _id: s._id.toString(),
-    name: s.name,
-    taxPin: s.taxPin || "",
-    email: s.email || "",
-    phone: s.phone || "",
-    address: s.address
-      ? `${s.address.line1 || ""}, ${s.address.city || ""}`.trim()
-      : "",
-  }));
-
-  const serializedAccounts = accounts.map((a) => ({
-    _id: a._id.toString(),
-    accountCode: a.accountCode,
-    accountName: a.accountName,
-    accountType: a.accountType,
-    subType: a.subType || null,
-    // Surfaced so the bill form can auto-pick Inventory when a product
-    // is selected on a line (systemAccount === "inventory"), same UX
-    // pattern as the PO form.
-    systemAccount: a.systemAccount || null,
-  }));
-
-  const serializedProducts = products.map((p) => ({
-    _id: p._id.toString(),
-    sku: p.SKU,
-    name: p.name,
-    unit: p.unit || "pcs",
-    costPrice: p.costing?.costPrice || p.costPrice || 0,
-  }));
-
-  const serializedAssets = assets.map((a) => ({
+  return assets.map((a) => ({
     _id: a._id.toString(),
     assetNumber: a.assetNumber,
     name: a.name,
     registrationNumber: a.registrationNumber || "",
   }));
-
-  return {
-    suppliers: serializedSuppliers,
-    accounts: serializedAccounts,
-    products: serializedProducts,
-    assets: serializedAssets,
-  };
 }
 
 // ============================================
@@ -145,8 +78,14 @@ function FormSkeleton() {
 // FORM WRAPPER (Server Component)
 // ============================================
 async function BillFormWrapper() {
-  const [{ suppliers, accounts, products, assets }, projects] =
-    await Promise.all([getBillFormData(), getActiveProjects()]);
+  // Suppliers, accounts and products come from Postgres and carry no
+  // companyId: RLS supplies it. Assets and projects are still Mongo modules.
+  const [{ suppliers, accounts, products }, assets, projects] =
+    await Promise.all([
+      getBillFormData(),
+      getMongoOnlyFormData(),
+      getActiveProjects(),
+    ]);
 
   // Check if we have required data
   if (suppliers.length === 0) {

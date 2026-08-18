@@ -59,7 +59,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { createBill, updateBill } from "@/app/mongodb/actions/bill-actions";
+import { createBill, updateBill } from "@/app/db/actions/bill-actions";
 import QuickCreatePartyDialog from "@/app/dashboard/invoices/components/QuickCreateCustomerDialog";
 import ProjectPicker from "@/components/project-picker";
 

@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { createBillPayment } from "@/app/mongodb/actions/bill-actions";
+import { createBillPayment } from "@/app/db/actions/bill-actions";
 
 const PAYMENT_METHODS = [
   { value: "bank_transfer", label: "Bank Transfer" },

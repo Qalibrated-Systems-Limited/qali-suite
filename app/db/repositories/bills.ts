@@ -146,8 +146,26 @@ export async function createBill(tx: Tx, input: CreateBillInput) {
     })
     .returning();
 
+  await insertBillLines(tx, input.companyId, bill.id, input.lines);
+
+  const [withTotals] = await tx.select().from(bills).where(eq(bills.id, bill.id));
+  return withTotals;
+}
+
+/**
+ * Resolves each line's account snapshot and writes the lines.
+ *
+ * Shared by create and update so the two cannot drift on what a bill line is
+ * allowed to charge, or on which account details get frozen onto it.
+ */
+async function insertBillLines(
+  tx: Tx,
+  companyId: string,
+  billId: string,
+  lines: BillLineInput[],
+) {
   let n = 0;
-  for (const line of input.lines) {
+  for (const line of lines) {
     n++;
 
     const [account] = await tx
@@ -169,8 +187,8 @@ export async function createBill(tx: Tx, input: CreateBillInput) {
     }
 
     await tx.insert(billLines).values({
-      companyId: input.companyId,
-      billId: bill.id,
+      companyId,
+      billId,
       lineNumber: n,
       description: line.description,
       productId: line.productId ?? null,
@@ -190,9 +208,78 @@ export async function createBill(tx: Tx, input: CreateBillInput) {
       assetNameAtBill: line.assetName ?? null,
     });
   }
+}
 
-  const [withTotals] = await tx.select().from(bills).where(eq(bills.id, bill.id));
-  return withTotals;
+/**
+ * Edits a draft or rejected bill.
+ *
+ * Editable exactly while nobody downstream has acted on it. A rejected bill
+ * returns to draft, and its rejection is cleared: it is being re-submitted,
+ * and leaving "rejected by Ada on the 3rd" attached to a bill that is now a
+ * draft again describes a state the bill is no longer in.
+ *
+ * THE SUPPLIER CANNOT CHANGE. Migration 0016 makes supplier_id and its
+ * snapshots immutable, on the reasoning that they record what the bill said
+ * when it was raised. The reference lets a draft be re-pointed at a different
+ * supplier; here that is refused in terms rather than left to surface as a
+ * trigger exception, and a bill raised against the wrong supplier is deleted
+ * and re-entered — which is a two-click operation on a draft.
+ *
+ * Lines are deleted and re-inserted rather than updated, which is also what
+ * makes the line-level snapshot trigger a non-issue: new rows, no UPDATE.
+ * Totals are the trigger's output, so nothing here computes one.
+ */
+export async function updateBill(
+  tx: Tx,
+  billId: string,
+  input: Omit<CreateBillInput, "companyId" | "createdById" | "createdByName" | "createdByRole">,
+) {
+  const [bill] = await tx.select().from(bills).where(eq(bills.id, billId));
+  if (!bill) throw new Error("Bill not found");
+  if (bill.status !== "draft" && bill.status !== "rejected") {
+    throw new Error(`Cannot edit a bill in ${bill.status} status`);
+  }
+  if (input.lines.length === 0) {
+    throw new Error("A bill must have at least one line");
+  }
+  if (input.supplierId && input.supplierId !== bill.supplierId) {
+    throw new Error(
+      `The supplier on bill ${bill.billNumber} cannot be changed: it records who the bill was raised against. Delete this draft and enter a new one.`,
+    );
+  }
+
+  await tx.delete(billLines).where(eq(billLines.billId, billId));
+  await insertBillLines(tx, bill.companyId, billId, input.lines);
+
+  const [updated] = await tx
+    .update(bills)
+    .set({
+      supplierInvoiceNumber: input.supplierInvoiceNumber ?? null,
+      billDate: input.billDate,
+      dueDate: input.dueDate,
+      whtApplicable: input.whtApplicable ?? false,
+      whtRate: input.whtRate ?? "0",
+      title: input.title ?? null,
+      reference: input.reference ?? null,
+      description: input.description ?? null,
+      internalNotes: input.internalNotes ?? null,
+      projectId: input.projectId ?? null,
+      projectNumberAtBill: input.projectNumber ?? null,
+      projectNameAtBill: input.projectName ?? null,
+      costCodeId: input.costCodeId ?? null,
+      costCodeAtBill: input.costCode ?? null,
+      costCodeNameAtBill: input.costCodeName ?? null,
+      status: "draft",
+      rejectedAt: null,
+      rejectedById: null,
+      rejectedByName: null,
+      rejectionReason: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(bills.id, billId))
+    .returning();
+
+  return updated;
 }
 
 /**
@@ -969,6 +1056,7 @@ export async function getBillDetail(tx: Tx, billId: string) {
   const [b] = (await tx.execute(sql`
     SELECT b.id,
            b.bill_number,
+           b.supplier_id,
            b.supplier_invoice_number,
            b.bill_date::text AS bill_date,
            b.due_date::text  AS due_date,
@@ -1122,6 +1210,8 @@ export async function getBillDetail(tx: Tx, billId: string) {
     canEdit: b.status === "draft" || b.status === "rejected",
 
     supplier: {
+      id: b.supplier_id,
+      partyId: b.supplier_id,
       name: b.supplier_name,
       email: b.supplier_email,
       phone: b.supplier_phone,
@@ -1160,4 +1250,34 @@ export async function getBillDetail(tx: Tx, billId: string) {
       amount: p.amount,
     })),
   };
+}
+
+/**
+ * Approved bills whose goods have not been admitted yet.
+ *
+ * These are the three-way-match bills: the purchase posted to GR/IR clearing
+ * (`used_grni`) and inventory has not moved (`inventory_moved = false`), so the
+ * receipt is still outstanding. The pair of columns is what approveBill writes
+ * to record which route the bill took, and reading them is what keeps "awaiting
+ * receipt" a fact about the bill rather than a status somebody has to maintain.
+ */
+export async function listBillsAwaitingGRN(tx: Tx, limit = 100) {
+  const rows = (await tx.execute(sql`
+    SELECT b.id, b.bill_number, b.bill_date::text AS bill_date,
+           b.supplier_id, b.supplier_name_at_bill, b.total::text AS total
+      FROM bills b
+     WHERE b.status = 'approved'
+       AND b.used_grni = true
+       AND b.inventory_moved = false
+     ORDER BY b.bill_date DESC, b.bill_number DESC
+     LIMIT ${Math.min(limit, 500)}
+  `)) as unknown as Array<Record<string, string>>;
+
+  return rows.map((r) => ({
+    _id: r.id,
+    billNumber: r.bill_number,
+    billDate: r.bill_date,
+    supplier: { id: r.supplier_id, partyId: r.supplier_id, name: r.supplier_name_at_bill },
+    amounts: { total: r.total },
+  }));
 }

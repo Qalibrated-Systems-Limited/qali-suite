@@ -1,10 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { withAuthorizedTenant } from "../tenant";
 import { BILL_WRITE_ROLES, BILL_APPROVE_ROLES, ADMIN_ROLES } from "@/lib/utils/role-gates";
 import * as billsRepo from "../repositories/bills";
 import * as accountsRepo from "../repositories/accounts";
+import * as partiesRepo from "../repositories/parties";
+import * as productsRepo from "../repositories/products";
+import * as paymentsRepo from "../repositories/payments";
 
 /**
  * Postgres-backed bill actions.
@@ -46,6 +50,17 @@ function toActionError(err: unknown): string {
     message.includes("Bill not found") ||
     message.includes("not in submitted status") ||
     message.includes("Only draft bills") ||
+    message.includes("Cannot edit a bill") ||
+    message.includes("cannot be changed") ||
+    message.includes("must have at least one line") ||
+    message.includes("Supplier not found") ||
+    message.includes("Account not found") ||
+    message.includes("expense or asset") ||
+    message.includes("must be approved before") ||
+    message.includes("balance_non_negative") ||
+    message.includes("already been posted") ||
+    message.includes("exceeds") ||
+    message.includes("Party not found") ||
     message.includes("already cancelled") ||
     message.includes("has been paid against it") ||
     message.includes("capitalised") ||
@@ -100,6 +115,13 @@ export async function listBillsForPage(opts: {
   };
 }
 
+/**
+ * Approved bills still awaiting a goods receipt — the GRN form's source picker.
+ */
+export async function getBillsAwaitingGRN() {
+  return withAuthorizedTenant([], (tx) => billsRepo.listBillsAwaitingGRN(tx));
+}
+
 /** The four figures the list page's cards read. */
 export async function getBillsStats() {
   return withAuthorizedTenant([], (tx) => billsRepo.getBillStats(tx));
@@ -138,8 +160,361 @@ export async function getPaymentAccounts() {
   );
 }
 
+/**
+ * Everything BillForm's pickers need, in the shapes it already expects.
+ *
+ * NOT here: fixed assets and projects. Neither module is ported (§10), and the
+ * bill keeps `project_id` / `asset_id` as deferred references with name
+ * snapshots beside them. The create page still reads those two from Mongo, and
+ * that is the honest state of it rather than something to paper over.
+ *
+ * The lists are capped by the repositories at 200. That is deliberate — an
+ * unbounded picker is a page that gets slower every month — but it means a
+ * tenant past 200 suppliers needs a searching picker rather than a longer cap.
+ */
+export async function getBillFormData() {
+  return withAuthorizedTenant([...BILL_WRITE_ROLES], async (tx) => {
+    const [suppliers, allAccounts, productList] = await Promise.all([
+      partiesRepo.listParties(tx, { role: "supplier", limit: 200 }),
+      accountsRepo.listAccounts(tx, { postableOnly: true }),
+      productsRepo.listProducts(tx, { limit: 200 }),
+    ]);
+
+    return {
+      suppliers: suppliers.map((s) => ({
+        _id: s.id,
+        name: s.name,
+        taxPin: s.taxPin ?? "",
+        email: s.email ?? "",
+        phone: s.phone ?? "",
+        address: [s.addressLine1, s.city].filter(Boolean).join(", "),
+      })),
+      // A bill line charges an expense or an asset; createBill refuses
+      // anything else, so the picker offers exactly what will be accepted.
+      accounts: allAccounts
+        .filter((a) => a.accountType === "expense" || a.accountType === "asset")
+        .map((a) => ({
+          _id: a.id,
+          accountCode: a.accountCode,
+          accountName: a.accountName,
+          accountType: a.accountType,
+          subType: a.subType ?? null,
+          // Lets the form auto-pick Inventory when a product is chosen.
+          systemAccount: a.systemAccount ?? null,
+        })),
+      products: productList.map((p) => ({
+        _id: p.id,
+        sku: p.sku,
+        name: p.name,
+        unit: p.unit ?? "pcs",
+        costPrice: p.costPrice,
+      })),
+    };
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Writes
+// Create and edit
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * BillForm submits indexed fields — `lines[0].description` — so the payload is
+ * reassembled the same way the reference does, and the form did not change.
+ */
+function parseFormData(formData: FormData) {
+  const data: Record<string, unknown> = {};
+  const lines: Array<Record<string, string>> = [];
+
+  for (const [key, value] of formData.entries()) {
+    const match = key.match(/^lines\[(\d+)\]\.(.+)$/);
+    if (match) {
+      const [, index, prop] = match;
+      const i = Number(index);
+      lines[i] = { ...(lines[i] ?? {}), [prop]: String(value) };
+    } else {
+      data[key] = String(value);
+    }
+  }
+
+  // Removing a line leaves a hole in the indices, so the array is sparse.
+  data.lines = lines.filter(Boolean);
+  return data as Record<string, unknown> & { lines: Array<Record<string, string>> };
+}
+
+const billLineSchema = z.object({
+  description: z.string().min(1, "Description is required"),
+  accountId: z.string().min(1, "Account is required"),
+  quantity: z.coerce.number().positive("Quantity must be greater than zero"),
+  unitPrice: z.coerce.number().min(0, "Unit price cannot be negative"),
+  vatRate: z.coerce.number().min(0).max(100).default(0),
+  unit: z.string().optional(),
+  productId: z.string().optional().nullable(),
+  assetId: z.string().optional().nullable(),
+});
+
+const billSchema = z.object({
+  supplierId: z.string().min(1, "Supplier is required"),
+  supplierInvoiceNumber: z.string().optional(),
+  billDate: z.string().min(1, "Bill date is required"),
+  dueDate: z.string().min(1, "Due date is required"),
+  whtApplicable: z.string().optional(),
+  whtRate: z.coerce.number().min(0).max(30).default(0),
+  title: z.string().optional(),
+  reference: z.string().optional(),
+  description: z.string().optional(),
+  internalNotes: z.string().optional(),
+  projectId: z.string().optional().nullable(),
+  lines: z.array(billLineSchema).min(1, "Add at least one line item"),
+});
+
+/** Dates arrive as ISO strings or datetime-local values; the column is a date. */
+const toDateOnly = (v: string) => String(v).slice(0, 10);
+/** Money crosses this boundary as a string and stays one. */
+const money = (n: number) => n.toFixed(4);
+
+type FormResult =
+  | { success: true; billId: string; billNumber: string; message: string }
+  | {
+      success: false;
+      error: string;
+      fieldErrors?: Record<string, string[]>;
+      values?: unknown;
+    };
+
+/**
+ * Empty string is what a cleared <select> submits, and it is not a uuid. Left
+ * as-is it reaches Postgres as `''::uuid` and fails with a type error rather
+ * than a message anyone can act on.
+ */
+const optionalId = (v: unknown) => {
+  const s = typeof v === "string" ? v.trim() : "";
+  return s ? s : null;
+};
+
+function toBillInput(data: z.infer<typeof billSchema>) {
+  return {
+    supplierId: data.supplierId,
+    supplierInvoiceNumber: data.supplierInvoiceNumber || null,
+    billDate: toDateOnly(data.billDate),
+    dueDate: toDateOnly(data.dueDate),
+    // A checkbox submits "on" when ticked and nothing at all when not; the
+    // form also sends the string "true". Both mean the same thing.
+    whtApplicable: data.whtApplicable === "true" || data.whtApplicable === "on",
+    whtRate: money(data.whtRate),
+    title: data.title || null,
+    reference: data.reference || null,
+    description: data.description || null,
+    internalNotes: data.internalNotes || null,
+    projectId: optionalId(data.projectId),
+    lines: data.lines.map((l) => ({
+      description: l.description,
+      accountId: l.accountId,
+      quantity: money(l.quantity),
+      unitPrice: money(l.unitPrice),
+      vatRate: money(l.vatRate),
+      unit: l.unit || "pcs",
+      productId: optionalId(l.productId),
+      assetId: optionalId(l.assetId),
+    })),
+  };
+}
+
+export async function createBill(
+  _prevState: unknown,
+  formData: FormData,
+): Promise<FormResult> {
+  const raw = parseFormData(formData);
+  const parsed = billSchema.safeParse(raw);
+  if (!parsed.success) {
+    const flat = parsed.error.flatten();
+    return {
+      success: false,
+      error: "Please correct the highlighted fields",
+      fieldErrors: flat.fieldErrors as Record<string, string[]>,
+      values: raw,
+    };
+  }
+
+  try {
+    const bill = await withAuthorizedTenant(
+      [...BILL_WRITE_ROLES],
+      async (tx, { user, companyId }) =>
+        billsRepo.createBill(tx, {
+          companyId,
+          ...toBillInput(parsed.data),
+          createdById: user.id,
+          createdByName: user.name,
+          createdByRole: user.role,
+        }),
+    );
+
+    revalidatePath("/dashboard/bills");
+    return {
+      success: true,
+      billId: bill.id,
+      billNumber: bill.billNumber,
+      message: `Bill ${bill.billNumber} created`,
+    };
+  } catch (err) {
+    return { success: false, error: toActionError(err), values: raw };
+  }
+}
+
+export async function updateBill(
+  billId: string,
+  _prevState: unknown,
+  formData: FormData,
+): Promise<FormResult> {
+  const raw = parseFormData(formData);
+  const parsed = billSchema.safeParse(raw);
+  if (!parsed.success) {
+    const flat = parsed.error.flatten();
+    return {
+      success: false,
+      error: "Please correct the highlighted fields",
+      fieldErrors: flat.fieldErrors as Record<string, string[]>,
+      values: raw,
+    };
+  }
+
+  try {
+    const bill = await withAuthorizedTenant([...BILL_WRITE_ROLES], (tx) =>
+      billsRepo.updateBill(tx, billId, toBillInput(parsed.data)),
+    );
+
+    revalidatePath("/dashboard/bills");
+    revalidatePath(`/dashboard/bills/${billId}`);
+    return {
+      success: true,
+      billId,
+      billNumber: bill.billNumber,
+      message: `Bill ${bill.billNumber} updated`,
+    };
+  } catch (err) {
+    return { success: false, error: toActionError(err), values: raw };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Payment
+// ─────────────────────────────────────────────────────────────────────────────
+
+const billPaymentSchema = z.object({
+  amount: z.coerce.number().positive("Amount must be greater than zero"),
+  paymentMethod: z.enum(["cash", "mpesa", "bank_transfer", "cheque", "card"], {
+    message: "Please select a payment method",
+  }),
+  accountId: z.string().min(1, "Please select a payment account"),
+  paymentDate: z.string().optional(),
+  reference: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+/**
+ * Pays a bill: creates the payment, allocates it, and posts it — one
+ * transaction, so all three happen or none does.
+ *
+ * The overpayment guard is the database's. CHECK (balance >= 0) on bills is
+ * exact, and the deferred trigger on payment_allocations enforces
+ * SUM(allocated) <= amount at COMMIT. bill-actions.js:1438 compares
+ * `amount > balance + 0.01` and lets a bill be overpaid by up to a cent (§9C).
+ * Nothing here restates either rule, because restating it is how the two
+ * copies in the reference came to disagree.
+ *
+ * The posting is NOT best-effort. If the entry cannot be written the payment
+ * does not exist either, rather than the bill showing settled against a ledger
+ * that never saw the money leave.
+ */
+export async function createBillPayment(
+  billId: string,
+  _prevState: unknown,
+  formData: FormData,
+): Promise<ActionResult & { fieldErrors?: Record<string, string> }> {
+  // formData.get() returns null for an absent field, and `.optional()` admits
+  // undefined, not null — so an omitted note failed the schema as a type error
+  // rather than being treated as omitted.
+  const field = (name: string) => formData.get(name) ?? undefined;
+  const parsed = billPaymentSchema.safeParse({
+    amount: field("amount"),
+    paymentMethod: field("paymentMethod"),
+    accountId: field("accountId"),
+    paymentDate: field("paymentDate"),
+    reference: field("reference"),
+    notes: field("notes"),
+  });
+  if (!parsed.success) {
+    const flat = parsed.error.flatten().fieldErrors;
+    const first = Object.values(flat).flat()[0];
+    return {
+      success: false,
+      error: String(first ?? "Please correct the highlighted fields"),
+      fieldErrors: Object.fromEntries(
+        Object.entries(flat).map(([k, v]) => [k, String(v?.[0] ?? "")]),
+      ),
+    };
+  }
+  const data = parsed.data;
+
+  try {
+    const result = await withAuthorizedTenant(
+      [...BILL_WRITE_ROLES],
+      async (tx, { user, companyId }) => {
+        const bill = await billsRepo.getBill(tx, billId);
+        if (!bill) throw new Error("Bill not found");
+        if (bill.status !== "approved") {
+          throw new Error("A bill must be approved before it can be paid");
+        }
+
+        const ap = await accountsRepo.getSystemAccount(tx, "accounts_payable");
+        if (!ap) {
+          throw new Error("Accounts Payable system account not configured");
+        }
+
+        const payment = await paymentsRepo.createPayment(tx, {
+          companyId,
+          paymentType: "made",
+          paymentDate: (data.paymentDate || new Date().toISOString()).slice(0, 10),
+          paymentMethod: data.paymentMethod,
+          amount: money(data.amount),
+          partyId: bill.supplierId,
+          accountId: data.accountId,
+          reference: data.reference || null,
+          description: data.notes || `Payment for bill ${bill.billNumber}`,
+          createdById: user.id,
+        });
+
+        await paymentsRepo.allocateToBill(tx, {
+          companyId,
+          paymentId: payment.id,
+          billId,
+          amount: money(data.amount),
+        });
+
+        await paymentsRepo.postPaymentMade(tx, payment.id, {
+          apAccountId: ap.id,
+          postedById: user.id,
+        });
+
+        return { payment, billNumber: bill.billNumber };
+      },
+    );
+
+    revalidatePath("/dashboard/bills");
+    revalidatePath(`/dashboard/bills/${billId}`);
+    revalidatePath("/dashboard/journal");
+    return {
+      success: true,
+      billId,
+      billNumber: result.billNumber,
+      message: `Payment ${result.payment.paymentNumber} recorded against ${result.billNumber}`,
+    };
+  } catch (err) {
+    return { success: false, error: toActionError(err) };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workflow
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function submitBill(billId: string): Promise<ActionResult> {

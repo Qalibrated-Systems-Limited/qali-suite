@@ -281,6 +281,85 @@ export async function postPaymentReceipt(
 }
 
 /**
+ * Posts a payment MADE to the ledger and moves it out of draft.
+ *
+ *     DR  Accounts Payable                 amount
+ *     CR  cash / bank / M-Pesa             amount
+ *
+ * The mirror of postPaymentReceipt, and the leg that did not exist: without it
+ * a bill payment settles the bill — amount_paid and payment_status follow the
+ * allocation by trigger — while the trial balance still shows the payable
+ * outstanding and the bank untouched. Bill and ledger disagreeing, with only
+ * the ledger being the books; the same failure §9.7 records for invoices.
+ *
+ * NO CLEARING LEG, deliberately. A receipt may be promised and not yet banked,
+ * which is what pending_clearance describes. Money leaving is the opposite
+ * case: once you have written the cheque or sent the transfer, the payable is
+ * discharged from your side. An unpresented cheque is a bank reconciliation
+ * matter, not an unposted payment, and modelling it as one would leave the
+ * payable outstanding on a bill the supplier considers settled.
+ */
+export async function postPaymentMade(
+  tx: Tx,
+  paymentId: string,
+  opts: { apAccountId: string; postedById: string },
+) {
+  const [payment] = await tx
+    .select()
+    .from(payments)
+    .where(eq(payments.id, paymentId));
+  if (!payment) throw new Error("Payment not found");
+  if (payment.paymentType !== "made") {
+    throw new Error(
+      `Payment ${payment.paymentNumber} is a receipt; post it with postPaymentReceipt`,
+    );
+  }
+  if (payment.journalEntryId) {
+    throw new Error(`Payment ${payment.paymentNumber} has already been posted`);
+  }
+
+  const entry = await createJournalEntry(tx, {
+    companyId: payment.companyId,
+    entryDate: payment.paymentDate,
+    entryType: "payment_made",
+    description: `Payment ${payment.paymentNumber} to ${payment.partyNameAtPayment}`,
+    reference: payment.paymentNumber,
+    partyType: "supplier",
+    partyId: payment.partyId,
+    sourceType: "payment",
+    sourceId: payment.id,
+    createdById: opts.postedById,
+    postImmediately: true,
+    lines: [
+      {
+        accountId: opts.apAccountId,
+        debit: payment.amount,
+        description: `Reduce payable — ${payment.partyNameAtPayment}`,
+      },
+      {
+        accountId: payment.accountId,
+        credit: payment.amount,
+        description: `Payment to ${payment.partyNameAtPayment}`,
+      },
+    ],
+  });
+
+  const [updated] = await tx
+    .update(payments)
+    .set({
+      journalEntryId: entry.id,
+      status: "confirmed",
+      confirmedAt: new Date(),
+      confirmedById: opts.postedById,
+      updatedAt: new Date(),
+    })
+    .where(eq(payments.id, paymentId))
+    .returning();
+
+  return { payment: updated, entry };
+}
+
+/**
  * Clears a receipt that was waiting on the bank: moves it out of the clearing
  * account and into the account it was actually banked into.
  *

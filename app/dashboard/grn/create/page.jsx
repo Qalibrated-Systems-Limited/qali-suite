@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   getBillById,
   getBillsAwaitingGRN,
-} from "@/app/mongodb/queries/bill-queries";
+} from "@/app/db/actions/bill-actions";
 import {
   getPurchaseOrderById,
   getOpenPurchaseOrders,
@@ -38,14 +38,17 @@ export default async function GRNCreatePage(props) {
   ]);
 
   if (fromBillId) {
-    const bill = await getBillById(fromBillId);
+    // getBillById returns { bill, error }. This destructured nothing and then
+    // read `bill.billNumber` and `bill.lines` off the WRAPPER, so every field
+    // came back undefined and `lines || []` was always empty — a bill prefill
+    // that has never prefilled anything.
+    const { bill } = await getBillById(fromBillId);
     if (bill) {
       prefill = {
         sourceType: "bill",
-        billId: bill._id?.toString?.() || bill._id,
+        billId: bill._id,
         billNumber: bill.billNumber,
-        supplierPartyId:
-          bill.supplier?.partyId?.toString?.() || bill.supplier?.partyId,
+        supplierPartyId: bill.supplier?.partyId,
         supplierName: bill.supplier?.name,
         receivedDate: new Date().toISOString().slice(0, 10),
         // Only stock-bearing lines (those tied to a product) are receivable;
@@ -53,9 +56,9 @@ export default async function GRNCreatePage(props) {
         lines: (bill.lines || [])
           .filter((l) => l.product?.id)
           .map((l) => ({
-            productId: l.product.id?.toString?.() || l.product.id,
+            productId: l.product.id,
             description: l.description || l.product.name || "",
-            sku: l.product.SKU || l.product.sku || "",
+            sku: l.product.sku || "",
             expectedQty: l.quantity || 0,
             receivedQty: l.quantity || 0,
             unit: l.unit || "pcs",

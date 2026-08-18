@@ -92,6 +92,7 @@ suite("bill actions (end to end)", () => {
       whtPayable: randomUUID(),
       inventory: randomUUID(),
       expense: randomUUID(),
+      bank: randomUUID(),
     };
 
     await admin`
@@ -112,8 +113,9 @@ suite("bill actions (end to end)", () => {
           (${accounts.inventory},  ${companyUuid}, '1300', 'Inventory',        'asset',     'inventory')
       `;
       await tx`
-        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type)
-        VALUES (${accounts.expense}, ${companyUuid}, '5100', 'Fuel', 'expense', 'operating_expense')
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type) VALUES
+          (${accounts.expense}, ${companyUuid}, '5100', 'Fuel',        'expense', 'operating_expense'),
+          (${accounts.bank},    ${companyUuid}, '1000', 'Equity Bank', 'asset',   'bank')
       `;
       await tx`
         INSERT INTO parties (id, company_id, primary_type, is_supplier, name)
@@ -284,7 +286,333 @@ suite("bill actions (end to end)", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Writes
+  // Create and edit
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /** BillForm submits indexed line fields; this builds the same payload. */
+  function billForm({ lines = [], ...fields }) {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(fields)) {
+      if (v !== undefined && v !== null) fd.set(k, String(v));
+    }
+    lines.forEach((line, i) => {
+      for (const [k, v] of Object.entries(line)) {
+        fd.set(`lines[${i}].${k}`, String(v ?? ""));
+      }
+    });
+    return fd;
+  }
+
+  const validForm = (over = {}) =>
+    billForm({
+      supplierId,
+      billDate: "2026-08-01",
+      dueDate: "2026-08-31",
+      supplierInvoiceNumber: "SUP-01",
+      lines: [
+        {
+          description: "Diesel",
+          accountId: accounts.expense,
+          quantity: 10,
+          unitPrice: 100,
+          vatRate: 16,
+          unit: "L",
+        },
+      ],
+      ...over,
+    });
+
+  describe("create", () => {
+    it("creates a draft from the form, with totals derived by trigger", async () => {
+      const result = await billActions.createBill(null, validForm());
+      expect(result.success).toBe(true);
+      expect(result.billNumber).toMatch(/^BILL-/);
+
+      const { bill } = await billActions.getBillById(result.billId);
+      expect(bill.status).toBe("draft");
+      expect(bill.supplier.name).toBe("Shell Kenya");
+      // Nothing in the action computes an amount: the trigger does.
+      expect(bill.amounts.subtotal).toBe("1000.0000");
+      expect(bill.amounts.vatTotal).toBe("160.0000");
+      expect(bill.amounts.total).toBe("1160.0000");
+      expect(bill.lines[0].unit).toBe("L");
+      // 0029: the creator, as they were named then.
+      expect(bill.createdBy).toEqual({ name: "Ada Manager", role: "Manager" });
+    });
+
+    it("applies withholding when the form ticks it", async () => {
+      const result = await billActions.createBill(
+        null,
+        validForm({ whtApplicable: "true", whtRate: 5 }),
+      );
+      expect(result.success).toBe(true);
+
+      const { bill } = await billActions.getBillById(result.billId);
+      // Withheld on the VAT-exclusive subtotal, the standard treatment (§9.8).
+      expect(bill.amounts.whtAmount).toBe("50.0000");
+      expect(bill.amounts.total).toBe("1160.0000");
+      expect(bill.amounts.netPayable).toBe("1110.0000");
+    });
+
+    it("returns field errors rather than a constraint violation", async () => {
+      const result = await billActions.createBill(
+        null,
+        billForm({ supplierId: "", billDate: "", dueDate: "", lines: [] }),
+      );
+      expect(result.success).toBe(false);
+      expect(result.fieldErrors.supplierId).toBeDefined();
+      expect(result.fieldErrors.lines).toBeDefined();
+      // The typed values come back so the form can repopulate.
+      expect(result.values).toBeDefined();
+    });
+
+    it("refuses a line charged to a revenue account", async () => {
+      const revenue = randomUUID();
+      await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        await tx`
+          INSERT INTO accounts (id, company_id, account_code, account_name, account_type)
+          VALUES (${revenue}, ${companyUuid}, '4000', 'Sales', 'revenue')
+        `;
+      });
+
+      const result = await billActions.createBill(
+        null,
+        validForm({
+          lines: [
+            {
+              description: "Wrong",
+              accountId: revenue,
+              quantity: 1,
+              unitPrice: 1,
+              vatRate: 0,
+            },
+          ],
+        }),
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/expense or asset/i);
+    });
+
+    it("refuses a role that cannot raise bills", async () => {
+      getTenantContext.mockResolvedValue({
+        user: { id: randomUUID(), name: "Store", role: "Storekeeper" },
+        companyId: mongoCompanyId,
+      });
+      const result = await billActions.createBill(null, validForm());
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/permission/i);
+    });
+  });
+
+  describe("edit", () => {
+    it("replaces the lines and re-derives the totals", async () => {
+      const created = await billActions.createBill(null, validForm());
+      const result = await billActions.updateBill(
+        created.billId,
+        null,
+        validForm({
+          lines: [
+            {
+              description: "Diesel",
+              accountId: accounts.expense,
+              quantity: 5,
+              unitPrice: 100,
+              vatRate: 16,
+            },
+            {
+              description: "Delivery",
+              accountId: accounts.expense,
+              quantity: 1,
+              unitPrice: 200,
+              vatRate: 0,
+            },
+          ],
+        }),
+      );
+      expect(result.success).toBe(true);
+
+      const { bill } = await billActions.getBillById(created.billId);
+      expect(bill.lines).toHaveLength(2);
+      expect(bill.lines.map((l) => l.lineNumber)).toEqual([1, 2]);
+      expect(bill.amounts.subtotal).toBe("700.0000");
+      expect(bill.amounts.vatTotal).toBe("80.0000");
+    });
+
+    it("returns a rejected bill to draft and clears the rejection", async () => {
+      const created = await billActions.createBill(null, validForm());
+      await withTenant(companyUuid, (tx) =>
+        billRepo.submitBill(tx, created.billId, randomUUID()),
+      );
+      const fd = new FormData();
+      fd.set("reason", "Wrong amount");
+      await billActions.rejectBill(created.billId, null, fd);
+
+      const result = await billActions.updateBill(created.billId, null, validForm());
+      expect(result.success).toBe(true);
+
+      const { bill } = await billActions.getBillById(created.billId);
+      expect(bill.status).toBe("draft");
+      // Leaving "rejected by Ada" on a bill that is a draft again describes a
+      // state it is no longer in.
+      expect(bill.rejectionReason).toBeNull();
+      expect(bill.rejectedBy).toBeNull();
+    });
+
+    it("refuses to change the supplier, in terms", async () => {
+      const other = randomUUID();
+      await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        await tx`
+          INSERT INTO parties (id, company_id, primary_type, is_supplier, name)
+          VALUES (${other}, ${companyUuid}, 'supplier', true, 'Total Kenya')
+        `;
+      });
+      const created = await billActions.createBill(null, validForm());
+
+      const result = await billActions.updateBill(
+        created.billId,
+        null,
+        validForm({ supplierId: other }),
+      );
+      // 0016 makes the supplier snapshot immutable; the action says so rather
+      // than letting a trigger exception reach the user.
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/supplier .* cannot be changed/i);
+    });
+
+    it("refuses to edit an approved bill", async () => {
+      const created = await billActions.createBill(null, validForm());
+      await withTenant(companyUuid, async (tx) => {
+        await billRepo.submitBill(tx, created.billId, randomUUID());
+        await billRepo.approveBill(tx, created.billId, {
+          apAccountId: accounts.ap,
+          vatInputAccountId: accounts.vatInput,
+          approvedById: approver,
+        });
+      });
+
+      const result = await billActions.updateBill(created.billId, null, validForm());
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/Cannot edit a bill in approved status/);
+    });
+  });
+
+  describe("payment", () => {
+    async function approvedBill(over = {}) {
+      const created = await billActions.createBill(null, validForm(over));
+      await withTenant(companyUuid, async (tx) => {
+        await billRepo.submitBill(tx, created.billId, randomUUID());
+        await billRepo.approveBill(tx, created.billId, {
+          apAccountId: accounts.ap,
+          vatInputAccountId: accounts.vatInput,
+          approvedById: approver,
+        });
+      });
+      return created.billId;
+    }
+
+    function paymentForm(over = {}) {
+      const fd = new FormData();
+      fd.set("amount", "500");
+      fd.set("paymentMethod", "bank_transfer");
+      fd.set("accountId", accounts.bank);
+      fd.set("paymentDate", "2026-08-20");
+      fd.set("reference", "EFT-1");
+      for (const [k, v] of Object.entries(over)) fd.set(k, String(v));
+      return fd;
+    }
+
+    it("records, allocates and POSTS the payment in one transaction", async () => {
+      const billId = await approvedBill();
+      const result = await billActions.createBillPayment(billId, null, paymentForm());
+      expect(result.success).toBe(true);
+      expect(result.message).toMatch(/^Payment PMT-/);
+
+      const { bill } = await billActions.getBillById(billId);
+      expect(bill.amounts.paid).toBe("500.0000");
+      expect(bill.amounts.balance).toBe("660.0000");
+      expect(bill.paymentStatus).toBe("partial");
+      expect(bill.payments).toHaveLength(1);
+
+      // The leg that did not exist: DR Accounts Payable, CR bank. Without it
+      // the bill settles while the trial balance still shows the payable.
+      const lines = await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        return tx`
+          SELECT a.account_code, l.debit::text AS dr, l.credit::text AS cr
+            FROM journal_lines l
+            JOIN journal_entries e ON e.id = l.entry_id
+            JOIN accounts a ON a.id = l.account_id
+           WHERE e.entry_type = 'payment_made'
+           ORDER BY a.account_code
+        `;
+      });
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toMatchObject({ account_code: "1000", dr: "0.0000", cr: "500.0000" });
+      expect(lines[1]).toMatchObject({ account_code: "2000", dr: "500.0000", cr: "0.0000" });
+    });
+
+    it("settles the bill exactly when paid in full", async () => {
+      const billId = await approvedBill();
+      const result = await billActions.createBillPayment(
+        billId,
+        null,
+        paymentForm({ amount: "1160" }),
+      );
+      expect(result.success).toBe(true);
+
+      const { bill } = await billActions.getBillById(billId);
+      expect(bill.amounts.balance).toBe("0.0000");
+      expect(bill.paymentStatus).toBe("paid");
+    });
+
+    it("refuses to overpay, to the cent", async () => {
+      const billId = await approvedBill();
+      // bill-actions.js:1438 guards with `amount > balance + 0.01`, so this
+      // would be allowed there. CHECK (balance >= 0) is exact.
+      const result = await billActions.createBillPayment(
+        billId,
+        null,
+        paymentForm({ amount: "1160.01" }),
+      );
+      expect(result.success).toBe(false);
+
+      const { bill } = await billActions.getBillById(billId);
+      expect(bill.amounts.paid).toBe("0.0000");
+      // And no orphan payment: the whole thing is one transaction.
+      const pays = await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        return tx`SELECT 1 FROM payments`;
+      });
+      expect(pays).toHaveLength(0);
+    });
+
+    it("refuses to pay a bill that has not been approved", async () => {
+      const created = await billActions.createBill(null, validForm());
+      const result = await billActions.createBillPayment(
+        created.billId,
+        null,
+        paymentForm(),
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/must be approved before/i);
+    });
+
+    it("returns a field error for a missing amount", async () => {
+      const billId = await approvedBill();
+      const result = await billActions.createBillPayment(
+        billId,
+        null,
+        paymentForm({ amount: "0" }),
+      );
+      expect(result.success).toBe(false);
+      expect(result.fieldErrors.amount).toMatch(/greater than zero/i);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Workflow
   // ───────────────────────────────────────────────────────────────────────────
 
   describe("submit and approve", () => {
@@ -488,6 +816,58 @@ suite("bill actions (end to end)", () => {
 
       const { bill: detail } = await billActions.getBillById(bill.id);
       expect(detail.createdBy).toEqual({ name: "Ada Manager", role: "Manager" });
+    });
+
+    it("lists only approved bills still awaiting a goods receipt", async () => {
+      // Approved the ordinary way: goods admitted, nothing outstanding.
+      const direct = await makeBill();
+      await withTenant(companyUuid, async (tx) => {
+        await billRepo.submitBill(tx, direct.id, randomUUID());
+        await billRepo.approveBill(tx, direct.id, {
+          apAccountId: accounts.ap,
+          approvedById: approver,
+        });
+      });
+
+      // Three-way match: the purchase posted to GR/IR and the goods have not
+      // arrived, so this one is awaiting receipt.
+      const grni = randomUUID();
+      const grniBill = await makeBill({
+        lines: [
+          {
+            description: "Cement",
+            accountId: accounts.inventory,
+            quantity: "10",
+            unitPrice: "100.0000",
+            vatRate: "0",
+            productId: null,
+          },
+        ],
+      });
+      await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        await tx`
+          INSERT INTO accounts (id, company_id, account_code, account_name, account_type)
+          VALUES (${grni}, ${companyUuid}, '2400', 'GR/IR Clearing', 'liability')
+        `;
+        await tx`
+          UPDATE bills SET status = 'approved', used_grni = true,
+                           inventory_moved = false
+           WHERE id = ${grniBill.id}
+        `;
+      });
+
+      const awaiting = await billActions.getBillsAwaitingGRN();
+      expect(awaiting.map((b) => b._id)).toEqual([grniBill.id]);
+      expect(awaiting[0].supplier.partyId).toBe(supplierId);
+    });
+
+    it("gives the GRN prefill a supplier id to work from", async () => {
+      const bill = await makeBill();
+      const { bill: detail } = await billActions.getBillById(bill.id);
+      // The GRN page reads bill.supplier.partyId and bill.lines[].product.id.
+      expect(detail.supplier.partyId).toBe(supplierId);
+      expect(detail.supplier.name).toBe("Shell Kenya");
     });
 
     it("reads a bill in another tenant as absent, not forbidden", async () => {
