@@ -361,6 +361,107 @@ suite("invoice actions (end to end)", () => {
     expect(rows.je.n).toBeGreaterThan(0);
   });
 
+  it("cancels a draft and gives back the reserved stock", async () => {
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 4, sellingPrice: 100 }],
+      }),
+    );
+
+    const cancelled = await invoiceActions.cancelInvoicePg(created.invoiceId, "Duplicate");
+    expect(cancelled.success).toBe(true);
+
+    const [p] = await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      return tx`SELECT quantity_committed::text AS c, quantity_on_hand::text AS h FROM products WHERE id = ${widgetId}`;
+    });
+    // The reservation is released; nothing physically moved, so on-hand stands.
+    expect(p.c).toBe("0.0000");
+    expect(p.h).toBe("100.0000");
+  });
+
+  it("refuses to cancel a completed invoice and points at a credit note", async () => {
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 1, sellingPrice: 100 }],
+      }),
+    );
+    await invoiceActions.completeInvoicePg(created.invoiceId);
+
+    const result = await invoiceActions.cancelInvoicePg(created.invoiceId, "Oops");
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/credit note/i);
+  });
+
+  it("records a payment, and the invoice settles itself", async () => {
+    const [bank] = await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      return tx`SELECT id FROM accounts WHERE account_code = '1200'`;
+    });
+
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 2, sellingPrice: 100 }],
+      }),
+    );
+    await invoiceActions.completeInvoicePg(created.invoiceId);
+
+    const fd = new FormData();
+    fd.set("amount", "120.0000");
+    fd.set("accountId", bank.id);
+    fd.set("paymentMethod", "mpesa");
+    fd.set("paymentDate", "2026-08-02");
+    const paid = await invoiceActions.recordInvoicePaymentPg(created.invoiceId, null, fd);
+    expect(paid.success).toBe(true);
+
+    const inv = await invoiceActions.getInvoiceDetailPg(created.invoiceId);
+    // Nothing in the action updated these: the allocation trigger did (0017).
+    expect(inv.amountPaid).toBe("120.0000");
+    expect(inv.amountDue).toBe("80.0000");
+    expect(inv.paymentStatus).toBe("partial");
+  });
+
+  it("names an over-payment rather than rounding it down to paid", async () => {
+    const [bank] = await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      return tx`SELECT id FROM accounts WHERE account_code = '1200'`;
+    });
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 1, sellingPrice: 100 }],
+      }),
+    );
+    await invoiceActions.completeInvoicePg(created.invoiceId);
+
+    const fd = new FormData();
+    fd.set("amount", "100.0100");
+    fd.set("accountId", bank.id);
+    const result = await invoiceActions.recordInvoicePaymentPg(created.invoiceId, null, fd);
+
+    // Deliberately ALLOWED, unlike a bill. A customer can genuinely overpay —
+    // a deposit, a rounded-up transfer — so bills carry CHECK (balance >= 0)
+    // and invoices do not. 0017 added the 'overpaid' state for exactly this:
+    // surfacing the cent beats collapsing it to 'paid' as Mongo did.
+    expect(result.success).toBe(true);
+
+    const inv = await invoiceActions.getInvoiceDetailPg(created.invoiceId);
+    expect(inv.amountPaid).toBe("100.0100");
+    expect(inv.amountDue).toBe("-0.0100");
+    expect(inv.paymentStatus).toBe("overpaid");
+  });
+
   it("surfaces a missing system account instead of a generic failure", async () => {
     await admin.begin(async (tx) => {
       await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;

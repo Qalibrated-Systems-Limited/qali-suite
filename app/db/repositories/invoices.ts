@@ -8,7 +8,7 @@ import {
   parties,
 } from "../schema";
 import { createJournalEntry } from "./journal";
-import { issueStock, commitStock } from "./products";
+import { issueStock, commitStock, releaseStock } from "./products";
 import { recordMovement } from "./stockMovements";
 import { recordInvoiceVatOutput } from "./taxTransactions";
 
@@ -472,6 +472,65 @@ export async function completeInvoice(
  * names, because that is what the existing page reads — matching the shape is
  * what lets the data source change without rewriting the markup.
  */
+/**
+ * Cancels a draft or sent invoice, releasing the stock it had reserved.
+ *
+ * A COMPLETED invoice cannot be cancelled — it has posted revenue, COGS and
+ * tax, and unwinding those silently would rewrite a period that may be closed.
+ * The correction for a posted invoice is a credit note, which is why credit
+ * notes exist. This mirrors app/mongodb/invoice-actions.js:1342 exactly.
+ *
+ * Only product lines fulfilled from inventory reserved anything: a service
+ * holds no stock, and a line fulfilled from a technician's stock or the
+ * weighbridge was never committed here.
+ */
+export async function cancelInvoice(
+  tx: Tx,
+  invoiceId: string,
+  cancelledById: string,
+  reason?: string,
+) {
+  const [invoice] = await tx
+    .select()
+    .from(invoices)
+    .where(eq(invoices.id, invoiceId));
+
+  if (!invoice) throw new Error("Invoice not found");
+  if (invoice.status === "cancelled") {
+    throw new Error("Invoice is already cancelled");
+  }
+  if (invoice.status !== "draft" && invoice.status !== "sent") {
+    throw new Error(
+      "Only draft or sent invoices can be cancelled. Raise a credit note for a completed invoice.",
+    );
+  }
+
+  const lines = await tx
+    .select()
+    .from(invoiceLines)
+    .where(eq(invoiceLines.invoiceId, invoiceId));
+
+  for (const line of lines) {
+    if (line.itemType !== "product" || !line.productId) continue;
+    if (line.fulfilmentSource !== "inventory") continue;
+    await releaseStock(tx, line.productId, line.quantity);
+  }
+
+  const [updated] = await tx
+    .update(invoices)
+    .set({
+      status: "cancelled",
+      cancelledAt: new Date(),
+      cancelledById,
+      notes: reason ? `${invoice.notes ?? ""}\nCancelled: ${reason}`.trim() : invoice.notes,
+      updatedAt: new Date(),
+    })
+    .where(eq(invoices.id, invoiceId))
+    .returning();
+
+  return updated;
+}
+
 export async function getInvoiceDetail(tx: Tx, invoiceId: string) {
   const [inv] = (await tx.execute(sql`
     SELECT i.id,
@@ -485,6 +544,7 @@ export async function getInvoiceDetail(tx: Tx, invoiceId: string) {
            i.tax_amount::text      AS tax_amount,
            i.total::text           AS total,
            i.amount_paid::text     AS amount_paid,
+           (i.total - i.amount_paid)::text AS amount_due,
            i.currency,
            i.title,
            i.notes,
@@ -537,6 +597,8 @@ export async function getInvoiceDetail(tx: Tx, invoiceId: string) {
     taxAmount: inv.tax_amount,
     total: inv.total,
     amountPaid: inv.amount_paid,
+    // Derived, never stored — a difference that is kept can drift (§8.4).
+    amountDue: inv.amount_due,
     currency: inv.currency,
     title: inv.title,
     notes: inv.notes,

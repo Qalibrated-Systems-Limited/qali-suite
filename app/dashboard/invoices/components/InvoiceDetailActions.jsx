@@ -25,7 +25,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { cancelInvoice, completeInvoice } from "@/app/mongodb/invoice-actions";
+import {
+  cancelInvoicePg as cancelInvoice,
+  completeInvoicePg as completeInvoice,
+} from "@/app/db/actions/invoice-actions";
 import { InvoicePaymentDialog } from "./InvoicePaymentDialog";
 import { IssueCreditNoteDialog } from "./IssueCreditNoteDialog";
 import { toast } from "sonner";

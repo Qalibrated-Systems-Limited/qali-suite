@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { InvoicePrintDialog } from "./invoicePrintDialog";
 import { InvoicePaymentDialog } from "./InvoicePaymentDialog";
-import { completeInvoice } from "@/app/mongodb/invoice-actions";
+import { completeInvoicePg as completeInvoice } from "@/app/db/actions/invoice-actions";
 import { toast } from "sonner";
 
 // Post Invoice Button with form wrapper and error handling

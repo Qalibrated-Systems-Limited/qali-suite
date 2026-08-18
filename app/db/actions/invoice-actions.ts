@@ -6,6 +6,7 @@ import { withAuthorizedTenant } from "../tenant";
 import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import * as invoices from "../repositories/invoices";
 import * as accountsRepo from "../repositories/accounts";
+import * as payments from "../repositories/payments";
 
 /**
  * Postgres-backed invoice actions.
@@ -114,7 +115,10 @@ function toActionError(err: unknown): string {
     message.includes("quantity_available") ||
     message.includes("not found, or not in draft") ||
     message.includes("permission") ||
-    message.includes("Not authenticated")
+    message.includes("Not authenticated") ||
+    message.includes("credit note") ||
+    message.includes("over-allocated") ||
+    message.includes("already cancelled")
   ) {
     return message;
   }
@@ -255,6 +259,114 @@ export async function completeInvoicePg(
 }
 
 /** Filtered, paginated list for the invoices page. */
+/**
+ * Cancels a draft or sent invoice. A completed one needs a credit note — the
+ * repository refuses it and the message says so.
+ */
+export async function cancelInvoicePg(
+  invoiceId: string,
+  reason = "",
+): Promise<ActionResult> {
+  try {
+    const invoice = await withAuthorizedTenant(
+      [...INVOICE_WRITE_ROLES],
+      (tx, { user }) =>
+        invoices.cancelInvoice(tx, invoiceId, user.id, reason),
+    );
+    revalidatePath("/dashboard/invoices");
+    revalidatePath(`/dashboard/invoices/${invoiceId}`);
+    return {
+      success: true,
+      invoiceId,
+      invoiceNumber: invoice.invoiceNumber,
+      message: `Invoice ${invoice.invoiceNumber} cancelled`,
+    };
+  } catch (err) {
+    return { success: false, error: toActionError(err) };
+  }
+}
+
+const paymentSchema = z.object({
+  amount: z.string().regex(MONEY, "Enter a valid amount"),
+  accountId: z.string().uuid("Choose an account to receive the payment into"),
+  paymentMethod: z
+    .enum(["cash", "mpesa", "bank_transfer", "cheque", "card"])
+    .default("cash"),
+  paymentDate: z.string().optional(),
+  reference: z.string().optional(),
+});
+
+/**
+ * Records a payment against an invoice: one payment, allocated to it.
+ *
+ * amount_paid and payment_status follow from the allocation by trigger
+ * (migration 0017) — nothing here updates the invoice, and over-payment is
+ * refused by the database rather than checked with a tolerance.
+ */
+export async function recordInvoicePaymentPg(
+  invoiceId: string,
+  _prevState: unknown,
+  formData: FormData,
+): Promise<ActionResult> {
+  const parsed = paymentSchema.safeParse({
+    amount: formData.get("amount"),
+    accountId: formData.get("accountId"),
+    paymentMethod: formData.get("paymentMethod") || undefined,
+    paymentDate: formData.get("paymentDate") || undefined,
+    reference: formData.get("reference") || undefined,
+  });
+
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: "Validation failed",
+      fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]>,
+    };
+  }
+  const d = parsed.data;
+
+  try {
+    const result = await withAuthorizedTenant(
+      [...INVOICE_WRITE_ROLES],
+      async (tx, { user, companyId }) => {
+        const invoice = await invoices.getInvoice(tx, invoiceId);
+        if (!invoice) throw new Error("Invoice not found");
+
+        const payment = await payments.createPayment(tx, {
+          companyId,
+          paymentType: "received",
+          paymentDate: d.paymentDate ?? new Date().toISOString().slice(0, 10),
+          paymentMethod: d.paymentMethod,
+          amount: d.amount,
+          partyId: invoice.customerId,
+          accountId: d.accountId,
+          reference: d.reference ?? null,
+          createdById: user.id,
+        });
+
+        await payments.allocateToInvoice(tx, {
+          companyId,
+          paymentId: payment.id,
+          invoiceId,
+          amount: d.amount,
+        });
+
+        return payment;
+      },
+    );
+
+    revalidatePath("/dashboard/invoices");
+    revalidatePath(`/dashboard/invoices/${invoiceId}`);
+    return {
+      success: true,
+      invoiceId,
+      message: `Payment ${result.paymentNumber} recorded`,
+    };
+  } catch (err) {
+    return { success: false, error: toActionError(err) };
+  }
+}
+
 export async function searchInvoicesPg(opts: {
   query?: string;
   page?: number;

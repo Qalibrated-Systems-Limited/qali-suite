@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { createInvoicePayment } from "@/app/mongodb/invoice-actions";
+import { recordInvoicePaymentPg as createInvoicePayment } from "@/app/db/actions/invoice-actions";
 
 const PAYMENT_METHODS = [
   { value: "bank_transfer", label: "Bank Transfer" },
