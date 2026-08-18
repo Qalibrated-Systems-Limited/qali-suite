@@ -82,6 +82,9 @@ export interface CreateInvoiceInput {
   createdByRole?: string | null;
 }
 
+/** True for "0", "0.0000" and friends, without going through Number(). */
+const isZeroMoney = (v: string | null) => v === null || /^-?0(\.0*)?$/.test(v);
+
 /** Exact decimal arithmetic on money strings, via Postgres rather than JS. */
 async function sumNumeric(tx: Tx, values: string[]): Promise<string> {
   if (values.length === 0) return "0.0000";
@@ -132,7 +135,7 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
     // Tax and the line total are computed in Postgres, in exact decimal. The
     // form multiplies rate by amount in float64 and would hand us the drift
     // this migration exists to remove.
-    const [{ tax_amount, line_total }] = (await tx.execute(sql`
+    const [{ tax_amount, line_total, net_amount }] = (await tx.execute(sql`
       WITH t AS (
         SELECT ${line.quantity}::numeric(19,4)  AS qty,
                ${line.unitPrice}::numeric(19,4) AS price,
@@ -141,6 +144,7 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
                ${line.taxRate ?? null}::numeric(9,4)        AS tax_rate
       )
       SELECT tax.amount::text AS tax_amount,
+             (t.qty * t.price - t.disc)::numeric(19,4)::text AS net_amount,
              (t.qty * t.price - t.disc + tax.amount)::numeric(19,4)::text AS line_total
         FROM t,
              LATERAL (
@@ -150,25 +154,31 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
                  0
                ) AS amount
              ) AS tax
-    `)) as unknown as Array<{ tax_amount: string; line_total: string }>;
+    `)) as unknown as Array<{ tax_amount: string; line_total: string; net_amount: string }>;
 
     resolved.push({
       ...line,
       itemType,
       taxAmount: tax_amount,
+      netAmount: net_amount,
       unitCost: line.unitCost ?? product?.costPrice ?? "0",
       lineTotal: line_total,
     });
   }
 
+  // subtotal is NET of tax. It used to sum line_total — which is net PLUS tax —
+  // so the invoice's own subtotal was the gross, and completeInvoice then
+  // credited revenue with it. Revenue overstated by the tax, and the VAT
+  // liability never raised.
   const subtotal = await sumNumeric(
     tx,
-    resolved.map((r) => r.lineTotal),
+    resolved.map((r) => r.netAmount),
   );
   const taxTotal = await sumNumeric(
     tx,
     resolved.map((r) => r.taxAmount ?? "0"),
   );
+  const total = await sumNumeric(tx, [subtotal, taxTotal]);
 
   const [invoice] = await tx
     .insert(invoices)
@@ -182,7 +192,7 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
       notes: input.notes ?? null,
       subtotal,
       taxAmount: taxTotal,
-      total: subtotal,
+      total,
       status: "draft",
       createdById: input.createdById ?? null,
       createdByName: input.createdByName ?? null,
@@ -388,9 +398,37 @@ export async function completeInvoice(
     sourceId: invoice.id,
     createdById: opts.completedById,
     postImmediately: true,
+    // Three lines, not two. Crediting revenue with the gross overstates income
+    // by the tax and leaves the liability to the revenue authority unrecorded —
+    // the money is collected on their behalf, not earned. Mongo splits it
+    // (invoice.js:1004, "Revenue journal entry (AR / Revenue / VAT Output)").
     lines: [
-      { accountId: opts.arAccountId, debit: invoice.total },
-      { accountId: opts.revenueAccountId, credit: invoice.total },
+      {
+        accountId: opts.arAccountId,
+        debit: invoice.total,
+        description: `Sale — invoice ${invoice.invoiceNumber}`,
+      },
+      {
+        accountId: opts.revenueAccountId,
+        credit: invoice.subtotal,
+        description: "Sales revenue",
+      },
+      ...(isZeroMoney(invoice.taxAmount)
+        ? []
+        : [
+            {
+              accountId: (() => {
+                if (!opts.vatOutputAccountId) {
+                  throw new Error(
+                    "Invoice carries tax but the VAT Output system account is not configured",
+                  );
+                }
+                return opts.vatOutputAccountId;
+              })(),
+              credit: invoice.taxAmount,
+              description: "VAT Output on sales",
+            },
+          ]),
     ],
   });
 

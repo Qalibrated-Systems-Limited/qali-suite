@@ -626,6 +626,75 @@ suite("invoice actions (end to end)", () => {
     expect(led.postingEntryId).toBe(led.cogsEntryId);
   });
 
+  it("splits net revenue from the tax it collected on behalf of KRA", async () => {
+    const vatId = randomUUID();
+    await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      await tx`UPDATE accounts SET system_account = NULL WHERE account_code = '2300'`;
+      await tx`
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, system_account)
+        VALUES (${vatId}, ${companyUuid}, '2310', 'VAT Output', 'liability', 'vat_output')
+      `;
+    });
+
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [
+          { productId: widgetId, quantity: 10, sellingPrice: 100, taxRate: 16 },
+        ],
+      }),
+    );
+
+    const inv = await invoiceActions.getInvoiceDetailPg(created.invoiceId);
+    // subtotal is NET. It used to sum line_total, which is net PLUS tax, so
+    // the invoice's own subtotal was the gross.
+    expect(inv.subtotal).toBe("1000.0000");
+    expect(inv.taxAmount).toBe("160.0000");
+    expect(inv.total).toBe("1160.0000");
+
+    await invoiceActions.completeInvoicePg(created.invoiceId);
+
+    const led = await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      const bal = async (code) =>
+        (
+          await tx`SELECT COALESCE(SUM(l.debit - l.credit), 0)::text AS b
+                     FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+                    WHERE a.account_code = ${code}`
+        )[0].b;
+      return { ar: await bal("1200"), sales: await bal("4000"), vat: await bal("2310") };
+    });
+
+    expect(led.ar).toBe("1160.0000");
+    // Revenue is what was earned; the tax was collected for someone else.
+    expect(led.sales).toBe("-1000.0000");
+    expect(led.vat).toBe("-160.0000");
+  });
+
+  it("refuses to complete a taxed invoice with no VAT Output account", async () => {
+    await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      await tx`UPDATE accounts SET system_account = NULL WHERE account_code = '2300'`;
+    });
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [
+          { productId: widgetId, quantity: 1, sellingPrice: 100, taxRate: 16 },
+        ],
+      }),
+    );
+    const done = await invoiceActions.completeInvoicePg(created.invoiceId);
+    // Better to refuse than to bury the tax in revenue.
+    expect(done.success).toBe(false);
+    expect(done.error).toMatch(/VAT Output/i);
+  });
+
   it("does not cost a service, which has none", async () => {
     const created = await invoiceActions.createInvoicePg(
       null,
