@@ -45,6 +45,8 @@ suite("invoice actions (end to end)", () => {
   let customerId;
   let widgetId;
   let bankId;
+  let cogsId;
+  let inventoryId;
 
   beforeAll(async () => {
     admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
@@ -67,6 +69,8 @@ suite("invoice actions (end to end)", () => {
     const revenue = randomUUID();
     const vat = randomUUID();
     bankId = randomUUID();
+    cogsId = randomUUID();
+    inventoryId = randomUUID();
 
     await admin`
       INSERT INTO companies (id, name, slug)
@@ -89,6 +93,11 @@ suite("invoice actions (end to end)", () => {
       await tx`
         INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type)
         VALUES (${bankId}, ${companyUuid}, '1000', 'Equity Bank', 'asset', 'bank')
+      `;
+      await tx`
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, system_account) VALUES
+          (${cogsId},      ${companyUuid}, '5000', 'Cost of Goods Sold', 'expense', 'cogs'),
+          (${inventoryId}, ${companyUuid}, '1300', 'Inventory',          'asset',   'inventory')
       `;
       await tx`
         INSERT INTO parties (id, company_id, primary_type, is_customer, name)
@@ -577,6 +586,69 @@ suite("invoice actions (end to end)", () => {
     expect(inv.amountPaid).toBe("100.0100");
     expect(inv.amountDue).toBe("-0.0100");
     expect(inv.paymentStatus).toBe("overpaid");
+  });
+
+  it("posts cost of sales, moving the value off the balance sheet", async () => {
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 10, sellingPrice: 250 }],
+      }),
+    );
+    await invoiceActions.completeInvoicePg(created.invoiceId);
+
+    const led = await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      const bal = async (id) =>
+        (
+          await tx`SELECT COALESCE(SUM(l.debit - l.credit), 0)::text AS b
+                     FROM journal_lines l WHERE l.account_id = ${id}`
+        )[0].b;
+      const [inv] = await tx`SELECT cogs_entry_id FROM invoices WHERE id = ${created.invoiceId}`;
+      const [cp] = await tx`SELECT journal_entry_id FROM cogs_postings`;
+      return {
+        cogs: await bal(cogsId),
+        inventory: await bal(inventoryId),
+        cogsEntryId: inv.cogs_entry_id,
+        postingEntryId: cp.journal_entry_id,
+      };
+    });
+
+    // 10 x 40. Previously both of these were 0 while the stock had left and
+    // cogs_postings already held 400 — gross profit overstated by the whole
+    // cost of the sale, inventory overstated by the same.
+    expect(led.cogs).toBe("400.0000");
+    expect(led.inventory).toBe("-400.0000");
+    expect(led.cogsEntryId).not.toBeNull();
+    // The posting belongs to the entry that actually moved the cost.
+    expect(led.postingEntryId).toBe(led.cogsEntryId);
+  });
+
+  it("does not cost a service, which has none", async () => {
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        serviceItems: [
+          { name: "Advisory", serviceCategory: "consultation", quantity: 1, unitPrice: 1000 },
+        ],
+      }),
+    );
+    await invoiceActions.completeInvoicePg(created.invoiceId);
+
+    const led = await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      const [inv] = await tx`SELECT cogs_entry_id FROM invoices WHERE id = ${created.invoiceId}`;
+      const [c] = await tx`SELECT COALESCE(SUM(l.debit - l.credit), 0)::text AS b
+                             FROM journal_lines l WHERE l.account_id = ${cogsId}`;
+      return { cogsEntryId: inv.cogs_entry_id, cogs: c.b };
+    });
+    // No cost, so no entry at all rather than an empty one.
+    expect(led.cogsEntryId).toBeNull();
+    expect(Number(led.cogs)).toBe(0);
   });
 
   it("surfaces a missing system account instead of a generic failure", async () => {

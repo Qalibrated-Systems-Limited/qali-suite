@@ -235,11 +235,22 @@ export async function completeInvoicePg(
           );
         }
         const vatOutput = await accountsRepo.getSystemAccount(tx, "vat_output");
+        // Cost of sales. Without cogs + inventory the stock leaves and its
+        // value never comes off the balance sheet (0027).
+        const cogs = await accountsRepo.getSystemAccount(tx, "cogs");
+        const inventory = await accountsRepo.getSystemAccount(tx, "inventory");
+        const technicianStock = await accountsRepo.getSystemAccount(
+          tx,
+          "technician_stock",
+        );
 
         return invoices.completeInvoice(tx, invoiceId, {
           arAccountId: ar.id,
           revenueAccountId: revenue.id,
           vatOutputAccountId: vatOutput?.id ?? null,
+          cogsAccountId: cogs?.id ?? null,
+          inventoryAccountId: inventory?.id ?? null,
+          technicianStockAccountId: technicianStock?.id ?? null,
           completedById: user.id,
         });
       },

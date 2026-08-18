@@ -346,6 +346,15 @@ export async function completeInvoice(
      */
     vatOutputAccountId?: string | null;
     vatRate?: string;
+    /**
+     * Cost of sales. Supply these and the completion posts
+     * DR COGS / CR Inventory (and/or Technician Stock) alongside revenue.
+     * Without them the stock leaves and its value never comes off the balance
+     * sheet — see migration 0027.
+     */
+    cogsAccountId?: string | null;
+    inventoryAccountId?: string | null;
+    technicianStockAccountId?: string | null;
   },
 ) {
   const [invoice] = await tx
@@ -435,6 +444,93 @@ export async function completeInvoice(
     if (!posting) cogsSkipped.push(line.id);
   }
 
+  // ── Cost of sales: DR COGS / CR wherever the stock came from ────────────
+  //
+  // §8.1 is the whole reason fulfilment_source is mandatory and single-valued:
+  // it decides which account COGS credits. Goods sold from the warehouse credit
+  // Inventory; goods sold out of a technician's van credit Technician Stock.
+  // A weighbridge line is skipped entirely — the gate already posted DR COGS /
+  // CR Inventory when the truck crossed the scale, and posting again would
+  // double the cost.
+  let cogsEntryId: string | null = null;
+  if (opts.cogsAccountId) {
+    let fromInventory = "0";
+    let fromTechnicianStock = "0";
+
+    for (const line of lines) {
+      if (line.itemType !== "product") continue; // a service has no cost
+      if (line.fulfilmentSource === "weighbridge") continue; // costed at the gate
+      if (cogsSkipped.includes(line.id)) continue; // someone else costed it
+
+      const [{ cost }] = (await tx.execute(sql`
+        SELECT (${line.quantity}::numeric(19,4) * ${line.unitCost}::numeric(19,4))::numeric(19,4) AS cost
+      `)) as unknown as Array<{ cost: string }>;
+
+      if (line.fulfilmentSource === "inventory") {
+        fromInventory = await sumNumeric(tx, [fromInventory, cost]);
+      } else {
+        fromTechnicianStock = await sumNumeric(tx, [fromTechnicianStock, cost]);
+      }
+    }
+
+    const total = await sumNumeric(tx, [fromInventory, fromTechnicianStock]);
+
+    if (Number(total) > 0) {
+      const creditLines = [];
+      if (Number(fromInventory) > 0) {
+        if (!opts.inventoryAccountId) {
+          throw new Error("Inventory system account not configured");
+        }
+        creditLines.push({
+          accountId: opts.inventoryAccountId,
+          credit: fromInventory,
+          description: "From inventory (direct sales)",
+        });
+      }
+      if (Number(fromTechnicianStock) > 0) {
+        if (!opts.technicianStockAccountId) {
+          throw new Error("Technician Stock system account not configured");
+        }
+        creditLines.push({
+          accountId: opts.technicianStockAccountId,
+          credit: fromTechnicianStock,
+          description: "From technician stock",
+        });
+      }
+
+      const cogsEntry = await createJournalEntry(tx, {
+        companyId: invoice.companyId,
+        entryDate: invoice.invoiceDate,
+        entryType: "sale",
+        description: `Cost of sales — Invoice ${invoice.invoiceNumber}`,
+        reference: invoice.invoiceNumber,
+        sourceType: "invoice",
+        sourceId: invoice.id,
+        createdById: opts.completedById,
+        postImmediately: true,
+        lines: [
+          {
+            accountId: opts.cogsAccountId,
+            debit: total,
+            description: "Cost of goods sold",
+          },
+          ...creditLines,
+        ],
+      });
+      cogsEntryId = cogsEntry.id;
+
+      // The postings belong to the COGS entry, not the revenue one — that is
+      // the entry that actually moved the cost.
+      await tx.execute(sql`
+        UPDATE cogs_postings SET journal_entry_id = ${cogsEntryId}
+         WHERE invoice_line_id IN (
+           SELECT id FROM invoice_lines WHERE invoice_id = ${invoiceId}
+         )
+         AND posted_by = 'invoice'
+      `);
+    }
+  }
+
   const [updated] = await tx
     .update(invoices)
     .set({
@@ -442,6 +538,7 @@ export async function completeInvoice(
       completedAt: new Date(),
       completedById: opts.completedById,
       revenueEntryId: revenueEntry.id,
+      cogsEntryId,
       updatedAt: new Date(),
     })
     .where(eq(invoices.id, invoiceId))
@@ -458,7 +555,7 @@ export async function completeInvoice(
       })
     : null;
 
-  return { invoice: updated, revenueEntry, cogsSkipped, vatOutput };
+  return { invoice: updated, revenueEntry, cogsEntryId, cogsSkipped, vatOutput };
 }
 
 /**

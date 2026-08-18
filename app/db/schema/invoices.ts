@@ -94,6 +94,13 @@ export const invoices = pgTable(
       () => journalEntries.id,
       { onDelete: "restrict" },
     ),
+    /**
+     * The cost-of-sales entry: DR COGS, CR Inventory and/or Technician Stock.
+     * A completed invoice raises two entries, and both are traceable (0027).
+     */
+    cogsEntryId: uuid("cogs_entry_id").references(() => journalEntries.id, {
+      onDelete: "restrict",
+    }),
 
     createdById: uuid("created_by_id"),
     /**
