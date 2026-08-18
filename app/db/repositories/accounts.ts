@@ -196,6 +196,37 @@ export async function listAccounts(
  * journalentries collection with no companyId in its $match and then wrote the
  * result back to a cached field. Nothing is cached here, so nothing can drift.
  */
+/**
+ * Resolves a system account by its role — "accounts_receivable", "vat_output",
+ * "grni" and so on.
+ *
+ * Every posting path needs this, and it belongs here rather than in each
+ * action: the repositories take account ids because they must not read
+ * configuration, so something has to turn a role into an id, once.
+ *
+ * Returns null when the role is not configured. Callers decide whether that is
+ * fatal — a missing VAT Output account only matters if the document carries
+ * VAT, and refusing every invoice over a control account that is never used
+ * would be wrong.
+ */
+export async function getSystemAccount(tx: Tx, systemAccount: string) {
+  const [account] = await tx
+    .select({
+      id: accounts.id,
+      accountCode: accounts.accountCode,
+      accountName: accounts.accountName,
+      accountType: accounts.accountType,
+    })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.systemAccount, systemAccount),
+        eq(accounts.isActive, true),
+      ),
+    );
+  return account ?? null;
+}
+
 export async function getAccountBalance(tx: Tx, accountId: string) {
   const [row] = (await tx.execute(sql`
     SELECT account_id, account_code, account_name,
