@@ -429,6 +429,157 @@ export async function completeInvoice(
   return { invoice: updated, revenueEntry, cogsSkipped, vatOutput };
 }
 
+/**
+ * The invoice list as the UI needs it: filtered, paginated, customer joined.
+ *
+ * TWO THINGS HERE ARE ABOUT THE QUERY PLAN, not style.
+ *
+ * 1. Predicates are composed, not written as a catch-all. The obvious shape —
+ *
+ *        WHERE ($1 = '' OR status::text = $1) AND ($2 = '' OR ...)
+ *
+ *    makes Postgres build ONE plan for every combination of filters, and it
+ *    cannot use an index for a predicate that might not apply. Measured on this
+ *    schema it produced a Seq Scan on invoices. Only active filters are emitted.
+ *
+ * 2. The cast goes on the PARAMETER, never the column. `status::text = $1`
+ *    casts every row before comparing and cannot use an index on status;
+ *    `status = $1::invoice_status` compares in the column's own type and can.
+ *
+ * Rows and the total come from one query via count(*) OVER(), rather than a
+ * second round trip for the page count as the Mongo path does.
+ *
+ * Search matches the invoice number by prefix, which the
+ * (company_id, invoice_number) index serves. Customer name is matched anywhere,
+ * which is a scan of the joined parties row; if that becomes hot the fix is a
+ * trigram index on parties.name, not a change here.
+ */
+export async function searchInvoices(
+  tx: Tx,
+  opts: {
+    query?: string;
+    page?: number;
+    perPage?: number;
+    status?: string;
+    paymentStatus?: string;
+    startDate?: string;
+    endDate?: string;
+  } = {},
+) {
+  const perPage = Math.min(opts.perPage ?? 20, 100);
+  const page = Math.max(opts.page ?? 1, 1);
+  const offset = (page - 1) * perPage;
+  const q = (opts.query ?? "").trim();
+
+  const where = [];
+  if (q) {
+    where.push(
+      sql`(i.invoice_number ILIKE ${q + "%"} OR p.name ILIKE ${"%" + q + "%"})`,
+    );
+  }
+  if (opts.status) where.push(sql`i.status = ${opts.status}::invoice_status`);
+  if (opts.paymentStatus) {
+    where.push(sql`i.payment_status = ${opts.paymentStatus}::payment_status`);
+  }
+  if (opts.startDate) where.push(sql`i.invoice_date >= ${opts.startDate}::date`);
+  if (opts.endDate) where.push(sql`i.invoice_date <= ${opts.endDate}::date`);
+
+  const clause = where.length
+    ? sql`WHERE ${sql.join(where, sql` AND `)}`
+    : sql``;
+
+  const rows = (await tx.execute(sql`
+    SELECT i.id,
+           i.invoice_number,
+           i.invoice_date,
+           i.due_date,
+           i.total::text        AS total,
+           i.amount_paid::text  AS amount_paid,
+           i.payment_status::text AS payment_status,
+           i.status::text         AS status,
+           p.name  AS customer_name,
+           p.email AS customer_email,
+           p.phone AS customer_phone,
+           count(*) OVER() AS total_count
+      FROM invoices i
+      JOIN parties p ON p.id = i.customer_id
+      ${clause}
+     ORDER BY i.invoice_date DESC, i.invoice_number DESC
+     LIMIT ${perPage} OFFSET ${offset}
+  `)) as unknown as Array<Record<string, string>>;
+
+  const total = rows.length ? Number(rows[0].total_count) : 0;
+
+  return {
+    // Shaped for the existing table component, so switching the data source
+    // does not rewrite the UI.
+    invoices: rows.map((r) => ({
+      _id: r.id,
+      id: r.id,
+      invoiceNumber: r.invoice_number,
+      invoiceDate: r.invoice_date,
+      dueDate: r.due_date,
+      total: r.total,
+      amountPaid: r.amount_paid,
+      paymentStatus: r.payment_status,
+      status: r.status,
+      customer: {
+        name: r.customer_name,
+        email: r.customer_email,
+        phone: r.customer_phone,
+      },
+    })),
+    total,
+    totalPages: Math.max(1, Math.ceil(total / perPage)),
+    page,
+  };
+}
+
+/** Headline figures for the list page, over the same filters, in one pass. */
+export async function getInvoiceStats(
+  tx: Tx,
+  opts: { status?: string; paymentStatus?: string; startDate?: string; endDate?: string } = {},
+) {
+  const where = [];
+  if (opts.status) where.push(sql`status = ${opts.status}::invoice_status`);
+  if (opts.paymentStatus) {
+    where.push(sql`payment_status = ${opts.paymentStatus}::payment_status`);
+  }
+  if (opts.startDate) where.push(sql`invoice_date >= ${opts.startDate}::date`);
+  if (opts.endDate) where.push(sql`invoice_date <= ${opts.endDate}::date`);
+  const clause = where.length ? sql`WHERE ${sql.join(where, sql` AND `)}` : sql``;
+
+  const [row] = (await tx.execute(sql`
+    SELECT count(*)::int                                     AS count,
+           COALESCE(SUM(total), 0)::text                     AS total,
+           COALESCE(SUM(amount_paid), 0)::text               AS paid,
+           COALESCE(SUM(total - amount_paid), 0)::text       AS outstanding,
+           count(*) FILTER (WHERE payment_status = 'paid')::int    AS paid_count,
+           count(*) FILTER (WHERE payment_status = 'partial')::int AS partial_count,
+           count(*) FILTER (WHERE payment_status = 'unpaid')::int  AS unpaid_count,
+           count(*) FILTER (
+             WHERE status = 'completed' AND payment_status <> 'paid'
+               AND due_date IS NOT NULL AND due_date < CURRENT_DATE
+           )::int                                                  AS overdue
+      FROM invoices
+      ${clause}
+  `)) as unknown as Array<Record<string, string>>;
+
+  // Named as the existing stats cards read them, so the component keeps its
+  // markup. `overdue` is DERIVED from due_date here rather than read from a
+  // stored status — see §9B.2 on why paymentStatus 'overdue' was not carried.
+  return {
+    totalInvoices: Number(row.count),
+    totalRevenue: row.total,
+    totalAmountPaid: row.paid,
+    balanceDue: row.outstanding,
+    totalPaid: Number(row.paid_count),
+    totalPartial: Number(row.partial_count),
+    totalUnpaid: Number(row.unpaid_count),
+    overdue: Number(row.overdue),
+  };
+}
+
 export async function listInvoices(
   tx: Tx,
   opts: { limit?: number; offset?: number; status?: "draft" | "completed" | "cancelled" } = {},

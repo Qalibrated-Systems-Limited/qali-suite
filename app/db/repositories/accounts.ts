@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import { accounts } from "../schema";
 
@@ -225,6 +225,33 @@ export async function getSystemAccount(tx: Tx, systemAccount: string) {
       ),
     );
   return account ?? null;
+}
+
+/** Cash, bank and M-Pesa accounts — what a payment can be received into. */
+export async function listPaymentAccounts(tx: Tx) {
+  const rows = await tx
+    .select({
+      id: accounts.id,
+      accountName: accounts.accountName,
+      accountCode: accounts.accountCode,
+      subType: accounts.subType,
+    })
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.accountType, "asset"),
+        eq(accounts.isActive, true),
+        inArray(accounts.subType, ["cash", "bank", "mpesa"]),
+      ),
+    )
+    .orderBy(asc(accounts.accountName));
+
+  return rows.map((a) => ({
+    _id: a.id,
+    name: a.accountName,
+    code: a.accountCode,
+    subType: a.subType,
+  }));
 }
 
 export async function getAccountBalance(tx: Tx, accountId: string) {

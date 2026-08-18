@@ -232,3 +232,160 @@ suite("invoice actions (end to end)", () => {
     expect(done.error).toMatch(/system account not configured/i);
   });
 });
+
+suite("invoice list page queries", () => {
+  // Same fixture path as above; these cover what the list page renders.
+  let admin;
+  let companyUuid;
+  let mongoCompanyId;
+  let customerId;
+  let widgetId;
+
+  beforeAll(async () => {
+    admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
+  });
+  afterAll(async () => {
+    if (admin) await admin.end();
+  });
+
+  beforeEach(async () => {
+    await admin`TRUNCATE companies CASCADE`;
+    await admin`TRUNCATE _migration_id_map, entry_counters`;
+    companyUuid = randomUUID();
+    mongoCompanyId = randomUUID().replace(/-/g, "").slice(0, 24);
+    customerId = randomUUID();
+    widgetId = randomUUID();
+    const bank = randomUUID();
+
+    await admin`
+      INSERT INTO companies (id, name, slug)
+      VALUES (${companyUuid}, 'Pilot', ${"p-" + companyUuid.slice(0, 8)})
+    `;
+    await admin`
+      INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
+      VALUES ('companies', ${mongoCompanyId}, ${companyUuid})
+    `;
+    await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      await tx`
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type)
+        VALUES (${bank}, ${companyUuid}, '1000', 'Equity Bank', 'asset', 'bank')
+      `;
+      await tx`
+        INSERT INTO parties (id, company_id, primary_type, is_customer, name, email)
+        VALUES (${customerId}, ${companyUuid}, 'customer', true, 'Acme Ltd', 'ap@acme.co')
+      `;
+      await tx`
+        INSERT INTO products (id, company_id, sku, name, cost_price, selling_price, quantity_on_hand)
+        VALUES (${widgetId}, ${companyUuid}, 'WID-1', 'Widget', 40, 250, 1000)
+      `;
+    });
+
+    getTenantContext.mockResolvedValue({
+      user: { id: randomUUID(), name: "Sales User", role: "Sales Manager" },
+      companyId: mongoCompanyId,
+    });
+
+    for (const [date, qty] of [["2026-08-01", "1"], ["2026-08-05", "2"], ["2026-07-01", "3"]]) {
+      await invoiceActions.createInvoicePg(
+        null,
+        form({
+          customerId,
+          invoiceDate: date,
+          "lines[0].productId": widgetId,
+          "lines[0].quantity": qty,
+          "lines[0].unitPrice": "100.0000",
+        }),
+      );
+    }
+  });
+
+  it("lists newest first, with the customer joined and a total in one query", async () => {
+    const r = await invoiceActions.searchInvoicesPg({});
+    expect(r.total).toBe(3);
+    expect(r.totalPages).toBe(1);
+    expect(r.invoices).toHaveLength(3);
+    expect(r.invoices[0].invoiceDate).toBe("2026-08-05");
+    expect(r.invoices[0].customer.name).toBe("Acme Ltd");
+    expect(r.invoices[0].customer.email).toBe("ap@acme.co");
+    // Money stays a string all the way to the component.
+    expect(r.invoices[0].total).toBe("200.0000");
+  });
+
+  it("filters by date range", async () => {
+    const r = await invoiceActions.searchInvoicesPg({
+      startDate: "2026-08-01",
+      endDate: "2026-08-31",
+    });
+    expect(r.total).toBe(2);
+  });
+
+  it("filters by status and payment status", async () => {
+    const drafts = await invoiceActions.searchInvoicesPg({ status: "draft" });
+    expect(drafts.total).toBe(3);
+    const completed = await invoiceActions.searchInvoicesPg({ status: "completed" });
+    expect(completed.total).toBe(0);
+    const unpaid = await invoiceActions.searchInvoicesPg({ paymentStatus: "unpaid" });
+    expect(unpaid.total).toBe(3);
+  });
+
+  it("searches by invoice number and by customer name", async () => {
+    const all = await invoiceActions.searchInvoicesPg({});
+    const number = all.invoices[0].invoiceNumber;
+
+    const byNumber = await invoiceActions.searchInvoicesPg({ query: number });
+    expect(byNumber.total).toBe(1);
+
+    const byCustomer = await invoiceActions.searchInvoicesPg({ query: "acme" });
+    expect(byCustomer.total).toBe(3);
+
+    const miss = await invoiceActions.searchInvoicesPg({ query: "nobody" });
+    expect(miss.total).toBe(0);
+    expect(miss.totalPages).toBe(1);
+  });
+
+  it("paginates", async () => {
+    const p1 = await invoiceActions.searchInvoicesPg({ perPage: 2, page: 1 });
+    expect(p1.invoices).toHaveLength(2);
+    expect(p1.total).toBe(3);
+    expect(p1.totalPages).toBe(2);
+    const p2 = await invoiceActions.searchInvoicesPg({ perPage: 2, page: 2 });
+    expect(p2.invoices).toHaveLength(1);
+  });
+
+  it("reports stats in the shape the cards render", async () => {
+    const s = await invoiceActions.getInvoiceStatsPg({});
+    expect(s.totalInvoices).toBe(3);
+    expect(s.totalRevenue).toBe("600.0000");
+    expect(s.totalAmountPaid).toBe("0.0000");
+    expect(s.balanceDue).toBe("600.0000");
+    expect(s.totalUnpaid).toBe(3);
+    expect(s.totalPaid).toBe(0);
+  });
+
+  it("offers cash, bank and M-Pesa accounts to the payment dialog", async () => {
+    const accts = await invoiceActions.getPaymentAccountsPg();
+    expect(accts).toHaveLength(1);
+    expect(accts[0].name).toBe("Equity Bank");
+    expect(accts[0].subType).toBe("bank");
+  });
+
+  it("shows another tenant nothing", async () => {
+    const otherUuid = randomUUID();
+    const otherMongo = randomUUID().replace(/-/g, "").slice(0, 24);
+    await admin`
+      INSERT INTO companies (id, name, slug)
+      VALUES (${otherUuid}, 'Other', ${"o-" + otherUuid.slice(0, 8)})
+    `;
+    await admin`
+      INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
+      VALUES ('companies', ${otherMongo}, ${otherUuid})
+    `;
+    getTenantContext.mockResolvedValue({
+      user: { id: randomUUID(), name: "Other User", role: "Sales Manager" },
+      companyId: otherMongo,
+    });
+    const r = await invoiceActions.searchInvoicesPg({});
+    expect(r.total).toBe(0);
+  });
+});

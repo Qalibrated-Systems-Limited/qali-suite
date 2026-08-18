@@ -202,6 +202,39 @@ export async function completeInvoicePg(
   }
 }
 
+/** Filtered, paginated list for the invoices page. */
+export async function searchInvoicesPg(opts: {
+  query?: string;
+  page?: number;
+  status?: string;
+  paymentStatus?: string;
+  startDate?: string;
+  endDate?: string;
+}) {
+  return withAuthorizedTenant([...INVOICE_WRITE_ROLES], (tx) =>
+    invoices.searchInvoices(tx, opts),
+  );
+}
+
+/** Headline figures for the same filter set. */
+export async function getInvoiceStatsPg(opts: {
+  status?: string;
+  paymentStatus?: string;
+  startDate?: string;
+  endDate?: string;
+} = {}) {
+  return withAuthorizedTenant([...INVOICE_WRITE_ROLES], (tx) =>
+    invoices.getInvoiceStats(tx, opts),
+  );
+}
+
+/** Cash/bank/M-Pesa accounts the payment dialog offers. */
+export async function getPaymentAccountsPg() {
+  return withAuthorizedTenant([...INVOICE_WRITE_ROLES], (tx) =>
+    accountsRepo.listPaymentAccounts(tx),
+  );
+}
+
 export async function getInvoicesPg(
   opts: { limit?: number; offset?: number; status?: "draft" | "completed" | "cancelled" } = {},
 ) {

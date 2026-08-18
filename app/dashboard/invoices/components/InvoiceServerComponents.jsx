@@ -2,13 +2,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileText, CheckCircle, XCircle, Clock } from "lucide-react";
 import {
-  searchInvoices,
-  fetchInvoicePages,
-  getInvoiceStats,
-} from "@/app/mongodb/queries/invoice-queries";
-import Account from "@/app/models/account";
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+  searchInvoicesPg,
+  getInvoiceStatsPg,
+  getPaymentAccountsPg,
+} from "@/app/db/actions/invoice-actions";
 import { InvoicesTable } from "./Invoicetable";
 import Pagination from "@/components/pagination";
 import { formatCurrency } from "@/lib/utils";
@@ -18,7 +15,7 @@ import { formatCurrency } from "@/lib/utils";
 // ============================================
 
 export async function InvoiceStatsCards({ filters }) {
-  const stats = await getInvoiceStats(filters);
+  const stats = await getInvoiceStatsPg(filters);
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
@@ -141,34 +138,18 @@ export function InvoiceStatsSkeleton() {
 // ============================================
 
 export async function InvoicesTableServer({ query, page, filters }) {
-  await dbConnect();
-  const { companyId } = await getTenantContext();
-
-  const [invoices, paymentAccounts] = await Promise.all([
-    searchInvoices(query, page, filters),
-    Account.find({
-      companyId,
-      accountType: "asset",
-      subType: { $in: ["cash", "bank", "mpesa"] },
-      isActive: true,
-    })
-      .select("_id accountName accountCode subType")
-      .sort({ accountName: 1 })
-      .lean(),
+  // Both go through the repository layer under RLS. No tenant filter is passed
+  // or needed: forgetting one returns zero rows rather than another company's
+  // invoices.
+  const [result, paymentAccounts] = await Promise.all([
+    searchInvoicesPg({ query, page, ...filters }),
+    getPaymentAccountsPg(),
   ]);
-
-  // Serialize payment accounts for client component
-  const serializedPaymentAccounts = paymentAccounts.map((acc) => ({
-    _id: acc._id.toString(),
-    name: acc.accountName,
-    code: acc.accountCode,
-    subType: acc.subType,
-  }));
 
   return (
     <InvoicesTable
-      invoices={invoices}
-      paymentAccounts={serializedPaymentAccounts}
+      invoices={result.invoices}
+      paymentAccounts={paymentAccounts}
     />
   );
 }
@@ -218,7 +199,9 @@ export function InvoicesTableSkeleton() {
 // ============================================
 
 export async function InvoicesPaginationServer({ query, filters }) {
-  const totalPages = await fetchInvoicePages(query, filters);
+  // The row query already returns its own total via count(*) OVER(); this is
+  // the page-count call the pagination control makes on its own.
+  const { totalPages } = await searchInvoicesPg({ query, page: 1, ...filters });
 
   if (totalPages <= 1) return null;
 
