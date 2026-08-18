@@ -29,7 +29,7 @@ export async function seedTestSource(mongoUri = process.env.MONGODB_URI) {
 await Promise.all(
   [
     "companies", "accounts", "fiscalperiods", "journalentries", "parties",
-    "products", "weighbridgeTickets",
+    "products", "weighbridgeTickets", "stockrequests",
   ].map(
     (c) => db.collection(c).deleteMany({}),
   ),
@@ -163,6 +163,156 @@ await db.collection("weighbridgeTickets").insertMany([
   },
 ]);
 
+await db.collection("stockrequests").insertMany([
+  {
+    // A pending request, untouched since creation. Its items therefore carry
+    // approvedQuantity: 0 — the creation default, which means "not approved
+    // yet" and NOT "approved for none". Every reader in the source resolves
+    // the target as `approvedQuantity || requestedQuantity`, so the target
+    // must come out as the requested quantity, not zero.
+    companyId,
+    requestNumber: "SR-00001",
+    requestType: "sale",
+    status: "pending",
+    priority: "high",
+    customer: {
+      id: customerId,
+      name: "Acme Ltd",
+      email: "ac@acme.co",
+      phone: "",
+      address: "",
+      taxPin: "P051234567A",
+    },
+    requester: {
+      name: "Jane Field",
+      id: "user-1",
+      department: "Sales",
+      email: "jane@pilot.co",
+    },
+    items: [
+      {
+        _id: new ObjectId(),
+        productId: widgetId,
+        productName: "Widget",
+        SKU: "wid-1",
+        currentStock: 100,
+        requestedQuantity: 12,
+        approvedQuantity: 0,
+        unitPrice: 250,
+        unit: "pcs",
+        fulfillments: [],
+        totalFulfilled: 0,
+        remainingToFulfill: 0,
+        fulfillmentStatus: "pending",
+      },
+    ],
+    approvalHistory: [],
+    requiredByDate: new Date("2026-09-01"),
+    totalValue: 0,
+    createdAt: new Date("2026-08-10"),
+    updatedAt: new Date("2026-08-10"),
+  },
+  {
+    // An approved internal request. customer.id is "" — creation writes the
+    // empty string, not null, for the two customerless types — and the target
+    // CHECK allows a null customer only for exactly these.
+    companyId,
+    requestNumber: "SR-00002",
+    requestType: "internal",
+    status: "approved",
+    priority: "normal",
+    customer: { id: "", name: "Internal Use" },
+    requester: {
+      name: "Sam Store",
+      id: "user-2",
+      department: "Technical",
+    },
+    items: [
+      {
+        _id: new ObjectId(),
+        productId: gadgetId,
+        productName: "Gadget",
+        SKU: "GAD-1",
+        currentStock: 0,
+        requestedQuantity: 4,
+        approvedQuantity: 3,
+        unitPrice: 99.99,
+        unit: "box",
+        fulfillments: [],
+        totalFulfilled: 0,
+        remainingToFulfill: 3,
+        fulfillmentStatus: "pending",
+      },
+      {
+        // The approver denied this line outright. Mongo stores the 0 and then
+        // discards it on every read, so it cannot represent the denial either.
+        _id: new ObjectId(),
+        productId: widgetId,
+        productName: "Widget",
+        SKU: "WID-1",
+        currentStock: 100,
+        requestedQuantity: 2,
+        approvedQuantity: 0,
+        unitPrice: 250,
+        unit: "pcs",
+        fulfillments: [],
+        totalFulfilled: 0,
+        fulfillmentStatus: "pending",
+      },
+    ],
+    approver: {
+      name: "Ada Manager",
+      id: "user-9",
+      approvedAt: new Date("2026-08-12"),
+      comments: "Approved short",
+      conditions: "Return by month end",
+    },
+    approvalHistory: [
+      {
+        _id: new ObjectId(),
+        approverName: "Ada Manager",
+        approverId: "user-9",
+        action: "approved",
+        comments: "Approved short",
+        timestamp: new Date("2026-08-12"),
+      },
+    ],
+    // totalValue is stale in the source: 4 x 99.99 was never re-derived after
+    // the approval cut it to 3. The target computes it from the items.
+    totalValue: 399.96,
+    createdAt: new Date("2026-08-11"),
+    updatedAt: new Date("2026-08-12"),
+  },
+  {
+    // Names a customer that no longer exists in `parties`. A journal entry in
+    // this position keeps the entry and drops the attribution; a sale request
+    // cannot, because the target requires a customer for customer-facing
+    // types. It must be quarantined, not silently reclassified.
+    companyId,
+    requestNumber: "SR-00003",
+    requestType: "demo",
+    status: "pending",
+    customer: { id: ghostCustomerId, name: "Gone Ltd" },
+    requester: { name: "Jane Field", id: "user-1", department: "Sales" },
+    items: [
+      {
+        _id: new ObjectId(),
+        productId: widgetId,
+        productName: "Widget",
+        SKU: "WID-1",
+        currentStock: 100,
+        requestedQuantity: 1,
+        approvedQuantity: 0,
+        unitPrice: 250,
+        unit: "pcs",
+        fulfillments: [],
+      },
+    ],
+    createdAt: new Date("2026-08-13"),
+    updatedAt: new Date("2026-08-13"),
+  },
+]);
+
 await db.collection("fiscalperiods").insertOne({
   companyId,
   year: 2026, month: 8,
@@ -244,7 +394,7 @@ if (isCli) {
   console.log("Seeded test source:");
   console.log(
     "  1 company, 3 accounts, 1 party, 2 products, 3 weighbridge tickets,\n" +
-      "  1 fiscal period, 5 journal entries",
+      "  3 stock requests, 1 fiscal period, 5 journal entries",
   );
   console.log("  (JE-00003 is deliberately off by 0.005)");
 }

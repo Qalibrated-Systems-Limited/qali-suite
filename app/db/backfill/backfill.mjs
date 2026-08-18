@@ -34,10 +34,11 @@
  * ORDER. There is no single-pass insert order: the references form cycles.
  * bill_lines -> weighbridge_tickets -> bills, and
  * stock_request_fulfilments -> item_checkouts -> stock_requests, and
- * invoice_lines -> item_checkouts -> invoices. Each cycle is broken the way
- * accounts.parent_id already is — insert with the back-reference null, then
- * UPDATE it once both sides exist. The sequence, with the reason each step
- * cannot move earlier:
+ * invoice_lines -> item_checkouts -> invoices, and
+ * stock_requests -> invoices -> item_checkouts -> stock_requests. Each cycle
+ * is broken the way accounts.parent_id already is — insert with the
+ * back-reference null, then UPDATE it once both sides exist. The sequence,
+ * with the reason each step cannot move earlier:
  *
  *    1  companies              tenant root
  *    2  accounts (+ parents)   self-referential, two-pass
@@ -47,6 +48,7 @@
  *    6  weighbridge_tickets    pass 1: no invoice/bill refs yet
  *    7  journal_entries+lines  referenced by everything that posts
  *    8  stock_requests, _items, _approvals
+ *                             pass 1: draft_invoice_id points at invoices
  *    9  item_checkouts         pass 1: request_id resolves, invoice refs do not
  *   10  invoices, invoice_lines, cogs_postings
  *   11  stock_movements        invoice_line_id now resolves
@@ -60,8 +62,9 @@
  *   19  PASS 2 back-references:
  *          weighbridge_tickets.invoice_id / bill_id / linked_ticket_id
  *          item_checkouts.sale_invoice_id / failed_invoice_id
+ *          stock_requests.draft_invoice_id
  *
- * Steps 1-7 are implemented. See docs/POSTGRES-MIGRATION-PLAN.md §9B.
+ * Steps 1-8 are implemented. See docs/POSTGRES-MIGRATION-PLAN.md §9B.
  */
 import postgres from "postgres";
 import { MongoClient } from "mongodb";
@@ -97,6 +100,9 @@ const newStats = () => ({
   weighbridgeTickets: 0,
   entries: 0,
   lines: 0,
+  stockRequests: 0,
+  stockRequestItems: 0,
+  stockRequestApprovals: 0,
   rejected: 0,
 });
 
@@ -559,13 +565,236 @@ async function run({ mongo, sql, stats, onlyCompany, log }) {
                 )
                 ON CONFLICT (entry_id, line_number) DO NOTHING
               `;
-              stats.lines++;
             }
           });
+          // Counted only once the savepoint has committed. Incrementing inside
+          // it credited the lines of an entry that then failed and was
+          // quarantined, so the reported line count over-stated what moved.
           stats.entries++;
+          stats.lines += lines.length;
         } catch (err) {
           await reject(tx, stats, "journalentries", e._id, "rejected_by_target", {
             entryNumber: e.entryNumber,
+            error: err.message,
+          });
+        }
+      }
+
+      // ── stock requests + items + approvals ───────────────────────────────
+      // Items reference products (step 5); the request references parties
+      // (step 4). Nothing here needs an invoice, a movement or a checkout —
+      // except draft_invoice_id, which points AT invoices (step 10). A `sale`
+      // request raises a draft invoice at fulfilment and records it, so the
+      // request points forward at a document that points back at it: the third
+      // cycle in the header's ORDER, found here, and left for pass 2.
+      const requestDocs = await db
+        .collection("stockrequests")
+        .find({ companyId: oldCompanyId })
+        .toArray()
+        .catch(() => []);
+
+      // The two types that have no external customer. Creation writes
+      // customer.id as "" for these — not null — so "absent" is the empty
+      // string as often as it is undefined.
+      const CUSTOMERLESS = new Set(["internal", "employee_borrow"]);
+
+      for (const r of requestDocs) {
+        const rawCustomerId = r.customer?.id ? String(r.customer.id).trim() : "";
+        const customerId = rawCustomerId
+          ? await resolvePartyId(tx, rawCustomerId)
+          : null;
+
+        // A journal entry that names a vanished party keeps the entry and drops
+        // the attribution. A request cannot: since 0022 the customer is a real
+        // FK, and stock_requests_customer_required_unless_internal makes it
+        // mandatory for the customer-facing types. So it is quarantined with
+        // the reason named, rather than migrated as if it were internal.
+        if (!CUSTOMERLESS.has(r.requestType) && !customerId) {
+          await reject(tx, stats, "stockrequests", r._id,
+            rawCustomerId ? "customer_not_migrated" : "customer_missing", {
+              requestNumber: r.requestNumber,
+              requestType: r.requestType,
+              customerId: rawCustomerId || null,
+              customerName: r.customer?.name ?? null,
+            });
+          continue;
+        }
+
+        const items = Array.isArray(r.items) ? r.items : [];
+        const history = Array.isArray(r.approvalHistory) ? r.approvalHistory : [];
+
+        // approver_name_at_action is NOT NULL: a row that cannot say who acted
+        // is not an audit record, and half a request's history is worse than a
+        // named reject. In practice the array is always empty — creation writes
+        // [] and nothing appends to it; the approver snapshot lives on the
+        // request itself — so this quarantines malformed legacy data only.
+        const badApproval = history.find((h) => !h.approverName || !h.action);
+        if (badApproval) {
+          await reject(tx, stats, "stockrequests", r._id,
+            "approval_history_incomplete", {
+              requestNumber: r.requestNumber,
+              approverName: badApproval.approverName ?? null,
+              action: badApproval.action ?? null,
+            });
+          continue;
+        }
+
+        const id = await mapId(tx, "stockRequests", r._id);
+
+        // requester.id, approver.id, rejectedBy.id and the creator are User
+        // ids, and `users` is not in this migration — so they are dropped, the
+        // same as they are for journal entries, and the name snapshots carry
+        // who did what.
+        //
+        // project_id and cost_code_id are deferred references: `projects` and
+        // `project_cost_codes` are not ported and neither column has an FK.
+        // The id map is what makes them resolve if those tables ever land, so
+        // the reference is preserved rather than dropped; the number and name
+        // snapshots are what anything reads today.
+        //
+        // total_value is NOT written: it is derived from the items by trigger.
+        try {
+          await tx.savepoint(async (sp) => {
+            await sp`
+              INSERT INTO stock_requests (
+                id, company_id, request_number, request_type, status, priority,
+                customer_id, customer_name_at_request, customer_email_at_request,
+                customer_phone_at_request, customer_address_at_request,
+                customer_tax_pin_at_request,
+                requester_id, requester_name_at_request, requester_department,
+                requester_email, requester_phone,
+                approved_by_id, approved_by_name_at_approval, approved_at,
+                approval_comments, approval_conditions,
+                rejected_by_id, rejected_at, rejection_reason,
+                cancelled_at, cancellation_reason,
+                notes, required_by_date,
+                draft_invoice_number_at_creation, draft_invoice_created_at,
+                project_id, project_number_at_request, project_name_at_request,
+                cost_code_id, cost_code_at_request,
+                created_by_id, requested_at, created_at, updated_at
+              ) VALUES (
+                ${id}, ${companyUuid}, ${r.requestNumber}, ${r.requestType},
+                ${r.status ?? "pending"}, ${r.priority ?? "normal"},
+                ${customerId}, ${r.customer?.name || null},
+                ${r.customer?.email || null}, ${r.customer?.phone || null},
+                ${r.customer?.address || null}, ${r.customer?.taxPin || null},
+                ${null}, ${r.requester?.name}, ${r.requester?.department},
+                ${r.requester?.email || null}, ${r.requester?.phone || null},
+                ${null}, ${r.approver?.name || null},
+                ${r.approver?.approvedAt ? new Date(r.approver.approvedAt) : null},
+                ${r.approver?.comments || null}, ${r.approver?.conditions || null},
+                ${null}, ${r.rejectedAt ? new Date(r.rejectedAt) : null},
+                ${r.rejectionReason || null},
+                ${r.cancelledAt ? new Date(r.cancelledAt) : null},
+                ${r.cancellationReason || null},
+                ${r.notes || null}, ${toDate(r.requiredByDate)},
+                ${r.draftInvoice?.invoiceNumber || null},
+                ${r.draftInvoice?.createdAt ? new Date(r.draftInvoice.createdAt) : null},
+                ${r.projectId ? await mapId(sp, "projects", r.projectId) : null},
+                ${r.project?.projectNumber || null}, ${r.project?.name || null},
+                ${r.costCodeId ? await mapId(sp, "projectCostCodes", r.costCodeId) : null},
+                ${r.costCode?.code || null},
+                ${null}, ${r.createdAt ? new Date(r.createdAt) : new Date()},
+                ${r.createdAt ? new Date(r.createdAt) : new Date()},
+                ${r.updatedAt ? new Date(r.updatedAt) : new Date()}
+              )
+              ON CONFLICT (id) DO NOTHING
+            `;
+
+            let n = 0;
+            for (const it of items) {
+              n++;
+              // Subdocuments carry their own _id, and steps 12 and 17 resolve
+              // fulfilments and invoiced quantities through it. Legacy rows
+              // without one fall back to a key derived from the request, so a
+              // re-run maps to the same uuid rather than duplicating the line.
+              const itemId = await mapId(
+                sp,
+                "stockRequestItems",
+                it._id ?? `${String(r._id)}#${n}`,
+              );
+
+              // THE ONE VALUE THAT CANNOT BE CARRIED LITERALLY.
+              //
+              // Creation writes approvedQuantity: 0 to mean "not approved
+              // yet", and every reader in the source resolves the target as
+              // `approvedQuantity || requestedQuantity` — model, actions and
+              // UI alike — so a stored 0 is never read as an approved zero,
+              // even though the approve action can write one. NULL is what the
+              // source behaves as, and it is what the target's
+              // COALESCE(approved_quantity, requested_quantity) expects.
+              //
+              // Carrying the literal 0 would set the target to zero for every
+              // pending request: remaining_to_fulfil would read 0 with nothing
+              // issued, total_value would compute as 0, and step 12 would then
+              // fail the over-fulfilment trigger on every request that had any
+              // stock issued against it.
+              const approvedQuantity =
+                Number(it.approvedQuantity) > 0
+                  ? toMoney(toScaled(it.approvedQuantity))
+                  : null;
+
+              await sp`
+                INSERT INTO stock_request_items (
+                  id, company_id, request_id, line_number,
+                  product_id, product_name_at_request, sku_at_request,
+                  stock_at_request, requested_quantity, approved_quantity,
+                  unit_price, unit, purpose, purpose_details,
+                  requires_return, expected_return_date, notes, created_at
+                ) VALUES (
+                  ${itemId}, ${companyUuid}, ${id}, ${n},
+                  ${await mapId(sp, "products", it.productId)},
+                  ${it.productName}, ${String(it.SKU ?? "").toUpperCase()},
+                  ${toMoney(toScaled(it.currentStock))},
+                  ${toMoney(toScaled(it.requestedQuantity))},
+                  ${approvedQuantity},
+                  ${toMoney(toScaled(it.unitPrice))}, ${it.unit || "pcs"},
+                  ${it.purpose ?? null}, ${it.purposeDetails || null},
+                  ${it.requiresReturn ?? false},
+                  ${toDate(it.expectedReturnDate)}, ${it.notes || null},
+                  ${r.createdAt ? new Date(r.createdAt) : new Date()}
+                )
+                ON CONFLICT (id) DO NOTHING
+              `;
+              // total_fulfilled, invoiced_quantity, fulfilment_status and the
+              // request's total_value and status are the five values §9.9
+              // records as maintained by hand. None is written here: they are
+              // derived by trigger from the fulfilment and invoice rows that
+              // arrive at steps 12 and 17.
+            }
+
+            for (const h of history) {
+              await sp`
+                INSERT INTO stock_request_approvals (
+                  id, company_id, request_id, approver_id,
+                  approver_name_at_action, action, comments, acted_at
+                ) VALUES (
+                  ${await mapId(sp, "stockRequestApprovals", h._id ?? `${String(r._id)}#${h.timestamp}`)},
+                  ${companyUuid}, ${id}, ${null},
+                  ${h.approverName}, ${h.action}, ${h.comments || null},
+                  ${h.timestamp ? new Date(h.timestamp) : new Date()}
+                )
+                ON CONFLICT (id) DO NOTHING
+              `;
+            }
+
+            // Inserting the items fires recalc_request, which stamps
+            // updated_at = now(). Restore what the source recorded: this is an
+            // audit field, and "when the backfill ran" is not an answer to
+            // "when was this request last touched".
+            if (r.updatedAt) {
+              await sp`
+                UPDATE stock_requests SET updated_at = ${new Date(r.updatedAt)}
+                 WHERE id = ${id}
+              `;
+            }
+          });
+          stats.stockRequests++;
+          stats.stockRequestItems += items.length;
+          stats.stockRequestApprovals += history.length;
+        } catch (err) {
+          await reject(tx, stats, "stockrequests", r._id, "rejected_by_target", {
+            requestNumber: r.requestNumber,
             error: err.message,
           });
         }

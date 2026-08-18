@@ -59,6 +59,9 @@ suite("postgres backfill and reconciliation", () => {
         parties: 1,
         products: 2,
         weighbridgeTickets: 1,
+        stockRequests: 2,
+        stockRequestItems: 3,
+        stockRequestApprovals: 1,
       });
       // Four of the five source entries land; the fifth is quarantined below.
       expect(stats.entries).toBe(4);
@@ -182,7 +185,14 @@ suite("postgres backfill and reconciliation", () => {
 
       // And one reject row per rejected document, however many times it ran.
       const [rejects] = await admin`SELECT count(*)::int AS n FROM _migration_rejects`;
-      expect(rejects.n).toBe(3);
+      expect(rejects.n).toBe(4);
+
+      // And no duplicated children: the item and approval ids come from the
+      // id map, so a second pass over the same subdocuments is a no-op.
+      const [items] = await admin`SELECT count(*)::int AS n FROM stock_request_items`;
+      const [approvals] = await admin`SELECT count(*)::int AS n FROM stock_request_approvals`;
+      expect(items.n).toBe(3);
+      expect(approvals.n).toBe(1);
     });
   });
 
@@ -225,6 +235,95 @@ suite("postgres backfill and reconciliation", () => {
       `;
       expect(r.detail.ticketNumber).toBe("WB-00003");
       expect(r.detail.secondWeight).toBeNull();
+    });
+  });
+
+  describe("stock requests", () => {
+    it("reads a creation-default approved quantity as unapproved, not as zero", async () => {
+      await run();
+      const [item] = await admin`
+        SELECT i.approved_quantity, i.requested_quantity::text AS requested,
+               i.remaining_to_fulfil::text AS remaining,
+               i.fulfilment_status::text AS status, i.sku_at_request,
+               r.total_value::text AS total_value
+          FROM stock_request_items i
+          JOIN stock_requests r ON r.id = i.request_id
+         WHERE r.request_number = 'SR-00001'
+      `;
+
+      // The source stores 0, which every one of its own readers resolves as
+      // `approvedQuantity || requestedQuantity`. Carrying the 0 literally
+      // would make the target zero — and then nothing could be issued against
+      // this request without tripping the over-fulfilment trigger at step 12.
+      expect(item.approved_quantity).toBeNull();
+      expect(item.requested).toBe("12.0000");
+      expect(item.remaining).toBe("12.0000");
+      expect(item.status).toBe("pending");
+      // The SKU is normalised the same way the product's own is.
+      expect(item.sku_at_request).toBe("WID-1");
+      // Derived from the items by trigger, not carried: 12 x 250.
+      expect(item.total_value).toBe("3000.0000");
+    });
+
+    it("re-derives a stale total value rather than carrying it", async () => {
+      await run();
+      const [r] = await admin`
+        SELECT total_value::text AS total_value, status::text, priority::text,
+               customer_id, customer_name_at_request,
+               approved_by_name_at_approval, approval_conditions,
+               updated_at
+          FROM stock_requests WHERE request_number = 'SR-00002'
+      `;
+      // The source says 399.96 — 4 x 99.99, never recomputed after the
+      // approval cut that line to 3. The target computes it from the items,
+      // resolving each target the way the source's own readers do:
+      // 3 x 99.99 + 2 x 250.
+      expect(r.total_value).toBe("799.9700");
+      expect(r.status).toBe("approved");
+      expect(r.priority).toBe("normal");
+      // customer.id is "" for the customerless types, not null.
+      expect(r.customer_id).toBeNull();
+      expect(r.customer_name_at_request).toBe("Internal Use");
+      // The approver is a User, which this migration does not port, so the
+      // name snapshot is what carries.
+      expect(r.approved_by_name_at_approval).toBe("Ada Manager");
+      expect(r.approval_conditions).toBe("Return by month end");
+      // Inserting the items fires recalc_request, which stamps updated_at.
+      // The source's value is restored over it.
+      expect(r.updated_at.toISOString()).toBe("2026-08-12T00:00:00.000Z");
+    });
+
+    it("carries the approval history as rows", async () => {
+      await run();
+      const rows = await admin`
+        SELECT a.approver_name_at_action, a.action, a.comments, a.approver_id
+          FROM stock_request_approvals a
+          JOIN stock_requests r ON r.id = a.request_id
+         WHERE r.request_number = 'SR-00002'
+      `;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].approver_name_at_action).toBe("Ada Manager");
+      expect(rows[0].action).toBe("approved");
+      expect(rows[0].approver_id).toBeNull();
+    });
+
+    it("quarantines a customer-facing request whose customer is gone", async () => {
+      await run();
+      const [r] = await admin`
+        SELECT detail FROM _migration_rejects
+         WHERE reason = 'customer_not_migrated'
+      `;
+      expect(r.detail.requestNumber).toBe("SR-00003");
+      expect(r.detail.requestType).toBe("demo");
+      expect(r.detail.customerName).toBe("Gone Ltd");
+
+      // Not migrated as an internal request, and not migrated without a
+      // customer: the target's CHECK requires one for this type, so keeping
+      // it would mean reclassifying it.
+      const rows = await admin`
+        SELECT 1 FROM stock_requests WHERE request_number = 'SR-00003'
+      `;
+      expect(rows).toHaveLength(0);
     });
   });
 
@@ -278,6 +377,10 @@ suite("postgres backfill and reconciliation", () => {
         .db()
         .collection("weighbridgeTickets")
         .deleteMany({ ticketNumber: { $in: ["WB-00002", "WB-00003"] } });
+      await client
+        .db()
+        .collection("stockrequests")
+        .deleteOne({ requestNumber: "SR-00003" });
       await client.close();
 
       const stats = await run();

@@ -870,10 +870,13 @@ system regardless of migration timing — it does not need this branch.
 
 ## 9B. Backfill coverage, and what extending it found
 
-`backfill.mjs` was written for slice 1 and still covers **6 of 27 tables**:
+`backfill.mjs` was written for slice 1 and covered **6 of 27 tables**:
 companies, accounts, fiscal_periods, parties, journal_entries, journal_lines.
-The 20 added by slices 2–5 are not covered, so §6.3 cutover cannot yet move a
-tenant's invoicing, payments, stock, AP or tax.
+The 20 added by slices 2–5 were not covered, so §6.3 cutover could not move a
+tenant's invoicing, payments, stock, AP or tax. It now covers **11**, through
+step 8 of the order in the script's header: products, weighbridge_tickets,
+stock_requests, stock_request_items and stock_request_approvals have been
+added.
 
 Two things were fixed before extending it, both found by use rather than review:
 
@@ -895,6 +898,12 @@ A single-pass insert order does not exist. `bill_lines` → `weighbridge_tickets
 already gets: insert rows with the cross-reference null, then UPDATE it once
 both sides exist.
 
+Step 8 found a third: `stock_requests.draft_invoice_id` → `invoices` →
+`item_checkouts` → `stock_requests`. A `sale` request raises a draft invoice at
+fulfilment and records it, so the request points forward at a document that
+points back at it. Same treatment — the column is left null in pass 1 and set
+in the pass-2 sweep at step 19.
+
 ### 9B.2 Schema gaps the mapping exposed
 
 Auditing every source enum against its Postgres counterpart — 12 surfaces —
@@ -913,6 +922,71 @@ The pattern across all three is the same as §9.7 and §9.9: **the sweep compare
 structures, and these are differences in what a value means.** An enum that
 matches label-for-label can still be wrong if one side stores a fact and the
 other stores a function of one.
+
+### 9B.3 Notes from step 8 — a stored zero that is never read as zero
+
+`stock_requests` and its items and approval history are covered. The three
+enums involved — `stockRequestTypes`, `priority` and
+`purposeForItemsRemovalFromStock` — match their Postgres counterparts exactly,
+as does the requester department list. Nothing structural was in the way. One
+value was, and it is the same shape of defect §9B.2 records.
+
+**`approvedQuantity: 0` does not mean zero was approved.** Creation writes it
+as the default (`requests-actions.js:708`), where it means *not approved yet*.
+The approve action can also write a genuine 0, denying a line outright
+(`requests-actions.js:172`). The two are indistinguishable in storage — and it
+does not matter, because **no reader in the source ever reads a 0 as zero**.
+Every one of them resolves the target the same way:
+
+| | |
+|---|---|
+| `requests.js:333,363,385` | `item.approvedQuantity \|\| item.requestedQuantity` |
+| `requests-actions.js:1389` | same |
+| `requestsActionsDialogs.jsx:471,495,538` | same |
+| `request.jsx:151`, `RequestDeliveryNotePDFButton.jsx:45` | same |
+
+So the approver's intent to deny a line is expressible on write and discarded
+on every read. `NULL` is what the source *behaves* as, and it is what the
+target's `COALESCE(approved_quantity, requested_quantity)` expects, so the
+backfill maps `0` → `NULL` uniformly.
+
+Carrying the literal 0 would have been quiet and wrong in three separate ways:
+`remaining_to_fulfil` would read 0 on a request with nothing issued,
+`total_value` would compute as 0, and at step 12 the first fulfilment against
+any such item would trip `stock_request_items_not_over_fulfilled` — *every*
+request that had ever had stock issued would fail the backfill, having already
+migrated its header cleanly.
+
+Making the denial representable is a design change, not a backfill decision. It
+is worth doing: Mongo's own `recalculateFulfillment` treats a denied line as
+still requiring its full requested quantity, so a request with one denied line
+can never reach `fulfilled` — in Mongo today, and faithfully in Postgres now.
+
+Three smaller things, recorded because they were decided during the port:
+
+- **A vanished customer quarantines the request.** A journal entry naming a
+  deleted party keeps the entry and drops the attribution (§9B's
+  `resolvePartyId`). A request cannot: since 0022 the customer is a real FK and
+  `stock_requests_customer_required_unless_internal` makes it mandatory for the
+  customer-facing types. Keeping it would mean reclassifying a `demo` as
+  internal, so it is rejected with the reason named. Note also that creation
+  writes `customer.id` as `""` — not null — for `internal` and
+  `employee_borrow`, so "absent" is the empty string as often as it is missing.
+
+- **`total_value` is not carried, and the fixture proves why.** The seeded
+  approved request stores 399.96, computed before the approval cut a line from
+  4 to 3 and never re-derived — `recalculateFulfillment()` is a method someone
+  has to call. The trigger computes 799.97 from the items. This is §9.9's point
+  demonstrated on real-shaped data rather than argued.
+
+- **`updated_at` is restored after the items land.** Inserting them fires
+  `recalc_request`, which stamps `updated_at = now()`. "When the backfill ran"
+  is not an answer to "when was this request last touched", so the source's
+  value is written back.
+
+Also fixed while here: `stats.lines` was incremented inside the savepoint, so a
+journal entry that failed and was quarantined still had its lines counted. The
+cutover gate reads these numbers.
 
 ---
 
