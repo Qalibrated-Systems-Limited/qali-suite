@@ -57,10 +57,42 @@ suite("postgres backfill and reconciliation", () => {
         accounts: 3,
         fiscalPeriods: 1,
         parties: 1,
+        products: 2,
       });
       // Four of the five source entries land; the fifth is quarantined below.
       expect(stats.entries).toBe(4);
       expect(stats.lines).toBe(7);
+    });
+
+    it("migrates products, exactly and with the SKU normalised", async () => {
+      await run();
+      const rows = await admin`
+        SELECT sku, name, unit, category, quantity_on_hand::text AS on_hand,
+               quantity_committed::text AS committed, reorder_level::text AS reorder,
+               cost_price::text AS cost, selling_price::text AS price,
+               costing_method::text AS method, is_active
+          FROM products ORDER BY sku
+      `;
+      expect(rows.map((r) => r.sku)).toEqual(["GAD-1", "WID-1"]);
+
+      const widget = rows.find((r) => r.sku === "WID-1");
+      expect(widget.name).toBe("Widget");
+      expect(widget.unit).toBe("pcs");
+      expect(widget.category).toBe("Hardware");
+      expect(widget.on_hand).toBe("100.0000");
+      expect(widget.committed).toBe("10.0000");
+      expect(widget.reorder).toBe("25.0000");
+      // 40.5 as a float becomes exactly 40.5000, not 40.4999...
+      expect(widget.cost).toBe("40.5000");
+      expect(widget.price).toBe("250.0000");
+      expect(widget.method).toBe("fifo");
+      expect(widget.is_active).toBe(true);
+
+      // 99.99 is the classic float that does not survive naive conversion.
+      const gadget = rows.find((r) => r.sku === "GAD-1");
+      expect(gadget.price).toBe("99.9900");
+      // status "discontinued" beats isActive true: three states flatten to two.
+      expect(gadget.is_active).toBe(false);
     });
 
     it("quarantines an unbalanced entry instead of rounding it into agreement", async () => {

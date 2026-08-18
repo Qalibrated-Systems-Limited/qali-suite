@@ -61,6 +61,7 @@ const newStats = () => ({
   accounts: 0,
   fiscalPeriods: 0,
   parties: 0,
+  products: 0,
   entries: 0,
   lines: 0,
   rejected: 0,
@@ -282,6 +283,52 @@ async function run({ mongo, sql, stats, onlyCompany, log }) {
           ON CONFLICT (id) DO NOTHING
         `;
         stats.parties++;
+      }
+
+      // ── products ─────────────────────────────────────────────────────────
+      // No dependencies beyond the company, and invoice/bill/stock lines all
+      // reference these, so they go early.
+      const productDocs = await db
+        .collection("products")
+        .find({ companyId: oldCompanyId })
+        .toArray()
+        .catch(() => []);
+
+      for (const pr of productDocs) {
+        const id = await mapId(tx, "products", pr._id);
+
+        // Mongo carries BOTH `status` (active/inactive/discontinued) and an
+        // `isActive` boolean. Postgres keeps only the boolean, so the three
+        // states flatten to two: anything not "active" is inactive. The
+        // distinction between discontinued and merely inactive is not carried,
+        // and nothing outside a service-layer filter type reads it.
+        const isActive =
+          pr.isActive !== false && (pr.status ?? "active") === "active";
+
+        await tx`
+          INSERT INTO products (
+            id, company_id, sku, name, description, category, unit,
+            product_type, quantity_on_hand, quantity_committed,
+            quantity_on_hold, reorder_level, cost_price, last_purchase_cost,
+            costing_method, selling_price, wholesale_price, is_active
+          ) VALUES (
+            ${id}, ${companyUuid}, ${String(pr.SKU ?? "").toUpperCase()},
+            ${pr.name}, ${pr.description ?? null}, ${pr.category ?? null},
+            ${pr.unit ?? "pcs"}, ${pr.type ?? "Inventory Item"},
+            ${toMoney(toScaled(pr.inventory?.quantityOnHand))},
+            ${toMoney(toScaled(pr.inventory?.quantityCommitted))},
+            ${toMoney(toScaled(pr.inventory?.quantityOnHold))},
+            ${toMoney(toScaled(pr.inventory?.reorderLevel))},
+            ${toMoney(toScaled(pr.costing?.costPrice))},
+            ${toMoney(toScaled(pr.costing?.lastPurchaseCost))},
+            ${pr.costing?.costingMethod ?? "average"},
+            ${toMoney(toScaled(pr.pricing?.sellingPrice))},
+            ${toMoney(toScaled(pr.pricing?.wholesalePrice))},
+            ${isActive}
+          )
+          ON CONFLICT (id) DO NOTHING
+        `;
+        stats.products++;
       }
 
       // ── journal entries + lines ──────────────────────────────────────────

@@ -27,7 +27,10 @@ export async function seedTestSource(mongoUri = process.env.MONGODB_URI) {
   const db = client.db();
 
 await Promise.all(
-  ["companies", "accounts", "fiscalperiods", "journalentries", "parties"].map(
+  [
+    "companies", "accounts", "fiscalperiods", "journalentries", "parties",
+    "products",
+  ].map(
     (c) => db.collection(c).deleteMany({}),
   ),
 );
@@ -35,6 +38,8 @@ await Promise.all(
 const companyId = new ObjectId();
 const cashId = new ObjectId();
 const salesId = new ObjectId();
+const widgetId = new ObjectId();
+const gadgetId = new ObjectId();
 const arId = new ObjectId();
 const customerId = new ObjectId();
 // Referenced by JE-00004 but never inserted into `parties` — stands in for a
@@ -78,6 +83,42 @@ await db.collection("parties").insertOne({
   creditTerms: { creditLimit: 500000, paymentTermsDays: 45 },
   isActive: true,
 });
+
+await db.collection("products").insertMany([
+  {
+    _id: widgetId,
+    companyId,
+    name: "Widget",
+    SKU: "wid-1", // lowercase on purpose: the target column is uppercased
+    description: "A widget",
+    category: "Hardware",
+    unit: "pcs",
+    inventory: {
+      quantityOnHand: 100,
+      quantityCommitted: 10,
+      quantityOnHold: 0,
+      reorderLevel: 25,
+    },
+    costing: { costPrice: 40.5, lastPurchaseCost: 42, costingMethod: "fifo" },
+    pricing: { sellingPrice: 250, wholesalePrice: 200 },
+    status: "active",
+    isActive: true,
+  },
+  {
+    // status and isActive disagree; the target keeps only the boolean, and
+    // "not active" wins.
+    _id: gadgetId,
+    companyId,
+    name: "Gadget",
+    SKU: "GAD-1",
+    unit: "box",
+    inventory: { quantityOnHand: 0, quantityCommitted: 0 },
+    costing: { costPrice: 0 },
+    pricing: { sellingPrice: 99.99 },
+    status: "discontinued",
+    isActive: true,
+  },
+]);
 
 await db.collection("fiscalperiods").insertOne({
   companyId,
@@ -144,7 +185,11 @@ await db.collection("journalentries").insertMany([
 ]);
 
   await client.close();
-  return { companyId, accounts: { cashId, salesId } };
+  return {
+    companyId,
+    accounts: { cashId, salesId },
+    products: { widgetId, gadgetId },
+  };
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
@@ -154,6 +199,8 @@ const isCli =
 if (isCli) {
   await seedTestSource();
   console.log("Seeded test source:");
-  console.log("  1 company, 3 accounts, 1 party, 1 fiscal period, 5 journal entries");
+  console.log(
+    "  1 company, 3 accounts, 1 party, 2 products, 1 fiscal period, 5 journal entries",
+  );
   console.log("  (JE-00003 is deliberately off by 0.005)");
 }
