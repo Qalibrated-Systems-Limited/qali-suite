@@ -31,7 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { createCreditNote } from "@/app/mongodb/actions/credit-note-actions";
+import { createCreditNotePg as createCreditNote } from "@/app/db/actions/credit-note-actions";
 import { toast } from "sonner";
 
 const REASONS = [
@@ -58,6 +58,7 @@ export function IssueCreditNoteDialog({ open, onOpenChange, invoice }) {
     if (open && invoice?.items) {
       setItems(
         invoice.items.map((item, index) => ({
+          originalInvoiceLineId: item._id || item.id || "",
           selected: false,
           originalItemIndex: index,
           itemType: item.itemType || "product",
@@ -275,6 +276,10 @@ export function IssueCreditNoteDialog({ open, onOpenChange, invoice }) {
                         {item.selected && item.quantity > 0 && (
                           <>
                             <input type="hidden" name={`items[${index}].originalItemIndex`} value={item.originalItemIndex} />
+                            {/* The line this credits, by id rather than by
+                                position — an ordinal into an array silently
+                                repoints when a line is removed. */}
+                            <input type="hidden" name={`items[${index}].originalInvoiceLineId`} value={item.originalInvoiceLineId || ""} />
                             <input type="hidden" name={`items[${index}].itemType`} value={item.itemType} />
                             <input type="hidden" name={`items[${index}].productId`} value={item.productId || ""} />
                             <input type="hidden" name={`items[${index}].productSKU`} value={item.productSKU || ""} />

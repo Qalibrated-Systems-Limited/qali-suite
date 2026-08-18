@@ -79,11 +79,21 @@ export async function createCreditNote(
       number: invoices.invoiceNumber,
       date: invoices.invoiceDate,
       total: invoices.total,
+      status: invoices.status,
       customerId: invoices.customerId,
     })
     .from(invoices)
     .where(eq(invoices.id, input.invoiceId));
   if (!invoice) throw new Error("Invoice not found");
+
+  // credit-note-actions.js:131. A credit note reverses revenue, and a draft or
+  // cancelled invoice never recognised any — cancelling it is the correction
+  // for those. Only a completed invoice can be credited.
+  if (invoice.status !== "completed") {
+    throw new Error(
+      `Only a completed invoice can be credited (this one is ${invoice.status})`,
+    );
+  }
 
   const [customer] = await tx
     .select({

@@ -204,6 +204,137 @@ suite("postgres credit notes", () => {
     });
   });
 
+  describe("what may be credited (ported rules)", () => {
+    it("refuses to credit an invoice that has not completed", async () => {
+      // A draft never recognised revenue, so there is nothing to reverse —
+      // cancelling it is the correction for those. credit-note-actions.js:131.
+      const draft = await asTenant(companyA, (tx) =>
+        invoiceRepo.createInvoice(tx, {
+          companyId: companyA,
+          customerId: customer,
+          invoiceDate: "2026-08-01",
+          lines: [{ productId: widget, quantity: "1", unitPrice: "100.0000" }],
+        }),
+      );
+
+      await expect(
+        asTenant(companyA, (tx) =>
+          creditNoteRepo.createCreditNote(tx, {
+            companyId: companyA,
+            invoiceId: draft.id,
+            creditNoteDate: "2026-08-10",
+            reason: "return",
+            reasonDescription: "Too early",
+            lines: [
+              { description: "Widget", productId: widget, quantity: "1", unitPrice: "100.0000" },
+            ],
+          }),
+        ),
+      ).rejects.toThrow(/only a completed invoice/i);
+    });
+
+    it("refuses to credit more than the invoice was worth, exactly", async () => {
+      // The invoice is 1000 (10 x 100). Credit 800, then try another 300.
+      await asTenant(companyA, (tx) =>
+        creditNoteRepo.createCreditNote(tx, {
+          companyId: companyA,
+          invoiceId: invoice.id,
+          creditNoteDate: "2026-08-10",
+          reason: "return",
+          reasonDescription: "Partial return",
+          lines: [
+            { description: "Widget", productId: widget, quantity: "8", unitPrice: "100.0000", taxRate: "0" },
+          ],
+        }),
+      );
+
+      await expectRejection(
+        asTenant(companyA, (tx) =>
+          creditNoteRepo.createCreditNote(tx, {
+            companyId: companyA,
+            invoiceId: invoice.id,
+            creditNoteDate: "2026-08-11",
+            reason: "return",
+            reasonDescription: "Too much",
+            lines: [
+              { description: "Widget", productId: widget, quantity: "3", unitPrice: "100.0000", taxRate: "0" },
+            ],
+          }),
+        ),
+        /over-credited/i,
+      );
+    });
+
+    it("refuses a single cent over — the Mongo guard allowed it", async () => {
+      // credit-note-actions.js:160 tests `> invoice.total + 0.01`, a seventh
+      // tolerance of the §9.2 kind, permitting a cent of negative revenue.
+      await expectRejection(
+        asTenant(companyA, (tx) =>
+          creditNoteRepo.createCreditNote(tx, {
+            companyId: companyA,
+            invoiceId: invoice.id,
+            creditNoteDate: "2026-08-10",
+            reason: "overcharge",
+            reasonDescription: "A cent too far",
+            lines: [
+              { description: "Widget", productId: widget, quantity: "1", unitPrice: "1000.0100", taxRate: "0" },
+            ],
+          }),
+        ),
+        /over-credited/i,
+      );
+    });
+
+    it("allows crediting the invoice in full, to the cent", async () => {
+      const note = await asTenant(companyA, (tx) =>
+        creditNoteRepo.createCreditNote(tx, {
+          companyId: companyA,
+          invoiceId: invoice.id,
+          creditNoteDate: "2026-08-10",
+          reason: "cancellation",
+          reasonDescription: "Full reversal",
+          lines: [
+            { description: "Widget", productId: widget, quantity: "10", unitPrice: "100.0000", taxRate: "0" },
+          ],
+        }),
+      );
+      expect(note.total).toBe("1000.0000");
+    });
+
+    it("frees the cap again when a note is voided", async () => {
+      const note = await asTenant(companyA, (tx) =>
+        creditNoteRepo.createCreditNote(tx, {
+          companyId: companyA,
+          invoiceId: invoice.id,
+          creditNoteDate: "2026-08-10",
+          reason: "return",
+          reasonDescription: "Mistake",
+          lines: [
+            { description: "Widget", productId: widget, quantity: "10", unitPrice: "100.0000", taxRate: "0" },
+          ],
+        }),
+      );
+      await asTenant(companyA, (tx) =>
+        creditNoteRepo.voidCreditNote(tx, note.id, randomUUID(), "Raised in error"),
+      );
+
+      // A voided note credits nothing, so the invoice is creditable again.
+      const replacement = await asTenant(companyA, (tx) =>
+        creditNoteRepo.createCreditNote(tx, {
+          companyId: companyA,
+          invoiceId: invoice.id,
+          creditNoteDate: "2026-08-11",
+          reason: "return",
+          reasonDescription: "Correct one",
+          lines: [
+            { description: "Widget", productId: widget, quantity: "10", unitPrice: "100.0000", taxRate: "0" },
+          ],
+        }),
+      );
+      expect(replacement.total).toBe("1000.0000");
+    });
+  });
+
   describe("application", () => {
     it("refuses to apply more than the credit is worth, exactly", async () => {
       const note = await makeNote();
