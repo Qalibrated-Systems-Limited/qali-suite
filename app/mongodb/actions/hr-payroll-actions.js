@@ -84,18 +84,27 @@ async function syncRunTotals(payrollRunId) {
   if (!totals) return;
   await PayrollRun.findByIdAndUpdate(payrollRunId, {
     "totals.employeeCount": totals.employeeCount,
-    "totals.totalBasicSalary": Math.round(totals.totalBasicSalary),
-    "totals.totalAllowances": Math.round(totals.totalAllowances),
-    "totals.totalGrossPay": Math.round(totals.totalGrossPay),
-    "totals.totalPAYE": Math.round(totals.totalPAYE),
-    "totals.totalNSSF": Math.round(totals.totalNSSF),
-    "totals.totalSHIF": Math.round(totals.totalSHIF || 0),
-    "totals.totalHousingLevy": Math.round(totals.totalHousingLevy || 0),
-    "totals.totalOtherDeductions": Math.round(totals.totalOtherDeductions),
-    "totals.totalDeductions": Math.round(totals.totalDeductions),
-    "totals.totalNetPay": Math.round(totals.totalNetPay),
-    "totals.totalEmployerNSSF": Math.round(totals.totalEmployerNSSF || 0),
-    "totals.totalEmployerAHL": Math.round(totals.totalEmployerAHL || 0),
+    // Rounded to CENTS, not to whole units, and each to the same precision.
+    //
+    // These twelve figures used to be Math.round()ed independently to whole
+    // units, and the accrual journal is built from them. Payroll balances by
+    // an identity — gross = paye + nssf + shif + levy + other + net — which
+    // holds exactly in the per-employee figures and is destroyed by rounding
+    // each side separately: nine roundings of up to half a unit each, so the
+    // entry could be out by several units through no error in the payroll.
+    // That is what the ±1 tolerance at the balance check was absorbing.
+    "totals.totalBasicSalary": cents(totals.totalBasicSalary),
+    "totals.totalAllowances": cents(totals.totalAllowances),
+    "totals.totalGrossPay": cents(totals.totalGrossPay),
+    "totals.totalPAYE": cents(totals.totalPAYE),
+    "totals.totalNSSF": cents(totals.totalNSSF),
+    "totals.totalSHIF": cents(totals.totalSHIF || 0),
+    "totals.totalHousingLevy": cents(totals.totalHousingLevy || 0),
+    "totals.totalOtherDeductions": cents(totals.totalOtherDeductions),
+    "totals.totalDeductions": cents(totals.totalDeductions),
+    "totals.totalNetPay": cents(totals.totalNetPay),
+    "totals.totalEmployerNSSF": cents(totals.totalEmployerNSSF || 0),
+    "totals.totalEmployerAHL": cents(totals.totalEmployerAHL || 0),
   });
 }
 
@@ -483,6 +492,12 @@ async function fetchAccountDetails(accountIds) {
 /**
  * Build a journal line if the account is mapped; returns null if skipped.
  */
+/** Two decimal places. Keeps every total at one precision so the payroll
+ *  identity survives into the journal. */
+function cents(v) {
+  return Math.round((Number(v) || 0) * 100) / 100;
+}
+
 function jeLine(accountMap, accountId, debit, credit, description) {
   if (!accountId) return null;
   const acct = accountMap.get(accountId.toString());
@@ -514,7 +529,12 @@ function jeLine(accountMap, accountId, debit, credit, description) {
  * Skips posting gracefully if no glMapping is configured.
  * Returns the new JournalEntry _id or null if skipped.
  */
-async function postPayrollAccrualJournal(run, glMapping, user) {
+/**
+ * Exported for testing. This function decides whether payroll — usually the
+ * largest recurring entry a business posts — reaches the books correctly, and
+ * it had no test while carrying a ±1 tolerance and a silent line-drop.
+ */
+export async function postPayrollAccrualJournal(run, glMapping, user) {
   if (!glMapping) return null;
 
   const t = run.totals || {};
@@ -545,6 +565,58 @@ async function postPayrollAccrualJournal(run, glMapping, user) {
   if (accountIds.every((id) => !id)) return null;
 
   const accountMap = await fetchAccountDetails(accountIds);
+
+  // Every account carrying an amount must be mapped, and the failure names it.
+  //
+  // jeLine() returns null for an unmapped account and .filter(Boolean) then
+  // DELETES that leg of the entry. The balance check below was being used to
+  // infer "is a mapping missing?" from "is it unbalanced?", and those are not
+  // the same question:
+  //
+  //   - a small leg vanishing (staff loans of 0.40) left an imbalance under
+  //     the tolerance, so it posted and the deduction never reached the books
+  //   - two legs vanishing can CANCEL. Employer NSSF expense of 12,000 and
+  //     NSSF payable of 12,000.30 both unmapped leaves a 0.30 imbalance, and
+  //     NSSF is then absent from the books entirely — no expense, no
+  //     liability — with nothing to show for it
+  //
+  // The larger the missing pair, the likelier they offset. So ask the real
+  // question directly.
+  const required = [
+    ["salaryExpense", glMapping.salaryExpense, totalGrossPay],
+    ["employerNssfExpense", glMapping.employerNssfExpense, totalEmployerNSSF],
+    ["employerAhlExpense", glMapping.employerAhlExpense, totalEmployerAHL],
+    ["payePayable", glMapping.payePayable, totalPAYE],
+    ["nssfPayable", glMapping.nssfPayable, totalNSSF + totalEmployerNSSF],
+    ["shifPayable", glMapping.shifPayable, totalSHIF],
+    ["ahlPayable", glMapping.ahlPayable, totalHousingLevy + totalEmployerAHL],
+    ["salaryPayable", glMapping.salaryPayable, totalNetPay],
+    ["staffLoansReceivable", glMapping.staffLoansReceivable, totalOtherDeductions],
+  ];
+
+  const unmapped = required
+    .filter(([, accountId, amount]) => cents(amount) !== 0 && !accountId)
+    .map(([name]) => name);
+
+  if (unmapped.length) {
+    throw new Error(
+      `Payroll GL mapping is incomplete: ${unmapped.join(", ")} ` +
+        "not mapped. Every account carrying an amount must be mapped before " +
+        "the payroll journal can post.",
+    );
+  }
+
+  const missingAccounts = required
+    .filter(([, accountId, amount]) => cents(amount) !== 0 && accountId)
+    .filter(([, accountId]) => !accountMap.get(accountId.toString()))
+    .map(([name]) => name);
+
+  if (missingAccounts.length) {
+    throw new Error(
+      `Payroll GL mapping points at accounts that do not exist: ` +
+        `${missingAccounts.join(", ")}.`,
+    );
+  }
   const periodLabel = run.period?.label || `${run.period?.month}/${run.period?.year}`;
 
   const lines = [
@@ -562,11 +634,24 @@ async function postPayrollAccrualJournal(run, glMapping, user) {
 
   if (lines.length < 2) return null;
 
-  // BUG-6: Verify journal is balanced before posting (catches partial GL mapping)
+  // The entry must balance. This is no longer standing in for the GL-mapping
+  // check above, so it does not need to tolerate a missing leg.
+  //
+  // The remaining allowance is half a cent, and it is a FLOAT guard rather
+  // than a business tolerance: these amounts are float64, so summing them can
+  // leave residue in the fifteenth decimal. It was ±1 — a whole currency unit
+  // on what is usually the largest recurring entry a business posts — because
+  // it was absorbing the independent rounding fixed above.
   const totalDebits = lines.reduce((s, l) => s + (l.debit || 0), 0);
   const totalCredits = lines.reduce((s, l) => s + (l.credit || 0), 0);
-  if (Math.abs(totalDebits - totalCredits) > 1) {
-    throw new Error(`Payroll journal is unbalanced: debits=${totalDebits}, credits=${totalCredits}. Check GL mapping — all accounts must be configured.`);
+  const drift = Math.abs(totalDebits - totalCredits);
+  if (drift > 0.005) {
+    throw new Error(
+      `Payroll journal is unbalanced by ${drift.toFixed(4)}: ` +
+        `debits=${totalDebits}, credits=${totalCredits}. ` +
+        "Payroll balances by identity (gross = deductions + net), so this " +
+        "means a component total disagrees with the payslips it came from.",
+    );
   }
 
   // Fiscal period is enforced at post() time: JournalEntry.validateFiscalPeriod
