@@ -3,9 +3,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Users, Building2, UserCheck, CreditCard, TrendingUp, TrendingDown } from "lucide-react";
 import {
   getPartiesPaginated,
-  fetchPartyPages,
   getPartyStats,
-} from "@/app/mongodb/queries/partyQueries";
+} from "@/app/db/actions/party-actions";
 import PartyListClient from "./partylistClient";
 import Pagination from "@/components/pagination";
 import { formatCurrency } from "@/lib/utils";
@@ -140,10 +139,12 @@ export function PartyStatsSkeleton() {
 // ============================================
 
 export async function PartiesTableServer({ query, page, type }) {
-  const parties = await getPartiesPaginated(
+  // One query returns the page and its total, so the pagination component no
+  // longer needs a second round trip over the same filters.
+  const { parties } = await getPartiesPaginated(
     query,
     page,
-    type === "all" ? null : type
+    type === "all" ? null : type,
   );
 
   return <PartyListClient parties={parties} currentType={type} />;
@@ -209,7 +210,11 @@ export function PartiesTableSkeleton() {
 // ============================================
 
 export async function PartiesPaginationServer({ query, type }) {
-  const totalPages = await fetchPartyPages(query, type === "all" ? null : type);
+  const { totalPages } = await getPartiesPaginated(
+    query,
+    1,
+    type === "all" ? null : type,
+  );
 
   if (totalPages <= 1) return null;
 

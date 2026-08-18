@@ -988,12 +988,13 @@ suite("invoice list page queries", () => {
     });
 
     it("creates a customer that can then actually be invoiced", async () => {
+      const partyActions = await import("@/app/db/actions/party-actions");
       const fd = new FormData();
       fd.set("name", "Kisumu Traders");
       fd.set("type", "customer");
       fd.set("email", "AC@Kisumu.CO");
 
-      const created = await invoiceActions.quickCreateParty(fd);
+      const created = await partyActions.quickCreateParty(fd);
       expect(created.success).toBe(true);
       expect(created.party.email).toBe("ac@kisumu.co");
 

@@ -251,7 +251,8 @@ suite("write paths with a real session id", () => {
     const fd = new FormData();
     fd.set("name", "Kisumu Traders");
     fd.set("type", "customer");
-    const created = await invoiceActions.quickCreateParty(fd);
+    const partyActions = await import("@/app/db/actions/party-actions");
+    const created = await partyActions.quickCreateParty(fd);
     expect(created.success, created.error).toBe(true);
 
     const [row] = await admin.begin(async (tx) => {

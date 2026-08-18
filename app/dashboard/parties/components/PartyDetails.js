@@ -8,7 +8,8 @@ import {
   Trash2,
   UserPlus,
 } from "lucide-react";
-import { getPartyById } from "@/app/mongodb/queries/partyQueries";
+import { getPartyById } from "@/app/db/actions/party-actions";
+// Users are not ported (§10), so the link-user picker stays on Mongo.
 import { getUsers } from "@/app/mongodb/queries/partyQueries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";

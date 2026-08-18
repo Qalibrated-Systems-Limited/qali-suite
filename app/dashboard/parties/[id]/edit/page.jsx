@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { getPartyById } from "@/app/mongodb/queries/partyQueries";
+import { getPartyById } from "@/app/db/actions/party-actions";
 import PartyForm from "../../components/partyForm";
 import { Button } from "@/components/ui/button";
 

@@ -95,6 +95,9 @@ export const parties = pgTable(
     bankBranch: text("bank_branch"),
     bankSwiftCode: text("bank_swift_code"),
 
+    /** Free text about the party (0032). Nothing derives from it. */
+    notes: text("notes"),
+
     isActive: boolean("is_active").notNull().default(true),
 
     createdById: text("created_by_id"),

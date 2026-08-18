@@ -82,7 +82,16 @@ export async function resolveCompanyUuid(
  */
 const activeCache = new Map<string, boolean>();
 
-async function assertCompanyActive(companyUuid: string) {
+async function assertCompanyActive(
+  companyUuid: string,
+  sourceKey: string,
+  role?: string,
+) {
+  // A SuperAdmin is platform staff, not a tenant user. Locking them out of a
+  // deactivated company would mean the only people who can reactivate it
+  // cannot open it — a trap that springs the moment the control is used.
+  if (role === "SuperAdmin") return;
+
   if (activeCache.get(companyUuid)) return;
 
   // Scoped, because since 0024 `companies` is itself under RLS keyed on its
@@ -95,12 +104,31 @@ async function assertCompanyActive(companyUuid: string) {
     `)) as unknown as Array<{ is_active: boolean }>;
   });
 
-  if (!rows.length || !rows[0].is_active) {
-    throw new Error(
-      "This company is not active. Contact your administrator.",
-    );
+  // NO ROW IS NOT "DEACTIVATED". It means the id map points at a company that
+  // is no longer there, so what this process cached is stale — and telling
+  // somebody their company is deactivated when the row was dropped underneath
+  // them sends them to an administrator who will find nothing wrong.
+  //
+  // Drop the stale entries and let the caller re-resolve, which provisions the
+  // tenant again. Reported by a developer whose dev database had been
+  // truncated by the test suite; a restore from backup does the same.
+  if (!rows.length) {
+    companyUuidCache.delete(sourceKey);
+    activeCache.delete(companyUuid);
+    throw new StaleTenantMapping(sourceKey);
+  }
+
+  if (!rows[0].is_active) {
+    throw new Error("This company is not active. Contact your administrator.");
   }
   activeCache.set(companyUuid, true);
+}
+
+/** Thrown when the cached mapping outlived the company row. Retried once. */
+class StaleTenantMapping extends Error {
+  constructor(readonly sourceKey: string) {
+    super(`Tenant mapping for ${sourceKey} is stale`);
+  }
 }
 
 /** Called when a tenant is activated or deactivated, so the gate reacts. */
@@ -135,9 +163,19 @@ export async function withAuthorizedTenant<T>(
 
   // The session carries a company CODE, not a name. It is the best label
   // available here, and provisioning only needs one to put on the row.
-  const companyUuid = await resolveCompanyUuid(companyId, { code: companyCode });
+  const hint = { code: companyCode };
+  let companyUuid = await resolveCompanyUuid(companyId, hint);
 
-  await assertCompanyActive(companyUuid);
+  try {
+    await assertCompanyActive(companyUuid, String(companyId), user.role);
+  } catch (err) {
+    if (!(err instanceof StaleTenantMapping)) throw err;
+    // Resolve again with the caches cleared: the tenant is re-provisioned and
+    // the request carries on, rather than failing on a fact about this
+    // process's memory that nobody reading the message can act on.
+    companyUuid = await resolveCompanyUuid(companyId, hint);
+    await assertCompanyActive(companyUuid, String(companyId), user.role);
+  }
 
   return withTenant(companyUuid, (tx) =>
     fn(tx, { user: user as ActionUser, companyId: companyUuid }),

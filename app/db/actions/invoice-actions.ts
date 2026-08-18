@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { withAuthorizedTenant } from "../tenant";
-import { INVOICE_WRITE_ROLES, PARTY_MANAGE_ROLES } from "@/lib/utils/role-gates";
+import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import * as invoices from "../repositories/invoices";
 import * as accountsRepo from "../repositories/accounts";
 import * as payments from "../repositories/payments";
@@ -540,55 +540,12 @@ export async function getInvoiceFormData() {
   });
 }
 
-/**
- * Creates a customer or supplier inline from the invoice form.
- *
- * The Mongo version wrote to Mongo only, so a customer created here could not
- * then be invoiced — the invoice write would not find them.
+/*
+ * quickCreateParty lived here while parties were still a Mongo module. It is
+ * in app/db/actions/party-actions now — one implementation, so the party a
+ * form creates inline and the party the parties page creates are the same
+ * thing, created the same way.
  */
-export async function quickCreateParty(formData: FormData) {
-  const name = String(formData.get("name") ?? "").trim();
-  const type = String(formData.get("type") ?? "customer");
-
-  if (!name) return { success: false as const, error: "Name is required" };
-  if (!["customer", "supplier", "both"].includes(type)) {
-    return { success: false as const, error: "Invalid party type" };
-  }
-
-  try {
-    const party = await withAuthorizedTenant(
-      [...PARTY_MANAGE_ROLES],
-      async (tx, { user, companyId }) =>
-        partiesRepo.createParty(tx, {
-          companyId,
-          name,
-          // "both" has no primary type of its own; it is the two booleans.
-          primaryType: type === "supplier" ? "supplier" : "customer",
-          isCustomer: type === "customer" || type === "both",
-          isSupplier: type === "supplier" || type === "both",
-          email: String(formData.get("email") ?? "").trim().toLowerCase() || null,
-          phone: String(formData.get("phone") ?? "").trim() || null,
-          createdById: user.id,
-        }),
-    );
-
-    revalidatePath("/dashboard/invoices");
-    return {
-      success: true as const,
-      // The dialog hands this straight to the picker's selection state.
-      party: {
-        _id: party.id,
-        name: party.name,
-        email: party.email ?? "",
-        phone: party.phone ?? "",
-        taxPin: party.taxPin ?? "",
-        address: "",
-      },
-    };
-  } catch (err) {
-    return { success: false as const, error: toActionError(err) };
-  }
-}
 
 /** Cash/bank/M-Pesa accounts the payment dialog offers. */
 export async function getPaymentAccountsPg() {

@@ -225,6 +225,13 @@
       "when": 1787049104566,
       "tag": "0031_actor_ids_are_text",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787049105566,
+      "tag": "0032_party_notes",
+      "breakpoints": true
     }
   ]
 }

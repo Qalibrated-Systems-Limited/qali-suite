@@ -37,7 +37,7 @@ import {
 import {
   togglePartyStatus,
   deleteParty,
-} from "@/app/mongodb/actions/party-actions";
+} from "@/app/db/actions/party-actions";
 import { toast } from "sonner";
 
 export default function CustomerListClient({ customers }) {

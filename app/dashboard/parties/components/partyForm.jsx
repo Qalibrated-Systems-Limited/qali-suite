@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { useRouter } from "next/navigation";
-import { createParty, updateParty } from "@/app/mongodb/actions/party-actions";
+import { createParty, updateParty } from "@/app/db/actions/party-actions";
 import { toast } from "sonner";
 import { useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

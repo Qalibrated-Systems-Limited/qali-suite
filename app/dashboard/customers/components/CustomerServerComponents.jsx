@@ -3,9 +3,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Users, TrendingUp, CreditCard, UserCheck } from "lucide-react";
 import {
   getPartiesPaginated,
-  fetchPartyPages,
   getPartyStats,
-} from "@/app/mongodb/queries/partyQueries";
+} from "@/app/db/actions/party-actions";
 import CustomerListClient from "./CustomerListClient";
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";
@@ -113,7 +112,7 @@ export function CustomerStatsSkeleton() {
 // ============================================
 
 export async function CustomersTableServer({ query, page }) {
-  const customers = await getPartiesPaginated(query, page, "customer");
+  const { parties: customers } = await getPartiesPaginated(query, page, "customer");
 
   return <CustomerListClient customers={customers} />;
 }
@@ -161,7 +160,7 @@ export function CustomersTableSkeleton() {
 // ============================================
 
 export async function CustomersPaginationServer({ query }) {
-  const totalPages = await fetchPartyPages(query, "customer");
+  const { totalPages } = await getPartiesPaginated(query, 1, "customer");
 
   if (totalPages <= 1) return null;
 

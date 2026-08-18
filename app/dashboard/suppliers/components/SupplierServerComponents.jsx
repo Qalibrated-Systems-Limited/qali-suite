@@ -3,9 +3,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Users, Building2, CreditCard, TrendingDown } from "lucide-react";
 import {
   getPartiesPaginated,
-  fetchPartyPages,
   getPartyStats,
-} from "@/app/mongodb/queries/partyQueries";
+} from "@/app/db/actions/party-actions";
 import SupplierListClient from "./SupplierListClient";
 import Pagination from "@/components/pagination";
 import { formatCurrency } from "@/lib/utils";
@@ -112,7 +111,7 @@ export function SupplierStatsSkeleton() {
 // ============================================
 
 export async function SuppliersTableServer({ query, page }) {
-  const suppliers = await getPartiesPaginated(query, page, "supplier");
+  const { parties: suppliers } = await getPartiesPaginated(query, page, "supplier");
 
   return <SupplierListClient suppliers={suppliers} />;
 }
@@ -163,7 +162,7 @@ export function SuppliersTableSkeleton() {
 // ============================================
 
 export async function SuppliersPaginationServer({ query }) {
-  const totalPages = await fetchPartyPages(query, "supplier");
+  const { totalPages } = await getPartiesPaginated(query, 1, "supplier");
 
   if (totalPages <= 1) return null;
 
