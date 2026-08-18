@@ -18,15 +18,8 @@
  */
 import postgres from "postgres";
 import { MongoClient, ObjectId } from "mongodb";
-
-const MONGODB_URI = process.env.MONGODB_URI;
-const DATABASE_URL = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
-if (!MONGODB_URI || !DATABASE_URL) {
-  console.error(
-    "MONGODB_URI and DIRECT_DATABASE_URL (or DATABASE_URL) must be set.",
-  );
-  process.exit(1);
-}
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
 const SCALE = 10000;
 const toScaled = (v) => Math.round((Number(v) || 0) * SCALE);
@@ -37,11 +30,32 @@ const fmt = (scaled) => {
   return neg ? `-${s}` : s;
 };
 
-const mongo = new MongoClient(MONGODB_URI);
-const sql = postgres(DATABASE_URL, { max: 1, onnotice: () => {} });
+/**
+ * Compares the two ledgers and returns the variance count.
+ *
+ * Exported so the cutover gate itself can be tested — a reconciliation that
+ * silently passes is worse than none.
+ */
+export async function reconcile({
+  mongoUri,
+  databaseUrl,
+  log = () => {},
+} = {}) {
+  const uri = mongoUri ?? process.env.MONGODB_URI;
+  const url =
+    databaseUrl ?? process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (!uri || !url) {
+    throw new Error(
+      "MONGODB_URI and DIRECT_DATABASE_URL (or DATABASE_URL) must be set.",
+    );
+  }
 
-try {
-  await mongo.connect();
+  const mongo = new MongoClient(uri);
+  const sql = postgres(url, { max: 1, onnotice: () => {} });
+  const findings = [];
+
+  try {
+    await mongo.connect();
   const db = mongo.db();
 
   const companies = await sql`
@@ -54,7 +68,7 @@ try {
   let failures = 0;
 
   for (const company of companies) {
-    console.log(`\n── ${company.name} ─────────────────────────────`);
+    log(`\n── ${company.name} ─────────────────────────────`);
 
     // ── Mongo side: exact integer aggregation over posted entries ──────────
     // _migration_id_map stores ids as text; Mongo stores companyId as an
@@ -72,7 +86,7 @@ try {
       .catch(() => []);
 
     if (entries.length === 0) {
-      console.log(
+      log(
         "  ⚠ source query returned 0 posted entries — verify the company id " +
           "mapping before trusting this result.",
       );
@@ -126,7 +140,8 @@ try {
 
       if (m.debit !== p.debit || m.credit !== p.credit) {
         companyFailures++;
-        console.log(
+        findings.push({ company: company.name, kind: "account_variance", account: p.code });
+        log(
           `  ✗ ${p.code.padEnd(10)} mongo Dr ${fmt(m.debit)} Cr ${fmt(m.credit)}` +
             `  |  pg Dr ${fmt(p.debit)} Cr ${fmt(p.credit)}` +
             `  |  ΔDr ${fmt(m.debit - p.debit)} ΔCr ${fmt(m.credit - p.credit)}`,
@@ -137,7 +152,9 @@ try {
     // Is the SOURCE ledger even internally consistent? This is the check that
     // surfaces pre-existing float drift, independent of the migration.
     if (mongoDebitTotal !== mongoCreditTotal) {
-      console.log(
+      findings.push({ company: company.name, kind: "source_out_of_balance",
+        variance: fmt(mongoDebitTotal - mongoCreditTotal) });
+      log(
         `  ⚠ SOURCE LEDGER IS OUT OF BALANCE: ` +
           `Dr ${fmt(mongoDebitTotal)} vs Cr ${fmt(mongoCreditTotal)} ` +
           `(variance ${fmt(mongoDebitTotal - mongoCreditTotal)}) — ` +
@@ -153,7 +170,7 @@ try {
        WHERE company_id = ${company.id}
     `;
 
-    console.log(
+    log(
       `  Postgres trial balance: Dr ${pgTotals.d} / Cr ${pgTotals.c} ` +
         `${pgTotals.d === pgTotals.c ? "✓ ties" : "✗ DOES NOT TIE"}`,
     );
@@ -162,26 +179,39 @@ try {
       SELECT count(*)::int AS n FROM _migration_rejects
     `;
     if (rejects.n > 0) {
-      console.log(`  ⚠ ${rejects.n} document(s) were quarantined during backfill.`);
+      findings.push({ company: company.name, kind: "quarantined", count: rejects.n });
+      log(`  ⚠ ${rejects.n} document(s) were quarantined during backfill.`);
       companyFailures++;
     }
 
     if (companyFailures === 0) {
-      console.log("  ✓ reconciles exactly");
+      log("  ✓ reconciles exactly");
     }
     failures += companyFailures;
   }
 
-  console.log(
-    failures === 0
-      ? "\n✓ RECONCILED — safe to cut over."
-      : `\n✗ ${failures} variance(s) — CUTOVER BLOCKED.`,
-  );
-  process.exitCode = failures === 0 ? 0 : 1;
-} catch (err) {
-  console.error("Reconciliation failed:", err);
-  process.exitCode = 1;
-} finally {
-  await mongo.close();
-  await sql.end();
+    log(
+      failures === 0
+        ? "\n✓ RECONCILED — safe to cut over."
+        : `\n✗ ${failures} variance(s) — CUTOVER BLOCKED.`,
+    );
+    return { failures, findings };
+  } finally {
+    await mongo.close();
+    await sql.end();
+  }
+}
+
+// ── CLI ──────────────────────────────────────────────────────────────────────
+const isCli =
+  process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+
+if (isCli) {
+  try {
+    const { failures } = await reconcile({ log: (m) => console.log(m) });
+    process.exitCode = failures === 0 ? 0 : 1;
+  } catch (err) {
+    console.error("Reconciliation failed:", err);
+    process.exitCode = 1;
+  }
 }

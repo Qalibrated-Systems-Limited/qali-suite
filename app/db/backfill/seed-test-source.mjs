@@ -11,16 +11,20 @@
  *   MONGODB_URI=... node app/db/backfill/seed-test-source.mjs
  */
 import { MongoClient, ObjectId } from "mongodb";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
-const uri = process.env.MONGODB_URI;
-if (!uri) {
-  console.error("MONGODB_URI must be set");
-  process.exit(1);
-}
+/**
+ * Seeds the representative source data. Exported so the backfill test can use
+ * exactly the fixture the cutover rehearsal uses — including the entry that is
+ * deliberately off by 0.005.
+ */
+export async function seedTestSource(mongoUri = process.env.MONGODB_URI) {
+  if (!mongoUri) throw new Error("MONGODB_URI must be set");
 
-const client = new MongoClient(uri);
-await client.connect();
-const db = client.db();
+  const client = new MongoClient(mongoUri);
+  await client.connect();
+  const db = client.db();
 
 await Promise.all(
   ["companies", "accounts", "fiscalperiods", "journalentries", "parties"].map(
@@ -139,8 +143,17 @@ await db.collection("journalentries").insertMany([
   },
 ]);
 
-console.log("Seeded test source:");
-console.log("  1 company, 3 accounts, 1 party, 1 fiscal period, 5 journal entries");
-console.log("  (JE-00003 is deliberately off by 0.005)");
+  await client.close();
+  return { companyId, accounts: { cashId, salesId } };
+}
 
-await client.close();
+// ── CLI ──────────────────────────────────────────────────────────────────────
+const isCli =
+  process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+
+if (isCli) {
+  await seedTestSource();
+  console.log("Seeded test source:");
+  console.log("  1 company, 3 accounts, 1 party, 1 fiscal period, 5 journal entries");
+  console.log("  (JE-00003 is deliberately off by 0.005)");
+}

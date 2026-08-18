@@ -34,21 +34,8 @@
 import postgres from "postgres";
 import { MongoClient } from "mongodb";
 import { randomUUID } from "node:crypto";
-
-const MONGODB_URI = process.env.MONGODB_URI;
-const DATABASE_URL = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
-
-if (!MONGODB_URI || !DATABASE_URL) {
-  console.error(
-    "MONGODB_URI and DIRECT_DATABASE_URL (or DATABASE_URL) must be set.",
-  );
-  process.exit(1);
-}
-
-const onlyCompany = (() => {
-  const i = process.argv.indexOf("--company");
-  return i > -1 ? process.argv[i + 1] : null;
-})();
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
 // ── exact money helpers ──────────────────────────────────────────────────────
 const SCALE = 10000; // numeric(19,4)
@@ -69,11 +56,7 @@ function toMoney(scaled) {
 
 const toDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 
-// ── main ─────────────────────────────────────────────────────────────────────
-const mongo = new MongoClient(MONGODB_URI);
-const sql = postgres(DATABASE_URL, { max: 1, onnotice: () => {} });
-
-const stats = {
+const newStats = () => ({
   companies: 0,
   accounts: 0,
   fiscalPeriods: 0,
@@ -81,7 +64,7 @@ const stats = {
   entries: 0,
   lines: 0,
   rejected: 0,
-};
+});
 
 /**
  * `db` must be the CURRENT connection — the transaction handle when inside
@@ -110,8 +93,16 @@ async function mapId(db, collection, oldId) {
   return row.new_uuid;
 }
 
-async function reject(db, collection, oldId, reason, detail) {
+async function reject(db, stats, collection, oldId, reason, detail) {
   stats.rejected++;
+  // One row per rejected document, not one per attempt. A resumed run
+  // re-examines everything, and without this the same unbalanced entry
+  // accumulates a reject row each time — inflating the count the cutover gate
+  // reads and making a stable migration look progressively worse.
+  await db`
+    DELETE FROM _migration_rejects
+     WHERE collection = ${collection} AND old_object_id = ${String(oldId)}
+  `;
   await db`
     INSERT INTO _migration_rejects (collection, old_object_id, reason, detail)
     VALUES (${collection}, ${String(oldId)}, ${reason}, ${db.json(detail ?? {})})
@@ -134,7 +125,7 @@ async function resolvePartyId(db, oldPartyId) {
   return row ? uuid : null;
 }
 
-async function run() {
+async function run({ mongo, sql, stats, onlyCompany, log }) {
   await mongo.connect();
   const db = mongo.db();
 
@@ -151,7 +142,7 @@ async function run() {
     ? companies.map((c) => c._id)
     : await db.collection("accounts").distinct("companyId");
 
-  console.log(`Found ${companyIds.length} company/companies to migrate.`);
+  log(`Found ${companyIds.length} company/companies to migrate.`);
 
   for (const oldCompanyId of companyIds) {
     const companyDoc = companies.find(
@@ -313,7 +304,7 @@ async function run() {
         const isPosted = e.status === "posted" || e.status === "reversed";
 
         if (isPosted && lines.length < 2) {
-          await reject(tx, "journalentries", e._id, "fewer_than_two_lines", {
+          await reject(tx, stats, "journalentries", e._id, "fewer_than_two_lines", {
             entryNumber: e.entryNumber,
             lineCount: lines.length,
           });
@@ -321,7 +312,7 @@ async function run() {
         }
 
         if (isPosted && debitSum !== creditSum) {
-          await reject(tx, "journalentries", e._id, "unbalanced_in_source", {
+          await reject(tx, stats, "journalentries", e._id, "unbalanced_in_source", {
             entryNumber: e.entryNumber,
             entryDate: e.entryDate,
             debits: toMoney(debitSum),
@@ -371,6 +362,12 @@ async function run() {
             for (const l of lines) {
               n++;
               const accountId = await mapId(sp, "accounts", l.accountId);
+              // ON CONFLICT is what makes the resume promise in the header
+              // true. Without it a re-run hits journal_lines_entry_line_uq,
+              // the savepoint rolls back, and an entry that migrated perfectly
+              // well the first time is quarantined as rejected_by_target — so
+              // a cutover retried after any transient failure would report a
+              // pile of phantom rejects and block itself.
               await sp`
                 INSERT INTO journal_lines (
                   company_id, entry_id, account_id, line_number,
@@ -380,13 +377,14 @@ async function run() {
                   ${toMoney(toScaled(l.debit))}, ${toMoney(toScaled(l.credit))},
                   ${l.description ?? null}
                 )
+                ON CONFLICT (entry_id, line_number) DO NOTHING
               `;
               stats.lines++;
             }
           });
           stats.entries++;
         } catch (err) {
-          await reject(tx, "journalentries", e._id, "rejected_by_target", {
+          await reject(tx, stats, "journalentries", e._id, "rejected_by_target", {
             entryNumber: e.entryNumber,
             error: err.message,
           });
@@ -394,26 +392,68 @@ async function run() {
       }
     });
 
-    console.log(`  ✓ company ${String(oldCompanyId)} migrated`);
+    log(`  ✓ company ${String(oldCompanyId)} migrated`);
   }
 }
 
-try {
-  await run();
-  console.log("\n── Backfill summary ─────────────────────────");
-  for (const [k, v] of Object.entries(stats)) {
-    console.log(`  ${k.padEnd(16)} ${v}`);
-  }
-  if (stats.rejected > 0) {
-    console.log(
-      `\n  ⚠ ${stats.rejected} document(s) quarantined. Inspect with:\n` +
-        `    SELECT reason, count(*) FROM _migration_rejects GROUP BY reason;`,
+/**
+ * Runs the backfill and returns its stats.
+ *
+ * Exported so it can be tested: this is the script that decides whether real
+ * books move, and until there was a test for it a change to the database role
+ * broke it silently.
+ */
+export async function backfill({
+  mongoUri,
+  databaseUrl,
+  onlyCompany = null,
+  log = () => {},
+} = {}) {
+  const uri = mongoUri ?? process.env.MONGODB_URI;
+  const url =
+    databaseUrl ?? process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (!uri || !url) {
+    throw new Error(
+      "MONGODB_URI and DIRECT_DATABASE_URL (or DATABASE_URL) must be set.",
     );
   }
-} catch (err) {
-  console.error("Backfill failed:", err);
-  process.exitCode = 1;
-} finally {
-  await mongo.close();
-  await sql.end();
+
+  const mongo = new MongoClient(uri);
+  const sql = postgres(url, { max: 1, onnotice: () => {} });
+  const stats = newStats();
+
+  try {
+    await run({ mongo, sql, stats, onlyCompany, log });
+    return stats;
+  } finally {
+    await mongo.close();
+    await sql.end();
+  }
+}
+
+// ── CLI ──────────────────────────────────────────────────────────────────────
+const isCli =
+  process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+
+if (isCli) {
+  const i = process.argv.indexOf("--company");
+  try {
+    const stats = await backfill({
+      onlyCompany: i > -1 ? process.argv[i + 1] : null,
+      log: (m) => console.log(m),
+    });
+    console.log("\n── Backfill summary ─────────────────────────");
+    for (const [k, v] of Object.entries(stats)) {
+      console.log(`  ${k.padEnd(16)} ${v}`);
+    }
+    if (stats.rejected > 0) {
+      console.log(
+        `\n  ⚠ ${stats.rejected} document(s) quarantined. Inspect with:\n` +
+          `    SELECT reason, count(*) FROM _migration_rejects GROUP BY reason;`,
+      );
+    }
+  } catch (err) {
+    console.error("Backfill failed:", err);
+    process.exitCode = 1;
+  }
 }
