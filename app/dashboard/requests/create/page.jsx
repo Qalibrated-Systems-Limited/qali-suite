@@ -1,16 +1,14 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 
-import Product from "@/app/models/product";
-import Party from "@/app/models/parties";
-
-import { createStockRequest } from "@/app/mongodb/requests-actions";
+import {
+  createStockRequest,
+  getRequestFormData,
+} from "@/app/db/actions/request-actions";
 import { IconArrowLeft, IconClipboardList } from "@tabler/icons-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CreateStockRequestForm } from "../components/CreateRequestForm";
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
 export const metadata = {
@@ -18,36 +16,7 @@ export const metadata = {
   description: "Create a new stock request",
 };
 
-async function getProducts(companyId) {
-  await dbConnect();
 
-  const filter = companyId ? { companyId } : {};
-  const products = await Product.find(filter)
-    .select("_id name SKU inventory.quantityAvailable inventory.quantityOnHand stock unit pricing.sellingPrice price category")
-    .sort({ name: 1 })
-    .lean();
-
-  return JSON.parse(JSON.stringify(products));
-}
-
-async function getCustomers(companyId) {
-  await dbConnect();
-
-  const filter = {
-    type: { $in: ["customer", "both"] },
-    isActive: true,
-  };
-  if (companyId) {
-    filter.companyId = companyId;
-  }
-
-  const customers = await Party.find(filter)
-    .select("_id name email phone address taxPin")
-    .sort({ name: 1 })
-    .lean();
-
-  return JSON.parse(JSON.stringify(customers));
-}
 
 export default async function CreateRequestPage() {
   const session = await auth();
@@ -56,13 +25,10 @@ export default async function CreateRequestPage() {
     redirect("/login");
   }
 
-  // Get tenant context
-  const { companyId } = await getTenantContext();
-
-  // Fetch products and customers in parallel
-  const [products, customers, projects] = await Promise.all([
-    getProducts(companyId),
-    getCustomers(companyId),
+  // Customers and products come from the store the form writes to, and no
+  // companyId is passed: RLS supplies it. Projects are still a Mongo module.
+  const [{ products, customers }, projects] = await Promise.all([
+    getRequestFormData(),
     getActiveProjects(),
   ]);
 

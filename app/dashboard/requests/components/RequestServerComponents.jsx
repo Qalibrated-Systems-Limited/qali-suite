@@ -9,10 +9,9 @@ import {
   XCircle,
 } from "lucide-react";
 import {
-  searchRequests,
-  fetchRequestPages,
+  getRequestsPaginated,
   getRequestStats,
-} from "@/app/mongodb/queries/request-queries";
+} from "@/app/db/actions/request-actions";
 import { RequestsListWithActions } from "./request";
 import Pagination from "@/components/pagination";
 
@@ -155,7 +154,17 @@ export async function RequestsTableServer({
   // Company fetch was for the (now-promoted-to-page) view dialog's PDF
   // button. The detail page loads its own company doc; this list path
   // no longer needs one — saves a round-trip per list render.
-  const requests = await searchRequests(query, page, userId, userRole, filters);
+  //
+  // One query returns the page, its total AND each request's fulfilment
+  // totals, which the list previously reduced in JavaScript over numeric
+  // strings — see searchStockRequests.
+  const { requests } = await getRequestsPaginated({
+    query,
+    page,
+    status: filters?.status,
+    priority: filters?.priority,
+    requestType: filters?.requestType,
+  });
 
   return (
     <RequestsListWithActions
@@ -227,7 +236,13 @@ export async function RequestsPaginationServer({
   userId,
   userRole,
 }) {
-  const totalPages = await fetchRequestPages(query, userId, userRole, filters);
+  const { totalPages } = await getRequestsPaginated({
+    query,
+    page: 1,
+    status: filters?.status,
+    priority: filters?.priority,
+    requestType: filters?.requestType,
+  });
 
   if (totalPages <= 1) return null;
 

@@ -38,7 +38,7 @@ import {
   rejectRequest,
   fulfillRequest,
   cancelRequest,
-} from "@/app/mongodb/requests-actions";
+} from "@/app/db/actions/request-actions";
 import { useEffect } from "react";
 import { IconClock } from "@tabler/icons-react";
 import { Progress } from "@/components/ui/progress";

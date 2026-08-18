@@ -144,28 +144,15 @@ export function RequestsListWithActions({ requests, userRole, userId }) {
   // ============================================
   // NEW: Calculate fulfillment progress
   // ============================================
-  const getFulfillmentProgress = (request) => {
-    if (request.status === "pending") return 0;
-
-    const totalRequested = request.items.reduce(
-      (sum, item) => sum + (item.approvedQuantity || item.requestedQuantity),
-      0
-    );
-    const totalFulfilled = request.items.reduce(
-      (sum, item) => sum + (item.totalFulfilled || 0),
-      0
-    );
-
-    if (totalRequested === 0) return 0;
-    return Math.round((totalFulfilled / totalRequested) * 100);
-  };
-
-  const getTotalRemaining = (request) => {
-    return request.items.reduce(
-      (sum, item) => sum + (item.remainingToFulfill || 0),
-      0
-    );
-  };
+  // Both of these are computed in SQL now and arrive on the row.
+  //
+  // They were reduced here over quantities that cross the boundary as
+  // numeric(19,4) STRINGS, so `0 + "10.0000"` produced "010.0000" and the next
+  // line appended to it — the progress bar was reading a concatenation. The
+  // remaining figure had a second problem: it read `item.remainingToFulfill`
+  // and the column is `remaining_to_fulfil`, one L, so it was NaN.
+  const getFulfillmentProgress = (request) => request.progress ?? 0;
+  const getTotalRemaining = (request) => request.totalRemaining ?? 0;
 
   return (
     <TooltipProvider>

@@ -11,6 +11,8 @@ import {
   parties,
   products,
 } from "../schema";
+import { issueStock } from "./products";
+import { recordMovement } from "./stockMovements";
 
 /**
  * Fulfilment — stock requests, item checkouts and weighbridge tickets.
@@ -764,4 +766,485 @@ export async function listWeighbridgeTickets(
     .where(filters.length ? and(...filters) : undefined)
     .orderBy(desc(weighbridgeTickets.createdAt))
     .limit(limit);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stock request reads, shaped for the pages
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Per-request fulfilment totals, computed in SQL.
+ *
+ * The list page derives these in JavaScript today:
+ *
+ *     request.items.reduce((sum, i) => sum + (i.approvedQuantity || i.requestedQuantity), 0)
+ *
+ * Quantities are numeric(19,4), which cross this boundary as STRINGS, so that
+ * reduce concatenates rather than adds — `0 + "5.0000"` is `"05.0000"`, and
+ * the next line appends to it. The same shape has already bitten the bills
+ * stats card and the invoice totals. Summing in numeric(19,4) removes the
+ * class of bug rather than the instance, and the page reads a number it does
+ * not have to compute.
+ *
+ * It also reads `item.remainingToFulfill`, which does not exist: the column is
+ * `remaining_to_fulfil`, one L, and the missing field made the "remaining"
+ * figure NaN. Both spellings are returned below so neither is a trap.
+ */
+const REQUEST_TOTALS = sql`
+  SELECT i.request_id,
+         count(*)::int                                      AS item_count,
+         COALESCE(SUM(COALESCE(i.approved_quantity, i.requested_quantity)), 0) AS target,
+         COALESCE(SUM(i.total_fulfilled), 0)                AS fulfilled,
+         COALESCE(SUM(i.remaining_to_fulfil), 0)            AS remaining
+    FROM stock_request_items i
+   GROUP BY i.request_id
+`;
+
+export async function searchStockRequests(
+  tx: Tx,
+  opts: {
+    query?: string;
+    status?: string;
+    requestType?: string;
+    priority?: string;
+    requesterId?: string;
+    page?: number;
+    perPage?: number;
+  } = {},
+) {
+  const perPage = Math.min(opts.perPage ?? 10, 100);
+  const page = Math.max(opts.page ?? 1, 1);
+  const offset = (page - 1) * perPage;
+  const q = (opts.query ?? "").trim();
+
+  const where = [];
+  if (q) {
+    where.push(sql`(
+      r.request_number ILIKE ${q + "%"}
+      OR r.requester_name_at_request ILIKE ${"%" + q + "%"}
+      OR r.customer_name_at_request ILIKE ${"%" + q + "%"}
+    )`);
+  }
+  if (opts.status) where.push(sql`r.status = ${opts.status}::stock_request_status`);
+  if (opts.requestType) {
+    where.push(sql`r.request_type = ${opts.requestType}::stock_request_type`);
+  }
+  if (opts.priority) where.push(sql`r.priority = ${opts.priority}::request_priority`);
+  if (opts.requesterId) where.push(sql`r.requester_id = ${opts.requesterId}`);
+
+  const clause = where.length ? sql`WHERE ${sql.join(where, sql` AND `)}` : sql``;
+
+  const rows = (await tx.execute(sql`
+    SELECT r.id, r.request_number, r.request_type::text AS request_type,
+           r.status::text AS status, r.priority::text AS priority,
+           r.customer_name_at_request, r.requester_name_at_request,
+           r.requester_id, r.requester_department::text AS requester_department,
+           r.total_value::text AS total_value,
+           r.required_by_date::text AS required_by_date,
+           r.requested_at, r.created_at, r.notes,
+           COALESCE(t.item_count, 0) AS item_count,
+           COALESCE(t.target, 0)::text     AS total_requested,
+           COALESCE(t.fulfilled, 0)::text  AS total_fulfilled,
+           COALESCE(t.remaining, 0)::text  AS total_remaining,
+           CASE
+             WHEN r.status = 'pending' OR COALESCE(t.target, 0) = 0 THEN 0
+             ELSE ROUND(COALESCE(t.fulfilled, 0) * 100 / t.target)
+           END::int AS progress,
+           count(*) OVER() AS total_count
+      FROM stock_requests r
+      LEFT JOIN (${REQUEST_TOTALS}) t ON t.request_id = r.id
+      ${clause}
+     ORDER BY r.requested_at DESC, r.request_number DESC
+     LIMIT ${perPage} OFFSET ${offset}
+  `)) as unknown as Array<Record<string, string | number>>;
+
+  const total = rows.length ? Number(rows[0].total_count) : 0;
+
+  return {
+    requests: rows.map((r) => ({
+      _id: r.id,
+      id: r.id,
+      requestNumber: r.request_number,
+      requestType: r.request_type,
+      status: r.status,
+      priority: r.priority,
+      totalValue: r.total_value,
+      requiredByDate: r.required_by_date,
+      requestedAt: r.requested_at,
+      createdAt: r.created_at,
+      notes: r.notes,
+      customer: { name: r.customer_name_at_request },
+      requester: {
+        id: r.requester_id,
+        name: r.requester_name_at_request,
+        department: r.requester_department,
+      },
+      itemCount: Number(r.item_count),
+      /** Summed in SQL — see the note above REQUEST_TOTALS. */
+      totalRequested: r.total_requested,
+      totalFulfilled: r.total_fulfilled,
+      totalRemaining: r.total_remaining,
+      progress: Number(r.progress),
+    })),
+    total,
+    totalPages: Math.max(1, Math.ceil(total / perPage)),
+    page,
+  };
+}
+
+/** The figures the requests list cards read. */
+export async function getStockRequestStats(tx: Tx) {
+  const [row] = (await tx.execute(sql`
+    SELECT count(*)::int                                          AS total,
+           count(*) FILTER (WHERE status = 'pending')::int         AS pending,
+           count(*) FILTER (WHERE status = 'approved')::int        AS approved,
+           count(*) FILTER (WHERE status IN ('fulfilled', 'invoiced'))::int
+                                                                   AS fulfilled,
+           count(*) FILTER (WHERE priority = 'urgent'
+                              AND status IN ('pending', 'approved',
+                                             'partially_fulfilled'))::int
+                                                                   AS urgent,
+           -- Overdue is DERIVED from the date, and compared against
+           -- CURRENT_DATE rather than now(): a request required TODAY has not
+           -- run out of time yet. §9B.2 records why no status stores this.
+           count(*) FILTER (WHERE required_by_date IS NOT NULL
+                              AND required_by_date < CURRENT_DATE
+                              AND status IN ('pending', 'approved',
+                                             'partially_fulfilled'))::int
+                                                                   AS overdue
+      FROM stock_requests
+  `)) as unknown as Array<Record<string, number>>;
+
+  return {
+    total: Number(row.total),
+    pending: Number(row.pending),
+    approved: Number(row.approved),
+    fulfilled: Number(row.fulfilled),
+    urgentCount: Number(row.urgent),
+    overdueCount: Number(row.overdue),
+  };
+}
+
+/** One request, shaped for the detail page. */
+export async function getStockRequestDetail(tx: Tx, requestId: string) {
+  const [r] = (await tx.execute(sql`
+    SELECT r.*,
+           r.request_type::text  AS request_type_text,
+           r.status::text        AS status_text,
+           r.priority::text      AS priority_text,
+           r.requester_department::text AS requester_department_text,
+           r.required_by_date::text AS required_by_date_text
+      FROM stock_requests r
+     WHERE r.id = ${requestId}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  if (!r) return null;
+
+  const items = (await tx.execute(sql`
+    SELECT i.id, i.line_number, i.product_id,
+           i.product_name_at_request, i.sku_at_request,
+           i.stock_at_request::text     AS stock_at_request,
+           i.requested_quantity::text   AS requested_quantity,
+           i.approved_quantity::text    AS approved_quantity,
+           i.unit_price::text           AS unit_price,
+           i.unit, i.purpose::text AS purpose, i.purpose_details, i.notes,
+           i.requires_return,
+           i.expected_return_date::text AS expected_return_date,
+           i.total_fulfilled::text      AS total_fulfilled,
+           i.remaining_to_fulfil::text  AS remaining_to_fulfil,
+           i.fulfilment_status::text    AS fulfilment_status,
+           i.invoiced_quantity::text    AS invoiced_quantity
+      FROM stock_request_items i
+     WHERE i.request_id = ${requestId}
+     ORDER BY i.line_number
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const approvals = (await tx.execute(sql`
+    SELECT approver_name_at_action, action, comments, acted_at
+      FROM stock_request_approvals
+     WHERE request_id = ${requestId}
+     ORDER BY acted_at
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return {
+    _id: r.id,
+    id: r.id,
+    requestNumber: r.request_number,
+    requestType: r.request_type_text,
+    status: r.status_text,
+    priority: r.priority_text,
+    totalValue: String(r.total_value ?? "0"),
+    requiredByDate: r.required_by_date_text,
+    requestedAt: r.requested_at,
+    createdAt: r.created_at,
+    notes: r.notes,
+
+    customer: {
+      id: r.customer_id,
+      name: r.customer_name_at_request,
+      email: r.customer_email_at_request,
+      phone: r.customer_phone_at_request,
+      address: r.customer_address_at_request,
+      taxPin: r.customer_tax_pin_at_request,
+    },
+    // Snapshots: there is no users table to join an id to (§10).
+    requester: {
+      id: r.requester_id,
+      name: r.requester_name_at_request,
+      department: r.requester_department_text,
+      email: r.requester_email,
+      phone: r.requester_phone,
+    },
+    approver: r.approved_by_name_at_approval
+      ? {
+          name: r.approved_by_name_at_approval,
+          approvedAt: r.approved_at,
+          comments: r.approval_comments,
+          conditions: r.approval_conditions,
+        }
+      : null,
+    rejectedBy: r.rejected_by_id ? { id: r.rejected_by_id } : null,
+    rejectedAt: r.rejected_at,
+    rejectionReason: r.rejection_reason,
+    cancelledAt: r.cancelled_at,
+    cancellationReason: r.cancellation_reason,
+
+    project: r.project_number_at_request
+      ? { projectNumber: r.project_number_at_request, name: r.project_name_at_request }
+      : null,
+    costCode: r.cost_code_at_request ? { code: r.cost_code_at_request } : null,
+    /** `storekeeper` has no counterpart here; the detail page guards on it. */
+    storekeeper: null,
+
+    draftInvoice: r.draft_invoice_number_at_creation
+      ? {
+          invoiceId: r.draft_invoice_id,
+          invoiceNumber: r.draft_invoice_number_at_creation,
+          createdAt: r.draft_invoice_created_at,
+        }
+      : null,
+
+    items: items.map((i) => ({
+      _id: i.id,
+      id: i.id,
+      lineNumber: i.line_number,
+      productId: i.product_id,
+      productName: i.product_name_at_request,
+      SKU: i.sku_at_request,
+      currentStock: i.stock_at_request,
+      requestedQuantity: i.requested_quantity,
+      approvedQuantity: i.approved_quantity,
+      unitPrice: i.unit_price,
+      unit: i.unit,
+      purpose: i.purpose,
+      purposeDetails: i.purpose_details,
+      requiresReturn: i.requires_return,
+      expectedReturnDate: i.expected_return_date,
+      notes: i.notes,
+      totalFulfilled: i.total_fulfilled,
+      // Both spellings: the column is `remaining_to_fulfil` and the UI reads
+      // `remainingToFulfill`, which silently produced NaN.
+      remainingToFulfil: i.remaining_to_fulfil,
+      remainingToFulfill: i.remaining_to_fulfil,
+      fulfillmentStatus: i.fulfilment_status,
+      fulfilmentStatus: i.fulfilment_status,
+      invoicedQuantity: i.invoiced_quantity,
+    })),
+
+    approvalHistory: approvals.map((a) => ({
+      approverName: a.approver_name_at_action,
+      action: a.action,
+      comments: a.comments,
+      timestamp: a.acted_at,
+    })),
+  };
+}
+
+/**
+ * Cancels a request.
+ *
+ * Only before anything has been issued against it. Once stock has moved the
+ * question is a return, not a cancellation, and the two are different events
+ * with different consequences for inventory.
+ */
+export async function cancelStockRequest(
+  tx: Tx,
+  requestId: string,
+  cancelledById: string,
+  reason: string,
+) {
+  const [request] = await tx
+    .select()
+    .from(stockRequests)
+    .where(eq(stockRequests.id, requestId));
+  if (!request) throw new Error("Stock request not found");
+
+  if (["fulfilled", "invoiced", "cancelled"].includes(request.status)) {
+    throw new Error(`Cannot cancel a request that is already ${request.status}`);
+  }
+
+  const [{ issued }] = (await tx.execute(sql`
+    SELECT COALESCE(SUM(total_fulfilled), 0)::text AS issued
+      FROM stock_request_items WHERE request_id = ${requestId}
+  `)) as unknown as Array<{ issued: string }>;
+
+  if (!/^-?0(\.0*)?$/.test(issued)) {
+    throw new Error(
+      `Cannot cancel ${request.requestNumber}: ${issued} has already been issued against it. Return the stock instead.`,
+    );
+  }
+
+  const [updated] = await tx
+    .update(stockRequests)
+    .set({
+      status: "cancelled",
+      cancelledAt: new Date(),
+      cancellationReason: reason || "No reason provided",
+      updatedAt: new Date(),
+    })
+    .where(eq(stockRequests.id, requestId))
+    .returning();
+
+  return updated;
+}
+
+/**
+ * Issues stock against an approved request.
+ *
+ * One transaction per call, doing per item, in this order:
+ *
+ *   1. record the movement   — provenance, BEFORE the level moves
+ *   2. issue the stock       — on hand down, commitment released
+ *   3. create a checkout     — only where the goods must come back
+ *   4. record the fulfilment — linking the movement and the checkout
+ *
+ * THE ORDER OF 1 AND 2 IS THE POINT. recordMovement reads the product's
+ * CURRENT level as previous_stock and derives new_stock from it, so issuing
+ * first makes every provenance record understate both levels by the quantity
+ * issued — a sale of 10 from 100 written down as "90 → 80". §9.7 records the
+ * same defect found at four other call sites; this is the fifth, and it is
+ * stated here rather than left to be rediscovered.
+ *
+ * A CHECKOUT IS RAISED ONLY WHERE THE STOCK IS COMING BACK. `internal` is
+ * consumed and `sale` is sold; demo, repair, installation and employee_borrow
+ * are out on loan and are what the outstanding-checkouts queue is for.
+ *
+ * NO DRAFT INVOICE. requests-actions.js:1491 raises one at fulfilment for
+ * `sale` requests. That is a separate decision with its own posting
+ * consequences, and stock_requests.draft_invoice_id is a pass-2 back-reference
+ * for the same reason — raising it belongs with the invoicing slice, not
+ * inside the stock issue.
+ */
+const RETURNABLE_TYPES = new Set([
+  "demo",
+  "repair",
+  "installation",
+  "employee_borrow",
+]);
+
+export async function fulfilStockRequest(
+  tx: Tx,
+  requestId: string,
+  issues: Array<{ itemId: string; quantity: string; serialNumbers?: string[] }>,
+  opts: {
+    fulfilledById: string;
+    fulfilledByName: string;
+    expectedReturnDate?: string | null;
+    notes?: string | null;
+  },
+) {
+  const [request] = await tx
+    .select()
+    .from(stockRequests)
+    .where(eq(stockRequests.id, requestId));
+  if (!request) throw new Error("Stock request not found");
+  if (!["approved", "partially_fulfilled"].includes(request.status)) {
+    throw new Error(
+      `Cannot issue against a request that is ${request.status}. It must be approved first.`,
+    );
+  }
+
+  const items = await tx
+    .select()
+    .from(stockRequestItems)
+    .where(eq(stockRequestItems.requestId, requestId));
+  const byId = new Map(items.map((i) => [i.id, i]));
+
+  const results = [];
+
+  for (const issue of issues) {
+    if (/^-?0(\.0*)?$/.test(issue.quantity)) continue;
+
+    const item = byId.get(issue.itemId);
+    if (!item) throw new Error(`Item ${issue.itemId} is not on this request`);
+
+    // 1. Provenance first — see the note above.
+    const movement = await recordMovement(tx, {
+      companyId: request.companyId,
+      productId: item.productId,
+      movementType: "issue",
+      direction: "out",
+      quantity: issue.quantity,
+      sourceReference: request.requestNumber,
+      performedById: opts.fulfilledById,
+      performedByName: opts.fulfilledByName,
+    });
+
+    // 2. Then the level moves.
+    await issueStock(tx, item.productId, issue.quantity);
+
+    // 3. Out on loan, or gone for good.
+    let checkout = null;
+    if (RETURNABLE_TYPES.has(request.requestType)) {
+      checkout = await createCheckout(tx, {
+        companyId: request.companyId,
+        productId: item.productId,
+        quantity: issue.quantity,
+        checkedOutToId: null,
+        checkedOutToName: request.requesterNameAtRequest,
+        checkedOutById: opts.fulfilledById,
+        checkedOutByName: opts.fulfilledByName,
+        purpose: request.requestType,
+        expectedReturnDate:
+          opts.expectedReturnDate ??
+          item.expectedReturnDate ??
+          request.requiredByDate ??
+          new Date().toISOString().slice(0, 10),
+        requestId: request.id,
+        requestNumber: request.requestNumber,
+        requestType: request.requestType,
+        notes: opts.notes ?? null,
+      });
+    }
+
+    // 4. The fulfilment row, which is what the triggers read. Over-issuing is
+    //    refused by the deferred constraint in 0022, not by a check here.
+    const fulfilment = await recordFulfilment(tx, {
+      companyId: request.companyId,
+      itemId: item.id,
+      quantity: issue.quantity,
+      fulfilledById: opts.fulfilledById,
+      fulfilledByName: opts.fulfilledByName,
+      serialNumbers: issue.serialNumbers,
+      movementId: movement.id,
+      checkoutId: checkout?.id ?? null,
+      notes: opts.notes ?? null,
+    });
+
+    results.push({ item, movement, checkout, fulfilment });
+  }
+
+  if (!results.length) {
+    throw new Error("Nothing to issue — every quantity was zero");
+  }
+
+  // Re-read: status and the item totals are the triggers' output, not this
+  // function's, so the caller gets what the database decided rather than what
+  // this code assumed.
+  const [updated] = await tx
+    .select()
+    .from(stockRequests)
+    .where(eq(stockRequests.id, requestId));
+
+  return { request: updated, issued: results.length };
 }
