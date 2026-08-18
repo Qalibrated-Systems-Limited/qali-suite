@@ -204,6 +204,13 @@
       "when": 1786992305192,
       "tag": "0028_credit_note_cap",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1787049102566,
+      "tag": "0029_bill_actor_snapshots",
+      "breakpoints": true
     }
   ]
 }

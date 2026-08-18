@@ -77,6 +77,9 @@ export interface CreateBillInput {
   costCodeName?: string | null;
   lines: BillLineInput[];
   createdById?: string | null;
+  /** 0029: who raised it, as they were named then. No users table to join to. */
+  createdByName?: string | null;
+  createdByRole?: string | null;
 }
 
 /**
@@ -138,6 +141,8 @@ export async function createBill(tx: Tx, input: CreateBillInput) {
       costCodeAtBill: input.costCode ?? null,
       costCodeNameAtBill: input.costCodeName ?? null,
       createdById: input.createdById ?? null,
+      createdByName: input.createdByName ?? null,
+      createdByRole: input.createdByRole ?? null,
     })
     .returning();
 
@@ -273,13 +278,24 @@ export async function getBill(tx: Tx, billId: string) {
   return { ...bill, lines };
 }
 
-export async function submitBill(tx: Tx, billId: string, submittedById: string) {
+/**
+ * `submittedByName`, and its siblings on the other transitions, are the 0029
+ * snapshots: there is no users table in Postgres to join an id to, so the name
+ * is recorded as it was at the moment the person acted.
+ */
+export async function submitBill(
+  tx: Tx,
+  billId: string,
+  submittedById: string,
+  submittedByName?: string | null,
+) {
   const [updated] = await tx
     .update(bills)
     .set({
       status: "submitted",
       submittedAt: new Date(),
       submittedById,
+      submittedByName: submittedByName ?? null,
       updatedAt: new Date(),
     })
     .where(and(eq(bills.id, billId), eq(bills.status, "draft")))
@@ -294,6 +310,7 @@ export async function rejectBill(
   billId: string,
   rejectedById: string,
   reason: string,
+  rejectedByName?: string | null,
 ) {
   const [updated] = await tx
     .update(bills)
@@ -301,6 +318,7 @@ export async function rejectBill(
       status: "rejected",
       rejectedAt: new Date(),
       rejectedById,
+      rejectedByName: rejectedByName ?? null,
       rejectionReason: reason || "No reason provided",
       updatedAt: new Date(),
     })
@@ -354,6 +372,7 @@ export async function approveBill(
   billId: string,
   opts: ApproveBillAccounts & {
     approvedById: string;
+    approvedByName?: string | null;
     /** Three-way match: goods are admitted on GRN acceptance, not here. */
     requireGRN?: boolean;
   },
@@ -516,6 +535,7 @@ export async function approveBill(
       status: "approved",
       approvedAt: new Date(),
       approvedById: opts.approvedById,
+      approvedByName: opts.approvedByName ?? null,
       journalEntryId: entry.id,
       // What the bill itself moved, so cancellation knows what to give back.
       inventoryMoved: !requireGRN || !hasInventoryLine,
@@ -559,6 +579,7 @@ export async function cancelBill(
   billId: string,
   cancelledById: string,
   reason: string,
+  cancelledByName?: string | null,
 ) {
   const [bill] = await tx.select().from(bills).where(eq(bills.id, billId));
   if (!bill) throw new Error("Bill not found");
@@ -621,6 +642,7 @@ export async function cancelBill(
       status: "cancelled",
       cancelledAt: new Date(),
       cancelledById,
+      cancelledByName: cancelledByName ?? null,
       cancellationReason: reason || "No reason provided",
       updatedAt: new Date(),
     })
@@ -924,4 +946,218 @@ export async function deleteDraftBill(tx: Tx, billId: string) {
 
   await tx.delete(bills).where(eq(bills.id, billId));
   return { billNumber: bill.billNumber };
+}
+
+/**
+ * A bill as the detail page renders it.
+ *
+ * Shaped to the page rather than to the schema — `amounts.total`,
+ * `supplier.name`, `line.account.code`, `accounting.journalEntryId` — so the
+ * markup did not have to change with the data source.
+ *
+ * Three queries rather than one join: joining lines to a header repeats every
+ * header column per line, and the page needs the header, the lines and the
+ * payments as separate shapes anyway.
+ *
+ * THE PAYMENTS COME FROM THE ALLOCATIONS. Mongo keeps an embedded payments[]
+ * array on the bill AND a Payment document with allocations, updated by
+ * different code paths — the §8.2 defect, closed in 0016. There is one record
+ * of the event here and the bill's amount_paid is derived from it, so a
+ * payment history and a balance cannot disagree.
+ */
+export async function getBillDetail(tx: Tx, billId: string) {
+  const [b] = (await tx.execute(sql`
+    SELECT b.id,
+           b.bill_number,
+           b.supplier_invoice_number,
+           b.bill_date::text AS bill_date,
+           b.due_date::text  AS due_date,
+           b.status::text         AS status,
+           b.payment_status::text AS payment_status,
+           b.subtotal::text     AS subtotal,
+           b.vat_amount::text   AS vat_amount,
+           b.wht_amount::text   AS wht_amount,
+           b.total::text        AS total,
+           b.net_payable::text  AS net_payable,
+           b.amount_paid::text  AS amount_paid,
+           b.balance::text      AS balance,
+           b.currency,
+           b.wht_applicable,
+           b.wht_rate::text     AS wht_rate,
+           b.title, b.reference, b.description, b.internal_notes,
+           b.created_at, b.created_by_name, b.created_by_role,
+           b.submitted_at, b.submitted_by_name,
+           b.approved_at, b.approved_by_name,
+           b.rejected_at, b.rejected_by_name, b.rejection_reason,
+           b.cancelled_at, b.cancelled_by_name, b.cancellation_reason,
+           b.journal_entry_id, b.inventory_moved, b.used_grni,
+           p.name    AS supplier_name,
+           p.email   AS supplier_email,
+           p.phone   AS supplier_phone,
+           p.tax_pin AS supplier_tax_pin,
+           concat_ws(', ',
+             NULLIF(p.address_line1, ''), NULLIF(p.address_line2, ''),
+             NULLIF(p.city, ''), NULLIF(p.country, '')
+           ) AS supplier_address
+      FROM bills b
+      JOIN parties p ON p.id = b.supplier_id
+     WHERE b.id = ${billId}
+  `)) as unknown as Array<Record<string, string | null>>;
+
+  // Null, not forbidden: RLS filtered another tenant's bill out before the
+  // query saw it, so the page 404s. Invisible rather than leaked (§2.2).
+  if (!b) return null;
+
+  const lines = (await tx.execute(sql`
+    SELECT l.id,
+           l.line_number,
+           l.description,
+           l.quantity::text    AS quantity,
+           l.unit,
+           l.unit_price::text  AS unit_price,
+           l.amount::text      AS amount,
+           l.vat_rate::text    AS vat_rate,
+           l.vat_amount::text  AS vat_amount,
+           l.line_total::text  AS line_total,
+           l.account_type::text AS account_type,
+           -- The snapshots, not a join: what the line was CHARGED to, which a
+           -- later rename of the account must not rewrite.
+           l.account_code_at_bill AS account_code,
+           l.account_name_at_bill AS account_name,
+           l.product_id,
+           l.capitalized_asset_id,
+           l.weighbridge_ticket_id,
+           pr.name AS product_name,
+           pr.sku  AS product_sku
+      FROM bill_lines l
+      LEFT JOIN products pr ON pr.id = l.product_id
+     WHERE l.bill_id = ${billId}
+     ORDER BY l.line_number
+  `)) as unknown as Array<Record<string, string | null>>;
+
+  // Polymorphic by design (0011): an allocation settles an invoice or a bill,
+  // so it is matched on document_type AND document_id. Matching document_id
+  // alone would be a cross-document read waiting on a uuid collision, and
+  // payment_allocations_document_idx is keyed on the pair.
+  const payments = (await tx.execute(sql`
+    SELECT a.id,
+           a.amount_allocated::text AS amount,
+           pay.payment_number,
+           pay.payment_date::text   AS payment_date,
+           pay.payment_method::text AS payment_method,
+           pay.reference
+      FROM payment_allocations a
+      JOIN payments pay ON pay.id = a.payment_id
+     WHERE a.document_type = 'bill' AND a.document_id = ${billId}
+     ORDER BY pay.payment_date, pay.payment_number
+  `)) as unknown as Array<Record<string, string | null>>;
+
+  return {
+    _id: b.id,
+    id: b.id,
+    billNumber: b.bill_number,
+    supplierInvoiceNumber: b.supplier_invoice_number,
+    billDate: b.bill_date,
+    dueDate: b.due_date,
+    status: b.status,
+    paymentStatus: b.payment_status,
+    currency: b.currency,
+    title: b.title,
+    reference: b.reference,
+    description: b.description,
+    internalNotes: b.internal_notes,
+
+    /**
+     * Named as the detail page reads them, and that naming is the fix for a
+     * live bug rather than a convenience.
+     *
+     * bill-queries.js:88-89 projects `amounts.vatTotal` and
+     * `amounts.whtAmount`. The model stores `amounts.vat` and `amounts.wht`
+     * (bill.js:298, 312; written as such at bill-actions.js:578, 580), so both
+     * projections resolve to undefined, fall through `|| 0`, and the page's
+     * `vatTotal > 0` and `whtAmount > 0` guards are never true. The VAT and
+     * withholding rows on the totals card have never rendered.
+     *
+     * `paid` and `balance` are the bill's own columns — balance is GENERATED
+     * as net_payable - amount_paid — so the card cannot show a balance the
+     * bill's own numbers do not support.
+     */
+    amounts: {
+      subtotal: b.subtotal,
+      vatTotal: b.vat_amount,
+      whtAmount: b.wht_amount,
+      total: b.total,
+      netPayable: b.net_payable,
+      paid: b.amount_paid,
+      balance: b.balance,
+    },
+    whtApplicable: b.wht_applicable,
+    whtRate: b.wht_rate,
+
+    createdAt: b.created_at,
+    createdBy: { name: b.created_by_name, role: b.created_by_role },
+    submittedAt: b.submitted_at,
+    submittedBy: b.submitted_by_name ? { name: b.submitted_by_name } : null,
+    approvedAt: b.approved_at,
+    approvedBy: b.approved_by_name ? { name: b.approved_by_name } : null,
+    rejectedAt: b.rejected_at,
+    rejectedBy: b.rejected_by_name ? { name: b.rejected_by_name } : null,
+    rejectionReason: b.rejection_reason,
+    cancelledAt: b.cancelled_at,
+    cancelledBy: b.cancelled_by_name ? { name: b.cancelled_by_name } : null,
+    cancellationReason: b.cancellation_reason,
+
+    accounting: {
+      journalEntryId: b.journal_entry_id,
+      inventoryMoved: b.inventory_moved,
+      usedGRNI: b.used_grni,
+    },
+
+    /**
+     * `canEdit` was a Mongoose virtual. It is a function of the status and
+     * nothing else, so it is computed where the status is read rather than
+     * left for each caller to restate — the mistake §8.4 records against
+     * stored derived values, in its smaller form.
+     */
+    canEdit: b.status === "draft" || b.status === "rejected",
+
+    supplier: {
+      name: b.supplier_name,
+      email: b.supplier_email,
+      phone: b.supplier_phone,
+      taxPin: b.supplier_tax_pin,
+      address: b.supplier_address || null,
+    },
+
+    lines: lines.map((l) => ({
+      _id: l.id,
+      lineNumber: l.line_number,
+      description: l.description,
+      quantity: l.quantity,
+      unit: l.unit,
+      unitPrice: l.unit_price,
+      amount: l.amount,
+      lineTotal: l.line_total,
+      vat: { rate: l.vat_rate, amount: l.vat_amount },
+      account: {
+        code: l.account_code,
+        name: l.account_name,
+        type: l.account_type,
+      },
+      product: l.product_id
+        ? { id: l.product_id, name: l.product_name, sku: l.product_sku }
+        : null,
+      capitalizedAssetId: l.capitalized_asset_id,
+      weighbridgeTicketId: l.weighbridge_ticket_id,
+    })),
+
+    payments: payments.map((p) => ({
+      _id: p.id,
+      paymentNumber: p.payment_number,
+      date: p.payment_date,
+      method: p.payment_method,
+      reference: p.reference,
+      amount: p.amount,
+    })),
+  };
 }

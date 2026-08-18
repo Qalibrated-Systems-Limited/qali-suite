@@ -175,6 +175,21 @@ export const bills = pgTable(
     costCodeNameAtBill: text("cost_code_name_at_bill"),
 
     createdById: uuid("created_by_id"),
+    /**
+     * Who acted, as they were named then (0029).
+     *
+     * There is no users table in Postgres — users are still in Mongo and out
+     * of scope (§10) — so an id alone is unrenderable. Same call as 0026 made
+     * for invoices, and the same one supplier_name_at_bill already makes on
+     * this table: where a person acted, the name is snapshotted beside the id,
+     * because a rename must not relabel what already happened (§9.4).
+     */
+    createdByName: text("created_by_name"),
+    createdByRole: text("created_by_role"),
+    submittedByName: text("submitted_by_name"),
+    approvedByName: text("approved_by_name"),
+    rejectedByName: text("rejected_by_name"),
+    cancelledByName: text("cancelled_by_name"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

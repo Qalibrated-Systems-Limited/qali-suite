@@ -42,7 +42,7 @@ import {
   rejectBill,
   cancelBill,
   deleteBill,
-} from "@/app/mongodb/actions/bill-actions";
+} from "@/app/db/actions/bill-actions";
 import { BillPaymentDialog } from "./BillPaymentDialog";
 
 export function BillDetailActions({ bill, userRole, paymentAccounts = [] }) {

@@ -1,10 +1,8 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { getBillById } from "@/app/mongodb/queries/bill-queries";
+import { getBillById, getPaymentAccounts } from "@/app/db/actions/bill-actions";
 import { formatAddress } from "@/lib/format-address";
-import Account from "@/app/models/account";
-import dbConnect from "@/app/config/dbConnect";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -76,21 +74,12 @@ export default async function BillDetailsPage({ params }) {
     notFound();
   }
 
-  // Fetch payment accounts (cash, bank, mpesa) for payment dialog (tenant-scoped)
-  await dbConnect();
-  const paymentAccounts = await Account.find({
-    companyId: user.companyId,
-    accountType: "asset",
-    subType: { $in: ["cash", "bank", "mpesa"] },
-    isActive: { $ne: false },
-    canPost: true,
-  })
-    .select("_id accountCode accountName subType")
-    .sort({ accountCode: 1 })
-    .lean();
-
+  // Cash, bank and M-Pesa accounts for the payment dialog. No companyId is
+  // passed: RLS supplies it, and omitting it returns nothing rather than
+  // another tenant's accounts.
+  const paymentAccounts = await getPaymentAccounts();
   const serializedPaymentAccounts = paymentAccounts.map((a) => ({
-    _id: a._id.toString(),
+    _id: a.id,
     accountCode: a.accountCode,
     accountName: a.accountName,
     subType: a.subType,
@@ -174,11 +163,16 @@ export default async function BillDetailsPage({ params }) {
     };
   };
 
+  // Overdue means the due DAY has passed. ISO date strings compare correctly
+  // and carry no time; `new Date(dueDate) < new Date()` built a UTC midnight
+  // from a date-only value and compared it to the current instant, so a bill
+  // due today showed as overdue from early morning. Matches the list page and
+  // the `due_date < CURRENT_DATE` the stats query uses.
   const isOverdue =
     bill.status === "approved" &&
     bill.paymentStatus !== "paid" &&
-    bill.dueDate &&
-    new Date(bill.dueDate) < new Date();
+    !!bill.dueDate &&
+    String(bill.dueDate).slice(0, 10) < new Date().toISOString().slice(0, 10);
 
   const statusConfig = getStatusConfig(bill.status);
   const paymentConfig = getPaymentStatusConfig(bill.paymentStatus, isOverdue);
@@ -669,8 +663,12 @@ export default async function BillDetailsPage({ params }) {
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Net Payable:</span>
+                    {/* net_payable is a GENERATED column (total - wht).
+                        Subtracting the two here recomputed it in JavaScript —
+                        a second source of truth for a value the database
+                        already derives, and float arithmetic on money. */}
                     <span className="font-medium">
-                      {formatCurrency(bill.amounts?.total - bill.amounts?.whtAmount)}
+                      {formatCurrency(bill.amounts?.netPayable)}
                     </span>
                   </div>
                 </>

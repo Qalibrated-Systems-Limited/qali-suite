@@ -46,6 +46,8 @@ function toActionError(err: unknown): string {
     message.includes("Bill not found") ||
     message.includes("not in submitted status") ||
     message.includes("Only draft bills") ||
+    message.includes("already cancelled") ||
+    message.includes("has been paid against it") ||
     message.includes("capitalised") ||
     message.includes("quantity_on_hand") ||
     message.includes("permission") ||
@@ -103,6 +105,39 @@ export async function getBillsStats() {
   return withAuthorizedTenant([], (tx) => billsRepo.getBillStats(tx));
 }
 
+/**
+ * One bill, shaped for the detail page.
+ *
+ * Returns `{ bill: null }` for a bill in another tenant rather than throwing:
+ * RLS filtered the row out before the query saw it, so it reads as absent and
+ * the page 404s. Invisible rather than forbidden, which is the point of §2.2 —
+ * a "you may not see this" response confirms the row exists.
+ */
+export async function getBillById(billId: string) {
+  try {
+    const bill = await withAuthorizedTenant([], (tx) =>
+      billsRepo.getBillDetail(tx, billId),
+    );
+    return { bill, error: bill ? null : "Bill not found" };
+  } catch (err) {
+    return { bill: null, error: toActionError(err) };
+  }
+}
+
+/**
+ * Cash, bank and M-Pesa accounts the bill payment dialog offers.
+ *
+ * Gated on BILL_WRITE_ROLES rather than reusing invoice-actions'
+ * getPaymentAccountsPg: that one is gated on INVOICE_WRITE_ROLES, which
+ * includes Sales Manager and excludes Procurement Officer — the wrong gate for
+ * a payables screen in both directions.
+ */
+export async function getPaymentAccounts() {
+  return withAuthorizedTenant([...BILL_WRITE_ROLES], (tx) =>
+    accountsRepo.listPaymentAccounts(tx),
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Writes
 // ─────────────────────────────────────────────────────────────────────────────
@@ -111,7 +146,8 @@ export async function submitBill(billId: string): Promise<ActionResult> {
   try {
     const bill = await withAuthorizedTenant(
       [...BILL_WRITE_ROLES],
-      async (tx, { user }) => billsRepo.submitBill(tx, billId, user.id),
+      async (tx, { user }) =>
+        billsRepo.submitBill(tx, billId, user.id, user.name),
     );
 
     revalidatePath("/dashboard/bills");
@@ -178,6 +214,7 @@ export async function approveBill(billId: string): Promise<ActionResult> {
           inventoryAccountId: inventory?.id ?? null,
           grniAccountId: grni?.id ?? null,
           approvedById: user.id,
+          approvedByName: user.name,
         });
       },
     );
@@ -197,15 +234,25 @@ export async function approveBill(billId: string): Promise<ActionResult> {
   }
 }
 
+/**
+ * Signatures match the Mongo actions the components already call —
+ * `(billId, prevState, formData)` — so BillDetailActions switched data source
+ * without changing a call site.
+ */
 export async function rejectBill(
   billId: string,
-  reason: string,
+  _prevState: unknown,
+  formData: FormData,
 ): Promise<ActionResult> {
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (!reason) {
+    return { success: false, error: "Please provide a rejection reason" };
+  }
   try {
     const bill = await withAuthorizedTenant(
       [...BILL_APPROVE_ROLES],
       async (tx, { user }) =>
-        billsRepo.rejectBill(tx, billId, user.id, reason),
+        billsRepo.rejectBill(tx, billId, user.id, reason, user.name),
     );
 
     revalidatePath("/dashboard/bills");
@@ -215,6 +262,43 @@ export async function rejectBill(
       billId,
       billNumber: bill.billNumber,
       message: `Bill ${bill.billNumber} rejected`,
+    };
+  } catch (err) {
+    return { success: false, error: toActionError(err) };
+  }
+}
+
+/**
+ * Cancels a bill, undoing everything its approval did: the purchase entry is
+ * REVERSED rather than deleted, and any stock the bill admitted is taken back —
+ * both inside one transaction, and both refused outright if the goods have
+ * since been consumed or any payment has been made against it.
+ */
+export async function cancelBill(
+  billId: string,
+  _prevState: unknown,
+  formData: FormData,
+): Promise<ActionResult> {
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (!reason) {
+    return { success: false, error: "Please provide a cancellation reason" };
+  }
+  try {
+    const bill = await withAuthorizedTenant(
+      [...BILL_APPROVE_ROLES],
+      async (tx, { user }) =>
+        billsRepo.cancelBill(tx, billId, user.id, reason, user.name),
+    );
+
+    revalidatePath("/dashboard/bills");
+    revalidatePath(`/dashboard/bills/${billId}`);
+    revalidatePath("/dashboard/journal");
+    revalidatePath("/dashboard/stocks");
+    return {
+      success: true,
+      billId,
+      billNumber: bill.billNumber,
+      message: `Bill ${bill.billNumber} cancelled`,
     };
   } catch (err) {
     return { success: false, error: toActionError(err) };

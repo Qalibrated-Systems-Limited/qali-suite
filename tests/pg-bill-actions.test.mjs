@@ -288,14 +288,17 @@ suite("bill actions (end to end)", () => {
   // ───────────────────────────────────────────────────────────────────────────
 
   describe("submit and approve", () => {
-    it("submits a draft", async () => {
+    it("submits a draft, recording who did it by name", async () => {
       const bill = await makeBill();
       const result = await billActions.submitBill(bill.id);
       expect(result.success).toBe(true);
       expect(result.message).toMatch(/submitted for approval/);
 
-      const { bills } = await billActions.listBillsForPage({});
-      expect(bills[0].status).toBe("submitted");
+      const { bill: detail } = await billActions.getBillById(bill.id);
+      expect(detail.status).toBe("submitted");
+      expect(detail.submittedBy).toEqual({ name: "Ada Manager" });
+      // A submitted bill is no longer editable.
+      expect(detail.canEdit).toBe(false);
     });
 
     it("approves a submitted bill and posts a balanced entry", async () => {
@@ -383,6 +386,135 @@ suite("bill actions (end to end)", () => {
     });
   });
 
+  describe("detail", () => {
+    it("returns the shapes the detail page renders", async () => {
+      const bill = await makeBill({
+        supplierInvoiceNumber: "SUP-77",
+        vatRate: "16",
+      });
+
+      const { bill: detail, error } = await billActions.getBillById(bill.id);
+      expect(error).toBeNull();
+      expect(detail.billNumber).toMatch(/^BILL-/);
+      expect(detail.supplier).toMatchObject({ name: "Shell Kenya" });
+      expect(detail.canEdit).toBe(true);
+
+      const [line] = detail.lines;
+      expect(line.description).toBe("Diesel");
+      // The snapshots, not a join: what the line was charged to.
+      expect(line.account).toMatchObject({ code: "5100", name: "Fuel", type: "expense" });
+      // vat_rate is numeric(5,2) — a rate, not money.
+      expect(line.vat).toEqual({ rate: "16.00", amount: "160.0000" });
+      expect(line.lineTotal).toBe("1160.0000");
+    });
+
+    it("populates the VAT and withholding rows the page guards on", async () => {
+      const bill = await makeBill({ vatRate: "16" });
+      const { bill: detail } = await billActions.getBillById(bill.id);
+
+      // bill-queries.js:88-89 projects amounts.vatTotal and amounts.whtAmount;
+      // the model stores amounts.vat and amounts.wht. Both resolve to 0, so
+      // the page's `vatTotal > 0` guard is never true and the VAT row on the
+      // totals card has never rendered. It renders now.
+      expect(detail.amounts.vatTotal).toBe("160.0000");
+      expect(detail.amounts.subtotal).toBe("1000.0000");
+      expect(detail.amounts.total).toBe("1160.0000");
+      // Generated, not recomputed on the page as total - wht.
+      expect(detail.amounts.netPayable).toBe("1160.0000");
+      expect(detail.amounts.balance).toBe("1160.0000");
+    });
+
+    it("reads the payment history from the allocations, not an embedded copy", async () => {
+      const bill = await makeBill();
+      await withTenant(companyUuid, async (tx) => {
+        await billRepo.submitBill(tx, bill.id, randomUUID());
+        await billRepo.approveBill(tx, bill.id, {
+          apAccountId: accounts.ap,
+          approvedById: approver,
+        });
+      });
+
+      const paymentId = randomUUID();
+      await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        await tx`
+          INSERT INTO payments (
+            id, company_id, payment_number, payment_type, payment_date,
+            payment_method, party_id, party_name_at_payment, amount,
+            account_id, account_code_at_payment, account_name_at_payment,
+            status, reference
+          ) VALUES (
+            ${paymentId}, ${companyUuid}, 'PAY-00001', 'made', '2026-08-15',
+            'bank_transfer', ${supplierId}, 'Shell Kenya', 400,
+            ${accounts.ap}, '2000', 'Accounts Payable', 'confirmed', 'EFT-9'
+          )
+        `;
+        await tx`
+          INSERT INTO payment_allocations (
+            company_id, payment_id, document_type, document_id,
+            document_number_at_allocation, original_amount, balance_before,
+            amount_allocated
+          ) VALUES (
+            ${companyUuid}, ${paymentId}, 'bill', ${bill.id},
+            ${bill.billNumber}, 1000, 1000, 400
+          )
+        `;
+      });
+
+      const { bill: detail } = await billActions.getBillById(bill.id);
+      expect(detail.payments).toHaveLength(1);
+      expect(detail.payments[0]).toMatchObject({
+        paymentNumber: 'PAY-00001',
+        amount: "400.0000",
+        reference: "EFT-9",
+      });
+      // amount_paid is derived from the allocations by trigger (0016/0017),
+      // so the history and the balance cannot disagree — the §8.2 correction.
+      expect(detail.amounts.paid).toBe("400.0000");
+      expect(detail.amounts.balance).toBe("600.0000");
+      expect(detail.paymentStatus).toBe("partial");
+    });
+
+    it("carries who acted, since there is no users table to join to", async () => {
+      const bill = await makeBill();
+      await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        await tx`
+          UPDATE bills
+             SET created_by_name = 'Ada Manager', created_by_role = 'Manager'
+           WHERE id = ${bill.id}
+        `;
+      });
+
+      const { bill: detail } = await billActions.getBillById(bill.id);
+      expect(detail.createdBy).toEqual({ name: "Ada Manager", role: "Manager" });
+    });
+
+    it("reads a bill in another tenant as absent, not forbidden", async () => {
+      const bill = await makeBill();
+      const otherMongoId = randomUUID().replace(/-/g, "").slice(0, 24);
+      const otherUuid = randomUUID();
+      await admin`
+        INSERT INTO companies (id, name, slug)
+        VALUES (${otherUuid}, 'Other', ${"o-" + otherUuid.slice(0, 8)})
+      `;
+      await admin`
+        INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
+        VALUES ('companies', ${otherMongoId}, ${otherUuid})
+      `;
+      getTenantContext.mockResolvedValue({
+        user: { id: randomUUID(), name: "Other", role: "Manager" },
+        companyId: otherMongoId,
+      });
+
+      const { bill: detail, error } = await billActions.getBillById(bill.id);
+      // RLS filtered it out before the query saw it, so the page 404s rather
+      // than confirming the row exists (§2.2).
+      expect(detail).toBeNull();
+      expect(error).toBe("Bill not found");
+    });
+  });
+
   describe("reject and delete", () => {
     it("rejects a submitted bill with a reason", async () => {
       const bill = await makeBill();
@@ -390,11 +522,63 @@ suite("bill actions (end to end)", () => {
         billRepo.submitBill(tx, bill.id, randomUUID()),
       );
 
-      const result = await billActions.rejectBill(bill.id, "Wrong supplier");
+      const fd = new FormData();
+      fd.set("reason", "Wrong supplier");
+      const result = await billActions.rejectBill(bill.id, null, fd);
       expect(result.success).toBe(true);
 
-      const { bills } = await billActions.listBillsForPage({});
-      expect(bills[0].status).toBe("rejected");
+      const { bill: detail } = await billActions.getBillById(bill.id);
+      expect(detail.status).toBe("rejected");
+      expect(detail.rejectionReason).toBe("Wrong supplier");
+      // The 0029 snapshot: the page renders rejectedBy.name, and there is no
+      // users table to resolve rejected_by_id against.
+      expect(detail.rejectedBy).toEqual({ name: "Ada Manager" });
+    });
+
+    it("refuses to reject without a reason", async () => {
+      const bill = await makeBill();
+      await withTenant(companyUuid, (tx) =>
+        billRepo.submitBill(tx, bill.id, randomUUID()),
+      );
+      const result = await billActions.rejectBill(bill.id, null, new FormData());
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/rejection reason/i);
+    });
+
+    it("cancels an approved bill by reversing its entry, not deleting it", async () => {
+      const bill = await makeBill();
+      await withTenant(companyUuid, async (tx) => {
+        await billRepo.submitBill(tx, bill.id, randomUUID());
+        await billRepo.approveBill(tx, bill.id, {
+          apAccountId: accounts.ap,
+          approvedById: approver,
+        });
+      });
+
+      const fd = new FormData();
+      fd.set("reason", "Duplicate");
+      const result = await billActions.cancelBill(bill.id, null, fd);
+      expect(result.success).toBe(true);
+
+      const { bill: detail } = await billActions.getBillById(bill.id);
+      expect(detail.status).toBe("cancelled");
+      expect(detail.cancelledBy).toEqual({ name: "Ada Manager" });
+
+      // The original entry stands and a reversing one joins it, so the ledger
+      // records what happened rather than pretending it did not.
+      const entries = await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        return tx`
+          SELECT SUM(l.debit)::text AS dr, SUM(l.credit)::text AS cr,
+                 count(DISTINCT e.id)::int AS n
+            FROM journal_lines l
+            JOIN journal_entries e ON e.id = l.entry_id
+        `;
+      });
+      expect(entries[0].n).toBe(2);
+      // Net zero across both, and each side still ties.
+      expect(entries[0].dr).toBe("2000.0000");
+      expect(entries[0].cr).toBe("2000.0000");
     });
 
     it("deletes a draft, and its lines with it", async () => {
