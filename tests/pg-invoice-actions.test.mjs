@@ -44,6 +44,7 @@ suite("invoice actions (end to end)", () => {
   let mongoCompanyId;
   let customerId;
   let widgetId;
+  let bankId;
 
   beforeAll(async () => {
     admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
@@ -65,6 +66,7 @@ suite("invoice actions (end to end)", () => {
     const ar = randomUUID();
     const revenue = randomUUID();
     const vat = randomUUID();
+    bankId = randomUUID();
 
     await admin`
       INSERT INTO companies (id, name, slug)
@@ -81,6 +83,12 @@ suite("invoice actions (end to end)", () => {
           (${ar},      ${companyUuid}, '1200', 'Accounts Receivable', 'asset',     'accounts_receivable'),
           (${revenue}, ${companyUuid}, '4000', 'Sales',               'revenue',   'sales_revenue'),
           (${vat},     ${companyUuid}, '2300', 'VAT Output',          'liability', 'vat_output')
+      `;
+      // A real cash account to receive into. Posting a receipt into the
+      // receivable itself nets to nothing, which is how this fixture was wrong.
+      await tx`
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type)
+        VALUES (${bankId}, ${companyUuid}, '1000', 'Equity Bank', 'asset', 'bank')
       `;
       await tx`
         INSERT INTO parties (id, company_id, primary_type, is_customer, name)
@@ -285,6 +293,10 @@ suite("invoice actions (end to end)", () => {
     expect(product.SKU).toBe("WID-1");
     expect(product.name).toBe("Widget");
     expect(product.amount).toBe("232.0000"); // 200 + 16%
+    expect(product.productId).toBe(widgetId);
+    expect(product.itemType).toBe("product");
+    // Recovered from the amount and its base, not stored and not assumed 16.
+    expect(product.taxRate).toBe("16.0000");
 
     // A service has no product, so its description stands in as its name.
     expect(service.SKU).toBeNull();
@@ -294,6 +306,35 @@ suite("invoice actions (end to end)", () => {
     expect(service.amount).toBe("1740.0000"); // 1500 + 16%
 
     expect(inv.total).toBe("1972.0000");
+  });
+
+  it("recovers a non-standard tax rate rather than defaulting to 16", async () => {
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [
+          { productId: widgetId, quantity: 10, sellingPrice: 50, taxRate: 8 },
+        ],
+      }),
+    );
+    const inv = await invoiceActions.getInvoiceDetailPg(created.invoiceId);
+    expect(inv.items[0].taxRate).toBe("8.0000");
+
+    // And a zero-rated line does not divide by zero or come back as 16.
+    const zero = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [
+          { productId: widgetId, quantity: 1, sellingPrice: 100, taxRate: 0 },
+        ],
+      }),
+    );
+    const zeroInv = await invoiceActions.getInvoiceDetailPg(zero.invoiceId);
+    expect(zeroInv.items[0].taxRate).toBe("0.0000");
   });
 
   it("returns null for an invoice in another tenant", async () => {
@@ -400,10 +441,7 @@ suite("invoice actions (end to end)", () => {
   });
 
   it("records a payment, and the invoice settles itself", async () => {
-    const [bank] = await admin.begin(async (tx) => {
-      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
-      return tx`SELECT id FROM accounts WHERE account_code = '1200'`;
-    });
+    const bank = { id: bankId };
 
     const created = await invoiceActions.createInvoicePg(
       null,
@@ -428,6 +466,85 @@ suite("invoice actions (end to end)", () => {
     expect(inv.amountPaid).toBe("120.0000");
     expect(inv.amountDue).toBe("80.0000");
     expect(inv.paymentStatus).toBe("partial");
+
+    // AND THE LEDGER MOVES. Settling the invoice without posting would leave
+    // the receivable outstanding and no cash received — the invoice and the
+    // books disagreeing, with only the books being the books.
+    const led = await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      const [pay] = await tx`SELECT status::text, journal_entry_id FROM payments`;
+      const [ar] = await tx`
+        SELECT COALESCE(SUM(l.debit - l.credit), 0)::text AS bal
+          FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+         WHERE a.system_account = 'accounts_receivable'
+      `;
+      const [cash] = await tx`
+        SELECT COALESCE(SUM(l.debit - l.credit), 0)::text AS bal
+          FROM journal_lines l WHERE l.account_id = ${bank.id}
+      `;
+      return { pay, ar, cash };
+    });
+
+    // M-Pesa is in hand on receipt: posted and confirmed, no clearing step.
+    expect(led.pay.status).toBe("confirmed");
+    expect(led.pay.journal_entry_id).not.toBeNull();
+    // 200 invoiced, 120 received.
+    expect(led.ar.bal).toBe("80.0000");
+    expect(led.cash.bal).toBe("120.0000");
+  });
+
+  it("holds an uncleared cheque in a clearing account, not in bank", async () => {
+    const clearing = randomUUID();
+    const bank = { id: bankId };
+    await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      await tx`
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type, system_account)
+        VALUES (${clearing}, ${companyUuid}, '1050', 'Undeposited Funds', 'asset', 'cash', 'undeposited_funds')
+      `;
+    });
+
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 1, sellingPrice: 500 }],
+      }),
+    );
+    await invoiceActions.completeInvoicePg(created.invoiceId);
+
+    const fd = new FormData();
+    fd.set("amount", "500.0000");
+    fd.set("accountId", bank.id);
+    fd.set("paymentMethod", "cheque");
+    const paid = await invoiceActions.recordInvoicePaymentPg(created.invoiceId, null, fd);
+    expect(paid.success).toBe(true);
+    expect(paid.message).toMatch(/awaiting clearance/i);
+
+    const led = await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      const [pay] = await tx`SELECT status::text FROM payments`;
+      const [clr] = await tx`
+        SELECT COALESCE(SUM(l.debit - l.credit), 0)::text AS bal
+          FROM journal_lines l WHERE l.account_id = ${clearing}
+      `;
+      const [bnk] = await tx`
+        SELECT COALESCE(SUM(l.debit - l.credit), 0)::text AS bal
+          FROM journal_lines l WHERE l.account_id = ${bank.id}
+      `;
+      return { pay, clr, bnk };
+    });
+
+    // The receivable is settled, but the cash is not claimed as bank until the
+    // statement says so.
+    expect(led.pay.status).toBe("pending_clearance");
+    expect(led.clr.bal).toBe("500.0000");
+    expect(Number(led.bnk.bal)).toBe(0);
+
+    // The invoice is still paid — the customer did pay.
+    const inv = await invoiceActions.getInvoiceDetailPg(created.invoiceId);
+    expect(inv.paymentStatus).toBe("paid");
   });
 
   it("names an over-payment rather than rounding it down to paid", async () => {

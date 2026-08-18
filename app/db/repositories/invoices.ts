@@ -574,7 +574,20 @@ export async function getInvoiceDetail(tx: Tx, invoiceId: string) {
            l.unit_price::text  AS unit_price,
            l.tax_amount::text  AS tax_amount,
            l.line_total::text  AS amount,
+           l.discount_amount::text AS discount_amount,
+           l.product_id,
            l.service_category::text AS service_category,
+           -- invoice_lines stores the tax AMOUNT, not the rate. Consumers that
+           -- need a rate (the credit note dialog prefills one) would otherwise
+           -- fall back to a hardcoded 16%, which is silently wrong for a line
+           -- billed at 0 or 8. Recovering it from the amount and its base is
+           -- exact, and avoids storing a second value that could disagree.
+           CASE
+             WHEN (l.quantity * l.unit_price - l.discount_amount) = 0 THEN 0
+             ELSE ROUND(
+               l.tax_amount * 100
+               / (l.quantity * l.unit_price - l.discount_amount), 4)
+           END::text AS tax_rate,
            pr.name AS product_name,
            pr.sku  AS sku
       FROM invoice_lines l
@@ -613,7 +626,14 @@ export async function getInvoiceDetail(tx: Tx, invoiceId: string) {
     },
     items: items.map((l) => ({
       _id: l.id,
+      id: l.id,
+      productId: l.product_id,
+      // Both spellings: the detail page reads `type`, the credit note dialog
+      // reads `itemType`.
       type: l.type,
+      itemType: l.type,
+      taxRate: l.tax_rate,
+      discountAmount: l.discount_amount,
       // A service has no product, so its own description is its name.
       name: l.product_name ?? l.description,
       SKU: l.sku,

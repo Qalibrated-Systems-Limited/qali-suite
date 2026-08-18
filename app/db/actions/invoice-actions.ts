@@ -351,16 +351,39 @@ export async function recordInvoicePaymentPg(
           amount: d.amount,
         });
 
-        return payment;
+        // Post it. Without this the invoice settles while the ledger still
+        // shows the receivable outstanding and no cash received — the invoice
+        // and the books disagreeing, with only the books being the books.
+        const ar = await accountsRepo.getSystemAccount(tx, "accounts_receivable");
+        if (!ar) {
+          throw new Error("Accounts Receivable system account not configured");
+        }
+        // Optional: where configured, an uncleared receipt waits here instead
+        // of being claimed as bank.
+        const clearing = await accountsRepo.getSystemAccount(
+          tx,
+          "undeposited_funds",
+        );
+
+        const posted = await payments.postPaymentReceipt(tx, payment.id, {
+          arAccountId: ar.id,
+          clearingAccountId: clearing?.id ?? null,
+          postedById: user.id,
+        });
+
+        return posted;
       },
     );
 
     revalidatePath("/dashboard/invoices");
     revalidatePath(`/dashboard/invoices/${invoiceId}`);
+    revalidatePath("/dashboard/accounts");
     return {
       success: true,
       invoiceId,
-      message: `Payment ${result.paymentNumber} recorded`,
+      message: result.pendingClearance
+        ? `Payment ${result.payment.paymentNumber} recorded, awaiting clearance`
+        : `Payment ${result.payment.paymentNumber} recorded`,
     };
   } catch (err) {
     return { success: false, error: toActionError(err) };

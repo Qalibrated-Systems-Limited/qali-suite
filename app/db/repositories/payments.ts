@@ -1,4 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
+import { createJournalEntry } from "./journal";
 import type { Tx } from "../client";
 import {
   payments,
@@ -186,6 +187,152 @@ export async function allocateToBill(
     .returning();
 
   return allocation;
+}
+
+/**
+ * Posts a receipt to the ledger and moves the payment out of draft.
+ *
+ *     DR  cash / bank / M-Pesa / clearing      amount
+ *     CR  Accounts Receivable                  amount
+ *
+ * This is what payment.confirm() does in Mongo (payment.js:537). Without it a
+ * payment settles the invoice — amount_paid and payment_status follow the
+ * allocation by trigger — while the trial balance still shows the receivable
+ * outstanding and no cash received. The invoice and the ledger disagree, and
+ * only the ledger is the books.
+ *
+ * CLEARING. A cheque banked or a transfer you have been told about is not cash
+ * in hand until the statement says so, and posting it straight to Bank claims
+ * money you cannot demonstrate. Where a clearing account is supplied, the
+ * receipt lands there and the payment stays `pending_clearance` — the state the
+ * enum has carried since 0011 and nothing has used. Cash and M-Pesa are in hand
+ * on receipt, so they post to their own account and confirm immediately.
+ *
+ * Falls back to the payment's own account when no clearing account is
+ * configured: refusing the receipt would be worse than posting it directly.
+ */
+export async function postPaymentReceipt(
+  tx: Tx,
+  paymentId: string,
+  opts: {
+    arAccountId: string;
+    /** Where an uncleared receipt waits. Omit to post straight to the account. */
+    clearingAccountId?: string | null;
+    postedById: string;
+  },
+) {
+  const [payment] = await tx
+    .select()
+    .from(payments)
+    .where(eq(payments.id, paymentId));
+  if (!payment) throw new Error("Payment not found");
+  if (payment.journalEntryId) {
+    throw new Error(`Payment ${payment.paymentNumber} has already been posted`);
+  }
+
+  // In hand on receipt; nothing to clear.
+  const settlesImmediately =
+    payment.paymentMethod === "cash" || payment.paymentMethod === "mpesa";
+
+  const useClearing = !settlesImmediately && Boolean(opts.clearingAccountId);
+  const debitAccountId = useClearing
+    ? opts.clearingAccountId!
+    : payment.accountId;
+
+  const entry = await createJournalEntry(tx, {
+    companyId: payment.companyId,
+    entryDate: payment.paymentDate,
+    entryType: "payment_received",
+    description: `Payment ${payment.paymentNumber} from ${payment.partyNameAtPayment}`,
+    reference: payment.paymentNumber,
+    partyType: "customer",
+    partyId: payment.partyId,
+    sourceType: "payment",
+    sourceId: payment.id,
+    createdById: opts.postedById,
+    postImmediately: true,
+    lines: [
+      {
+        accountId: debitAccountId,
+        debit: payment.amount,
+        description: `Payment from ${payment.partyNameAtPayment}`,
+      },
+      {
+        accountId: opts.arAccountId,
+        credit: payment.amount,
+        description: `Reduce receivable — ${payment.partyNameAtPayment}`,
+      },
+    ],
+  });
+
+  const [updated] = await tx
+    .update(payments)
+    .set({
+      journalEntryId: entry.id,
+      status: useClearing ? "pending_clearance" : "confirmed",
+      confirmedAt: useClearing ? null : new Date(),
+      confirmedById: useClearing ? null : opts.postedById,
+      updatedAt: new Date(),
+    })
+    .where(eq(payments.id, paymentId))
+    .returning();
+
+  return { payment: updated, entry, pendingClearance: useClearing };
+}
+
+/**
+ * Clears a receipt that was waiting on the bank: moves it out of the clearing
+ * account and into the account it was actually banked into.
+ *
+ *     DR  bank        amount
+ *     CR  clearing    amount
+ */
+export async function clearPaymentReceipt(
+  tx: Tx,
+  paymentId: string,
+  opts: { clearingAccountId: string; clearedById: string },
+) {
+  const [payment] = await tx
+    .select()
+    .from(payments)
+    .where(
+      and(
+        eq(payments.id, paymentId),
+        eq(payments.status, "pending_clearance"),
+      ),
+    );
+  if (!payment) {
+    throw new Error("Payment not found, or not awaiting clearance");
+  }
+
+  await createJournalEntry(tx, {
+    companyId: payment.companyId,
+    entryDate: new Date().toISOString().slice(0, 10),
+    entryType: "payment_received",
+    description: `Cleared ${payment.paymentNumber} — ${payment.partyNameAtPayment}`,
+    reference: payment.paymentNumber,
+    sourceType: "payment",
+    sourceId: payment.id,
+    createdById: opts.clearedById,
+    postImmediately: true,
+    lines: [
+      { accountId: payment.accountId, debit: payment.amount },
+      { accountId: opts.clearingAccountId, credit: payment.amount },
+    ],
+  });
+
+  const [updated] = await tx
+    .update(payments)
+    .set({
+      status: "confirmed",
+      confirmedAt: new Date(),
+      confirmedById: opts.clearedById,
+      updatedAt: new Date(),
+    })
+    .where(eq(payments.id, paymentId))
+    .returning();
+
+  return updated;
 }
 
 /** Allocation totals from the view — derived, never stored, never clamped. */
