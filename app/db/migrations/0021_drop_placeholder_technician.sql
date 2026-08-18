@@ -1,0 +1,1 @@
+ALTER TABLE "stock_requests" DROP COLUMN "technician_id";

@@ -569,8 +569,8 @@ eight models.
 2. ~~`stock_movements`~~ — done (migrations 0013–0014)
 3. ~~`bills` + `credit_notes`~~ — done (migrations 0015–0017)
 4. ~~`tax_transactions`~~ — done (migrations 0018–0019)
-5. Full `stock_requests` / `item_checkouts` / `weighbridge_tickets`, replacing
-   the minimal versions from §8.1
+5. ~~Full `stock_requests` / `item_checkouts` / `weighbridge_tickets`~~ — done
+   (migrations 0020–0022), replacing the minimal versions from §8.1
 
 Before step 2, one complete write path is wired end-to-end through the real UI —
 create invoice, complete it, see it post, see it in the reports. Thirteen tables
@@ -688,6 +688,52 @@ created manually"* — so an approved bill could leave no record of the VAT it
 claimed or the tax it withheld. It is now in the approval's transaction: it
 fails the approval or it exists. Same change as the stock movements in §9.7, and
 the same reasoning.
+
+### 9.9 Notes from step 5 — and a miscount in the sweep
+
+`stock_requests`, `item_checkouts` and `weighbridge_tickets` replace the minimal
+placeholders §8.1 left. With them the §9 sweep is complete.
+
+**The sweep undercounted the derived values in `requests.js`, and the model says
+why.** §9.1 recorded "0 pre-save derived" because the model carries no hook:
+
+```js
+// NO PRE-SAVE MIDDLEWARE! (Transaction-safe)
+// We calculate manually in actions using helper methods
+```
+
+That is a count of hooks, not of derived values. There are five, maintained by
+`recalculateFulfillment()`, a method every caller has to remember:
+
+| field | defined as |
+|---|---|
+| `item.totalFulfilled` | sum of the `fulfillments` array |
+| `item.remainingToFulfill` | `Math.max(0, target - totalFulfilled)` |
+| `item.fulfillmentStatus` | pending / partial / complete |
+| `request.status` | promoted when every item completes |
+| `request.totalValue` | sum of quantity × unitPrice |
+
+This is §8.4 in its least defensible form. The hook was removed deliberately to
+make transactions work, and what replaced it is strictly weaker — a hook at
+least fires on every save. Each of the five is a generated column or a trigger
+now. `remainingToFulfil` drops the `Math.max(0, …)`: clamping at zero hides an
+over-fulfilment, which is the same defect §9.3 records against
+`Payment.unappliedAmount`.
+
+Three more corrections of the kind already made elsewhere:
+
+- **`netWeight` is generated.** The weighbridge model's own header says
+  `Net = |first − second|` and then stores it as an independent field that
+  nothing reconciles. It is `abs(first_weight - second_weight)` now, so a
+  ticket cannot claim a net its weighings do not support. The two-pass sequence
+  is enforced too: a ticket cannot be `completed` on one weighing, and a
+  recorded weighing cannot be edited.
+- **`direction` is derived from `transaction_type`.** The model requires both
+  and constrains neither against the other, so a purchase could be recorded as
+  outbound — and direction is what the stock side reads. A CHECK pairs them.
+- **`externalRef` is unique where present.** It is the gate software's
+  idempotency key; Mongo indexes it without uniqueness, which is what lets a
+  retried gate call book one trip twice.
 
 ---
 

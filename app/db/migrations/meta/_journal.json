@@ -141,6 +141,27 @@
       "when": 1786986643298,
       "tag": "0019_tax_transactions_constraints_and_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786992284331,
+      "tag": "0020_fulfilment_full",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786992298192,
+      "tag": "0021_drop_placeholder_technician",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1786992299192,
+      "tag": "0022_fulfilment_constraints_and_rls",
+      "breakpoints": true
     }
   ]
 }

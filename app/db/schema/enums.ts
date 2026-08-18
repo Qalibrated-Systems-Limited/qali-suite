@@ -208,6 +208,132 @@ export const creditNoteItemTypeEnum = pgEnum("credit_note_item_type", [
   "service",
 ]);
 
+// ── Fulfilment: stock requests, checkouts, weighbridge ───────────────────────
+
+/** Mirrors `stockRequestTypes` in lib/utils.js. */
+export const stockRequestTypeEnum = pgEnum("stock_request_type", [
+  "sale", // direct sale → draft invoice at fulfilment
+  "demo", // loan to customer → checkout, may convert to sale
+  "installation", // installation job → checkout, accountant invoices
+  "internal", // consumed internally → no invoice, no return
+  "repair", // repair/service → checkout, usually returns
+  "employee_borrow", // employee borrows for company use → must return
+]);
+
+export const stockRequestStatusEnum = pgEnum("stock_request_status", [
+  "pending",
+  "approved",
+  "partially_fulfilled",
+  "fulfilled",
+  "invoiced",
+  "rejected",
+  "cancelled",
+]);
+
+/** Mirrors `priority` in lib/utils.js. */
+export const requestPriorityEnum = pgEnum("request_priority", [
+  "low",
+  "normal",
+  "high",
+  "urgent",
+]);
+
+export const requesterDepartmentEnum = pgEnum("requester_department", [
+  "Technical",
+  "Sales",
+  "Service",
+  "Installation",
+  "Admin",
+  "Finance",
+  "Other",
+]);
+
+/** Mirrors `purposeForItemsRemovalFromStock` in lib/utils.js. */
+export const stockRemovalPurposeEnum = pgEnum("stock_removal_purpose", [
+  "sale",
+  "technician_test",
+  "customer_demo",
+  "internal_use",
+  "installation",
+  "repair",
+  "other",
+]);
+
+export const fulfilmentStatusEnum = pgEnum("fulfilment_status", [
+  "pending",
+  "partial",
+  "complete",
+]);
+
+export const checkoutStatusEnum = pgEnum("checkout_status", [
+  "checked_out",
+  "returned",
+  "overdue",
+  "lost",
+  "damaged",
+  "converted_to_sale",
+  "expensed",
+]);
+
+export const returnConditionEnum = pgEnum("return_condition", [
+  "excellent",
+  "good",
+  "fair",
+  "poor",
+  "damaged",
+  "lost",
+]);
+
+/** Why stock must come back: the sale that justified issuing it did not land. */
+export const returnRequiredReasonEnum = pgEnum("return_required_reason", [
+  "invoice_expired",
+  "invoice_cancelled",
+  "sale_failed",
+  "other",
+]);
+
+export const checkoutReminderTypeEnum = pgEnum("checkout_reminder_type", [
+  "upcoming",
+  "due_today",
+  "overdue",
+  "final_warning",
+]);
+
+export const checkoutReminderMethodEnum = pgEnum("checkout_reminder_method", [
+  "email",
+  "sms",
+  "in_app",
+]);
+
+/**
+ * What a weighbridge trip was for. Mirrors WB_TRANSACTION_TYPES.
+ *
+ * This is the field that drives the general ledger, and the model says so:
+ * "transactionType drives all accounting — direction alone is insufficient.
+ * Gate software must declare the purpose of each trip."
+ */
+export const wbTransactionTypeEnum = pgEnum("wb_transaction_type", [
+  "purchase", // inbound from supplier, clears via bill → GR/IR
+  "sale", // outbound to customer against an invoice
+  "sale_standalone", // outbound to customer, no invoice
+  "transfer_out", // outbound to own location
+  "transfer_in", // inbound from own location
+  "return_to_supplier",
+  "customer_return",
+]);
+
+/** The truck's direction. Describes the movement, not the accounting. */
+export const wbDirectionEnum = pgEnum("wb_direction", ["inbound", "outbound"]);
+
+export const wbStatusEnum = pgEnum("wb_status", [
+  "pending",
+  "first_recorded",
+  "completed",
+  "voided",
+]);
+
+export const wbWeightUnitEnum = pgEnum("wb_weight_unit", ["kg", "t"]);
+
 // ── Tax transactions ─────────────────────────────────────────────────────────
 
 /**
