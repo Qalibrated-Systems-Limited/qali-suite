@@ -30,6 +30,38 @@
  * app.company_id set, so the backfill goes through exactly the same RLS path
  * the application does. A bug that would leak across tenants at runtime fails
  * here too.
+ *
+ * ORDER. There is no single-pass insert order: the references form cycles.
+ * bill_lines -> weighbridge_tickets -> bills, and
+ * stock_request_fulfilments -> item_checkouts -> stock_requests, and
+ * invoice_lines -> item_checkouts -> invoices. Each cycle is broken the way
+ * accounts.parent_id already is — insert with the back-reference null, then
+ * UPDATE it once both sides exist. The sequence, with the reason each step
+ * cannot move earlier:
+ *
+ *    1  companies              tenant root
+ *    2  accounts (+ parents)   self-referential, two-pass
+ *    3  fiscal_periods
+ *    4  parties                journal_entries.party_id FK
+ *    5  products               referenced by every line table
+ *    6  weighbridge_tickets    pass 1: no invoice/bill refs yet
+ *    7  journal_entries+lines  referenced by everything that posts
+ *    8  stock_requests, _items, _approvals
+ *    9  item_checkouts         pass 1: request_id resolves, invoice refs do not
+ *   10  invoices, invoice_lines, cogs_postings
+ *   11  stock_movements        invoice_line_id now resolves
+ *   12  stock_request_fulfilments   checkout_id and movement_id now resolve
+ *   13  bills, bill_lines      bill_lines -> weighbridge_tickets now resolves
+ *   14  credit_notes, credit_note_lines
+ *   15  payments, payment_allocations   allocations name invoices AND bills
+ *   16  tax_transactions       source doc may be an invoice, bill or entry
+ *   17  stock_request_item_invoices
+ *   18  checkout_reminders
+ *   19  PASS 2 back-references:
+ *          weighbridge_tickets.invoice_id / bill_id / linked_ticket_id
+ *          item_checkouts.sale_invoice_id / failed_invoice_id
+ *
+ * Steps 1-7 are implemented. See docs/POSTGRES-MIGRATION-PLAN.md §9B.
  */
 import postgres from "postgres";
 import { MongoClient } from "mongodb";
