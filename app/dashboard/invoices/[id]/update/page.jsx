@@ -1,15 +1,12 @@
 import { auth } from "@/auth";
 import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { redirect, notFound } from "next/navigation";
-import { getInvoiceById } from "@/app/mongodb/queries/invoice-queries";
 import {
-  fetchActiveCustomers,
-  fetchAvailableProducts,
-} from "@/app/mongodb/queries/invoice-queries";
-import { getActiveCheckouts } from "@/app/mongodb/queries/checkout-queries";
+  getInvoiceDetailPg,
+  getInvoiceFormData,
+} from "@/app/db/actions/invoice-actions";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 import EditInvoiceFormClient from "../../components/EditInvoiceForm";
-import { serializeBsonType } from "@/lib/utils";
 
 export default async function EditInvoicePage({ params }) {
   const resolvedParams = await params;
@@ -37,28 +34,37 @@ export default async function EditInvoicePage({ params }) {
     );
   }
 
-  // Fetch invoice data
-  const result = await getInvoiceById(resolvedParams.id);
+  // Read the invoice from the store the form writes to. This read Mongo with
+  // what is now a Postgres uuid, so the edit page could not open at all.
+  const invoice = await getInvoiceDetailPg(resolvedParams.id);
 
-  if (!result) {
+  // Null rather than forbidden for another tenant's invoice: RLS filters it
+  // before the query sees it, so the page 404s (§2.2).
+  if (!invoice) {
     notFound();
   }
 
-  const invoice = serializeBsonType(result);
+  // Mirrors what updateInvoice refuses, and reads the right field to do it.
+  // `status` is draft/completed/cancelled — "paid" is a PAYMENT status, so
+  // `status === "paid"` was never true and a settled invoice could be opened
+  // for editing here only to be refused on save.
+  const blockedReason =
+    invoice.paymentStatus === "paid"
+      ? "Paid invoices cannot be edited."
+      : invoice.status === "cancelled"
+        ? "Cancelled invoices cannot be edited."
+        : invoice.status === "completed"
+          ? "Completed invoices cannot be edited. Raise a credit note instead."
+          : null;
 
-  // Can't edit paid or cancelled invoices
-  if (invoice.status === "paid" || invoice.status === "cancelled") {
+  if (blockedReason) {
     return (
       <div className="flex min-h-100 items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-foreground mb-2">
             Cannot Edit Invoice
           </h2>
-          <p className="text-muted-foreground mb-4">
-            {invoice.status === "paid"
-              ? "Paid invoices cannot be edited."
-              : "Cancelled invoices cannot be edited."}
-          </p>
+          <p className="text-muted-foreground mb-4">{blockedReason}</p>
           <a
             href={`/dashboard/invoices/${invoice._id}`}
             className="text-yellow-600 hover:text-yellow-700 underline"
@@ -70,13 +76,13 @@ export default async function EditInvoicePage({ params }) {
     );
   }
 
-  // Fetch customers, products, and active checkouts in parallel
-  const [customers, products, checkouts, projects] = await Promise.all([
-    fetchActiveCustomers(),
-    fetchAvailableProducts(),
-    getActiveCheckouts(),
+  // See the create page: pickers come from Postgres, checkouts wait on the
+  // fulfilment backfill, projects are still a Mongo module.
+  const [{ customers, products }, projects] = await Promise.all([
+    getInvoiceFormData(),
     getActiveProjects(),
   ]);
+  const checkouts = [];
 
   return (
     <EditInvoiceFormClient

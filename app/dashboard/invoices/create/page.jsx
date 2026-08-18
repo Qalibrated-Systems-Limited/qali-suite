@@ -1,11 +1,7 @@
 import { auth } from "@/auth";
 import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { redirect } from "next/navigation";
-import {
-  fetchActiveCustomers,
-  fetchAvailableProducts,
-} from "@/app/mongodb/queries/invoice-queries";
-import { getActiveCheckouts } from "@/app/mongodb/queries/checkout-queries";
+import { getInvoiceFormData } from "@/app/db/actions/invoice-actions";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 import CreateInvoiceFormClient from "../components/CreateInvoiceForm";
 
@@ -34,13 +30,18 @@ export default async function CreateInvoicePage() {
     );
   }
 
-  // Fetch customers, products, and active checkouts
-  const [customers, products, checkouts, projects] = await Promise.all([
-    fetchActiveCustomers(),
-    fetchAvailableProducts(),
-    getActiveCheckouts(),
+  // Customers and products come from Postgres — the store the form writes to.
+  // They were served from Mongo, so every id the picker offered named a
+  // record that did not exist where the invoice was being written.
+  //
+  // Checkouts are empty until item_checkouts is backfilled: the column is a
+  // real FK, and a picker whose every option fails the write is worse than no
+  // picker. Projects are still a Mongo module.
+  const [{ customers, products }, projects] = await Promise.all([
+    getInvoiceFormData(),
     getActiveProjects(),
   ]);
+  const checkouts = [];
 
   return (
     <div className="space-y-6">

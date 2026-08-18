@@ -3,10 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { withAuthorizedTenant } from "../tenant";
-import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
+import { INVOICE_WRITE_ROLES, PARTY_MANAGE_ROLES } from "@/lib/utils/role-gates";
 import * as invoices from "../repositories/invoices";
 import * as accountsRepo from "../repositories/accounts";
 import * as payments from "../repositories/payments";
+import * as partiesRepo from "../repositories/parties";
+import * as productsRepo from "../repositories/products";
 
 /**
  * Postgres-backed invoice actions.
@@ -480,6 +482,109 @@ export async function getInvoiceStatsPg(opts: {
   return withAuthorizedTenant([...INVOICE_WRITE_ROLES], (tx) =>
     invoices.getInvoiceStats(tx, opts),
   );
+}
+
+/**
+ * The customer and product pickers on the invoice forms.
+ *
+ * These were served from Mongo while the form submitted to Postgres, so every
+ * id the picker offered was an ObjectId and every submission named a customer
+ * and products that do not exist in the store being written to. The form has
+ * been Postgres-backed since the create slice; its data had not caught up.
+ *
+ * Shapes match what the form already reads — `_id`, `SKU`,
+ * `pricing.sellingPrice`, `inventory.quantityAvailable` — so the markup did
+ * not change.
+ *
+ * CHECKOUTS ARE NOT INCLUDED, and that is deliberate rather than an omission:
+ * `item_checkouts` is not backfilled yet (step 9), and invoice_lines.checkout_id
+ * is a real FK. Offering a picker whose every option fails the write is worse
+ * than not offering one, so the form receives an empty list until fulfilment
+ * lands. Selling from a technician's van still works — it is the pre-linked
+ * checkout shortcut that is unavailable.
+ */
+export async function getInvoiceFormData() {
+  return withAuthorizedTenant([...INVOICE_WRITE_ROLES], async (tx) => {
+    const [customers, products] = await Promise.all([
+      partiesRepo.listParties(tx, { role: "customer", limit: 200 }),
+      productsRepo.listProducts(tx, { limit: 200 }),
+    ]);
+
+    return {
+      customers: customers.map((c) => ({
+        _id: c.id,
+        name: c.name,
+        email: c.email ?? "",
+        phone: c.phone ?? "",
+        taxPin: c.taxPin ?? "",
+        address: [c.addressLine1, c.city].filter(Boolean).join(", "),
+      })),
+      products: products.map((p) => ({
+        _id: p.id,
+        name: p.name,
+        SKU: p.sku,
+        unit: p.unit ?? "pcs",
+        pricing: { sellingPrice: p.sellingPrice },
+        inventory: {
+          // What can actually be sold: on hand less what other drafts and
+          // holds have already claimed. A GENERATED column, so the picker
+          // cannot show availability the stock table does not support.
+          quantityAvailable: p.quantityAvailable,
+          quantityOnHand: p.quantityOnHand,
+        },
+      })),
+    };
+  });
+}
+
+/**
+ * Creates a customer or supplier inline from the invoice form.
+ *
+ * The Mongo version wrote to Mongo only, so a customer created here could not
+ * then be invoiced — the invoice write would not find them.
+ */
+export async function quickCreateParty(formData: FormData) {
+  const name = String(formData.get("name") ?? "").trim();
+  const type = String(formData.get("type") ?? "customer");
+
+  if (!name) return { success: false as const, error: "Name is required" };
+  if (!["customer", "supplier", "both"].includes(type)) {
+    return { success: false as const, error: "Invalid party type" };
+  }
+
+  try {
+    const party = await withAuthorizedTenant(
+      [...PARTY_MANAGE_ROLES],
+      async (tx, { user, companyId }) =>
+        partiesRepo.createParty(tx, {
+          companyId,
+          name,
+          // "both" has no primary type of its own; it is the two booleans.
+          primaryType: type === "supplier" ? "supplier" : "customer",
+          isCustomer: type === "customer" || type === "both",
+          isSupplier: type === "supplier" || type === "both",
+          email: String(formData.get("email") ?? "").trim().toLowerCase() || null,
+          phone: String(formData.get("phone") ?? "").trim() || null,
+          createdById: user.id,
+        }),
+    );
+
+    revalidatePath("/dashboard/invoices");
+    return {
+      success: true as const,
+      // The dialog hands this straight to the picker's selection state.
+      party: {
+        _id: party.id,
+        name: party.name,
+        email: party.email ?? "",
+        phone: party.phone ?? "",
+        taxPin: party.taxPin ?? "",
+        address: "",
+      },
+    };
+  } catch (err) {
+    return { success: false as const, error: toActionError(err) };
+  }
 }
 
 /** Cash/bank/M-Pesa accounts the payment dialog offers. */

@@ -959,4 +959,71 @@ suite("invoice list page queries", () => {
     const r = await invoiceActions.searchInvoicesPg({});
     expect(r.total).toBe(0);
   });
+
+  describe("form data", () => {
+    it("serves the pickers from the store the form writes to", async () => {
+      const { customers, products } = await invoiceActions.getInvoiceFormData();
+
+      // These were served from Mongo while the form submitted to Postgres, so
+      // every id the picker offered named a record that does not exist where
+      // the invoice is written — the create form could not complete at all.
+      expect(customers.map((c) => c._id)).toContain(customerId);
+      expect(products.map((p) => p._id)).toContain(widgetId);
+
+      const widget = products.find((p) => p._id === widgetId);
+      expect(widget.SKU).toBe("WID-1");
+      expect(widget.pricing.sellingPrice).toBe("250.0000");
+      // What can actually be sold, not what is on the shelf: this fixture has
+      // 1000 on hand with three drafts holding 6, and available is a GENERATED
+      // column, so the picker cannot offer stock the drafts have claimed.
+      expect(widget.inventory.quantityOnHand).toBe("1000.0000");
+      expect(widget.inventory.quantityAvailable).toBe("994.0000");
+    });
+
+    it("offers no checkouts until item_checkouts is backfilled", async () => {
+      const data = await invoiceActions.getInvoiceFormData();
+      // invoice_lines.checkout_id is a real FK; a picker whose every option
+      // fails the write is worse than no picker.
+      expect(data.checkouts).toBeUndefined();
+    });
+
+    it("creates a customer that can then actually be invoiced", async () => {
+      const fd = new FormData();
+      fd.set("name", "Kisumu Traders");
+      fd.set("type", "customer");
+      fd.set("email", "AC@Kisumu.CO");
+
+      const created = await invoiceActions.quickCreateParty(fd);
+      expect(created.success).toBe(true);
+      expect(created.party.email).toBe("ac@kisumu.co");
+
+      // The point of the change: the Mongo version wrote to Mongo, so a
+      // customer created inline could not be invoiced.
+      const result = await invoiceActions.createInvoicePg(
+        null,
+        form({
+          customerId: created.party._id,
+          invoiceDate: "2026-08-01",
+          serviceItems: [
+            { name: "Consulting", quantity: 1, unitPrice: 5000 },
+          ],
+        }),
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it("gives the edit form the customer id it preselects from", async () => {
+      const created = await invoiceActions.createInvoicePg(
+        null,
+        form({
+          customerId,
+          invoiceDate: "2026-08-01",
+          stockItems: [{ productId: widgetId, quantity: 1, sellingPrice: 250 }],
+        }),
+      );
+      const invoice = await invoiceActions.getInvoiceDetailPg(created.invoiceId);
+      // Without this the edit page reopened with no customer chosen.
+      expect(invoice.customer.id).toBe(customerId);
+    });
+  });
 });

@@ -818,6 +818,7 @@ export async function getInvoiceDetail(tx: Tx, invoiceId: string) {
            i.notes,
            i.created_by_name,
            i.created_by_role,
+           i.customer_id,
            p.name    AS customer_name,
            p.email   AS customer_email,
            p.phone   AS customer_phone,
@@ -886,6 +887,10 @@ export async function getInvoiceDetail(tx: Tx, invoiceId: string) {
     // Snapshotted at creation: there is no users table to join to (0026).
     createdBy: { name: inv.created_by_name, role: inv.created_by_role },
     customer: {
+      // The edit form preselects the picker from this, so the id has to be
+      // here — without it every edit reopened with no customer chosen.
+      id: inv.customer_id,
+      _id: inv.customer_id,
       name: inv.customer_name,
       email: inv.customer_email,
       phone: inv.customer_phone,
