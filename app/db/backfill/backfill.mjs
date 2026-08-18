@@ -2,7 +2,14 @@
  * MongoDB -> PostgreSQL backfill for the accounting core.
  *
  * Usage:
- *   MONGODB_URI=... DATABASE_URL=... node app/db/backfill/backfill.mjs [--company <mongoId>]
+ *   MONGODB_URI=... DIRECT_DATABASE_URL=... node app/db/backfill/backfill.mjs [--company <mongoId>]
+ *
+ * CONNECTION. Runs on DIRECT_DATABASE_URL — the privileged, unpooled one —
+ * falling back to DATABASE_URL. This is not interchangeable with the
+ * application's connection: the backfill provisions companies, and writes
+ * _migration_id_map and _migration_rejects, none of which app_user may do
+ * (migrations 0023, 0024). It also runs long transactions that transaction-mode
+ * pooling would break.
  *
  * Design notes that matter:
  *
@@ -29,10 +36,12 @@ import { MongoClient } from "mongodb";
 import { randomUUID } from "node:crypto";
 
 const MONGODB_URI = process.env.MONGODB_URI;
-const DATABASE_URL = process.env.DATABASE_URL;
+const DATABASE_URL = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
 
 if (!MONGODB_URI || !DATABASE_URL) {
-  console.error("Both MONGODB_URI and DATABASE_URL must be set.");
+  console.error(
+    "MONGODB_URI and DIRECT_DATABASE_URL (or DATABASE_URL) must be set.",
+  );
   process.exit(1);
 }
 
@@ -151,7 +160,13 @@ async function run() {
     const companyUuid = await mapId(sql, "companies", oldCompanyId);
 
     await sql.begin(async (tx) => {
-      // Companies is the tenant root and is not itself under RLS.
+      // Scope FIRST. Since migration 0024 `companies` is itself under RLS,
+      // keyed on its own id, with a WITH CHECK — so the tenant root has to be
+      // inserted inside its own scope. Setting it up front also means the
+      // backfill does not depend on connecting as a role that bypasses RLS; it
+      // goes through the same path the application does, as the note above says.
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+
       await tx`
         INSERT INTO companies (id, name, slug, base_currency)
         VALUES (
@@ -163,10 +178,6 @@ async function run() {
         ON CONFLICT (id) DO NOTHING
       `;
       stats.companies++;
-
-      // Everything below is tenant-scoped; go through the same RLS path the
-      // app uses rather than around it.
-      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
 
       // ── accounts (pass 1: rows, pass 2: parents) ─────────────────────────
       const accounts = await db

@@ -2,7 +2,10 @@
  * Cutover gate: the Postgres trial balance must equal the Mongo trial balance
  * exactly, per account, to the cent.
  *
- *   MONGODB_URI=... DATABASE_URL=... node app/db/backfill/reconcile.mjs
+ *   MONGODB_URI=... DIRECT_DATABASE_URL=... node app/db/backfill/reconcile.mjs
+ *
+ * Runs on the privileged connection: it reads across every tenant, and reads
+ * _migration_rejects, which the application role cannot (migration 0024).
  *
  * Exits non-zero on any variance. Per docs/POSTGRES-MIGRATION-PLAN.md §6.3 a
  * variance BLOCKS cutover — it is not rounded away. Each one is either float
@@ -16,9 +19,12 @@
 import postgres from "postgres";
 import { MongoClient, ObjectId } from "mongodb";
 
-const { MONGODB_URI, DATABASE_URL } = process.env;
+const MONGODB_URI = process.env.MONGODB_URI;
+const DATABASE_URL = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
 if (!MONGODB_URI || !DATABASE_URL) {
-  console.error("Both MONGODB_URI and DATABASE_URL must be set.");
+  console.error(
+    "MONGODB_URI and DIRECT_DATABASE_URL (or DATABASE_URL) must be set.",
+  );
   process.exit(1);
 }
 
