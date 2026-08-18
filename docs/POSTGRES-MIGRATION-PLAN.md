@@ -809,6 +809,54 @@ cutover.
 
 ---
 
+## 9B. Backfill coverage, and what extending it found
+
+`backfill.mjs` was written for slice 1 and still covers **6 of 27 tables**:
+companies, accounts, fiscal_periods, parties, journal_entries, journal_lines.
+The 20 added by slices 2–5 are not covered, so §6.3 cutover cannot yet move a
+tenant's invoicing, payments, stock, AP or tax.
+
+Two things were fixed before extending it, both found by use rather than review:
+
+- It ran on `DATABASE_URL`, which now names `app_user`. That role cannot insert
+  companies (RLS), write `_migration_id_map` (SELECT only) or touch
+  `_migration_rejects` at all. Both scripts take `DIRECT_DATABASE_URL` now.
+- **Resume did not work**, contradicting the script's own header. The entry
+  insert had `ON CONFLICT DO NOTHING`; the lines insert did not, so a re-run hit
+  `journal_lines_entry_line_uq`, the savepoint rolled back, and every
+  already-migrated entry was quarantined as `rejected_by_target`. A cutover
+  retried after any transient failure would have blocked itself on phantom
+  rejects. Now tested (`tests/pg-backfill.test.mjs`).
+
+### 9B.1 Ordering has cycles
+
+A single-pass insert order does not exist. `bill_lines` → `weighbridge_tickets`
+→ `bills`, and `stock_request_fulfilments` → `item_checkouts` →
+`stock_requests`. These need the two-pass treatment `accounts.parent_id`
+already gets: insert rows with the cross-reference null, then UPDATE it once
+both sides exist.
+
+### 9B.2 Schema gaps the mapping exposed
+
+Auditing every source enum against its Postgres counterpart — 12 surfaces —
+found 10 matching exactly and two that did not:
+
+| source | Postgres | resolution |
+|---|---|---|
+| `invoice.status` has `void` | `invoice_status` does not | Dead value: nothing sets or reads it for invoices (the `void` hits elsewhere are credit notes and bills). Backfill maps it to `cancelled` defensively rather than widening the enum for a state the application never produces. |
+| `invoice.paymentStatus` has `overdue` | `payment_status` has `overpaid` instead | **Live** — `executive-queries.js:72` and the sales-by-rep report both read it. But `overdue` is *derived*: `due_date < today AND payment_status <> 'paid'`. A stored copy is guaranteed to be wrong for some rows at any moment unless something recomputes it nightly, which is §8.4 exactly. Postgres is right to omit it; `invoices_aging_idx` answers the question from `due_date`. The backfill recomputes to `unpaid`/`partial`. |
+
+And one that was not an enum at all, which blocked the first table outright:
+invoice lines could not be services. See migration 0025 — the fix, and the
+reasoning, are recorded in the commit.
+
+The pattern across all three is the same as §9.7 and §9.9: **the sweep compared
+structures, and these are differences in what a value means.** An enum that
+matches label-for-label can still be wrong if one side stores a fact and the
+other stores a function of one.
+
+---
+
 ## 10. Explicitly out of scope
 
 - Redesigning the posting engine, fiscal periods, or COGS logic beyond the
