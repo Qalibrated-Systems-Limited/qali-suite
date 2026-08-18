@@ -43,9 +43,9 @@ export const fiscalPeriods = pgTable(
     status: fiscalPeriodStatusEnum("status").notNull().default("open"),
 
     closedAt: timestamp("closed_at", { withTimezone: true }),
-    closedById: uuid("closed_by_id"),
+    closedById: text("closed_by_id"),
     lockedAt: timestamp("locked_at", { withTimezone: true }),
-    lockedById: uuid("locked_by_id"),
+    lockedById: text("locked_by_id"),
 
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

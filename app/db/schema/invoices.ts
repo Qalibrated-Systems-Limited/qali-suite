@@ -85,9 +85,9 @@ export const invoices = pgTable(
      */
     sourceType: invoiceSourceTypeEnum("source_type").notNull().default("direct"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
-    completedById: uuid("completed_by_id"),
+    completedById: text("completed_by_id"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
-    cancelledById: uuid("cancelled_by_id"),
+    cancelledById: text("cancelled_by_id"),
 
     /** The revenue journal entry raised when the invoice was completed. */
     revenueEntryId: uuid("revenue_entry_id").references(
@@ -102,7 +102,7 @@ export const invoices = pgTable(
       onDelete: "restrict",
     }),
 
-    createdById: uuid("created_by_id"),
+    createdById: text("created_by_id"),
     /**
      * Who raised it, as they were named then. There is no users table in
      * Postgres to join to, and a rename must not relabel a document already

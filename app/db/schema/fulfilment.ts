@@ -101,20 +101,20 @@ export const stockRequests = pgTable(
     customerAddressAtRequest: text("customer_address_at_request"),
     customerTaxPinAtRequest: text("customer_tax_pin_at_request"),
 
-    requesterId: uuid("requester_id"),
+    requesterId: text("requester_id"),
     requesterNameAtRequest: text("requester_name_at_request").notNull(),
     requesterDepartment: requesterDepartmentEnum("requester_department").notNull(),
     requesterEmail: text("requester_email"),
     requesterPhone: text("requester_phone"),
 
     // ── Approval ─────────────────────────────────────────────────────────────
-    approvedById: uuid("approved_by_id"),
+    approvedById: text("approved_by_id"),
     approvedByNameAtApproval: text("approved_by_name_at_approval"),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     approvalComments: text("approval_comments"),
     approvalConditions: text("approval_conditions"),
 
-    rejectedById: uuid("rejected_by_id"),
+    rejectedById: text("rejected_by_id"),
     rejectedAt: timestamp("rejected_at", { withTimezone: true }),
     rejectionReason: text("rejection_reason"),
 
@@ -141,7 +141,7 @@ export const stockRequests = pgTable(
     costCodeId: uuid("cost_code_id"),
     costCodeAtRequest: text("cost_code_at_request"),
 
-    createdById: uuid("created_by_id"),
+    createdById: text("created_by_id"),
     requestedAt: timestamp("requested_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -287,7 +287,7 @@ export const stockRequestFulfilments = pgTable(
     /** Serials issued, where the product is serialised. */
     serialNumbers: text("serial_numbers").array(),
 
-    fulfilledById: uuid("fulfilled_by_id"),
+    fulfilledById: text("fulfilled_by_id"),
     fulfilledByNameAtFulfilment: text("fulfilled_by_name_at_fulfilment"),
     fulfilledAt: timestamp("fulfilled_at", { withTimezone: true })
       .notNull()
@@ -347,7 +347,7 @@ export const stockRequestApprovals = pgTable(
       .notNull()
       .references(() => companies.id, { onDelete: "cascade" }),
     requestId: uuid("request_id").notNull(),
-    approverId: uuid("approver_id"),
+    approverId: text("approver_id"),
     approverNameAtAction: text("approver_name_at_action").notNull(),
     action: text("action").notNull(),
     comments: text("comments"),
@@ -387,13 +387,13 @@ export const itemCheckouts = pgTable(
     serialNo: text("serial_no"),
 
     // ── Who has it ───────────────────────────────────────────────────────────
-    checkedOutToId: uuid("checked_out_to_id"),
+    checkedOutToId: text("checked_out_to_id"),
     checkedOutToNameAtCheckout: text("checked_out_to_name_at_checkout").notNull(),
     checkedOutToDepartment: text("checked_out_to_department"),
     checkedOutToEmail: text("checked_out_to_email"),
     checkedOutToPhone: text("checked_out_to_phone"),
 
-    checkedOutById: uuid("checked_out_by_id"),
+    checkedOutById: text("checked_out_by_id"),
     checkedOutByNameAtCheckout: text("checked_out_by_name_at_checkout").notNull(),
 
     checkedOutAt: timestamp("checked_out_at", { withTimezone: true })
@@ -407,7 +407,7 @@ export const itemCheckouts = pgTable(
 
     // ── Return ───────────────────────────────────────────────────────────────
     actualReturnDate: date("actual_return_date"),
-    returnedById: uuid("returned_by_id"),
+    returnedById: text("returned_by_id"),
     returnedByNameAtReturn: text("returned_by_name_at_return"),
     returnCondition: returnConditionEnum("return_condition"),
     returnNotes: text("return_notes"),
@@ -424,7 +424,7 @@ export const itemCheckouts = pgTable(
     // ── Conversion to sale ───────────────────────────────────────────────────
     saleConverted: boolean("sale_converted").notNull().default(false),
     saleConvertedAt: timestamp("sale_converted_at", { withTimezone: true }),
-    saleConvertedById: uuid("sale_converted_by_id"),
+    saleConvertedById: text("sale_converted_by_id"),
     saleInvoiceId: uuid("sale_invoice_id"),
     saleInvoiceNumberAtConversion: text("sale_invoice_number_at_conversion"),
     quantitySold: qty("quantity_sold").notNull().default("0"),
@@ -433,7 +433,7 @@ export const itemCheckouts = pgTable(
     // ── Conversion to expense ────────────────────────────────────────────────
     expensed: boolean("expensed").notNull().default(false),
     expensedAt: timestamp("expensed_at", { withTimezone: true }),
-    expensedById: uuid("expensed_by_id"),
+    expensedById: text("expensed_by_id"),
     expenseAccountId: uuid("expense_account_id"),
     expenseAccountCodeAtExpense: text("expense_account_code_at_expense"),
     expenseAccountNameAtExpense: text("expense_account_name_at_expense"),
@@ -449,7 +449,7 @@ export const itemCheckouts = pgTable(
     returnRequired: boolean("return_required").notNull().default(false),
     returnRequiredReason: returnRequiredReasonEnum("return_required_reason"),
     returnRequiredAt: timestamp("return_required_at", { withTimezone: true }),
-    returnRequiredById: uuid("return_required_by_id"),
+    returnRequiredById: text("return_required_by_id"),
     failedInvoiceId: uuid("failed_invoice_id"),
     failedInvoiceNumber: text("failed_invoice_number"),
     returnDeadline: date("return_deadline"),
@@ -464,7 +464,7 @@ export const itemCheckouts = pgTable(
     customerNameAtCheckout: text("customer_name_at_checkout"),
 
     isEscalated: boolean("is_escalated").notNull().default(false),
-    escalatedToId: uuid("escalated_to_id"),
+    escalatedToId: text("escalated_to_id"),
     escalatedToNameAtEscalation: text("escalated_to_name_at_escalation"),
     escalatedAt: timestamp("escalated_at", { withTimezone: true }),
     escalationReason: text("escalation_reason"),
@@ -640,7 +640,7 @@ export const weighbridgeTickets = pgTable(
 
     completedAt: timestamp("completed_at", { withTimezone: true }),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
-    voidedById: uuid("voided_by_id"),
+    voidedById: text("voided_by_id"),
     voidReason: text("void_reason"),
     notes: text("notes"),
     /** Non-blocking warnings raised on completion, surfaced in the UI. */

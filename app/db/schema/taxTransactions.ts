@@ -132,12 +132,12 @@ export const taxTransactions = pgTable(
     filingPeriod: text("filing_period").notNull(),
     filed: boolean("filed").notNull().default(false),
     filedAt: timestamp("filed_at", { withTimezone: true }),
-    filedById: uuid("filed_by_id"),
+    filedById: text("filed_by_id"),
     filingReference: text("filing_reference"),
 
     remitted: boolean("remitted").notNull().default(false),
     remittedAt: timestamp("remitted_at", { withTimezone: true }),
-    remittedById: uuid("remitted_by_id"),
+    remittedById: text("remitted_by_id"),
     remittanceReference: text("remittance_reference"),
 
     certificateIssued: boolean("certificate_issued").notNull().default(false),
@@ -149,7 +149,7 @@ export const taxTransactions = pgTable(
     // ── Reconciliation ───────────────────────────────────────────────────────
     reconciled: boolean("reconciled").notNull().default(false),
     reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
-    reconciledById: uuid("reconciled_by_id"),
+    reconciledById: text("reconciled_by_id"),
     reconciliationNotes: text("reconciliation_notes"),
 
     // ── Accounting link ──────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ export const taxTransactions = pgTable(
     description: text("description"),
     notes: text("notes"),
 
-    createdById: uuid("created_by_id"),
+    createdById: text("created_by_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

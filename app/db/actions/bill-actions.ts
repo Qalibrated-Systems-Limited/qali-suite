@@ -542,12 +542,19 @@ export async function submitBill(billId: string): Promise<ActionResult> {
  * Approves a bill: posts the purchase entry, admits any stock the bill
  * receives, and records the VAT and WHT — all in one transaction.
  *
- * SEPARATION OF DUTIES is checked here rather than in the database, and that
- * is a deliberate limit rather than an oversight. The rule depends on the
- * actor's ROLE, and roles live in Mongo — there is no users table in Postgres
- * (§10). The base rule alone (`approved_by_id <> submitted_by_id`) could be a
- * CHECK, but only if the override below were dropped, which is a product
- * decision and not one to make silently in a migration.
+ * SEPARATION OF DUTIES is checked here, and the honest account of why is
+ * narrower than "roles live in Mongo".
+ *
+ * The BASE RULE needs no roles at all. `approved_by_id <> submitted_by_id`
+ * compares two values already on the row, and could be a CHECK today — it does
+ * not depend on users being ported. What needs a role is only the OVERRIDE
+ * below, and an override is exactly the part of a separation-of-duties control
+ * an auditor asks about.
+ *
+ * So this is not "the rule cannot move to the database". It is "the rule can,
+ * and the exemption cannot, and shipping the rule without the exemption would
+ * change who can approve what". That is a product decision, and it is worth
+ * making deliberately rather than as a side effect of a migration.
  *
  * One difference from the reference: it treats SuperAdmin as outranking Admin.
  * bill-actions.js:1088 tests `user.role !== "Admin"`, so a SuperAdmin who

@@ -98,8 +98,8 @@ export const products = pgTable(
 
     isActive: boolean("is_active").notNull().default(true),
 
-    createdById: uuid("created_by_id"),
-    lastModifiedById: uuid("last_modified_by_id"),
+    createdById: text("created_by_id"),
+    lastModifiedById: text("last_modified_by_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

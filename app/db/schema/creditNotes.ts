@@ -108,14 +108,14 @@ export const creditNotes = pgTable(
     ),
 
     issuedAt: timestamp("issued_at", { withTimezone: true }),
-    issuedById: uuid("issued_by_id"),
+    issuedById: text("issued_by_id"),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
-    voidedById: uuid("voided_by_id"),
+    voidedById: text("voided_by_id"),
     voidReason: text("void_reason"),
 
     notes: text("notes"),
 
-    createdById: uuid("created_by_id"),
+    createdById: text("created_by_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

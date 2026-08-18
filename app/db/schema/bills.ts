@@ -135,14 +135,14 @@ export const bills = pgTable(
 
     // ── Workflow ─────────────────────────────────────────────────────────────
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
-    submittedById: uuid("submitted_by_id"),
+    submittedById: text("submitted_by_id"),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
-    approvedById: uuid("approved_by_id"),
+    approvedById: text("approved_by_id"),
     rejectedAt: timestamp("rejected_at", { withTimezone: true }),
-    rejectedById: uuid("rejected_by_id"),
+    rejectedById: text("rejected_by_id"),
     rejectionReason: text("rejection_reason"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
-    cancelledById: uuid("cancelled_by_id"),
+    cancelledById: text("cancelled_by_id"),
     cancellationReason: text("cancellation_reason"),
 
     /** The purchase journal entry raised when the bill was approved. */
@@ -174,7 +174,7 @@ export const bills = pgTable(
     costCodeAtBill: text("cost_code_at_bill"),
     costCodeNameAtBill: text("cost_code_name_at_bill"),
 
-    createdById: uuid("created_by_id"),
+    createdById: text("created_by_id"),
     /**
      * Who acted, as they were named then (0029).
      *

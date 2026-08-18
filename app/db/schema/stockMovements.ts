@@ -104,8 +104,21 @@ export const stockMovements = pgTable(
     sourceReference: text("source_reference"),
 
     // ── People ─────────────────────────────────────────────────────────────
-    performedById: uuid("performed_by_id"),
+    performedById: text("performed_by_id"),
     performedByNameAtMovement: text("performed_by_name_at_movement"),
+    /**
+     * A PARTY, not a user — the one identity column here that is a real
+     * reference, so it stays a uuid while the actor columns become text (0031).
+     *
+     * Worth flagging where the fulfilment slice will meet it: the source field
+     * is polymorphic. requests-actions.js:1493 writes
+     * `isSale ? request.customer.id : request.requester.id` — a party for a
+     * sale, a USER for an internal issue. The port narrowed it to parties, so
+     * an internal issue cannot record who took the stock beyond the name
+     * snapshot. Resolving that is a job for step 9/12, where this column is
+     * actually written, and it wants the party_type/party_id treatment rather
+     * than a widened type.
+     */
     issuedToId: uuid("issued_to_id").references(() => parties.id, {
       onDelete: "restrict",
     }),
@@ -115,14 +128,14 @@ export const stockMovements = pgTable(
     expectedReturnDate: date("expected_return_date"),
     actualReturnDate: date("actual_return_date"),
 
-    verifiedById: uuid("verified_by_id"),
+    verifiedById: text("verified_by_id"),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
 
     // ── Reversal ───────────────────────────────────────────────────────────
     status: movementStatusEnum("status").notNull().default("completed"),
     isReversed: boolean("is_reversed").notNull().default(false),
     reversedAt: timestamp("reversed_at", { withTimezone: true }),
-    reversedById: uuid("reversed_by_id"),
+    reversedById: text("reversed_by_id"),
     originalMovementId: uuid("original_movement_id").references(
       (): AnyPgColumn => stockMovements.id,
       { onDelete: "restrict" },

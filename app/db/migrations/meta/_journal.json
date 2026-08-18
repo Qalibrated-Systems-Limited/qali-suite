@@ -218,6 +218,13 @@
       "when": 1787049103566,
       "tag": "0030_fiscal_period_future",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787049104566,
+      "tag": "0031_actor_ids_are_text",
+      "breakpoints": true
     }
   ]
 }

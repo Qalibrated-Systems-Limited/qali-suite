@@ -65,9 +65,9 @@ export const journalEntries = pgTable(
 
     status: journalStatusEnum("status").notNull().default("draft"),
     postedAt: timestamp("posted_at", { withTimezone: true }),
-    postedById: uuid("posted_by_id"),
+    postedById: text("posted_by_id"),
     reversedAt: timestamp("reversed_at", { withTimezone: true }),
-    reversedById: uuid("reversed_by_id"),
+    reversedById: text("reversed_by_id"),
 
     reversalEntryId: uuid("reversal_entry_id").references(
       (): AnyPgColumn => journalEntries.id,
@@ -90,8 +90,8 @@ export const journalEntries = pgTable(
     fiscalYear: integer("fiscal_year"),
     fiscalMonth: integer("fiscal_month"),
 
-    createdById: uuid("created_by_id"),
-    lastModifiedById: uuid("last_modified_by_id"),
+    createdById: text("created_by_id"),
+    lastModifiedById: text("last_modified_by_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

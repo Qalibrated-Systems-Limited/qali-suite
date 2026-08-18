@@ -79,16 +79,16 @@ export const payments = pgTable(
 
     status: paymentRecordStatusEnum("status").notNull().default("draft"),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
-    confirmedById: uuid("confirmed_by_id"),
+    confirmedById: text("confirmed_by_id"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
-    cancelledById: uuid("cancelled_by_id"),
+    cancelledById: text("cancelled_by_id"),
 
     journalEntryId: uuid("journal_entry_id").references(
       () => journalEntries.id,
       { onDelete: "restrict" },
     ),
 
-    createdById: uuid("created_by_id"),
+    createdById: text("created_by_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

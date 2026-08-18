@@ -76,8 +76,8 @@ export const accounts = pgTable(
     bankBranch: text("bank_branch"),
     bankSwiftCode: text("bank_swift_code"),
 
-    createdById: uuid("created_by_id"),
-    lastModifiedById: uuid("last_modified_by_id"),
+    createdById: text("created_by_id"),
+    lastModifiedById: text("last_modified_by_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
