@@ -809,6 +809,65 @@ cutover.
 
 ---
 
+## 9C. §9.2 undercounted: the sweep only read models
+
+§9.2 catalogued **six** float tolerances. It scanned `app/models/`. Business
+rules also live in `app/mongodb/actions/`, `queries/` and `services/`, and a
+scan of those turns up roughly twenty more — found because porting credit notes
+rules-first hit one the sweep had never seen
+(`credit-note-actions.js:160`, over-credit an invoice by a cent).
+
+They are not all the same thing, and the distinction matters:
+
+**A. Permit a real error** — the dangerous class, same as §9.2's two:
+
+| location | effect |
+|---|---|
+| `invoice-actions.js:1162` | overpay an invoice by up to a cent |
+| `payment-actions.js:230` | over-allocate a payment — a second copy of `payment.js:407` |
+| `bill-actions.js:1438` | overpay a bill — a second copy of `bill.js:1302` |
+| `credit-note-actions.js:160` | over-credit an invoice |
+
+Note the duplication: two of these restate a model-level guard in the action, so
+the same defect exists twice and fixing one leaves the other.
+
+**B. Post an unbalanced entry:**
+
+| location | tolerance |
+|---|---|
+| `journal-actions.js:50` | 0.01 |
+| `petty-cash-actions.js:80` | 0.01 |
+| `claim-action.js:2132` | 0.01 |
+| **`hr-payroll-actions.js:568`** | **1.00 — a whole currency unit** |
+
+The payroll one is the worst in the codebase. Its own comment reads *"BUG-6:
+Verify journal is balanced before posting"*, so it was added as a fix and given
+a tolerance a hundred times the others — on what is typically the largest
+recurring entry a business posts.
+
+**C. Reporting filters** — `accountQueries.js:496`, `reportQueries.js:90`,
+`journalQueries.js:118`, several in `reportsService.js`. These drop or flag
+balances under a cent. Cosmetic rather than corrupting, but they hide exactly
+the residue that indicates drift.
+
+**D. Deliberate heuristics, not defects** — `bankFeedService.js:641` scores a
+bank line against a document within 1.00 as a *suggested* match. That is fuzzy
+matching for a human to confirm, and correctly tolerant. Listed so it is not
+mistaken for the others in a later sweep.
+
+### What the port already fixes, and what is still live
+
+A and B are structurally impossible on Postgres **for ported paths**: exact
+balance since 0001, over-allocation since 0012, bill overpayment since 0016,
+over-crediting since 0028. Invoice overpayment is deliberately *allowed* and
+named `overpaid` (0017), so that tolerance is moot rather than fixed.
+
+But payroll, petty cash and claims are **not ported**. Their tolerances are
+live in Mongo today, and the payroll one at ±1.00 is worth fixing in the old
+system regardless of migration timing — it does not need this branch.
+
+---
+
 ## 9B. Backfill coverage, and what extending it found
 
 `backfill.mjs` was written for slice 1 and still covers **6 of 27 tables**:
