@@ -1,4 +1,3 @@
-import { getBalanceSheetData } from "@/app/mongodb/queries/reportQueries";
 import { getBalanceSheetDataPg } from "@/app/db/actions/report-actions";
 import { BalanceSheetClient } from "./BalanceSheetClient";
 
@@ -15,12 +14,7 @@ export default async function BalanceSheetPage({ searchParams }) {
   let error = null;
 
   try {
-    // `?source=pg` reads the same statement from Postgres for side-by-side
-    // comparison during the migration; MongoDB stays the default.
-    reportData =
-      params?.source === "pg"
-        ? await getBalanceSheetDataPg(asOfDate)
-        : await getBalanceSheetData(asOfDate);
+    reportData = await getBalanceSheetDataPg(asOfDate);
   } catch (err) {
     console.error("Error fetching balance sheet:", err);
     error = err.message;

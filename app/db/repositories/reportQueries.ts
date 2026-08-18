@@ -393,6 +393,18 @@ export async function getProfitLoss(
     revenue: { accounts: revenue, total: totalRevenue },
     expenses: { accounts: expenses, total: totalExpenses },
     summary: {
+      /**
+       * A misnomer carried from reportsService.js:57, where it is also
+       * `totalRevenue`. It is NOT revenue less cost of sales — COGS is an
+       * expense account here and the statement does not separate it from
+       * operating expenses.
+       *
+       * Named rather than renamed because the P&L client reads
+       * `variance.revenue`, which is computed from this, and the two agree:
+       * the variance shown on the Total Revenue row IS a revenue variance.
+       * Anyone reading the variance calculation alone would reasonably think
+       * it a bug, so this is the note that says it is not.
+       */
       grossProfit: totalRevenue,
       totalExpenses,
       netIncome,

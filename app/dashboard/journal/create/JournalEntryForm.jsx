@@ -75,9 +75,10 @@ const emptyLine = () => ({
 
 export default function JournalEntryForm({ accounts = [], entryTypes = [], action = null }) {
   const router = useRouter();
-  // `action` lets the page choose the data source. It defaults to the MongoDB
-  // action, so nothing changes unless a caller passes something else — see the
-  // ?source=pg branch in page.tsx.
+  // `action` is supplied by the page. The Mongo fallback is kept only so a
+  // caller that passes nothing still has one; the create page always passes
+  // the Postgres action, because the account list it renders comes from there
+  // and an id from one store selects nothing in the other.
   const [state, formAction, isPending] = useActionState(
     action ?? createOnMongo,
     null,

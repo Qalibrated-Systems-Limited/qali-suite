@@ -1,6 +1,5 @@
-import { getGeneralLedgerData } from "@/app/mongodb/queries/reportQueries";
 import { getGeneralLedgerDataPg } from "@/app/db/actions/report-actions";
-import { getPostableAccounts } from "@/app/mongodb/queries/accountQueries";
+import { getPostableAccountsPg } from "@/app/db/actions/journal-actions";
 import { GeneralLedgerClient } from "./GeneralLedgerClient";
 
 export const metadata = {
@@ -29,19 +28,14 @@ export default async function GeneralLedgerPage({ searchParams }) {
   let error = null;
 
   try {
-    // Get list of postable accounts for dropdown
-    accounts = await getPostableAccounts();
+    // The dropdown and the report now come from the same store. They did not:
+    // the list was Mongo while `?source=pg` read the ledger from Postgres, and
+    // an account id from one store selects nothing in the other — so the pg
+    // path could not actually be exercised from this page.
+    accounts = await getPostableAccountsPg();
 
-    // Get report data if account is selected.
-    // `?source=pg` reads the same ledger out of Postgres for side-by-side
-    // comparison during the migration; MongoDB stays the default. The account
-    // dropdown still comes from Mongo — accounts carry different ids in each
-    // store, so a pg run needs the Postgres account id.
     if (accountId) {
-      reportData =
-        params?.source === "pg"
-          ? await getGeneralLedgerDataPg(accountId, startDate, endDate)
-          : await getGeneralLedgerData(accountId, startDate, endDate);
+      reportData = await getGeneralLedgerDataPg(accountId, startDate, endDate);
     }
   } catch (err) {
     console.error("Error fetching general ledger:", err);
@@ -51,7 +45,7 @@ export default async function GeneralLedgerPage({ searchParams }) {
   return (
     <GeneralLedgerClient
       initialData={reportData}
-      accounts={JSON.parse(JSON.stringify(accounts))}
+      accounts={accounts}
       selectedAccountId={accountId}
       initialStartDate={startDate}
       initialEndDate={endDate}

@@ -34,6 +34,7 @@ const { getTenantContext } = await import("@/lib/utils/tenant-utils");
 const invoiceActions = await import("@/app/db/actions/invoice-actions");
 const billActions = await import("@/app/db/actions/bill-actions");
 const journalActions = await import("@/app/db/actions/journal-actions");
+const reportActions = await import("@/app/db/actions/report-actions");
 
 /** The exact shape auth.ts issues: `dbUser._id.toString()`. */
 const objectId = () =>
@@ -279,5 +280,105 @@ suite("write paths with a real session id", () => {
        WHERE m.collection = 'companies' AND m.old_object_id = ${freshCompany}
     `;
     expect(company.name).toBe("NEWCO");
+  });
+
+  /**
+   * The loop: money written through the app has to show up in the books the
+   * app reports. Until the reports came off `?source=pg` they read Mongo,
+   * so an invoice could post to the Postgres ledger and the trial balance
+   * would not move.
+   */
+  describe("what is written is what is reported", () => {
+    async function completedInvoice() {
+      const fd = new FormData();
+      fd.set("invoiceData", JSON.stringify({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [{ productId: widgetId, quantity: 2, sellingPrice: 250, taxRate: 0 }],
+        serviceItems: [],
+      }));
+      const created = await invoiceActions.createInvoicePg(null, fd);
+      expect(created.success, created.error).toBe(true);
+      const done = await invoiceActions.completeInvoicePg(created.invoiceId);
+      expect(done.success, done.error).toBe(true);
+      return created.invoiceId;
+    }
+
+    it("shows a completed invoice on the trial balance", async () => {
+      await completedInvoice();
+
+      const tb = await reportActions.getTrialBalanceDataPg("2026-08-31", false);
+      const byCode = Object.fromEntries(
+        tb.accounts.map((a) => [a.accountCode, a]),
+      );
+
+      // 2 x 250 receivable, 500 revenue, and the cost of sales pair.
+      expect(Number(byCode["1200"].debit)).toBe(500);
+      expect(Number(byCode["4000"].credit)).toBe(500);
+      expect(Number(byCode["5000"].debit)).toBe(80);
+      expect(Number(byCode["1300"].credit)).toBe(80);
+      expect(tb.summary.isBalanced).toBe(true);
+    });
+
+    it("shows an approved bill on the trial balance", async () => {
+      const fd = new FormData();
+      fd.set("supplierId", supplierId);
+      fd.set("billDate", "2026-08-01");
+      fd.set("dueDate", "2026-08-31");
+      fd.set("lines[0].description", "Diesel");
+      fd.set("lines[0].accountId", acct.expense);
+      fd.set("lines[0].quantity", "10");
+      fd.set("lines[0].unitPrice", "100");
+      fd.set("lines[0].vatRate", "16");
+
+      const created = await billActions.createBill(null, fd);
+      await billActions.submitBill(created.billId);
+      const approved = await billActions.approveBill(created.billId);
+      expect(approved.success, approved.error).toBe(true);
+
+      const tb = await reportActions.getTrialBalanceDataPg("2026-08-31", false);
+      const byCode = Object.fromEntries(
+        tb.accounts.map((a) => [a.accountCode, a]),
+      );
+      expect(Number(byCode["5100"].debit)).toBe(1000);
+      expect(Number(byCode["1400"].debit)).toBe(160);
+      expect(Number(byCode["2000"].credit)).toBe(1160);
+      expect(tb.summary.isBalanced).toBe(true);
+    });
+
+    it("carries the same figures into the P&L and the balance sheet", async () => {
+      await completedInvoice();
+
+      const pl = await reportActions.getProfitLossDataPg("2026-08-01", "2026-08-31");
+      expect(pl.current.revenue.total).toBe(500);
+      // Cost of sales is an expense here; the statement does not split it out.
+      expect(pl.current.expenses.total).toBe(80);
+      expect(pl.current.summary.netIncome).toBe(420);
+
+      const bs = await reportActions.getBalanceSheetDataPg("2026-08-31");
+      // The identity the whole exercise exists to preserve.
+      expect(bs.summary.totalAssets).toBeCloseTo(
+        bs.summary.totalLiabilities + bs.summary.totalEquity,
+        4,
+      );
+    });
+
+    it("reports the general ledger for an account chosen from its own store", async () => {
+      await completedInvoice();
+
+      // The dropdown and the report were served from different stores, so an
+      // id from the list selected nothing in the report.
+      const accounts = await journalActions.getPostableAccountsPg();
+      const revenue = accounts.find((a) => a.accountCode === "4000");
+      expect(revenue).toBeDefined();
+
+      const gl = await reportActions.getGeneralLedgerDataPg(
+        revenue._id,
+        "2026-08-01",
+        "2026-08-31",
+      );
+      expect(gl.account.accountCode).toBe("4000");
+      expect(gl.transactions.length).toBeGreaterThan(0);
+    });
   });
 });
