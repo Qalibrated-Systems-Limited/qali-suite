@@ -45,7 +45,17 @@ export interface InvoiceLineInput {
   unit?: string;
   description?: string | null;
   discountAmount?: string;
+  /**
+   * Absolute tax for the line. Supply this OR taxRate, not both.
+   */
   taxAmount?: string;
+  /**
+   * Tax as a percentage. Preferred over taxAmount: the UI knows the rate, and
+   * computing the amount here keeps it exact decimal instead of the float
+   * multiplication a browser would do. invoice_lines stores only the amount,
+   * so the rate is not retained — see the note in §9B.2 about rates.
+   */
+  taxRate?: string;
   /**
    * Where this line's stock comes from. Mandatory and single-valued — the
    * matching reference below must be supplied and the others left out, which a
@@ -117,15 +127,33 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
       throw new Error("A service line cannot name a product");
     }
 
-    const [{ line_total }] = (await tx.execute(sql`
-      SELECT (${line.quantity}::numeric(19,4) * ${line.unitPrice}::numeric(19,4)
-              - ${line.discountAmount ?? "0"}::numeric(19,4)
-              + ${line.taxAmount ?? "0"}::numeric(19,4))::numeric(19,4) AS line_total
-    `)) as unknown as Array<{ line_total: string }>;
+    // Tax and the line total are computed in Postgres, in exact decimal. The
+    // form multiplies rate by amount in float64 and would hand us the drift
+    // this migration exists to remove.
+    const [{ tax_amount, line_total }] = (await tx.execute(sql`
+      WITH t AS (
+        SELECT ${line.quantity}::numeric(19,4)  AS qty,
+               ${line.unitPrice}::numeric(19,4) AS price,
+               ${line.discountAmount ?? "0"}::numeric(19,4) AS disc,
+               ${line.taxAmount ?? null}::numeric(19,4)     AS tax_abs,
+               ${line.taxRate ?? null}::numeric(9,4)        AS tax_rate
+      )
+      SELECT tax.amount::text AS tax_amount,
+             (t.qty * t.price - t.disc + tax.amount)::numeric(19,4)::text AS line_total
+        FROM t,
+             LATERAL (
+               SELECT COALESCE(
+                 t.tax_abs,
+                 ROUND((t.qty * t.price - t.disc) * COALESCE(t.tax_rate, 0) / 100, 4),
+                 0
+               ) AS amount
+             ) AS tax
+    `)) as unknown as Array<{ tax_amount: string; line_total: string }>;
 
     resolved.push({
       ...line,
       itemType,
+      taxAmount: tax_amount,
       unitCost: line.unitCost ?? product?.costPrice ?? "0",
       lineTotal: line_total,
     });

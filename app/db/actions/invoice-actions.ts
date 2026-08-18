@@ -22,62 +22,94 @@ import * as accountsRepo from "../repositories/accounts";
 const MONEY = /^\d+(\.\d{1,4})?$/;
 const QTY = /^\d+(\.\d{1,4})?$/;
 
-const lineSchema = z
-  .object({
-    itemType: z.enum(["product", "service"]).default("product"),
-    productId: z.string().uuid().optional(),
-    serviceCategory: z
-      .enum([
-        "labor",
-        "mileage",
-        "accommodation",
-        "installation",
-        "consultation",
-        "maintenance",
-        "repair",
-        "other",
-      ])
-      .optional(),
-    description: z.string().optional(),
-    unit: z.string().optional(),
-    quantity: z.string().regex(QTY, "Invalid quantity"),
-    unitPrice: z.string().regex(MONEY, "Invalid unit price"),
-    discountAmount: z.string().regex(MONEY, "Invalid discount").optional(),
-    taxAmount: z.string().regex(MONEY, "Invalid tax").optional(),
-  })
-  // Mirrors CHECK invoice_lines_product_matches_item_type. Checked here only so
-  // the user gets a field error instead of a constraint violation.
-  .refine((l) => (l.itemType === "product") === Boolean(l.productId), {
-    message: "A product line needs a product; a service line must not have one",
-    path: ["productId"],
-  });
-
-const createSchema = z.object({
-  customerId: z.string().uuid("Customer is required"),
-  invoiceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date"),
-  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  title: z.string().optional(),
-  notes: z.string().optional(),
-  lines: z.array(lineSchema).min(1, "At least one line is required"),
+/**
+ * The payload CreateInvoiceForm actually submits: one JSON blob under
+ * `invoiceData`, with products and services in SEPARATE lists.
+ *
+ * The first version of this action parsed indexed `lines[i].x` fields, which is
+ * how the JOURNAL form submits — and nothing invoice-shaped ever sent that. The
+ * schema is derived from the form now, not assumed.
+ *
+ * That the form has always kept stockItems and serviceItems apart is also the
+ * clearest evidence migration 0025 was right: the UI has modelled the
+ * product/service split from the start, and only the table could not express it.
+ */
+const stockItemSchema = z.object({
+  productId: z.string().min(1, "Product is required"),
+  quantity: z.coerce.number().positive("Quantity must be greater than zero"),
+  sellingPrice: z.coerce.number().min(0, "Price cannot be negative"),
+  taxRate: z.coerce.number().min(0).max(100).default(0),
+  unit: z.string().optional(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  checkoutId: z.string().optional().nullable(),
+  stockRequestId: z.string().optional().nullable(),
+  weighbridgeTicketId: z.string().optional().nullable(),
 });
 
+const serviceItemSchema = z.object({
+  name: z.string().min(1, "Service name is required"),
+  serviceCategory: z
+    .enum([
+      "labor",
+      "mileage",
+      "accommodation",
+      "installation",
+      "consultation",
+      "maintenance",
+      "repair",
+      "other",
+    ])
+    .default("other"),
+  description: z.string().optional(),
+  unit: z.string().optional(),
+  quantity: z.coerce.number().positive("Quantity must be greater than zero"),
+  unitPrice: z.coerce.number().min(0, "Price cannot be negative"),
+  taxRate: z.coerce.number().min(0).max(100).default(0),
+});
+
+const invoiceDataSchema = z
+  .object({
+    customerId: z.string().min(1, "Customer is required"),
+    invoiceDate: z.string().min(1, "Invoice date is required"),
+    dueDate: z.string().optional().nullable(),
+    title: z.string().optional().nullable(),
+    notes: z.string().optional().nullable(),
+    stockItems: z.array(stockItemSchema).default([]),
+    serviceItems: z.array(serviceItemSchema).default([]),
+  })
+  .refine((d) => d.stockItems.length + d.serviceItems.length > 0, {
+    message: "Add at least one item or service",
+    path: ["stockItems"],
+  });
+
+/** Dates arrive as ISO strings or datetime-local values; the column is a date. */
+const toDateOnly = (v?: string | null) =>
+  v ? String(v).slice(0, 10) : undefined;
+
+/** Money crosses this boundary as a string and stays one. */
+const money = (n: number) => n.toFixed(4);
+
 /**
- * Deliberately the shape app/mongodb/invoice-actions.js returns, so a page can
- * change data source without the component changing.
+ * Deliberately the shape app/mongodb/invoice-actions.js returns, so a component
+ * can change data source without changing.
  */
 export type ActionResult =
   | { success: true; invoiceId?: string; invoiceNumber?: string; message?: string }
   | { success: false; error: string; fieldErrors?: Record<string, string[]> };
 
+/**
+ * Postgres phrases accounting violations for a user already. Surface those;
+ * hide anything else behind a generic message and a log line.
+ */
 function toActionError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   if (
-    // Phrased for a user by the database or the repository.
     message.includes("not balanced") ||
     message.includes("fiscal period") ||
     message.includes("system account") ||
     message.includes("Product not found") ||
-    message.includes("product") ||
+    message.includes("product line") ||
     message.includes("service line") ||
     message.includes("quantity_available") ||
     message.includes("not found, or not in draft") ||
@@ -90,41 +122,18 @@ function toActionError(err: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
-function parseLines(formData: FormData) {
-  const lines = [];
-  let i = 0;
-  while (formData.has(`lines[${i}].quantity`)) {
-    const productId = String(formData.get(`lines[${i}].productId`) || "");
-    lines.push({
-      itemType: String(formData.get(`lines[${i}].itemType`) || (productId ? "product" : "service")),
-      productId: productId || undefined,
-      serviceCategory:
-        String(formData.get(`lines[${i}].serviceCategory`) || "") || undefined,
-      description: String(formData.get(`lines[${i}].description`) || "") || undefined,
-      unit: String(formData.get(`lines[${i}].unit`) || "") || undefined,
-      quantity: String(formData.get(`lines[${i}].quantity`)),
-      unitPrice: String(formData.get(`lines[${i}].unitPrice`) || "0"),
-      discountAmount: String(formData.get(`lines[${i}].discountAmount`) || "") || undefined,
-      taxAmount: String(formData.get(`lines[${i}].taxAmount`) || "") || undefined,
-    });
-    i++;
-  }
-  return lines;
-}
-
 export async function createInvoicePg(
   _prevState: unknown,
   formData: FormData,
 ): Promise<ActionResult> {
-  const parsed = createSchema.safeParse({
-    customerId: formData.get("customerId"),
-    invoiceDate: formData.get("invoiceDate"),
-    dueDate: formData.get("dueDate") || undefined,
-    title: formData.get("title") || undefined,
-    notes: formData.get("notes") || undefined,
-    lines: parseLines(formData),
-  });
+  let raw: unknown;
+  try {
+    raw = JSON.parse(String(formData.get("invoiceData") ?? "{}"));
+  } catch {
+    return { success: false, error: "Could not read the invoice data" };
+  }
 
+  const parsed = invoiceDataSchema.safeParse(raw);
   if (!parsed.success) {
     return {
       success: false,
@@ -132,6 +141,42 @@ export async function createInvoicePg(
       fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]>,
     };
   }
+  const d = parsed.data;
+
+  // Products and services become one ordered list of lines. Tax is passed as a
+  // RATE so the repository computes the amount in exact decimal rather than
+  // trusting the float the browser calculated.
+  const lines = [
+    ...d.stockItems.map((it) => ({
+      itemType: "product" as const,
+      productId: it.productId,
+      description: it.description || it.name || null,
+      unit: it.unit,
+      quantity: money(it.quantity),
+      unitPrice: money(it.sellingPrice),
+      taxRate: money(it.taxRate),
+      // §8.1: single-valued and mandatory. The form sets at most one of these.
+      fulfilmentSource: it.weighbridgeTicketId
+        ? ("weighbridge" as const)
+        : it.stockRequestId
+          ? ("stock_request" as const)
+          : it.checkoutId
+            ? ("checkout" as const)
+            : ("inventory" as const),
+      checkoutId: it.checkoutId || null,
+      stockRequestId: it.stockRequestId || null,
+      weighbridgeTicketId: it.weighbridgeTicketId || null,
+    })),
+    ...d.serviceItems.map((it) => ({
+      itemType: "service" as const,
+      serviceCategory: it.serviceCategory,
+      description: it.description || it.name,
+      unit: it.unit,
+      quantity: money(it.quantity),
+      unitPrice: money(it.unitPrice),
+      taxRate: money(it.taxRate),
+    })),
+  ];
 
   try {
     const invoice = await withAuthorizedTenant(
@@ -139,7 +184,12 @@ export async function createInvoicePg(
       (tx, { user, companyId }) =>
         invoices.createInvoice(tx, {
           companyId,
-          ...parsed.data,
+          customerId: d.customerId,
+          invoiceDate: toDateOnly(d.invoiceDate)!,
+          dueDate: toDateOnly(d.dueDate) ?? null,
+          title: d.title ?? null,
+          notes: d.notes ?? null,
+          lines,
           createdById: user.id,
         }),
     );

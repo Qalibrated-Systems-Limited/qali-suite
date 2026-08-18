@@ -55,7 +55,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { cn, formatAddress } from "@/lib/utils";
-import { createInvoice } from "@/app/mongodb/invoice-actions";
+import { createInvoicePg as createInvoice } from "@/app/db/actions/invoice-actions";
 import QuickCreatePartyDialog from "./QuickCreateCustomerDialog";
 import ProjectPicker from "@/components/project-picker";
 

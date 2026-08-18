@@ -24,11 +24,17 @@ vi.mock("@/lib/utils/tenant-utils", () => ({ getTenantContext: vi.fn() }));
 const { getTenantContext } = await import("@/lib/utils/tenant-utils");
 const invoiceActions = await import("@/app/db/actions/invoice-actions");
 
-function form(fields) {
+/**
+ * The form submits one JSON blob under `invoiceData`, with products and
+ * services in separate lists. Building it the same way here keeps the test
+ * honest about the real contract.
+ */
+function form({ customerId, invoiceDate, dueDate, title, notes, stockItems = [], serviceItems = [] }) {
   const fd = new FormData();
-  for (const [k, v] of Object.entries(fields)) {
-    if (v !== undefined && v !== null) fd.set(k, String(v));
-  }
+  fd.set(
+    "invoiceData",
+    JSON.stringify({ customerId, invoiceDate, dueDate, title, notes, stockItems, serviceItems }),
+  );
   return fd;
 }
 
@@ -96,12 +102,10 @@ suite("invoice actions (end to end)", () => {
     const result = await invoiceActions.createInvoicePg(
       null,
       form({
-        customerId,
-        invoiceDate: "2026-08-01",
-        "lines[0].productId": widgetId,
-        "lines[0].quantity": "4",
-        "lines[0].unitPrice": "250.0000",
-      }),
+          customerId,
+          invoiceDate: "2026-08-01",
+          stockItems: [{ productId: widgetId, quantity: 4, sellingPrice: 250.0000 }],
+        }),
     );
 
     expect(result.success).toBe(true);
@@ -121,12 +125,15 @@ suite("invoice actions (end to end)", () => {
       form({
         customerId,
         invoiceDate: "2026-08-01",
-        "lines[0].itemType": "service",
-        "lines[0].serviceCategory": "installation",
-        "lines[0].description": "Installation",
-        "lines[0].unit": "hours",
-        "lines[0].quantity": "3",
-        "lines[0].unitPrice": "2500.0000",
+        serviceItems: [
+          {
+            name: "Installation",
+            serviceCategory: "installation",
+            unit: "hours",
+            quantity: 3,
+            unitPrice: 2500,
+          },
+        ],
       }),
     );
     expect(result.success).toBe(true);
@@ -144,10 +151,8 @@ suite("invoice actions (end to end)", () => {
       form({
         customerId,
         invoiceDate: "2026-08-01",
-        // product line with no product
-        "lines[0].itemType": "product",
-        "lines[0].quantity": "1",
-        "lines[0].unitPrice": "10",
+        // a stock item with no product at all
+        stockItems: [{ productId: "", quantity: 1, sellingPrice: 10 }],
       }),
     );
     expect(result.success).toBe(false);
@@ -163,27 +168,90 @@ suite("invoice actions (end to end)", () => {
     const result = await invoiceActions.createInvoicePg(
       null,
       form({
-        customerId,
-        invoiceDate: "2026-08-01",
-        "lines[0].productId": widgetId,
-        "lines[0].quantity": "1",
-        "lines[0].unitPrice": "10",
-      }),
+          customerId,
+          invoiceDate: "2026-08-01",
+          stockItems: [{ productId: widgetId, quantity: 1, sellingPrice: 10 }],
+        }),
     );
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/permission/i);
+  });
+
+  it("computes tax from the rate in exact decimal, not from a browser float", async () => {
+    // 3 x 333.33 = 999.99 at 16% is 159.9984. Computed in float64 the way the
+    // form does it, this is where the fourth decimal goes wrong.
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [
+          { productId: widgetId, quantity: 3, sellingPrice: 333.33, taxRate: 16 },
+        ],
+      }),
+    );
+    expect(created.success).toBe(true);
+
+    const [line] = await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      return tx`
+        SELECT tax_amount::text AS tax, line_total::text AS total
+          FROM invoice_lines WHERE invoice_id = ${created.invoiceId}
+      `;
+    });
+    expect(line.tax).toBe("159.9984");
+    expect(line.total).toBe("1159.9884");
+  });
+
+  it("maps a checkout-sourced item to its fulfilment source (§8.1)", async () => {
+    const checkoutId = randomUUID();
+    await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      await tx`
+        INSERT INTO item_checkouts (
+          id, company_id, checkout_number, product_id, quantity,
+          checked_out_to_name_at_checkout, checked_out_by_name_at_checkout,
+          purpose, expected_return_date
+        ) VALUES (
+          ${checkoutId}, ${companyUuid}, 'CHK-1', ${widgetId}, 5,
+          'Tech', 'Store', 'installation', '2026-09-01'
+        )
+      `;
+    });
+
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        stockItems: [
+          { productId: widgetId, quantity: 2, sellingPrice: 100, checkoutId },
+        ],
+      }),
+    );
+    expect(created.success).toBe(true);
+
+    const [line] = await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      return tx`
+        SELECT fulfilment_source::text AS src, checkout_id
+          FROM invoice_lines WHERE invoice_id = ${created.invoiceId}
+      `;
+    });
+    // Single-valued and mandatory, rather than inferred from which nullable
+    // field happens to exist.
+    expect(line.src).toBe("checkout");
+    expect(line.checkout_id).toBe(checkoutId);
   });
 
   it("completes an invoice: posts revenue, issues stock, costs it", async () => {
     const created = await invoiceActions.createInvoicePg(
       null,
       form({
-        customerId,
-        invoiceDate: "2026-08-01",
-        "lines[0].productId": widgetId,
-        "lines[0].quantity": "4",
-        "lines[0].unitPrice": "250.0000",
-      }),
+          customerId,
+          invoiceDate: "2026-08-01",
+          stockItems: [{ productId: widgetId, quantity: 4, sellingPrice: 250.0000 }],
+        }),
     );
     const done = await invoiceActions.completeInvoicePg(created.invoiceId);
     expect(done.success).toBe(true);
@@ -220,12 +288,10 @@ suite("invoice actions (end to end)", () => {
     const created = await invoiceActions.createInvoicePg(
       null,
       form({
-        customerId,
-        invoiceDate: "2026-08-01",
-        "lines[0].productId": widgetId,
-        "lines[0].quantity": "1",
-        "lines[0].unitPrice": "10",
-      }),
+          customerId,
+          invoiceDate: "2026-08-01",
+          stockItems: [{ productId: widgetId, quantity: 1, sellingPrice: 10 }],
+        }),
     );
     const done = await invoiceActions.completeInvoicePg(created.invoiceId);
     expect(done.success).toBe(false);
@@ -292,9 +358,7 @@ suite("invoice list page queries", () => {
         form({
           customerId,
           invoiceDate: date,
-          "lines[0].productId": widgetId,
-          "lines[0].quantity": qty,
-          "lines[0].unitPrice": "100.0000",
+          stockItems: [{ productId: widgetId, quantity: Number(qty), sellingPrice: 100 }],
         }),
       );
     }
