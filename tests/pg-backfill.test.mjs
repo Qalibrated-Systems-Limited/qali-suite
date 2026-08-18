@@ -58,6 +58,7 @@ suite("postgres backfill and reconciliation", () => {
         fiscalPeriods: 1,
         parties: 1,
         products: 2,
+        weighbridgeTickets: 1,
       });
       // Four of the five source entries land; the fifth is quarantined below.
       expect(stats.entries).toBe(4);
@@ -96,11 +97,11 @@ suite("postgres backfill and reconciliation", () => {
     });
 
     it("quarantines an unbalanced entry instead of rounding it into agreement", async () => {
-      const stats = await run();
-      expect(stats.rejected).toBe(1);
+      await run();
 
       const [reject] = await admin`
         SELECT reason, detail FROM _migration_rejects
+         WHERE reason = 'unbalanced_in_source'
       `;
       expect(reject.reason).toBe("unbalanced_in_source");
       expect(reject.detail.entryNumber).toBe("JE-00003");
@@ -181,7 +182,49 @@ suite("postgres backfill and reconciliation", () => {
 
       // And one reject row per rejected document, however many times it ran.
       const [rejects] = await admin`SELECT count(*)::int AS n FROM _migration_rejects`;
-      expect(rejects.n).toBe(1);
+      expect(rejects.n).toBe(3);
+    });
+  });
+
+  describe("weighbridge tickets", () => {
+    it("generates net weight rather than trusting a seeded one", async () => {
+      await run();
+      const [t] = await admin`
+        SELECT ticket_number, direction::text, first_weight::text AS first,
+               second_weight::text AS second, net_weight::text AS net,
+               status::text, external_ref
+          FROM weighbridge_tickets
+      `;
+      expect(t.ticket_number).toBe("WB-00001");
+      expect(t.direction).toBe("inbound");
+      expect(t.first).toBe("18500.0000");
+      expect(t.second).toBe("6200.0000");
+      // Computed by the column, not carried from the source.
+      expect(t.net).toBe("12300.0000");
+      expect(t.status).toBe("completed");
+      expect(t.external_ref).toBe("GATE-001");
+    });
+
+    it("quarantines a ticket whose direction contradicts its purpose", async () => {
+      await run();
+      const [r] = await admin`
+        SELECT detail FROM _migration_rejects
+         WHERE reason = 'direction_contradicts_transaction_type'
+      `;
+      expect(r.detail.ticketNumber).toBe("WB-00002");
+      expect(r.detail.transactionType).toBe("purchase");
+      expect(r.detail.direction).toBe("outbound");
+      expect(r.detail.expected).toBe("inbound");
+    });
+
+    it("quarantines a ticket completed on one weighing", async () => {
+      await run();
+      const [r] = await admin`
+        SELECT detail FROM _migration_rejects
+         WHERE reason = 'completed_without_both_weighings'
+      `;
+      expect(r.detail.ticketNumber).toBe("WB-00003");
+      expect(r.detail.secondWeight).toBeNull();
     });
   });
 
@@ -219,9 +262,11 @@ suite("postgres backfill and reconciliation", () => {
       expect(accounts).toEqual(["1000", "4000"]);
     });
 
-    it("passes once the source ledger is consistent", async () => {
-      // Remove the deliberately-drifted entry from the source, then migrate a
-      // ledger that does tie.
+    it("passes only when the whole source is clean, not just the ledger", async () => {
+      // ANY quarantine blocks cutover, not only a ledger variance: a document
+      // that did not migrate is missing data, whatever collection it came
+      // from. So clearing the drifted entry is not enough — the two malformed
+      // weighbridge tickets have to go too.
       const { MongoClient } = await import("mongodb");
       const client = new MongoClient(mongoUri);
       await client.connect();
@@ -229,6 +274,10 @@ suite("postgres backfill and reconciliation", () => {
         .db()
         .collection("journalentries")
         .deleteOne({ entryNumber: "JE-00003" });
+      await client
+        .db()
+        .collection("weighbridgeTickets")
+        .deleteMany({ ticketNumber: { $in: ["WB-00002", "WB-00003"] } });
       await client.close();
 
       const stats = await run();

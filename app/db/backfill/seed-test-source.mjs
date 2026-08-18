@@ -29,7 +29,7 @@ export async function seedTestSource(mongoUri = process.env.MONGODB_URI) {
 await Promise.all(
   [
     "companies", "accounts", "fiscalperiods", "journalentries", "parties",
-    "products",
+    "products", "weighbridgeTickets",
   ].map(
     (c) => db.collection(c).deleteMany({}),
   ),
@@ -120,6 +120,49 @@ await db.collection("products").insertMany([
   },
 ]);
 
+await db.collection("weighbridgeTickets").insertMany([
+  {
+    // Clean two-pass weighing. Net is NOT seeded: it is generated in the
+    // target as abs(first - second), and seeding a third number that could
+    // disagree with the two readings is the defect being corrected.
+    companyId,
+    ticketNumber: "WB-00001",
+    externalRef: "GATE-001",
+    transactionType: "purchase",
+    direction: "inbound",
+    vehicleReg: "KDA 123A",
+    productId: widgetId,
+    productName: "Widget",
+    firstWeight: 18500,
+    secondWeight: 6200,
+    weightUnit: "kg",
+    status: "completed",
+    completedAt: new Date("2026-08-04"),
+  },
+  {
+    // Direction contradicts the transaction type. Mongo constrains neither
+    // against the other; the target pairs them.
+    companyId,
+    ticketNumber: "WB-00002",
+    transactionType: "purchase",
+    direction: "outbound",
+    productId: widgetId,
+    firstWeight: 100,
+    secondWeight: 50,
+    status: "first_recorded",
+  },
+  {
+    // Claims to be complete on one weighing, so it has no net weight.
+    companyId,
+    ticketNumber: "WB-00003",
+    transactionType: "sale",
+    direction: "outbound",
+    productId: widgetId,
+    firstWeight: 9000,
+    status: "completed",
+  },
+]);
+
 await db.collection("fiscalperiods").insertOne({
   companyId,
   year: 2026, month: 8,
@@ -200,7 +243,8 @@ if (isCli) {
   await seedTestSource();
   console.log("Seeded test source:");
   console.log(
-    "  1 company, 3 accounts, 1 party, 2 products, 1 fiscal period, 5 journal entries",
+    "  1 company, 3 accounts, 1 party, 2 products, 3 weighbridge tickets,\n" +
+      "  1 fiscal period, 5 journal entries",
   );
   console.log("  (JE-00003 is deliberately off by 0.005)");
 }

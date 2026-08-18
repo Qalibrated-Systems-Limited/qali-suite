@@ -62,6 +62,7 @@ const newStats = () => ({
   fiscalPeriods: 0,
   parties: 0,
   products: 0,
+  weighbridgeTickets: 0,
   entries: 0,
   lines: 0,
   rejected: 0,
@@ -329,6 +330,106 @@ async function run({ mongo, sql, stats, onlyCompany, log }) {
           ON CONFLICT (id) DO NOTHING
         `;
         stats.products++;
+      }
+
+      // ── weighbridge tickets (pass 1) ─────────────────────────────────────
+      // Invoice lines and bill lines both reference these, so they land before
+      // either. Their own invoice_id/bill_id/linked_ticket_id point the other
+      // way and are filled in pass 2, once those rows exist — the same
+      // two-pass shape accounts.parent_id uses.
+      const wbDocs = await db
+        .collection("weighbridgeTickets")
+        .find({ companyId: oldCompanyId })
+        .toArray()
+        .catch(() => []);
+
+      const INBOUND = new Set(["purchase", "transfer_in", "customer_return"]);
+
+      for (const t of wbDocs) {
+        const id = await mapId(tx, "weighbridgeTickets", t._id);
+
+        // Mongo requires transactionType AND direction and constrains neither
+        // against the other, so a purchase could be recorded as outbound.
+        // Postgres pairs them with a CHECK. Where the source disagrees, the
+        // ticket is quarantined rather than silently re-pointed: direction is
+        // what the stock side reads, and guessing which field is right would
+        // move inventory the wrong way.
+        const expected = INBOUND.has(t.transactionType) ? "inbound" : "outbound";
+        if (t.direction && t.direction !== expected) {
+          await reject(tx, stats, "weighbridgeTickets", t._id,
+            "direction_contradicts_transaction_type", {
+              ticketNumber: t.ticketNumber,
+              transactionType: t.transactionType,
+              direction: t.direction,
+              expected,
+            });
+          continue;
+        }
+
+        // net_weight is GENERATED as abs(first - second) and is never written.
+        // A ticket calling itself completed on one weighing has no net at all,
+        // and the target refuses it — as it should, so it is surfaced here.
+        if (t.status === "completed" && (t.firstWeight == null || t.secondWeight == null)) {
+          await reject(tx, stats, "weighbridgeTickets", t._id,
+            "completed_without_both_weighings", {
+              ticketNumber: t.ticketNumber,
+              firstWeight: t.firstWeight ?? null,
+              secondWeight: t.secondWeight ?? null,
+            });
+          continue;
+        }
+
+        const wbPartyId = t.partyId ? await mapId(tx, "parties", t.partyId) : null;
+        const [partyExists] = wbPartyId
+          ? await tx`SELECT 1 AS ok FROM parties WHERE id = ${wbPartyId}`
+          : [null];
+
+        try {
+          await tx.savepoint(async (sp) => {
+            await sp`
+              INSERT INTO weighbridge_tickets (
+                id, company_id, ticket_number, external_ref, transaction_type,
+                direction, vehicle_reg, driver_name, driver_phone,
+                product_id, product_name_at_ticket, product_code_at_ticket,
+                party_id, party_name_at_ticket,
+                first_weight, second_weight, weight_unit,
+                first_weight_recorded_at, second_weight_recorded_at,
+                status, ticket_date, internal_ref,
+                purchase_order_ref, invoice_ref, invoice_item_fulfilled,
+                bill_ref, transfer_ref, transfer_cleared,
+                completed_at, voided_at, void_reason, notes, warnings
+              ) VALUES (
+                ${id}, ${companyUuid}, ${t.ticketNumber}, ${t.externalRef ?? null},
+                ${t.transactionType}, ${expected},
+                ${t.vehicleReg ?? null}, ${t.driverName ?? null}, ${t.driverPhone ?? null},
+                ${t.productId ? await mapId(sp, "products", t.productId) : null},
+                ${t.productName ?? null}, ${t.productCode ?? null},
+                ${partyExists ? wbPartyId : null}, ${t.partyName ?? null},
+                ${t.firstWeight == null ? null : toMoney(toScaled(t.firstWeight))},
+                ${t.secondWeight == null ? null : toMoney(toScaled(t.secondWeight))},
+                ${t.weightUnit ?? "kg"},
+                ${t.firstWeightRecordedAt ? new Date(t.firstWeightRecordedAt) : null},
+                ${t.secondWeightRecordedAt ? new Date(t.secondWeightRecordedAt) : null},
+                ${t.status ?? "pending"}, ${toDate(t.createdAt)}, ${t.internalRef ?? null},
+                ${t.purchaseOrderRef ?? null}, ${t.invoiceRef ?? null},
+                ${t.invoiceItemFulfilled ?? false},
+                ${t.billRef ?? null}, ${t.transferRef ?? null},
+                ${t.transferCleared ?? false},
+                ${t.completedAt ? new Date(t.completedAt) : null},
+                ${t.voidedAt ? new Date(t.voidedAt) : null},
+                ${t.voidReason ?? null}, ${t.notes || null},
+                ${t.warnings?.length ? t.warnings : null}
+              )
+              ON CONFLICT (id) DO NOTHING
+            `;
+          });
+          stats.weighbridgeTickets++;
+        } catch (err) {
+          await reject(tx, stats, "weighbridgeTickets", t._id, "rejected_by_target", {
+            ticketNumber: t.ticketNumber,
+            error: err.message,
+          });
+        }
       }
 
       // ── journal entries + lines ──────────────────────────────────────────
