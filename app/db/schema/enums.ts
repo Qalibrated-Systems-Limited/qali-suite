@@ -22,7 +22,14 @@ export const partyTypeEnum = pgEnum("party_type", [
   "other",
 ]);
 
+/**
+ * `future` is a period that exists and has never been opened. Onboarding
+ * creates twelve and opens only the first, so eleven of every twelve start
+ * here. It is postable — see migration 0030 for why, and for the gap that
+ * makes it necessary.
+ */
 export const fiscalPeriodStatusEnum = pgEnum("fiscal_period_status", [
+  "future",
   "open",
   "closed",
   "locked",

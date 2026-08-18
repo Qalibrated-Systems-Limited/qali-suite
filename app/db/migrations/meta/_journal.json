@@ -211,6 +211,13 @@
       "when": 1787049102566,
       "tag": "0029_bill_actor_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1787049103566,
+      "tag": "0030_fiscal_period_future",
+      "breakpoints": true
     }
   ]
 }

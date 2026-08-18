@@ -313,13 +313,28 @@ await db.collection("stockrequests").insertMany([
   },
 ]);
 
-await db.collection("fiscalperiods").insertOne({
-  companyId,
-  year: 2026, month: 8,
-  periodName: "August 2026", periodCode: "2026-08",
-  startDate: new Date("2026-08-01"), endDate: new Date("2026-08-31"),
-  status: "open",
-});
+await db.collection("fiscalperiods").insertMany([
+  {
+    companyId,
+    year: 2026, month: 8,
+    periodName: "August 2026", periodCode: "2026-08",
+    startDate: new Date("2026-08-01"), endDate: new Date("2026-08-31"),
+    status: "open",
+  },
+  {
+    // Onboarding opens the first period and leaves the other eleven at
+    // "future" (companyOnboardingService.js:143), so every real tenant has
+    // eleven of these. fiscal_period_status did not carry the value until
+    // 0030, which means the backfill would have failed on the first real
+    // company it touched — and did not fail here only because this fixture
+    // had a single, open period.
+    companyId,
+    year: 2026, month: 9,
+    periodName: "September 2026", periodCode: "2026-09",
+    startDate: new Date("2026-09-01"), endDate: new Date("2026-09-30"),
+    status: "future",
+  },
+]);
 
 await db.collection("journalentries").insertMany([
   // Clean cash sale.
@@ -394,7 +409,7 @@ if (isCli) {
   console.log("Seeded test source:");
   console.log(
     "  1 company, 3 accounts, 1 party, 2 products, 3 weighbridge tickets,\n" +
-      "  3 stock requests, 1 fiscal period, 5 journal entries",
+      "  3 stock requests, 2 fiscal periods, 5 journal entries",
   );
   console.log("  (JE-00003 is deliberately off by 0.005)");
 }

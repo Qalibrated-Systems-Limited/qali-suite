@@ -55,7 +55,7 @@ suite("postgres backfill and reconciliation", () => {
       expect(stats).toMatchObject({
         companies: 1,
         accounts: 3,
-        fiscalPeriods: 1,
+        fiscalPeriods: 2,
         parties: 1,
         products: 2,
         weighbridgeTickets: 1,
@@ -97,6 +97,20 @@ suite("postgres backfill and reconciliation", () => {
       expect(gadget.price).toBe("99.9900");
       // status "discontinued" beats isActive true: three states flatten to two.
       expect(gadget.is_active).toBe(false);
+    });
+
+    it("migrates a period nobody has opened yet", async () => {
+      await run();
+      const rows = await admin`
+        SELECT period_code, status::text FROM fiscal_periods ORDER BY period_code
+      `;
+      // Onboarding leaves eleven of every twelve periods at "future", and the
+      // target enum did not carry the value until 0030 — so this would have
+      // failed on the first real tenant, not on the fixture.
+      expect(rows).toEqual([
+        { period_code: "2026-08", status: "open" },
+        { period_code: "2026-09", status: "future" },
+      ]);
     });
 
     it("quarantines an unbalanced entry instead of rounding it into agreement", async () => {

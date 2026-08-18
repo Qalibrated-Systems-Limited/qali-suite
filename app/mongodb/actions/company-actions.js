@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { provisionCompany } from "@/app/db/provisioning";
 import mongoose from "mongoose";
 import { resetCompanyData } from "@/lib/company-reset";
 import { auth } from "@/auth";
@@ -279,6 +280,18 @@ export async function createCompany(prevState, formData) {
       fiscalYearStart,
       session.user
     );
+
+    // Same tenant, second store. A company that exists in one and not the
+    // other has ledger pages that fail for reasons nobody in the business can
+    // act on, so it is part of creating a company. See the note in
+    // CompanyOnboardingService.createCompanyWithSetup.
+    await provisionCompany({
+      sourceCompanyId: company._id.toString(),
+      name: company.name,
+      slug: company.slug,
+      baseCurrency: data.currency,
+      fiscalYearStart,
+    });
 
     // Mark setup as completed
     company.settings.setupCompleted = true;
