@@ -6,7 +6,7 @@ import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import EmployeeProfile from "@/app/models/employeeProfile";
 import PayrollEntry from "@/app/models/payrollEntry";
-import Company from "@/app/models/Company";
+import { getCompanyForDocuments } from "@/app/db/platform";
 
 export async function generateMetadata({ params, searchParams }) {
   const { profileId } = await params;
@@ -69,9 +69,7 @@ export default async function P9CertificatePage({ params, searchParams }) {
     .lean();
 
   // Load company for employer details
-  const company = await Company.findById(profile.companyId || companyId)
-    .select("name taxPin address")
-    .lean();
+  const company = await getCompanyForDocuments(String(profile.companyId || companyId));
 
   // Build month-by-month data (fill gaps with zeros)
   const monthData = MONTHS.map((name, i) => {

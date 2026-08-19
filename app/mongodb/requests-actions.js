@@ -20,7 +20,6 @@ import {
 } from "@/lib/utils/tenant-utils";
 import { stockRequestTypes, stockRequestTypeConfig } from "@/lib/utils";
 import Project from "../models/project";
-import Company from "../models/Company";
 import { requireFreshSession } from "@/lib/utils/session-freshness";
 
 // Senior approval roles — bypass value threshold + department routing.
@@ -125,12 +124,13 @@ export async function approveRequest(requestId, prevState, formData) {
     // request they have no context for.
     const isSenior = SENIOR_APPROVAL_ROLES.has(user.role);
     if (!isSenior) {
-      const companyDoc = await Company.findById(request.companyId)
-        .select("settings.approvalThresholds")
-        .session(session)
-        .lean();
-      const threshold =
-        companyDoc?.settings?.approvalThresholds?.stockRequestValue ?? 100_000;
+      // From Postgres (0035) — the threshold is a rule the books obey, so it
+      // is read where the books are rather than from a settings sub-doc that
+      // may never have been written.
+      const { getCompanyThresholds } = await import("@/app/db/companyConfig");
+      const { stockRequestValue: threshold } = await getCompanyThresholds(
+        String(request.companyId),
+      );
 
       const requestValue = request.totalValue || 0;
       if (requestValue > threshold) {
@@ -1261,11 +1261,11 @@ function deriveCompanyCode(name) {
 }
 
 async function generateInvoiceNumber(companyId, session) {
-  // Get company code for prefix
-  const Company = mongoose.model("Company");
-  const company = await Company.findById(companyId)
-    .select("code name")
-    .session(session);
+  // Get company code for prefix. From Postgres since 0035 — the code is on the
+  // company record there, and it is the same value every other document
+  // number is built from.
+  const { getCompanySubscription } = await import("@/app/db/platform");
+  const company = await getCompanySubscription(String(companyId));
 
   let companyCode = null;
   if (company) {

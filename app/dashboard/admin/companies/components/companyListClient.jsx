@@ -1,6 +1,8 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useTransition } from "react";
+import { toast } from "sonner";
 import { useDebouncedCallback } from "use-debounce";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
@@ -28,7 +30,10 @@ import {
   ChevronRight,
   Eye,
   Edit,
+  LogIn,
+  Loader2,
 } from "lucide-react";
+import { switchToCompanyBySourceId } from "@/app/db/actions/company-switch-actions";
 
 const statusColors = {
   active: "bg-green-500/10 text-green-600 border-green-500/20",
@@ -54,6 +59,28 @@ export default function CompanyListClient({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [isSwitching, startSwitch] = useTransition();
+
+  /**
+   * Enter a company rather than read about it.
+   *
+   * A SuperAdmin does not see across tenants — they hold a grant for each one
+   * and work inside one at a time, under the same policies as anybody else in
+   * it. This is how they get in: the grant is written if it is not already
+   * there, the session moves onto that company, and every page that follows is
+   * scoped to it.
+   */
+  const openCompany = (id, name) => {
+    startSwitch(async () => {
+      const result = await switchToCompanyBySourceId(id);
+      if (!result?.ok) {
+        toast.error(result?.error ?? "Could not open that company.");
+        return;
+      }
+      toast.success(`Now operating as ${name}`);
+      router.push("/dashboard");
+    });
+  };
 
   const updateUrl = (updates) => {
     const params = new URLSearchParams(searchParams);
@@ -138,8 +165,13 @@ export default function CompanyListClient({
                 </TableCell>
               </TableRow>
             ) : (
-              companies.map((company) => (
-                <TableRow key={company._id}>
+              companies.map((company) => {
+                // The admin routes still carry the Mongo id; a tenant
+                // provisioned straight into Postgres has none, so fall back to
+                // the tenant uuid rather than linking to /undefined.
+                const routeId = company.sourceId ?? company.id;
+                return (
+                <TableRow key={company.id}>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center">
@@ -148,7 +180,7 @@ export default function CompanyListClient({
                       <div>
                         <p className="font-medium">{company.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {company.address?.city || "No location"}
+                          {company.city || "No location"}
                         </p>
                       </div>
                     </div>
@@ -162,9 +194,9 @@ export default function CompanyListClient({
                   <TableCell>
                     <Badge
                       variant="outline"
-                      className={planColors[company.subscription?.plan] || ""}
+                      className={planColors[company.plan] || ""}
                     >
-                      {company.subscription?.plan || "free"}
+                      {company.plan || "free"}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -177,20 +209,41 @@ export default function CompanyListClient({
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
+                      {/* Operate as this company. Greyed out for one that is
+                          not active, because the tenant gate refuses those —
+                          a button that always fails is worse than no button. */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title={
+                          company.status === "active"
+                            ? `Operate as ${company.name}`
+                            : "This company is not active"
+                        }
+                        disabled={isSwitching || company.status !== "active"}
+                        onClick={() => openCompany(routeId, company.name)}
+                      >
+                        {isSwitching ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <LogIn className="h-4 w-4" />
+                        )}
+                      </Button>
                       <Button variant="ghost" size="icon" asChild>
-                        <Link href={`/dashboard/admin/companies/${company._id}`}>
+                        <Link href={`/dashboard/admin/companies/${routeId}`}>
                           <Eye className="h-4 w-4" />
                         </Link>
                       </Button>
                       <Button variant="ghost" size="icon" asChild>
-                        <Link href={`/dashboard/admin/companies/${company._id}/edit`}>
+                        <Link href={`/dashboard/admin/companies/${routeId}/edit`}>
                           <Edit className="h-4 w-4" />
                         </Link>
                       </Button>
                     </div>
                   </TableCell>
                 </TableRow>
-              ))
+                );
+              })
             )}
           </TableBody>
         </Table>

@@ -3,10 +3,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, ShieldCheck } from "lucide-react";
 
-import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
-import Company from "@/app/models/Company";
-import { APPROVAL_THRESHOLD_DEFAULTS } from "@/app/mongodb/queries/threshold-queries";
+import { getCompanyThresholds } from "@/app/db/companyConfig";
 import ApprovalThresholdsForm from "./components/ApprovalThresholdsForm";
 
 export const metadata = {
@@ -34,7 +32,6 @@ export default async function ApprovalThresholdsPage() {
 
   // Read current values for this tenant. SuperAdmin without a companyId
   // is excluded — they should configure per-tenant via the SuperAdmin UI.
-  await dbConnect();
   const { companyId } = await getTenantContext();
   if (!companyId) {
     return (
@@ -47,29 +44,10 @@ export default async function ApprovalThresholdsPage() {
     );
   }
 
-  const company = await Company.findById(companyId)
-    .select("settings.approvalThresholds")
-    .lean();
-  const cfg = company?.settings?.approvalThresholds || {};
-  const initial = {
-    stockAdjustmentValue:
-      cfg.stockAdjustmentValue ??
-      APPROVAL_THRESHOLD_DEFAULTS.stockAdjustmentValue,
-    stockHighRiskTypes:
-      cfg.stockHighRiskTypes && cfg.stockHighRiskTypes.length > 0
-        ? cfg.stockHighRiskTypes
-        : APPROVAL_THRESHOLD_DEFAULTS.stockHighRiskTypes,
-    minimumMarginPercent:
-      cfg.minimumMarginPercent ??
-      APPROVAL_THRESHOLD_DEFAULTS.minimumMarginPercent,
-    creditNoteValue:
-      cfg.creditNoteValue ?? APPROVAL_THRESHOLD_DEFAULTS.creditNoteValue,
-    billPaymentValue:
-      cfg.billPaymentValue ?? APPROVAL_THRESHOLD_DEFAULTS.billPaymentValue,
-    discountCapPercent:
-      cfg.discountCapPercent ??
-      APPROVAL_THRESHOLD_DEFAULTS.discountCapPercent,
-  };
+  // Every column is NOT NULL with a default and the row is created with the
+  // company (0035), so what comes back IS the configuration — there is nothing
+  // left to paper over with defaults here.
+  const initial = await getCompanyThresholds(String(companyId));
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">

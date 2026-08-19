@@ -2,8 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { isSubscriptionUsable } from "@/lib/plan-gate";
 import { UpgradePrompt } from "@/components/upgrade-prompt";
-import dbConnect from "@/app/config/dbConnect";
-import Company from "@/app/models/Company";
+import { getCompanySubscription } from "@/app/db/platform";
 
 export const metadata = { title: "Subscription Expired | QaliSuite" };
 
@@ -17,10 +16,9 @@ export default async function SubscriptionExpiredPage() {
   // Live DB check for freshness — handles SuperAdmin trial extensions
   // and subscription renewals that haven't propagated to the JWT yet
   if (session.user.companyId) {
-    await dbConnect();
-    const company = await Company.findById(session.user.companyId)
-      .select("subscription.status subscription.trialEndsAt")
-      .lean();
+    // From Postgres since 0035, so a SuperAdmin extending a trial takes effect
+    // on the next request rather than at the next token refresh.
+    const company = await getCompanySubscription(String(session.user.companyId));
     if (company?.subscription) {
       subCheck = isSubscriptionUsable({
         user: {

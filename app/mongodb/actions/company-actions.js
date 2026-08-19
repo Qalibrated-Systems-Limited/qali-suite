@@ -84,6 +84,20 @@ const optionalNumber = (min, max) =>
     });
 
 const CreateCompanySchema = z.object({
+  // ── The company's own administrator ──────────────────────────────────────
+  // REQUIRED, not optional. A company created with nobody able to administer
+  // it is a company only platform staff can operate — which quietly makes the
+  // SuperAdmin's standing access load-bearing instead of a fallback. Every ERP
+  // that sells to businesses asks for this at creation: NetSuite takes an
+  // admin email when the account is opened, Xero has a subscriber, Odoo's
+  // creation wizard assigns one. The person who runs the business should be
+  // able to run their books without us.
+  adminName: z.string().min(1, "The company administrator's name is required").max(50),
+  adminEmail: z
+    .string()
+    .email("Enter a valid email for the company administrator")
+    .transform((v) => v.toLowerCase().trim()),
+
   // Basic Info
   name: z.string().min(1, "Company name is required").max(100),
   code: z
@@ -164,6 +178,8 @@ export async function createCompany(prevState, formData) {
 
   // Extract form values to preserve on error
   const formValues = {
+    adminName: formData.get("adminName"),
+    adminEmail: formData.get("adminEmail"),
     name: formData.get("name"),
     code: formData.get("code"),
     tagline: formData.get("tagline"),
@@ -210,24 +226,44 @@ export async function createCompany(prevState, formData) {
   }
 
   const data = validatedFields.data;
-  console.log(data);
+
+  // Set when the company is created but its administrator is not, so the
+  // redirect lands where that can be fixed instead of on a list that looks
+  // like everything worked.
+  let needsAdminAttention = null;
 
   try {
     await connectDB();
 
-    // Check for duplicate name or code
-    const existingCompany = await Company.findOne({
-      $or: [
-        { name: { $regex: new RegExp(`^${data.name}$`, "i") } },
-        { code: data.code },
-      ],
-    });
+    // Duplicate check in Postgres, because that is where the constraint is:
+    // companies_code_uq is a unique index, so a race past this check still
+    // fails at the database rather than producing two companies that share a
+    // document-number prefix. The Mongo version also interpolated the name
+    // straight into a RegExp, so a company called "C++ (K) Ltd" threw.
+    const { findCompanyByNameOrCode } = await import("@/app/db/platform");
+    const clash = await findCompanyByNameOrCode(data.name, data.code);
+    if (clash) {
+      return clash.conflict === "code"
+        ? { errors: { code: ["This company code is already in use"] }, values: formValues }
+        : { errors: { name: ["A company with this name already exists"] }, values: formValues };
+    }
 
-    if (existingCompany) {
-      if (existingCompany.code === data.code) {
-        return { errors: { code: ["This company code is already in use"] }, values: formValues };
-      }
-      return { errors: { name: ["A company with this name already exists"] }, values: formValues };
+    // The administrator must not already have a login: a user belongs to one
+    // company, so re-pointing an existing account would move them out of the
+    // company they are already in.
+    const User = (await import("../../models/user")).default;
+    const existingAdmin = await User.findOne({ email: data.adminEmail })
+      .select("_id")
+      .lean();
+    if (existingAdmin) {
+      return {
+        errors: {
+          adminEmail: [
+            "A user with this email already exists. Grant them access from the company's access list instead.",
+          ],
+        },
+        values: formValues,
+      };
     }
 
     // Create the company
@@ -296,6 +332,12 @@ export async function createCompany(prevState, formData) {
       slug: company.slug,
       baseCurrency: data.currency,
       fiscalYearStart,
+      // The creator gets the first grant, so the company is not created with
+      // nobody able to open it. Recorded as a row rather than implied by a
+      // role check, which is what answers "who could see this company" later.
+      ownerUserId: session.user.id,
+      ownerName: session.user.name,
+      ownerRole: session.user.role,
     });
 
     // Mark setup as completed
@@ -303,13 +345,96 @@ export async function createCompany(prevState, formData) {
     company.settings.setupCompletedAt = new Date();
     await company.save();
 
+    // Provisioning creates the tenant with a name, a slug and a currency.
+    // Everything else the form collected — branding, tax, bank, settings,
+    // subscription — lands here, so the Postgres record is complete from the
+    // moment the company exists rather than at its first edit.
+    await syncCompanyRecord(company._id.toString(), company.toObject());
+
+    // ── REGISTER THE COMPANY'S ADMINISTRATOR ────────────────────────────────
+    //
+    // A company is not usable until somebody in it can administer it. Created
+    // here rather than left to a later invite so there is no window in which
+    // the only people who can open the books are platform staff — which is
+    // what would make the SuperAdmin's standing access load-bearing rather
+    // than a fallback.
+    //
+    // No password is set: the invite is the credential. They choose one when
+    // they accept, so nothing is ever mailed that could be replayed.
+    //
+    // A failure here does NOT roll the company back. The company and its
+    // ledger are real and correct at this point; an admin who did not get
+    // their email is fixable from the company's access list, and destroying a
+    // provisioned tenant over an SMTP outage is not.
+    const adminInvite = { created: false, emailSent: false, error: null };
+    try {
+      const Invite = (await import("../../models/invite")).default;
+      const { grantCompanyAccess } = await import("@/app/db/companyAccessAdmin");
+      const { sendInviteEmail } = await import("@/lib/email");
+
+      const admin = await User.create({
+        name: data.adminName,
+        email: data.adminEmail,
+        role: "Admin",
+        companyId: company._id,
+        status: "Active",
+        creator: { name: session.user.name, id: session.user.id },
+      });
+
+      // The grant is what the tenant gate actually reads (0033). Recorded as
+      // 'primary' — this is their home company, not a platform grant.
+      await grantCompanyAccess({
+        sourceCompanyId: company._id.toString(),
+        userId: admin._id.toString(),
+        role: "Admin",
+        grantedById: session.user.id,
+        grantedByName: session.user.name,
+      });
+      // The identity 47 actor columns point at, and the grant's party link.
+      const { syncUserToPostgres } = await import("@/app/db/userSync");
+      await syncUserToPostgres(admin._id.toString());
+      adminInvite.created = true;
+
+      const { rawToken, hashedToken } = Invite.generateToken();
+      await Invite.create({
+        email: data.adminEmail,
+        role: "Admin",
+        companyId: company._id,
+        invitedBy: { name: session.user.name, id: session.user.id },
+        token: hashedToken,
+      });
+
+      await sendInviteEmail({
+        to: data.adminEmail,
+        inviterName: session.user.name,
+        companyName: company.name,
+        role: "Admin",
+        rawToken,
+      });
+      adminInvite.emailSent = true;
+    } catch (err) {
+      console.error("Company admin registration failed:", err);
+      adminInvite.error = err.message;
+    }
+
+    if (!adminInvite.created || !adminInvite.emailSent) {
+      needsAdminAttention = company._id.toString();
+    }
+
     revalidatePath("/dashboard/admin/companies");
   } catch (error) {
     console.error("Create company error:", error);
     return { errors: { _form: [error.message || "Failed to create company"] }, values: formValues };
   }
 
-  redirect("/dashboard/admin/companies");
+  // The company and its ledger are real either way. If the administrator did
+  // not get set up, land on the company itself — its access list is where that
+  // is fixed — rather than on a list that shows a green tick.
+  redirect(
+    needsAdminAttention
+      ? `/dashboard/admin/companies/${needsAdminAttention}`
+      : "/dashboard/admin/companies",
+  );
 }
 
 /**
@@ -403,11 +528,13 @@ export async function updateCompany(prevState, formData) {
     if (data.code) {
       const canUpdateCode = session.user.role === "SuperAdmin" || !company.code;
       if (canUpdateCode) {
-        // Check if new code is already in use by another company
-        const codeInUse = await Company.findOne({
-          code: data.code.toUpperCase(),
-          _id: { $ne: companyId }
-        });
+        // Checked in Postgres, where companies_code_uq actually enforces it.
+        const { findCompanyByNameOrCode } = await import("@/app/db/platform");
+        const codeInUse = await findCompanyByNameOrCode(
+          null,
+          data.code,
+          companyId,
+        );
         if (codeInUse) {
           return { errors: { code: ["This company code is already in use"] }, values: formValues };
         }
@@ -428,12 +555,15 @@ export async function updateCompany(prevState, formData) {
         generatedCode = nameToUse.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
       }
 
-      // Ensure uniqueness
+      // Ensure uniqueness against the index that enforces it, and bound the
+      // search: an unbounded while-loop against a database is a hang waiting
+      // for a pathological name.
+      const { findCompanyByNameOrCode } = await import("@/app/db/platform");
       let finalCode = generatedCode;
-      let suffix = 1;
-      while (await Company.findOne({ code: finalCode, _id: { $ne: companyId } })) {
+      for (let suffix = 1; suffix < 100; suffix++) {
+        const taken = await findCompanyByNameOrCode(null, finalCode, companyId);
+        if (!taken) break;
         finalCode = `${generatedCode.slice(0, 4)}${suffix}`;
-        suffix++;
       }
       company.code = finalCode;
     }
@@ -538,15 +668,11 @@ export async function updateCompany(prevState, formData) {
 
     await company.save();
 
-    // The Postgres tenant row carries the name, slug and base currency, and
-    // nothing was keeping them in step — a renamed company kept its old name
-    // there indefinitely. Only the fields Postgres behaves on; branding and
-    // subscription stay where they are.
-    await syncCompanyRecord(companyId, {
-      name: company.name,
-      slug: company.slug,
-      baseCurrency: company.settings?.currency,
-    });
+    // Postgres holds the whole company record since 0035 — including the
+    // settings the books obey — so the mirror carries the whole document
+    // rather than three fields. Mongo is the follower here until its readers
+    // are ported.
+    await syncCompanyRecord(companyId, company.toObject());
 
     revalidatePath("/dashboard/admin/companies");
     revalidatePath(`/dashboard/admin/companies/${companyId}`);
@@ -599,8 +725,14 @@ export async function updateCompanyStatus(companyId, status) {
     await company.save();
 
     // Only "active" lets the books be touched. Suspended and inactive both
-    // stop at the tenant gate, which is what those statuses are for.
-    await setCompanyActive(companyId, status === "active");
+    // stop at the tenant gate, which is what those statuses are for — but
+    // which one is carried across, so the admin list can tell a lapsed trial
+    // from a deliberate suspension.
+    await setCompanyActive(
+      companyId,
+      status === "active",
+      status === "suspended" ? "suspended" : "inactive",
+    );
 
     revalidatePath("/dashboard/admin/companies");
 
@@ -852,10 +984,11 @@ export async function createCompanyWithOnboarding(prevState, formData) {
   try {
     await connectDB();
 
-    // Check for duplicate name
-    const existingCompany = await Company.findOne({
-      name: { $regex: new RegExp(`^${data.name}$`, "i") },
-    });
+    // Duplicate check in Postgres, where the company record lives (0035). The
+    // Mongo version interpolated the name straight into a RegExp, so a company
+    // called "C++ (K) Ltd" threw instead of being created.
+    const { findCompanyByNameOrCode } = await import("@/app/db/platform");
+    const existingCompany = await findCompanyByNameOrCode(data.name, null);
 
     if (existingCompany) {
       return { errors: { name: ["A company with this name already exists"] }, values: formValues };

@@ -109,7 +109,10 @@ export async function createBill(tx: Tx, input: CreateBillInput) {
   if (!supplier) throw new Error("Supplier not found");
 
   const [{ bill_number }] = (await tx.execute(
-    sql`SELECT next_entry_number(${input.companyId}::uuid, 'BILL') AS bill_number`,
+    sql`SELECT next_entry_number(
+      ${input.companyId}::uuid,
+      document_prefix(${input.companyId}::uuid, 'bill')
+    ) AS bill_number`,
   )) as unknown as Array<{ bill_number: string }>;
 
   const [bill] = await tx
@@ -308,7 +311,10 @@ export async function createOpeningBalanceBill(
   if (!supplier) throw new Error("Supplier not found");
 
   const [{ bill_number }] = (await tx.execute(
-    sql`SELECT next_entry_number(${input.companyId}::uuid, 'BILL-OB') AS bill_number`,
+    sql`SELECT next_entry_number(
+      ${input.companyId}::uuid,
+      document_prefix(${input.companyId}::uuid, 'bill') || '-OB'
+    ) AS bill_number`,
   )) as unknown as Array<{ bill_number: string }>;
 
   const [bill] = await tx

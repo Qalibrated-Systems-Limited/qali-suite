@@ -3,7 +3,6 @@
 import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
 import EmployeeClaim from "../../models/employeesClaims";
-import Company from "../../models/Company";
 import Party from "../../models/parties";
 import EmployeeProfile from "../../models/employeeProfile";
 import Account from "../../models/account";
@@ -185,9 +184,8 @@ async function generateClaimNumber(tenantCompanyId, session) {
   // Fetch company code for prefix
   let companyCode = null;
   if (tenantCompanyId) {
-    const company = await Company.findById(tenantCompanyId)
-      .select("code name")
-      .lean();
+    const { getCompanyForDocuments } = await import("@/app/db/platform");
+    const company = await getCompanyForDocuments(String(tenantCompanyId));
 
     if (company) {
       // Use explicit code if set, otherwise derive from company name

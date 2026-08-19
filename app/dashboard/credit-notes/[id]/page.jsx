@@ -3,7 +3,7 @@ import { canSeeSalesNav } from "@/lib/permissions";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getCreditNoteById } from "@/app/mongodb/queries/credit-note-queries";
-import { getCompanyById } from "@/app/mongodb/queries/company-queries";
+import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
 import { serializeBsonType } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

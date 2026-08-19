@@ -3,7 +3,6 @@ import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { z } from "zod";
 import User from "./app/models/user";
-import Company from "./app/models/Company";
 import Invite from "./app/models/invite";
 import { authConfig } from "./auth.config";
 import dbConnect from "./app/config/dbConnect";
@@ -34,7 +33,7 @@ async function getUser(email: string) {
   }
 }
 
-export const { auth, signIn, signOut, handlers } = NextAuth({
+export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
   ...authConfig,
   // Session lifetime (was NextAuth's 30-day default).
   // - maxAge: absolute upper bound. 8h matches a typical work session,
@@ -86,17 +85,22 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
             let currentPeriodEnd: string | null = null;
             let maxUsers: number = 5;
             if (user.companyId) {
-              const company = await Company.findById(user.companyId)
-                .select("code subscription")
-                .lean();
-              companyCode = (company as any)?.code;
-              const sub = (company as any)?.subscription || {};
-              companyPlan = sub.plan || "free";
-              subscriptionStatus = sub.status || "trial";
-              trialEndsAt = sub.trialEndsAt?.toISOString() || null;
-              currentPeriodEnd =
-                sub.currentPeriodEnd?.toISOString() || null;
-              maxUsers = sub.maxUsers || 5;
+              // The company record lives in Postgres since 0035. Loaded here
+              // so the session carries the plan the books were actually
+              // configured with, not a copy that stopped being updated.
+              const { getCompanySubscription } = await import(
+                "@/app/db/platform"
+              );
+              const company = await getCompanySubscription(
+                String(user.companyId),
+              );
+              companyCode = company?.code ?? undefined;
+              const sub = company?.subscription;
+              companyPlan = sub?.plan || "free";
+              subscriptionStatus = sub?.status || "trial";
+              trialEndsAt = sub?.trialEndsAt?.toISOString() || null;
+              currentPeriodEnd = sub?.currentPeriodEnd?.toISOString() || null;
+              maxUsers = sub?.maxUsers ?? 5;
             }
             return {
               id: user._id.toString(),
@@ -233,19 +237,42 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
       return true;
     },
 
-    async jwt({ token, user, account, trigger }: any) {
+    async jwt({ token, user, account, trigger, session }: any) {
       // Manual refresh trigger from client (useSession().update())
       // Re-reads subscription/plan data from DB so the session reflects
       // a recent plan change without forcing a re-login.
+      // Switching the active company. Validated against the user's grants
+      // before it is written, so a crafted update cannot select a company the
+      // user does not hold — the Postgres gate re-checks too, but the token
+      // should not carry a claim that was never true.
+      if (trigger === "update" && session?.activeCompanyId !== undefined) {
+        const requested = session.activeCompanyId;
+        if (requested === null) {
+          token.activeCompanyId = null;
+          return token;
+        }
+        try {
+          const { assertUserMayEnterCompany } = await import(
+            "@/lib/company-switch"
+          );
+          const ok = await assertUserMayEnterCompany(
+            String(token.id),
+            String(requested),
+          );
+          if (ok) token.activeCompanyId = String(requested);
+        } catch {
+          // Leave the token unchanged rather than granting on an error.
+        }
+        return token;
+      }
+
       if (trigger === "update" && token?.companyId) {
         try {
-          await dbConnect();
-          const company = await Company.findById(token.companyId)
-            .select("code subscription")
-            .lean();
+          const { getCompanySubscription } = await import("@/app/db/platform");
+          const company = await getCompanySubscription(String(token.companyId));
           if (company) {
-            const sub = (company as any).subscription || {};
-            token.companyCode = (company as any).code;
+            const sub = company.subscription;
+            token.companyCode = company.code;
             token.companyPlan = sub.plan || "free";
             token.subscriptionStatus = sub.status || "trial";
             token.trialEndsAt = sub.trialEndsAt?.toISOString() || null;
@@ -292,17 +319,17 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           let currentPeriodEnd: string | null = null;
           let maxUsers: number = 5;
           if (dbUser.companyId) {
-            const company = await Company.findById(dbUser.companyId)
-              .select("code subscription")
-              .lean();
-            companyCode = (company as any)?.code;
-            const sub = (company as any)?.subscription || {};
-            companyPlan = sub.plan || "free";
-            subscriptionStatus = sub.status || "trial";
-            trialEndsAt = sub.trialEndsAt?.toISOString() || null;
-            currentPeriodEnd =
-              sub.currentPeriodEnd?.toISOString() || null;
-            maxUsers = sub.maxUsers || 5;
+            const { getCompanySubscription } = await import("@/app/db/platform");
+            const company = await getCompanySubscription(
+              String(dbUser.companyId),
+            );
+            companyCode = company?.code ?? undefined;
+            const sub = company?.subscription;
+            companyPlan = sub?.plan || "free";
+            subscriptionStatus = sub?.status || "trial";
+            trialEndsAt = sub?.trialEndsAt?.toISOString() || null;
+            currentPeriodEnd = sub?.currentPeriodEnd?.toISOString() || null;
+            maxUsers = sub?.maxUsers ?? 5;
           }
           token.role = dbUser.role;
           token.id = dbUser._id.toString();
@@ -347,6 +374,8 @@ export const { auth, signIn, signOut, handlers } = NextAuth({
           id: token.id,
           avatar: token.avatar,
           companyId: token.companyId,
+          /** The company being operated on; distinct from the home company. */
+          activeCompanyId: token.activeCompanyId ?? null,
           companyCode: token.companyCode,
           companyPlan: token.companyPlan || "free",
           subscriptionStatus: token.subscriptionStatus || "active",

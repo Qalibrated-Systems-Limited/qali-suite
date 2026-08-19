@@ -2,7 +2,12 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import ResetTransactionsCard from "../components/ResetTransactionsCard";
-import { getCompanyById } from "@/app/mongodb/queries/company-queries";
+import CompanyAccessCard from "../components/CompanyAccessCard";
+// Postgres holds the whole company record since 0035, settings included. The
+// shape matches what this page already read from Mongo — nested subscription,
+// settings and features — so only the id changes: `sourceId` is the Mongo id
+// the routes still carry, and a tenant born in Postgres has none.
+import { getCompanyRecord } from "@/app/db/platform";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +28,7 @@ import {
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
-  const company = await getCompanyById(id);
+  const company = await getCompanyRecord(id);
   return {
     title: company?.name || "Company Details",
   };
@@ -64,11 +69,16 @@ export default async function CompanyDetailPage({ params }) {
   }
 
   const { id } = await params;
-  const company = await getCompanyById(id);
+  const company = await getCompanyRecord(id);
 
   if (!company) {
     notFound();
   }
+
+  // The admin routes still carry the Mongo id. A tenant provisioned straight
+  // into Postgres has none, so fall back to its own id rather than linking to
+  // /undefined.
+  const routeId = company.sourceId ?? company.id;
 
   return (
     <div className="container max-w-4xl py-6 space-y-6">
@@ -102,13 +112,13 @@ export default async function CompanyDetailPage({ params }) {
             {company.subscription?.plan}
           </Badge>
           <Button variant="outline" asChild>
-            <Link href={`/dashboard/admin/companies/${company._id}/subscription`}>
+            <Link href={`/dashboard/admin/companies/${routeId}/subscription`}>
               <Shield className="h-4 w-4 mr-2" />
               Subscription
             </Link>
           </Button>
           <Button asChild className="bg-yellow-500 text-black hover:bg-yellow-600">
-            <Link href={`/dashboard/admin/companies/${company._id}/edit`}>
+            <Link href={`/dashboard/admin/companies/${routeId}/edit`}>
               <Edit className="h-4 w-4 mr-2" />
               Edit
             </Link>
@@ -284,10 +294,17 @@ export default async function CompanyDetailPage({ params }) {
         </Card>
       </div>
 
+      {/* Who may operate in this company. Rows in the ledger, not a role
+          check — the tenant gate reads exactly these on every request. */}
+      <CompanyAccessCard
+        companyId={routeId}
+        companyName={company.name}
+      />
+
       {/* Audit Info */}
       {/* Danger zone — SuperAdmin transactional reset */}
       <ResetTransactionsCard
-        companyId={company._id.toString()}
+        companyId={routeId}
         companyName={company.name}
       />
 

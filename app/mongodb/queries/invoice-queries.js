@@ -101,14 +101,13 @@ export const generateInvoiceNumber = async (
   session = null,
 ) => {
   const { format } = await import("date-fns");
-  const Company = (await import("../../models/Company")).default;
 
   // Fetch company code for prefix
   let companyCode = null;
   if (tenantCompanyId) {
-    const company = await Company.findById(tenantCompanyId)
-      .select("code name")
-      .lean();
+    // The company record is in Postgres since 0035.
+    const { getCompanyForDocuments } = await import("@/app/db/platform");
+    const company = await getCompanyForDocuments(String(tenantCompanyId));
 
     if (company) {
       // Use explicit code if set, otherwise derive from company name

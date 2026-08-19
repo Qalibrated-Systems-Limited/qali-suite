@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getPurchaseOrderById } from "@/app/mongodb/queries/purchase-order-queries";
-import { getCompanyById } from "@/app/mongodb/queries/company-queries";
+import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
 import { serializeBsonType, formatAddress } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import dbConnect from "@/app/config/dbConnect";
-import Company from "@/app/models/Company";
+import { getCompanySubscription } from "@/app/db/platform";
 import User from "@/app/models/user";
 import SubscriptionAuditLog from "@/app/models/SubscriptionAuditLog";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
@@ -44,9 +44,8 @@ export async function updateCompanyPlan(_prevState, formData) {
     }
 
     // Read current state once to drive the "should we activate?" decision.
-    const company = await Company.findById(companyId)
-      .select("subscription")
-      .lean();
+    // From Postgres since 0035 — same nested shape.
+    const company = await getCompanySubscription(String(companyId));
     if (!company) return { success: false, error: "Company not found" };
     const currentPlan = company.subscription?.plan;
     const currentStatus = company.subscription?.status;
@@ -140,7 +139,7 @@ export async function renewSubscription(_prevState, formData) {
       return { success: false, error: "Months must be between 1 and 60" };
     }
 
-    const company = await Company.findById(companyId).select("subscription").lean();
+    const company = await getCompanySubscription(String(companyId));
     if (!company) return { success: false, error: "Company not found" };
 
     const now = new Date();
@@ -220,7 +219,7 @@ export async function extendTrial(_prevState, formData) {
       return { success: false, error: "Days must be between 1 and 365" };
     }
 
-    const company = await Company.findById(companyId).select("subscription.status").lean();
+    const company = await getCompanySubscription(String(companyId));
     if (!company) return { success: false, error: "Company not found" };
 
     // Refuse to demote active/cancelled paying customers back to trial

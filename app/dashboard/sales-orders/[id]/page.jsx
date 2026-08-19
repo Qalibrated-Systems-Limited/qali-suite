@@ -5,7 +5,7 @@ import { canSeeSalesNav } from "@/lib/permissions";
 import { ArrowLeft, Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cSalesOrder } from "@/app/mongodb/queries/sales-order-queries";
-import { getCompanyById } from "@/app/mongodb/queries/company-queries";
+import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
 import { serializeBsonType } from "@/lib/utils";
 import AccessDenied from "@/app/dashboard/components/crm/AccessDenied";
 import SalesOrderActions from "../components/SalesOrderActions";

@@ -232,6 +232,41 @@
       "when": 1787049105566,
       "tag": "0032_party_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787049106566,
+      "tag": "0033_user_company_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787049107566,
+      "tag": "0034_companies_visible_to_grantees",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1787049108566,
+      "tag": "0035_company_record",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787049109566,
+      "tag": "0036_users",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787049110566,
+      "tag": "0037_grants_visible_within_company",
+      "breakpoints": true
     }
   ]
 }

@@ -184,8 +184,14 @@ async function resolveInvoiceLines(tx: Tx, inputs: InvoiceLineInput[]) {
  * is what produced the drift the whole migration exists to remove.
  */
 export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
+  // document_prefix, not a literal 'INV': the tenant's configured prefix lived
+  // in Mongo settings that nothing on this path read, so a company that chose
+  // its own numbering silently stopped getting it when this ported (0035).
   const [{ invoice_number }] = (await tx.execute(
-    sql`SELECT next_entry_number(${input.companyId}::uuid, 'INV') AS invoice_number`,
+    sql`SELECT next_entry_number(
+      ${input.companyId}::uuid,
+      document_prefix(${input.companyId}::uuid, 'invoice')
+    ) AS invoice_number`,
   )) as unknown as Array<{ invoice_number: string }>;
 
   const { lines: resolved, subtotal, taxTotal, total } =

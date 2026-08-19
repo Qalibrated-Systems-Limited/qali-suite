@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import dbConnect from "@/app/config/dbConnect";
 import Invite from "@/app/models/invite";
 import User from "@/app/models/user";
-import Company from "@/app/models/Company";
+import { getCompanySubscription } from "@/app/db/platform";
 import Party from "@/app/models/parties";
 import EmployeeProfile from "@/app/models/employeeProfile";
 import { userRoles } from "@/lib/utils";
@@ -14,6 +14,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import crypto from "crypto";
 import { checkUserLimit, evaluateUserLimit } from "@/lib/check-user-limit";
+import { syncUserToPostgres } from "@/app/db/userSync";
 
 const ADMIN_ROLES = ["SuperAdmin", "Admin"];
 
@@ -60,8 +61,8 @@ export async function sendInvite(prevState, formData) {
     const bypassLimit = currentUser.role === "SuperAdmin";
 
     // One round-trip for everything: pre-flight checks AND user limit data.
-    // We also pull subscription fields on Company so evaluateUserLimit can
-    // run inline without a second Company.findById.
+    // The company's name and subscription come from Postgres (0035) in the
+    // same batch, so evaluateUserLimit still runs inline off one read.
     const [existingUser, existingInvite, company, activeUserCount] =
       await Promise.all([
         User.findOne({ email }).select("_id").lean(),
@@ -73,11 +74,7 @@ export async function sendInvite(prevState, formData) {
         })
           .select("_id")
           .lean(),
-        Company.findById(companyId)
-          .select(
-            "name subscription.maxUsers subscription.plan subscription.status subscription.currentPeriodEnd subscription.trialEndsAt",
-          )
-          .lean(),
+        getCompanySubscription(String(companyId)),
         // Skip the count when SuperAdmin is bypassing — saves a roundtrip.
         bypassLimit
           ? Promise.resolve(0)
@@ -239,7 +236,7 @@ export async function acceptInviteWithPassword(rawToken, formData) {
       // User exists but has no password — set their name and password, preserve existing role
       existingUser.name = name;
       existingUser.password = password;
-      const hasExistingRole = existingUser.role && existingUser.role !== "User" && existingUser.role !== "Viewer";
+      const hasExistingRole = existingUser.role && existingUser.role !== "Employee" && existingUser.role !== "Viewer";
       if (!hasExistingRole) existingUser.role = invite.role;
       if (!existingUser.companyId) existingUser.companyId = invite.companyId;
       existingUser.authProvider = "credentials";
@@ -257,6 +254,10 @@ export async function acceptInviteWithPassword(rawToken, formData) {
           User.findByIdAndUpdate(existingUser._id, { partyId: invite.partyId }),
         ]);
       }
+
+      // Postgres holds the identity the actor columns point at (0036); the
+      // party link is what makes "this login is that employee" answerable.
+      await syncUserToPostgres(existingUser._id.toString());
 
       invite.status = "accepted";
       invite.acceptedAt = new Date();
@@ -296,6 +297,8 @@ export async function acceptInviteWithPassword(rawToken, formData) {
         User.findByIdAndUpdate(newUser._id, { partyId: invite.partyId }),
       ]);
     }
+
+    await syncUserToPostgres(newUser._id.toString());
 
     invite.status = "accepted";
     invite.acceptedAt = new Date();
@@ -377,7 +380,7 @@ export async function resendInvite(inviteId) {
     // Save invite and fetch company name in parallel
     const [, company] = await Promise.all([
       invite.save(),
-      Company.findById(invite.companyId).select("name").lean(),
+      getCompanySubscription(String(invite.companyId)),
     ]);
 
     // Send email in background — don't block the response

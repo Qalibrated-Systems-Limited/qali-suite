@@ -47,11 +47,29 @@ const customerId = new ObjectId();
 // still migrate, losing only the party attribution.
 const ghostCustomerId = new ObjectId();
 
+// Shaped like a real Company document, not like the Postgres row. It carried
+// `baseCurrency`, a field the Mongo model does not have — so the backfill's
+// currency read always missed and every tenant landed on the "KES" fallback.
+// The currency lives under `settings`, and so does everything else the books
+// obey (0035).
 await db.collection("companies").insertOne({
   _id: companyId,
   name: "Pilot Tenant",
   slug: "pilot",
-  baseCurrency: "KES",
+  code: "PILOT",
+  email: "books@pilot.co.ke",
+  taxPin: "P051234567X",
+  address: { city: "Nairobi", country: "Kenya" },
+  status: "active",
+  subscription: { plan: "professional", status: "active", maxUsers: 25 },
+  settings: {
+    currency: "USD",
+    defaultVatRate: 0,
+    invoicePrefix: "SI",
+    defaultCostingMethod: "fifo",
+    approvalThresholds: { billPaymentValue: 250_000 },
+  },
+  features: { multiCurrency: true },
 });
 
 await db.collection("accounts").insertMany([
@@ -82,6 +100,36 @@ await db.collection("parties").insertOne({
   address: { line1: "1 Moi Ave", city: "Nairobi", country: "Kenya" },
   creditTerms: { creditLimit: 500000, paymentTermsDays: 45 },
   isActive: true,
+});
+
+// An employee party plus the login that belongs to it, so the backfill's
+// user → party link is exercised rather than assumed.
+const employeeId = new ObjectId();
+const userId = new ObjectId();
+
+await db.collection("parties").insertOne({
+  _id: employeeId,
+  companyId,
+  type: "employee",
+  name: "Jane Wanjiru",
+  email: "jane@pilot.co.ke",
+  employeeNumber: "EMP-001",
+  department: "Finance",
+  isActive: true,
+});
+
+await db.collection("users").insertOne({
+  _id: userId,
+  companyId,
+  partyId: employeeId,
+  name: "Jane Wanjiru",
+  email: "Jane@Pilot.CO.KE", // mixed case on purpose: the column is lowercased
+  role: "Accountant",
+  status: "Active",
+  department: "Finance",
+  authProvider: "credentials",
+  tokenVersion: 3,
+  creator: { name: "Root", id: "root" },
 });
 
 await db.collection("products").insertMany([
@@ -397,6 +445,7 @@ await db.collection("journalentries").insertMany([
     companyId,
     accounts: { cashId, salesId },
     products: { widgetId, gadgetId },
+    people: { employeeId, userId },
   };
 }
 
@@ -408,7 +457,7 @@ if (isCli) {
   await seedTestSource();
   console.log("Seeded test source:");
   console.log(
-    "  1 company, 3 accounts, 1 party, 2 products, 3 weighbridge tickets,\n" +
+    "  1 company, 3 accounts, 2 parties, 1 user, 2 products, 3 weighbridge tickets,\n" +
       "  3 stock requests, 2 fiscal periods, 5 journal entries",
   );
   console.log("  (JE-00003 is deliberately off by 0.005)");

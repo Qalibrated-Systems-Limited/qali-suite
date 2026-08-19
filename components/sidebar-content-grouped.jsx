@@ -1050,7 +1050,7 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
                       {user?.name}
                     </p>
                     <p className="text-xs text-muted-foreground truncate">
-                      {user?.role || "User"}
+                      {user?.role || "Employee"}
                     </p>
                   </div>
                 </button>
@@ -1081,7 +1081,7 @@ export const SidebarContentGrouped = ({ onItemClick, user, collapsed }) => {
                       {user?.email}
                     </p>
                     <p className="text-xs font-medium text-yellow-600 dark:text-yellow-500 truncate mt-1">
-                      {user?.role || "User"}
+                      {user?.role || "Employee"}
                     </p>
                   </div>
                 </div>

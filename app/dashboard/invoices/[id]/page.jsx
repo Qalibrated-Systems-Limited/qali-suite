@@ -6,7 +6,7 @@ import {
   getInvoiceDetailPg,
   getPaymentAccountsPg,
 } from "@/app/db/actions/invoice-actions";
-import { getCompanyById } from "@/app/mongodb/queries/company-queries";
+import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
 import { serializeBsonType, formatAddress } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

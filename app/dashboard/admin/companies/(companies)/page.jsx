@@ -1,10 +1,14 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+// The platform's own view of its tenants, read from Postgres (0035). It is
+// the one surface that reads across companies, which is why it runs on the
+// privileged connection — `companies` is under RLS keyed on its own id, so a
+// scoped connection sees exactly one.
 import {
   searchCompanies,
-  fetchCompanyPages,
+  countCompanyPages,
   getCompanyStats,
-} from "@/app/mongodb/queries/company-queries";
+} from "@/app/db/platform";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Building2,
@@ -51,7 +55,7 @@ export default async function CompaniesPage({ searchParams }) {
 
   const [companies, totalPages, stats] = await Promise.all([
     searchCompanies(search, page, { status, plan }),
-    fetchCompanyPages(search, { status, plan }),
+    countCompanyPages(search, { status, plan }),
     getCompanyStats(),
   ]);
 

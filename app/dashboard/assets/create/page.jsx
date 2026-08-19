@@ -6,7 +6,6 @@ import { ChevronLeft, AlertTriangle } from "lucide-react";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import Account from "@/app/models/account";
-import Company from "@/app/models/Company";
 import AssetForm from "@/app/dashboard/assets/components/AssetForm";
 import { loadBillLineForCapitalization } from "@/app/mongodb/actions/asset-actions";
 
@@ -18,14 +17,12 @@ async function AssetFormLoader({ fromBillLine }) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
 
-  // Load the capitalization threshold (soft policy) from company settings.
-  const company = companyId
-    ? await Company.findById(companyId)
-        .select("settings.capitalizationThreshold")
-        .lean()
-    : null;
-  const capitalizationThreshold =
-    company?.settings?.capitalizationThreshold || 0;
+  // The capitalisation threshold (soft policy), from Postgres (0035).
+  // 0 disables the policy and is a real value, not a missing one.
+  const { getSettingsFor } = await import("@/app/db/companyConfig");
+  const capitalizationThreshold = companyId
+    ? Number((await getSettingsFor(String(companyId))).capitalizationThreshold)
+    : 0;
 
   const accountTypes = [
     "fixed_asset",

@@ -30,7 +30,13 @@ import { QaliSuiteIcon } from "@/components/qalisuite-logo";
 import NotificationBell from "./NotificationBell";
 import { titleForPath } from "@/lib/nav/route-titles";
 
-export function AppSidebar({ children, user, notifications, ...props }) {
+export function AppSidebar({
+  children,
+  user,
+  notifications,
+  companySwitcher,
+  ...props
+}) {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [mounted, setMounted] = React.useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
@@ -106,6 +112,13 @@ export function AppSidebar({ children, user, notifications, ...props }) {
 
               {/* Right: Action Buttons */}
               <div className="flex items-center gap-0.5 sm:gap-1.5 ml-auto shrink-0">
+                {/* Which company this session is operating on. Lives here
+                    rather than on a page header because it is true of every
+                    page, and because a user who is in the wrong company needs
+                    to see that before they read the numbers, not after.
+                    Renders nothing when there is only one to be in. */}
+                {companySwitcher}
+
                 {/* Mobile search icon — opens command palette */}
                 <MobileSearch />
 
@@ -165,7 +178,7 @@ export function AppSidebar({ children, user, notifications, ...props }) {
                           {user?.email || ""}
                         </p>
                         <p className="text-xs text-yellow-500 font-medium">
-                          {user?.role || "User"}
+                          {user?.role || "Employee"}
                         </p>
                       </div>
                     </DropdownMenuLabel>

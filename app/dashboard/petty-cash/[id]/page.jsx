@@ -6,7 +6,6 @@ import {
   getPettyCashReturnById,
   getPettyCashFloatAccounts,
 } from "@/app/mongodb/queries/petty-cash-queries";
-import Company from "@/app/models/Company";
 import dbConnect from "@/app/config/dbConnect";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +42,8 @@ export default async function PettyCashReturnPage({ params }) {
   // Source accounts for funding = cash/bank accounts other than this float.
   const sourceAccounts = floatAccounts.filter((a) => a._id !== ret.floatAccountId);
   await dbConnect();
-  const company = await Company.findById(ret.companyId).select("name tagline").lean();
+  const { getCompanyForDocuments } = await import("@/app/db/platform");
+  const company = await getCompanyForDocuments(String(ret.companyId));
 
   const role = session.user.role;
   const canEdit = CUSTODIAN_ROLES.has(role) && ret.status === "draft";

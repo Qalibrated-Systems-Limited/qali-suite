@@ -50,13 +50,78 @@ suite("postgres backfill and reconciliation", () => {
   }
 
   describe("backfill", () => {
+    it("carries the settings the books obey, not just the tenant root", async () => {
+      await run();
+
+      const [c] = await admin`SELECT * FROM companies`;
+      // The currency comes from settings.currency. The old read looked for a
+      // `baseCurrency` field the model does not have, so every backfilled
+      // tenant silently landed on KES whatever it actually trades in.
+      expect(c.base_currency).toBe("USD");
+      expect(c.code).toBe("PILOT");
+      expect(c.tax_pin).toBe("P051234567X");
+      expect(c.plan).toBe("professional");
+      expect(c.max_users).toBe(25);
+
+      const [s] = await admin`SELECT * FROM company_settings
+                               WHERE company_id = ${c.id}`;
+      // A VAT-exempt tenant must not be handed 16% because the backfill only
+      // moved four columns.
+      expect(Number(s.default_vat_rate)).toBe(0);
+      expect(s.invoice_prefix).toBe("SI");
+      expect(s.default_costing_method).toBe("fifo");
+      expect(Number(s.bill_payment_value)).toBe(250000);
+      expect(s.feature_multi_currency).toBe(true);
+      // Untouched keys land on the platform default rather than null.
+      expect(Number(s.stock_adjustment_value)).toBe(50000);
+    });
+
+    it("brings users across with their id, and links them to their party", async () => {
+      await run();
+
+      const [u] = await admin`SELECT * FROM users`;
+      // The Mongo id IS the id. Every actor column already holds it (0031),
+      // so keeping it makes each of those a foreign key rather than a second
+      // id map to carry forever.
+      expect(u.id).toMatch(/^[0-9a-f]{24}$/);
+      expect(u.name).toBe("Jane Wanjiru");
+      // Lowercased on the way in — Mongo enforces this with a setter, which
+      // enforces nothing if a write ever bypasses it.
+      expect(u.email).toBe("jane@pilot.co.ke");
+      expect(u.role).toBe("Accountant");
+      expect(u.token_version).toBe(3);
+
+      const [grant] = await admin`SELECT * FROM user_company_access`;
+      expect(grant.user_id).toBe(u.id);
+      expect(grant.granted_via).toBe("primary");
+
+      // "In THIS company, this login is that person." The link is on the
+      // grant, not on the user, because a party is company-scoped.
+      const [party] = await admin`SELECT name FROM parties
+                                   WHERE id = ${grant.party_id}`;
+      expect(party.name).toBe("Jane Wanjiru");
+    });
+
+    it("is idempotent about the company record", async () => {
+      await run();
+      // A backfill is meant to be re-runnable after a partial failure. The
+      // company insert used DO NOTHING, so a second pass corrected nothing.
+      await admin`UPDATE company_settings SET invoice_prefix = 'WRONG'`;
+      await run();
+
+      const [s] = await admin`SELECT invoice_prefix FROM company_settings`;
+      expect(s.invoice_prefix).toBe("SI");
+    });
+
     it("migrates the accounting core and reports what it moved", async () => {
       const stats = await run();
       expect(stats).toMatchObject({
         companies: 1,
         accounts: 3,
         fiscalPeriods: 2,
-        parties: 1,
+        parties: 2,
+        users: 1,
+        userGrants: 1,
         products: 2,
         weighbridgeTickets: 1,
         stockRequests: 2,

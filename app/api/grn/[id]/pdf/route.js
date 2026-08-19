@@ -5,7 +5,6 @@ import { safeErrorMessage } from "@/lib/safe-error";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { getGRNById } from "@/app/mongodb/queries/grn-queries";
-import Company from "@/app/models/Company";
 import { GoodsReceiptPDF } from "@/lib/pdf";
 
 // ============================================
@@ -34,9 +33,8 @@ export async function GET(_req, { params }) {
 
     // Company branding for the PDF header.
     const { companyId } = await getTenantContext();
-    const company = await Company.findById(companyId)
-      .select("name logo email phone address")
-      .lean();
+    const { getCompanyForDocuments } = await import("@/app/db/platform");
+    const company = await getCompanyForDocuments(String(companyId));
 
     const buffer = await renderToBuffer(
       GoodsReceiptPDF({ grn, company }),

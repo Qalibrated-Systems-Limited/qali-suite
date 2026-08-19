@@ -12,12 +12,12 @@ import EmploymentHistory from "@/app/models/employmentHistory";
 import Party from "@/app/models/parties";
 import Invite from "@/app/models/invite";
 import User from "@/app/models/user";
-import Company from "@/app/models/Company";
 import { sendInviteEmail } from "@/lib/email";
 import cloudinary from "@/lib/cloudinary";
 import { requirePlanAccess } from "@/lib/plan-gate";
 import { checkUserLimit } from "@/lib/check-user-limit";
 import LeaveType from "@/app/models/leaveType";
+import { syncUserToPostgres } from "@/app/db/userSync";
 
 // ============================================
 // ROLE AUTHORIZATION
@@ -336,6 +336,7 @@ export async function updateEmployee(_prevState, formData) {
           name: fullName,
           ...(syncDepartment ? { department: syncDepartment } : {}),
         });
+        await syncUserToPostgres(profile.userId.toString());
       }
     } else if ((syncDepartment || syncDesignation || newEmail || newPhone) && profile.partyId) {
       // Name didn't change but other fields did — still sync
@@ -350,6 +351,7 @@ export async function updateEmployee(_prevState, formData) {
       await Party.findByIdAndUpdate(profile.partyId, partyUpdate);
       if (profile.userId && syncDepartment) {
         await User.findByIdAndUpdate(profile.userId, { department: syncDepartment });
+        await syncUserToPostgres(profile.userId.toString());
       }
     }
 
@@ -571,6 +573,7 @@ export async function terminateEmployee(_prevState, formData) {
         $set: { status: "Inactive" },
         $inc: { tokenVersion: 1 },
       });
+      await syncUserToPostgres(profile.userId.toString());
     }
 
     revalidatePath(`/dashboard/hr/employees/${profileId}`);
@@ -711,7 +714,8 @@ export async function sendEmployeePortalInvite(profileId, role = "Employee") {
     }
 
     // Fetch company name for the email
-    const company = await Company.findById(profile.companyId).select("name").lean();
+    const { getCompanySubscription } = await import("@/app/db/platform");
+    const company = await getCompanySubscription(String(profile.companyId));
 
     const { rawToken, hashedToken } = Invite.generateToken();
 

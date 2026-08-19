@@ -1,7 +1,7 @@
 import { EditUserForm } from "./form";
 import { auth } from "@/auth";
 import { getUserById } from "@/app/mongodb/queries/user-queries";
-import { getCompaniesForDropdown } from "@/app/mongodb/queries/company-queries";
+import { listCompaniesForDropdown as getCompaniesForDropdown } from "@/app/db/platform";
 import { notFound } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";

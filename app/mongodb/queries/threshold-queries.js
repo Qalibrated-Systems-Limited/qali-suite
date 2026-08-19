@@ -1,71 +1,53 @@
 import "server-only";
-import { cache } from "react";
 
-import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
-import Company from "@/app/models/Company";
+import {
+  getCompanyThresholds as readThresholds,
+} from "@/app/db/companyConfig";
 
 // ============================================
 // APPROVAL THRESHOLDS — per-company configuration
 // ============================================
-// Single source of truth for the action layer. Replaces hardcoded
-// constants. Cached per request — multiple actions calling this in the
-// same render share one DB read.
+// Single source of truth for the action layer, read from Postgres since 0035:
+// these are rules the books obey, and a rule read from another store is a rule
+// outside the transaction meant to honour it.
 //
-// Returns sensible fallbacks if the company doc lacks the sub-doc (e.g.
-// for tenants created before the schema was added).
+// NO SILENT FALLBACK ANY MORE. This used to answer platform defaults whenever
+// the read threw — so a company that had set stockAdjustmentValue to 0,
+// meaning "always require approval", got 50,000 instead the moment the
+// database hiccupped, and adjustments up to fifty thousand shillings
+// auto-approved. A financial control that fails open is worse than one that
+// fails. The caller now sees the error.
+//
+// The values themselves are still NOT NULL with defaults in the database, and
+// the row is created with the company, so there is nothing left to substitute.
 
 const DEFAULTS = Object.freeze({
   stockAdjustmentValue: 50_000,
+  stockRequestValue: 100_000,
   stockHighRiskTypes: ["theft", "write_off", "expiry"],
   minimumMarginPercent: 8,
   creditNoteValue: 25_000,
   billPaymentValue: 100_000,
-  expensePaymentValue: 50_000, // expense payments above this need sign-off
+  expensePaymentValue: 50_000,
   discountCapPercent: 15,
 });
 
-export const getCompanyThresholds = cache(async (companyId) => {
-  if (!companyId) return { ...DEFAULTS };
-  try {
-    await dbConnect();
-    const company = await Company.findById(companyId)
-      .select("settings.approvalThresholds")
-      .lean();
-    const cfg = company?.settings?.approvalThresholds || {};
-    return {
-      stockAdjustmentValue:
-        cfg.stockAdjustmentValue ?? DEFAULTS.stockAdjustmentValue,
-      stockHighRiskTypes:
-        cfg.stockHighRiskTypes && cfg.stockHighRiskTypes.length > 0
-          ? cfg.stockHighRiskTypes
-          : DEFAULTS.stockHighRiskTypes,
-      minimumMarginPercent:
-        cfg.minimumMarginPercent ?? DEFAULTS.minimumMarginPercent,
-      creditNoteValue: cfg.creditNoteValue ?? DEFAULTS.creditNoteValue,
-      billPaymentValue: cfg.billPaymentValue ?? DEFAULTS.billPaymentValue,
-      expensePaymentValue:
-        cfg.expensePaymentValue ?? DEFAULTS.expensePaymentValue,
-      discountCapPercent:
-        cfg.discountCapPercent ?? DEFAULTS.discountCapPercent,
-    };
-  } catch (error) {
-    console.error("getCompanyThresholds error:", error);
-    return { ...DEFAULTS };
+/** Caching lives in getSettingsFor, which several actions share per request. */
+export const getCompanyThresholds = async (companyId) => {
+  if (!companyId) {
+    throw new Error("Approval thresholds asked for without a company.");
   }
-});
+  return readThresholds(String(companyId));
+};
 
 /**
  * Convenience wrapper that auto-resolves the caller's tenant context.
  * Use this from server actions where you already have getTenantContext.
  */
 export async function getCallerThresholds() {
-  try {
-    const { companyId } = await getTenantContext();
-    return getCompanyThresholds(companyId?.toString?.() || null);
-  } catch {
-    return { ...DEFAULTS };
-  }
+  const { companyId } = await getTenantContext();
+  return getCompanyThresholds(companyId?.toString?.() || companyId);
 }
 
 export const APPROVAL_THRESHOLD_DEFAULTS = DEFAULTS;

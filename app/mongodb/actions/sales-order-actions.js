@@ -16,7 +16,6 @@ import SalesOrder from "@/app/models/salesOrder";
 import Quote from "@/app/models/quote";
 import Product from "@/app/models/product";
 import Invoice from "@/app/models/invoice";
-import Company from "@/app/models/Company";
 import { generateInvoiceNumber } from "@/app/mongodb/queries/invoice-queries";
 
 // ============================================
@@ -381,11 +380,13 @@ export async function convertSalesOrderToInvoice(orderId) {
     const hasCommitted = invoiceItems.some((i) => i.stockCommitted);
     let draftExpiresAt = null;
     if (hasCommitted) {
-      const company = await Company.findById(so.companyId)
-        .select("settings.draftInvoiceExpiryDays")
-        .session(session)
-        .lean();
-      const expiryDays = company?.settings?.draftInvoiceExpiryDays ?? 14;
+      // How long a draft invoice may hold committed stock, from Postgres
+      // (0035). Bounded 1-90 by a CHECK there, so it cannot be a value that
+      // holds stock forever.
+      const { getSettingsFor } = await import("@/app/db/companyConfig");
+      const { draftInvoiceExpiryDays: expiryDays } = await getSettingsFor(
+        String(so.companyId),
+      );
       draftExpiresAt = new Date(now.getTime() + expiryDays * 24 * 60 * 60 * 1000);
     }
     const [invoice] = await Invoice.create(

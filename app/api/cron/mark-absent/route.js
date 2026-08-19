@@ -3,7 +3,6 @@ import { safeErrorMessage } from "@/lib/safe-error";
 import dbConnect from "@/app/config/dbConnect";
 import Attendance from "@/app/models/attendance";
 import EmployeeProfile from "@/app/models/employeeProfile";
-import Company from "@/app/models/Company";
 
 // ============================================
 // CRON: AUTO-MARK ABSENT
@@ -38,7 +37,8 @@ export async function GET(request) {
     const dateKey = toDateKey(now);
 
     // Get all non-SuperAdmin companies
-    const companies = await Company.find({}).select("_id name").lean();
+    const { listAllCompanies } = await import("@/app/db/platform");
+    const companies = await listAllCompanies();
 
     const results = [];
 

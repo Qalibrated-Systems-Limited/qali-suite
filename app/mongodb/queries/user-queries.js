@@ -1,6 +1,6 @@
 import dbConnect from "../../config/dbConnect";
 import User from "../../models/user";
-import Company from "../../models/Company";
+import { listAllCompanies } from "@/app/db/platform";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import { serializeBsonType } from "@/lib/utils";
 import mongoose from "mongoose";
@@ -91,12 +91,15 @@ export const searchUsers = async (searchTerm, page = 1, filters = {}) => {
   const [rawResult, companies] = await Promise.all([
     User.aggregate(pipeline),
     isSuperAdmin
-      ? Company.find({}).select("name").lean()
+      ? listAllCompanies()
       : Promise.resolve(null),
   ]);
 
+  // EVERY company, not only the active ones: this map resolves the company a
+  // user is already attached to, and a user in a suspended company still has
+  // to render with a company name rather than a blank.
   const companyNameById = companies
-    ? new Map(companies.map((c) => [c._id.toString(), c.name]))
+    ? new Map(companies.map((c) => [String(c._id), c.name]))
     : null;
 
   return rawResult.map((res) => {

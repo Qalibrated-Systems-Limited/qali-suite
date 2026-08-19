@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { notFound, redirect } from "next/navigation";
 import { getRequestById } from "@/app/db/actions/request-actions";
-import { getCompanyById } from "@/app/mongodb/queries/company-queries";
+import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
 import { serializeBsonType } from "@/lib/utils";
 import { RequestDetail } from "./RequestDetail";
 

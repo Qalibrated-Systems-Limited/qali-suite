@@ -35,6 +35,12 @@ const {
   resetCompanyBooks,
 } = await import("@/app/db/companyAdmin");
 const billActions = await import("@/app/db/actions/bill-actions");
+const { withUserScope } = await import("@/app/db/client");
+const access = await import("@/app/db/repositories/companyAccess");
+const accessAdmin = await import("@/app/db/companyAccessAdmin");
+const platform = await import("@/app/db/platform");
+const userAdmin = await import("@/app/db/userAdmin");
+const usersRepo = await import("@/app/db/repositories/users");
 
 /** A Mongo-shaped id, which is what a session carries during the transition. */
 const sourceId = () => randomUUID().replace(/-/g, "").slice(0, 24);
@@ -497,7 +503,7 @@ suite("tenant provisioning", () => {
       // Picking one silently would show a platform administrator one
       // customer's books while they believed they were reading another's.
       await expect(billActions.getBillsStats()).rejects.toThrow(
-        /there are 2\. Choose a company/i,
+        /You have access to 2\. Choose one/i,
       );
     });
 
@@ -576,6 +582,728 @@ suite("tenant provisioning", () => {
       `;
       expect(row).toBeDefined();
       expect(row.id).not.toBe(vanished);
+    });
+  });
+
+  /**
+   * The company record moved to Postgres (0035) — including the settings the
+   * books obey, which is the point: a rule read from another store is a rule
+   * outside the transaction that has to honour it.
+   */
+  describe("company record", () => {
+    it("creates the rules the books obey along with the company", async () => {
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: sourceId(),
+        name: "Pilot",
+      });
+
+      const [settings] = await scoped(
+        companyId,
+        (tx) => tx`SELECT * FROM company_settings WHERE company_id = ${companyId}`,
+      );
+      // Defaults, not nothing. A tenant with no settings row would have no VAT
+      // rate, no thresholds and no prefixes, and every read of them would have
+      // to invent an answer.
+      expect(settings).toBeDefined();
+      expect(Number(settings.default_vat_rate)).toBe(16);
+      expect(settings.invoice_prefix).toBe("INV");
+      expect(settings.stock_high_risk_types).toEqual([
+        "theft",
+        "write_off",
+        "expiry",
+      ]);
+    });
+
+    it("numbers documents with the prefix the tenant configured", async () => {
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: sourceId(),
+        name: "Pilot",
+      });
+
+      // The bug this closes: settings.invoicePrefix existed, the UI wrote it,
+      // and the ported repository numbered with a hardcoded 'INV'.
+      await scoped(
+        companyId,
+        (tx) => tx`UPDATE company_settings SET invoice_prefix = 'SI'
+                    WHERE company_id = ${companyId}`,
+      );
+
+      const [{ n }] = await scoped(
+        companyId,
+        (tx) => tx`SELECT next_entry_number(
+                     ${companyId}::uuid,
+                     document_prefix(${companyId}::uuid, 'invoice')
+                   ) AS n`,
+      );
+      expect(n).toBe("SI-00001");
+
+      // A kind with no setting still numbers, rather than producing "-00001".
+      const [{ p }] = await scoped(
+        companyId,
+        (tx) => tx`SELECT document_prefix(${companyId}::uuid, 'grn') AS p`,
+      );
+      expect(p).toBe("GRN");
+    });
+
+    it("cannot let is_active drift from status", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "Pilot",
+      });
+
+      await setCompanyActive(source, false, "suspended");
+
+      const [row] = await scoped(
+        companyId,
+        (tx) => tx`SELECT status, is_active FROM companies WHERE id = ${companyId}`,
+      );
+      // Two flags for one fact is a drift waiting to happen, so is_active is
+      // GENERATED and cannot be written at all.
+      expect(row.status).toBe("suspended");
+      expect(row.is_active).toBe(false);
+
+      await expect(
+        scoped(
+          companyId,
+          (tx) => tx`UPDATE companies SET is_active = true WHERE id = ${companyId}`,
+        ),
+      ).rejects.toThrow(/can only be updated to DEFAULT/i);
+    });
+
+    it("carries the whole company document, not three fields", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "Pilot",
+      });
+
+      await syncCompanyRecord(source, {
+        name: "Pilot Traders",
+        code: "qsl",
+        email: "Books@Pilot.CO.KE",
+        taxPin: "p051234567x",
+        address: { city: "Nairobi", country: "Kenya" },
+        bankName: "Equity",
+        status: "active",
+        subscription: { plan: "professional", status: "active", maxUsers: 25 },
+        settings: {
+          currency: "usd",
+          defaultVatRate: 0,
+          invoicePrefix: "SI",
+          approvalThresholds: { billPaymentValue: 250000 },
+        },
+        features: { multiCurrency: true },
+      });
+
+      const [c] = await scoped(
+        companyId,
+        (tx) => tx`SELECT * FROM companies WHERE id = ${companyId}`,
+      );
+      expect(c.name).toBe("Pilot Traders");
+      // Normalised on the way in, the way Mongo's setters did it.
+      expect(c.code).toBe("QSL");
+      expect(c.email).toBe("books@pilot.co.ke");
+      expect(c.tax_pin).toBe("P051234567X");
+      expect(c.base_currency).toBe("USD");
+      expect(c.plan).toBe("professional");
+      expect(c.max_users).toBe(25);
+      expect(c.city).toBe("Nairobi");
+
+      const [s] = await scoped(
+        companyId,
+        (tx) => tx`SELECT * FROM company_settings WHERE company_id = ${companyId}`,
+      );
+      // Zero is a real VAT rate, not a missing one — an exempt tenant must not
+      // be handed 16% because 0 looked falsy on the way through.
+      expect(Number(s.default_vat_rate)).toBe(0);
+      expect(s.invoice_prefix).toBe("SI");
+      expect(Number(s.bill_payment_value)).toBe(250000);
+      expect(s.feature_multi_currency).toBe(true);
+      // Untouched keys keep their defaults rather than being blanked by a form
+      // that never showed them.
+      expect(Number(s.stock_adjustment_value)).toBe(50000);
+    });
+  });
+
+  /**
+   * Logins (0036) — the table 0031 said did not exist yet, which is why 47
+   * actor columns are bare text with a name snapshot.
+   */
+  describe("users", () => {
+    const USER_ID = "507f1f77bcf86cd799439055";
+
+    it("keeps the id the rest of the system already uses", async () => {
+      const source = sourceId();
+      await provisionCompany({ sourceCompanyId: source, name: "Pilot" });
+
+      await userAdmin.syncUser({
+        id: USER_ID,
+        name: "Jane Wanjiru",
+        email: "Jane@Pilot.CO.KE",
+        role: "Accountant",
+        status: "Active",
+        companyId: source,
+        tokenVersion: 3,
+      });
+
+      const [u] = await admin`SELECT * FROM users WHERE id = ${USER_ID}`;
+      // A uuid key here would have meant rewriting 47 actor columns and
+      // carrying a second id map forever.
+      expect(u.id).toBe(USER_ID);
+      // Lowercased in the column, not by a setter that a raw write can skip.
+      expect(u.email).toBe("jane@pilot.co.ke");
+      // Mongo's "Active" becomes the lowercase the CHECK allows.
+      expect(u.status).toBe("active");
+      expect(u.token_version).toBe(3);
+      expect(u.home_company_id).not.toBeNull();
+    });
+
+    it("converges when run twice, and does not blank what it was not told", async () => {
+      const source = sourceId();
+      await provisionCompany({ sourceCompanyId: source, name: "Pilot" });
+
+      await userAdmin.syncUser({
+        id: USER_ID,
+        name: "Jane Wanjiru",
+        email: "jane@pilot.co.ke",
+        department: "Finance",
+        companyId: source,
+      });
+      // A caller that changed a role must not blank a department it never saw.
+      await userAdmin.syncUser({ id: USER_ID, role: "CFO" });
+
+      const [u] = await admin`SELECT * FROM users WHERE id = ${USER_ID}`;
+      expect(u.role).toBe("CFO");
+      expect(u.department).toBe("Finance");
+      expect(u.name).toBe("Jane Wanjiru");
+    });
+
+    it("shows a user themselves, and their colleagues, and nobody else's", async () => {
+      const a = sourceId();
+      const b = sourceId();
+      const A = await provisionCompany({ sourceCompanyId: a, name: "A" });
+      const B = await provisionCompany({ sourceCompanyId: b, name: "B" });
+
+      await userAdmin.syncUser({ id: "user-a1", name: "A One", email: "a1@a.co", companyId: a });
+      await userAdmin.syncUser({ id: "user-a2", name: "A Two", email: "a2@a.co", companyId: a });
+      await userAdmin.syncUser({ id: "user-b1", name: "B One", email: "b1@b.co", companyId: b });
+
+      for (const [uid, c] of [["user-a1", A], ["user-a2", A], ["user-b1", B]]) {
+        await accessAdmin.grantCompanyAccess({
+          sourceCompanyId: uid === "user-b1" ? b : a,
+          userId: uid,
+        });
+      }
+
+      // Through app_user, which does NOT bypass RLS — asserting on the owner
+      // connection would pass while enforcing nothing (§9A).
+      const app = postgres(process.env.PG_TEST_URL ?? DATABASE_URL, {
+        max: 1,
+        onnotice: () => {},
+      });
+      try {
+        const colleagues = await app.begin(async (tx) => {
+          await tx`SELECT set_config('app.user_id', 'user-a1', true)`;
+          await tx`SELECT set_config('app.company_id', ${A.companyId}, true)`;
+          return tx`SELECT id FROM users ORDER BY id`;
+        });
+        expect(colleagues.map((r) => r.id)).toEqual(["user-a1", "user-a2"]);
+
+        // Before a company is chosen, a user still sees themselves — which is
+        // what the switcher asks.
+        const alone = await app.begin(async (tx) => {
+          await tx`SELECT set_config('app.user_id', 'user-a1', true)`;
+          return tx`SELECT id FROM users`;
+        });
+        expect(alone.map((r) => r.id)).toEqual(["user-a1"]);
+
+        // And with no scope at all: nothing, rather than every login on the
+        // platform.
+        const unscoped = await app.begin((tx) => tx`SELECT id FROM users`);
+        expect(unscoped).toHaveLength(0);
+      } finally {
+        await app.end();
+      }
+    });
+
+    it("allows a grant with no role of its own", async () => {
+      const source = sourceId();
+      await provisionCompany({ sourceCompanyId: source, name: "Pilot" });
+      await userAdmin.syncUser({ id: "u-null", name: "N", email: "n@p.co", companyId: source });
+
+      // Null means "use the user's global role", which is what every grant
+      // carried over from the single-company model says.
+      await expect(
+        accessAdmin.grantCompanyAccess({
+          sourceCompanyId: source,
+          userId: "u-null",
+          role: null,
+        }),
+      ).resolves.toMatchObject({ granted: true });
+
+    });
+
+    it("links a login to its party, per company", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "Pilot",
+      });
+      await userAdmin.syncUser({ id: USER_ID, name: "Jane", email: "j@p.co", companyId: source });
+      await accessAdmin.grantCompanyAccess({ sourceCompanyId: source, userId: USER_ID });
+
+      const partyId = randomUUID();
+      await scoped(companyId, (tx) =>
+        tx`INSERT INTO parties (id, company_id, primary_type, is_employee, name)
+           VALUES (${partyId}, ${companyId}, 'employee', true, 'Jane Wanjiru')`);
+      await admin`INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
+                  VALUES ('parties', 'mongo-party-1', ${partyId})`;
+
+      const result = await userAdmin.linkUserToParty({
+        userId: USER_ID,
+        sourceCompanyId: source,
+        sourcePartyId: "mongo-party-1",
+      });
+      expect(result.linked).toBe(true);
+
+      const linked = await withUserScope(USER_ID, (tx) =>
+        usersRepo.getUserParty(tx, USER_ID, companyId),
+      );
+      expect(linked).toBe(partyId);
+    });
+
+    it("reports a missing grant rather than a silent no-op", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "No Grant Ltd",
+      });
+      await userAdmin.syncUser({ id: USER_ID, name: "Jane", email: "j@p.co", companyId: source });
+
+      const partyId = randomUUID();
+      await scoped(companyId, (tx) =>
+        tx`INSERT INTO parties (id, company_id, primary_type, is_employee, name)
+           VALUES (${partyId}, ${companyId}, 'employee', true, 'Jane Wanjiru')`);
+      await admin`INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
+                  VALUES ('parties', 'mongo-party-nograft', ${partyId})`;
+
+      // grantCompanyAccess was never called, so the UPDATE matches no row. The
+      // link is not written, and the caller is told so — the ordering bug is
+      // the call site's, and it is only visible if this says something.
+      const result = await userAdmin.linkUserToParty({
+        userId: USER_ID,
+        sourceCompanyId: source,
+        sourcePartyId: "mongo-party-nograft",
+      });
+      expect(result.linked).toBe(false);
+      expect(result.reason).toBe("no-grant");
+    });
+
+    it("refuses a party from another company", async () => {
+      const a = sourceId();
+      const A = await provisionCompany({ sourceCompanyId: a, name: "A" });
+      const B = await provisionCompany({ sourceCompanyId: sourceId(), name: "B" });
+
+      await userAdmin.syncUser({ id: USER_ID, name: "Jane", email: "j@p.co", companyId: a });
+      await accessAdmin.grantCompanyAccess({ sourceCompanyId: a, userId: USER_ID });
+
+      // A party belonging to B.
+      const strayParty = randomUUID();
+      await scoped(B.companyId, (tx) =>
+        tx`INSERT INTO parties (id, company_id, primary_type, is_customer, name)
+           VALUES (${strayParty}, ${B.companyId}, 'customer', true, 'Elsewhere')`);
+
+      // The composite foreign key on (party_id, company_id) makes this
+      // impossible rather than merely wrong — a plain reference to parties(id)
+      // would allow it, and RLS would not catch it because this path runs
+      // privileged.
+      await expect(
+        admin`UPDATE user_company_access SET party_id = ${strayParty}
+               WHERE user_id = ${USER_ID} AND company_id = ${A.companyId}`,
+      ).rejects.toThrow(/foreign key|violates/i);
+    });
+  });
+
+  /**
+   * The platform's cross-tenant surface. The ONE place that reads across
+   * companies, which is why it runs on the privileged connection.
+   */
+  describe("platform view", () => {
+    it("lists, filters and pages tenants", async () => {
+      await provisionCompany({ sourceCompanyId: sourceId(), name: "Alpha Ltd" });
+      const b = sourceId();
+      await provisionCompany({ sourceCompanyId: b, name: "Beta Traders" });
+      await setCompanyActive(b, false, "suspended");
+
+      const all = await platform.searchCompanies();
+      expect(all.map((c) => c.name).sort()).toEqual(["Alpha Ltd", "Beta Traders"]);
+      // Both ids, because the admin routes still carry the Mongo one.
+      expect(all.every((c) => c.id && c.sourceId)).toBe(true);
+
+      const active = await platform.searchCompanies("", 1, { status: "active" });
+      expect(active.map((c) => c.name)).toEqual(["Alpha Ltd"]);
+
+      // The Mongo version built { $regex: searchTerm } straight from the query
+      // string, so a user typing "(" got a driver error. Here it is data.
+      await expect(platform.searchCompanies("(")).resolves.toEqual([]);
+      const found = await platform.searchCompanies("beta");
+      expect(found.map((c) => c.name)).toEqual(["Beta Traders"]);
+    });
+
+    it("counts by status and plan in one pass", async () => {
+      const a = sourceId();
+      await provisionCompany({ sourceCompanyId: a, name: "Alpha" });
+      const b = sourceId();
+      await provisionCompany({ sourceCompanyId: b, name: "Beta" });
+      await setCompanyActive(b, false, "suspended");
+      await syncCompanyRecord(a, { subscription: { plan: "enterprise" } });
+
+      const stats = await platform.getCompanyStats();
+      expect(stats.totalCompanies).toBe(2);
+      expect(stats.activeCompanies).toBe(1);
+      expect(stats.suspendedCompanies).toBe(1);
+      expect(stats.enterpriseCount).toBe(1);
+      // Provisioned tenants start on trial, which is what the admin header
+      // counts as "On Trial".
+      expect(stats.trialCount).toBe(2);
+    });
+
+    it("reads one company whole, by either id", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "Alpha",
+      });
+      await syncCompanyRecord(source, {
+        address: { street: "12 Kenyatta Ave", city: "Nairobi", country: "Kenya" },
+        settings: { invoicePrefix: "SI" },
+      });
+
+      const byMongoId = await platform.getCompanyRecord(source);
+      const byUuid = await platform.getCompanyRecord(companyId);
+      expect(byMongoId.id).toBe(companyId);
+      expect(byUuid.sourceId).toBe(source);
+
+      // Composed on read, never stored — Mongo kept a fullAddress and a
+      // pre-save hook to rebuild it, which is a hook that exists because the
+      // value should not have been stored (§8.4).
+      expect(byMongoId.fullAddress).toBe("12 Kenyatta Ave, Nairobi, Kenya");
+      expect(byMongoId.settings.invoicePrefix).toBe("SI");
+      // The transition alias the eighteen ported pages read.
+      expect(byMongoId._id).toBe(source);
+    });
+
+    it("returns null rather than throwing for a company that is not there", async () => {
+      await expect(platform.getCompanyRecord("nope")).resolves.toBeNull();
+      await expect(
+        platform.getCompanyRecord("00000000-0000-0000-0000-000000000000"),
+      ).resolves.toBeNull();
+    });
+  });
+
+  /**
+   * Authorisation is a SET; operating context is ONE of it (0033).
+   */
+  describe("company access", () => {
+    const USER = "507f1f77bcf86cd799439011";
+    const asUser = (companyId, role = "Manager") =>
+      getTenantContext.mockResolvedValue({
+        user: { id: USER, name: "Ada", role },
+        companyId,
+        companyCode: "PILOT",
+        activeCompanyId: null,
+      });
+
+    it("seeds a grant from what the system already believed", async () => {
+      const source = sourceId();
+      await provisionCompany({ sourceCompanyId: source, name: "Pilot" });
+      asUser(source);
+
+      await billActions.getBillsStats();
+
+      const grants = await withUserScope(USER, (tx) =>
+        access.listAllowedCompanies(tx, USER),
+      );
+      expect(grants).toHaveLength(1);
+      expect(grants[0].name).toBe("Pilot");
+    });
+
+    it("shows a user only their own grants, through the application role", async () => {
+      const a = sourceId();
+      const b = sourceId();
+      const A = await provisionCompany({ sourceCompanyId: a, name: "A" });
+      const B = await provisionCompany({ sourceCompanyId: b, name: "B" });
+
+      await withUserScope(USER, (tx) =>
+        access.grantAccess(tx, { userId: USER, companyId: A.companyId }),
+      );
+      await withUserScope("other-user", (tx) =>
+        access.grantAccess(tx, { userId: "other-user", companyId: B.companyId }),
+      );
+
+      // Through app_user, which does NOT bypass RLS — asserting this on the
+      // owner connection would pass while enforcing nothing (§9A).
+      const app = postgres(process.env.PG_TEST_URL ?? DATABASE_URL, {
+        max: 1,
+        onnotice: () => {},
+      });
+      try {
+        const mine = await app.begin(async (tx) => {
+          await tx`SELECT set_config('app.user_id', ${USER}, true)`;
+          return tx`SELECT company_id FROM user_company_access`;
+        });
+        expect(mine.map((r) => r.company_id)).toEqual([A.companyId]);
+
+        // And with no user scope at all: nothing, rather than everything.
+        const unscoped = await app.begin(
+          (tx) => tx`SELECT company_id FROM user_company_access`,
+        );
+        expect(unscoped).toHaveLength(0);
+      } finally {
+        await app.end();
+      }
+    });
+
+    it("refuses a company the user does not hold, without swapping in one they do", async () => {
+      const a = sourceId();
+      const A = await provisionCompany({ sourceCompanyId: a, name: "A" });
+      const B = await provisionCompany({ sourceCompanyId: sourceId(), name: "B" });
+
+      getTenantContext.mockResolvedValue({
+        user: { id: USER, name: "Ada", role: "Manager" },
+        companyId: a,
+        companyCode: "A",
+        // Asking for B while only holding A.
+        activeCompanyId: B.companyId,
+      });
+      await withUserScope(USER, (tx) =>
+        access.grantAccess(tx, { userId: USER, companyId: A.companyId }),
+      );
+
+      await expect(billActions.getBillsStats()).rejects.toThrow(
+        /do not have access to that company/i,
+      );
+    });
+
+    it("honours the active choice among several grants", async () => {
+      const A = await provisionCompany({ sourceCompanyId: sourceId(), name: "A" });
+      const B = await provisionCompany({ sourceCompanyId: sourceId(), name: "B" });
+      for (const c of [A, B]) {
+        await withUserScope(USER, (tx) =>
+          access.grantAccess(tx, { userId: USER, companyId: c.companyId }),
+        );
+      }
+
+      // A bill in B only.
+      await scoped(B.companyId, (tx) =>
+        tx`INSERT INTO parties (id, company_id, primary_type, is_supplier, name)
+           VALUES (${randomUUID()}, ${B.companyId}, 'supplier', true, 'Shell')`);
+
+      getTenantContext.mockResolvedValue({
+        user: { id: USER, name: "Ada", role: "Manager" },
+        companyId: null,
+        companyCode: null,
+        activeCompanyId: A.companyId,
+      });
+      // Operating on A: B's data is invisible, because RLS is scoped to the
+      // ACTIVE company and not to the set the user is authorised for.
+      const onA = await billActions.getBillsStats();
+      expect(onA.pendingApproval.count).toBe(0);
+
+      getTenantContext.mockResolvedValue({
+        user: { id: USER, name: "Ada", role: "Manager" },
+        companyId: null,
+        companyCode: null,
+        activeCompanyId: B.companyId,
+      });
+      await expect(billActions.getBillsStats()).resolves.toBeDefined();
+    });
+
+    it("refuses to guess between two grants with nothing active", async () => {
+      const A = await provisionCompany({ sourceCompanyId: sourceId(), name: "A" });
+      const B = await provisionCompany({ sourceCompanyId: sourceId(), name: "B" });
+      for (const c of [A, B]) {
+        await withUserScope(USER, (tx) =>
+          access.grantAccess(tx, { userId: USER, companyId: c.companyId }),
+        );
+      }
+      asUser(null);
+
+      await expect(billActions.getBillsStats()).rejects.toThrow(
+        /You have access to 2\. Choose one/i,
+      );
+    });
+
+    it("revokes immediately, without waiting for a token refresh", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "Pilot",
+      });
+      asUser(source);
+      await billActions.getBillsStats();
+
+      await withUserScope(USER, (tx) =>
+        access.revokeAccess(tx, USER, companyId),
+      );
+
+      // The grants are re-read every request rather than trusted from the
+      // session, so this takes effect now rather than at the next refresh.
+      await expect(billActions.getBillsStats()).rejects.toThrow(
+        /do not have access to any company/i,
+      );
+    });
+
+    it("grants the creator when a company is created", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "Pilot",
+        ownerUserId: USER,
+        ownerName: "Ada",
+        ownerRole: "Manager",
+      });
+
+      // Not lazily, on their first request — at creation. A company nobody
+      // holds is a company nobody can open.
+      const grants = await withUserScope(USER, (tx) =>
+        access.listAllowedCompanies(tx, USER),
+      );
+      expect(grants.map((g) => g.id)).toEqual([companyId]);
+    });
+
+    it("gives every existing SuperAdmin the NEXT company too", async () => {
+      const ROOT = "507f1f77bcf86cd799439099";
+
+      // First company, created by platform staff.
+      await provisionCompany({
+        sourceCompanyId: sourceId(),
+        name: "A",
+        ownerUserId: ROOT,
+        ownerName: "Root",
+        ownerRole: "SuperAdmin",
+      });
+
+      // Second, created later and by nobody in particular. Before the fan-out
+      // existed this was invisible to Root: lazy seeding only fires for a user
+      // holding NO grant at all, and Root already held one.
+      const B = await provisionCompany({ sourceCompanyId: sourceId(), name: "B" });
+
+      const grants = await withUserScope(ROOT, (tx) =>
+        access.listAllowedCompanies(tx, ROOT),
+      );
+      expect(grants.map((g) => g.id)).toContain(B.companyId);
+      expect(grants).toHaveLength(2);
+    });
+
+    it("tops a SuperAdmin up rather than locking them out", async () => {
+      // A company that predates this person being made platform staff: no row
+      // for them, and standing access means they still get in.
+      const A = await provisionCompany({ sourceCompanyId: sourceId(), name: "A" });
+      const B = await provisionCompany({ sourceCompanyId: sourceId(), name: "B" });
+
+      await withUserScope(USER, (tx) =>
+        access.grantAccess(tx, { userId: USER, companyId: A.companyId }),
+      );
+
+      getTenantContext.mockResolvedValue({
+        user: { id: USER, name: "Root", role: "SuperAdmin" },
+        companyId: null,
+        companyCode: null,
+        activeCompanyId: B.companyId,
+      });
+      await expect(billActions.getBillsStats()).resolves.toBeDefined();
+
+      const grants = await withUserScope(USER, (tx) =>
+        access.listAllowedCompanies(tx, USER),
+      );
+      // Written down, not waved through: the access is a row on B, which is
+      // what a later audit of B reads.
+      expect(grants.map((g) => g.id).sort()).toEqual(
+        [A.companyId, B.companyId].sort(),
+      );
+    });
+
+    it("does NOT top up anyone else", async () => {
+      const A = await provisionCompany({ sourceCompanyId: sourceId(), name: "A" });
+      const B = await provisionCompany({ sourceCompanyId: sourceId(), name: "B" });
+
+      await withUserScope(USER, (tx) =>
+        access.grantAccess(tx, { userId: USER, companyId: A.companyId }),
+      );
+
+      getTenantContext.mockResolvedValue({
+        user: { id: USER, name: "Ada", role: "Manager" },
+        companyId: null,
+        companyCode: null,
+        activeCompanyId: B.companyId,
+      });
+      await expect(billActions.getBillsStats()).rejects.toThrow(
+        /do not have access to that company/i,
+      );
+    });
+
+    it("administers access from outside the tenant, and the gate obeys it", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "Pilot",
+      });
+
+      // A SuperAdmin granting somebody else cannot go through that person's
+      // own scope — the grants policy only lets a user write their OWN rows.
+      await accessAdmin.grantCompanyAccess({
+        sourceCompanyId: source,
+        userId: USER,
+        grantedById: "root",
+        grantedByName: "Root",
+      });
+
+      getTenantContext.mockResolvedValue({
+        user: { id: USER, name: "Ada", role: "Manager" },
+        companyId: null,
+        companyCode: null,
+        activeCompanyId: companyId,
+      });
+      await expect(billActions.getBillsStats()).resolves.toBeDefined();
+
+      const members = await accessAdmin.listCompanyMembers(source);
+      expect(members).toHaveLength(1);
+      expect(members[0].grantedByName).toBe("Root");
+
+      await accessAdmin.revokeCompanyAccess(source, USER);
+      await expect(billActions.getBillsStats()).rejects.toThrow(
+        /do not have access to that company/i,
+      );
+
+      // Suspended, not deleted: "removed in March" is a question somebody
+      // will ask, and a row that is gone cannot answer it.
+      const after = await accessAdmin.listCompanyMembers(source);
+      expect(after).toHaveLength(1);
+      expect(after[0].status).toBe("suspended");
+    });
+
+    it("gives a SuperAdmin a grant per company, not a bypass", async () => {
+      const A = await provisionCompany({ sourceCompanyId: sourceId(), name: "A" });
+      const B = await provisionCompany({ sourceCompanyId: sourceId(), name: "B" });
+
+      getTenantContext.mockResolvedValue({
+        user: { id: USER, name: "Root", role: "SuperAdmin" },
+        companyId: null,
+        companyCode: null,
+        activeCompanyId: A.companyId,
+      });
+      await billActions.getBillsStats();
+
+      const grants = await withUserScope(USER, (tx) =>
+        access.listAllowedCompanies(tx, USER),
+      );
+      // Rows, not a role check — which is what answers "who could see this
+      // company in March".
+      expect(grants.map((g) => g.id).sort()).toEqual(
+        [A.companyId, B.companyId].sort(),
+      );
     });
   });
 });

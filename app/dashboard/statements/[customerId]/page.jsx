@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getStatementOfAccount } from "@/app/mongodb/queries/statement-queries";
-import { getCompanyForDocuments } from "@/app/mongodb/queries/company-queries";
+import { getCompanyForDocuments } from "@/app/db/platform";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

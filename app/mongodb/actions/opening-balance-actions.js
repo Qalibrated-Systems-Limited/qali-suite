@@ -6,7 +6,6 @@ import JournalEntry from "@/app/models/JournalEntry";
 import Account from "@/app/models/account";
 import Invoice from "@/app/models/invoice";
 import Bill from "@/app/models/bill";
-import Company from "@/app/models/Company";
 import Party from "@/app/models/parties";
 import ErpCounter from "@/app/models/erp-counter";
 import dbConnect from "@/app/config/dbConnect";
@@ -235,6 +234,7 @@ export async function setConversionDate({ date } = {}) {
   }
 
   try {
+    const Company = (await import("../../models/Company")).default;
     await Company.findByIdAndUpdate(companyId, {
       $set: {
         "conversion.date": conv,
@@ -242,6 +242,16 @@ export async function setConversionDate({ date } = {}) {
         "conversion.setAt": new Date(),
       },
     });
+
+    // Mirrored to Postgres so the company record does not go stale while the
+    // opening-balance flow is still Mongo. A missing tenant is not fatal here:
+    // the date is only read back from Mongo today.
+    try {
+      const { setConversionDate: mirror } = await import("@/app/db/platform");
+      await mirror(String(companyId), conv, { id: user.id, name: user.name });
+    } catch {
+      // Nothing reads the Postgres copy yet; a fixture with no tenant is fine.
+    }
     revalidatePath("/dashboard/accounts/opening-balances");
     return { success: true };
   } catch (error) {
@@ -256,6 +266,14 @@ async function resolveConversionWindow(companyId, docDateStr, label) {
   const docDate = new Date(docDateStr);
   if (Number.isNaN(docDate.getTime())) return { error: `The ${label} date is invalid.` };
 
+  // STILL MONGO, deliberately. The conversion date has a Postgres column
+  // (0035) and the backfill fills it, but the documents it governs — opening
+  // invoices, bills and their journal entries — are still Mongo. Reading the
+  // date from Postgres while the rule is checked against the Mongo ledger puts
+  // the rule's data in a different store from the rule's subject, which is the
+  // thing 0035 was written to stop. It moves when the opening-balance flow
+  // moves; until then app/db/platform.ts keeps the column in step.
+  const Company = (await import("../../models/Company")).default;
   const company = await Company.findById(companyId).select("conversion").lean();
   const conversionDate = company?.conversion?.date ? new Date(company.conversion.date) : null;
   if (!conversionDate) {

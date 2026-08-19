@@ -381,6 +381,11 @@ export class CompanyOnboardingService {
         fiscalYearStart: company.settings.fiscalYearStart,
         seedAccounts: options.seedAccounts !== false,
         initFiscalPeriods: options.initFiscalPeriods !== false,
+        // Whoever ran onboarding gets the first grant — a company nobody may
+        // enter is not a usable company.
+        ownerUserId: adminUser?.id ?? null,
+        ownerName: adminUser?.name ?? null,
+        ownerRole: adminUser?.role ?? null,
       });
 
       // Mark setup as complete

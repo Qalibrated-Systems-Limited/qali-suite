@@ -2,7 +2,6 @@
 
 import { auth } from "@/auth";
 import User from "../models/user";
-import Company from "../models/Company";
 import Party from "../models/parties";
 import Invite from "../models/invite";
 import { revalidatePath } from "next/cache";
@@ -14,6 +13,7 @@ import mongoose from "mongoose";
 import { sendInviteEmail } from "@/lib/email";
 import { checkUserLimit } from "@/lib/check-user-limit";
 import { requireFreshSession } from "@/lib/utils/session-freshness";
+import { syncUserToPostgres } from "@/app/db/userSync";
 
 // ============================================
 // AUTHORIZATION HELPERS
@@ -130,8 +130,8 @@ export async function createUser(prevState, formData) {
 
   // Validate company exists if companyId is provided
   if (assignedCompanyId) {
-    const company = await Company.findById(assignedCompanyId);
-    if (!company) {
+    const { companyExists } = await import("@/app/db/platform");
+    if (!(await companyExists(String(assignedCompanyId)))) {
       return {
         message: "Company not found",
         errors: { companyId: ["Selected company does not exist"] },
@@ -180,6 +180,11 @@ export async function createUser(prevState, formData) {
 
     newUserId = newUser._id.toString();
 
+    // Postgres holds the identity 47 actor columns point at (0031, 0036).
+    // Re-reads the document rather than mapping fields here, so this cannot
+    // drift from what Mongo now says. Never throws.
+    await syncUserToPostgres(newUserId);
+
     // Note: We do NOT auto-create a Party here. The proper employee flow is:
     //   HR creates employee → Party + EmployeeProfile (together, transactional)
     //   HR sends portal invite → links User to existing Party + Profile
@@ -188,7 +193,8 @@ export async function createUser(prevState, formData) {
 
     // Send invite email so user can set up their account
     try {
-      const company = await Company.findById(assignedCompanyId).select("name").lean();
+      const { getCompanySubscription } = await import("@/app/db/platform");
+      const company = await getCompanySubscription(String(assignedCompanyId));
       const { rawToken, hashedToken } = Invite.generateToken();
 
       await Invite.create({
@@ -332,8 +338,8 @@ export async function updateUser(userId, prevState, formData) {
 
     // Validate company exists if provided
     if (assignedCompanyId) {
-      const company = await Company.findById(assignedCompanyId);
-      if (!company) {
+      const { companyExists } = await import("@/app/db/platform");
+      if (!(await companyExists(String(assignedCompanyId)))) {
         return {
           message: "Company not found",
           errors: { companyId: ["Selected company does not exist"] },
@@ -363,6 +369,11 @@ export async function updateUser(userId, prevState, formData) {
       },
       ...(privilegeChanged && { $inc: { tokenVersion: 1 } }),
     });
+
+    // Postgres holds the identity 47 actor columns point at (0031, 0036).
+    // Re-reads the document rather than mapping fields here, so this cannot
+    // drift from what Mongo now says. Never throws.
+    await syncUserToPostgres(userId);
 
     revalidatePath("/dashboard/users");
     revalidatePath("/dashboard/admin/users");
@@ -433,6 +444,11 @@ export async function resetUserPassword(userId, prevState, formData) {
     targetUser.password = validatedFields.data.newPassword;
     targetUser.tokenVersion = (targetUser.tokenVersion || 0) + 1;
     await targetUser.save();
+
+    // Postgres holds the identity 47 actor columns point at (0031, 0036).
+    // Re-reads the document rather than mapping fields here, so this cannot
+    // drift from what Mongo now says. Never throws.
+    await syncUserToPostgres(userId);
 
     revalidatePath("/dashboard/users");
     revalidatePath("/dashboard/admin/users");
@@ -548,6 +564,11 @@ export async function toggleUserStatus(userId) {
       $inc: { tokenVersion: 1 },
     });
 
+    // Postgres holds the identity 47 actor columns point at (0031, 0036).
+    // Re-reads the document rather than mapping fields here, so this cannot
+    // drift from what Mongo now says. Never throws.
+    await syncUserToPostgres(userId);
+
     revalidatePath("/dashboard/users");
     revalidatePath("/dashboard/admin/users");
     return {
@@ -584,8 +605,8 @@ export async function assignUserToCompany(userId, companyId) {
 
     // Validate company if provided
     if (companyId) {
-      const company = await Company.findById(companyId);
-      if (!company) {
+      const { companyExists } = await import("@/app/db/platform");
+      if (!(await companyExists(String(companyId)))) {
         return { message: "Company not found", success: false };
       }
     }
@@ -596,6 +617,11 @@ export async function assignUserToCompany(userId, companyId) {
       $set: { companyId: companyId || null },
       $inc: { tokenVersion: 1 },
     });
+
+    // Postgres holds the identity 47 actor columns point at (0031, 0036).
+    // Re-reads the document rather than mapping fields here, so this cannot
+    // drift from what Mongo now says. Never throws.
+    await syncUserToPostgres(userId);
 
     revalidatePath("/dashboard/admin/users");
     revalidatePath("/dashboard/users");
@@ -632,8 +658,8 @@ export async function bulkAssignUsersToCompany(userIds, companyId) {
   try {
     // Validate company if provided
     if (companyId) {
-      const company = await Company.findById(companyId);
-      if (!company) {
+      const { companyExists } = await import("@/app/db/platform");
+      if (!(await companyExists(String(companyId)))) {
         return { message: "Company not found", success: false };
       }
     }

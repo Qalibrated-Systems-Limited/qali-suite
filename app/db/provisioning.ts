@@ -61,6 +61,20 @@ export interface ProvisionCompanyInput {
   fiscalYearStart?: Date | string | null;
   seedAccounts?: boolean;
   initFiscalPeriods?: boolean;
+  /**
+   * Who created it. Gets the first grant, so the company is not born with
+   * nobody able to enter it. Optional: an operator script backfilling
+   * pre-existing tenants has no creator, and those users are seeded on their
+   * first request instead (tenant.ts).
+   */
+  ownerUserId?: string | null;
+  ownerName?: string | null;
+  /**
+   * The creator's role. A SuperAdmin's grant is recorded as 'superadmin' so
+   * the fan-out above finds them when the NEXT company is created; anyone else
+   * gets 'primary', their home company.
+   */
+  ownerRole?: string | null;
 }
 
 const MONTHS = [
@@ -148,6 +162,59 @@ export async function provisionCompany(input: ProvisionCompanyInput) {
       VALUES ('companies', ${sourceId}, ${companyId})
       ON CONFLICT (collection, old_object_id) DO NOTHING
     `);
+
+    /**
+     * The rules the books obey, created with the company (0035).
+     *
+     * Defaults only — the caller's own settings are written by the company
+     * form afterwards. A tenant with no settings row would have no VAT rate,
+     * no thresholds and no document prefixes, and every read of them would
+     * have to invent an answer.
+     */
+    await tx.execute(sql`
+      INSERT INTO company_settings (company_id) VALUES (${companyId})
+      ON CONFLICT (company_id) DO NOTHING
+    `);
+
+    /**
+     * WHO CAN ENTER IT, DECIDED WHEN IT IS CREATED.
+     *
+     * A tenant with no grants is a tenant nobody can open. The lazy seeding in
+     * tenant.ts only fires for a user who holds NO grant at all, so once a
+     * SuperAdmin has been seeded, the next company created would have been
+     * invisible to them — the switcher would not list it and the gate would
+     * refuse it. Found by asking what happens on the second company.
+     *
+     * Every existing SuperAdmin, read from the grants themselves rather than
+     * from Mongo: `granted_via = 'superadmin'` is this table's own record of
+     * who platform staff are, and it is the same row a later audit reads.
+     * Runs on the privileged connection, which is the only one that may look
+     * across tenants — an application connection sees one company's grants and
+     * that is the point.
+     */
+    await tx.execute(sql`
+      INSERT INTO user_company_access (
+        user_id, company_id, granted_via, granted_by_name
+      )
+      SELECT DISTINCT a.user_id, ${companyId}::uuid, 'superadmin', 'System'
+        FROM user_company_access a
+       WHERE a.granted_via = 'superadmin'
+      ON CONFLICT (user_id, company_id) DO NOTHING
+    `);
+
+    if (input.ownerUserId) {
+      await tx.execute(sql`
+        INSERT INTO user_company_access (
+          user_id, company_id, granted_via, granted_by_id, granted_by_name
+        ) VALUES (
+          ${String(input.ownerUserId)}, ${companyId},
+          ${input.ownerRole === "SuperAdmin" ? "superadmin" : "primary"},
+          ${String(input.ownerUserId)}, ${input.ownerName ?? "System"}
+        )
+        ON CONFLICT (user_id, company_id) DO UPDATE
+          SET status = 'active', updated_at = now()
+      `);
+    }
 
     if (input.seedAccounts !== false) {
       await seedChartOfAccounts(tx as unknown as Tx, companyId);

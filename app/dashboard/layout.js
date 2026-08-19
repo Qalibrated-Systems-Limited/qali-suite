@@ -6,6 +6,7 @@ import { AppSidebar } from "./components/app-sidebar";
 import { CommandPaletteProvider } from "@/components/command-palette-provider";
 import MobileBottomNav from "./components/MobileBottomNav";
 import { cMyNotifications } from "@/app/mongodb/queries/notification-queries";
+import { CompanySwitcher } from "@/components/company-switcher-server";
 
 export const metadata = {
   title: "QaliSuite Dashboard",
@@ -59,6 +60,10 @@ async function DashboardLayout({ children }) {
       <AppSidebar
         user={user}
         notifications={notifications}
+        /* Rendered on the server and passed down: the grants are a Postgres
+           read scoped to the user, and the active company lives in the session
+           cookie — neither is reachable from the client sidebar. */
+        companySwitcher={<CompanySwitcher />}
         children={
           <div className="p-4 pb-20 md:p-6 md:pb-6">
             {children}

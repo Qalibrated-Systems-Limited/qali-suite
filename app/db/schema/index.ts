@@ -6,6 +6,8 @@
  */
 export * from "./enums";
 export * from "./companies";
+export * from "./users";
+export * from "./companyAccess";
 export * from "./accounts";
 export * from "./fiscalPeriods";
 export * from "./parties";

@@ -74,6 +74,63 @@ export default function CompanyForm({ company = null, isSuperAdmin = false }) {
         </div>
       )}
 
+      {/* Who will run it. Creation only — an existing company changes its
+          administrators from its access list, not by editing a form field. */}
+      {!isEdit && (
+        <Card className="border-yellow-500/40">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              Company Administrator
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              The person who will run this company. They get an Admin login and
+              an email to set their password. A company with no administrator
+              can only be operated by platform staff, so this is required.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="adminName">
+                  Full Name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="adminName"
+                  name="adminName"
+                  defaultValue={v("adminName", "")}
+                  placeholder="Jane Wanjiru"
+                  className="bg-background"
+                />
+                {state.errors?.adminName && (
+                  <p className="text-sm text-destructive">
+                    {state.errors.adminName[0]}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="adminEmail">
+                  Email <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="adminEmail"
+                  name="adminEmail"
+                  type="email"
+                  defaultValue={v("adminEmail", "")}
+                  placeholder="jane@acme.co.ke"
+                  className="bg-background"
+                />
+                {state.errors?.adminEmail && (
+                  <p className="text-sm text-destructive">
+                    {state.errors.adminEmail[0]}
+                  </p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Basic Information */}
       <Card>
         <CardHeader>

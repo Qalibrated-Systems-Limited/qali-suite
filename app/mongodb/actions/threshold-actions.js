@@ -3,9 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
-import Company from "@/app/models/Company";
+import { saveCompanyThresholds } from "@/app/db/companyConfig";
 
 // ============================================
 // APPROVAL THRESHOLDS — UPDATE ACTION
@@ -39,7 +38,6 @@ const ALLOWED_ROLES = new Set(["SuperAdmin", "Admin", "CFO"]);
 
 export async function updateApprovalThresholds(_prevState, formData) {
   try {
-    await dbConnect();
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
     if (!ALLOWED_ROLES.has(user.role)) {
@@ -84,26 +82,17 @@ export async function updateApprovalThresholds(_prevState, formData) {
       };
     }
 
-    await Company.findByIdAndUpdate(
-      targetCompanyId,
-      {
-        $set: {
-          "settings.approvalThresholds.stockAdjustmentValue":
-            parsed.data.stockAdjustmentValue,
-          "settings.approvalThresholds.stockHighRiskTypes":
-            parsed.data.stockHighRiskTypes,
-          "settings.approvalThresholds.minimumMarginPercent":
-            parsed.data.minimumMarginPercent,
-          "settings.approvalThresholds.creditNoteValue":
-            parsed.data.creditNoteValue,
-          "settings.approvalThresholds.billPaymentValue":
-            parsed.data.billPaymentValue,
-          "settings.approvalThresholds.discountCapPercent":
-            parsed.data.discountCapPercent,
-        },
-      },
-      { runValidators: true },
-    );
+    // Written to Postgres inside the tenant's own scope (0035). These are
+    // rules the books obey, so they live next to the books rather than one
+    // store away from the check that reads them.
+    await saveCompanyThresholds(String(targetCompanyId), {
+      stockAdjustmentValue: parsed.data.stockAdjustmentValue,
+      stockHighRiskTypes: parsed.data.stockHighRiskTypes,
+      minimumMarginPercent: parsed.data.minimumMarginPercent,
+      creditNoteValue: parsed.data.creditNoteValue,
+      billPaymentValue: parsed.data.billPaymentValue,
+      discountCapPercent: parsed.data.discountCapPercent,
+    });
 
     revalidatePath("/dashboard/settings/approvals");
     return { success: true, message: "Approval thresholds updated." };

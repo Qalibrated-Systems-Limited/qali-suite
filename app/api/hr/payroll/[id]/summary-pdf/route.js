@@ -6,7 +6,7 @@ import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import PayrollRun from "@/app/models/payrollRun";
 import PayrollEntry from "@/app/models/payrollEntry";
-import Company from "@/app/models/Company";
+import { getCompanyForDocuments } from "@/app/db/platform";
 import { PayrollSummaryDocument } from "./PayrollSummaryDocument";
 import { checkPlanAccess } from "@/lib/plan-gate";
 
@@ -48,9 +48,7 @@ export async function GET(_req, { params }) {
       .sort({ employeeName: 1 })
       .lean();
 
-    const company = await Company.findById(run.companyId)
-      .select("name email phone address")
-      .lean();
+    const company = await getCompanyForDocuments(String(run.companyId));
 
     const buffer = await renderToBuffer(
       PayrollSummaryDocument({ run, entries, company })

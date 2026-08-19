@@ -5,7 +5,6 @@
 import { auth } from "@/auth";
 import Invoice from "../models/invoice";
 import Product from "../models/product";
-import Company from "../models/Company";
 import { StockMovement } from "../models/stockmovement";
 import Account from "../models/account";
 import Party from "../models/parties";
@@ -530,8 +529,12 @@ export async function updateInvoice(invoiceId, prevState, formData) {
 
       if (hasCommittedStockNow && !existingInvoice.draftExpiresAt) {
         // Invoice now has committed stock but no expiry - set one
-        const companyDoc = await Company.findById(companyId).session(mongoSession);
-        const expiryDays = companyDoc?.settings?.draftInvoiceExpiryDays ?? 14;
+        // From Postgres since 0035, bounded 1-90 by a CHECK there, so it
+        // cannot be a value that holds committed stock forever.
+        const { getSettingsFor } = await import("@/app/db/companyConfig");
+        const { draftInvoiceExpiryDays: expiryDays } = await getSettingsFor(
+          String(companyId),
+        );
         existingInvoice.draftExpiresAt = new Date(
           Date.now() + expiryDays * 24 * 60 * 60 * 1000
         );
@@ -694,14 +697,14 @@ export async function createInvoice(prevState, formData) {
     const canOverridePricing = PRICING_POLICY_ROLES.has(user.role);
 
     if (!canOverridePricing) {
-      // Load the company's configured caps. Tolerant defaults if the
-      // settings sub-doc isn't seeded yet (treat as "no cap").
-      const companyDoc = await Company.findById(companyId)
-        .select("settings.approvalThresholds")
-        .session(mongoSession)
-        .lean();
-      const thresholds = companyDoc?.settings?.approvalThresholds || {};
-      const discountCap = thresholds.discountCapPercent ?? 100;
+      // The company's configured caps, from Postgres (0035). The old read
+      // treated an unseeded settings sub-doc as "no cap" — a discount control
+      // that failed OPEN, so a tenant whose settings had never been written
+      // could discount by 100%. The column is NOT NULL with a default and the
+      // row is created with the company, so there is nothing to fall back to.
+      const { getCompanyThresholds } = await import("@/app/db/companyConfig");
+      const thresholds = await getCompanyThresholds(String(companyId));
+      const discountCap = thresholds.discountCapPercent;
 
       const requestedDiscount = data.discountPercentage || 0;
       if (requestedDiscount > discountCap) {
@@ -875,9 +878,11 @@ export async function createInvoice(prevState, formData) {
     let draftExpiresAt = null;
 
     if (hasCommittedStock) {
-      // Fetch company settings for expiry days
-      const company = await Company.findById(companyId).session(mongoSession);
-      const expiryDays = company?.settings?.draftInvoiceExpiryDays ?? 14;
+      // How long a draft may hold committed stock, from Postgres (0035).
+      const { getSettingsFor } = await import("@/app/db/companyConfig");
+      const { draftInvoiceExpiryDays: expiryDays } = await getSettingsFor(
+        String(companyId),
+      );
       draftExpiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
     }
 

@@ -7,7 +7,7 @@ import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import PayrollRun from "@/app/models/payrollRun";
 import PayrollEntry from "@/app/models/payrollEntry";
 import EmployeeProfile from "@/app/models/employeeProfile";
-import Company from "@/app/models/Company";
+import { getCompanyForDocuments } from "@/app/db/platform";
 import { PayslipDocument } from "../../payroll/[id]/payslip/[entryId]/PayslipDocument";
 
 export async function GET(_req, { params }) {
@@ -54,9 +54,7 @@ export async function GET(_req, { params }) {
       return NextResponse.json({ error: "Payroll run not found" }, { status: 404 });
     }
 
-    const company = await Company.findById(entry.companyId)
-      .select("name logo email phone address")
-      .lean();
+    const company = await getCompanyForDocuments(String(entry.companyId));
 
     const buffer = await renderToBuffer(
       PayslipDocument({ run, entry, company })

@@ -1,6 +1,5 @@
 import { sql } from "drizzle-orm";
 import { privilegedDb } from "./provisioning";
-import { forgetCompanyActive } from "./tenant";
 
 /**
  * Company lifecycle on the Postgres side.
@@ -25,32 +24,206 @@ async function companyUuidFor(sourceCompanyId: string) {
 }
 
 /**
- * Keeps the Postgres tenant row in step with the company record.
+ * Writes the whole company record to Postgres.
  *
- * Only the fields Postgres actually behaves on. Branding, subscription, M-Pesa
- * tills and the rest stay where they are — `companies` here is a tenant root,
- * not a copy of the company document, and mirroring fields nothing reads would
- * only create more to drift.
+ * It used to carry name, slug and base currency only, on the reasoning that
+ * `companies` was a tenant root rather than a copy of the company document.
+ * 0035 ended that: the settings the books OBEY are here now, because a rule
+ * read from another store is a rule outside the transaction that has to honour
+ * it. So this mirrors everything while both stores are live, and Mongo becomes
+ * the follower rather than the source.
  *
- * A no-op for a company that was never provisioned: it will pick these up when
- * it is, from the same source.
+ * Takes the Mongo document's own shape — nested `settings`, `subscription`,
+ * `address` — so the caller hands over what it already has instead of
+ * flattening it correctly at every call site.
+ *
+ * A no-op for a company that was never provisioned: it picks these up when it
+ * is, from the same source.
  */
+export interface CompanyRecordChanges {
+  name?: string | null;
+  slug?: string | null;
+  code?: string | null;
+  tagline?: string | null;
+  logo?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  address?: {
+    street?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
+  } | null;
+  taxPin?: string | null;
+  vatNumber?: string | null;
+  registrationNumber?: string | null;
+  bankName?: string | null;
+  bankBranch?: string | null;
+  accountName?: string | null;
+  accountNumber?: string | null;
+  swiftCode?: string | null;
+  mpesaPaybill?: string | null;
+  mpesaTill?: string | null;
+  status?: string | null;
+  subscription?: {
+    plan?: string | null;
+    status?: string | null;
+    trialEndsAt?: Date | string | null;
+    currentPeriodStart?: Date | string | null;
+    currentPeriodEnd?: Date | string | null;
+    maxUsers?: number | null;
+  } | null;
+  conversion?: {
+    date?: Date | string | null;
+    setBy?: { id?: string | null; name?: string | null } | null;
+    setAt?: Date | string | null;
+  } | null;
+  lastModifiedBy?: { id?: string | null; name?: string | null } | null;
+  /** Mongo's nested settings block; only the keys present are written. */
+  settings?: Record<string, unknown> | null;
+  /** Mongo's feature flags. */
+  features?: Record<string, boolean> | null;
+  /** Legacy alias — callers that only had the currency. */
+  baseCurrency?: string | null;
+}
+
+/** null for anything the caller did not supply, so COALESCE leaves it alone. */
+function opt(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const s = String(value).trim();
+  return s === "" ? null : s;
+}
+
+function optNum(value: unknown): number | null {
+  return value === undefined || value === null || value === "" ? null : Number(value);
+}
+
+function optBool(value: unknown): boolean | null {
+  return value === undefined || value === null ? null : Boolean(value);
+}
+
+function optDate(value: unknown): string | null {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 export async function syncCompanyRecord(
   sourceCompanyId: string,
-  changes: { name?: string | null; slug?: string | null; baseCurrency?: string | null },
+  changes: CompanyRecordChanges,
 ) {
   const companyId = await companyUuidFor(sourceCompanyId);
   if (!companyId) return { synced: false as const };
 
+  const s = (changes.settings ?? {}) as Record<string, unknown>;
+  const thresholds = (s.approvalThresholds ?? {}) as Record<string, unknown>;
+  const sub = changes.subscription ?? {};
+  const addr = changes.address ?? {};
+  const conv = changes.conversion ?? {};
+  const feat = changes.features ?? {};
+
+  // Mongo's status is the three-valued one; is_active is GENERATED from it.
+  const status = opt(changes.status);
+  const currency = opt(s.currency) ?? opt(changes.baseCurrency);
+
   await privilegedDb().transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.company_id', ${companyId}, true)`);
+
     await tx.execute(sql`
       UPDATE companies
-         SET name          = COALESCE(${changes.name ?? null}, name),
-             slug          = COALESCE(${changes.slug ?? null}, slug),
-             base_currency = COALESCE(${changes.baseCurrency?.toUpperCase() ?? null}, base_currency),
-             updated_at    = now()
+         SET name                 = COALESCE(${opt(changes.name)}, name),
+             slug                 = COALESCE(${opt(changes.slug)}, slug),
+             code                 = COALESCE(${opt(changes.code)?.toUpperCase() ?? null}, code),
+             tagline              = COALESCE(${opt(changes.tagline)}, tagline),
+             logo                 = COALESCE(${opt(changes.logo)}, logo),
+             email                = COALESCE(${opt(changes.email)?.toLowerCase() ?? null}, email),
+             phone                = COALESCE(${opt(changes.phone)}, phone),
+             website              = COALESCE(${opt(changes.website)}, website),
+             street               = COALESCE(${opt(addr.street)}, street),
+             city                 = COALESCE(${opt(addr.city)}, city),
+             state                = COALESCE(${opt(addr.state)}, state),
+             postal_code          = COALESCE(${opt(addr.postalCode)}, postal_code),
+             country              = COALESCE(${opt(addr.country)}, country),
+             tax_pin              = COALESCE(${opt(changes.taxPin)?.toUpperCase() ?? null}, tax_pin),
+             vat_number           = COALESCE(${opt(changes.vatNumber)}, vat_number),
+             registration_number  = COALESCE(${opt(changes.registrationNumber)}, registration_number),
+             bank_name            = COALESCE(${opt(changes.bankName)}, bank_name),
+             bank_branch          = COALESCE(${opt(changes.bankBranch)}, bank_branch),
+             account_name         = COALESCE(${opt(changes.accountName)}, account_name),
+             account_number       = COALESCE(${opt(changes.accountNumber)}, account_number),
+             swift_code           = COALESCE(${opt(changes.swiftCode)}, swift_code),
+             mpesa_paybill        = COALESCE(${opt(changes.mpesaPaybill)}, mpesa_paybill),
+             mpesa_till           = COALESCE(${opt(changes.mpesaTill)}, mpesa_till),
+             base_currency        = COALESCE(${currency?.toUpperCase() ?? null}, base_currency),
+             status               = COALESCE(${status}, status),
+             plan                 = COALESCE(${opt(sub.plan)}, plan),
+             subscription_status  = COALESCE(${opt(sub.status)}, subscription_status),
+             trial_ends_at        = COALESCE(${optDate(sub.trialEndsAt)}::timestamptz, trial_ends_at),
+             current_period_start = COALESCE(${optDate(sub.currentPeriodStart)}::timestamptz, current_period_start),
+             current_period_end   = COALESCE(${optDate(sub.currentPeriodEnd)}::timestamptz, current_period_end),
+             max_users            = COALESCE(${optNum(sub.maxUsers)}::int, max_users),
+             conversion_date      = COALESCE(${optDate(conv.date)}::date, conversion_date),
+             conversion_set_by_id = COALESCE(${opt(conv.setBy?.id)}, conversion_set_by_id),
+             conversion_set_by_name = COALESCE(${opt(conv.setBy?.name)}, conversion_set_by_name),
+             conversion_set_at    = COALESCE(${optDate(conv.setAt)}::timestamptz, conversion_set_at),
+             last_modified_by_id  = COALESCE(${opt(changes.lastModifiedBy?.id)}, last_modified_by_id),
+             last_modified_by_name = COALESCE(${opt(changes.lastModifiedBy?.name)}, last_modified_by_name),
+             updated_at           = now()
        WHERE id = ${companyId}
+    `);
+
+    // The settings row exists from provisioning; upserted anyway so a tenant
+    // that predates 0035 and somehow missed the backfill still lands one.
+    await tx.execute(sql`
+      INSERT INTO company_settings (company_id) VALUES (${companyId})
+      ON CONFLICT (company_id) DO NOTHING
+    `);
+
+    await tx.execute(sql`
+      UPDATE company_settings
+         SET currency_symbol      = COALESCE(${opt(s.currencySymbol)}, currency_symbol),
+             locale               = COALESCE(${opt(s.locale)}, locale),
+             timezone             = COALESCE(${opt(s.timezone)}, timezone),
+             default_vat_rate     = COALESCE(${optNum(s.defaultVatRate)}::numeric, default_vat_rate),
+             enable_withholding_tax = COALESCE(${optBool(s.enableWithholdingTax)}::boolean, enable_withholding_tax),
+             default_wht_rate     = COALESCE(${optNum(s.defaultWhtRate)}::numeric, default_wht_rate),
+             require_grn          = COALESCE(${optBool(s.requireGRN)}::boolean, require_grn),
+             fiscal_year_start_month = COALESCE(${optNum(s.fiscalYearStart)}::int, fiscal_year_start_month),
+             invoice_prefix       = COALESCE(${opt(s.invoicePrefix)}, invoice_prefix),
+             bill_prefix          = COALESCE(${opt(s.billPrefix)}, bill_prefix),
+             quote_prefix         = COALESCE(${opt(s.quotePrefix)}, quote_prefix),
+             po_prefix            = COALESCE(${opt(s.poPrefix)}, po_prefix),
+             default_costing_method = COALESCE(${opt(s.defaultCostingMethod)}, default_costing_method),
+             low_stock_threshold  = COALESCE(${optNum(s.lowStockThreshold)}::numeric, low_stock_threshold),
+             default_payment_terms = COALESCE(${opt(s.defaultPaymentTerms)}, default_payment_terms),
+             default_payment_terms_days = COALESCE(${optNum(s.defaultPaymentTermsDays)}::int, default_payment_terms_days),
+             draft_invoice_expiry_days = COALESCE(${optNum(s.draftInvoiceExpiryDays)}::int, draft_invoice_expiry_days),
+             capitalization_threshold = COALESCE(${optNum(s.capitalizationThreshold)}::numeric, capitalization_threshold),
+             stock_adjustment_value = COALESCE(${optNum(thresholds.stockAdjustmentValue)}::numeric, stock_adjustment_value),
+             stock_request_value  = COALESCE(${optNum(thresholds.stockRequestValue)}::numeric, stock_request_value),
+             stock_high_risk_types = COALESCE(${
+               Array.isArray(thresholds.stockHighRiskTypes)
+                 ? (thresholds.stockHighRiskTypes as string[])
+                 : null
+             }::text[], stock_high_risk_types),
+             minimum_margin_percent = COALESCE(${optNum(thresholds.minimumMarginPercent)}::numeric, minimum_margin_percent),
+             credit_note_value    = COALESCE(${optNum(thresholds.creditNoteValue)}::numeric, credit_note_value),
+             bill_payment_value   = COALESCE(${optNum(thresholds.billPaymentValue)}::numeric, bill_payment_value),
+             expense_payment_value = COALESCE(${optNum(thresholds.expensePaymentValue)}::numeric, expense_payment_value),
+             discount_cap_percent = COALESCE(${optNum(thresholds.discountCapPercent)}::numeric, discount_cap_percent),
+             feature_inventory    = COALESCE(${optBool(feat.inventory)}::boolean, feature_inventory),
+             feature_sales        = COALESCE(${optBool(feat.sales)}::boolean, feature_sales),
+             feature_purchases    = COALESCE(${optBool(feat.purchases)}::boolean, feature_purchases),
+             feature_accounting   = COALESCE(${optBool(feat.accounting)}::boolean, feature_accounting),
+             feature_expenses     = COALESCE(${optBool(feat.expenses)}::boolean, feature_expenses),
+             feature_reports      = COALESCE(${optBool(feat.reports)}::boolean, feature_reports),
+             feature_multi_currency = COALESCE(${optBool(feat.multiCurrency)}::boolean, feature_multi_currency),
+             feature_advanced_reporting = COALESCE(${optBool(feat.advancedReporting)}::boolean, feature_advanced_reporting),
+             feature_api_access   = COALESCE(${optBool(feat.apiAccess)}::boolean, feature_api_access),
+             updated_at           = now()
+       WHERE company_id = ${companyId}
     `);
   });
 
@@ -64,19 +237,33 @@ export async function syncCompanyRecord(
  * tenant, so deactivating a company here actually stops its books being read
  * or written rather than only greying it out in an admin list.
  */
-export async function setCompanyActive(sourceCompanyId: string, isActive: boolean) {
+export async function setCompanyActive(
+  sourceCompanyId: string,
+  isActive: boolean,
+  /**
+   * Which inactive state. Mongo distinguishes "inactive" from "suspended" and
+   * the books do not care, but an admin list that shows every stopped company
+   * as merely "inactive" cannot tell a lapsed trial from a deliberate
+   * suspension.
+   */
+  inactiveStatus: "inactive" | "suspended" = "inactive",
+) {
   const companyId = await companyUuidFor(sourceCompanyId);
   if (!companyId) return { synced: false as const };
 
   await privilegedDb().transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.company_id', ${companyId}, true)`);
+    // `status`, not `is_active`: since 0035 is_active is GENERATED from it and
+    // cannot be written, which is what stops the two disagreeing.
     await tx.execute(sql`
-      UPDATE companies SET is_active = ${isActive}, updated_at = now()
+      UPDATE companies
+         SET status = ${isActive ? "active" : inactiveStatus}, updated_at = now()
        WHERE id = ${companyId}
     `);
   });
 
-  forgetCompanyActive(companyId);
+  // No cache to invalidate: the tenant gate reads is_active through the
+  // grant list on every request, so a deactivation takes effect immediately.
   return { synced: true as const, companyId };
 }
 

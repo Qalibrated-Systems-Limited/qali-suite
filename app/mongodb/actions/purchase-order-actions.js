@@ -39,7 +39,7 @@ import PurchaseOrder from "@/app/models/purchaseOrder";
 import Party from "@/app/models/parties";
 import Product from "@/app/models/product";
 import Account from "@/app/models/account";
-import Company from "@/app/models/Company";
+import { getCompanyForDocuments } from "@/app/db/platform";
 import dbConnect from "@/app/config/dbConnect";
 import { sendPurchaseOrderEmail } from "@/lib/email";
 import {
@@ -722,9 +722,7 @@ export async function sendPurchaseOrder(poId) {
             import("@react-pdf/renderer"),
             import("@/lib/pdf"),
             PurchaseOrder.findById(poId).lean(),
-            Company.findById(po.companyId)
-              .select("name email phone address bankName accountNumber settings")
-              .lean(),
+            getCompanyForDocuments(String(po.companyId)),
           ]);
         if (!freshPO) return;
 

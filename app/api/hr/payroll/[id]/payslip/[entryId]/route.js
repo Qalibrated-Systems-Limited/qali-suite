@@ -6,7 +6,7 @@ import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import PayrollRun from "@/app/models/payrollRun";
 import PayrollEntry from "@/app/models/payrollEntry";
-import Company from "@/app/models/Company";
+import { getCompanyForDocuments } from "@/app/db/platform";
 import { PayslipDocument } from "./PayslipDocument";
 import { checkPlanAccess } from "@/lib/plan-gate";
 
@@ -40,9 +40,7 @@ export async function GET(_req, { params }) {
     }).lean();
     if (!entry) return NextResponse.json({ error: "Payroll entry not found" }, { status: 404 });
 
-    const company = await Company.findById(run.companyId)
-      .select("name logo email phone address")
-      .lean();
+    const company = await getCompanyForDocuments(String(run.companyId));
 
     const buffer = await renderToBuffer(
       PayslipDocument({ run, entry, company })

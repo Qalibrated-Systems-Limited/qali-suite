@@ -23,7 +23,7 @@ import {
 import InviteUserDialog from "../components/InviteUserDialog";
 import InvitesList from "../components/InvitesList";
 import { getCompanyInvites } from "@/app/mongodb/actions/invite-actions";
-import { getCompaniesForDropdown } from "@/app/mongodb/queries/company-queries";
+import { listCompaniesForDropdown as getCompaniesForDropdown } from "@/app/db/platform";
 import { UsersTable } from "../components/UserTable";
 import { UsersTableSkeleton } from "../components/UserSkeleton";
 

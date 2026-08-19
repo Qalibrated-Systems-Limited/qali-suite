@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { getUserById } from "@/app/mongodb/queries/user-queries";
-import { getCompanyById } from "@/app/mongodb/queries/company-queries";
+import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
 import { getMyEmployeeProfile } from "@/app/mongodb/queries/hr-queries";
 import {
   User,

@@ -96,6 +96,8 @@ const newStats = () => ({
   accounts: 0,
   fiscalPeriods: 0,
   parties: 0,
+  users: 0,
+  userGrants: 0,
   products: 0,
   weighbridgeTickets: 0,
   entries: 0,
@@ -198,15 +200,213 @@ async function run({ mongo, sql, stats, onlyCompany, log }) {
       // goes through the same path the application does, as the note above says.
       await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
 
+      /**
+       * The WHOLE company record, not four columns (0035).
+       *
+       * The settings the books obey live here now, so a backfill that carried
+       * only name/slug/currency would leave every migrated tenant on platform
+       * defaults — a company that charges no VAT would silently start
+       * charging 16%, and one with its own invoice prefix would lose it.
+       *
+       * The currency comes from `settings.currency`, which is where the Mongo
+       * model actually keeps it. This read `companyDoc.baseCurrency`, a field
+       * that does not exist on the model, so every backfilled tenant landed on
+       * the "KES" fallback regardless of what it trades in.
+       *
+       * DO UPDATE rather than DO NOTHING: the backfill is meant to be re-run
+       * after a partial failure, and a second pass that refuses to correct the
+       * row is a second pass that does nothing.
+       */
+      const cs = companyDoc?.settings ?? {};
+      const csub = companyDoc?.subscription ?? {};
+      const caddr = companyDoc?.address ?? {};
+      const cconv = companyDoc?.conversion ?? {};
+
       await tx`
-        INSERT INTO companies (id, name, slug, base_currency)
+        INSERT INTO companies (
+          id, name, slug, code, tagline, logo, email, phone, website,
+          street, city, state, postal_code, country,
+          tax_pin, vat_number, registration_number,
+          bank_name, bank_branch, account_name, account_number, swift_code,
+          mpesa_paybill, mpesa_till, base_currency,
+          plan, subscription_status, trial_ends_at,
+          current_period_start, current_period_end, max_users,
+          conversion_date, conversion_set_by_id, conversion_set_by_name,
+          conversion_set_at, status, created_by_id, created_by_name
+        )
         VALUES (
           ${companyUuid},
           ${companyDoc?.name ?? `Company ${String(oldCompanyId).slice(-6)}`},
           ${companyDoc?.slug ?? String(oldCompanyId)},
-          ${companyDoc?.baseCurrency ?? "KES"}
+          ${companyDoc?.code ?? null},
+          ${companyDoc?.tagline ?? null},
+          ${companyDoc?.logo ?? null},
+          ${companyDoc?.email ?? null},
+          ${companyDoc?.phone ?? null},
+          ${companyDoc?.website ?? null},
+          ${caddr.street ?? null},
+          ${caddr.city ?? null},
+          ${caddr.state ?? null},
+          ${caddr.postalCode ?? null},
+          ${caddr.country ?? "Kenya"},
+          ${companyDoc?.taxPin ?? null},
+          ${companyDoc?.vatNumber ?? null},
+          ${companyDoc?.registrationNumber ?? null},
+          ${companyDoc?.bankName ?? null},
+          ${companyDoc?.bankBranch ?? null},
+          ${companyDoc?.accountName ?? null},
+          ${companyDoc?.accountNumber ?? null},
+          ${companyDoc?.swiftCode ?? null},
+          ${companyDoc?.mpesaPaybill ?? null},
+          ${companyDoc?.mpesaTill ?? null},
+          ${String(cs.currency ?? "KES").toUpperCase()},
+          ${csub.plan ?? "free"},
+          ${csub.status ?? "trial"},
+          ${csub.trialEndsAt ?? null},
+          ${csub.currentPeriodStart ?? null},
+          ${csub.currentPeriodEnd ?? null},
+          ${csub.maxUsers ?? 2},
+          ${cconv.date ?? null},
+          ${cconv.setBy?.id ?? null},
+          ${cconv.setBy?.name ?? null},
+          ${cconv.setAt ?? null},
+          ${companyDoc?.status ?? "active"},
+          ${companyDoc?.createdBy?.id ?? null},
+          ${companyDoc?.createdBy?.name ?? null}
         )
-        ON CONFLICT (id) DO NOTHING
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          slug = EXCLUDED.slug,
+          code = EXCLUDED.code,
+          tagline = EXCLUDED.tagline,
+          logo = EXCLUDED.logo,
+          email = EXCLUDED.email,
+          phone = EXCLUDED.phone,
+          website = EXCLUDED.website,
+          street = EXCLUDED.street,
+          city = EXCLUDED.city,
+          state = EXCLUDED.state,
+          postal_code = EXCLUDED.postal_code,
+          country = EXCLUDED.country,
+          tax_pin = EXCLUDED.tax_pin,
+          vat_number = EXCLUDED.vat_number,
+          registration_number = EXCLUDED.registration_number,
+          bank_name = EXCLUDED.bank_name,
+          bank_branch = EXCLUDED.bank_branch,
+          account_name = EXCLUDED.account_name,
+          account_number = EXCLUDED.account_number,
+          swift_code = EXCLUDED.swift_code,
+          mpesa_paybill = EXCLUDED.mpesa_paybill,
+          mpesa_till = EXCLUDED.mpesa_till,
+          base_currency = EXCLUDED.base_currency,
+          plan = EXCLUDED.plan,
+          subscription_status = EXCLUDED.subscription_status,
+          trial_ends_at = EXCLUDED.trial_ends_at,
+          current_period_start = EXCLUDED.current_period_start,
+          current_period_end = EXCLUDED.current_period_end,
+          max_users = EXCLUDED.max_users,
+          conversion_date = EXCLUDED.conversion_date,
+          conversion_set_by_id = EXCLUDED.conversion_set_by_id,
+          conversion_set_by_name = EXCLUDED.conversion_set_by_name,
+          conversion_set_at = EXCLUDED.conversion_set_at,
+          status = EXCLUDED.status,
+          updated_at = now()
+      `;
+
+      const th = cs.approvalThresholds ?? {};
+      const cf = companyDoc?.features ?? {};
+
+      await tx`
+        INSERT INTO company_settings (
+          company_id, currency_symbol, locale, timezone,
+          default_vat_rate, enable_withholding_tax, default_wht_rate,
+          require_grn, fiscal_year_start_month,
+          invoice_prefix, bill_prefix, quote_prefix, po_prefix,
+          default_costing_method, low_stock_threshold,
+          default_payment_terms, default_payment_terms_days,
+          draft_invoice_expiry_days, capitalization_threshold,
+          stock_adjustment_value, stock_request_value, stock_high_risk_types,
+          minimum_margin_percent, credit_note_value, bill_payment_value,
+          expense_payment_value, discount_cap_percent,
+          feature_inventory, feature_sales, feature_purchases,
+          feature_accounting, feature_expenses, feature_reports,
+          feature_multi_currency, feature_advanced_reporting, feature_api_access
+        )
+        VALUES (
+          ${companyUuid},
+          ${cs.currencySymbol ?? "KES"},
+          ${cs.locale ?? "en-KE"},
+          ${cs.timezone ?? "Africa/Nairobi"},
+          ${cs.defaultVatRate ?? 16},
+          ${cs.enableWithholdingTax ?? true},
+          ${cs.defaultWhtRate ?? 5},
+          ${cs.requireGRN ?? false},
+          ${cs.fiscalYearStart ?? 1},
+          ${cs.invoicePrefix ?? "INV"},
+          ${cs.billPrefix ?? "BILL"},
+          ${cs.quotePrefix ?? "QT"},
+          ${cs.poPrefix ?? "PO"},
+          ${cs.defaultCostingMethod ?? "average"},
+          ${cs.lowStockThreshold ?? 10},
+          ${cs.defaultPaymentTerms ?? "Net 30"},
+          ${cs.defaultPaymentTermsDays ?? 30},
+          ${cs.draftInvoiceExpiryDays ?? 14},
+          ${cs.capitalizationThreshold ?? 0},
+          ${th.stockAdjustmentValue ?? 50000},
+          ${th.stockRequestValue ?? 100000},
+          ${th.stockHighRiskTypes ?? ["theft", "write_off", "expiry"]},
+          ${th.minimumMarginPercent ?? 8},
+          ${th.creditNoteValue ?? 25000},
+          ${th.billPaymentValue ?? 100000},
+          ${th.expensePaymentValue ?? 50000},
+          ${th.discountCapPercent ?? 15},
+          ${cf.inventory ?? true},
+          ${cf.sales ?? true},
+          ${cf.purchases ?? true},
+          ${cf.accounting ?? true},
+          ${cf.expenses ?? true},
+          ${cf.reports ?? true},
+          ${cf.multiCurrency ?? false},
+          ${cf.advancedReporting ?? false},
+          ${cf.apiAccess ?? false}
+        )
+        ON CONFLICT (company_id) DO UPDATE SET
+          currency_symbol = EXCLUDED.currency_symbol,
+          locale = EXCLUDED.locale,
+          timezone = EXCLUDED.timezone,
+          default_vat_rate = EXCLUDED.default_vat_rate,
+          enable_withholding_tax = EXCLUDED.enable_withholding_tax,
+          default_wht_rate = EXCLUDED.default_wht_rate,
+          require_grn = EXCLUDED.require_grn,
+          fiscal_year_start_month = EXCLUDED.fiscal_year_start_month,
+          invoice_prefix = EXCLUDED.invoice_prefix,
+          bill_prefix = EXCLUDED.bill_prefix,
+          quote_prefix = EXCLUDED.quote_prefix,
+          po_prefix = EXCLUDED.po_prefix,
+          default_costing_method = EXCLUDED.default_costing_method,
+          low_stock_threshold = EXCLUDED.low_stock_threshold,
+          default_payment_terms = EXCLUDED.default_payment_terms,
+          default_payment_terms_days = EXCLUDED.default_payment_terms_days,
+          draft_invoice_expiry_days = EXCLUDED.draft_invoice_expiry_days,
+          capitalization_threshold = EXCLUDED.capitalization_threshold,
+          stock_adjustment_value = EXCLUDED.stock_adjustment_value,
+          stock_request_value = EXCLUDED.stock_request_value,
+          stock_high_risk_types = EXCLUDED.stock_high_risk_types,
+          minimum_margin_percent = EXCLUDED.minimum_margin_percent,
+          credit_note_value = EXCLUDED.credit_note_value,
+          bill_payment_value = EXCLUDED.bill_payment_value,
+          expense_payment_value = EXCLUDED.expense_payment_value,
+          discount_cap_percent = EXCLUDED.discount_cap_percent,
+          feature_inventory = EXCLUDED.feature_inventory,
+          feature_sales = EXCLUDED.feature_sales,
+          feature_purchases = EXCLUDED.feature_purchases,
+          feature_accounting = EXCLUDED.feature_accounting,
+          feature_expenses = EXCLUDED.feature_expenses,
+          feature_reports = EXCLUDED.feature_reports,
+          feature_multi_currency = EXCLUDED.feature_multi_currency,
+          feature_advanced_reporting = EXCLUDED.feature_advanced_reporting,
+          feature_api_access = EXCLUDED.feature_api_access,
+          updated_at = now()
       `;
       stats.companies++;
 
@@ -322,6 +522,83 @@ async function run({ mongo, sql, stats, onlyCompany, log }) {
           ON CONFLICT (id) DO NOTHING
         `;
         stats.parties++;
+      }
+
+      /**
+       * ── users, and who may enter this company ──────────────────────────
+       *
+       * After parties, because a grant may point at one (0036): "in THIS
+       * company, this login is that person".
+       *
+       * The id is the Mongo id, not a new uuid. Every actor column already
+       * holds it (0031) and so does user_company_access, so keeping it makes
+       * each of those a foreign key the day this row exists rather than a
+       * second id map to carry forever.
+       *
+       * The grant is written here too — a company whose users have no grants
+       * is a company nobody can open, and the lazy seeding on the request
+       * path only fires for a user holding no grant at all.
+       */
+      const userDocs = await db
+        .collection("users")
+        .find({ companyId: oldCompanyId })
+        .toArray()
+        .catch(() => []);
+
+      for (const u of userDocs) {
+        const userId = String(u._id);
+        await tx`
+          INSERT INTO users (
+            id, name, email, role, status, department, avatar, auth_provider,
+            home_company_id, token_version, created_by_id, created_by_name
+          ) VALUES (
+            ${userId},
+            ${u.name ?? "Unknown user"},
+            ${String(u.email ?? `${userId}@unknown.invalid`).toLowerCase()},
+            ${u.role ?? "User"},
+            ${u.status === "Inactive" ? "inactive" : "active"},
+            ${u.department ?? null},
+            ${u.avatar ?? null},
+            ${u.authProvider ?? "credentials"},
+            ${companyUuid},
+            ${u.tokenVersion ?? 0},
+            ${u.creator?.id ?? null},
+            ${u.creator?.name ?? null}
+          )
+          ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            email = EXCLUDED.email,
+            role = EXCLUDED.role,
+            status = EXCLUDED.status,
+            department = EXCLUDED.department,
+            avatar = EXCLUDED.avatar,
+            auth_provider = EXCLUDED.auth_provider,
+            home_company_id = EXCLUDED.home_company_id,
+            token_version = EXCLUDED.token_version,
+            updated_at = now()
+        `;
+        stats.users++;
+
+        // Their party in this company, when they have one. u.partyId is the
+        // Mongo id; mapId resolves it to the uuid the party landed under.
+        const partyUuid = u.partyId
+          ? await mapId(tx, "parties", u.partyId)
+          : null;
+
+        await tx`
+          INSERT INTO user_company_access (
+            user_id, company_id, role, party_id, status, granted_via,
+            granted_by_name
+          ) VALUES (
+            ${userId}, ${companyUuid}, ${null}, ${partyUuid},
+            'active', 'primary', 'Backfill'
+          )
+          ON CONFLICT (user_id, company_id) DO UPDATE SET
+            status = 'active',
+            party_id = COALESCE(EXCLUDED.party_id, user_company_access.party_id),
+            updated_at = now()
+        `;
+        stats.userGrants++;
       }
 
       // ── products ─────────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ import {
 import { formatCurrency, serializeBsonType, formatAddress } from "@/lib/utils";
 import { QuoteDetailActions } from "../components/QuoteDetailActions";
 import { QuoteItemsTable } from "../components/QuoteItemsTable";
-import { getCompanyById } from "@/app/mongodb/queries/company-queries";
+import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
 
 export default async function QuoteDetailPage({ params, searchParams }) {
   const session = await auth();

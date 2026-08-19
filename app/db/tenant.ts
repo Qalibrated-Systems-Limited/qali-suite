@@ -1,6 +1,15 @@
 import { sql } from "drizzle-orm";
-import { db, withTenant, type Tx } from "./client";
+import { db, withTenant, withUserScope, type Tx } from "./client";
+import { upsertUser } from "./repositories/users";
+import {
+  listAllowedCompanies,
+  resolveActiveCompany,
+  grantAccess,
+  hasAnyGrant,
+} from "./repositories/companyAccess";
+import { grantAllTenants } from "./companyAccessAdmin";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { roleAllowed } from "@/lib/permissions";
 import {
   provisionCompany,
   forgetCompanyMapping,
@@ -30,6 +39,37 @@ import {
 // per-instance and rebuilt on cold start — no invalidation needed.
 const companyUuidCache = new Map<string, string>();
 
+/**
+ * The tenant's uuid, or null — WITHOUT provisioning one.
+ *
+ * resolveCompanyUuid creates the tenant when there is no mapping, which is
+ * right on the request path: a company that predates provisioning should just
+ * work. It is wrong for a READ. Asking "what is my VAT rate" must not
+ * manufacture a company, a chart of accounts and twelve fiscal periods as a
+ * side effect — and a caller that asks about a tenant that is not there wants
+ * to know that, not to be handed a brand-new empty one.
+ */
+export async function lookupCompanyUuid(
+  mongoCompanyId: string | null | undefined,
+): Promise<string | null> {
+  if (!isUsableCompanyId(mongoCompanyId)) return null;
+
+  const key = String(mongoCompanyId);
+  const cached = companyUuidCache.get(key);
+  if (cached) return cached;
+
+  const rows = (await db.execute(sql`
+    SELECT c.id
+      FROM _migration_id_map m
+      JOIN companies c ON c.id = m.new_uuid
+     WHERE m.collection = 'companies' AND m.old_object_id = ${key}
+  `)) as unknown as Array<{ id: string }>;
+
+  if (!rows.length) return null;
+  companyUuidCache.set(key, rows[0].id);
+  return rows[0].id;
+}
+
 export async function resolveCompanyUuid(
   mongoCompanyId: string | null | undefined,
   /** What the session knows about the tenant, for the provisioning fallback. */
@@ -56,8 +96,22 @@ export async function resolveCompanyUuid(
   `)) as unknown as Array<{ new_uuid: string }>;
 
   if (rows.length) {
-    companyUuidCache.set(key, rows[0].new_uuid);
-    return rows[0].new_uuid;
+    // A MAPPING IS NOT PROOF THE COMPANY IS THERE. The row can go while the
+    // mapping stays — a restore, or the test suite truncating the database it
+    // shares with the dev server, which is how this was found. Checking here
+    // means every caller gets a uuid that resolves to something, instead of
+    // each one discovering the hole differently.
+    const alive = (await db.execute(sql`
+      SELECT 1 AS ok FROM companies WHERE id = ${rows[0].new_uuid}
+    `)) as unknown as Array<unknown>;
+
+    if (alive.length) {
+      companyUuidCache.set(key, rows[0].new_uuid);
+      return rows[0].new_uuid;
+    }
+
+    companyUuidCache.delete(key);
+    await forgetCompanyMapping(key);
   }
 
 
@@ -83,131 +137,198 @@ export async function resolveCompanyUuid(
   return provisioned.companyId;
 }
 
-/**
- * Refuses a deactivated tenant.
- *
- * `companies.is_active` existed and NOTHING read it — not the policies, not a
- * repository — so deactivating a company greyed it out in an admin list while
- * its books stayed readable and writable. A flag nothing enforces is worse
- * than no flag, because it reads like a control.
- *
- * Checked here rather than in a policy because RLS decides which rows a tenant
- * can see, and this is a question about the tenant itself. Cached alongside
- * the uuid resolution it follows, and invalidated by setCompanyActive.
- */
-const activeCache = new Map<string, boolean>();
-
-async function assertCompanyActive(
-  companyUuid: string,
-  sourceKey: string,
-  role?: string,
-) {
-  // A SuperAdmin is platform staff, not a tenant user. Locking them out of a
-  // deactivated company would mean the only people who can reactivate it
-  // cannot open it — a trap that springs the moment the control is used.
-  if (role === "SuperAdmin") return;
-
-  if (activeCache.get(companyUuid)) return;
-
-  // Scoped, because since 0024 `companies` is itself under RLS keyed on its
-  // own id. Read on an unscoped connection it returns zero rows and every
-  // tenant looks deactivated — which is how this was first written, and what
-  // the provisioning tests caught.
-  const rows = await withTenant(companyUuid, async (tx) => {
-    return (await tx.execute(sql`
-      SELECT is_active FROM companies WHERE id = ${companyUuid}
-    `)) as unknown as Array<{ is_active: boolean }>;
-  });
-
-  // NO ROW IS NOT "DEACTIVATED". It means the id map points at a company that
-  // is no longer there, so what this process cached is stale — and telling
-  // somebody their company is deactivated when the row was dropped underneath
-  // them sends them to an administrator who will find nothing wrong.
-  //
-  // Drop the stale entries and let the caller re-resolve, which provisions the
-  // tenant again. Reported by a developer whose dev database had been
-  // truncated by the test suite; a restore from backup does the same.
-  if (!rows.length) {
-    companyUuidCache.delete(sourceKey);
-    activeCache.delete(companyUuid);
-    // The stale entry is in the DATABASE, not just this process. Clearing the
-    // in-process cache alone made the retry resolve the same dead uuid and
-    // fail identically — which is what a developer hit after the company row
-    // went and the mapping stayed.
-    await forgetCompanyMapping(sourceKey);
-    throw new StaleTenantMapping(sourceKey);
-  }
-
-  if (!rows[0].is_active) {
-    throw new Error("This company is not active. Contact your administrator.");
-  }
-  activeCache.set(companyUuid, true);
-}
-
-/** Thrown when the cached mapping outlived the company row. Retried once. */
-class StaleTenantMapping extends Error {
-  constructor(readonly sourceKey: string) {
-    super(`Tenant mapping for ${sourceKey} is stale`);
-  }
-}
-
-/** Called when a tenant is activated or deactivated, so the gate reacts. */
-export function forgetCompanyActive(companyUuid: string) {
-  activeCache.delete(companyUuid);
-}
-
 function isUsableCompanyId(value: unknown): value is string {
   const s = String(value ?? "").trim();
   return s !== "" && s !== "null" && s !== "undefined";
-}
-
-/**
- * Which tenant this request acts as.
- *
- * A SUPERADMIN IS NOT AN EXEMPTION FROM TENANCY, IT IS A CHOICE OF TENANT.
- * Mongo's withTenantScope returns the query UNSCOPED for a SuperAdmin
- * (tenant-utils.js:116), so they read every tenant's rows mixed together —
- * which is exactly the §2.2 model row-level security replaces, and giving
- * them a BYPASSRLS connection would undo §9A along with it.
- *
- * So a SuperAdmin acts INSIDE one company, with all the same policies applied.
- * Their session usually carries which; when it does not:
- *
- *   • one tenant exists  → act as it, because there is no choice to make
- *   • several exist      → refuse, and say so. Picking one silently would show
- *                          a platform administrator one customer's books while
- *                          they believed they were looking at another's.
- *
- * The lasting answer is a company switcher that writes the choice to the
- * session. This is what makes the app usable until there is one, and it is
- * deliberately not a way to see across tenants.
- */
-async function resolveActingCompanyId(
-  sessionCompanyId: unknown,
-  role: string | undefined,
-): Promise<string> {
-  if (isUsableCompanyId(sessionCompanyId)) return sessionCompanyId;
-
-  if (role !== "SuperAdmin") {
-    throw new Error(
-      "No company selected. Choose a company before opening this page.",
-    );
-  }
-
-  const tenants = await listProvisionedTenants();
-  if (tenants.length === 1) return tenants[0].source_id;
-
-  throw new Error(
-    tenants.length === 0
-      ? "No company has been set up yet. Create one under Admin → Companies."
-      : `No company selected. This account is not tied to one, and there are ${tenants.length}. Choose a company before opening this page.`,
-  );
 }
 
 export interface ActionUser {
   id: string;
   name: string;
   role: string;
+  /** Present from the session; used to seed the users table (0036). */
+  email?: string | null;
+}
+
+/**
+ * Which tenant this request acts as.
+ *
+ * AUTHORISATION IS A SET; OPERATING CONTEXT IS ONE OF IT. The grants say which
+ * companies the user may enter (0033); the session says which one they are on.
+ * RLS is scoped to that one, never to the set — `company_id = ANY(allowed)`
+ * would make an ordinary list return several companies' ledgers together,
+ * which is not a broader view of the books but a meaningless one.
+ *
+ * A SuperAdmin is not an exemption from this, only a user with more grants.
+ * Nothing here needs a database role that bypasses row-level security.
+ *
+ * The grants are re-read every request rather than trusted from the token, so
+ * revoking access or deactivating a company takes effect immediately instead
+ * of at the next refresh.
+ */
+async function resolveActingCompany(
+  user: ActionUser,
+  sessionCompanyId: unknown,
+  sessionCompanyCode: unknown,
+  activeCompanyId: unknown,
+): Promise<{ companyUuid: string; role: string }> {
+  const { allowed: granted, seeded } = await withUserScope(
+    user.id,
+    async (tx) => ({
+      allowed: await listAllowedCompanies(tx, user.id),
+      // Any row, not any ACTIVE row: a user whose access was revoked must not
+      // be re-granted by the next request, and "no active grants" cannot tell
+      // that apart from "never granted anything".
+      seeded: await hasAnyGrant(tx, user.id),
+    }),
+  );
+
+  // NOTHING GRANTED YET. Every user predates this table, so the grants are
+  // seeded from what the system already believed — lazily, so nobody is locked
+  // out by a script that has not been run, and idempotently, so it converges
+  // whether it runs once or on every request.
+  const allowed =
+    granted.length || seeded
+      ? granted
+      : await seedGrants(user, sessionCompanyId, sessionCompanyCode);
+
+  const requested = isUsableCompanyId(activeCompanyId)
+    ? String(activeCompanyId)
+    : null;
+  let active = resolveActiveCompany(allowed, requested);
+
+  /**
+   * PLATFORM STAFF HOLD STANDING ACCESS, AND IT IS STILL A ROW.
+   *
+   * Of the two ways ERPs let platform staff in — standing (NetSuite's
+   * Administrator, a Dynamics sysadmin, who simply hold every company in the
+   * deployment) and granted-per-company (Xero, QuickBooks, SAP's separation of
+   * duties, where each one is handed over and audited) — this is the first,
+   * written down as the second. A SuperAdmin ends up holding every tenant, but
+   * by a dated, named, revocable row that shows on that company's access list,
+   * not by a role check scattered through the code. That is what answers "who
+   * could read these books in March".
+   *
+   * Topped up HERE, on the path where they would otherwise be refused, so an
+   * ordinary request pays nothing for it. It is reached by a SuperAdmin who
+   * predates a company, or a company that predates them — neither of which
+   * should mean the only people who can repair a tenant cannot open it.
+   *
+   * Standing means standing: revoking a SuperAdmin is undone the next time
+   * they are refused. Take the SuperAdmin role away instead — that is the
+   * control, and the access card says so.
+   */
+  if (!active && user.role === "SuperAdmin") {
+    await grantAllTenants({ id: user.id, name: user.name });
+    const toppedUp = await withUserScope(user.id, (tx) =>
+      listAllowedCompanies(tx, user.id),
+    );
+    active = resolveActiveCompany(toppedUp, requested);
+    if (active) return { companyUuid: active.id, role: active.role ?? user.role };
+    allowed.splice(0, allowed.length, ...toppedUp);
+  }
+
+  if (active) return { companyUuid: active.id, role: active.role ?? user.role };
+
+  if (requested) {
+    throw new Error("You do not have access to that company. Choose another.");
+  }
+
+  const usable = allowed.filter((c) => c.isActive);
+  throw new Error(
+    usable.length === 0
+      ? allowed.length === 0
+        ? "You do not have access to any company. Contact your administrator."
+        : "This company is not active. Contact your administrator."
+      : `No company selected. You have access to ${usable.length}. Choose one before opening this page.`,
+  );
+}
+
+/**
+ * Derives grants from what the system believed before this table existed.
+ *
+ * A SuperAdmin manages every company, so they get one grant each — written
+ * down rather than implied by a role check scattered through the code, which
+ * is what answers "who could see this company in March". Anyone else gets
+ * their home company.
+ */
+async function seedGrants(
+  user: ActionUser,
+  sessionCompanyId: unknown,
+  sessionCompanyCode: unknown,
+) {
+  const reread = () =>
+    withUserScope(user.id, (tx) => listAllowedCompanies(tx, user.id));
+
+  /**
+   * The login itself, recorded the first time we seed for this person (0036).
+   *
+   * Here rather than on every request: an upsert per request is a write per
+   * request for a row that changes when an admin edits it, which is rare.
+   * Every user predates the table, so they arrive one at a time as each is
+   * first seen — the same laziness the grants use, for the same reason.
+   *
+   * A failure does not stop the request. Nothing reads `users` on this path
+   * yet; the grants are what the gate obeys, and refusing somebody entry
+   * because their identity row could not be written would be a new way to
+   * lock people out of working books.
+   */
+  const recordUser = async (homeCompanyId: string | null) => {
+    try {
+      await withUserScope(user.id, (tx) =>
+        upsertUser(tx, {
+          id: user.id,
+          name: user.name,
+          email: user.email ?? null,
+          role: user.role,
+          homeCompanyId,
+        }),
+      );
+    } catch (err) {
+      console.error("Could not record user in Postgres:", err);
+    }
+  };
+
+  if (user.role === "SuperAdmin") {
+    const tenants = await listProvisionedTenants();
+    if (tenants.length) {
+      await withUserScope(user.id, async (tx) => {
+        for (const t of tenants) {
+          await grantAccess(tx, {
+            userId: user.id,
+            companyId: t.id,
+            grantedVia: "superadmin",
+            grantedByName: "System",
+          });
+        }
+      });
+      // Platform staff belong to no company, so no home company.
+      await recordUser(null);
+      return reread();
+    }
+  }
+
+  if (!isUsableCompanyId(sessionCompanyId)) {
+    throw new Error(
+      user.role === "SuperAdmin"
+        ? "No company has been set up yet. Create one under Admin → Companies."
+        : "No company selected. Choose a company before opening this page.",
+    );
+  }
+
+  const companyUuid = await resolveCompanyUuid(sessionCompanyId, {
+    code: sessionCompanyCode as string | null,
+  });
+  await withUserScope(user.id, (tx) =>
+    grantAccess(tx, {
+      userId: user.id,
+      companyId: companyUuid,
+      grantedVia: "primary",
+      grantedByName: "System",
+    }),
+  );
+  await recordUser(companyUuid);
+  return reread();
 }
 
 /**
@@ -222,32 +343,40 @@ export async function withAuthorizedTenant<T>(
   allowedRoles: string[],
   fn: (tx: Tx, ctx: { user: ActionUser; companyId: string }) => Promise<T>,
 ): Promise<T> {
-  const { user, companyId, companyCode } = await getTenantContext();
+  const { user, companyId, companyCode, activeCompanyId } =
+    await getTenantContext();
 
   if (!user) throw new Error("Not authenticated");
-  if (allowedRoles.length && !allowedRoles.includes(user.role)) {
+  // roleAllowed, not allowList.includes: it grants SuperAdmin without every
+  // call site having to remember to list them, which is the whole point of
+  // the helper — and under the standing-access model a SuperAdmin who has
+  // entered a company acts with full authority INSIDE it, on that company's
+  // rows only. The gate runs again below against the role for the ACTIVE
+  // company, which is the one that decides what this request may do.
+  if (allowedRoles.length && !roleAllowed(user.role, allowedRoles)) {
     throw new Error("You don't have permission to perform this action.");
   }
 
   // The session carries a company CODE, not a name. It is the best label
   // available here, and provisioning only needs one to put on the row.
-  const actingCompanyId = await resolveActingCompanyId(companyId, user.role);
-  const hint = { code: companyCode };
-  let companyUuid = await resolveCompanyUuid(actingCompanyId, hint);
+  const acting = await resolveActingCompany(
+    user as ActionUser,
+    companyId,
+    companyCode,
+    activeCompanyId,
+  );
 
-  try {
-    await assertCompanyActive(companyUuid, actingCompanyId, user.role);
-  } catch (err) {
-    if (!(err instanceof StaleTenantMapping)) throw err;
-    // Resolve again with the caches cleared: the tenant is re-provisioned and
-    // the request carries on, rather than failing on a fact about this
-    // process's memory that nobody reading the message can act on.
-    companyUuid = await resolveCompanyUuid(actingCompanyId, hint);
-    await assertCompanyActive(companyUuid, actingCompanyId, user.role);
+  // The role for the ACTIVE company. Null on the grant means the global role,
+  // which is what every grant carried over from the single-company model says.
+  const actingUser = { ...(user as ActionUser), role: acting.role };
+  if (allowedRoles.length && !roleAllowed(actingUser.role, allowedRoles)) {
+    throw new Error("You don't have permission to perform this action.");
   }
 
-  return withTenant(companyUuid, (tx) =>
-    fn(tx, { user: user as ActionUser, companyId: companyUuid }),
+  return withTenant(
+    acting.companyUuid,
+    (tx) => fn(tx, { user: actingUser, companyId: acting.companyUuid }),
+    actingUser.id,
   );
 }
 

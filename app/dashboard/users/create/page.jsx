@@ -5,7 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Shield, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { getCompaniesForDropdown } from "@/app/mongodb/queries/company-queries";
+import { listCompaniesForDropdown as getCompaniesForDropdown } from "@/app/db/platform";
 
 async function CreateUserPage() {
   const session = await auth();

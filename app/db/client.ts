@@ -79,6 +79,12 @@ export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export async function withTenant<T>(
   companyId: string,
   fn: (tx: Tx) => Promise<T>,
+  /**
+   * Who is making the request. Set alongside the tenant so a policy can key on
+   * the USER where that is the natural boundary — user_company_access does,
+   * because "which companies may I enter" is asked before one is chosen (0033).
+   */
+  userId?: string | null,
 ): Promise<T> {
   if (!companyId) {
     throw new Error("withTenant called without a companyId");
@@ -87,6 +93,28 @@ export async function withTenant<T>(
     await tx.execute(
       sql`SELECT set_config('app.company_id', ${companyId}, true)`,
     );
+    if (userId) {
+      await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    }
+    return fn(tx);
+  });
+}
+
+/**
+ * Runs `fn` scoped to a USER but no company.
+ *
+ * For the one question that precedes choosing a tenant: which companies may
+ * this person operate in. Only user_company_access has a policy that answers
+ * under this scope; every company-keyed table returns zero rows, which is the
+ * correct answer to asking them without a tenant.
+ */
+export async function withUserScope<T>(
+  userId: string,
+  fn: (tx: Tx) => Promise<T>,
+): Promise<T> {
+  if (!userId) throw new Error("withUserScope called without a userId");
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
     return fn(tx);
   });
 }

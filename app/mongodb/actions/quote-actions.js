@@ -4,7 +4,7 @@ import { formatAddress } from "@/lib/format-address";
 import Quote from "@/app/models/quote";
 import Party from "@/app/models/parties";
 import Product from "@/app/models/product";
-import Company from "@/app/models/Company";
+import { getCompanyForDocuments } from "@/app/db/platform";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
@@ -435,9 +435,7 @@ export async function sendQuote(quoteId) {
           import("@react-pdf/renderer"),
           import("@/lib/pdf"),
           Quote.findById(quoteId).lean(),
-          Company.findById(quote.companyId)
-            .select("name email phone address bankName accountNumber settings")
-            .lean(),
+          getCompanyForDocuments(String(quote.companyId)),
         ]);
       if (!freshQuote) return;
 
