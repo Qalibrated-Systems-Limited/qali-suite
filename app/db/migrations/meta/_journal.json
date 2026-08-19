@@ -267,6 +267,27 @@
       "when": 1787049110566,
       "tag": "0037_grants_visible_within_company",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787049111566,
+      "tag": "0038_user_role_is_constrained",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1787049112566,
+      "tag": "0039_roles_are_authority_not_job_title",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1787049113566,
+      "tag": "0040_role_default_is_a_role",
+      "breakpoints": true
     }
   ]
 }

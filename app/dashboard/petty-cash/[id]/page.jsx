@@ -15,7 +15,7 @@ import PettyCashLedger from "../components/PettyCashLedger";
 import PettyCashWorkflow from "../components/PettyCashWorkflow";
 
 const CUSTODIAN_ROLES = new Set(["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"]);
-const APPROVER_ROLES = new Set(["SuperAdmin", "Admin", "CEO", "CFO"]);
+const APPROVER_ROLES = new Set(["SuperAdmin", "Admin", "CFO"]);
 
 const STATUS_STYLES = {
   draft: "bg-zinc-100 text-zinc-700",

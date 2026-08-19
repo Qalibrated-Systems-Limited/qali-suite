@@ -36,7 +36,7 @@ async function loadConfig() {
 export default async function AttendanceConfigPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!["SuperAdmin", "Admin", "HR"].includes(session.user.role)) redirect("/dashboard/settings");
+  if (!["SuperAdmin", "Admin", "HR Manager"].includes(session.user.role)) redirect("/dashboard/settings");
 
   const config = await loadConfig();
 

@@ -6,7 +6,7 @@ import LeaveAdminClient from "./LeaveAdminClient";
 
 export const metadata = { title: "Leave Administration | HR" };
 
-const ALLOWED = ["SuperAdmin", "Admin", "HR"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR Manager"];
 
 export default async function LeaveAdminPage() {
   const session = await auth();

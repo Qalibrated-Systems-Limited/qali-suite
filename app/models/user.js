@@ -4,9 +4,8 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
 export const userRoles = [
-  "SuperAdmin", // System-wide admin (manages all companies)
+  "SuperAdmin", // Platform staff — holds a grant for every company (0033)
   "Admin", // Company-level admin
-  "CEO", // Executive — read access across the business; no operational writes
   // Finance / accounting tiers (stacked top-down)
   "CFO", // Highest finance authority — large write-offs, price floor, policy
   "Finance Manager", // Mid-tier finance approvals, journal posting oversight
@@ -19,13 +18,41 @@ export const userRoles = [
   "Manager", // Cross-functional operations
   "Store Manager", // Authorizes intra-store moves, supervises counts
   "Storekeeper", // Physical custody — receives, issues, counts. NO pricing access
-  // Other
-  "HR",
-  "Technician",
-  "Employee",
-  "User", // Legacy generic — prefer Employee for new users
-  "Viewer", // Read-only
+  // People
+  "HR Manager", // Employee records, leave, payroll runs
+  "Employee", // Own records, requests, self-service
+  "Viewer", // Read-only across the business
 ];
+
+/**
+ * A ROLE IS AUTHORITY, NOT A JOB TITLE (migration 0039).
+ *
+ * SAP, NetSuite, Dynamics, Odoo, Xero and QuickBooks all model a role as a
+ * bundle of permissions — Dynamics is explicit about it: Roles are made of
+ * Duties, Duties of Privileges. None of them ship a role called "Technician",
+ * because that is a job, and a job belongs on the employee record next to the
+ * salary. `EmployeeProfile.employment.designation` is where it lives here.
+ *
+ * Retired, and what they became:
+ *
+ *   Technician → Employee   A job title. The concept survives where it is used:
+ *                           StockRequest.technician is a party reference, so
+ *                           the person on a repair job is still named.
+ *   CEO        → Viewer     Its own comment said "read access, no operational
+ *                           writes", which is Viewer. Two spellings of one fact
+ *                           drift the moment a gate is added for one only.
+ *   User       → Employee   Marked legacy here, and set as the DEFAULT — so
+ *                           every user created without an explicit role landed
+ *                           on the role this file told you not to use.
+ *   HR         → HR Manager Reads as authority rather than as the department
+ *                           somebody sits in; `department` already records that.
+ */
+export const RETIRED_ROLES = Object.freeze({
+  Technician: "Employee",
+  CEO: "Viewer",
+  User: "Employee",
+  HR: "HR Manager",
+});
 
 const Schema = mongoose.Schema;
 
@@ -79,7 +106,9 @@ const userSchema = new Schema(
     role: {
       type: String,
       enum: userRoles,
-      default: "User",
+      // Employee, not the legacy "User": the default should be a role the
+      // product actually gates on.
+      default: "Employee",
     },
 
     avatar: {

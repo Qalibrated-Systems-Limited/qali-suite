@@ -148,8 +148,8 @@ function DocRow({ profileId, doc, canDelete }) {
 }
 
 export default function EmployeeDocuments({ profileId, documents = [], userRole }) {
-  const canUpload = ["SuperAdmin", "Admin", "HR", "Manager"].includes(userRole);
-  const canDelete = ["SuperAdmin", "Admin", "HR"].includes(userRole);
+  const canUpload = ["SuperAdmin", "Admin", "HR Manager", "Manager"].includes(userRole);
+  const canDelete = ["SuperAdmin", "Admin", "HR Manager"].includes(userRole);
   const [showForm, setShowForm] = useState(false);
 
   return (

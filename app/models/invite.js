@@ -17,7 +17,7 @@ const inviteSchema = new Schema(
       type: String,
       enum: userRoles,
       required: [true, "Role is required"],
-      default: "User",
+      default: "Employee",
     },
 
     companyId: {

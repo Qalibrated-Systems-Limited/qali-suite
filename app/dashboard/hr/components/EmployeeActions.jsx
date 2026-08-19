@@ -46,7 +46,7 @@ function ConfirmDialog({ open, onClose, title, description, confirmLabel, onConf
 const INVITE_ROLES = [
   { value: "Employee", label: "Employee", desc: "View own payslips, leave, attendance" },
   { value: "Manager", label: "Manager", desc: "Approve leave, view team data" },
-  { value: "HR", label: "HR", desc: "Full HR access — employees, payroll, leave" },
+  { value: "HR Manager", label: "HR Manager", desc: "Full HR access — employees, payroll, leave" },
   { value: "Accountant", label: "Accountant", desc: "Finance, reports, tax compliance" },
   { value: "Store Manager", label: "Store Manager", desc: "Inventory, stock requests" },
   { value: "Admin", label: "Admin", desc: "Full system access" },
@@ -159,9 +159,9 @@ export function EmployeeActions({ profileId, status, hasLogin, userRole, email }
   const [dialog, setDialog] = useState(null);
   const [dialogError, setDialogError] = useState(null);
 
-  const canConfirm = status === "probation" && ["SuperAdmin", "Admin", "Manager", "HR"].includes(userRole);
+  const canConfirm = status === "probation" && ["SuperAdmin", "Admin", "Manager", "HR Manager"].includes(userRole);
   const canTerminate = status !== "terminated" && userRole === "Admin";
-  const canInvite = !hasLogin && ["SuperAdmin", "Admin", "HR"].includes(userRole);
+  const canInvite = !hasLogin && ["SuperAdmin", "Admin", "HR Manager"].includes(userRole);
 
   function handleConfirm() {
     setDialogError(null);

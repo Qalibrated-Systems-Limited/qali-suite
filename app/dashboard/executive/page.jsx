@@ -13,7 +13,9 @@ export const dynamic = "force-dynamic";
 // Role-centre exclusivity: the CEO reaches this view at /dashboard (their
 // home, via the role registry); this standalone route exists for SuperAdmin
 // support access and deep links.
-const EXEC_ROLES = ["SuperAdmin", "CEO"];
+// The executive dashboard IS the read-across-the-business view, which is
+// what Viewer means now that CEO has retired into it (0039).
+const EXEC_ROLES = ["SuperAdmin", "Admin", "CFO", "Viewer"];
 
 export default async function ExecutivePage() {
   const session = await auth();

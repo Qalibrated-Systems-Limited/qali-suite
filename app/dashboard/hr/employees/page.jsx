@@ -7,7 +7,7 @@ import { UserPlus, Search, Upload, AlertTriangle } from "lucide-react";
 
 export const metadata = { title: "Employees | HR" };
 
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR"];
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
 
 function StatusBadge({ status }) {
   const map = {

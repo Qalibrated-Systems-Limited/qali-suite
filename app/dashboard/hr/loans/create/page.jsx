@@ -10,8 +10,8 @@ import LoanRequestForm from "@/app/dashboard/hr/loans/components/LoanRequestForm
 
 export const metadata = { title: "New Loan Request | HR" };
 
-const CREATE_ROLES = ["SuperAdmin", "Admin", "Manager", "HR", "Employee"];
-const ADMIN_ROLES = ["SuperAdmin", "Admin", "Manager", "HR"];
+const CREATE_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager", "Employee"];
+const ADMIN_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
 
 async function LoanFormLoader({ isAdmin, userId }) {
   await dbConnect();

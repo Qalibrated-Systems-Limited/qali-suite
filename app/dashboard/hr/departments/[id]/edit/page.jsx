@@ -9,7 +9,7 @@ import EmployeeProfile from "@/app/models/employeeProfile";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import DepartmentEditForm from "../../../components/DepartmentEditForm";
 
-const EDIT_ROLES = ["SuperAdmin", "Admin", "Manager", "HR"];
+const EDIT_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
 
 export async function generateMetadata({ params }) {
   const { id } = await params;

@@ -7,7 +7,7 @@ import { Plus, Banknote, FileText } from "lucide-react";
 
 export const metadata = { title: "Payroll | HR" };
 
-const PAYROLL_ROLES = ["SuperAdmin", "Admin", "HR"];
+const PAYROLL_ROLES = ["SuperAdmin", "Admin", "HR Manager"];
 
 function StatusBadge({ status }) {
   const map = {
@@ -145,7 +145,7 @@ export default async function PayrollPage({ searchParams }) {
           <p className="hidden sm:block text-sm text-muted-foreground">Monthly payroll runs</p>
         </div>
         <div className="flex items-center gap-2">
-          {["SuperAdmin", "Admin", "HR", "Accountant"].includes(session.user.role) && (
+          {["SuperAdmin", "Admin", "HR Manager", "Accountant"].includes(session.user.role) && (
             <a
               href={`/api/hr/p9a?year=${currentYear}`}
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors"

@@ -7,7 +7,7 @@ import PayrollRun from "@/app/models/payrollRun";
 import PayrollEntry from "@/app/models/payrollEntry";
 import { checkPlanAccess } from "@/lib/plan-gate";
 
-const ALLOWED = ["SuperAdmin", "Admin", "HR"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR Manager"];
 
 export async function GET(_req, { params }) {
   try {

@@ -79,7 +79,7 @@ export function CreateUserForm({ companies = [], isSuperAdmin = false }) {
     defaultValues: {
       name: "",
       email: "",
-      role: "User",
+      role: "Employee",
       department: "",
       companyId: "",
     },

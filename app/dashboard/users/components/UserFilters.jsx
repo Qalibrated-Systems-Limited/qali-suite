@@ -24,10 +24,8 @@ export function UserRoleFilter({ currentRole }) {
         { value: "Admin", label: "Admin" },
         { value: "Manager", label: "Manager" },
         { value: "Employee", label: "Employee" },
-        { value: "Technician", label: "Technician" },
         { value: "Store Manager", label: "Store Manager" },
         { value: "Accountant", label: "Accountant" },
-        { value: "User", label: "User" },
         { value: "Viewer", label: "Viewer" },
       ]}
     />

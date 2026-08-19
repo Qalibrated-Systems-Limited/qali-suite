@@ -12,7 +12,7 @@ export async function saveAttendanceConfig(_prevState, formData) {
     await requirePlanAccess("hr");
     const session = await auth();
     if (!session?.user) return { success: false, error: "Unauthorized" };
-    if (!["SuperAdmin", "Admin", "HR"].includes(session.user.role)) return { success: false, error: "Forbidden" };
+    if (!["SuperAdmin", "Admin", "HR Manager"].includes(session.user.role)) return { success: false, error: "Forbidden" };
 
     await dbConnect();
     const { companyId } = await getTenantContext();

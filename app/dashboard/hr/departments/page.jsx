@@ -7,7 +7,7 @@ import { getDepartments } from "@/app/mongodb/queries/hr-queries";
 
 export const metadata = { title: "Departments | HR" };
 
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR"];
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
 
 async function DepartmentList({ searchParams }) {
   const params = await searchParams;

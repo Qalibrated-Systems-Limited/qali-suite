@@ -60,8 +60,8 @@ export function LeaveDetailActions({ leave, userRole }) {
   const [isPending, startTransition] = useTransition();
   const [rejectOpen, setRejectOpen] = useState(false);
 
-  const canApprove = leave.status === "submitted" && ["SuperAdmin", "Admin", "Manager", "HR"].includes(userRole);
-  const canReject = leave.status === "submitted" && ["SuperAdmin", "Admin", "Manager", "HR"].includes(userRole);
+  const canApprove = leave.status === "submitted" && ["SuperAdmin", "Admin", "Manager", "HR Manager"].includes(userRole);
+  const canReject = leave.status === "submitted" && ["SuperAdmin", "Admin", "Manager", "HR Manager"].includes(userRole);
   const canRecall = leave.status === "submitted";
   // A draft can be submitted for approval. The action enforces ownership
   // (owner, or Admin/HR/Manager) — without this the draft was a dead end.

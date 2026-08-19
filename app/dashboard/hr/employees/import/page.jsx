@@ -6,7 +6,7 @@ import BulkImportClient from "./BulkImportClient";
 
 export const metadata = { title: "Import Employees | HR" };
 
-const ALLOWED = ["SuperAdmin", "Admin", "HR"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR Manager"];
 
 export default async function EmployeeImportPage() {
   const session = await auth();

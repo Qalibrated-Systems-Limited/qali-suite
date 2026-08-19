@@ -54,7 +54,7 @@ import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import Account from "@/app/models/account";
 
-const VIEW_ROLES = ["SuperAdmin", "Admin", "CEO", "CFO", "Finance Manager", "Accountant", "Manager"];
+const VIEW_ROLES = ["SuperAdmin", "Admin", "Viewer", "CFO", "Finance Manager", "Accountant", "Manager"];
 const ADMIN_ROLES = ["SuperAdmin", "Admin"];
 const POST_DEP_ROLES = ["SuperAdmin", "Admin", "Accountant"];
 

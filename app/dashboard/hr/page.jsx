@@ -7,7 +7,7 @@ import { Users, Building2, Calendar, Banknote, Clock, UserCheck, AlertTriangle, 
 
 export const metadata = { title: "HR | Dashboard" };
 
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR"];
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
 
 async function HRStatsCards() {
   const stats = await getHRStats();

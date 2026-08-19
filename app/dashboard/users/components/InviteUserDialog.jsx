@@ -45,7 +45,7 @@ export default function InviteUserDialog({ isSuperAdmin = false, companies = [] 
   // Role + Company are now searchable comboboxes (Popover + Command),
   // so their value lives in local state and is submitted via a hidden
   // <input> rather than the Select's native form integration.
-  const [role, setRole] = useState("User");
+  const [role, setRole] = useState("Employee");
   const [rolePopoverOpen, setRolePopoverOpen] = useState(false);
   const [companyId, setCompanyId] = useState("");
   const [companyPopoverOpen, setCompanyPopoverOpen] = useState(false);

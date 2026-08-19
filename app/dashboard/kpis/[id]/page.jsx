@@ -9,9 +9,9 @@ import KpiDetailView from "./KpiDetailView";
 
 export const metadata = { title: "KPI Detail" };
 
-const VIEW_ROLES = ["SuperAdmin", "Admin", "CEO", "Manager", "CFO", "HR", "Accountant", "Finance Manager"];
-const MANAGE_ROLES = ["SuperAdmin", "Admin", "CEO", "Manager", "CFO", "HR"];
-const ENTER_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR", "Accountant"];
+const VIEW_ROLES = ["SuperAdmin", "Admin", "Viewer", "Manager", "CFO", "HR Manager", "Accountant", "Finance Manager"];
+const MANAGE_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR Manager"];
+const ENTER_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR Manager", "Accountant"];
 
 export default async function KpiDetailPage(props) {
   const session = await auth();

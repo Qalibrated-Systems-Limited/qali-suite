@@ -6,7 +6,7 @@ import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import EmployeeProfile from "@/app/models/employeeProfile";
 import { requirePlanAccess } from "@/lib/plan-gate";
 
-const ALLOWED = ["SuperAdmin", "Admin", "HR"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR Manager"];
 
 function guard(user) {
   if (!user) return "Not authenticated";

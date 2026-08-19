@@ -65,7 +65,7 @@ export default async function SettingsPage() {
   // canSeeSettingsNav surfaces the link to them, so the page now matches.
   const isFinanceUser =
     role === "Accountant" || role === "CFO" || role === "Finance Manager";
-  const isHR = role === "HR";
+  const isHR = role === "HR Manager";
 
   // At least one settings section must be visible
   const canSeeGeneralOrAccounting = isAdmin || isFinanceUser;

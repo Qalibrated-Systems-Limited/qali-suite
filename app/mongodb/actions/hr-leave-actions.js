@@ -15,9 +15,9 @@ import PublicHoliday from "@/app/models/publicHoliday";
 // ROLE AUTHORIZATION
 // ============================================
 const LEAVE_ROLES = {
-  CREATE: ["SuperAdmin", "Admin", "Manager", "HR", "Employee"],
-  APPROVE: ["SuperAdmin", "Admin", "Manager", "HR"],
-  ADMIN_CANCEL: ["SuperAdmin", "Admin", "HR"],   // Cancel an already-approved leave
+  CREATE: ["SuperAdmin", "Admin", "Manager", "HR Manager", "Employee"],
+  APPROVE: ["SuperAdmin", "Admin", "Manager", "HR Manager"],
+  ADMIN_CANCEL: ["SuperAdmin", "Admin", "HR Manager"],   // Cancel an already-approved leave
 };
 
 function hasRole(user, allowedRoles) {
@@ -74,7 +74,7 @@ export async function createLeaveRequest(_prevState, formData) {
     const profileId = formData.get("profileId")?.toString();
 
     // Ownership check — employees can only create leave for themselves
-    if (!["Admin", "HR", "Manager", "SuperAdmin"].includes(user.role)) {
+    if (!["Admin", "HR Manager", "Manager", "SuperAdmin"].includes(user.role)) {
       await dbConnect();
       const ownerProfile = await EmployeeProfile.findById(profileId).select("userId").lean();
       if (!ownerProfile || ownerProfile.userId?.toString() !== user.id) {
@@ -220,7 +220,7 @@ export async function submitLeaveRequest(leaveId) {
     if (!leave) return { success: false, error: "Leave request not found" };
 
     // Ownership check — employees can only submit their own leave requests
-    if (!["Admin", "HR", "Manager", "SuperAdmin"].includes(user.role)) {
+    if (!["Admin", "HR Manager", "Manager", "SuperAdmin"].includes(user.role)) {
       if (leave.employee.userId?.toString() !== user.id) {
         return { success: false, error: "You can only submit your own leave requests" };
       }

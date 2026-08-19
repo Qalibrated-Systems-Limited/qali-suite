@@ -827,6 +827,82 @@ suite("tenant provisioning", () => {
       }
     });
 
+    it("refuses a role that is not a role", async () => {
+      const source = sourceId();
+      await provisionCompany({ sourceCompanyId: source, name: "Pilot" });
+
+      // roleAllowed answers false for anything off the list, so a role saved
+      // as "Acountant" is refused by every gate in the product: the person can
+      // sign in and can do nothing, with no error anywhere that says why.
+      const err = await userAdmin
+        .syncUser({
+          id: "typo-user",
+          name: "Typo",
+          email: "typo@p.co",
+          role: "Acountant",
+          companyId: source,
+        })
+        .catch((e) => e);
+      // Drizzle wraps the driver error, so the constraint name is on the
+      // cause rather than in the message.
+      expect(err?.cause?.constraint_name).toBe("users_role_valid");
+
+      await expect(
+        userAdmin.syncUser({
+          id: "good-user",
+          name: "Fine",
+          email: "fine@p.co",
+          role: "Accountant",
+          companyId: source,
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it("refuses the roles that were retired", async () => {
+      const source = sourceId();
+      await provisionCompany({ sourceCompanyId: source, name: "Pilot" });
+
+      // A role says what you may do, not what you do all day (0039).
+      for (const dead of ["Technician", "CEO", "User", "HR"]) {
+        const err = await userAdmin
+          .syncUser({
+            id: `dead-${dead}`,
+            name: dead,
+            email: `${dead}@p.co`,
+            role: dead,
+            companyId: source,
+          })
+          .catch((e) => e);
+        expect(err?.cause?.constraint_name).toBe("users_role_valid");
+      }
+
+      // And what they became is accepted.
+      for (const live of ["Employee", "Viewer", "HR Manager"]) {
+        await expect(
+          userAdmin.syncUser({
+            id: `live-${live}`,
+            name: live,
+            email: `${live.replace(" ", "")}@p.co`,
+            role: live,
+            companyId: source,
+          }),
+        ).resolves.toBeDefined();
+      }
+    });
+
+    it("defaults to a role that exists", async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({ sourceCompanyId: source, name: "P" });
+
+      // The column default has to satisfy the column's own CHECK — it was left
+      // as the retired 'User' and every insert that omitted a role would have
+      // failed on a value the schema itself supplied (0040).
+      await admin`INSERT INTO users (id, name, email, home_company_id)
+                  VALUES ('defaulted', 'No Role', 'nr@p.co', ${companyId})`;
+      const [u] = await admin`SELECT role FROM users WHERE id = 'defaulted'`;
+      expect(u.role).toBe("Employee");
+    });
+
     it("allows a grant with no role of its own", async () => {
       const source = sourceId();
       await provisionCompany({ sourceCompanyId: source, name: "Pilot" });
@@ -842,6 +918,15 @@ suite("tenant provisioning", () => {
         }),
       ).resolves.toMatchObject({ granted: true });
 
+      const err = await accessAdmin
+        .grantCompanyAccess({
+          sourceCompanyId: source,
+          userId: "u-null",
+          // A retired role is refused like any other non-role (0039).
+          role: "Technician",
+        })
+        .catch((e) => e);
+      expect(err?.cause?.constraint_name).toBe("user_company_access_role_valid");
     });
 
     it("links a login to its party, per company", async () => {

@@ -33,8 +33,8 @@ import {
 // SuperAdmin / CFO / Finance Manager added across the board — they are
 // the senior finance authority. HR drafts; Finance approves and posts.
 const PAYROLL_ROLES = {
-  CREATE: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR"],
-  REVIEW: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR", "Manager"],
+  CREATE: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR Manager"],
+  REVIEW: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR Manager", "Manager"],
   APPROVE: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
   POST: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
   VOID: ["SuperAdmin", "Admin", "CFO"],

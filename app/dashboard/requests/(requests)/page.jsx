@@ -45,7 +45,7 @@ const RequestsPage = async (props) => {
   // lowercase coercion broke buildRoleFilter — Admin / SuperAdmin /
   // Manager would silently fall through to "own requests only" because
   // the filter compares against canonical names.
-  const userRole = user.role || "User";
+  const userRole = user.role || "Employee";
   const canOnlyViewOwn = ![
     "SuperAdmin",
     "Admin",

@@ -161,7 +161,7 @@ export function PayrollActions({ payrollRun, userRole }) {
 
   const { _id: runId, status } = payrollRun;
 
-  const canGenerate = ["draft", "processing"].includes(status) && ["SuperAdmin", "Admin", "HR"].includes(userRole);
+  const canGenerate = ["draft", "processing"].includes(status) && ["SuperAdmin", "Admin", "HR Manager"].includes(userRole);
   const canApprove = ["processing", "review"].includes(status) && userRole === "Admin";
   const canMarkPaid = status === "approved" && userRole === "Admin";
   const canVoid = !["paid", "voided"].includes(status) && userRole === "Admin";
@@ -307,7 +307,7 @@ export function PayslipButton({ payrollRunId, entryId }) {
 
 // ─── Payroll Export Buttons (bank CSV, M-Pesa CSV, statutory) ────
 export function PayrollExportButtons({ payrollRunId, userRole }) {
-  if (!["SuperAdmin", "Admin", "HR"].includes(userRole)) return null;
+  if (!["SuperAdmin", "Admin", "HR Manager"].includes(userRole)) return null;
 
   const exportLink = (href, icon, label) => (
     <a

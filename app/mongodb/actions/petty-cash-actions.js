@@ -32,7 +32,9 @@ const CUSTODIAN_ROLES = new Set([
   "Accountant",
 ]);
 // The MD signs off. (Managing Director maps to CEO/Admin in the role set.)
-const APPROVER_ROLES = new Set(["SuperAdmin", "Admin", "CEO", "CFO"]);
+// CEO retired (0039). Dropped rather than mapped to Viewer: this is an
+// APPROVAL gate, and a read-only role must not inherit an approval right.
+const APPROVER_ROLES = new Set(["SuperAdmin", "Admin", "CFO"]);
 
 function isCustodian(user) {
   return CUSTODIAN_ROLES.has(user?.role);

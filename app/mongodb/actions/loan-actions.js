@@ -76,11 +76,11 @@ const RejectLoanSchema = z.object({
 // ROLE AUTHORIZATION
 // ============================================
 const LOAN_ROLES = {
-  CREATE: ["SuperAdmin", "Admin", "HR", "Employee"],
-  APPROVE: ["SuperAdmin", "Admin", "HR", "CFO", "Finance Manager"],
+  CREATE: ["SuperAdmin", "Admin", "HR Manager", "Employee"],
+  APPROVE: ["SuperAdmin", "Admin", "HR Manager", "CFO", "Finance Manager"],
   // Disbursement releases cash — finance leadership in addition to Admin.
   DISBURSE: ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
-  VIEW_ALL: ["SuperAdmin", "Admin", "HR", "Accountant", "CFO", "Finance Manager"],
+  VIEW_ALL: ["SuperAdmin", "Admin", "HR Manager", "Accountant", "CFO", "Finance Manager"],
 };
 
 function hasRole(user, roles) {
@@ -186,7 +186,7 @@ export async function createLoanRequest(_prevState, formData) {
     await dbConnect();
 
     // Ownership check -- Employee role can only request for themselves
-    if (!["Admin", "HR", "Manager", "SuperAdmin"].includes(user.role)) {
+    if (!["Admin", "HR Manager", "Manager", "SuperAdmin"].includes(user.role)) {
       const profile = await EmployeeProfile.findOne({
         companyId: tenantCompanyId,
         partyId,

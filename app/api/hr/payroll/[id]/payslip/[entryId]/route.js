@@ -10,7 +10,7 @@ import { getCompanyForDocuments } from "@/app/db/platform";
 import { PayslipDocument } from "./PayslipDocument";
 import { checkPlanAccess } from "@/lib/plan-gate";
 
-const ALLOWED = ["SuperAdmin", "Admin", "HR", "Manager"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR Manager", "Manager"];
 
 export async function GET(_req, { params }) {
   try {

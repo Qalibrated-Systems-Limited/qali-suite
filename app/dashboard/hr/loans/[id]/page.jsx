@@ -64,7 +64,7 @@ function serializeLoan(raw) {
   };
 }
 
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR", "Accountant", "Employee"];
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager", "Accountant", "Employee"];
 
 const MONTH_NAMES = [
   "", "January", "February", "March", "April", "May", "June",

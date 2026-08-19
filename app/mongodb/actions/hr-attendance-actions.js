@@ -19,7 +19,7 @@ import {
 // HR ATTENDANCE ACTIONS
 // ============================================
 
-const ALLOWED_HR = ["SuperAdmin", "Admin", "HR", "Manager"];
+const ALLOWED_HR = ["SuperAdmin", "Admin", "HR Manager", "Manager"];
 
 // Build employee snapshot from profile
 function employeeSnapshot(profile) {
@@ -48,7 +48,7 @@ export async function clockIn({ profileId, method = "web", ipAddress, location }
     const { companyId } = await getTenantContext();
 
     // Ownership check — employees can only clock in for themselves
-    if (!["Admin", "HR", "Manager", "SuperAdmin"].includes(session.user.role)) {
+    if (!["Admin", "HR Manager", "Manager", "SuperAdmin"].includes(session.user.role)) {
       const ownerProfile = await EmployeeProfile.findById(profileId).select("userId").lean();
       if (!ownerProfile || ownerProfile.userId?.toString() !== session.user.id) {
         return { success: false, error: "You can only clock in for yourself" };
@@ -200,7 +200,7 @@ export async function clockOut({ profileId, method = "web", ipAddress } = {}) {
     const { companyId } = await getTenantContext();
 
     // Ownership check — employees can only clock out for themselves
-    if (!["Admin", "HR", "Manager", "SuperAdmin"].includes(session.user.role)) {
+    if (!["Admin", "HR Manager", "Manager", "SuperAdmin"].includes(session.user.role)) {
       const profile = await EmployeeProfile.findById(profileId).select("userId").lean();
       if (!profile || profile.userId?.toString() !== session.user.id) {
         return { success: false, error: "You can only clock out for yourself" };

@@ -28,7 +28,7 @@ const EMPLOYEE_NAV = [
 
 export default function HRNav({ role }) {
   const pathname = usePathname();
-  const isAdmin = ["SuperAdmin", "Admin", "Manager", "HR"].includes(role);
+  const isAdmin = ["SuperAdmin", "Admin", "Manager", "HR Manager"].includes(role);
   const navItems = isAdmin ? ADMIN_NAV : EMPLOYEE_NAV;
 
   return (

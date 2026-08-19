@@ -589,7 +589,7 @@ const getNavigationGroups = (user) => {
     label: "Human Resources",
     icon: Briefcase,
     id: "hr",
-    defaultOpen: user?.role === "HR",
+    defaultOpen: user?.role === "HR Manager",
     hidden: !hasMod("hr"),
     items: [
       {
@@ -617,7 +617,7 @@ const getNavigationGroups = (user) => {
         icon: Calendar,
         label: "Leave",
         id: "hr-leave",
-        href: ["Admin", "HR", "Manager"].includes(user?.role) ? "/dashboard/hr/leave" : "/dashboard/hr/my-leave",
+        href: ["Admin", "HR Manager", "Manager"].includes(user?.role) ? "/dashboard/hr/leave" : "/dashboard/hr/my-leave",
         hidden: user?.role === "SuperAdmin",
       },
       {
@@ -626,25 +626,25 @@ const getNavigationGroups = (user) => {
         id: "hr-leave-types",
         href: "/dashboard/hr/leave-types",
         // Config screen — only Admin / HR (matches the action gate).
-        hidden: !["Admin", "HR"].includes(user?.role),
+        hidden: !["Admin", "HR Manager"].includes(user?.role),
       },
       {
         icon: Clock,
         label: "Attendance",
         id: "hr-attendance",
-        href: ["Admin", "HR", "Manager"].includes(user?.role) ? "/dashboard/hr/attendance" : "/dashboard/hr/my-attendance",
+        href: ["Admin", "HR Manager", "Manager"].includes(user?.role) ? "/dashboard/hr/attendance" : "/dashboard/hr/my-attendance",
         hidden: user?.role === "SuperAdmin",
       },
       {
         icon: DollarSign,
-        label: ["Admin", "HR"].includes(user?.role) ? "Payroll" : "My Payslips",
+        label: ["Admin", "HR Manager"].includes(user?.role) ? "Payroll" : "My Payslips",
         id: "hr-payroll",
-        href: ["Admin", "HR"].includes(user?.role) ? "/dashboard/hr/payroll" : "/dashboard/hr/my-payslips",
+        href: ["Admin", "HR Manager"].includes(user?.role) ? "/dashboard/hr/payroll" : "/dashboard/hr/my-payslips",
         hidden: user?.role === "SuperAdmin",
       },
       {
         icon: Wallet,
-        label: ["Admin", "HR", "Manager"].includes(user?.role) ? "Loans & Advances" : "My Loans",
+        label: ["Admin", "HR Manager", "Manager"].includes(user?.role) ? "Loans & Advances" : "My Loans",
         id: "hr-loans",
         href: "/dashboard/hr/loans",
         hidden: user?.role === "SuperAdmin",
@@ -654,7 +654,7 @@ const getNavigationGroups = (user) => {
         label: "User Accounts",
         id: "hr-users",
         href: "/dashboard/users",
-        hidden: user?.role !== "HR",
+        hidden: user?.role !== "HR Manager",
       },
     ],
   },
@@ -719,7 +719,7 @@ const getNavigationGroups = (user) => {
     label: "Settings",
     id: "settings",
     href: "/dashboard/settings",
-    hidden: !canSeeSettingsNav(user?.role) && user?.role !== "HR",
+    hidden: !canSeeSettingsNav(user?.role) && user?.role !== "HR Manager",
   },
 ];
 }; // end getNavigationGroups

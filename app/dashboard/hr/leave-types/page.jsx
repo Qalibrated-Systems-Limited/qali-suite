@@ -8,7 +8,7 @@ export const metadata = { title: "Leave Types | HR" };
 // Admin / HR only — matches the server-action guard. Anyone else lands
 // back on the HR landing without leaking that this page exists for
 // privileged users.
-const ALLOWED = ["SuperAdmin", "Admin", "HR"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR Manager"];
 
 export default async function LeaveTypesIndex() {
   const session = await auth();

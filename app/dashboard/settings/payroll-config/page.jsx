@@ -9,7 +9,7 @@ import PayrollConfigClient from "./PayrollConfigClient";
 
 export const metadata = { title: "Payroll Configuration | Settings" };
 
-const ALLOWED = ["SuperAdmin", "Admin", "HR"];
+const ALLOWED = ["SuperAdmin", "Admin", "HR Manager"];
 
 async function getDetailAccounts(companyId) {
   await dbConnect();

@@ -23,11 +23,11 @@ import { syncUserToPostgres } from "@/app/db/userSync";
 // ROLE AUTHORIZATION
 // ============================================
 const EMP_ROLES = {
-  CREATE: ["SuperAdmin", "Admin", "Manager", "HR"],
-  UPDATE: ["SuperAdmin", "Admin", "Manager", "HR"],
+  CREATE: ["SuperAdmin", "Admin", "Manager", "HR Manager"],
+  UPDATE: ["SuperAdmin", "Admin", "Manager", "HR Manager"],
   // Compensation is finance-sensitive — finance leadership in addition to HR.
-  UPDATE_COMPENSATION: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR"],
-  TERMINATE: ["SuperAdmin", "Admin", "HR"],
+  UPDATE_COMPENSATION: ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR Manager"],
+  TERMINATE: ["SuperAdmin", "Admin", "HR Manager"],
 };
 
 function hasRole(user, allowedRoles) {
@@ -592,7 +592,7 @@ export async function updateLeaveBalance(_prevState, formData) {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["SuperAdmin", "Admin", "HR"].includes(user?.role)) {
+    if (!["SuperAdmin", "Admin", "HR Manager"].includes(user?.role)) {
       return { success: false, error: "You do not have permission to manage leave balances" };
     }
 
@@ -688,7 +688,7 @@ export async function sendEmployeePortalInvite(profileId, role = "Employee") {
 
     // Check if a User with this email already exists
     // Validate role
-    const ALLOWED_ROLES = ["Employee", "Manager", "Accountant", "HR", "Store Manager", "Admin"];
+    const ALLOWED_ROLES = ["Employee", "Manager", "Accountant", "HR Manager", "Store Manager", "Admin"];
     const inviteRole = ALLOWED_ROLES.includes(role) ? role : "Employee";
 
     const existingUser = await User.findOne({ email });
@@ -762,7 +762,7 @@ export async function uploadEmployeePhoto(_prevState, formData) {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["SuperAdmin", "Admin", "HR", "Manager"].includes(user?.role)) {
+    if (!["SuperAdmin", "Admin", "HR Manager", "Manager"].includes(user?.role)) {
       return { success: false, error: "You do not have permission to upload photos" };
     }
 
@@ -816,7 +816,7 @@ export async function uploadEmployeeDocument(_prevState, formData) {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["SuperAdmin", "Admin", "HR", "Manager"].includes(user?.role)) {
+    if (!["SuperAdmin", "Admin", "HR Manager", "Manager"].includes(user?.role)) {
       return { success: false, error: "You do not have permission to upload documents" };
     }
 
@@ -879,7 +879,7 @@ export async function deleteEmployeeDocument(profileId, documentId) {
   try {
     const { companyId, isSuperAdmin, user } = await getTenantContext();
 
-    if (!["SuperAdmin", "Admin", "HR"].includes(user?.role)) {
+    if (!["SuperAdmin", "Admin", "HR Manager"].includes(user?.role)) {
       return { success: false, error: "You do not have permission to delete documents" };
     }
 
