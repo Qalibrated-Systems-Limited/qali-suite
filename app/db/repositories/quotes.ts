@@ -547,6 +547,32 @@ export async function convertQuoteToInvoice(
     throw new Error("Nothing left to invoice on this quote.");
   }
 
+  /**
+   * THE DISCOUNT HAS TO BE CARRIED, AND PRORATED.
+   *
+   * A quote line holds a discount PERCENTAGE and the database generates the
+   * amount; an invoice line takes an absolute discountAmount. Mapping the
+   * lines without it produced an invoice for 1160 against a quote for 1044 —
+   * the customer's 10% silently gone. A test caught it.
+   *
+   * Prorated, because a partial conversion takes part of the line: invoicing 4
+   * of 10 carries four tenths of the discount. Computed in SQL, at
+   * numeric(19,4), with the same ROUND the generated column uses — doing it in
+   * JavaScript is the §2.1 mistake this port exists to stop making.
+   */
+  // Bound as ARRAY LITERALS, not as JavaScript arrays: the driver binds a JS
+  // array as one scalar and Postgres answers "malformed array literal". Both
+  // are still parameters, and both hold values Postgres itself produced.
+  const idList = `{${toInvoice.map(({ line }) => line.id).join(",")}}`;
+  const qtyList = `{${toInvoice.map(({ quantity }) => quantity).join(",")}}`;
+  const discountRows = (await tx.execute(sql`
+    SELECT u.line_id::text AS line_id,
+           ROUND(u.qty * ql.unit_price * ql.discount_percentage / 100, 4)::text AS discount
+      FROM unnest(${idList}::uuid[], ${qtyList}::numeric[]) AS u(line_id, qty)
+      JOIN quote_lines ql ON ql.id = u.line_id
+  `)) as unknown as Array<{ line_id: string; discount: string }>;
+  const discountByLine = new Map(discountRows.map((r) => [r.line_id, r.discount]));
+
   const invoice = await invoicesRepo.createInvoice(tx, {
     companyId: quote.companyId,
     customerId: quote.customerId,
@@ -562,6 +588,7 @@ export async function convertQuoteToInvoice(
       unit: line.unit ?? "pcs",
       quantity,
       unitPrice: line.unitPrice,
+      discountAmount: discountByLine.get(line.id) ?? "0",
       taxRate: line.taxRate,
       fulfilmentSource: "inventory",
     })),
