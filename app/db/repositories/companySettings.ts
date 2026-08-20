@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { Tx } from "../client";
+import { pgArray } from "../pgArray";
 
 /**
  * The rules the books obey (0035).
@@ -185,7 +186,7 @@ export async function updateCompanySettings(
            capitalization_threshold = COALESCE(${v(patch.capitalizationThreshold)}::numeric, capitalization_threshold),
            stock_adjustment_value = COALESCE(${v(patch.stockAdjustmentValue)}::numeric, stock_adjustment_value),
            stock_request_value  = COALESCE(${v(patch.stockRequestValue)}::numeric, stock_request_value),
-           stock_high_risk_types = COALESCE(${v(patch.stockHighRiskTypes)}::text[], stock_high_risk_types),
+           stock_high_risk_types = COALESCE(${pgArray(patch.stockHighRiskTypes)}::text[], stock_high_risk_types),
            minimum_margin_percent = COALESCE(${v(patch.minimumMarginPercent)}::numeric, minimum_margin_percent),
            credit_note_value    = COALESCE(${v(patch.creditNoteValue)}::numeric, credit_note_value),
            bill_payment_value   = COALESCE(${v(patch.billPaymentValue)}::numeric, bill_payment_value),

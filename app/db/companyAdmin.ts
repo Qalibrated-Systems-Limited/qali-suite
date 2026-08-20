@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { privilegedDb } from "./provisioning";
+import { pgArray } from "./pgArray";
 
 /**
  * Company lifecycle on the Postgres side.
@@ -203,11 +204,9 @@ export async function syncCompanyRecord(
              capitalization_threshold = COALESCE(${optNum(s.capitalizationThreshold)}::numeric, capitalization_threshold),
              stock_adjustment_value = COALESCE(${optNum(thresholds.stockAdjustmentValue)}::numeric, stock_adjustment_value),
              stock_request_value  = COALESCE(${optNum(thresholds.stockRequestValue)}::numeric, stock_request_value),
-             stock_high_risk_types = COALESCE(${
-               Array.isArray(thresholds.stockHighRiskTypes)
-                 ? (thresholds.stockHighRiskTypes as string[])
-                 : null
-             }::text[], stock_high_risk_types),
+             stock_high_risk_types = COALESCE(${pgArray(
+               thresholds.stockHighRiskTypes as string[] | undefined,
+             )}::text[], stock_high_risk_types),
              minimum_margin_percent = COALESCE(${optNum(thresholds.minimumMarginPercent)}::numeric, minimum_margin_percent),
              credit_note_value    = COALESCE(${optNum(thresholds.creditNoteValue)}::numeric, credit_note_value),
              bill_payment_value   = COALESCE(${optNum(thresholds.billPaymentValue)}::numeric, bill_payment_value),
