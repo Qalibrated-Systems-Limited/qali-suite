@@ -3,9 +3,9 @@
 import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  createAccount,
-  updateAccount,
-} from "@/app/mongodb/actions/account-actions";
+  createAccountPg as createAccount,
+  updateAccountPg as updateAccount,
+} from "@/app/db/actions/account-actions";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";

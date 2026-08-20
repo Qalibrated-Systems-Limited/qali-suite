@@ -38,10 +38,10 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import {
-  activateAccount,
-  deactivateAccount,
-  calculateAccountBalance,
-} from "@/app/mongodb/actions/account-actions";
+  activateAccountPg as activateAccount,
+  deactivateAccountPg as deactivateAccount,
+  refreshAccountBalancePg as calculateAccountBalance,
+} from "@/app/db/actions/account-actions";
 import { toast } from "sonner";
 
 const ACCOUNT_TYPE_LABELS = {

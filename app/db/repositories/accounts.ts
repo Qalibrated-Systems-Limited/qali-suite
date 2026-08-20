@@ -381,3 +381,158 @@ export async function getAccountsGrouped(tx: Tx) {
   }
   return grouped;
 }
+
+/** One account, with its derived balance. */
+export async function getAccount(tx: Tx, accountId: string) {
+  const rows = (await tx.execute(sql`
+    SELECT a.*, COALESCE(b.balance, 0)::numeric(19,4) AS balance,
+           COALESCE(b.total_debit, 0)::numeric(19,4)  AS total_debit,
+           COALESCE(b.total_credit, 0)::numeric(19,4) AS total_credit,
+           p.account_code AS parent_code, p.account_name AS parent_name
+      FROM accounts a
+      LEFT JOIN account_balances b ON b.account_id = a.id
+      LEFT JOIN accounts p ON p.id = a.parent_id
+     WHERE a.id = ${accountId}::uuid
+  `)) as unknown as Array<Record<string, unknown>>;
+  if (!rows.length) return null;
+  const r = rows[0];
+  return {
+    _id: String(r.id),
+    id: String(r.id),
+    accountCode: String(r.account_code),
+    accountName: String(r.account_name),
+    accountType: String(r.account_type),
+    subType: (r.sub_type as string) ?? null,
+    parentId: (r.parent_id as string) ?? null,
+    parentCode: (r.parent_code as string) ?? null,
+    parentName: (r.parent_name as string) ?? null,
+    canPost: Boolean(r.can_post),
+    isActive: Boolean(r.is_active),
+    systemAccount: (r.system_account as string) ?? null,
+    description: (r.description as string) ?? null,
+    cachedBalance: Number(r.balance ?? 0),
+    totalDebit: Number(r.total_debit ?? 0),
+    totalCredit: Number(r.total_credit ?? 0),
+  };
+}
+
+/**
+ * Edits an account's own fields.
+ *
+ * The CODE AND TYPE ARE NOT EDITABLE once entries exist: a posted line belongs
+ * to an account of a type, and changing that type retrospectively reclassifies
+ * history — an asset becoming an expense rewrites every report that ever ran.
+ * The source allowed it. Refused here, with the reason.
+ */
+export async function updateAccount(
+  tx: Tx,
+  accountId: string,
+  input: {
+    accountName?: string;
+    subType?: string | null;
+    description?: string | null;
+    /** Constrained to the ledger's five types — the column is an enum. */
+    accountType?: "asset" | "liability" | "equity" | "revenue" | "expense";
+    accountCode?: string;
+  },
+) {
+  const [existing] = await tx.select().from(accounts).where(eq(accounts.id, accountId));
+  if (!existing) throw new Error("Account not found");
+
+  const typeChanging =
+    input.accountType != null && input.accountType !== existing.accountType;
+  const codeChanging =
+    input.accountCode != null &&
+    input.accountCode.toUpperCase() !== existing.accountCode;
+
+  if (typeChanging || codeChanging) {
+    const [{ n }] = (await tx.execute(sql`
+      SELECT COUNT(*)::int AS n FROM journal_lines WHERE account_id = ${accountId}::uuid
+    `)) as unknown as Array<{ n: number }>;
+    if (Number(n) > 0) {
+      throw new Error(
+        `This account has ${n} posted line(s); its code and type can no longer change. Deactivate it and create a new one.`,
+      );
+    }
+  }
+
+  const [updated] = await tx
+    .update(accounts)
+    .set({
+      accountName: input.accountName ?? existing.accountName,
+      subType: input.subType !== undefined ? input.subType : existing.subType,
+      description:
+        input.description !== undefined ? input.description : existing.description,
+      accountType: input.accountType ?? existing.accountType,
+      accountCode: input.accountCode
+        ? input.accountCode.toUpperCase()
+        : existing.accountCode,
+      updatedAt: new Date(),
+    })
+    .where(eq(accounts.id, accountId))
+    .returning();
+  return updated;
+}
+
+/** Counts for the cards above the chart. */
+export async function getAccountStats(tx: Tx) {
+  const [row] = (await tx.execute(sql`
+    SELECT COUNT(*)::int                                        AS total,
+           COUNT(*) FILTER (WHERE is_active)::int               AS active,
+           COUNT(*) FILTER (WHERE can_post)::int                AS postable,
+           COUNT(*) FILTER (WHERE system_account IS NOT NULL)::int AS system
+      FROM accounts
+  `)) as unknown as Array<Record<string, unknown>>;
+  const n = (v: unknown) => Number(v ?? 0);
+  return {
+    total: n(row?.total),
+    active: n(row?.active),
+    postable: n(row?.postable),
+    system: n(row?.system),
+    totalAccounts: n(row?.total),
+    activeAccounts: n(row?.active),
+  };
+}
+
+/**
+ * The account ledger: every posted line, with a running balance.
+ *
+ * Computed in SQL with a window function rather than accumulated in JavaScript,
+ * so the running total is exact decimal arithmetic and the rows arrive already
+ * in order.
+ */
+export async function getAccountLedger(
+  tx: Tx,
+  accountId: string,
+  opts: { limit?: number; startDate?: string; endDate?: string } = {},
+) {
+  const where = [sql`jl.account_id = ${accountId}::uuid`];
+  if (opts.startDate) where.push(sql`je.entry_date >= ${opts.startDate}::date`);
+  if (opts.endDate) where.push(sql`je.entry_date <= ${opts.endDate}::date`);
+
+  const rows = (await tx.execute(sql`
+    SELECT je.id AS entry_id, je.entry_number, je.entry_date, je.description,
+           je.reference, jl.debit, jl.credit, jl.description AS line_description,
+           SUM(jl.debit - jl.credit) OVER (
+             ORDER BY je.entry_date, je.entry_number, jl.id
+             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+           )::numeric(19,4) AS running_balance
+      FROM journal_lines jl
+      JOIN journal_entries je ON je.id = jl.entry_id
+     WHERE ${sql.join(where, sql` AND `)}
+     ORDER BY je.entry_date, je.entry_number, jl.id
+     LIMIT ${Math.min(opts.limit ?? 200, 500)}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    entryId: String(r.entry_id),
+    entryNumber: String(r.entry_number),
+    entryDate: r.entry_date as Date,
+    description: (r.description as string) ?? null,
+    lineDescription: (r.line_description as string) ?? null,
+    reference: (r.reference as string) ?? null,
+    debit: Number(r.debit ?? 0),
+    credit: Number(r.credit ?? 0),
+    runningBalance: Number(r.running_balance ?? 0),
+  }));
+}

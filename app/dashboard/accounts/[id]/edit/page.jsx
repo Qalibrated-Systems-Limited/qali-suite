@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { getAccountById } from "@/app/mongodb/queries/accountQueries";
+import { getAccountByIdPg as getAccountById } from "@/app/db/actions/account-actions";
 import AccountForm from "../../components/accountForm";
 import { Button } from "@/components/ui/button";
 

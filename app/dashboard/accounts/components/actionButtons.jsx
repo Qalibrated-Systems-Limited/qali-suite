@@ -15,10 +15,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  activateAccount,
-  deactivateAccount,
-  calculateAccountBalance,
-} from "@/app/mongodb/actions/account-actions";
+  activateAccountPg as activateAccount,
+  deactivateAccountPg as deactivateAccount,
+  refreshAccountBalancePg as calculateAccountBalance,
+} from "@/app/db/actions/account-actions";
 import { toast } from "sonner";
 
 // ============================================

@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileText, CheckCircle, Layers, Calculator } from "lucide-react";
-import { getAccountStats } from "@/app/mongodb/queries/accountQueries";
+import { getAccountStatsPg as getAccountStats } from "@/app/db/actions/account-actions";
 import AccountsListClient from "./accountsList";
 import { getAccountsGroupedPg } from "@/app/db/actions/journal-actions";
 

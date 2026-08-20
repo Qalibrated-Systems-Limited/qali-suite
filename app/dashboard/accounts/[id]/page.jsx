@@ -15,7 +15,7 @@ import {
   Shield,
   Activity,
 } from "lucide-react";
-import { getAccountById } from "@/app/mongodb/queries/accountQueries";
+import { getAccountByIdPg as getAccountById } from "@/app/db/actions/account-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
