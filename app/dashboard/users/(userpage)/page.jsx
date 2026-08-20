@@ -1,10 +1,9 @@
 import { Suspense } from "react";
 import {
-  searchUsers,
-  fetchUserPages,
-  getUserStats,
-  getDepartments,
-} from "@/app/mongodb/queries/user-queries";
+  searchUsersPg,
+  getUserStatsPg,
+  getDepartmentsPg,
+} from "@/app/db/actions/user-actions";
 import { auth } from "@/auth";
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";
@@ -22,7 +21,7 @@ import {
 } from "../components/UserFilters";
 import InviteUserDialog from "../components/InviteUserDialog";
 import InvitesList from "../components/InvitesList";
-import { getCompanyInvites } from "@/app/mongodb/actions/invite-actions";
+import { getCompanyInvitesPg } from "@/app/db/actions/invite-actions";
 import { listCompaniesForDropdown as getCompaniesForDropdown } from "@/app/db/platform";
 import { UsersTable } from "../components/UserTable";
 import { UsersTableSkeleton } from "../components/UserSkeleton";
@@ -80,10 +79,12 @@ async function UsersPage(props) {
   // are unrelated to inviting/cancelling a user — so they're streamed via the
   // <Suspense> boundary below instead of blocking. This keeps the post-invite
   // revalidation (which the "Sending…" spinner waits on) fast.
-  const [stats, departments, { invites }, companies] = await Promise.all([
-    getUserStats(filters),
-    getDepartments(),
-    getCompanyInvites(),
+  // getCompanyInvitesPg returns the rows directly — the Mongo action wrapped
+  // them in { invites }.
+  const [stats, departments, invites, companies] = await Promise.all([
+    getUserStatsPg(filters),
+    getDepartmentsPg(),
+    getCompanyInvitesPg(),
     isSuperAdmin ? getCompaniesForDropdown() : Promise.resolve([]),
   ]);
 
@@ -259,10 +260,13 @@ async function UsersPage(props) {
 // shell (stats, invites, filters) render immediately and lets revalidatePath
 // refreshes return without waiting on this work.
 async function UsersTableSection({ query, currentPage, filters, user, isSuperAdmin }) {
-  const [totalPages, users] = await Promise.all([
-    fetchUserPages(query, filters),
-    searchUsers(query, currentPage, filters),
-  ]);
+  // One query for the page and its total — searchUsersPg returns both, so the
+  // separate count fetchUserPages did is gone.
+  const { rows: users, pages: totalPages } = await searchUsersPg({
+    query,
+    page: currentPage,
+    ...filters,
+  });
 
   return (
     <>

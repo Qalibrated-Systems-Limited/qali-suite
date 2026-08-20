@@ -41,7 +41,7 @@ import {
   Shield,
   Building,
 } from "lucide-react";
-import { deleteUser, toggleUserStatus } from "@/app/mongodb/user-actions";
+import { deleteUserPg, toggleUserStatusPg } from "@/app/db/actions/user-actions";
 import { useRouter } from "next/navigation";
 import { ResetPasswordDialog } from "./ResetPasswordDialog";
 
@@ -81,7 +81,7 @@ export function UsersTable({ users, currentUser, isSuperAdmin = false }) {
 
     setIsLoading(true);
     try {
-      const result = await deleteUser(selectedUser._id);
+      const result = await deleteUserPg(selectedUser._id);
       if (result.success) {
         router.refresh();
       } else {
@@ -99,7 +99,7 @@ export function UsersTable({ users, currentUser, isSuperAdmin = false }) {
   const handleToggleStatus = async (userId) => {
     setIsLoading(true);
     try {
-      const result = await toggleUserStatus(userId);
+      const result = await toggleUserStatusPg(userId);
       if (result.success) {
         router.refresh();
       } else {
@@ -282,7 +282,7 @@ export function UsersTable({ users, currentUser, isSuperAdmin = false }) {
                                     className="text-foreground cursor-pointer"
                                   >
                                     <Power className="mr-2 h-4 w-4" />
-                                    {user.status === "Active"
+                                    {user.status === "active"
                                       ? "Deactivate"
                                       : "Activate"}
                                   </DropdownMenuItem>
@@ -432,7 +432,7 @@ export function UsersTable({ users, currentUser, isSuperAdmin = false }) {
                               className="text-foreground cursor-pointer"
                             >
                               <Power className="mr-2 h-4 w-4" />
-                              {user.status === "Active"
+                              {user.status === "active"
                                 ? "Deactivate"
                                 : "Activate"}
                             </DropdownMenuItem>

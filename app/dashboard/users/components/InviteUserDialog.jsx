@@ -35,12 +35,12 @@ import {
   Check,
   ChevronDown,
 } from "lucide-react";
-import { sendInvite } from "@/app/mongodb/actions/invite-actions";
+import { sendInvitePg } from "@/app/db/actions/invite-actions";
 import { userRolesMapping, cn } from "@/lib/utils";
 
 export default function InviteUserDialog({ isSuperAdmin = false, companies = [] }) {
   const [open, setOpen] = useState(false);
-  const [state, dispatch, isPending] = useActionState(sendInvite, {});
+  const [state, dispatch, isPending] = useActionState(sendInvitePg, {});
 
   // Role + Company are now searchable comboboxes (Popover + Command),
   // so their value lives in local state and is submitted via a hidden

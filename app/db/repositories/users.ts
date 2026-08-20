@@ -188,9 +188,14 @@ export async function searchUsers(
 
   const rows = (await tx.execute(sql`
     SELECT u.id, u.name, u.email, u.role, u.status, u.department, u.avatar,
-           u.auth_provider, u.home_company_id, u.created_at,
+           u.auth_provider, u.home_company_id, u.created_at, u.token_version,
+           c.name AS company_name,
            COUNT(*) OVER ()::int AS total_count
       FROM users u
+      -- Their home company's name, when this request can see that company.
+      -- 0024 keys the companies policy on its own id, so a user whose home is
+      -- another tenant reads as null here rather than leaking a name.
+      LEFT JOIN companies c ON c.id = u.home_company_id
      WHERE ${sql.join(where, sql` AND `)}
      ORDER BY u.name
      LIMIT ${perPage} OFFSET ${(page - 1) * perPage}
@@ -198,7 +203,15 @@ export async function searchUsers(
 
   const total = rows.length ? Number(rows[0].total_count) : 0;
   return {
-    rows: rows.map(shape),
+    // `_id` alongside `id`: the table and its links were written against Mongo
+    // documents and key on _id. Shaped here rather than rewriting the
+    // component, which the port has no reason to redesign.
+    rows: rows.map((r) => ({
+      ...shape(r),
+      _id: String(r.id),
+      companyName: (r.company_name as string) ?? null,
+      createdAt: r.created_at as Date,
+    })),
     total,
     page,
     perPage,

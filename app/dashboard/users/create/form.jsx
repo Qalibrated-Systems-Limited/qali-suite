@@ -30,7 +30,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { createUser } from "@/app/mongodb/user-actions";
+import { createUserPg } from "@/app/db/actions/user-actions";
 import { AlertCircle, Loader2, UserPlus, X, Building2, Check, ChevronsUpDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { userDepartments, userRolesMapping, userRoles, cn } from "@/lib/utils";
@@ -68,7 +68,7 @@ const getAvailableRoles = (isSuperAdmin) => {
 export function CreateUserForm({ companies = [], isSuperAdmin = false }) {
   const router = useRouter();
   const initialState = { message: "", errors: {} };
-  const [state, dispatch, isPending] = useActionState(createUser, initialState);
+  const [state, dispatch, isPending] = useActionState(createUserPg, initialState);
   const [companyOpen, setCompanyOpen] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
 

@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
-import { getUserById } from "@/app/mongodb/queries/user-queries";
+import { getUserByIdPg } from "@/app/db/actions/user-actions";
 import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
 import Link from "next/link";
 import {
@@ -38,7 +38,7 @@ export default async function UserDetailsPage({ params, searchParams }) {
     redirect("/dashboard");
   }
 
-  const user = await getUserById(id);
+  const user = await getUserByIdPg(id);
 
   if (!user) {
     notFound();
@@ -180,7 +180,7 @@ export default async function UserDetailsPage({ params, searchParams }) {
             <div>
               <p className="text-sm text-muted-foreground">Status</p>
               <p className="font-semibold flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${user.status === "Active" ? "bg-green-500" : "bg-gray-400"}`} />
+                <span className={`h-2 w-2 rounded-full ${user.status === "active" ? "bg-green-500" : "bg-gray-400"}`} />
                 {user.status || "Active"}
               </p>
             </div>
@@ -254,12 +254,12 @@ export default async function UserDetailsPage({ params, searchParams }) {
               <dt className="text-sm font-medium text-muted-foreground">Status</dt>
               <dd className="mt-1">
                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                  user.status === "Active"
+                  user.status === "active"
                     ? "bg-green-500/10 text-green-600"
                     : "bg-gray-500/10 text-gray-600"
                 }`}>
                   <span className={`h-1.5 w-1.5 rounded-full ${
-                    user.status === "Active" ? "bg-green-500" : "bg-gray-400"
+                    user.status === "active" ? "bg-green-500" : "bg-gray-400"
                   }`} />
                   {user.status || "Active"}
                 </span>

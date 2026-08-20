@@ -14,7 +14,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { resendInvite, cancelInvite } from "@/app/mongodb/actions/invite-actions";
+import { resendInvitePg, cancelInvitePg } from "@/app/db/actions/invite-actions";
 import { toast } from "sonner";
 
 function StatusBadge({ status, isExpired }) {
@@ -59,7 +59,7 @@ function InviteRow({ invite }) {
 
   const handleResend = () => {
     startTransition(async () => {
-      const result = await resendInvite(invite._id);
+      const result = await resendInvitePg(invite._id);
       if (result.success) {
         toast.success(result.message);
       } else {
@@ -70,7 +70,7 @@ function InviteRow({ invite }) {
 
   const handleCancel = () => {
     startTransition(async () => {
-      const result = await cancelInvite(invite._id);
+      const result = await cancelInvitePg(invite._id);
       if (result.success) {
         toast.success(result.message);
         setHidden(true);

@@ -1,6 +1,6 @@
 import { EditUserForm } from "./form";
 import { auth } from "@/auth";
-import { getUserById } from "@/app/mongodb/queries/user-queries";
+import { getUserByIdPg } from "@/app/db/actions/user-actions";
 import { listCompaniesForDropdown as getCompaniesForDropdown } from "@/app/db/platform";
 import { notFound } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
@@ -56,7 +56,7 @@ async function EditUserPage(props) {
   }
 
   // Fetch user data
-  let user = await getUserById(userId);
+  let user = await getUserByIdPg(userId);
 
   if (!user) {
     return notFound();

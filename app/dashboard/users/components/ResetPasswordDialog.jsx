@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Key, Loader2, AlertCircle, CheckCircle } from "lucide-react";
-import { resetUserPassword } from "@/app/mongodb/user-actions";
+import { resetUserPasswordPg } from "@/app/db/actions/user-actions";
 import { useEffect, useState } from "react";
 
 export function ResetPasswordDialog({ user, open, onOpenChange }) {
@@ -22,7 +22,7 @@ export function ResetPasswordDialog({ user, open, onOpenChange }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  const resetWithId = resetUserPassword.bind(null, user._id);
+  const resetWithId = resetUserPasswordPg.bind(null, user._id);
   const [state, dispatch, isPending] = useActionState(resetWithId, {
     message: "",
     errors: {},

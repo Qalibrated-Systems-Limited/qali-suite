@@ -30,7 +30,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { updateUser } from "@/app/mongodb/user-actions";
+import { updateUserPg } from "@/app/db/actions/user-actions";
 import { AlertCircle, Loader2, Save, X, Mail, Building2, Check, ChevronsUpDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { userDepartments, userRolesMapping, userRoles, cn } from "@/lib/utils";
@@ -69,7 +69,7 @@ const getAvailableRoles = (isSuperAdmin) => {
 export function EditUserForm({ user, companies = [], isSuperAdmin = false }) {
   const router = useRouter();
   const initialState = { message: "", errors: {} };
-  const updateWithId = updateUser.bind(null, user._id);
+  const updateWithId = updateUserPg.bind(null, user._id);
   const [state, dispatch, isPending] = useActionState(
     updateWithId,
     initialState
