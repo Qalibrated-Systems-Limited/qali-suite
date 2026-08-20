@@ -990,6 +990,107 @@ cutover gate reads these numbers.
 
 ---
 
+## 9D. Identity: which company a request is on, and who is on it
+
+Migrations 0033–0040. This vertical had to land before the auth cutover rather
+than as part of it, because Postgres already depends on it: the 47 actor
+columns of 0031 name a user, `user_company_access` hangs off that user, and
+every policy reads `app.user_id`. The identity has to exist here before the
+credentials move; those are two cutovers, not one.
+
+Three tables, each encoding one rule.
+
+**Authorisation is a SET; operating context is exactly ONE of it** (0033).
+`user_company_access` answers "which companies may I enter", and
+`app.company_id` answers "which company is this request on". RLS stays on the
+active company. Widening it to `company_id = ANY(allowed)` would make an
+ordinary `SELECT * FROM invoices` return three companies' ledgers in one list,
+which is not a broader view of the books but a meaningless one. The table keys
+on the user, not the company, because the question is asked BEFORE a company is
+chosen — the same reasoning 0024 applied to `companies` keying on its own id.
+
+**The party link belongs on the grant, not on the user** (0036). `parties` is
+company-scoped, so a person who is an employee of one company and a supplier to
+another has two party rows; a single `users.party_id` could only ever name one.
+Odoo can point `res.users` at `res.partner` because `res.partner` is global.
+Here the link goes on `user_company_access`, which already has exactly one row
+per (user, company) — the right cardinality for "in THIS company, this login is
+that person".
+
+The foreign key is composite — `(party_id, company_id)` against `parties(id,
+company_id)`, unique since 0005 — so a grant for company A cannot point at a
+party belonging to company B. A plain reference to `parties(id)` would allow
+exactly that, and **RLS would not catch it, because provisioning and admin
+paths run privileged.** Where a path bypasses the policies by design, the
+constraint is the only thing left; it has to carry the tenant.
+
+**The password hash is deliberately absent** (0036). Moving credentials is a
+security-sensitive cutover of its own and NextAuth still reads them through
+mongoose. A column added now would be one nothing enforces, which reads like a
+control and is not one. `token_version` IS here, because the session-freshness
+check enforces it and will need it the moment auth moves.
+
+### 9D.1 The mirror, and what deletes it
+
+Mongo stays the writer of record for logins, so `userSync.js` mirrors after each
+of the eleven Mongo writes. It re-reads the document rather than mapping the
+fields a caller happened to change — eleven call sites hand-mapping fields is
+eleven chances to drift — and it never throws, because a failed mirror is a
+stale name on an audit trail, not a reason to fail a password change.
+
+This is the only entity that is mirrored. Everything ported before it —
+invoices, bills, credit notes, payments, parties, stock requests, reports — was
+moved outright, and §6.3 still holds: with one pilot tenant we do not dual-write.
+The direction is one-way and never reverses; nothing writes Mongo from Postgres.
+
+| at the auth cutover | |
+|---|---|
+| `userSync.js`, all 11 call sites | deleted |
+| `syncUser()`, the `_migration_id_map` lookups | deleted — `upsertUser()` already does this inside RLS |
+| `linkUserToParty()` | kept, minus the id resolution — the rule it encodes is domain logic |
+| the privileged-write half of `userAdmin.ts` | kept — writing a record from outside its own scope is permanent |
+
+### 9D.2 A narrowed enum is a migration in BOTH stores
+
+0038 constrained the role columns, which made the problem visible: four of the
+sixteen values were not levels of authority. 0039 retired them and rewrote the
+rows; 0040 fixed the DEFAULT, which 0036 had left as the now-retired `User` —
+the column would have rejected a value the schema itself supplied. 0040 is a
+separate file because an applied migration is immutable: the edit began life
+appended to 0039 and the migrator silently did nothing, since it tracks which
+migrations have run, not what they say.
+
+The lesson generalises past roles, and it is the one to carry into the remaining
+models. **Mongoose validates enums on SAVE, not on read.** A document holding a
+retired value therefore loads without complaint and throws on the next save —
+including a save that only touched an unrelated field:
+
+```
+loaded: <user> role: HR
+validate() -> THROWS: `HR` is not a valid enum value for path `role`.
+```
+
+Measured on the development database, where two users and one pending invite
+held retired values. The reachable damage was not the Postgres mirror failing
+quietly; it was that those users could no longer be edited, could not have a
+password reset, and would fail the Google sign-in avatar write in `auth.ts`.
+
+So while both stores are live, narrowing an enum in Postgres is only half the
+change. `scripts/migrate-retired-roles.mjs` is the other half, and the shape is
+worth reusing: rewrite every collection carrying the value (`invites` as well as
+`users`, or accepting an invite mints a user on a value the schema no longer
+accepts), use the raw driver rather than the models — the models are the thing
+rejecting these documents, so writing through them cannot fix them — and read
+the data back afterwards, naming anything that matches neither the old values
+nor the new instead of defaulting it.
+
+One retired value was not translated. Petty cash used `CEO` as an APPROVER, and
+a read-only role must not inherit an approval right, so it is dropped from that
+gate rather than mapped to `Viewer`. A rename sweep that maps every occurrence
+uniformly would have silently granted approval authority.
+
+---
+
 ## 10. Explicitly out of scope
 
 - Redesigning the posting engine, fiscal periods, or COGS logic beyond the
