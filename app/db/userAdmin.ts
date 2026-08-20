@@ -291,3 +291,137 @@ export async function getUserStatusAndVersion(userId: string) {
     tokenVersion: Number(rows[0].token_version ?? 0),
   };
 }
+
+/**
+ * Administrative writes to someone else's login.
+ *
+ * All privileged, for the reason at the top of this file: the users policy
+ * covers your own row and reading colleagues, and an admin editing another
+ * person is neither. The ROLE CHECK IS THE CALLER'S — these functions do what
+ * they are told, and the actions above them decide who may.
+ */
+
+/** Bumps token_version, which invalidates every issued session for this user. */
+async function revokeSessions(userId: string) {
+  await privilegedDb().execute(sql`
+    UPDATE users SET token_version = token_version + 1, updated_at = now()
+     WHERE id = ${String(userId)}
+  `);
+}
+
+export async function adminUpdateUser(input: {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  role?: string | null;
+  department?: string | null;
+  status?: string | null;
+}) {
+  const email = input.email ? String(input.email).toLowerCase().trim() : null;
+  const status = input.status
+    ? String(input.status).toLowerCase() === "inactive" ? "inactive" : "active"
+    : null;
+
+  const [before] = (await privilegedDb().execute(sql`
+    SELECT role, status FROM users WHERE id = ${String(input.id)}
+  `)) as unknown as Array<{ role: string; status: string }>;
+  if (!before) throw new Error("That user no longer exists.");
+
+  await privilegedDb().execute(sql`
+    UPDATE users
+       SET name       = COALESCE(${input.name ?? null}, name),
+           email      = COALESCE(${email}, email),
+           role       = COALESCE(${input.role ?? null}, role),
+           department = COALESCE(${input.department ?? null}, department),
+           status     = COALESCE(${status}, status),
+           updated_at = now()
+     WHERE id = ${String(input.id)}
+  `);
+
+  /**
+   * A CHANGE OF PRIVILEGE ENDS THE SESSIONS THAT PREDATE IT.
+   *
+   * Demoting somebody or deactivating them means nothing while their existing
+   * JWT still says otherwise, and it lives up to eight hours. Bumping
+   * token_version makes the freshness check reject it on the next privileged
+   * request — seconds, not hours.
+   */
+  const roleChanged = input.role != null && input.role !== before.role;
+  const statusChanged = status != null && status !== before.status;
+  if (roleChanged || statusChanged) await revokeSessions(input.id);
+
+  return { roleChanged, statusChanged };
+}
+
+export async function adminSetPassword(userId: string, passwordHash: string) {
+  await privilegedDb().execute(sql`
+    UPDATE users
+       SET password_hash = ${passwordHash},
+           reset_password_token = NULL,
+           reset_password_expire = NULL,
+           token_version = token_version + 1,
+           updated_at = now()
+     WHERE id = ${String(userId)}
+  `);
+  // Sessions go with the old password, always: a password is changed precisely
+  // when the old one is not to be trusted.
+}
+
+export async function adminToggleStatus(userId: string) {
+  const rows = (await privilegedDb().execute(sql`
+    UPDATE users
+       SET status = CASE WHEN status = 'active' THEN 'inactive' ELSE 'active' END,
+           token_version = token_version + 1,
+           updated_at = now()
+     WHERE id = ${String(userId)}
+    RETURNING status
+  `)) as unknown as Array<{ status: string }>;
+  if (!rows.length) throw new Error("That user no longer exists.");
+  return rows[0].status;
+}
+
+/**
+ * Deletes a login.
+ *
+ * Refused when the person is the last active SuperAdmin — a platform with
+ * nobody who can administer it is not a state to allow, and the source checked
+ * this in the action where a concurrent delete could slip past.
+ */
+export async function adminDeleteUser(userId: string) {
+  const [target] = (await privilegedDb().execute(sql`
+    SELECT role, status FROM users WHERE id = ${String(userId)}
+  `)) as unknown as Array<{ role: string; status: string }>;
+  if (!target) throw new Error("That user no longer exists.");
+
+  if (target.role === "SuperAdmin") {
+    const [{ n }] = (await privilegedDb().execute(sql`
+      SELECT COUNT(*)::int AS n FROM users
+       WHERE role = 'SuperAdmin' AND status = 'active' AND id <> ${String(userId)}
+    `)) as unknown as Array<{ n: number }>;
+    if (Number(n) === 0) {
+      throw new Error("This is the last active SuperAdmin and cannot be removed.");
+    }
+  }
+
+  await privilegedDb().execute(sql`DELETE FROM users WHERE id = ${String(userId)}`);
+  return { deleted: true as const };
+}
+
+/** True when the address is already a login. Platform-wide, as emails are. */
+export async function emailExists(email: string) {
+  const rows = (await privilegedDb().execute(sql`
+    SELECT id FROM users WHERE lower(email) = ${String(email).toLowerCase().trim()}
+  `)) as unknown as Array<{ id: string }>;
+  return rows.length > 0;
+}
+
+/** How many active logins hold a grant in this company — the seat count. */
+export async function countCompanyUsers(companyId: string) {
+  const [{ n }] = (await privilegedDb().execute(sql`
+    SELECT COUNT(DISTINCT u.id)::int AS n
+      FROM users u
+      JOIN user_company_access a ON a.user_id = u.id AND a.status = 'active'
+     WHERE a.company_id = ${companyId}::uuid AND u.status = 'active'
+  `)) as unknown as Array<{ n: number }>;
+  return Number(n);
+}

@@ -251,10 +251,11 @@ export async function createCompany(prevState, formData) {
     // The administrator must not already have a login: a user belongs to one
     // company, so re-pointing an existing account would move them out of the
     // company they are already in.
-    const User = (await import("../../models/user")).default;
-    const existingAdmin = await User.findOne({ email: data.adminEmail })
-      .select("_id")
-      .lean();
+    // Postgres, since the auth cutover. Asking Mongo rejected an address that
+    // had a Mongo document and no Postgres login — which is what blocked
+    // creating a company for a user the new store had never heard of.
+    const { emailExists } = await import("@/app/db/userAdmin");
+    const existingAdmin = await emailExists(data.adminEmail);
     if (existingAdmin) {
       return {
         errors: {
@@ -368,41 +369,49 @@ export async function createCompany(prevState, formData) {
     // provisioned tenant over an SMTP outage is not.
     const adminInvite = { created: false, emailSent: false, error: null };
     try {
-      const Invite = (await import("../../models/invite")).default;
-      const { grantCompanyAccess } = await import("@/app/db/companyAccessAdmin");
+      const { randomUUID, createHash, randomBytes } = await import("node:crypto");
+      const { createUserFromInvite } = await import("@/app/db/userAdmin");
+      const { resolveCompanyUuid } = await import("@/app/db/tenant");
+      const { createInvite } = await import("@/app/db/repositories/invites");
+      const { withTenant } = await import("@/app/db/client");
       const { sendInviteEmail } = await import("@/lib/email");
 
-      const admin = await User.create({
+      const companyUuid = await resolveCompanyUuid(company._id.toString());
+
+      /**
+       * The login and its grant, in Postgres. createUserFromInvite writes both
+       * — a user row without a grant is a login that can sign in and open
+       * nothing — so grantCompanyAccess is no longer called separately.
+       *
+       * No password: the admin sets one from the invitation email below.
+       */
+      const adminId = randomUUID();
+      await createUserFromInvite({
+        id: adminId,
         name: data.adminName,
         email: data.adminEmail,
         role: "Admin",
-        companyId: company._id,
-        status: "Active",
-        creator: { name: session.user.name, id: session.user.id },
+        companyId: companyUuid,
+        authProvider: "credentials",
+        invitedById: session.user.id,
+        invitedByName: session.user.name,
       });
-
-      // The grant is what the tenant gate actually reads (0033). Recorded as
-      // 'primary' — this is their home company, not a platform grant.
-      await grantCompanyAccess({
-        sourceCompanyId: company._id.toString(),
-        userId: admin._id.toString(),
-        role: "Admin",
-        grantedById: session.user.id,
-        grantedByName: session.user.name,
-      });
-      // The identity 47 actor columns point at, and the grant's party link.
-      const { syncUserToPostgres } = await import("@/app/db/userSync");
-      await syncUserToPostgres(admin._id.toString());
       adminInvite.created = true;
 
-      const { rawToken, hashedToken } = Invite.generateToken();
-      await Invite.create({
-        email: data.adminEmail,
-        role: "Admin",
-        companyId: company._id,
-        invitedBy: { name: session.user.name, id: session.user.id },
-        token: hashedToken,
-      });
+      // Same token scheme as before: 32 random bytes emailed, sha256 stored.
+      const rawToken = randomBytes(32).toString("hex");
+      const hashedToken = createHash("sha256").update(rawToken).digest("hex");
+      await withTenant(companyUuid, (tx) =>
+        createInvite(tx, {
+          companyId: companyUuid,
+          email: data.adminEmail,
+          role: "Admin",
+          token: hashedToken,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          invitedById: session.user.id,
+          invitedByName: session.user.name,
+        }),
+      );
 
       await sendInviteEmail({
         to: data.adminEmail,

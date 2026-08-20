@@ -150,3 +150,86 @@ export async function getUserParty(
   `)) as unknown as Array<{ party_id: string | null }>;
   return rows.length ? rows[0].party_id : null;
 }
+
+/**
+ * The users page: search, filters, paging and a total in one trip.
+ *
+ * NO companyId FILTER, and none is needed. 0036's `visible_within_company`
+ * policy already restricts this to people holding an active grant in the
+ * company this request is scoped to, so the list is the company's staff
+ * because the database says so, not because the query remembered.
+ */
+export async function searchUsers(
+  tx: Tx,
+  opts: {
+    query?: string;
+    page?: number;
+    perPage?: number;
+    role?: string;
+    status?: string;
+    department?: string;
+  } = {},
+) {
+  const perPage = Math.min(opts.perPage ?? 10, 200);
+  const page = Math.max(opts.page ?? 1, 1);
+
+  const where = [sql`TRUE`];
+  if (opts.query) {
+    const like = `%${opts.query}%`;
+    where.push(sql`(u.name ILIKE ${like} OR u.email ILIKE ${like})`);
+  }
+  if (opts.role && opts.role !== "all") where.push(sql`u.role = ${opts.role}`);
+  if (opts.status && opts.status !== "all") {
+    where.push(sql`u.status = ${opts.status.toLowerCase()}`);
+  }
+  if (opts.department && opts.department !== "all") {
+    where.push(sql`u.department = ${opts.department}`);
+  }
+
+  const rows = (await tx.execute(sql`
+    SELECT u.id, u.name, u.email, u.role, u.status, u.department, u.avatar,
+           u.auth_provider, u.home_company_id, u.created_at,
+           COUNT(*) OVER ()::int AS total_count
+      FROM users u
+     WHERE ${sql.join(where, sql` AND `)}
+     ORDER BY u.name
+     LIMIT ${perPage} OFFSET ${(page - 1) * perPage}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const total = rows.length ? Number(rows[0].total_count) : 0;
+  return {
+    rows: rows.map(shape),
+    total,
+    page,
+    perPage,
+    pages: Math.max(Math.ceil(total / perPage), 1),
+  };
+}
+
+/** Counts by status and role, for the cards above the list. */
+export async function getUserStats(tx: Tx) {
+  const [row] = (await tx.execute(sql`
+    SELECT COUNT(*)::int                                      AS total,
+           COUNT(*) FILTER (WHERE status = 'active')::int     AS active,
+           COUNT(*) FILTER (WHERE status = 'inactive')::int   AS inactive,
+           COUNT(*) FILTER (WHERE role = 'Admin')::int        AS admins
+      FROM users
+  `)) as unknown as Array<Record<string, unknown>>;
+  const n = (v: unknown) => Number(v ?? 0);
+  return {
+    total: n(row?.total),
+    active: n(row?.active),
+    inactive: n(row?.inactive),
+    admins: n(row?.admins),
+  };
+}
+
+/** The distinct departments in this company, for the filter. */
+export async function listDepartments(tx: Tx) {
+  const rows = (await tx.execute(sql`
+    SELECT DISTINCT department FROM users
+     WHERE department IS NOT NULL AND department <> ''
+     ORDER BY department
+  `)) as unknown as Array<{ department: string }>;
+  return rows.map((r) => r.department);
+}
