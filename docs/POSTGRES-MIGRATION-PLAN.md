@@ -1096,6 +1096,57 @@ uniformly would have silently granted approval authority.
 
 ---
 
+## 9E. Quotes — scope, and the bug that makes it next
+
+Enumerated before writing anything, per BUILDING-ON-POSTGRES.md's first step.
+
+| | |
+|---|---|
+| model | `app/models/quote.js`, 1,007 lines (quote + embedded lines) |
+| actions | `quote-actions.js`, 11 exported: create, update, send, accept, reject, cancel, convertToInvoice, getActiveQuotesForCustomer, getQuoteStats, delete, clone |
+| reads | `queries/quote-queries.js` |
+| pages | list, detail, update, create |
+| components | 11, including `ConvertToInvoiceDialog` and `QuotePDFButton` |
+| PDF | client-side (`@/lib/pdf` → `QuotePDF`), fed by the page — no route to port, but the data SHAPE is a contract |
+| API routes | none |
+| cron | none |
+
+### Why quotes rather than something larger
+
+**Converting a quote to an invoice is broken right now, and the invoice port is
+what broke it.** Every invoice surface — list, detail, create, complete,
+payments — reads Postgres through `app/db/actions/invoice-actions`. But
+`quote-actions.js:648` calls `quote.convertToInvoice(...)`, and that method does
+`mongoose.model("Invoice")` and writes a **Mongo** invoice. It then redirects to
+`/dashboard/invoices/<mongo _id>`, a Postgres-backed page that will be handed a
+24-character ObjectId where it expects a uuid.
+
+So the conversion produces an invoice that appears in no list, and lands the
+user on a page that cannot load it. This is precisely the defect 5cf453641
+fixed for the create and edit forms — "writing to a store their pickers did not
+read" — surviving in the one path that was not a form.
+
+It is the strongest argument for the vertical rule: the bug exists because a
+feature was ported by SURFACE (the invoice screens) rather than by FEATURE
+(everything that creates an invoice). Quotes is not merely unported; it is a
+live inconsistency, and the conversion path is the reason to do it next.
+
+### Design notes for the port
+
+- **Totals derive from lines**, by trigger, as with `stock_requests` (§9.9).
+  The source recomputes them in application code that somebody has to remember
+  to call, which is how a stored total comes to disagree with its own items.
+- **`invoicedQuantity` is a derived value** (§9.3): it is the sum of what the
+  linked invoices actually took. Storing it separately from the invoice lines
+  that justify it is a second source of truth for the same fact.
+- **Line snapshots stay** (§9.4): `productName` and `productSKU` are what was
+  quoted, and a later rename must not silently rewrite a document a customer
+  received.
+- Money is `numeric(19,4)`; the source's `Math.round(x * 100) / 100` on
+  percentage discounts is exactly §2.1.
+
+---
+
 ## 10. Explicitly out of scope
 
 - Redesigning the posting engine, fiscal periods, or COGS logic beyond the
