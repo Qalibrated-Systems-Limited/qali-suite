@@ -4,6 +4,11 @@
 **Status:** Design agreed, vertical slice in progress
 **Date:** 2026-08-13
 
+> **Building on this?** See **[BUILDING-ON-POSTGRES.md](BUILDING-ON-POSTGRES.md)**
+> — how to get a tenant-scoped transaction, which layer to call, and the three
+> mistakes that are easy to make here. This document is the reasoning; that one
+> is the practice.
+
 ---
 
 ## 1. Decision summary
