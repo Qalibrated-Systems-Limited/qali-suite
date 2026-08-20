@@ -272,6 +272,22 @@ suite("quotes repository", () => {
         }));
       detail = await asTenant(companyA, (tx) => quotesRepo.getQuoteDetail(tx, q.id));
       expect(detail.status).toBe("converted");
+
+      // TWO invoices, from one quote. Partial conversion is the point: a
+      // customer accepts ten and is billed for four now and six later, and both
+      // invoices are real documents descended from the same quote.
+      const invoices = await admin`
+        SELECT i.invoice_number, i.total
+          FROM document_flow f
+          JOIN invoices i ON i.id = f.successor_id
+         WHERE f.predecessor_id = ${q.id} AND f.successor_type = 'invoice'
+         ORDER BY i.invoice_number`;
+      expect(invoices).toHaveLength(2);
+      // 4 and 6 of the same line, each carrying its share of the discount.
+      expect(invoices.map((i) => i.total)).toEqual(["417.6000", "626.4000"]);
+      // And they add up to the quote.
+      const sum = invoices.reduce((t, i) => t + Number(i.total), 0);
+      expect(sum.toFixed(4)).toBe(detail.total);
     });
 
     it("refuses to invoice a draft, and an expired one", async () => {
