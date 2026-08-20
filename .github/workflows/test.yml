@@ -32,7 +32,11 @@ name: Test
 # Events that trigger this workflow.
 on:
   push:
-    branches: [main, jeff-business-suite]
+    # feat/postgres-migration is here so the Postgres job actually runs while
+    # the port is in progress. Without it CI first speaks at the PR to main,
+    # which on a long-lived branch means dozens of commits of no feedback.
+    # Drop it from this list once the branch merges.
+    branches: [main, jeff-business-suite, feat/postgres-migration]
   pull_request:
     branches: [main, jeff-business-suite]
 
