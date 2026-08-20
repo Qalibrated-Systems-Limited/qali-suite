@@ -266,34 +266,109 @@ CREATE TRIGGER recalc_quote_on_line_change
 AFTER INSERT OR UPDATE OR DELETE ON "quote_lines"
 FOR EACH ROW EXECUTE FUNCTION recalc_quote();--> statement-breakpoint
 
--- The link an invoice line keeps back to the quote line it came from. Nullable
--- because most invoice lines have no quote behind them.
-ALTER TABLE "invoice_lines"
-  ADD COLUMN "quote_line_id" uuid REFERENCES "quote_lines"("id") ON DELETE SET NULL;--> statement-breakpoint
+-- ─────────────────────────────────────────────────────────────────────────────
+-- DOCUMENT FLOW — which document became which.
+--
+-- Not `invoices.quote_id`. Today a quote converts straight to an invoice, but
+-- every ERP that models selling properly puts an ORDER between them — SAP
+-- quote → order → delivery → invoice, NetSuite estimate → sales order →
+-- invoice, Odoo quotation → sale.order → account.move — and this codebase
+-- already has a salesOrder model waiting. A column named quote_id on invoices
+-- encodes "an invoice comes from a quote", which stops being true the moment
+-- the order step lands, and then every reader of it has to change.
+--
+-- So the link is a RELATIONSHIP, the way SAP's VBFA is: predecessor becomes
+-- successor, either of which may be any document. Adding sales orders later
+-- means inserting rows of a new type, not migrating a column.
+--
+-- Header rows carry no quantity ("this invoice came from that quote"). Line
+-- rows carry the quantity that flowed ("this invoice line took 3 of that quote
+-- line"), which is what makes partial conversion answerable.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE "document_flow" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "company_id" uuid NOT NULL REFERENCES "companies"("id") ON DELETE CASCADE,
 
-CREATE INDEX "invoice_lines_quote_line_idx"
-  ON "invoice_lines" ("quote_line_id") WHERE "quote_line_id" IS NOT NULL;--> statement-breakpoint
+  "predecessor_type" text NOT NULL,
+  "predecessor_id" uuid NOT NULL,
+  "successor_type" text NOT NULL,
+  "successor_id" uuid NOT NULL,
 
-ALTER TABLE "invoices"
-  ADD COLUMN "quote_id" uuid REFERENCES "quotes"("id") ON DELETE SET NULL;--> statement-breakpoint
+  -- Null for a header link; set for a line link.
+  "quantity" numeric(19,4),
+
+  "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+  "created_by_id" text,
+
+  CONSTRAINT "document_flow_predecessor_type_valid" CHECK ("predecessor_type" IN (
+    'quote', 'quote_line', 'sales_order', 'sales_order_line',
+    'invoice', 'invoice_line', 'purchase_order', 'purchase_order_line', 'bill', 'bill_line'
+  )),
+  CONSTRAINT "document_flow_successor_type_valid" CHECK ("successor_type" IN (
+    'quote', 'quote_line', 'sales_order', 'sales_order_line',
+    'invoice', 'invoice_line', 'purchase_order', 'purchase_order_line', 'bill', 'bill_line'
+  )),
+  -- A line link says how much; a header link does not pretend to.
+  CONSTRAINT "document_flow_line_has_quantity" CHECK (
+    ("predecessor_type" LIKE '%_line' AND "quantity" IS NOT NULL)
+    OR ("predecessor_type" NOT LIKE '%_line' AND "quantity" IS NULL)
+  ),
+  CONSTRAINT "document_flow_quantity_positive"
+    CHECK ("quantity" IS NULL OR "quantity" > 0),
+  -- A document does not descend from itself.
+  CONSTRAINT "document_flow_no_self_link"
+    CHECK (NOT ("predecessor_id" = "successor_id")),
+  -- One row per pair: the same conversion recorded twice would double every
+  -- quantity derived from it.
+  CONSTRAINT "document_flow_pair_uq" UNIQUE ("predecessor_id", "successor_id")
+);--> statement-breakpoint
+
+CREATE INDEX "document_flow_predecessor_idx"
+  ON "document_flow" ("company_id", "predecessor_type", "predecessor_id");--> statement-breakpoint
+CREATE INDEX "document_flow_successor_idx"
+  ON "document_flow" ("company_id", "successor_type", "successor_id");--> statement-breakpoint
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- How much of each quote line has been invoiced — derived, not counted.
+-- How much of each quote line has been invoiced — derived, at any chain depth.
 --
--- The source increments quote_lines.invoicedQuantity on conversion. This asks
--- the invoice lines instead, so cancelling an invoice cannot leave a quote
--- claiming it was fully invoiced. Only completed and draft invoices count; a
--- cancelled one took nothing.
+-- RECURSIVE because the chain is not fixed. Today it is quote line → invoice
+-- line; with sales orders it becomes quote line → order line → invoice line,
+-- and this view does not change when that happens. That is the whole reason
+-- the flow is a relationship rather than a column.
+--
+-- The quantity counted is the one flowing INTO the invoice line, not the
+-- quote's — quoting 10 and invoicing 3 has invoiced 3. Cancelled invoices took
+-- nothing and are excluded.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE VIEW "quote_line_invoiced" AS
-SELECT ql.id            AS quote_line_id,
-       ql.quote_id      AS quote_id,
-       ql.company_id    AS company_id,
-       ql.quantity      AS quoted_quantity,
-       COALESCE(SUM(il.quantity), 0)::numeric(19,4) AS invoiced_quantity
+WITH RECURSIVE descend AS (
+  SELECT f.predecessor_id AS quote_line_id,
+         f.successor_id,
+         f.successor_type,
+         f.quantity
+    FROM document_flow f
+   WHERE f.predecessor_type = 'quote_line'
+
+  UNION ALL
+
+  SELECT d.quote_line_id,
+         f.successor_id,
+         f.successor_type,
+         f.quantity
+    FROM descend d
+    JOIN document_flow f ON f.predecessor_id = d.successor_id
+)
+SELECT ql.id         AS quote_line_id,
+       ql.quote_id   AS quote_id,
+       ql.company_id AS company_id,
+       ql.quantity   AS quoted_quantity,
+       COALESCE(SUM(d.quantity) FILTER (
+         WHERE d.successor_type = 'invoice_line' AND i.id IS NOT NULL
+       ), 0)::numeric(19,4) AS invoiced_quantity
   FROM quote_lines ql
+  LEFT JOIN descend d ON d.quote_line_id = ql.id
   LEFT JOIN invoice_lines il
-         ON il.quote_line_id = ql.id
+         ON il.id = d.successor_id AND d.successor_type = 'invoice_line'
   LEFT JOIN invoices i
          ON i.id = il.invoice_id AND i.status <> 'cancelled'
  GROUP BY ql.id, ql.quote_id, ql.company_id, ql.quantity;--> statement-breakpoint
@@ -366,7 +441,7 @@ DO $$
 DECLARE
   t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['quotes', 'quote_lines', 'document_deliveries']
+  FOREACH t IN ARRAY ARRAY['quotes', 'quote_lines', 'document_deliveries', 'document_flow']
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
@@ -381,4 +456,5 @@ END $$;--> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE, DELETE ON "quotes" TO app_user;--> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE, DELETE ON "quote_lines" TO app_user;--> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE ON "document_deliveries" TO app_user;--> statement-breakpoint
+GRANT SELECT, INSERT, DELETE ON "document_flow" TO app_user;--> statement-breakpoint
 GRANT SELECT ON "quote_line_invoiced" TO app_user;

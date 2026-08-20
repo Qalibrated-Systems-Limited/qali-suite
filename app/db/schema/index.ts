@@ -17,6 +17,7 @@ export * from "./journal";
 export * from "./invoices";
 export * from "./quotes";
 export * from "./documentDeliveries";
+export * from "./documentFlow";
 export * from "./payments";
 export * from "./stockMovements";
 export * from "./bills";
