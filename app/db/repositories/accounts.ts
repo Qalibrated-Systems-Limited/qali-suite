@@ -315,3 +315,69 @@ export async function activateAccount(tx: Tx, accountId: string) {
   if (!updated) throw new Error("Account not found");
   return updated;
 }
+
+/**
+ * The chart of accounts as a tree, grouped by type, with balances.
+ *
+ * What the accounts page renders. The Mongo equivalent read a `cachedBalance`
+ * field that calculateActualBalance() wrote back after aggregating the whole
+ * journal — §4.4's stored-derived-value problem, and the reason a balance could
+ * disagree with its own entries. Here it comes from the account_balances view,
+ * in ONE query for the whole chart rather than one per account.
+ */
+export async function getAccountsGrouped(tx: Tx) {
+  const rows = (await tx.execute(sql`
+    SELECT a.id, a.account_code, a.account_name, a.account_type, a.sub_type,
+           a.parent_id, a.can_post, a.is_active, a.system_account,
+           COALESCE(b.balance, 0)::numeric(19,4) AS balance
+      FROM accounts a
+      LEFT JOIN account_balances b ON b.account_id = a.id
+     WHERE a.is_active = true
+     ORDER BY a.account_code
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  type Node = {
+    _id: string;
+    accountCode: string;
+    accountName: string;
+    accountType: string;
+    subType: string | null;
+    parentId: string | null;
+    canPost: boolean;
+    isActive: boolean;
+    systemAccount: string | null;
+    cachedBalance: number;
+    children: Node[];
+  };
+
+  // `_id` and `cachedBalance` are the client component's names. It was written
+  // against Mongo documents; shaping here beats redesigning it, and the value
+  // behind cachedBalance is no longer cached — it is the view's.
+  const byId = new Map<string, Node>();
+  for (const r of rows) {
+    byId.set(String(r.id), {
+      _id: String(r.id),
+      accountCode: String(r.account_code),
+      accountName: String(r.account_name),
+      accountType: String(r.account_type),
+      subType: (r.sub_type as string) ?? null,
+      parentId: (r.parent_id as string) ?? null,
+      canPost: Boolean(r.can_post),
+      isActive: Boolean(r.is_active),
+      systemAccount: (r.system_account as string) ?? null,
+      cachedBalance: Number(r.balance ?? 0),
+      children: [],
+    });
+  }
+
+  const grouped: Record<string, Node[]> = {};
+  for (const node of byId.values()) {
+    const parent = node.parentId ? byId.get(node.parentId) : null;
+    if (parent) {
+      parent.children.push(node);
+      continue;
+    }
+    (grouped[node.accountType] ??= []).push(node);
+  }
+  return grouped;
+}

@@ -1,11 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileText, CheckCircle, Layers, Calculator } from "lucide-react";
-import {
-  getAccountsGrouped,
-  getAccountStats,
-} from "@/app/mongodb/queries/accountQueries";
+import { getAccountStats } from "@/app/mongodb/queries/accountQueries";
 import AccountsListClient from "./accountsList";
+import { getAccountsGroupedPg } from "@/app/db/actions/journal-actions";
 
 // ============================================
 // ACCOUNT STATS CARDS (Async Server Component)
@@ -109,7 +107,7 @@ export function AccountStatsSkeleton() {
 // ============================================
 
 export async function AccountsListServer() {
-  const accountsGrouped = await getAccountsGrouped();
+  const accountsGrouped = await getAccountsGroupedPg();
 
   return <AccountsListClient accountsGrouped={accountsGrouped} />;
 }

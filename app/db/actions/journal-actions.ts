@@ -266,3 +266,8 @@ export async function getPostableAccountsPg() {
     }));
   });
 }
+
+/** The chart of accounts for the accounts page — a tree per type, with balances. */
+export async function getAccountsGroupedPg() {
+  return withAuthorizedTenant([], (tx) => accountsRepo.getAccountsGrouped(tx));
+}
