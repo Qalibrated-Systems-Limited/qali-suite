@@ -68,6 +68,20 @@ export const quotes = pgTable(
     cancellationReason: text("cancellation_reason"),
     convertedAt: timestamp("converted_at", { withTimezone: true }),
 
+    /**
+     * Who sold it — a reference, as SAP carries partner function VE, NetSuite a
+     * Sales Rep and Odoo a user_id. The name beside it is the snapshot that was
+     * printed on what the customer received (§9.4).
+     */
+    salespersonPartyId: uuid("salesperson_party_id"),
+    salespersonName: text("salesperson_name"),
+    salespersonEmployeeNumber: text("salesperson_employee_number"),
+
+    /** The agreed rate for this deal. */
+    commissionRate: percent("commission_rate").notNull().default("0"),
+    /** GENERATED from subtotal x rate. Selectable, never insertable. */
+    commissionAmount: money("commission_amount"),
+
     createdById: text("created_by_id"),
     createdByName: text("created_by_name"),
     createdByRole: text("created_by_role"),

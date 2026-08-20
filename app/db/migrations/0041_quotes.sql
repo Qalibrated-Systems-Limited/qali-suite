@@ -61,6 +61,8 @@ CREATE TABLE "quotes" (
 
   -- Lifecycle stamps. Each is the answer to "when did this become that", and
   -- each is null until it does.
+  -- When the user pressed send. What happened to the OUTBOUND EMAIL is not
+  -- here — see document_deliveries below.
   "sent_at" timestamp with time zone,
   "accepted_at" timestamp with time zone,
   "accepted_by_name" text,
@@ -69,6 +71,17 @@ CREATE TABLE "quotes" (
   "cancelled_at" timestamp with time zone,
   "cancellation_reason" text,
   "converted_at" timestamp with time zone,
+
+  -- ── WHO SOLD IT ───────────────────────────────────────────────────────────
+  -- A reference, the way SAP carries partner function VE, NetSuite a Sales Rep
+  -- and Odoo a user_id on the order. The name is snapshotted beside it because
+  -- it was printed on what the customer received (§9.4).
+  "salesperson_party_id" uuid,
+  "salesperson_name" text,
+  "salesperson_employee_number" text,
+
+  -- The agreed rate for THIS deal. The amount is not stored — see below.
+  "commission_rate" numeric(9,4) NOT NULL DEFAULT 0,
 
   "created_by_id" text,
   "created_by_name" text,
@@ -82,6 +95,13 @@ CREATE TABLE "quotes" (
     FOREIGN KEY ("customer_id", "company_id")
     REFERENCES "parties"("id", "company_id"),
 
+  CONSTRAINT "quotes_salesperson_fk"
+    FOREIGN KEY ("salesperson_party_id", "company_id")
+    REFERENCES "parties"("id", "company_id"),
+
+  CONSTRAINT "quotes_commission_is_a_percentage"
+    CHECK ("commission_rate" >= 0 AND "commission_rate" <= 100),
+
   CONSTRAINT "quotes_status_valid" CHECK ("status" IN (
     'draft', 'sent', 'accepted', 'rejected', 'expired', 'converted', 'cancelled'
   )),
@@ -94,6 +114,26 @@ CREATE TABLE "quotes" (
   CONSTRAINT "quotes_valid_until_after_date"
     CHECK ("valid_until" IS NULL OR "valid_until" >= "quote_date")
 );--> statement-breakpoint
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Commission follows the subtotal. It is not a number anybody types.
+--
+-- The source computes `salesPerson.commission.amount` in a pre-save hook, from
+-- subtotal x rate, and stores it — so a quote edited by any path that does not
+-- re-run the hook keeps a commission for a total it no longer has. Every ERP
+-- that takes commission seriously derives it: NetSuite from Commission Plans
+-- against realised revenue, SAP through settlement, Odoo from its plans. The
+-- RATE is the agreed term and belongs on the deal; the AMOUNT is arithmetic.
+--
+-- GENERATED from subtotal, which the recalc trigger maintains — so it moves
+-- whenever the lines move, with nothing to remember.
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE "quotes"
+  ADD COLUMN "commission_amount" numeric(19,4)
+  GENERATED ALWAYS AS (ROUND("subtotal" * "commission_rate" / 100, 4)) STORED;--> statement-breakpoint
+
+CREATE INDEX "quotes_salesperson_idx"
+  ON "quotes" ("salesperson_party_id") WHERE "salesperson_party_id" IS NOT NULL;--> statement-breakpoint
 
 CREATE INDEX "quotes_company_status_idx" ON "quotes" ("company_id", "status");--> statement-breakpoint
 CREATE INDEX "quotes_company_date_idx" ON "quotes" ("company_id", "quote_date" DESC);--> statement-breakpoint
@@ -259,13 +299,74 @@ SELECT ql.id            AS quote_line_id,
  GROUP BY ql.id, ql.quote_id, ql.company_id, ql.quantity;--> statement-breakpoint
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- What happened to a document we emailed.
+--
+-- The source keeps sentTo, deliveredAt, deliveryAttempts and lastDeliveryError
+-- ON THE QUOTE, which is four columns describing something that is not the
+-- quote — and which cannot answer "what happened on the second attempt", since
+-- each send overwrites the last. No ERP models it that way: SAP has output
+-- management with its own status records, NetSuite a communication log on the
+-- record, Odoo mail.message tracking. All of them keep one row per attempt.
+--
+-- One row per attempt here too, and generic over the document, because an
+-- invoice, a purchase order and a statement are all emailed by the same code
+-- and would otherwise each grow their own four columns.
+--
+--   attempts        = count of rows
+--   last error      = the newest failed row
+--   delivered_at    = the newest delivered row
+--
+-- all derived, none stored twice.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE "document_deliveries" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "company_id" uuid NOT NULL REFERENCES "companies"("id") ON DELETE CASCADE,
+
+  -- Not a foreign key: this table serves every document type, and a column per
+  -- type would be one nullable FK per document and a CHECK to keep exactly one
+  -- of them populated. The pair is indexed instead.
+  "document_type" text NOT NULL,
+  "document_id" uuid NOT NULL,
+
+  "recipient" text NOT NULL,
+  "status" text NOT NULL,
+  "provider" text,
+  "provider_message_id" text,
+  "error" text,
+  "attempted_at" timestamp with time zone NOT NULL DEFAULT now(),
+  "delivered_at" timestamp with time zone,
+  "attempted_by_id" text,
+  "attempted_by_name" text,
+
+  CONSTRAINT "document_deliveries_type_valid" CHECK ("document_type" IN (
+    'quote', 'invoice', 'bill', 'credit_note', 'purchase_order', 'statement'
+  )),
+  CONSTRAINT "document_deliveries_status_valid" CHECK ("status" IN (
+    'queued', 'sent', 'delivered', 'failed', 'bounced'
+  )),
+  -- A delivered row says when. Anything else has not been delivered.
+  CONSTRAINT "document_deliveries_delivered_has_time" CHECK (
+    ("status" = 'delivered' AND "delivered_at" IS NOT NULL)
+    OR ("status" <> 'delivered' AND "delivered_at" IS NULL)
+  ),
+  -- A failure says why; a success does not pretend to.
+  CONSTRAINT "document_deliveries_failure_has_reason" CHECK (
+    ("status" IN ('failed', 'bounced') AND "error" IS NOT NULL)
+    OR ("status" NOT IN ('failed', 'bounced'))
+  )
+);--> statement-breakpoint
+
+CREATE INDEX "document_deliveries_document_idx"
+  ON "document_deliveries" ("company_id", "document_type", "document_id", "attempted_at" DESC);--> statement-breakpoint
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Row-level security, same shape as every other tenant-scoped table.
 -- ─────────────────────────────────────────────────────────────────────────────
 DO $$
 DECLARE
   t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['quotes', 'quote_lines']
+  FOREACH t IN ARRAY ARRAY['quotes', 'quote_lines', 'document_deliveries']
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
@@ -279,4 +380,5 @@ END $$;--> statement-breakpoint
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON "quotes" TO app_user;--> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE, DELETE ON "quote_lines" TO app_user;--> statement-breakpoint
+GRANT SELECT, INSERT, UPDATE ON "document_deliveries" TO app_user;--> statement-breakpoint
 GRANT SELECT ON "quote_line_invoiced" TO app_user;
