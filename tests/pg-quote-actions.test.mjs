@@ -286,6 +286,37 @@ suite("quote actions (end to end)", () => {
     });
   });
 
+  describe("the form's pickers", () => {
+    it("offers only the acting company's customers, even to a SuperAdmin", async () => {
+      // A second tenant with a customer of its own.
+      const otherCompany = randomUUID();
+      const otherCustomer = randomUUID();
+      await admin`INSERT INTO companies (id, name, slug)
+                  VALUES (${otherCompany}, 'Elsewhere', ${"e-" + otherCompany.slice(0, 8)})`;
+      await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${otherCompany}, true)`;
+        await tx`INSERT INTO parties (id, company_id, primary_type, is_customer, name)
+                 VALUES (${otherCustomer}, ${otherCompany}, 'customer', true, 'Not Yours Ltd')`;
+      });
+
+      // Platform staff, acting in the pilot company.
+      getTenantContext.mockResolvedValue({
+        user: { id: randomUUID(), name: "Platform", role: "SuperAdmin" },
+        companyId: mongoCompanyId,
+        isSuperAdmin: true,
+      });
+
+      const { customers } = await quoteActions.getQuoteFormData();
+      const names = customers.map((c) => c.name);
+
+      // The Mongo picker read through withTenantScope, which returns the query
+      // UNSCOPED for a SuperAdmin — this listed both.
+      expect(names).toContain("Acme Ltd");
+      expect(names).not.toContain("Not Yours Ltd");
+      expect(customers.every((c) => c._id !== otherCustomer)).toBe(true);
+    });
+  });
+
   it("records a failed send as an attempt and leaves the quote a draft", async () => {
     const created = await quoteActions.createQuotePg(
       null,

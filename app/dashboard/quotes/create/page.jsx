@@ -1,10 +1,9 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import {
-  fetchActiveCustomers,
-  fetchAvailableProducts,
-} from "@/app/mongodb/queries/invoice-queries";
-import { getQuoteById } from "@/app/mongodb/queries/quote-queries";
+  getQuoteFormData,
+  getQuoteDetailPg,
+} from "@/app/db/actions/quote-actions";
 import CreateQuoteForm from "../components/CreateQuoteForm";
 
 export default async function CreateQuotePage({ searchParams }) {
@@ -33,16 +32,16 @@ export default async function CreateQuotePage({ searchParams }) {
     );
   }
 
-  // Fetch customers and products
-  const [customers, products] = await Promise.all([
-    fetchActiveCustomers(),
-    fetchAvailableProducts(),
-  ]);
+  // Scoped to the company this request is acting in — for a SuperAdmin, the
+  // one chosen in the switcher. The Mongo pickers read through withTenantScope,
+  // which is UNSCOPED for a SuperAdmin, so this combobox listed every tenant's
+  // customers.
+  const { customers, products } = await getQuoteFormData();
 
   // Check if duplicating from existing quote
   let duplicateFrom = null;
   if (params.from) {
-    duplicateFrom = await getQuoteById(params.from);
+    duplicateFrom = await getQuoteDetailPg(params.from);
   }
 
   return (

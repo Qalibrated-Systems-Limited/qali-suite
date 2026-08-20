@@ -5,6 +5,8 @@ import { withAuthorizedTenant } from "../tenant";
 import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { roleAllowed } from "@/lib/permissions";
 import * as quotes from "../repositories/quotes";
+import * as partiesRepo from "../repositories/parties";
+import * as productsRepo from "../repositories/products";
 import { quoteDataSchema, toRepositoryInput } from "../validation/quotes";
 
 /**
@@ -302,6 +304,60 @@ export async function convertQuoteToInvoicePg(
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────────
+
+/**
+ * The pickers on the create and edit forms.
+ *
+ * SCOPED, WHICH THE MONGO ONES WERE NOT. The form fetched customers through
+ * invoice-queries.fetchActiveCustomers, which reads Mongo's Party through
+ * withTenantScope — and that returns the query UNSCOPED for a SuperAdmin
+ * (lib/utils/tenant-utils.js:116). Signed in as platform staff, the customer
+ * combobox listed every tenant's customers, and the products picker the same.
+ *
+ * Reported from the running app. It is the defect 5cf253641 fixed for invoices
+ * — a form whose pickers read a different store from the one it writes to —
+ * surviving in quotes, with a cross-tenant list on top of it.
+ *
+ * Here the read runs inside withAuthorizedTenant, so it returns the ACTING
+ * company's customers and nothing else: for a SuperAdmin that is the company
+ * chosen in the switcher, and where none is chosen and several are held, the
+ * request is refused rather than answered with a mixture.
+ *
+ * Shapes match getInvoiceFormData deliberately — the quote form and the
+ * invoice form pick from the same kind of list and should not disagree about
+ * what a customer looks like.
+ */
+export async function getQuoteFormData() {
+  return withAuthorizedTenant([...INVOICE_WRITE_ROLES], async (tx) => {
+    const [customers, products] = await Promise.all([
+      partiesRepo.listParties(tx, { role: "customer", limit: 200 }),
+      productsRepo.listProducts(tx, { limit: 200 }),
+    ]);
+
+    return {
+      customers: customers.map((c) => ({
+        _id: c.id,
+        name: c.name,
+        email: c.email ?? "",
+        phone: c.phone ?? "",
+        taxPin: c.taxPin ?? "",
+        address: [c.addressLine1, c.city].filter(Boolean).join(", "),
+      })),
+      products: products.map((p) => ({
+        _id: p.id,
+        name: p.name,
+        SKU: p.sku,
+        unit: p.unit ?? "pcs",
+        pricing: { sellingPrice: p.sellingPrice },
+        inventory: {
+          quantityAvailable: p.quantityAvailable,
+          quantityOnHand: p.quantityOnHand,
+        },
+      })),
+    };
+  });
+}
+
 
 export async function getQuotesPg(opts: {
   limit?: number;
