@@ -46,6 +46,15 @@ export const users = pgTable(
     }),
     /** Bumped when a privilege or credential changes, to reject issued JWTs. */
     tokenVersion: integer("token_version").notNull().default(0),
+
+    /**
+     * bcrypt, cost 10, carried verbatim from Mongo (0043). Null for a Google
+     * user, who never had one — the credentials provider must refuse a null
+     * rather than compare against an empty string.
+     */
+    passwordHash: text("password_hash"),
+    resetPasswordToken: text("reset_password_token"),
+    resetPasswordExpire: timestamp("reset_password_expire", { withTimezone: true }),
     createdById: text("created_by_id"),
     createdByName: text("created_by_name"),
     createdAt: timestamp("created_at", { withTimezone: true })

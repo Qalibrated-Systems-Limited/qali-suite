@@ -302,6 +302,13 @@
       "when": 1787049115566,
       "tag": "0042_quote_customer_tax_pin",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1787049116566,
+      "tag": "0043_user_credentials",
+      "breakpoints": true
     }
   ]
 }
