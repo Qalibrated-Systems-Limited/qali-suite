@@ -32,8 +32,18 @@ import { cn } from "@/lib/utils";
  * which company is active. The choice is written by a server action for the
  * same reason: the session is a cookie the server owns.
  *
- * Renders nothing when there is only one company to be in, because then there
- * is no choice to present.
+ * WITH ONE COMPANY IT STILL SAYS WHICH. It used to render nothing, on the
+ * reasoning that a menu of one is not a choice — which is true, and left the
+ * screen with no answer to "which tenant am I in". That question is asked most
+ * by exactly the people who see one company today and several tomorrow: a
+ * SuperAdmin's session carries no company of its own, so "the only one there
+ * is" and "the one I switched to" look identical, and only one of them stays
+ * true after a second tenant is created.
+ *
+ * So: a plain label at one, a menu at several. Odoo and Dynamics both keep the
+ * company in the chrome whether or not you can change it, for the same reason —
+ * the numbers on the page belong to a company, and the reader should not have
+ * to remember which.
  */
 export function CompanySwitcherMenu({ companies = [], activeCompanyId, className }) {
   const router = useRouter();
@@ -41,9 +51,29 @@ export function CompanySwitcherMenu({ companies = [], activeCompanyId, className
   const [activeId, setActiveId] = useState(activeCompanyId ?? null);
 
   const usable = companies.filter((c) => c.isActive);
-  if (usable.length <= 1) return null;
+  // Nothing to say only when there is nothing to be in — a signed-out user, or
+  // a tenant that has not been provisioned yet.
+  if (usable.length === 0) return null;
 
-  const active = usable.find((c) => c.id === activeId) ?? null;
+  const active = usable.find((c) => c.id === activeId) ?? usable[0] ?? null;
+
+  // One company is not a choice, so it is not a button. It is still the answer
+  // to which company these numbers belong to.
+  if (usable.length === 1) {
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 h-8 px-2 rounded-md text-xs",
+          "text-muted-foreground max-w-[10rem] sm:max-w-[16rem]",
+          className,
+        )}
+        title={`Operating in ${active?.name ?? ""}`}
+      >
+        <Building2 className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">{active?.name}</span>
+      </span>
+    );
+  }
 
   function switchTo(companyId) {
     if (companyId === activeId || isPending) return;
