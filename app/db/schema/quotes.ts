@@ -41,6 +41,8 @@ export const quotes = pgTable(
     customerEmail: text("customer_email"),
     customerPhone: text("customer_phone"),
     customerAddress: text("customer_address"),
+    /** Snapshotted like the rest (0042) — it is printed on the document. */
+    customerTaxPin: text("customer_tax_pin"),
 
     quoteDate: date("quote_date").notNull(),
     validUntil: date("valid_until"),

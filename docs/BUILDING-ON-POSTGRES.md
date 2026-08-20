@@ -228,8 +228,15 @@ A driver error arrives wrapped: drizzle throws `DrizzleQueryError` with the
 ## Local setup
 
 ```
-npm run db:migrate     # applies app/db/migrations in journal order
+npm run db:migrate:all   # dev AND test databases, in journal order
 ```
+
+**Both, every time.** There are two databases — `.env` names the one `next dev`
+uses, `.env.test.local` names the one the suites TRUNCATE — and nothing applies
+migrations automatically to either. Migrate only the test one and the app throws
+`relation "quotes" does not exist` on the page you just built; migrate only the
+dev one and the suites fail the same way. `db:migrate` and `db:migrate:test` do
+them singly if you need that.
 
 On a brand-new cluster, migration 0023 creates `app_user` as `NOLOGIN` with no
 password — inventing a credential is not a migration's job. Once, before the app

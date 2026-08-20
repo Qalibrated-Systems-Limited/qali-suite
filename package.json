@@ -13,7 +13,9 @@
     "test:coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file=.env app/db/migrate.mjs",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "db:migrate:test": "node --env-file=.env.test.local app/db/migrate.mjs",
+    "db:migrate:all": "npm run db:migrate && npm run db:migrate:test"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

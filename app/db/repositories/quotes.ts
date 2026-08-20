@@ -34,6 +34,7 @@ export interface CreateQuoteInput {
   customerEmail?: string | null;
   customerPhone?: string | null;
   customerAddress?: string | null;
+  customerTaxPin?: string | null;
   quoteDate: string;
   validUntil?: string | null;
   title?: string | null;
@@ -127,6 +128,7 @@ export async function createQuote(tx: Tx, input: CreateQuoteInput) {
       customerEmail: input.customerEmail ?? null,
       customerPhone: input.customerPhone ?? null,
       customerAddress: input.customerAddress ?? null,
+      customerTaxPin: input.customerTaxPin ?? null,
       quoteDate: input.quoteDate,
       validUntil: input.validUntil ?? null,
       status: "draft",
@@ -223,12 +225,42 @@ export async function getQuoteDetail(tx: Tx, quoteId: string) {
     ["failed", "bounced"].includes(d.status),
   );
 
+  /**
+   * The invoices this quote produced.
+   *
+   * The source kept an embedded array and pushed to it; these are the
+   * document_flow header rows joined to the invoices, so an invoice that was
+   * deleted cannot leave a dangling entry, and the amount shown is the
+   * invoice's own total rather than a figure computed at conversion time.
+   */
+  const relatedInvoices = (await tx.execute(sql`
+    SELECT i.id, i.invoice_number, i.total, i.status,
+           f.created_at, f.created_by_id
+      FROM document_flow f
+      JOIN invoices i ON i.id = f.successor_id
+     WHERE f.predecessor_id = ${quoteId}::uuid
+       AND f.successor_type = 'invoice'
+     ORDER BY f.created_at
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  // Who pressed send, from the delivery log rather than a column on the quote.
+  const firstSend = [...deliveries].reverse().find((d) => d.attemptedByName);
+
   return {
     ...quote,
     isExpired: isExpired(quote),
     lines: lines.map((l) => ({
       ...l,
       invoicedQuantity: byLine.get(l.id) ?? "0.0000",
+    })),
+    sentByName: firstSend?.attemptedByName ?? null,
+    invoices: relatedInvoices.map((r) => ({
+      invoiceId: String(r.id),
+      invoiceNumber: String(r.invoice_number),
+      amount: Number(r.total),
+      status: String(r.status),
+      createdAt: r.created_at as Date,
+      createdById: (r.created_by_id as string) ?? null,
     })),
     delivery: {
       attempts: deliveries.length,
@@ -510,6 +542,7 @@ export async function updateQuote(
       customerEmail: input.customerEmail ?? quote.customerEmail,
       customerPhone: input.customerPhone ?? quote.customerPhone,
       customerAddress: input.customerAddress ?? quote.customerAddress,
+      customerTaxPin: input.customerTaxPin ?? quote.customerTaxPin,
       quoteDate: input.quoteDate ?? quote.quoteDate,
       validUntil: input.validUntil ?? quote.validUntil,
       title: input.title ?? quote.title,
@@ -680,6 +713,7 @@ export async function cloneQuote(
     customerEmail: source.customerEmail,
     customerPhone: source.customerPhone,
     customerAddress: source.customerAddress,
+    customerTaxPin: source.customerTaxPin,
     quoteDate: new Date().toISOString().slice(0, 10),
     validUntil: null,
     title: source.title,
