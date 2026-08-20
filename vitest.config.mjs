@@ -63,7 +63,19 @@ export default defineConfig({
     // false-positive uniqueness conflicts.
     fileParallelism: false,
     testTimeout: 30_000, // memory-server cold start can take ~5s on first run
-    hookTimeout: 60_000, // covers binary download on a brand-new dev machine
+    /**
+     * 120s, not 60s. Every Postgres suite opens with `TRUNCATE companies
+     * CASCADE`, which takes an ACCESS EXCLUSIVE lock and cascades across the
+     * 29 tables that reference `companies`. On a loaded machine that hook
+     * genuinely exceeded 60s, and the symptom is not a clear timeout — the
+     * NEXT test's fixture insert collides on a unique index, because the
+     * truncate that should have cleared the previous tenant never finished.
+     * Measured here on a two-core CI-shaped load; the failing test moved
+     * between runs, which is what told us it was the clock and not the schema.
+     *
+     * A hook that is actually hung still fails, just later.
+     */
+    hookTimeout: 120_000,
     include: ["tests/**/*.test.{js,mjs,ts}"],
     exclude: ["node_modules", ".next"],
     coverage: {

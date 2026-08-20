@@ -4,7 +4,8 @@
 #
 # What this does:
 #   - On every push to main and every pull request, spin up an Ubuntu
-#     VM, install Node + npm deps, then lint + run `npm test`.
+#     VM with an empty Postgres, install Node + npm deps, lint, apply
+#     the migrations from scratch, then run `npm test`.
 #   - If lint finds an ERROR (or any test fails), the PR is marked ✗ and
 #     (with branch protection enabled — see README) merging is blocked.
 #
@@ -42,7 +43,34 @@ jobs:
   test:
     name: Vitest suite
     runs-on: ubuntu-latest  # free Ubuntu runner; ~5s startup
-    timeout-minutes: 10     # hard kill if anything hangs (mongodb-memory-server cold-start safety)
+    timeout-minutes: 30     # the Postgres suites are integration tests; 10 was sized for Mongo alone
+
+    # ── Postgres, empty, created fresh for every run ──────────────────
+    # The suites are `DATABASE_URL ? describe : describe.skip`, so without
+    # this service every Postgres test SKIPPED and CI still went green —
+    # the exact failure mode vitest.config.mjs warns about, on the branch
+    # whose entire subject is the Postgres port.
+    #
+    # An empty database each run is the point, not a side effect: it means
+    # `node app/db/migrate.mjs` below proves the migrations apply from
+    # ZERO on every push. There is no production data to migrate (the
+    # deployments start fresh), so "0001 through the latest applies to an
+    # empty database" is the property that actually has to hold.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: erp_test
+        ports:
+          - 5432:5432
+        # The job starts as soon as the container does; without a health
+        # gate the migrate step races the server's first accept().
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       # ── 1. Pull the repo at the commit being tested ────────────────
@@ -82,14 +110,31 @@ jobs:
       - name: Lint
         run: npm run lint:ci
 
-      # ── 6. Run the test suite ──────────────────────────────────────
+      # ── 6. Apply migrations to the empty database ──────────────────
+      # Invoked directly rather than through `npm run db:migrate`, because
+      # that script is `node --env-file=.env …` and there is no .env in CI.
+      # This step failing means a fresh deployment could not be stood up —
+      # which nothing else in this pipeline would have caught.
+      - name: Apply migrations from scratch
+        run: node app/db/migrate.mjs
+        env:
+          DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/erp_test
+
+      # ── 7. Run the test suite ──────────────────────────────────────
       # If any test fails, the step exits non-zero and the job fails.
       # GitHub then surfaces a ✗ on the commit / PR.
+      #
+      # Both URLs point at the superuser deliberately. globalSetup derives a
+      # RESTRICTED role (app_test_role) from DIRECT_DATABASE_URL and hands the
+      # workers that instead — a superuser bypasses RLS even under FORCE ROW
+      # LEVEL SECURITY, and the isolation tests would pass vacuously (§9A).
       - name: Run tests
         run: npm test
         env:
           # Some Mongoose features check NODE_ENV. Keep it explicit.
           NODE_ENV: test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/erp_test
+          DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/erp_test
 
       # ── (Optional) Upload coverage ─────────────────────────────────
       # Uncomment once you decide where to send coverage. Codecov is
