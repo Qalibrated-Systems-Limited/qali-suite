@@ -621,7 +621,31 @@ export async function rejectQuote(tx: Tx, quoteId: string, reason?: string | nul
   });
 }
 
+/**
+ * Cancels a quote that has produced nothing.
+ *
+ * The source's canCancel refuses when `invoices.length > 0`, and the transition
+ * table alone cannot express that — it sees the status, not what the quote has
+ * already become. Without this a quote with real invoices against it could be
+ * cancelled, leaving those invoices descended from a cancelled document.
+ *
+ * Asked of document_flow, which is where the source's embedded invoices array
+ * went, so it counts invoices that exist rather than ids somebody pushed.
+ */
 export async function cancelQuote(tx: Tx, quoteId: string, reason?: string | null) {
+  const [{ n }] = (await tx.execute(sql`
+    SELECT COUNT(*)::int AS n
+      FROM document_flow
+     WHERE predecessor_id = ${quoteId}::uuid
+       AND successor_type = 'invoice'
+  `)) as unknown as Array<{ n: number }>;
+
+  if (Number(n) > 0) {
+    throw new Error(
+      `This quote has ${n} invoice(s) against it and cannot be cancelled. Cancel the invoices first.`,
+    );
+  }
+
   return setStatus(tx, quoteId, "cancelled", {
     cancelledAt: new Date(),
     cancellationReason: reason ?? null,

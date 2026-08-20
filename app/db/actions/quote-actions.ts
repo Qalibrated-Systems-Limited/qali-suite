@@ -42,6 +42,7 @@ function toActionError(err: unknown): string {
     message.includes("Nothing left to invoice") ||
     message.includes("still to invoice") ||
     message.includes("Cancel it instead") ||
+    message.includes("cannot be cancelled") ||
     message.includes("Quote not found") ||
     message.includes("permission")
   ) {

@@ -290,6 +290,30 @@ suite("quotes repository", () => {
       ).rejects.toThrow(/expired/i);
     });
 
+    it("refuses to cancel a quote that has invoices against it", async () => {
+      const q = await asTenant(companyA, (tx) => quotesRepo.createQuote(tx, baseInput()));
+      await asTenant(companyA, (tx) => quotesRepo.sendQuote(tx, q.id, { recipient: "b@acme.co" }));
+      const lineId = (await asTenant(companyA, (tx) => quotesRepo.getQuoteDetail(tx, q.id))).lines[0].id;
+
+      // Part-invoice it, so the quote is still open but has produced something.
+      await asTenant(companyA, (tx) =>
+        quotesRepo.convertQuoteToInvoice(tx, q.id, {
+          invoiceDate: "2026-08-21",
+          selection: [{ quoteLineId: lineId, quantity: "4.0000" }],
+        }));
+
+      // The source's canCancel: no cancelling once invoices exist, or they
+      // would descend from a cancelled document.
+      await expect(
+        asTenant(companyA, (tx) => quotesRepo.cancelQuote(tx, q.id, "changed mind")),
+      ).rejects.toThrow(/invoice\(s\) against it/i);
+
+      // A quote that produced nothing still cancels.
+      const clean = await asTenant(companyA, (tx) => quotesRepo.createQuote(tx, baseInput()));
+      const cancelled = await asTenant(companyA, (tx) => quotesRepo.cancelQuote(tx, clean.id));
+      expect(cancelled.status).toBe("cancelled");
+    });
+
     it("refuses to invoice a cancelled quote", async () => {
       const q = await asTenant(companyA, (tx) => quotesRepo.createQuote(tx, baseInput()));
       await asTenant(companyA, (tx) => quotesRepo.cancelQuote(tx, q.id));
