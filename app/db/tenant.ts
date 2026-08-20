@@ -90,6 +90,27 @@ export async function resolveCompanyUuid(
   const cached = companyUuidCache.get(key);
   if (cached) return cached;
 
+  /**
+   * ALREADY A TENANT ID. Since the auth cutover the session carries the
+   * Postgres uuid directly — users.home_company_id — not the Mongo id this
+   * function was written to translate.
+   *
+   * Without this the uuid would miss _migration_id_map, fall through to the
+   * provisioning branch below, and CREATE A SECOND COMPANY for a tenant that
+   * already exists. Verified against `companies` rather than trusted on shape,
+   * so a well-formed uuid naming no company is still refused.
+   */
+  if (UUID_RE.test(key)) {
+    const live = (await db.execute(sql`
+      SELECT id FROM companies WHERE id = ${key}::uuid
+    `)) as unknown as Array<{ id: string }>;
+    if (live.length) {
+      companyUuidCache.set(key, key);
+      return key;
+    }
+    throw new Error("That company no longer exists. Choose another.");
+  }
+
   const rows = (await db.execute(sql`
     SELECT new_uuid FROM _migration_id_map
      WHERE collection = 'companies' AND old_object_id = ${key}
@@ -136,6 +157,9 @@ export async function resolveCompanyUuid(
   companyUuidCache.set(key, provisioned.companyId);
   return provisioned.companyId;
 }
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isUsableCompanyId(value: unknown): value is string {
   const s = String(value ?? "").trim();

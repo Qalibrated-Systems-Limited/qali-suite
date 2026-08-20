@@ -101,7 +101,43 @@ try {
     written++;
   }
 
+  // ── Pending invitations ────────────────────────────────────────────────
+  // Carried so an invite emailed before the cutover still works after it. Only
+  // the ones still open: an accepted invite is history, and its user already
+  // exists; a cancelled one should not be resurrected by a backfill.
+  const inviteDocs = await mongoose.connection
+    .collection("invites")
+    .find({ status: "pending" })
+    .toArray();
+  console.log(`${inviteDocs.length} pending invitation(s) in Mongo`);
+
+  let invitesWritten = 0, invitesSkipped = 0;
+  for (const iv of inviteDocs) {
+    const [m] = await sql`SELECT new_uuid FROM _migration_id_map
+                           WHERE collection = 'companies' AND old_object_id = ${String(iv.companyId)}`;
+    if (!m?.new_uuid) {
+      // An invite into a tenant that does not exist here cannot be honoured.
+      invitesSkipped++;
+      continue;
+    }
+    const role = RETIRED[iv.role] ?? iv.role ?? "Employee";
+    if (DRY) {
+      console.log(`  would write invite ${iv.email} -> ${role}`);
+      continue;
+    }
+    await sql`
+      INSERT INTO invites (company_id, email, role, token, status, expires_at,
+                           invited_by_id, invited_by_name)
+      VALUES (${m.new_uuid}, ${String(iv.email).toLowerCase().trim()}, ${role},
+              ${iv.token}, 'pending',
+              ${iv.expiresAt ? new Date(iv.expiresAt) : new Date(Date.now() + 7 * 864e5)},
+              ${iv.invitedBy?.id ?? "unknown"}, ${iv.invitedBy?.name ?? "Unknown"})
+      ON CONFLICT (token) DO NOTHING`;
+    invitesWritten++;
+  }
+
   if (!DRY) {
+    console.log(`invites        ${invitesWritten} written${invitesSkipped ? `, ${invitesSkipped} skipped (tenant not provisioned)` : ""}`);
     // Every SuperAdmin holds every company — the standing access §9D describes,
     // as dated rows. Without users in this table, provisioning granted nobody.
     const admins = await sql`SELECT id, name FROM users WHERE role = 'SuperAdmin'`;

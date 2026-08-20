@@ -149,3 +149,145 @@ export async function linkUserToParty(input: {
 
   return { linked: true as const, companyId, partyId: partyUuid };
 }
+
+/**
+ * The sign-in lookup (0043).
+ *
+ * Privileged, because signing in happens before any company is chosen — there
+ * is no `app.company_id` to scope by, and the users policy would correctly
+ * return nothing. The proof of identity is the password, checked by the caller
+ * against the hash returned here.
+ *
+ * Returns the hash rather than comparing here so the comparison stays in
+ * auth.ts beside the rest of the credential handling, and so nothing else is
+ * tempted to use this as a login check.
+ */
+export async function findUserForSignIn(email: string) {
+  const rows = (await privilegedDb().execute(sql`
+    SELECT id, name, email, role, status, avatar, auth_provider,
+           home_company_id, token_version, password_hash
+      FROM users
+     WHERE lower(email) = ${String(email).toLowerCase().trim()}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  if (!rows.length) return null;
+  const r = rows[0];
+  return {
+    id: String(r.id),
+    name: String(r.name),
+    email: String(r.email),
+    role: String(r.role),
+    status: String(r.status),
+    avatar: (r.avatar as string) ?? null,
+    authProvider: String(r.auth_provider),
+    homeCompanyId: (r.home_company_id as string) ?? null,
+    tokenVersion: Number(r.token_version ?? 0),
+    /** Null for a Google user, who never had one (0043). */
+    passwordHash: (r.password_hash as string) ?? null,
+  };
+}
+
+/** The session-freshness check reads this on privileged routes. */
+export async function getTokenVersion(userId: string): Promise<number | null> {
+  const rows = (await privilegedDb().execute(sql`
+    SELECT token_version FROM users WHERE id = ${String(userId)}
+  `)) as unknown as Array<{ token_version: number }>;
+  return rows.length ? Number(rows[0].token_version) : null;
+}
+
+/** Records a Google avatar change without touching anything else. */
+export async function updateAvatar(userId: string, avatar: string) {
+  await privilegedDb().execute(sql`
+    UPDATE users SET avatar = ${avatar}, updated_at = now()
+     WHERE id = ${String(userId)}
+  `);
+}
+
+/**
+ * Creates the login an accepted invitation promises.
+ *
+ * Privileged for the same reason as the invite lookup: the person has no
+ * company until this row and its grant exist. The id is generated here rather
+ * than taken from anywhere, because there is no Mongo document to mirror — this
+ * is the first store to know about them.
+ */
+export async function createUserFromInvite(input: {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  companyId: string;
+  passwordHash?: string | null;
+  authProvider?: string;
+  avatar?: string | null;
+  invitedById?: string | null;
+  invitedByName?: string | null;
+}) {
+  await privilegedDb().execute(sql`
+    INSERT INTO users (id, name, email, role, status, auth_provider, avatar,
+                       home_company_id, token_version, password_hash,
+                       created_by_id, created_by_name)
+    VALUES (${input.id}, ${input.name},
+            ${input.email.toLowerCase().trim()}, ${input.role}, 'active',
+            ${input.authProvider ?? "credentials"}, ${input.avatar ?? null},
+            ${input.companyId}::uuid, 0, ${input.passwordHash ?? null},
+            ${input.invitedById ?? null}, ${input.invitedByName ?? null})
+    ON CONFLICT (id) DO NOTHING
+  `);
+
+  // The grant is what actually lets them in; a user row without one is a login
+  // that can sign in and open nothing.
+  await privilegedDb().execute(sql`
+    INSERT INTO user_company_access (user_id, company_id, granted_via,
+                                     granted_by_id, granted_by_name)
+    VALUES (${input.id}, ${input.companyId}::uuid, 'invite',
+            ${input.invitedById ?? null}, ${input.invitedByName ?? null})
+    ON CONFLICT DO NOTHING
+  `);
+}
+
+/**
+ * Says which party a login is, given ids Postgres already owns.
+ *
+ * The sibling above takes Mongo ids and resolves them, which was right while
+ * the session carried them. Since the auth cutover the invite already holds a
+ * tenant uuid and a party uuid, so there is nothing to translate — and going
+ * through the translating version would look them up in _migration_id_map and
+ * find nothing.
+ *
+ * Privileged because it runs during sign-in, before a tenant is scoped. The
+ * composite foreign key on (party_id, company_id) is what keeps it honest:
+ * this cannot point a grant at another company's party (0036).
+ */
+export async function linkUserToPartyDirect(input: {
+  userId: string;
+  companyId: string;
+  partyId: string | null;
+}) {
+  const rows = (await privilegedDb().execute(sql`
+    UPDATE user_company_access
+       SET party_id = ${input.partyId}::uuid, updated_at = now()
+     WHERE user_id = ${String(input.userId)}
+       AND company_id = ${input.companyId}::uuid
+    RETURNING id
+  `)) as unknown as Array<{ id: string }>;
+  return { linked: rows.length > 0 };
+}
+
+/**
+ * Status and token version, for the session-freshness check.
+ *
+ * The narrowest possible read on the hottest privileged path: two columns by
+ * primary key. Returns null when the login is gone, which the caller treats as
+ * a stale session rather than an error.
+ */
+export async function getUserStatusAndVersion(userId: string) {
+  const rows = (await privilegedDb().execute(sql`
+    SELECT status, token_version FROM users WHERE id = ${String(userId)}
+  `)) as unknown as Array<{ status: string; token_version: number }>;
+  if (!rows.length) return null;
+  return {
+    status: String(rows[0].status),
+    tokenVersion: Number(rows[0].token_version ?? 0),
+  };
+}

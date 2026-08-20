@@ -2,10 +2,16 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { z } from "zod";
-import User from "./app/models/user";
-import Invite from "./app/models/invite";
+import bcrypt from "bcryptjs";
 import { authConfig } from "./auth.config";
-import dbConnect from "./app/config/dbConnect";
+import {
+  findUserForSignIn,
+  updateAvatar,
+  createUserFromInvite,
+  syncUser,
+} from "./app/db/userAdmin";
+import { findOpenInviteForEmail, acceptInvite } from "./app/db/inviteAdmin";
+import { linkUserToPartyDirect } from "./app/db/userAdmin";
 
 type UserType = {
   id: string;
@@ -18,15 +24,17 @@ type UserType = {
   tokenVersion?: number;
 };
 
+/**
+ * The sign-in lookup, on Postgres (0043).
+ *
+ * Privileged, because signing in happens before a company is chosen: there is
+ * no app.company_id to scope by, and the users policy would correctly return
+ * nothing. Identity is proved by the password, compared below against the hash
+ * this returns.
+ */
 async function getUser(email: string) {
   try {
-    await dbConnect();
-    // `tokenVersion` is `select: false` on the schema; explicitly pull
-    // it so we can mint the JWT with the current version stamp.
-    const user = await User.findOne({ email }).select(
-      "+password +tokenVersion",
-    );
-    return user;
+    return await findUserForSignIn(email);
   } catch (error) {
     console.error("Failed to fetch user:", error);
     throw new Error("Failed to fetch user.");
@@ -67,7 +75,8 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
 
           // Deactivated users cannot start a new session. (The Google
           // OAuth path also enforces this in the signIn callback.)
-          if (user.status === "Inactive") return null;
+          // Postgres stores this lowercase, with a CHECK — 0036.
+          if (user.status !== "active") return null;
 
           // Note: we used to early-reject `authProvider === "google"`
           // here. Removed because (a) it forced Google-signed-up users
@@ -75,7 +84,15 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
           // Google account, and (b) comparePassword now safely returns
           // false when no password is set — so the result is the same
           // ("invalid credentials") without leaking the auth method.
-          const passwordsMatch = await user.comparePassword(password);
+          /**
+           * A NULL HASH IS NOT AN EMPTY PASSWORD. A Google user never had one
+           * (0043), and bcrypt.compare against null would throw. Refusing here
+           * returns the same "invalid credentials" as a wrong password, so the
+           * response still does not leak which accounts use Google.
+           */
+          const passwordsMatch = user.passwordHash
+            ? await bcrypt.compare(password, user.passwordHash)
+            : false;
 
           if (passwordsMatch) {
             let companyCode: string | undefined;
@@ -84,7 +101,7 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
             let trialEndsAt: string | null = null;
             let currentPeriodEnd: string | null = null;
             let maxUsers: number = 5;
-            if (user.companyId) {
+            if (user.homeCompanyId) {
               // The company record lives in Postgres since 0035. Loaded here
               // so the session carries the plan the books were actually
               // configured with, not a copy that stopped being updated.
@@ -92,7 +109,7 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
                 "@/app/db/platform"
               );
               const company = await getCompanySubscription(
-                String(user.companyId),
+                String(user.homeCompanyId),
               );
               companyCode = company?.code ?? undefined;
               const sub = company?.subscription;
@@ -103,12 +120,14 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
               maxUsers = sub?.maxUsers ?? 5;
             }
             return {
-              id: user._id.toString(),
+              id: user.id,
               name: user.name,
               role: user.role,
               email: user.email,
               image: user.avatar,
-              companyId: user.companyId?.toString(),
+              // The tenant's Postgres uuid now, not a Mongo id.
+              // resolveCompanyUuid accepts it directly.
+              companyId: user.homeCompanyId ?? undefined,
               companyCode,
               companyPlan,
               subscriptionStatus,
@@ -127,111 +146,116 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
     ...authConfig.callbacks,
     async signIn({ user, account }) {
       if (account?.provider === "google") {
-        await dbConnect();
-
         const email = user.email?.toLowerCase();
         if (!email) return false;
 
-        // Check if user already exists
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
-          // Check user status
-          if (existingUser.status === "Inactive") return false;
+        const existing = await findUserForSignIn(email);
 
-          // Update avatar if changed
-          if (user.image && existingUser.avatar !== user.image) {
-            existingUser.avatar = user.image;
-            await existingUser.save();
+        if (existing) {
+          // Deactivated users cannot start a session, by either provider.
+          if (existing.status !== "active") return false;
+
+          if (user.image && existing.avatar !== user.image) {
+            await updateAvatar(existing.id, user.image);
           }
 
-          // Check for pending invites — apply role and link employee profile
-          const pendingInvite = await Invite.findOne({
-            email,
-            status: "pending",
-            expiresAt: { $gt: new Date() },
-          });
+          /**
+           * A pending invitation for someone who already has a login.
+           *
+           * Read privileged: the person has no tenant context yet, so every
+           * policy would correctly return nothing (inviteAdmin.ts).
+           */
+          const invite = await findOpenInviteForEmail(email);
+          if (invite) {
+            // Only promote a role that says nothing. The source used the same
+            // rule, spelled against roles 0039 retired.
+            // Not roleAllowed(): this is not a permission gate. It asks
+            // whether the role already says something, and roleAllowed would
+            // answer true for a SuperAdmin by design — which is the opposite
+            // of what is being decided here.
+            const hasRealRole =
+              !!existing.role &&
+              existing.role !== "Employee" &&
+              existing.role !== "Viewer";
 
-          if (pendingInvite) {
-            // Only set role if user doesn't already have a meaningful one
-            const hasExistingRole = existingUser.role && existingUser.role !== "User" && existingUser.role !== "Viewer";
-            if (!hasExistingRole) existingUser.role = pendingInvite.role;
-            if (!existingUser.companyId && pendingInvite.companyId) existingUser.companyId = pendingInvite.companyId;
-            await existingUser.save();
+            await syncUser({
+              id: existing.id,
+              role: hasRealRole ? existing.role : invite.role,
+              // Only fill a home company if they have none; an existing member
+              // of one company does not get moved by being invited to another.
+              companyId: existing.homeCompanyId ? undefined : invite.companyId,
+            });
 
-            // Link employee profile if this is an employee invite
-            if (pendingInvite.partyId) {
-              const Party = (await import("@/app/models/parties")).default;
-              const EmployeeProfile = (await import("@/app/models/employeeProfile")).default;
-              await Promise.all([
-                Party.findByIdAndUpdate(pendingInvite.partyId, { userId: existingUser._id }),
-                EmployeeProfile.findOneAndUpdate(
-                  { partyId: pendingInvite.partyId },
-                  { userId: existingUser._id },
-                ),
-              ]);
+            /**
+             * The invite names an employee: say which party this login is.
+             *
+             * On the GRANT, not on the user — a party is company-scoped, so a
+             * person who is an employee here and a supplier elsewhere has two
+             * party rows (0036). The source wrote Party.userId in Mongo, which
+             * has been the wrong store since parties moved.
+             */
+            if (invite.partyId) {
+              await linkUserToPartyDirect({
+                userId: existing.id,
+                companyId: invite.companyId,
+                partyId: invite.partyId,
+              });
             }
 
-            // Mark all pending invites for this email as accepted
-            await Invite.updateMany(
-              { email, status: "pending" },
-              { $set: { status: "accepted", acceptedAt: new Date() } },
-            );
+            // Consume it. The UPDATE carries status='pending' in its WHERE, so
+            // a second click matches nothing rather than accepting twice.
+            await acceptInvite(invite.id, existing.id);
           }
 
           return true;
         }
 
-        // No existing user — check for a pending invite
-        const invite = await Invite.findOne({
-          email,
-          status: "pending",
-          expiresAt: { $gt: new Date() },
-        });
+        // No login yet. This is an invite-only system: without one, no account
+        // is created and sign-in is refused.
+        const invite = await findOpenInviteForEmail(email);
+        if (!invite) return false;
 
-        if (!invite) {
-          // No invite = deny sign-in (invite-only system)
-          return false;
-        }
-
-        // Create new user from Google profile + invite data
-        const newUser = await User.create({
-          name: user.name,
+        // The id is generated here — there is no Mongo document to mirror, and
+        // Postgres is now the first store to know about this person.
+        const newUserId = crypto.randomUUID();
+        await createUserFromInvite({
+          id: newUserId,
+          name: user.name ?? email,
           email,
-          avatar: user.image,
           role: invite.role,
           companyId: invite.companyId,
           authProvider: "google",
-          creator: invite.invitedBy,
+          avatar: user.image ?? null,
+          invitedById: invite.id,
+          invitedByName: invite.invitedByName,
         });
 
-        // Link to employee profile if this is an employee invite
         if (invite.partyId) {
-          const Party = (await import("@/app/models/parties")).default;
-          const EmployeeProfile = (await import("@/app/models/employeeProfile")).default;
-          await Promise.all([
-            Party.findByIdAndUpdate(invite.partyId, { userId: newUser._id }),
-            EmployeeProfile.findOneAndUpdate(
-              { partyId: invite.partyId },
-              { userId: newUser._id },
-            ),
-          ]);
+          await linkUserToPartyDirect({
+            userId: newUserId,
+            companyId: invite.companyId,
+            partyId: invite.partyId,
+          });
         }
 
-        // Mark invite as accepted
-        invite.status = "accepted";
-        invite.acceptedAt = new Date();
-        await invite.save();
-
+        await acceptInvite(invite.id, newUserId);
         return true;
       }
 
-      // Credentials provider — mark any pending invites as accepted
+      // Credentials sign-in also consumes a pending invitation, so an invited
+      // person who sets a password is not left with the invite still open.
       if (account?.provider === "credentials" && user?.email) {
-        await dbConnect();
-        await Invite.updateMany(
-          { email: user.email.toLowerCase(), status: "pending" },
-          { $set: { status: "accepted", acceptedAt: new Date() } },
-        );
+        const invite = await findOpenInviteForEmail(user.email.toLowerCase());
+        if (invite && user.id) {
+          if (invite.partyId) {
+            await linkUserToPartyDirect({
+              userId: String(user.id),
+              companyId: invite.companyId,
+              partyId: invite.partyId,
+            });
+          }
+          await acceptInvite(invite.id, String(user.id));
+        }
       }
 
       return true;
@@ -305,12 +329,11 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
         token.user = user;
       }
 
-      // For Google OAuth — fetch user data from DB
+      // For Google OAuth — read the login back, now from Postgres. The signIn
+      // callback has just created it or updated it, so this sees the role the
+      // invitation granted rather than what Google sent.
       if (user && account?.provider === "google") {
-        await dbConnect();
-        const dbUser = await User.findOne({
-          email: user.email?.toLowerCase(),
-        }).select("+tokenVersion");
+        const dbUser = await findUserForSignIn(String(user.email ?? "").toLowerCase());
         if (dbUser) {
           let companyCode: string | undefined;
           let companyPlan: string = "free";
@@ -318,10 +341,10 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
           let trialEndsAt: string | null = null;
           let currentPeriodEnd: string | null = null;
           let maxUsers: number = 5;
-          if (dbUser.companyId) {
+          if (dbUser.homeCompanyId) {
             const { getCompanySubscription } = await import("@/app/db/platform");
             const company = await getCompanySubscription(
-              String(dbUser.companyId),
+              String(dbUser.homeCompanyId),
             );
             companyCode = company?.code ?? undefined;
             const sub = company?.subscription;
@@ -332,24 +355,24 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
             maxUsers = sub?.maxUsers ?? 5;
           }
           token.role = dbUser.role;
-          token.id = dbUser._id.toString();
+          token.id = dbUser.id;
           token.avatar = dbUser.avatar || user.image;
-          token.companyId = dbUser.companyId?.toString();
+          token.companyId = dbUser.homeCompanyId ?? undefined;
           token.companyCode = companyCode;
           token.companyPlan = companyPlan;
           token.subscriptionStatus = subscriptionStatus;
           token.trialEndsAt = trialEndsAt;
           token.currentPeriodEnd = currentPeriodEnd;
           token.maxUsers = maxUsers;
-          token.tokenVersion = (dbUser as any).tokenVersion ?? 0;
+          token.tokenVersion = dbUser.tokenVersion ?? 0;
           token.planRefreshedAt = Date.now();
           token.user = {
-            id: dbUser._id.toString(),
+            id: dbUser.id,
             name: dbUser.name,
             role: dbUser.role,
             email: dbUser.email,
             image: dbUser.avatar || user.image,
-            companyId: dbUser.companyId?.toString(),
+            companyId: dbUser.homeCompanyId ?? undefined,
             companyCode,
             companyPlan,
           };

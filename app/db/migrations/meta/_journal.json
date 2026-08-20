@@ -309,6 +309,13 @@
       "when": 1787049116566,
       "tag": "0043_user_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1787049117566,
+      "tag": "0044_invites",
+      "breakpoints": true
     }
   ]
 }
