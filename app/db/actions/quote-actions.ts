@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { withAuthorizedTenant } from "../tenant";
 import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
+import { roleAllowed } from "@/lib/permissions";
 import * as quotes from "../repositories/quotes";
 import { quoteDataSchema, toRepositoryInput } from "../validation/quotes";
 
@@ -310,10 +311,74 @@ export async function getQuotesPg(opts: {
   return withAuthorizedTenant([], (tx) => quotes.listQuotes(tx, opts));
 }
 
+/**
+ * The list page's query, with the visibility rule applied.
+ *
+ * A rep sees their own quotes; the roles that may write invoices see the
+ * floor's. The source applied this in the query layer and it would have
+ * vanished silently in the port — the list would simply have shown everyone
+ * everything, which reads as a working page.
+ */
+export async function searchQuotesPg(
+  opts: {
+    query?: string;
+    page?: number;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+    customerId?: string;
+    expiringSoon?: boolean;
+  } = {},
+) {
+  return withAuthorizedTenant([], (tx, { user }) =>
+    quotes.searchQuotes(tx, {
+      ...opts,
+      visibleToUserId: roleAllowed(user.role, [...INVOICE_WRITE_ROLES])
+        ? null
+        : user.id,
+    }),
+  );
+}
+
+export async function countQuotesPg(
+  opts: {
+    query?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+    customerId?: string;
+    expiringSoon?: boolean;
+  } = {},
+) {
+  return withAuthorizedTenant([], (tx, { user }) =>
+    quotes.countQuotes(tx, {
+      ...opts,
+      visibleToUserId: roleAllowed(user.role, [...INVOICE_WRITE_ROLES])
+        ? null
+        : user.id,
+    }),
+  );
+}
+
+export async function getQuotesWithAvailableItemsPg(customerId: string) {
+  return withAuthorizedTenant([], (tx) =>
+    quotes.getQuotesWithAvailableItems(tx, customerId),
+  );
+}
+
 export async function getQuoteDetailPg(quoteId: string) {
   return withAuthorizedTenant([], (tx) => quotes.getQuoteDetail(tx, quoteId));
 }
 
-export async function getQuoteStatsPg() {
-  return withAuthorizedTenant([], (tx) => quotes.getQuoteStats(tx));
+export async function getQuoteStatsPg(
+  filters: { status?: string; startDate?: string; endDate?: string } = {},
+) {
+  return withAuthorizedTenant([], (tx, { user }) =>
+    quotes.getQuoteStats(tx, {
+      ...filters,
+      visibleToUserId: roleAllowed(user.role, [...INVOICE_WRITE_ROLES])
+        ? null
+        : user.id,
+    }),
+  );
 }

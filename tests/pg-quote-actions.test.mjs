@@ -219,6 +219,73 @@ suite("quote actions (end to end)", () => {
     });
   });
 
+  describe("who sees which quotes", () => {
+    it("shows a rep only their own, and a Sales Manager everyone's", async () => {
+      // Two quotes, raised by two different people.
+      asRole("Sales Manager");
+      const mine = await quoteActions.createQuotePg(null, form({ customerId, items: [serviceItem] }));
+      const repId = randomUUID();
+      getTenantContext.mockResolvedValue({
+        user: { id: repId, name: "Rep", role: "Sales Manager" },
+        companyId: mongoCompanyId,
+      });
+      const theirs = await quoteActions.createQuotePg(null, form({ customerId, items: [serviceItem] }));
+      expect(theirs.success).toBe(true);
+
+      // A Sales Manager may write invoices, so they see the floor's.
+      const all = await quoteActions.searchQuotesPg({});
+      expect(all.total).toBe(2);
+
+      // An Employee is outside INVOICE_WRITE_ROLES, so the list narrows to
+      // their own — and they raised none.
+      getTenantContext.mockResolvedValue({
+        user: { id: randomUUID(), name: "Someone", role: "Employee" },
+        companyId: mongoCompanyId,
+      });
+      const employeeView = await quoteActions.searchQuotesPg({});
+      expect(employeeView.total).toBe(0);
+
+      // The rep who raised one sees exactly that one.
+      getTenantContext.mockResolvedValue({
+        user: { id: repId, name: "Rep", role: "Employee" },
+        companyId: mongoCompanyId,
+      });
+      const repView = await quoteActions.searchQuotesPg({});
+      expect(repView.total).toBe(1);
+      expect(repView.rows[0].id).toBe(theirs.quoteId);
+      expect(mine.quoteId).not.toBe(theirs.quoteId);
+    });
+
+    it("searches by number and by customer, and pages", async () => {
+      asRole("Sales Manager");
+      const a = await quoteActions.createQuotePg(null, form({ customerId, items: [serviceItem] }));
+      await quoteActions.createQuotePg(null, form({ customerId, items: [serviceItem] }));
+
+      const [row] = await admin`SELECT quote_number FROM quotes WHERE id = ${a.quoteId}`;
+      const byNumber = await quoteActions.searchQuotesPg({ query: row.quote_number });
+      expect(byNumber.total).toBe(1);
+
+      const byCustomer = await quoteActions.searchQuotesPg({ query: "Acme" });
+      expect(byCustomer.total).toBe(2);
+
+      const paged = await quoteActions.searchQuotesPg({ page: 1 });
+      expect(paged.pages).toBe(1);
+      expect(paged.rows).toHaveLength(2);
+    });
+
+    it("lists only quotes with something left to invoice", async () => {
+      asRole("Sales Manager");
+      const created = await createSent();
+      let available = await quoteActions.getQuotesWithAvailableItemsPg(customerId);
+      expect(available).toHaveLength(1);
+      expect(available[0].remaining).toBe("10.0000");
+
+      await quoteActions.convertQuoteToInvoicePg(created.quoteId, { invoiceDate: "2026-08-21" });
+      available = await quoteActions.getQuotesWithAvailableItemsPg(customerId);
+      expect(available).toHaveLength(0);
+    });
+  });
+
   it("records a failed send as an attempt and leaves the quote a draft", async () => {
     const created = await quoteActions.createQuotePg(
       null,

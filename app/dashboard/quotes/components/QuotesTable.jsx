@@ -201,9 +201,9 @@ export function QuotesTable({ quotes }) {
                     <div className="text-sm font-semibold text-foreground">
                       {formatCurrency(quote.total)}
                     </div>
-                    {quote.invoices?.length > 0 && (
+                    {quote.invoiceCount > 0 && (
                       <div className="text-xs text-muted-foreground">
-                        {quote.invoices.length} invoice(s)
+                        {quote.invoiceCount} invoice(s)
                       </div>
                     )}
                   </td>

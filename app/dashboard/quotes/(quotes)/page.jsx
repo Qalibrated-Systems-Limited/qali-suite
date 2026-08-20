@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import { getQuoteStats } from "@/app/mongodb/queries/quote-queries";
+import { getQuoteStatsPg } from "@/app/db/actions/quote-actions";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -48,7 +48,7 @@ async function QuotesPage(props) {
   };
 
   // Fetch stats for filter components (needed for tabs and mobile sheet)
-  const stats = await getQuoteStats(filters);
+  const stats = await getQuoteStatsPg(filters);
 
   // Check if any filters are active
   const hasActiveFilters = status !== "all" || startDate || endDate;

@@ -269,16 +269,225 @@ export async function listQuotes(
   return rows.map((r) => ({ ...r, isExpired: isExpired(r) }));
 }
 
-/** Counts and value by status, in one pass rather than one query per status. */
-export async function getQuoteStats(tx: Tx) {
+/**
+ * The list page's query: search, filters, paging and a total, in one trip.
+ *
+ * `visibleToUserId` IS A FEATURE, NOT A DETAIL. The source restricts the list
+ * to `createdBy.id` for anyone outside SuperAdmin, Admin, CFO, Finance Manager,
+ * Accountant and Sales Manager — a rep sees their own quotes and not the
+ * floor's. That set is INVOICE_WRITE_ROLES, so the caller passes a user id when
+ * the role is outside it and null when it is not.
+ *
+ * It is a parameter rather than a policy because the tenant GUCs carry a user
+ * id but not a role, and inventing a second GUC to teach the database about
+ * roles is a larger change than this rule is worth.
+ */
+export async function searchQuotes(
+  tx: Tx,
+  opts: {
+    query?: string;
+    page?: number;
+    perPage?: number;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+    customerId?: string;
+    expiringSoon?: boolean;
+    visibleToUserId?: string | null;
+  } = {},
+) {
+  const perPage = Math.min(opts.perPage ?? 10, 200);
+  const page = Math.max(opts.page ?? 1, 1);
+  const offset = (page - 1) * perPage;
+
+  const where = [sql`TRUE`];
+  if (opts.query) {
+    const like = `%${opts.query}%`;
+    where.push(sql`(q.quote_number ILIKE ${like} OR q.customer_name ILIKE ${like})`);
+  }
+  if (opts.status && opts.status !== "all") {
+    where.push(sql`q.status = ${opts.status}`);
+  }
+  if (opts.startDate) where.push(sql`q.quote_date >= ${opts.startDate}::date`);
+  if (opts.endDate) where.push(sql`q.quote_date <= ${opts.endDate}::date`);
+  if (opts.customerId) where.push(sql`q.customer_id = ${opts.customerId}::uuid`);
+  if (opts.expiringSoon) {
+    where.push(sql`q.status IN ('draft','sent')
+                   AND q.valid_until BETWEEN CURRENT_DATE AND CURRENT_DATE + 7`);
+  }
+  if (opts.visibleToUserId) {
+    where.push(sql`q.created_by_id = ${opts.visibleToUserId}`);
+  }
+  const clause = sql.join(where, sql` AND `);
+
+  // One trip: the page of rows and the total that pages it. Two round trips for
+  // a list nobody reads twice is a round trip wasted.
   const rows = (await tx.execute(sql`
-    SELECT status,
-           COUNT(*)::int AS count,
-           COALESCE(SUM(total), 0)::numeric(19,4) AS value
+    SELECT q.id, q.quote_number, q.quote_date, q.valid_until, q.customer_id,
+           q.customer_name, q.customer_email, q.customer_phone,
+           q.status, q.total, q.salesperson_name,
+           -- How many invoices this quote produced. The header rows in
+           -- document_flow already say; the list showed "n invoice(s)" from an
+           -- embedded array that no longer exists.
+           (SELECT COUNT(*)::int FROM document_flow f
+             WHERE f.predecessor_id = q.id AND f.successor_type = 'invoice') AS invoice_count,
+           COUNT(*) OVER ()::int AS total_count
+      FROM quotes q
+     WHERE ${clause}
+     ORDER BY q.quote_date DESC, q.created_at DESC
+     LIMIT ${perPage} OFFSET ${offset}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const total = rows.length ? Number(rows[0].total_count) : 0;
+  return {
+    rows: rows.map((r) => ({
+      id: String(r.id),
+      quoteNumber: String(r.quote_number),
+      quoteDate: String(r.quote_date),
+      validUntil: (r.valid_until as string) ?? null,
+      customerId: String(r.customer_id),
+      customerName: String(r.customer_name),
+      customerEmail: (r.customer_email as string) ?? null,
+      customerPhone: (r.customer_phone as string) ?? null,
+      invoiceCount: Number(r.invoice_count ?? 0),
+      status: String(r.status),
+      total: String(r.total),
+      salespersonName: (r.salesperson_name as string) ?? null,
+      isExpired: isExpired({
+        status: String(r.status),
+        validUntil: (r.valid_until as string) ?? null,
+      }),
+    })),
+    total,
+    page,
+    perPage,
+    pages: Math.max(Math.ceil(total / perPage), 1),
+  };
+}
+
+/**
+ * Just the total, for the pagination boundary.
+ *
+ * A separate query rather than threading the count out of searchQuotes: the
+ * table and the pager are separate Suspense boundaries so they stream
+ * independently, and this counts an indexed predicate instead of re-running the
+ * row fetch to throw the rows away.
+ */
+export async function countQuotes(
+  tx: Tx,
+  opts: Parameters<typeof searchQuotes>[1] = {},
+) {
+  const where = [sql`TRUE`];
+  if (opts.query) {
+    const like = `%${opts.query}%`;
+    where.push(sql`(quote_number ILIKE ${like} OR customer_name ILIKE ${like})`);
+  }
+  if (opts.status && opts.status !== "all") where.push(sql`status = ${opts.status}`);
+  if (opts.startDate) where.push(sql`quote_date >= ${opts.startDate}::date`);
+  if (opts.endDate) where.push(sql`quote_date <= ${opts.endDate}::date`);
+  if (opts.customerId) where.push(sql`customer_id = ${opts.customerId}::uuid`);
+  if (opts.expiringSoon) {
+    where.push(sql`status IN ('draft','sent')
+                   AND valid_until BETWEEN CURRENT_DATE AND CURRENT_DATE + 7`);
+  }
+  if (opts.visibleToUserId) where.push(sql`created_by_id = ${opts.visibleToUserId}`);
+
+  const [row] = (await tx.execute(sql`
+    SELECT COUNT(*)::int AS n FROM quotes WHERE ${sql.join(where, sql` AND `)}
+  `)) as unknown as Array<{ n: number }>;
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * Quotes for a customer that still have something left to invoice.
+ *
+ * The source walks every line counting invoicedQuantity. Here "left" is what
+ * quote_line_invoiced already derives, so a cancelled invoice releases its
+ * quantity back without anything having to remember to.
+ */
+export async function getQuotesWithAvailableItems(tx: Tx, customerId: string) {
+  const rows = (await tx.execute(sql`
+    SELECT q.id, q.quote_number, q.quote_date, q.total,
+           SUM(v.quoted_quantity - v.invoiced_quantity)::numeric(19,4) AS remaining
+      FROM quotes q
+      JOIN quote_line_invoiced v ON v.quote_id = q.id
+     WHERE q.customer_id = ${customerId}::uuid
+       AND q.status IN ('sent', 'accepted')
+     GROUP BY q.id, q.quote_number, q.quote_date, q.total
+    HAVING SUM(v.quoted_quantity - v.invoiced_quantity) > 0
+     ORDER BY q.quote_date DESC
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    quoteNumber: String(r.quote_number),
+    quoteDate: String(r.quote_date),
+    total: String(r.total),
+    remaining: String(r.remaining),
+  }));
+}
+
+/**
+ * The stats cards' numbers.
+ *
+ * THE SHAPE IS THE COMPONENT'S CONTRACT — a flat object of counts and values
+ * that QuoteStatsCards destructures, cancelled excluded, carrying the same
+ * per-user visibility as the list. Returning something tidier would mean
+ * editing a component to suit the port, which is how a "port" becomes a
+ * rewrite.
+ *
+ * One pass with FILTER aggregates rather than a query per status.
+ */
+export async function getQuoteStats(
+  tx: Tx,
+  opts: {
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+    visibleToUserId?: string | null;
+  } = {},
+) {
+  const where = [sql`status <> 'cancelled'`];
+  if (opts.status && opts.status !== "all") where.push(sql`status = ${opts.status}`);
+  if (opts.startDate) where.push(sql`quote_date >= ${opts.startDate}::date`);
+  if (opts.endDate) where.push(sql`quote_date <= ${opts.endDate}::date`);
+  if (opts.visibleToUserId) where.push(sql`created_by_id = ${opts.visibleToUserId}`);
+  const clause = sql.join(where, sql` AND `);
+
+  const [row] = (await tx.execute(sql`
+    SELECT COUNT(*)::int                                        AS total,
+           COALESCE(SUM(total), 0)::numeric(19,4)               AS "totalValue",
+           COUNT(*) FILTER (WHERE status = 'draft')::int        AS draft,
+           COUNT(*) FILTER (WHERE status = 'sent')::int         AS sent,
+           COUNT(*) FILTER (WHERE status = 'accepted')::int     AS accepted,
+           COUNT(*) FILTER (WHERE status = 'rejected')::int     AS rejected,
+           COUNT(*) FILTER (WHERE status = 'converted')::int    AS converted,
+           COUNT(*) FILTER (WHERE status = 'expired')::int      AS expired,
+           COALESCE(SUM(total) FILTER (WHERE status = 'draft'), 0)::numeric(19,4)     AS "draftValue",
+           COALESCE(SUM(total) FILTER (WHERE status = 'sent'), 0)::numeric(19,4)      AS "sentValue",
+           COALESCE(SUM(total) FILTER (WHERE status = 'accepted'), 0)::numeric(19,4)  AS "acceptedValue",
+           COALESCE(SUM(total) FILTER (WHERE status = 'converted'), 0)::numeric(19,4) AS "convertedValue"
       FROM quotes
-     GROUP BY status
-  `)) as unknown as Array<{ status: string; count: number; value: string }>;
-  return rows;
+     WHERE ${clause}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  // Numbers, because the cards format them as numbers. Money stays exact in
+  // the database; these are display totals, already aggregated.
+  const n = (v: unknown) => Number(v ?? 0);
+  return {
+    total: n(row?.total),
+    totalValue: n(row?.totalValue),
+    draft: n(row?.draft),
+    sent: n(row?.sent),
+    accepted: n(row?.accepted),
+    rejected: n(row?.rejected),
+    converted: n(row?.converted),
+    expired: n(row?.expired),
+    draftValue: n(row?.draftValue),
+    sentValue: n(row?.sentValue),
+    acceptedValue: n(row?.acceptedValue),
+    convertedValue: n(row?.convertedValue),
+  };
 }
 
 export async function updateQuote(

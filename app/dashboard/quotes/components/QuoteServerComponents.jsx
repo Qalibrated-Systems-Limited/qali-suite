@@ -2,10 +2,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileText, CheckCircle, Send, AlertTriangle } from "lucide-react";
 import {
-  searchQuotes,
-  fetchQuotePages,
-  getQuoteStats,
-} from "@/app/mongodb/queries/quote-queries";
+  searchQuotesPg,
+  countQuotesPg,
+  getQuoteStatsPg,
+} from "@/app/db/actions/quote-actions";
 import { QuotesTable } from "./QuotesTable";
 import Pagination from "@/components/pagination";
 import { formatCurrency } from "@/lib/utils";
@@ -15,7 +15,7 @@ import { formatCurrency } from "@/lib/utils";
 // ============================================
 
 export async function QuoteStatsCards({ filters }) {
-  const stats = await getQuoteStats(filters);
+  const stats = await getQuoteStatsPg(filters);
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
@@ -135,7 +135,27 @@ export function QuoteStatsSkeleton() {
 // ============================================
 
 export async function QuotesTableServer({ query, page, filters }) {
-  const quotes = await searchQuotes(query, page, filters);
+  const { rows } = await searchQuotesPg({ query, page, ...filters });
+
+  // The table was written against Mongo documents. Shaped here rather than
+  // rewritten there: `customer` was an embedded object and `_id` is what every
+  // link and key in it uses, so changing the component would be a redesign the
+  // port has no reason to make.
+  const quotes = rows.map((r) => ({
+    _id: r.id,
+    quoteNumber: r.quoteNumber,
+    quoteDate: r.quoteDate,
+    validUntil: r.validUntil,
+    status: r.status,
+    total: r.total,
+    isExpired: r.isExpired,
+    invoiceCount: r.invoiceCount,
+    customer: {
+      name: r.customerName,
+      email: r.customerEmail,
+      phone: r.customerPhone,
+    },
+  }));
 
   return <QuotesTable quotes={quotes} />;
 }
@@ -185,7 +205,8 @@ export function QuotesTableSkeleton() {
 // ============================================
 
 export async function QuotesPaginationServer({ query, filters }) {
-  const totalPages = await fetchQuotePages(query, filters);
+  const total = await countQuotesPg({ query, ...filters });
+  const totalPages = Math.max(Math.ceil(total / 10), 1);
 
   if (totalPages <= 1) return null;
 
@@ -219,5 +240,5 @@ export function PaginationSkeleton() {
 // ============================================
 
 export async function getQuoteStatsForFilters(filters) {
-  return await getQuoteStats(filters);
+  return await getQuoteStatsPg(filters);
 }
