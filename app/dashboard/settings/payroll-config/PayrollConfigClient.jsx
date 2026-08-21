@@ -2,10 +2,14 @@
 
 import { useState, useEffect, useActionState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, CheckCircle2, ChevronDown, ChevronUp, Loader2, AlertCircle, Trash2, Check } from "lucide-react";
+import { Plus, ChevronDown, ChevronUp, Loader2, AlertCircle, Trash2, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { createPayrollConfig, activatePayrollConfig, savePayrollGlMapping, backfillStatutoryAccounts } from "@/app/mongodb/actions/hr-settings-actions";
+import {
+  savePayrollRates,
+  savePayrollGlMapping,
+  autoMapPayrollAccounts,
+} from "@/app/db/actions/hr-payroll-actions";
 
 // ─── Kenya default PAYE brackets (annual taxable income, KES) ───
 const KENYA_DEFAULT_BRACKETS = [
@@ -89,7 +93,7 @@ function BracketRow({ idx, bracket, onChange, onRemove, isLast }) {
 
 // ─── New Config Form ─────────────────────────────────────────────
 function NewConfigForm({ onSuccess }) {
-  const [state, formAction, isPending] = useActionState(createPayrollConfig, initial);
+  const [state, formAction, isPending] = useActionState(savePayrollRates, initial);
   const [brackets, setBrackets] = useState(KENYA_DEFAULT_BRACKETS);
   const [open, setOpen] = useState(true);
 
@@ -300,12 +304,12 @@ function GlMappingForm({ config, accounts }) {
 
   function handleBackfill() {
     startBackfill(async () => {
-      const res = await backfillStatutoryAccounts();
+      const res = await autoMapPayrollAccounts(config._id);
       if (res.success) {
         toast.success(res.message);
         router.refresh();
       } else {
-        toast.error(res.error || "Could not backfill statutory accounts");
+        toast.error(res.error || "Could not map the accounts");
       }
     });
   }
@@ -333,7 +337,9 @@ function GlMappingForm({ config, accounts }) {
             <div className="flex-1 text-xs">
               <p className="font-medium text-foreground">Missing accounts?</p>
               <p className="text-muted-foreground">
-                Older tenants may be missing AHL Payable, Salaries Payable, or Employer AHL. Run backfill to add them — safe to click repeatedly.
+                The standard chart of accounts already labels everything
+                payroll posts to. Fill the mapping from it rather than choosing
+                eleven accounts by hand — anything already set is left alone.
               </p>
             </div>
             <Button
@@ -344,7 +350,7 @@ function GlMappingForm({ config, accounts }) {
               disabled={isBackfilling}
             >
               {isBackfilling && <Loader2 className="h-3 w-3 animate-spin" />}
-              {isBackfilling ? "Backfilling..." : "Backfill statutory accounts"}
+              {isBackfilling ? "Mapping…" : "Map from the chart of accounts"}
             </Button>
           </div>
 
@@ -391,18 +397,16 @@ function GlMappingForm({ config, accounts }) {
 }
 
 // ─── Config Card (existing config) ──────────────────────────────
-function ConfigCard({ config, onActivate, canEdit, accounts }) {
+/**
+ * A set of rates.
+ *
+ * There is no "activate" any more: the set whose date range covers a payroll
+ * period IS the one that governs it, and the ranges cannot overlap. Marking
+ * one active was a flag somebody had to keep true, and getForPeriod() ignored
+ * it anyway — it read the ranges.
+ */
+function ConfigCard({ config, canEdit, accounts }) {
   const [expanded, setExpanded] = useState(false);
-  const [isPending, startTransition] = useTransition();
-
-  function handleActivate() {
-    startTransition(async () => {
-      const result = await activatePayrollConfig(config._id);
-      if (result?.success === false) toast.error(result.error);
-      else toast.success("Configuration set as active");
-      onActivate?.();
-    });
-  }
 
   return (
     <div className={`rounded-lg border bg-card shadow-sm ${config.isActive ? "border-emerald-500/40" : "border-border"}`}>
@@ -411,8 +415,11 @@ function ConfigCard({ config, onActivate, canEdit, accounts }) {
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-semibold text-foreground">{config.name}</p>
             {config.isActive && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                <Check className="h-3 w-3" /> Active
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400"
+                title="These are the rates in force today, because today falls in their date range"
+              >
+                <Check className="h-3 w-3" /> In force
               </span>
             )}
           </div>
@@ -423,12 +430,6 @@ function ConfigCard({ config, onActivate, canEdit, accounts }) {
           {config.notes && <p className="mt-1 text-xs text-muted-foreground">{config.notes}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {!config.isActive && (
-            <Button size="sm" variant="outline" onClick={handleActivate} disabled={isPending}>
-              {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
-              Set Active
-            </Button>
-          )}
           <button
             onClick={() => setExpanded((v) => !v)}
             className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -520,7 +521,7 @@ export default function PayrollConfigClient({ initialConfigs, canEdit, accounts 
       {initialConfigs.length > 0 ? (
         <div className="space-y-3">
           {initialConfigs.map((c) => (
-            <ConfigCard key={c._id} config={c} onActivate={canEdit ? handleMutation : null} canEdit={canEdit} accounts={accounts} />
+            <ConfigCard key={c._id} config={c} canEdit={canEdit} accounts={accounts} />
           ))}
         </div>
       ) : (

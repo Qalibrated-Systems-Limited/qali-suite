@@ -1,11 +1,9 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { Calendar, Clock, Receipt, UserPlus } from "lucide-react";
-import {
-  getMyEmployeeProfile,
-  getMyPayslips,
-  getMyTodayAttendanceSummary,
-} from "@/app/mongodb/queries/hr-queries";
+import { getMyLeave } from "@/app/db/actions/hr-leave-actions";
+import { getMyPayslips } from "@/app/db/actions/hr-payroll-actions";
+import { getMyAttendanceToday } from "@/app/db/actions/hr-attendance-actions";
 
 // ============================================
 // MY HR STRIP
@@ -19,8 +17,8 @@ const ATTENDANCE_LABEL: Record<string, string> = {
   present:          "Present",
   late:             "Late",
   absent:           "Absent",
-  "half-day":       "Half Day",
-  "on-leave":       "On Leave",
+  half_day:         "Half Day",
+  on_leave:         "On Leave",
   holiday:          "Holiday",
   "not-clocked-in": "Not clocked in",
 };
@@ -29,7 +27,7 @@ const ATTENDANCE_COLOR: Record<string, string> = {
   present:          "text-emerald-600 dark:text-emerald-400",
   late:             "text-amber-600 dark:text-amber-400",
   absent:           "text-red-600 dark:text-red-400",
-  "on-leave":       "text-purple-600 dark:text-purple-400",
+  on_leave:         "text-purple-600 dark:text-purple-400",
   "not-clocked-in": "text-muted-foreground",
 };
 
@@ -52,11 +50,12 @@ function formatTime(input: string | Date | null | undefined): string {
 }
 
 async function HRStripContent() {
-  const [profile, { payslips }, attendance] = await Promise.all([
-    getMyEmployeeProfile(),
-    getMyPayslips({ page: 1, limit: 1 }),
-    getMyTodayAttendanceSummary(),
+  const [mine, { employee: profile, payslips }, today] = await Promise.all([
+    getMyLeave(),
+    getMyPayslips(),
+    getMyAttendanceToday(),
   ]);
+  const attendance = today?.today?.record ?? null;
 
   // No employee profile — show a prompt instead of silently disappearing
   if (!profile) {
@@ -76,11 +75,9 @@ async function HRStripContent() {
     );
   }
 
-  const leaveBalances: any[] = Array.isArray(profile.leaveBalances)
-    ? profile.leaveBalances
-    : [];
-  const annualLeave = leaveBalances.find((b: any) => b.leaveType === "annual");
-  const sickLeave   = leaveBalances.find((b: any) => b.leaveType === "sick");
+  const leaveBalances: any[] = mine.balances ?? [];
+  const annualLeave = leaveBalances.find((b: any) => b.code === "annual");
+  const sickLeave = leaveBalances.find((b: any) => b.code === "sick");
   const latestPayslip = payslips[0] || null;
   const todayStatus = attendance?.status || "not-clocked-in";
 
@@ -129,18 +126,18 @@ async function HRStripContent() {
             <div className="space-y-0.5 mt-0.5">
               {annualLeave && (
                 <p className="text-sm text-foreground">
-                  <span className="font-semibold">{annualLeave.balanceDays}</span>
+                  <span className="font-semibold">{annualLeave.availableDays}</span>
                   <span className="text-muted-foreground text-xs"> / {annualLeave.entitledDays}d annual</span>
                 </p>
               )}
               {sickLeave && (
                 <p className="text-sm text-foreground">
-                  <span className="font-semibold">{sickLeave.balanceDays}</span>
+                  <span className="font-semibold">{sickLeave.availableDays}</span>
                   <span className="text-muted-foreground text-xs"> / {sickLeave.entitledDays}d sick</span>
                 </p>
               )}
               {!annualLeave && !sickLeave && leaveBalances[0] && (
-                <p className="text-sm font-semibold text-foreground">{leaveBalances[0].balanceDays} days</p>
+                <p className="text-sm font-semibold text-foreground">{leaveBalances[0].availableDays} days</p>
               )}
               <p className="text-xs text-primary mt-1">View all balances →</p>
             </div>
@@ -160,10 +157,10 @@ async function HRStripContent() {
           <p className="text-xs text-muted-foreground">Latest Payslip</p>
           {latestPayslip ? (
             <>
-              <p className="text-sm font-semibold text-foreground">{latestPayslip.period.label}</p>
+              <p className="text-sm font-semibold text-foreground">{latestPayslip.label}</p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Net <span className="font-mono font-medium text-foreground">
-                  {latestPayslip.currency} {new Intl.NumberFormat("en-KE").format(latestPayslip.netPay)}
+                  KES {new Intl.NumberFormat("en-KE").format(latestPayslip.netPay)}
                 </span>
               </p>
             </>

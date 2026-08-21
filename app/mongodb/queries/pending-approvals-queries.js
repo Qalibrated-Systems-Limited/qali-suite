@@ -14,10 +14,10 @@
 // ============================================
 import mongoose from "mongoose";
 import dbConnect from "@/app/config/dbConnect";
+import { listLeaveAwaitingApproval } from "@/app/db/actions/hr-leave-actions";
+import { listLoansAwaitingApproval } from "@/app/db/actions/hr-loan-actions";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import Bill from "@/app/models/bill";
-import LeaveRequest from "@/app/models/leaveRequest";
-import Loan from "@/app/models/loan";
 import EmployeeClaim from "@/app/models/employeesClaims";
 import Nonconformance from "@/app/models/nonconformance";
 import Expense from "@/app/models/expenses";
@@ -65,66 +65,28 @@ export async function getPendingBills(limit = DEFAULT_LIMIT) {
 // ============================================
 // LEAVE REQUESTS — status: submitted
 // ============================================
+/**
+ * Leave awaiting a decision.
+ *
+ * Reads Postgres — the Mongo collection this used to query is no longer
+ * written to, so the approvals dashboard would show an empty leave queue
+ * however many requests were waiting.
+ */
 export async function getPendingLeaveRequests(limit = DEFAULT_LIMIT) {
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
-
-  return LeaveRequest.find({
-    ...tenantFilter(companyId, isSuperAdmin),
-    status: "submitted",
-  })
-    .select(
-      "leaveNumber leaveTypeName employee dates totalDays submittedAt createdAt",
-    )
-    .sort({ submittedAt: -1, createdAt: -1 })
-    .limit(limit)
-    .lean()
-    .then((rows) =>
-      rows.map((r) => ({
-        _id: r._id.toString(),
-        ref: r.leaveNumber || `LV-${String(r._id).slice(-6).toUpperCase()}`,
-        title: r.employee?.name || "—",
-        subtitle: r.leaveTypeName || "Leave",
-        submittedAt: r.submittedAt || r.createdAt,
-        submittedBy: r.employee?.name || "—",
-        href: `/dashboard/hr/leave/${r._id}`,
-        meta:
-          r.dates?.from && r.dates?.to
-            ? `${new Date(r.dates.from).toLocaleDateString("en-KE", { day: "numeric", month: "short" })} – ${new Date(r.dates.to).toLocaleDateString("en-KE", { day: "numeric", month: "short" })} · ${r.totalDays || 0}d`
-            : `${r.totalDays || 0}d`,
-      })),
-    );
+  return listLeaveAwaitingApproval(limit);
 }
 
 // ============================================
 // LOANS — status: pending_approval
 // ============================================
+/**
+ * Staff loans awaiting approval. Postgres, for the same reason as leave.
+ *
+ * The dashboard shows an amount beside a loan, so it is carried through
+ * rather than left to be parsed out of the description.
+ */
 export async function getPendingLoans(limit = DEFAULT_LIMIT) {
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
-
-  return Loan.find({
-    ...tenantFilter(companyId, isSuperAdmin),
-    status: "pending_approval",
-  })
-    .select(
-      "loanNumber employee principalAmount termMonths requestedBy requestedAt createdAt",
-    )
-    .sort({ requestedAt: -1, createdAt: -1 })
-    .limit(limit)
-    .lean()
-    .then((rows) =>
-      rows.map((r) => ({
-        _id: r._id.toString(),
-        ref: r.loanNumber,
-        title: r.employee?.name || r.requestedBy?.name || "—",
-        amount: r.principalAmount || 0,
-        submittedAt: r.requestedAt || r.createdAt,
-        submittedBy: r.requestedBy?.name || "—",
-        href: `/dashboard/hr/loans/${r._id}`,
-        meta: r.termMonths ? `${r.termMonths} months` : null,
-      })),
-    );
+  return listLoansAwaitingApproval(limit);
 }
 
 // ============================================

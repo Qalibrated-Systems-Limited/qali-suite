@@ -121,7 +121,7 @@ export default function KpiForm({ mode = "create", kpi = null, ownerCandidates =
     if (kpi?.owner?.name) return "freetext";
     return ownerCandidates.length > 0 ? "employee" : "freetext";
   });
-  const [selectedPartyId, setSelectedPartyId] = useState(kpi?.owner?.partyId || "");
+  const [selectedPartyId, setSelectedPartyId] = useState(kpi?.owner?.name || "");
   const [freetextName, setFreetextName] = useState(kpi?.owner?.name || "");
 
   // Controlled source so the combobox can drive form state cleanly.
@@ -146,16 +146,23 @@ export default function KpiForm({ mode = "create", kpi = null, ownerCandidates =
   // Shape employee candidates for the combobox. Department becomes the group
   // heading so the picker is naturally bucketed (Finance, Operations, …);
   // employee number folded into the description so search hits on it too.
-  const ownerComboItems = useMemo(() => {
-    return ownerCandidates
-      .filter((c) => c.partyId) // skip employees without a Party link — can't be set as owner
-      .map((c) => ({
-        value: c.partyId,
+  // The owner is stored as a name and an employee number, which is all these
+  // screens display — so the picker's value IS the name. It used to be the
+  // employee's Party id, which no longer fits: employees moved to Postgres and
+  // their ids are uuids, not ObjectIds.
+  const ownerComboItems = useMemo(
+    () =>
+      ownerCandidates.map((c) => ({
+        value: c.name,
         label: c.name,
-        description: [c.employeeNumber, c.designation].filter(Boolean).join(" · ") || undefined,
+        description:
+          [c.employeeNumber, c.designation].filter(Boolean).join(" · ") || undefined,
         group: c.department || "Other",
-      }));
-  }, [ownerCandidates]);
+      })),
+    [ownerCandidates],
+  );
+
+  const selectedEmployee = ownerCandidates.find((c) => c.name === selectedPartyId);
 
   // No useEffect / toast — createKpi and updateKpi server-actions call
   // `redirect()` on success, so a successful submit navigates away rather
@@ -298,15 +305,22 @@ export default function KpiForm({ mode = "create", kpi = null, ownerCandidates =
             )}
 
             {ownerMode === "employee" && ownerCandidates.length > 0 ? (
-              <KpiCombobox
-                name="ownerPartyId"
-                value={selectedPartyId}
-                onChange={setSelectedPartyId}
-                items={ownerComboItems}
-                placeholder="Select an employee…"
-                searchPlaceholder="Search by name, number, or department…"
-                emptyText="No employees match."
-              />
+              <>
+                <KpiCombobox
+                  name="ownerName"
+                  value={selectedPartyId}
+                  onChange={setSelectedPartyId}
+                  items={ownerComboItems}
+                  placeholder="Select an employee…"
+                  searchPlaceholder="Search by name, number, or department…"
+                  emptyText="No employees match."
+                />
+                <input
+                  type="hidden"
+                  name="ownerEmployeeNumber"
+                  value={selectedEmployee?.employeeNumber || ""}
+                />
+              </>
             ) : (
               <input
                 type="text"

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { withAuthorizedTenant } from "../tenant";
 import {
+  HR_VIEW_ROLES,
   HR_WRITE_ROLES,
   HR_ADMIN_ROLES,
   HR_COMPENSATION_ROLES,
@@ -794,6 +795,99 @@ export async function listUsersWithoutEmployeeRecord() {
   return withAuthorizedTenant([...HR_WRITE_ROLES], (tx) =>
     employees.listUsersWithoutEmployeeRecord(tx),
   );
+}
+
+/**
+ * Employees as owner candidates, for modules outside HR that name one.
+ *
+ * Read-only and forgiving: a tenant with no HR records gets an empty list, and
+ * the caller falls back to free text. Anybody who can see HR may pick.
+ */
+export async function listEmployeesForOwnerPicker(limit = 200) {
+  try {
+    return await withAuthorizedTenant([], (tx) =>
+      employees.listEmployeesForPicker(tx, { limit }),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The HR facts other modules snapshot onto their own documents: the employee
+ * number, the department and the designation.
+ *
+ * Keyed on the PARTY, because that is the id the ledger-side modules — claims,
+ * expenses, payments — already hold. Returns blanks rather than throwing: a
+ * claim raised by somebody with no HR record is still a claim.
+ */
+export async function getEmployeeSnapshotByParty(partyId: string) {
+  try {
+    const employee = await withAuthorizedTenant([], (tx) =>
+      employees.getEmployeeByParty(tx, partyId),
+    );
+    return {
+      employeeNumber: employee?.employeeNumber ?? "",
+      department: employee?.department ?? "",
+      designation: employee?.designation ?? "",
+    };
+  } catch {
+    return { employeeNumber: "", department: "", designation: "" };
+  }
+}
+
+/** Headcount, for a KPI or a dashboard. Excludes people who have left. */
+export async function getActiveHeadcount() {
+  try {
+    const stats = await withAuthorizedTenant([], (tx) =>
+      employees.getHeadcountStats(tx),
+    );
+    return stats.active + stats.probation;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The signed-in person's own employee record, if they have one.
+ *
+ * For the profile page and anything else that shows somebody their own
+ * details. Never throws — not being an employee is a normal state.
+ */
+export async function getMyEmployeeRecord() {
+  try {
+    return await withAuthorizedTenant([], (tx, { user }) =>
+      employees.getEmployeeByUser(tx, user.id),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The four numbers on the HR alerts strip, from Postgres.
+ *
+ * "On leave today" is a question about dates, answered by the
+ * `employees_on_leave` view — not a status flag on the employee that a sweep
+ * has to remember to set and unset.
+ */
+export async function getHrAlertCounts() {
+  try {
+    return await withAuthorizedTenant([...HR_VIEW_ROLES], async (tx) => {
+      const [pendingLeave, onLeave, expiring] = await Promise.all([
+        leave.countPendingApprovals(tx),
+        leave.getEmployeesOnLeaveToday(tx),
+        employees.getExpiringContracts(tx, 30),
+      ]);
+      return {
+        pendingLeave,
+        contractsExpiring: expiring.length,
+        onLeaveToday: onLeave.length,
+      };
+    });
+  } catch {
+    return { pendingLeave: 0, contractsExpiring: 0, onLeaveToday: 0 };
+  }
 }
 
 export async function getHrOverview() {

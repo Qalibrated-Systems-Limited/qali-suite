@@ -11,8 +11,8 @@ import mongoose from "mongoose";
 
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { countMyUpcomingLeave } from "@/app/db/actions/hr-leave-actions";
 import EmployeeClaim from "@/app/models/employeesClaims";
-import LeaveRequest from "@/app/models/leaveRequest";
 import { ItemCheckout } from "@/app/models/checkouts";
 
 // ============================================
@@ -39,10 +39,6 @@ const cMyAlerts = cache(async (userId) => {
       ? {}
       : { companyId: new mongoose.Types.ObjectId(companyId) };
 
-    const now = new Date();
-    const in30 = new Date(now);
-    in30.setDate(in30.getDate() + 30);
-
     const [
       myPendingClaims,
       myCheckedOut,
@@ -64,12 +60,9 @@ const cMyAlerts = cache(async (userId) => {
         "checkedOutTo.id": userId,
         status: "overdue",
       }),
-      LeaveRequest.countDocuments({
-        ...tenantMatch,
-        "employee.userId": userId,
-        status: { $in: ["submitted", "approved"] },
-        "dates.from": { $gte: now, $lte: in30 },
-      }),
+      // Leave moved to Postgres; the rest of this strip has not. Counted
+      // there rather than from a Mongo collection nothing writes any more.
+      countMyUpcomingLeave(),
     ]);
 
     return {

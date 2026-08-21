@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { createPublicHoliday, deletePublicHoliday, seedKenyaHolidays } from "@/app/mongodb/actions/hr-holiday-actions";
+import { createHoliday, deleteHoliday, seedKenyaHolidays } from "@/app/db/actions/hr-leave-actions";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -18,7 +18,7 @@ function HolidayRow({ holiday, canEdit }) {
   function handleDelete() {
     if (!confirm(`Delete "${holiday.name}"?`)) return;
     startTransition(async () => {
-      const result = await deletePublicHoliday(holiday._id);
+      const result = await deleteHoliday(holiday.id);
       if (result?.success === false) toast.error(result.error);
       else { toast.success("Holiday removed"); router.refresh(); }
     });
@@ -49,7 +49,7 @@ function HolidayRow({ holiday, canEdit }) {
 }
 
 function AddHolidayForm({ onSuccess }) {
-  const [state, formAction, isPending] = useActionState(createPublicHoliday, initial);
+  const [state, formAction, isPending] = useActionState(createHoliday, initial);
   const [isRecurring, setIsRecurring] = useState(true);
 
   useEffect(() => {
@@ -139,7 +139,7 @@ export default function HolidayClient({ initialHolidays, canEdit }) {
           </div>
         ) : (
           initialHolidays.map((h) => (
-            <HolidayRow key={h._id} holiday={h} canEdit={canEdit} />
+            <HolidayRow key={h.id} holiday={h} canEdit={canEdit} />
           ))
         )}
       </div>

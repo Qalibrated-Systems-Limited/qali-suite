@@ -224,6 +224,39 @@ export async function getLoanForPage(id: string) {
   });
 }
 
+/** Loans awaiting approval — the count and the list, for the approvals dashboard. */
+export async function countLoansAwaitingApproval() {
+  try {
+    const { pending } = await withAuthorizedTenant(REQUEST_ROLES, (tx) =>
+      loans.getLoanStats(tx),
+    );
+    return pending;
+  } catch {
+    return 0;
+  }
+}
+
+export async function listLoansAwaitingApproval(limit = 5) {
+  try {
+    const { rows } = await withAuthorizedTenant(REQUEST_ROLES, (tx) =>
+      loans.listLoans(tx, { status: "pending_approval", limit }),
+    );
+    return rows.map((l) => ({
+      _id: l.id,
+      ref: l.loanNumber,
+      title: l.employeeName,
+      subtitle: l.loanType.replace(/_/g, " "),
+      submittedAt: l.requestedAt,
+      submittedBy: l.employeeName,
+      amount: l.principalAmount,
+      href: `/dashboard/hr/loans/${l.id}`,
+      meta: `${l.tenureMonths} months`,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function getLoanFormData() {
   return withAuthorizedTenant(REQUEST_ROLES, async (tx) => {
     const [staff, postable] = await Promise.all([

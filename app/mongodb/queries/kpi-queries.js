@@ -9,11 +9,11 @@
 // ============================================
 
 import dbConnect from "@/app/config/dbConnect";
+import { listEmployeesForOwnerPicker } from "@/app/db/actions/hr-employee-actions";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 
 import Kpi from "@/app/models/kpi";
 import KpiSnapshot from "@/app/models/kpiSnapshot";
-import EmployeeProfile from "@/app/models/employeeProfile";
 
 // ============================================
 // SERIALIZERS
@@ -251,29 +251,20 @@ export async function getKpiSummaryForDashboard({ limit = 6 } = {}) {
 // (no EmployeeProfile records) — the form gracefully falls back to free-text
 // name entry. Capped at 200 to keep the dropdown rendering snappy.
 export async function getKpiOwnerCandidates({ limit = 200 } = {}) {
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
+  // Employees live in Postgres. This used to query a Mongo collection nothing
+  // writes to any more, so the picker was empty for every tenant and the form
+  // silently fell back to free text.
+  const employees = await listEmployeesForOwnerPicker(limit);
 
-  const employees = await EmployeeProfile.find(
-    withTenantScope({ "employment.status": { $in: ["active", "probation"] } }, companyId, isSuperAdmin)
-  )
-    .select("partyId employeeNumber personalInfo.firstName personalInfo.lastName employment.designation employment.department")
-    .sort({ "personalInfo.firstName": 1 })
-    .limit(limit)
-    .lean();
-
-  return employees.map((e) => {
-    const fullName = [e.personalInfo?.firstName, e.personalInfo?.lastName]
-      .filter(Boolean)
-      .join(" ")
-      .trim();
-    return {
-      partyId: e.partyId?.toString() || null,
-      profileId: e._id.toString(),
-      name: fullName || e.employeeNumber || "(unnamed)",
-      employeeNumber: e.employeeNumber || null,
-      designation: e.employment?.designation || null,
-      department: e.employment?.department || null,
-    };
-  });
+  return employees.map((e) => ({
+    // The KPI owner is stored as a NAME and a number, which is all the KPI
+    // screens display. No cross-store id is kept: an employee's uuid does not
+    // fit a Mongo ObjectId field, and storing one that does not resolve is
+    // worse than storing none.
+    employeeId: e.id,
+    name: e.name,
+    employeeNumber: e.employeeNumber,
+    designation: e.designation,
+    department: e.department,
+  }));
 }

@@ -306,6 +306,87 @@ export async function seedLeaveTypes() {
   }
 }
 
+// ── Public holidays ──────────────────────────────────────────────────────────
+
+export async function listHolidaysForPage(year?: number) {
+  return withAuthorizedTenant([...HR_VIEW_ROLES], (tx) =>
+    leave.listHolidays(tx, year),
+  );
+}
+
+export async function seedKenyaHolidays() {
+  try {
+    const { seeded } = await withAuthorizedTenant(
+      [...HR_ADMIN_ROLES],
+      (tx, { companyId }) => leave.seedKenyaHolidays(tx, companyId),
+    );
+    revalidatePath("/dashboard/settings/public-holidays");
+    return {
+      success: true as const,
+      seeded,
+      message: seeded
+        ? `${seeded} public holiday(s) added.`
+        : "The standard holidays are already on the calendar.",
+    };
+  } catch (err) {
+    return { success: false as const, error: userMessage(err, "Could not add the holidays.") };
+  }
+}
+
+export async function createHoliday(
+  _prevState: unknown,
+  formData: FormData,
+): Promise<ActionResult> {
+  const name = str(formData, "name");
+  const day = Number(str(formData, "day"));
+  const month = Number(str(formData, "month"));
+  const isRecurring = formData.get("isRecurring") === "true";
+  const year = Number(str(formData, "year")) || null;
+
+  if (!name) {
+    return { success: false, error: "Name is required", fieldErrors: { name: "Required" } };
+  }
+  if (!(day >= 1 && day <= 31) || !(month >= 1 && month <= 12)) {
+    return { success: false, error: "Choose a valid date." };
+  }
+  if (!isRecurring && !year) {
+    return {
+      success: false,
+      error: "A one-off holiday needs the year it falls in — otherwise nothing ever matches it.",
+      fieldErrors: { year: "Required" },
+    };
+  }
+
+  try {
+    await withAuthorizedTenant([...HR_ADMIN_ROLES], (tx, { user, companyId }) =>
+      leave.createHoliday(tx, {
+        companyId,
+        name,
+        day,
+        month,
+        year,
+        isRecurring,
+        actor: { id: user.id, name: user.name },
+      }),
+    );
+  } catch (err) {
+    return { success: false, error: userMessage(err, "Could not add the holiday.") };
+  }
+
+  revalidatePath("/dashboard/settings/public-holidays");
+  return { success: true, message: `${name} added.` };
+}
+
+export async function deleteHoliday(id: string) {
+  try {
+    await withAuthorizedTenant([...HR_ADMIN_ROLES], (tx) => leave.deleteHoliday(tx, id));
+  } catch (err) {
+    return { success: false as const, error: userMessage(err, "Could not remove the holiday.") };
+  }
+  revalidatePath("/dashboard/settings/public-holidays");
+  return { success: true as const };
+}
+
 // ── Entitlements and the year end ────────────────────────────────────────────
 
 export async function setEntitlement(
@@ -572,6 +653,54 @@ export async function getLeaveCalendarForPage(month: number, year: number) {
     ]);
     return { from, to, events, holidays };
   });
+}
+
+/**
+ * Leave awaiting a decision — the count and the list, for the approvals
+ * dashboard.
+ *
+ * Both live here rather than in the Mongo approval queries, which count a
+ * collection nothing writes to any more.
+ */
+export async function countLeaveAwaitingApproval() {
+  try {
+    return await withAuthorizedTenant([...HR_VIEW_ROLES], (tx) =>
+      leave.countPendingApprovals(tx),
+    );
+  } catch {
+    return 0;
+  }
+}
+
+export async function listLeaveAwaitingApproval(limit = 5) {
+  try {
+    const { rows } = await withAuthorizedTenant([...HR_VIEW_ROLES], (tx) =>
+      leave.listLeaveRequests(tx, { status: "submitted", limit }),
+    );
+    return rows.map((r) => ({
+      _id: r.id,
+      ref: r.leaveNumber,
+      title: r.employeeName,
+      subtitle: r.leaveTypeName,
+      submittedAt: r.submittedAt,
+      submittedBy: r.employeeName,
+      href: `/dashboard/hr/leave/${r.id}`,
+      meta: `${new Date(`${r.fromDate}T00:00:00`).toLocaleDateString("en-KE", { day: "numeric", month: "short" })} – ${new Date(`${r.toDate}T00:00:00`).toLocaleDateString("en-KE", { day: "numeric", month: "short" })} · ${r.totalDays}d`,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** For the dashboard alerts strip. Never throws; an alert is not worth a page. */
+export async function countMyUpcomingLeave() {
+  try {
+    return await withAuthorizedTenant([], (tx, { user }) =>
+      leave.countUpcomingLeaveForUser(tx, user.id),
+    );
+  } catch {
+    return 0;
+  }
 }
 
 export async function listLeaveTypesForPage() {

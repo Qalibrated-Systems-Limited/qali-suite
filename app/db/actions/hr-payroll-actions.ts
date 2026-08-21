@@ -301,18 +301,49 @@ export async function removePayslipLine(lineId: string, runId?: string) {
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
+/**
+ * The PAYE bands, from the form's indexed fields.
+ *
+ * `bracket_to_N` blank or zero means the top band, which has no ceiling.
+ * Rates arrive as percentages because that is what a person types.
+ */
+function readBrackets(formData: FormData) {
+  const brackets: Array<{ from: number; to: number | null; rate: number }> = [];
+  for (let i = 0; formData.has(`bracket_from_${i}`); i++) {
+    const from = Number(str(formData, `bracket_from_${i}`) || 0);
+    const toRaw = str(formData, `bracket_to_${i}`);
+    const to = toRaw === "" || toRaw === "0" ? null : Number(toRaw);
+    const rate = Number(str(formData, `bracket_rate_${i}`) || 0) / 100;
+    if (Number.isFinite(from) && Number.isFinite(rate) && rate > 0) {
+      brackets.push({ from, to, rate });
+    }
+  }
+  return brackets;
+}
+
+/** A percentage as typed, as the fraction the schema stores. */
+const pct = (fd: FormData, key: string, fallback = 0) => {
+  const v = Number(str(fd, key));
+  return Number.isFinite(v) ? v / 100 : fallback;
+};
+
 export async function savePayrollRates(
   _prevState: unknown,
   formData: FormData,
 ): Promise<ActionResult> {
-  let brackets: Array<{ from: number; to: number | null; rate: number }>;
-  try {
-    brackets = JSON.parse(str(formData, "brackets") || "[]");
-  } catch {
-    return { success: false, error: "The PAYE bands could not be read." };
-  }
-  if (!Array.isArray(brackets) || !brackets.length) {
+  const brackets = readBrackets(formData);
+  if (!brackets.length) {
     return { success: false, error: "At least one PAYE band is required." };
+  }
+  if (!str(formData, "name")) {
+    return { success: false, error: "Give this set of rates a name", fieldErrors: { name: "Required" } };
+  }
+  if (!str(formData, "effectiveFrom")) {
+    return {
+      success: false,
+      error: "Say when these rates start applying",
+      fieldErrors: { effectiveFrom: "Required" },
+    };
   }
 
   try {
@@ -324,21 +355,19 @@ export async function savePayrollRates(
         effectiveFrom: str(formData, "effectiveFrom"),
         effectiveTo: str(formData, "effectiveTo") || null,
         personalRelief: num(formData, "personalRelief"),
-        insuranceReliefRate: num(formData, "insuranceReliefRate", 0.15),
+        insuranceReliefRate: formData.has("insuranceReliefRate")
+          ? pct(formData, "insuranceReliefRate", 0.15)
+          : 0.15,
         insuranceReliefCap: num(formData, "insuranceReliefCap", 5000),
         nssfTierILimit: num(formData, "nssfTierILimit"),
         nssfTierIILimit: num(formData, "nssfTierIILimit"),
-        nssfEmployeeRate: num(formData, "nssfEmployeeRate"),
-        nssfEmployerRate: num(formData, "nssfEmployerRate"),
-        shifRate: num(formData, "shifRate"),
+        nssfEmployeeRate: pct(formData, "nssfEmployeeRate"),
+        nssfEmployerRate: pct(formData, "nssfEmployerRate"),
+        shifRate: pct(formData, "shifRate"),
         shifMinimum: num(formData, "shifMinimum", 300),
-        ahlEmployeeRate: num(formData, "ahlEmployeeRate"),
-        ahlEmployerRate: num(formData, "ahlEmployerRate"),
-        brackets: brackets.map((b) => ({
-          from: Number(b.from),
-          to: b.to == null || b.to === 0 ? null : Number(b.to),
-          rate: Number(b.rate),
-        })),
+        ahlEmployeeRate: pct(formData, "ahlEmployeeRate"),
+        ahlEmployerRate: pct(formData, "ahlEmployerRate"),
+        brackets,
         notes: str(formData, "notes") || null,
         actor: { id: user.id, name: user.name },
       }),
@@ -347,7 +376,7 @@ export async function savePayrollRates(
     return { success: false, error: userMessage(err, "Could not save the payroll rates.") };
   }
 
-  revalidatePath("/dashboard/settings/payroll");
+  revalidatePath("/dashboard/settings/payroll-config");
   return { success: true, message: "Payroll rates saved." };
 }
 
@@ -379,8 +408,81 @@ export async function savePayrollGlMapping(
     return { success: false, error: userMessage(err, "Could not save the account mapping.") };
   }
 
-  revalidatePath("/dashboard/settings/payroll");
+  revalidatePath("/dashboard/settings/payroll-config");
   return { success: true, message: "Account mapping saved." };
+}
+
+/**
+ * Fills the GL mapping from the chart's own system-account markers.
+ *
+ * The standard chart already labels every account payroll needs — PAYE
+ * payable, NSSF payable, salaries payable and the rest. Making somebody pick
+ * eleven of them out of a dropdown, correctly, is a step that only exists
+ * because nothing connected the two.
+ *
+ * Anything already mapped is left alone; anything the chart does not label is
+ * reported so it can be chosen by hand.
+ */
+export async function autoMapPayrollAccounts(configId: string) {
+  const WANTED: Array<[string, string]> = [
+    ["salaryExpense", "salaries_expense"],
+    ["employerNssfExpense", "employer_nssf_expense"],
+    ["employerAhlExpense", "employer_ahl_expense"],
+    ["salaryPayable", "salaries_payable"],
+    ["payePayable", "paye_payable"],
+    ["nssfPayable", "nssf_payable"],
+    ["shifPayable", "shif_payable"],
+    ["ahlPayable", "ahl_payable"],
+    ["bankAccount", "cash_at_bank"],
+    // Staff loans sit under employee advances in the standard chart.
+    ["staffLoansReceivable", "employee_advance"],
+  ];
+
+  try {
+    const result = await withAuthorizedTenant(
+      CONFIG_ROLES,
+      async (tx, { user }) => {
+        const current = await payroll.getRatesById(tx, configId);
+        if (!current) throw new Error("Those payroll rates no longer exist.");
+
+        const mapping: Record<string, string | null> = {};
+        const unmatched: string[] = [];
+
+        for (const [field, marker] of WANTED) {
+          if (current.glMapping[field]) continue;
+          const account = await accounts.getSystemAccount(tx, marker);
+          if (account) mapping[field] = account.id;
+          else unmatched.push(field);
+        }
+
+        if (Object.keys(mapping).length) {
+          await payroll.saveGlMapping(tx, {
+            configId,
+            mapping,
+            actor: { id: user.id, name: user.name },
+          });
+        }
+        return { mapped: Object.keys(mapping).length, unmatched };
+      },
+    );
+
+    revalidatePath("/dashboard/settings/payroll-config");
+    return {
+      success: true as const,
+      ...result,
+      message: result.mapped
+        ? `${result.mapped} account(s) mapped from the chart of accounts.` +
+          (result.unmatched.length
+            ? ` ${result.unmatched.length} could not be matched and need choosing by hand.`
+            : "")
+        : "Everything payroll needs is already mapped.",
+    };
+  } catch (err) {
+    return {
+      success: false as const,
+      error: userMessage(err, "The accounts could not be mapped."),
+    };
+  }
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────────

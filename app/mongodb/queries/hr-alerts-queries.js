@@ -4,9 +4,8 @@ import mongoose from "mongoose";
 
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
-import LeaveRequest from "@/app/models/leaveRequest";
 import EmployeeClaim from "@/app/models/employeesClaims";
-import EmployeeProfile from "@/app/models/employeeProfile";
+import { getHrAlertCounts } from "@/app/db/actions/hr-employee-actions";
 
 // ============================================
 // HR ALERTS
@@ -21,36 +20,16 @@ export const cHRAlerts = cache(async () => {
       ? {}
       : { companyId: new mongoose.Types.ObjectId(companyId) };
 
-    const now = new Date();
-    const in30 = new Date(now);
-    in30.setDate(in30.getDate() + 30);
-
-    const [
-      pendingLeave,
-      pendingClaims,
-      contractsExpiring,
-      onLeaveToday,
-    ] = await Promise.all([
-      LeaveRequest.countDocuments({
-        ...tenantMatch,
-        status: "submitted",
-      }),
+    // Leave, contracts and who is away today all come from Postgres. Claims
+    // have not moved yet, so they are still counted here.
+    const [hr, pendingClaims] = await Promise.all([
+      getHrAlertCounts(),
       EmployeeClaim.countDocuments({
         ...tenantMatch,
         status: "submitted",
       }),
-      EmployeeProfile.countDocuments({
-        ...tenantMatch,
-        "employment.contractEnd": { $gte: now, $lte: in30 },
-        "employment.status": { $in: ["active", "probation"] },
-      }),
-      LeaveRequest.countDocuments({
-        ...tenantMatch,
-        status: "approved",
-        "dates.from": { $lte: now },
-        "dates.to": { $gte: now },
-      }),
     ]);
+    const { pendingLeave, contractsExpiring, onLeaveToday } = hr;
 
     return {
       pendingLeave,

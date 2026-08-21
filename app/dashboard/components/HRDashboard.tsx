@@ -20,12 +20,9 @@ import {
 
 import MyHRStrip from "./MyHRStrip";
 import { HRAlertsStrip, HRAlertsStripSkeleton } from "./HRAlertsStrip";
-import {
-  getHRStats,
-  getExpiringContracts,
-  getTodayAttendanceStats,
-  getLeaveRequests,
-} from "@/app/mongodb/queries/hr-queries";
+import { getHrOverview } from "@/app/db/actions/hr-employee-actions";
+import { getAttendanceForPage } from "@/app/db/actions/hr-attendance-actions";
+import { listLeaveForPage } from "@/app/db/actions/hr-leave-actions";
 
 // ============================================
 // HR DASHBOARD PAGE
@@ -106,12 +103,16 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 // HR METRICS
 // ============================================
 async function HRMetrics() {
-  const stats = await getHRStats();
+  const [{ stats }, pending] = await Promise.all([
+    getHrOverview(),
+    listLeaveForPage({ status: "submitted", limit: 1 }),
+  ]);
+  const pendingLeaveApprovals = pending.pagination.total;
 
   const metrics = [
     {
       label: "Total Staff",
-      value: stats.totalHeadcount,
+      value: stats.headcount,
       icon: Users,
       color: "text-violet-600 dark:text-violet-400",
       bg: "bg-violet-500/10",
@@ -120,7 +121,7 @@ async function HRMetrics() {
     },
     {
       label: "Active",
-      value: stats.totalActive,
+      value: stats.active,
       icon: UserCheck,
       color: "text-emerald-600 dark:text-emerald-400",
       bg: "bg-emerald-500/10",
@@ -129,7 +130,7 @@ async function HRMetrics() {
     },
     {
       label: "On Leave",
-      value: stats.totalOnLeave,
+      value: stats.onLeave,
       icon: Calendar,
       color: "text-amber-600 dark:text-amber-400",
       bg: "bg-amber-500/10",
@@ -138,7 +139,7 @@ async function HRMetrics() {
     },
     {
       label: "Probation",
-      value: stats.totalProbation,
+      value: stats.probation,
       icon: Clock,
       color: "text-blue-600 dark:text-blue-400",
       bg: "bg-blue-500/10",
@@ -147,13 +148,13 @@ async function HRMetrics() {
     },
     {
       label: "Pending Leaves",
-      value: stats.pendingLeaveApprovals,
+      value: pendingLeaveApprovals,
       icon: AlertTriangle,
       color: "text-red-600 dark:text-red-400",
       bg: "bg-red-500/10",
-      border: stats.pendingLeaveApprovals > 0 ? "border-red-300 dark:border-red-800" : "border-red-100 dark:border-red-900/30",
+      border: pendingLeaveApprovals > 0 ? "border-red-300 dark:border-red-800" : "border-red-100 dark:border-red-900/30",
       href: "/dashboard/hr/leave?status=submitted",
-      alert: stats.pendingLeaveApprovals > 0,
+      alert: pendingLeaveApprovals > 0,
     },
   ];
 
@@ -182,7 +183,7 @@ async function HRMetrics() {
 // PENDING LEAVE APPROVALS
 // ============================================
 async function PendingLeaveCard() {
-  const { leaveRequests: requests } = await getLeaveRequests({ status: "submitted", limit: 8 });
+  const { requests } = await listLeaveForPage({ status: "submitted", limit: 8 });
 
   const TYPE_COLOR: Record<string, string> = {
     annual:        "bg-blue-500/10 text-blue-700 dark:text-blue-300",
@@ -229,31 +230,39 @@ async function PendingLeaveCard() {
       ) : (
         <div className="divide-y divide-border">
           {requests.map((req: any) => {
-            const days = req.duration?.workingDays ?? req.duration?.calendarDays ?? "?";
-            const start = req.startDate ? new Date(req.startDate).toLocaleDateString("en-KE", { month: "short", day: "numeric" }) : "";
-            const end   = req.endDate   ? new Date(req.endDate).toLocaleDateString("en-KE",   { month: "short", day: "numeric" }) : "";
-            const typeKey = req.leaveType as string;
+            // The Mongo shape this read — duration.workingDays, startDate,
+            // endDate — was never what getLeaveRequests returned, so the row
+            // showed "? days" and no dates at all.
+            const days = req.totalDays;
+            const fmt = (d: string) =>
+              new Date(`${d}T00:00:00`).toLocaleDateString("en-KE", {
+                month: "short",
+                day: "numeric",
+              });
+            const start = fmt(req.fromDate);
+            const end = fmt(req.toDate);
+            const typeKey = req.leaveTypeCode as string;
 
             return (
               <Link
-                key={req._id}
-                href={`/dashboard/hr/leave/${req._id}`}
+                key={req.id}
+                href={`/dashboard/hr/leave/${req.id}`}
                 className="flex items-center gap-4 px-5 py-3.5 hover:bg-muted/40 transition-colors"
               >
                 {/* Avatar initials */}
                 <div className="h-8 w-8 shrink-0 rounded-full bg-violet-500/10 flex items-center justify-center text-xs font-bold text-violet-700 dark:text-violet-300 uppercase">
-                  {(req.employee?.name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+                  {(req.employeeName || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{req.employee?.name}</p>
+                  <p className="text-sm font-medium text-foreground truncate">{req.employeeName}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {start}{end && start !== end ? ` – ${end}` : ""} · {days} day{days !== 1 ? "s" : ""}
                   </p>
                 </div>
 
                 <span className={`shrink-0 text-xs rounded-full px-2.5 py-0.5 font-medium ${TYPE_COLOR[typeKey] || "bg-muted text-muted-foreground"}`}>
-                  {TYPE_LABEL[typeKey] || typeKey}
+                  {TYPE_LABEL[typeKey] || req.leaveTypeName}
                 </span>
               </Link>
             );
@@ -268,13 +277,13 @@ async function PendingLeaveCard() {
 // TODAY'S ATTENDANCE CARD
 // ============================================
 async function AttendanceCard() {
-  const stats = await getTodayAttendanceStats();
+  const { stats } = await getAttendanceForPage();
 
   const dateStr = new Date().toLocaleDateString("en-KE", {
     weekday: "short", month: "short", day: "numeric",
   });
 
-  if (stats.totalActive === 0) {
+  if (stats.headcount === 0) {
     return (
       <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <div className="flex items-center gap-2 mb-2">
@@ -288,9 +297,9 @@ async function AttendanceCard() {
     );
   }
 
-  const presentPct = Math.round((stats.present / stats.totalActive) * 100);
-  const absentPct  = Math.round((stats.absent  / stats.totalActive) * 100);
-  const leavePct   = Math.round((stats.onLeave / stats.totalActive) * 100);
+  const presentPct = Math.round((stats.present / stats.headcount) * 100);
+  const absentPct  = Math.round((stats.absent  / stats.headcount) * 100);
+  const leavePct   = Math.round((stats.onLeave / stats.headcount) * 100);
 
   return (
     <Link
@@ -332,7 +341,7 @@ async function AttendanceCard() {
       </div>
 
       <p className="text-xs text-muted-foreground text-center mt-3">
-        {presentPct}% present out of {stats.totalActive} active employees
+        {presentPct}% present of {stats.headcount} on the payroll
       </p>
     </Link>
   );
@@ -342,7 +351,7 @@ async function AttendanceCard() {
 // CONTRACT EXPIRY ALERTS
 // ============================================
 async function ContractAlerts() {
-  const expiring = await getExpiringContracts(30);
+  const { expiringContracts: expiring } = await getHrOverview();
   if (!expiring.length) return null;
 
   return (
@@ -356,8 +365,8 @@ async function ContractAlerts() {
       <div className="divide-y divide-amber-100 dark:divide-amber-900/30">
         {expiring.map((e: any) => (
           <Link
-            key={e._id}
-            href={`/dashboard/hr/employees/${e._id}`}
+            key={e.id}
+            href={`/dashboard/hr/employees/${e.id}`}
             className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-amber-500/10 transition-colors"
           >
             <div className="min-w-0">

@@ -271,7 +271,32 @@ export async function linkUserToPartyDirect(input: {
        AND company_id = ${input.companyId}::uuid
     RETURNING id
   `)) as unknown as Array<{ id: string }>;
-  return { linked: rows.length > 0 };
+
+  /**
+   * AND THE EMPLOYMENT RECORD, if this party has one.
+   *
+   * A portal invite is sent from an employee's record and carries their party
+   * id. Linking the party alone leaves `employees.user_id` null, so the person
+   * signs in successfully and is then told they have no employee record — no
+   * leave, no payslips, nowhere to clock in. That is the whole point of the
+   * invitation.
+   *
+   * Privileged, because this runs for somebody who has no session yet.
+   */
+  let employeeLinked = false;
+  if (input.partyId) {
+    const linked = (await privilegedDb().execute(sql`
+      UPDATE employees
+         SET user_id = ${String(input.userId)}, updated_at = now()
+       WHERE party_id = ${input.partyId}::uuid
+         AND company_id = ${input.companyId}::uuid
+         AND user_id IS NULL
+      RETURNING id
+    `)) as unknown as Array<{ id: string }>;
+    employeeLinked = linked.length > 0;
+  }
+
+  return { linked: rows.length > 0, employeeLinked };
 }
 
 /**

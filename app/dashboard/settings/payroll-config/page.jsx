@@ -3,45 +3,56 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
 import { ChevronLeft, Settings } from "lucide-react";
-import { getPayrollConfigs } from "@/app/mongodb/queries/hr-queries";
-import dbConnect from "@/app/config/dbConnect";
+import { getPayrollSettings } from "@/app/db/actions/hr-payroll-actions";
+import { roleAllowed } from "@/lib/permissions";
 import PayrollConfigClient from "./PayrollConfigClient";
 
 export const metadata = { title: "Payroll Configuration | Settings" };
 
-const ALLOWED = ["SuperAdmin", "Admin", "HR Manager"];
+// HR prepares payroll and finance approves it, so both set the rates.
+const ALLOWED = ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR Manager"];
 
-async function getDetailAccounts(companyId) {
-  await dbConnect();
-  const mongoose = (await import("mongoose")).default;
-  const Account = mongoose.model("Account");
-  const accounts = await Account.find(
-    { companyId, canPost: true, isActive: true },
-    "accountCode accountName accountType"
-  ).sort({ accountCode: 1 }).lean();
-  return accounts.map((a) => ({
-    _id: a._id.toString(),
-    accountCode: a.accountCode,
-    accountName: a.accountName,
-    accountType: a.accountType,
+async function ConfigLoader({ canEdit }) {
+  const { configs, accounts, active } = await getPayrollSettings();
+
+  // The client speaks `_id`, `isActive` and a `glMapping` object. There is no
+  // isActive flag in Postgres — the set of rates whose date range covers today
+  // IS the active one, and the ranges cannot overlap (0048), so the answer is
+  // singular by construction rather than by a flag somebody has to maintain.
+  const shaped = configs.map((c) => ({
+    _id: c.id,
+    name: c.name,
+    effectiveFrom: c.effectiveFrom,
+    effectiveTo: c.effectiveTo,
+    isActive: c.id === active?.id,
+    bracketCount: c.bracketCount,
+    glMapping: c.id === active?.id ? (active?.glMapping ?? {}) : {},
+    glMapped: c.glMapped,
+    glTotal: c.glTotal,
   }));
-}
 
-async function ConfigLoader({ canEdit, companyId }) {
-  const [configs, accounts] = await Promise.all([
-    getPayrollConfigs(),
-    canEdit ? getDetailAccounts(companyId) : Promise.resolve([]),
-  ]);
-  return <PayrollConfigClient initialConfigs={configs} canEdit={canEdit} accounts={accounts} />;
+  return (
+    <PayrollConfigClient
+      initialConfigs={shaped}
+      canEdit={canEdit}
+      accounts={accounts.map((a) => ({
+        _id: a.id,
+        accountCode: a.code,
+        accountName: a.name,
+        accountType: a.type,
+      }))}
+    />
+  );
 }
 
 export default async function PayrollConfigPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!ALLOWED.includes(session.user.role)) redirect("/dashboard/settings");
+  if (!roleAllowed(session.user.role, ALLOWED)) redirect("/dashboard/settings");
 
-  const canEdit = session.user.role === "Admin";
-  const companyId = session.user.companyId;
+  // Whoever may open this may change it — the source showed the page to HR and
+  // then disabled every control, while the actions accepted them.
+  const canEdit = true;
 
   return (
     <div className="space-y-6 p-4 sm:p-6 lg:p-8 max-w-4xl">
@@ -78,7 +89,7 @@ export default async function PayrollConfigPage() {
           </div>
         }
       >
-        <ConfigLoader canEdit={canEdit} companyId={companyId} />
+        <ConfigLoader canEdit={canEdit} />
       </Suspense>
     </div>
   );

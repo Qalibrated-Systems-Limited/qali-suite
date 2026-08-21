@@ -2,7 +2,11 @@
 
 import { useState, useEffect, useTransition } from "react";
 import { Clock, LogIn, LogOut, Loader2 } from "lucide-react";
-import { clockIn, clockOut, getMyTodayAttendance } from "@/app/mongodb/actions/hr-attendance-actions";
+import {
+  clockIn,
+  clockOut,
+  getMyAttendanceToday,
+} from "@/app/db/actions/hr-attendance-actions";
 import {
   Tooltip,
   TooltipContent,
@@ -34,18 +38,17 @@ function useElapsed(since) {
 export function SidebarClockWidget({ collapsed }) {
   const [initial, setInitial] = useState(null); // null = loading
   const [record, setRecord] = useState(null);
-  const [profileId, setProfileId] = useState(null);
   const [config, setConfig] = useState(null);
   const [isPending, startTransition] = useTransition();
   const elapsed = useElapsed(record?.checkIn && !record?.checkOut ? record.checkIn : null);
 
   useEffect(() => {
-    getMyTodayAttendance().then((data) => {
-      if (data?.noProfile) { setInitial("noProfile"); return; }
+    getMyAttendanceToday().then((data) => {
+      // Nobody without an employee record has anything to clock in against.
+      if (!data?.employee) { setInitial("noProfile"); return; }
       setInitial("ready");
-      setRecord(data?.record || null);
-      setProfileId(data?.profileId || null);
-      setConfig(data?.config || null);
+      setRecord(data.today?.record || null);
+      setConfig(data.today || null);
     });
   }, []);
 
@@ -56,15 +59,16 @@ export function SidebarClockWidget({ collapsed }) {
 
   function handleClockIn() {
     startTransition(async () => {
-      const location = await getGeo(config?.geoFenceEnabled);
-      const res = await clockIn({ profileId, method: "web", location });
+      const location = await getGeo(config?.geofenceEnabled);
+      // The IP is read from the request headers by the action, not sent here.
+      const res = await clockIn({ method: "web", location });
       if (res.success) setRecord({ checkIn: res.checkIn, checkOut: null, status: res.status });
     });
   }
 
   function handleClockOut() {
     startTransition(async () => {
-      const res = await clockOut({ profileId, method: "web" });
+      const res = await clockOut();
       if (res.success) setRecord((p) => ({ ...p, checkOut: new Date().toISOString(), hoursWorked: res.hoursWorked }));
     });
   }

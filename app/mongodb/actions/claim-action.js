@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
 import EmployeeClaim from "../../models/employeesClaims";
 import Party from "../../models/parties";
-import EmployeeProfile from "../../models/employeeProfile";
+import { getEmployeeSnapshotByParty } from "@/app/db/actions/hr-employee-actions";
 import Account from "../../models/account";
 import JournalEntry from "../../models/JournalEntry";
 import ErpCounter from "../../models/erp-counter";
@@ -103,18 +103,16 @@ async function getOrCreateEmployeeParty(user, tenantCompanyId, isSuperAdmin, ses
   return party;
 }
 
-// Fetch HR snapshot data from EmployeeProfile (source of truth for department/designation).
-// Falls back to empty strings if user has no profile yet.
-async function getEmployeeHRSnapshot(partyId, session) {
-  const profile = await EmployeeProfile.findOne({ partyId })
-    .select("employeeNumber employment.department employment.designation")
-    .session(session)
-    .lean();
-  return {
-    employeeNumber: profile?.employeeNumber || "",
-    department: profile?.employment?.department || "",
-    designation: profile?.employment?.designation || "",
-  };
+/**
+ * The employee's number, department and designation, snapshotted onto a claim.
+ *
+ * Read from POSTGRES, where the employment record lives. The Mongo session
+ * argument is gone with it: this is a read in another store, and it cannot
+ * join the claim's transaction. That is acceptable — a snapshot taken a
+ * moment before the write is still what the claim said.
+ */
+async function getEmployeeHRSnapshot(partyId) {
+  return getEmployeeSnapshotByParty(String(partyId));
 }
 
 // ============================================
@@ -372,7 +370,7 @@ export async function createAdvanceRequest(prevState, formData) {
     const claimNumber = await generateClaimNumber(tenantCompanyId, session);
 
     // Fetch HR snapshot from EmployeeProfile — source of truth for department/designation
-    const hrSnapshot = await getEmployeeHRSnapshot(party._id, session);
+    const hrSnapshot = await getEmployeeHRSnapshot(party._id);
 
     // Build advanceDetails based on type
     const advanceDetails = {
@@ -590,7 +588,7 @@ export async function createReimbursement(prevState, formData) {
     const claimNumber = await generateClaimNumber(tenantCompanyId, session);
 
     // Fetch HR snapshot from EmployeeProfile — source of truth for department/designation
-    const hrSnapshot = await getEmployeeHRSnapshot(party._id, session);
+    const hrSnapshot = await getEmployeeHRSnapshot(party._id);
 
     // Look up project if provided (optional)
     let projectFields = {};

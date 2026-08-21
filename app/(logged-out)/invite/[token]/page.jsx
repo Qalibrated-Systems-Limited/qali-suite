@@ -1,13 +1,44 @@
-import { getInviteByToken } from "@/app/mongodb/actions/invite-actions";
+import { getInviteByTokenPg } from "@/app/db/actions/invite-actions";
+import { getCompanyForDocuments } from "@/app/db/platform";
 import AcceptInviteClient from "./AcceptInviteClient";
 import { AlertCircle, Clock, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { QaliSuiteMark } from "@/components/qalisuite-logo";
 
+/**
+ * Resolves the invitation, and the company it is for.
+ *
+ * Reads POSTGRES. Invitations are created there — by the users page and by
+ * HR's portal invite — and this page still read Mongo, so every link sent
+ * since the auth cutover landed on "Invite Unavailable". Exactly the seam the
+ * port keeps producing: a screen reading one store while its writer used the
+ * other.
+ */
+async function loadInvite(token) {
+  const invite = await getInviteByTokenPg(token);
+  if (!invite) {
+    return {
+      valid: false,
+      error: "This invitation is no longer valid. Ask whoever invited you for a new one.",
+    };
+  }
+  const company = await getCompanyForDocuments(invite.companyId);
+  return {
+    valid: true,
+    invite: {
+      email: invite.email,
+      role: invite.role,
+      companyName: company?.name || "your new company",
+      invitedBy: invite.invitedByName || "An administrator",
+      expiresAt: invite.expiresAt,
+    },
+  };
+}
+
 export async function generateMetadata({ params }) {
   const { token } = await params;
-  const result = await getInviteByToken(token);
+  const result = await loadInvite(token);
 
   if (!result.valid) {
     return { title: "Invalid Invite | QaliSuite" };
@@ -21,7 +52,7 @@ export async function generateMetadata({ params }) {
 
 export default async function InvitePage({ params }) {
   const { token } = await params;
-  const result = await getInviteByToken(token);
+  const result = await loadInvite(token);
 
   if (!result.valid) {
     return (

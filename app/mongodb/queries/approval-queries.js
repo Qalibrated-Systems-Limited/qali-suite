@@ -3,6 +3,8 @@ import { cache } from "react";
 import mongoose from "mongoose";
 
 import dbConnect from "@/app/config/dbConnect";
+import { countLeaveAwaitingApproval } from "@/app/db/actions/hr-leave-actions";
+import { countLoansAwaitingApproval } from "@/app/db/actions/hr-loan-actions";
 import {
   getTenantContext,
   withTenantScope,
@@ -11,8 +13,6 @@ import ApprovalRequest, {
   APPROVER_MATRIX,
 } from "@/app/models/approvalRequest";
 import Bill from "@/app/models/bill";
-import LeaveRequest from "@/app/models/leaveRequest";
-import Loan from "@/app/models/loan";
 import EmployeeClaim from "@/app/models/employeesClaims";
 import Nonconformance from "@/app/models/nonconformance";
 import Expense from "@/app/models/expenses";
@@ -83,17 +83,14 @@ export const cMyPendingApprovals = cache(async () => {
       );
     }
     if (LEAVE_APPROVER_ROLES.has(role)) {
-      tasks.push(
-        LeaveRequest.countDocuments({ ...tenantMatch, status: "submitted" }),
-      );
+      // Leave lives in Postgres. Counting the Mongo collection would report
+      // zero for every tenant, and an approvals dashboard that says there is
+      // nothing to approve is worse than no dashboard.
+      tasks.push(countLeaveAwaitingApproval());
     }
     if (LOAN_APPROVER_ROLES.has(role)) {
-      tasks.push(
-        Loan.countDocuments({
-          ...tenantMatch,
-          status: "pending_approval",
-        }),
-      );
+      // Also Postgres, for the same reason as leave above.
+      tasks.push(countLoansAwaitingApproval());
     }
     if (CLAIM_APPROVER_ROLES.has(role)) {
       tasks.push(

@@ -21,7 +21,7 @@ import {
   AlertCircle,
   CheckCircle2,
 } from "lucide-react";
-import { acceptInviteWithPassword } from "@/app/mongodb/actions/invite-actions";
+import { acceptInviteWithPasswordPg as acceptInviteWithPassword } from "@/app/db/actions/invite-actions";
 
 export default function AcceptInviteClient({ token, email, companyName }) {
   const router = useRouter();

@@ -807,11 +807,118 @@ export async function getEmployeesOnLeaveToday(tx: Tx) {
   }));
 }
 
+/**
+ * How much leave the signed-in person has coming up.
+ *
+ * Counted off the leave requests, so it includes what is still waiting for a
+ * decision — which is what somebody looking at an alerts strip wants to know.
+ */
+export async function countUpcomingLeaveForUser(
+  tx: Tx,
+  userId: string,
+  daysAhead = 30,
+) {
+  const [row] = (await tx.execute(sql`
+    SELECT COUNT(*)::int AS n
+      FROM leave_requests r
+      JOIN employees e ON e.id = r.employee_id
+     WHERE e.user_id = ${userId}
+       AND r.status IN ('submitted', 'approved')
+       AND r.from_date BETWEEN CURRENT_DATE
+                           AND CURRENT_DATE + ${Math.min(Math.max(daysAhead, 1), 365)}::int
+  `)) as unknown as Array<{ n: number }>;
+  return Number(row.n);
+}
+
 export async function countPendingApprovals(tx: Tx) {
   const [row] = (await tx.execute(
     sql`SELECT COUNT(*)::int AS n FROM leave_requests WHERE status = 'submitted'`,
   )) as unknown as Array<{ n: number }>;
   return Number(row.n);
+}
+
+// ── Public holidays ──────────────────────────────────────────────────────────
+
+/** Kenya's gazetted days. Seeded per tenant, once. */
+const KENYA_HOLIDAYS = [
+  { name: "New Year's Day", day: 1, month: 1 },
+  { name: "Labour Day", day: 1, month: 5 },
+  { name: "Madaraka Day", day: 1, month: 6 },
+  { name: "Huduma Day", day: 10, month: 10 },
+  { name: "Mashujaa Day", day: 20, month: 10 },
+  { name: "Jamhuri Day", day: 12, month: 12 },
+  { name: "Christmas Day", day: 25, month: 12 },
+  { name: "Boxing Day", day: 26, month: 12 },
+] as const;
+
+export async function seedKenyaHolidays(tx: Tx, companyId: string) {
+  let seeded = 0;
+  for (const h of KENYA_HOLIDAYS) {
+    const rows = (await tx.execute(sql`
+      INSERT INTO public_holidays (company_id, name, day, month, is_recurring)
+      VALUES (${companyId}::uuid, ${h.name}, ${h.day}, ${h.month}, true)
+      ON CONFLICT DO NOTHING
+      RETURNING id
+    `)) as unknown as Array<unknown>;
+    if (rows.length) seeded++;
+  }
+  // Easter, Eid and any gazetted extras move every year, so they are added as
+  // one-offs rather than guessed.
+  return { seeded };
+}
+
+export async function listHolidays(tx: Tx, year?: number) {
+  const rows = (await tx.execute(sql`
+    SELECT id, name, day, month, year, is_recurring, created_by_name
+      FROM public_holidays
+     ${year ? sql`WHERE is_recurring OR year = ${year}` : sql``}
+     ORDER BY month, day
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    name: String(r.name),
+    day: Number(r.day),
+    month: Number(r.month),
+    year: r.year === null ? null : Number(r.year),
+    isRecurring: Boolean(r.is_recurring),
+    createdByName: (r.created_by_name as string) ?? null,
+  }));
+}
+
+export async function createHoliday(
+  tx: Tx,
+  input: {
+    companyId: string;
+    name: string;
+    day: number;
+    month: number;
+    year?: number | null;
+    isRecurring: boolean;
+    actor?: { id?: string | null; name?: string | null };
+  },
+) {
+  const name = trimmed(input.name);
+  if (!name) throw new Error("The holiday needs a name");
+
+  const [created] = (await tx.execute(sql`
+    INSERT INTO public_holidays
+      (company_id, name, day, month, year, is_recurring, created_by_id, created_by_name)
+    VALUES (${input.companyId}::uuid, ${name}, ${input.day}, ${input.month},
+            ${input.isRecurring ? null : (input.year ?? null)}, ${input.isRecurring},
+            ${input.actor?.id ?? null}, ${input.actor?.name ?? null})
+    RETURNING id, name
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return { id: String(created.id), name: String(created.name) };
+}
+
+export async function deleteHoliday(tx: Tx, id: string) {
+  const rows = (await tx.execute(sql`
+    DELETE FROM public_holidays WHERE id = ${id}::uuid RETURNING id
+  `)) as unknown as Array<unknown>;
+  if (!rows.length) throw new Error("That holiday is no longer on the calendar.");
+  return { deleted: true };
 }
 
 // ── Year-end and accrual ─────────────────────────────────────────────────────

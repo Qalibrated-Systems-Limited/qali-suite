@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { getUserById } from "@/app/mongodb/queries/user-queries";
 import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
-import { getMyEmployeeProfile } from "@/app/mongodb/queries/hr-queries";
+import { getMyEmployeeRecord } from "@/app/db/actions/hr-employee-actions";
 import {
   User,
   Mail,
@@ -36,7 +36,7 @@ export default async function ProfilePage() {
 
   const [user, empProfile] = await Promise.all([
     getUserById(session.user.id),
-    getMyEmployeeProfile(),
+    getMyEmployeeRecord(),
   ]);
 
   let company = null;
@@ -48,8 +48,8 @@ export default async function ProfilePage() {
   const hasPassword = !!user?.hasPassword;
 
   // Photo priority: employee profile photo → Google avatar → initials
-  const photo = empProfile?.photo || user?.avatar || null;
-  const displayName = empProfile?.name || user?.name || "User";
+  const photo = empProfile?.photoUrl || user?.avatar || null;
+  const displayName = empProfile?.fullName || user?.name || "User";
   const department = empProfile?.department || user?.department || null;
 
   const initials =

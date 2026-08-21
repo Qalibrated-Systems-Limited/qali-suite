@@ -2,6 +2,7 @@
 
 import mongoose from "mongoose";
 import { revalidatePath } from "next/cache";
+import { getActiveHeadcount } from "@/app/db/actions/hr-employee-actions";
 import { redirect } from "next/navigation";
 import dbConnect from "@/app/config/dbConnect";
 import {
@@ -14,7 +15,6 @@ import Kpi from "@/app/models/kpi";
 import KpiSnapshot from "@/app/models/kpiSnapshot";
 import Account from "@/app/models/account";
 import JournalEntry from "@/app/models/JournalEntry";
-import EmployeeProfile from "@/app/models/employeeProfile";
 import PayrollRun from "@/app/models/payrollRun";
 import Invoice from "@/app/models/invoice";
 import { KPI_TEMPLATES } from "@/app/dashboard/kpis/lib/kpi-templates";
@@ -84,13 +84,11 @@ function parseKpiFormData(formData) {
   const statusLabelNearTarget = formData.get("statusLabelNearTarget")?.toString().trim() || "";
   const statusLabelOffTarget = formData.get("statusLabelOffTarget")?.toString().trim() || "";
 
-  // Owner — three accepted shapes from the form:
-  //   1. ownerPartyId set → look up EmployeeProfile, snapshot { partyId, profileId, name, employeeNumber }
-  //   2. ownerUserId set → snapshot { userId, name }
-  //   3. just ownerName → free text only (for tenants without HR / non-employee owners)
-  const ownerPartyId = formData.get("ownerPartyId")?.toString().trim() || "";
-  const ownerUserId = formData.get("ownerUserId")?.toString().trim() || "";
+  // Owner — a name, and an employee number when it was picked from the staff
+  // list rather than typed. See buildOwnerSubdoc for why nothing else is kept.
   const ownerName = formData.get("ownerName")?.toString().trim() || "";
+  const ownerEmployeeNumber =
+    formData.get("ownerEmployeeNumber")?.toString().trim() || "";
 
   const errors = {};
   if (!name) errors.name = "Name is required";
@@ -132,8 +130,7 @@ function parseKpiFormData(formData) {
       statusLabelOnTarget,
       statusLabelNearTarget,
       statusLabelOffTarget,
-      ownerPartyId,
-      ownerUserId,
+      ownerEmployeeNumber,
       ownerName,
     },
   };
@@ -144,43 +141,26 @@ function parseKpiFormData(formData) {
 // doesn't need to $lookup. If only a free-text name is provided, just store
 // that. Returns undefined if no owner info at all.
 async function buildOwnerSubdoc(companyId, isSuperAdmin, parsed) {
-  const { ownerPartyId, ownerUserId, ownerName } = parsed;
+  const { ownerName, ownerEmployeeNumber } = parsed;
 
-  if (ownerPartyId) {
-    const profile = await EmployeeProfile.findOne(
-      withTenantScope({ partyId: new ObjectId(ownerPartyId) }, companyId, isSuperAdmin)
-    )
-      .select("partyId employeeNumber personalInfo.firstName personalInfo.lastName")
-      .lean();
+  /*
+   * The owner is a NAME, and optionally an employee number.
+   *
+   * It used to look up an EmployeeProfile to snapshot both. Employees are in
+   * Postgres now, and their ids are uuids — which do not fit the ObjectId
+   * fields on this schema. Since the KPI screens only ever display the name
+   * and the number, those are what is stored; nothing is kept that cannot
+   * resolve.
+   */
+  const name = (ownerName || "").trim();
+  const employeeNumber = (ownerEmployeeNumber || "").trim();
 
-    if (profile) {
-      const fullName = [profile.personalInfo?.firstName, profile.personalInfo?.lastName]
-        .filter(Boolean)
-        .join(" ")
-        .trim();
-      return {
-        partyId: profile.partyId,
-        profileId: profile._id,
-        userId: ownerUserId ? new ObjectId(ownerUserId) : undefined,
-        name: ownerName || fullName,
-        employeeNumber: profile.employeeNumber,
-      };
-    }
-    // partyId provided but no matching EmployeeProfile — fall through to name-only owner
-  }
+  if (!name && !employeeNumber) return undefined;
 
-  if (ownerUserId) {
-    return {
-      userId: new ObjectId(ownerUserId),
-      name: ownerName || null,
-    };
-  }
-
-  if (ownerName) {
-    return { name: ownerName };
-  }
-
-  return undefined;
+  return {
+    name: name || null,
+    employeeNumber: employeeNumber || null,
+  };
 }
 
 // ============================================
@@ -616,15 +596,11 @@ async function computeCashPosition(ctx) {
   return balances.reduce((sum, b) => sum + b, 0);
 }
 
-async function computeActiveHeadcount(ctx) {
-  // Point-in-time as of period end. Note: uses current employment.status —
-  // EmploymentHistory could give a true as-of count later, but for SMBs the
-  // current status is usually a good enough proxy for recent periods.
-  const tenantMatch = ctx.isSuperAdmin ? {} : { companyId: new ObjectId(ctx.companyId) };
-  return EmployeeProfile.countDocuments({
-    ...tenantMatch,
-    "employment.status": { $in: ["active", "probation"] },
-  });
+async function computeActiveHeadcount() {
+  // Counted in Postgres, where the employees are. Uses the CURRENT status —
+  // an as-of count could be derived from employment_events later, but for an
+  // SMB the current status is a fair proxy for a recent period.
+  return getActiveHeadcount();
 }
 
 async function computeGrossMarginPercent(ctx) {
