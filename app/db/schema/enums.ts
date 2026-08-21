@@ -80,6 +80,10 @@ export const sourceDocumentTypeEnum = pgEnum("source_document_type", [
   "bill",
   "stock_movement",
   "weighbridge_ticket",
+  /** 0050 — the acceptance entry: DR Inventory, CR GR/IR. */
+  "goods_receipt",
+  /** 0051 — the write-off or supplier debit-note a disposition raises. */
+  "nonconformance",
 ]);
 
 // ── Invoices slice ───────────────────────────────────────────────────────────
