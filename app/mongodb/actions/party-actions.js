@@ -482,20 +482,16 @@ export async function deleteParty(partyId) {
       withTenantScope({ "party.id": partyId }, companyId, isSuperAdmin)
     );
 
-    // Check for HR data (employee-specific)
-    const EmployeeProfile = (await import("../../models/employeeProfile")).default;
-    const LeaveRequest = (await import("../../models/leaveRequest")).default;
-    const PayrollEntry = (await import("../../models/payrollEntry")).default;
-
+    // HR data — leave and payslips — is in Postgres, so it is counted there.
+    // A party with an employment record cannot be hard-deleted anyway: the
+    // employees table holds a foreign key to it.
     if (party.type === "employee") {
-      const [leaveCount, payrollCount] = await Promise.all([
-        LeaveRequest.countDocuments(
-          withTenantScope({ "employee.partyId": partyId }, companyId, isSuperAdmin)
-        ),
-        PayrollEntry.countDocuments(
-          withTenantScope({ partyId }, companyId, isSuperAdmin)
-        ),
-      ]);
+      const { countHrHistoryForParty } = await import(
+        "@/app/db/actions/hr-employee-actions"
+      );
+      const { leaveCount, payrollCount } = await countHrHistoryForParty(
+        String(partyId),
+      );
 
       if (leaveCount > 0 || payrollCount > 0 || transactionCount > 0) {
         // Soft delete — HR data exists
@@ -534,16 +530,9 @@ export async function deleteParty(partyId) {
         message: `Party deactivated (${transactionCount} transactions exist)`,
       };
     } else {
-      // Hard delete — cascade clean EmployeeProfile and clear User ref
-      const profile = await EmployeeProfile.findOneAndDelete(
-        withTenantScope({ partyId }, companyId, isSuperAdmin)
-      );
-
-      // If this party was linked to a User, clear the back-link on User
-      if (party.userId) {
-        const User = (await import("../../models/user")).default;
-        // Note: User doesn't have partyId yet but future-proofs this
-      }
+      // Hard delete. There is no HR record to cascade: an employment record
+      // lives in Postgres and holds a foreign key to this party, so one
+      // existing would have been caught above.
 
       await Party.findOneAndDelete(
         withTenantScope({ _id: partyId }, companyId, isSuperAdmin)
@@ -554,12 +543,7 @@ export async function deleteParty(partyId) {
       revalidatePath("/dashboard/suppliers");
       revalidatePath("/dashboard/hr/employees");
 
-      return {
-        success: true,
-        message: profile
-          ? "Party and employee profile deleted successfully"
-          : "Party deleted successfully",
-      };
+      return { success: true, message: "Party deleted successfully" };
     }
   } catch (error) {
     console.error("Delete party error:", error);

@@ -13,6 +13,7 @@ import { userMessage } from "../errors";
 import * as employees from "../repositories/employees";
 import * as departments from "../repositories/departments";
 import * as leave from "../repositories/leave";
+import * as payrollRepo from "../repositories/payroll";
 import { deactivateUser } from "../userAdmin";
 import { sendInvitePg } from "./invite-actions";
 import cloudinary from "@/lib/cloudinary";
@@ -845,6 +846,32 @@ export async function getActiveHeadcount() {
     return stats.active + stats.probation;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * How much HR history a party has: leave requests and payslips.
+ *
+ * Asked before deleting a party. A party with an employment record cannot be
+ * hard-deleted anyway — `employees.party_id` is a foreign key to it — but the
+ * counts let the caller say WHY rather than quoting a constraint.
+ */
+export async function countHrHistoryForParty(partyId: string) {
+  try {
+    return await withAuthorizedTenant([], async (tx) => {
+      const employee = await employees.getEmployeeByParty(tx, partyId);
+      if (!employee) return { leaveCount: 0, payrollCount: 0 };
+
+      const [leaveRows, payslips] = await Promise.all([
+        leave.listLeaveRequests(tx, { employeeId: employee.id, limit: 1 }),
+        payrollRepo.listEmployeePayslips(tx, { employeeId: employee.id, limit: 1 }),
+      ]);
+      return { leaveCount: leaveRows.total, payrollCount: payslips.length };
+    });
+  } catch {
+    // Failing closed here would block a delete for the wrong reason; the
+    // foreign key is the real guard.
+    return { leaveCount: 0, payrollCount: 0 };
   }
 }
 
