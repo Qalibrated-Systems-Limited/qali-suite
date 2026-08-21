@@ -6,6 +6,48 @@ half — what to call, what not to, and the three things that bite.
 
 ---
 
+## Where the port has reached
+
+Counted, not remembered — regenerate it with:
+
+```
+grep -rln "@/app/mongodb" app/dashboard --include="*.jsx" | cut -d/ -f3 | sort | uniq -c | sort -rn
+```
+
+A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
+
+| on Postgres | still Mongo (files) |
+|---|---|
+| users, accounts (bar opening balances), invoices, bills, parties, requests, journal, statements, supplier-statements, credit-notes | **hr 47**, claims 13, settings 11, projects 11, integrations 11, assets 11, reports 9, purchase-orders 9, tax 8, banking 8, quotes 7, kpis 7, payments 6 |
+
+Also on Postgres, below the screens: auth and sign-in, invitations, companies
+and provisioning, company access and the switcher, fiscal periods, payments,
+stock movements, tax transactions, fulfilment, and the reporting queries.
+
+**`docs/CURRENT-STATE.md` predates all of this** — it is a 2026-05-29 snapshot
+of `jeff-business-suite` and describes the stack as Mongoose/MongoDB. Do not
+take it as the state of this branch.
+
+### The shape of the remaining risk
+
+Every module in the right-hand column is a SEAM, and seams are where this port
+has actually gone wrong. Not one of the bugs found so far was a mistranslated
+query; they were all a screen reading one store while its writer used the
+other:
+
+- the invoice create and edit forms wrote Postgres while their pickers read
+  Mongo (5cf453641)
+- quote → invoice conversion wrote a MONGO invoice while every invoice screen
+  read Postgres, then redirected to a page that could not load it (§9E)
+- the customer picker showed every tenant's customers, because Mongo's
+  withTenantScope is unscoped for a SuperAdmin
+- the chart of accounts edited a store nothing else read
+
+The lesson for whatever is ported next: the danger is not the module you are
+moving, it is the module that talks to it.
+
+---
+
 ## The one rule
 
 **Never write a `companyId` filter.** Tenant isolation is row-level security,

@@ -1,5 +1,12 @@
 # Qalisuite — Current State of the System
 
+> ⚠️ **STALE FOR `feat/postgres-migration`.** This snapshot describes the
+> Mongoose/MongoDB stack as of May 2026. On the Postgres branch, users,
+> accounts, invoices, bills, parties, requests, auth and more have moved. See
+> **[BUILDING-ON-POSTGRES.md](BUILDING-ON-POSTGRES.md)** for what has been
+> converted and **[POSTGRES-MIGRATION-PLAN.md](POSTGRES-MIGRATION-PLAN.md)**
+> for why. This document remains accurate for `jeff-business-suite`.
+
 **Snapshot date:** 2026-05-29
 **Branch:** `jeff-business-suite` (the main ERP SaaS)
 **Stack:** Next.js 16 (Turbopack) · React 19 · Mongoose 8 / MongoDB · NextAuth 5 · Tailwind v4 · shadcn/ui · Recharts · @react-pdf/renderer
