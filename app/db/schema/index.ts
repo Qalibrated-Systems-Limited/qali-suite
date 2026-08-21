@@ -24,3 +24,4 @@ export * from "./stockMovements";
 export * from "./bills";
 export * from "./creditNotes";
 export * from "./taxTransactions";
+export * from "./hr";

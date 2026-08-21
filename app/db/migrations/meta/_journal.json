@@ -316,6 +316,13 @@
       "when": 1787049117566,
       "tag": "0044_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1787049118566,
+      "tag": "0045_hr_people",
+      "breakpoints": true
     }
   ]
 }
