@@ -1338,7 +1338,23 @@ These did not:
 | `claim-action.js` | 4 | 4 × `JournalEntry.post()` | every approved employee reimbursement |
 | `asset-actions.js` | 11 | 3 × `.post()` | acquisition, depreciation and disposal |
 | `petty-cash-actions.js` | 3 | 1 × `.post()` | every petty cash movement |
-| `grn-actions.js` | 2 | 2 × `.post()` | goods received, and the GR/IR clearing |
+| ~~`grn-actions.js`~~ | — | — | **closed — see "Done" below** |
+
+**The count was four and it is five.** `lib/integrations/connectors/weighbridge.js`
+posts through the Mongo `JournalEntry` model too (`je[0].post()`, line 624), and
+it was missed here because the sweep read `app/mongodb/actions/` and this is an
+integration connector.
+
+It is the same fault as the GRN one, from the other side. Its account matrix
+maps `purchase` to **DR Inventory / CR GR/IR** — the entry a goods receipt
+makes — while `bill_lines.weighbridge_ticket_id` in Postgres exists precisely so
+an approved bill can CLEAR that position: "the weighbridge already posted DR
+Inventory / CR GR/IR when the goods crossed the scale." One half is in Mongo and
+the other in Postgres, so a weighed-in purchase leaves GR/IR with a debit
+nothing credits, and its Inventory debit never reaches the real books at all.
+
+The connector also resolves products, invoices and accounts against Mongo, and
+writes its stock movements there. It is a whole vertical, not a stray call.
 
 Nothing errors. The entry is created, validated and posted — into a ledger no
 screen reads. The books are quietly short by exactly these four streams, and
@@ -1515,12 +1531,37 @@ Each of these was a guard at one call site, which is not a control:
   rejected would leave the order looking short by quantity that is owed for,
   and GR/IR would never net.
 
-#### What is not done yet
+#### Done
 
-The schema and repositories are in, with 47 tests passing. The actions, the 24
-screens, the GRN PDF route and the seams into bills, products and the
-procurement dashboard are not — so `grn-actions.js` and its siblings are still
-live, and still posting into Mongo, until they are replaced.
+Schema, repositories, actions, the 24 screens, the GRN PDF route, the
+procurement dashboard and the approvals queue. The Mongo layer — 5,371 lines
+across three models, three action files and four query files — is deleted, and
+`find-unwired-actions.mjs` reports no orphaned write path.
+
+**GR/IR closes.** Acceptance posts DR Inventory / CR GR/IR into the ledger the
+bill posts to, and `/dashboard/reports/gr-ir` lists every order line where the
+value received and the value billed disagree. The clearing balance is now a
+figure somebody can reconcile rather than one that could only grow.
+
+Three things surfaced in the screens step that had no counterpart in the plan.
+
+**The receipt form carried no purchase order line.** Mongo matched receipt lines
+to order lines by product id; the Postgres design references the line, and
+without it a PO-sourced receipt links to nothing — the tolerance trigger cannot
+fire and the order reads as never delivered.
+
+**Nothing called `recordLineDecisions`.** The Mongo `acceptGRN` takes
+`lineDecisions = null` and falls back to accepting what arrived, and the UI
+passes null on the ordinary path. Ported literally, signing a receipt would
+have admitted nothing, posted no entry and stranded the goods on hold —
+silently. A line still `pending` at finalisation is now accepted in full;
+rejecting or holding one is the deliberate act. `find-unwired-actions.mjs` is
+what surfaced it, which is the second time that check has earned itself.
+
+**Neither the order nor its lines carried a snapshot.** POForm posts a hidden
+`supplierId` and `lines[i].productId` and nothing else, so the supplier name and
+tax PIN printed on the order, and the product name and SKU §9.4 exists to
+freeze, were absent. Both are resolved from the row under RLS now.
 
 ### After procurement
 

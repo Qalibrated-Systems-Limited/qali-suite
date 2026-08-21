@@ -80,7 +80,7 @@ form-data adapter, or a lower-level variant a route handler will want, can
 legitimately have no screen calling it. What you are looking for is **a whole
 file's worth at once** — that means the screens were never pointed at it.
 
-### Read this before touching claims, assets, petty cash or GRN
+### Read this before touching claims, assets, petty cash or the weighbridge
 
 **Four live modules still post journal entries into MongoDB**, and every ledger
 screen — the journal browser, trial balance, P&L, balance sheet, general
@@ -91,27 +91,26 @@ ledger — reads Postgres:
 | `claim-action.js` | 4 | every approved employee reimbursement |
 | `asset-actions.js` | 11 | acquisition, depreciation, disposal |
 | `petty-cash-actions.js` | 3 | every petty cash movement |
-| `grn-actions.js` | 2 | goods received, and GR/IR clearing |
+| `lib/integrations/connectors/weighbridge.js` | API | every weighed-in purchase, sale and transfer |
 
 Nothing errors: the entry is created, validated and posted into a ledger no
 screen reads. If you are adding to one of these, post through
 `app/db/repositories/journal.ts` rather than the Mongoose model, or you are
 adding to the pile.
 
-GRN is the worst of the four, because `bills` is already ported WITH
-three-way match: a tenant with `require_grn` on gets bills posting to GR/IR
-clearing, and the only thing that could clear it lives in the other store. See
-POSTGRES-MIGRATION-PLAN.md §9G, which is also the argument for doing
-procurement next.
+**GRN was the fourth and it is done** — migrations 0049-0051, the repositories,
+the actions and all 24 screens. Acceptance posts DR Inventory / CR GR/IR into
+the same ledger the bill posts to, and `/dashboard/reports/gr-ir` reconciles the
+account. See §9G.
 
-**Procurement is mid-port.** Migrations 0049-0051 are in, and so are
-`app/db/repositories/purchaseOrders.ts`, `goodsReceipts.ts` and
-`nonconformance.ts` — `finaliseAcceptance()` posts the clearing entry and
-`gr_ir_open_items` reports what has not netted. The ACTIONS and SCREENS are
-not ported, so `grn-actions.js` is still the live path and still posts into
-Mongo. If you are working in procurement, build against the repositories; if
-you have to touch `grn-actions.js` before the actions land, know that anything
-it posts is going nowhere.
+**The weighbridge took its place, and it was never counted.** The original
+sweep read `app/mongodb/actions/`; this is an integration connector, so it was
+missed. It posts through the Mongo `JournalEntry` model and its account matrix
+maps `purchase` to DR Inventory / CR GR/IR — the receipt's own entry — while
+`bill_lines.weighbridge_ticket_id` exists in Postgres so an approved bill can
+clear exactly that position. Half the pair is in each store, which is the GRN
+bug in mirror image. Its products, invoices, accounts and stock movements are on
+Mongo too, so it is a vertical rather than a stray call.
 
 ---
 
