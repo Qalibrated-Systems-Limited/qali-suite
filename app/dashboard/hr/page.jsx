@@ -2,22 +2,28 @@ import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getHRStats, getExpiringContracts, getTodayAttendanceStats } from "@/app/mongodb/queries/hr-queries";
-import { Users, Building2, Calendar, Banknote, Clock, UserCheck, AlertTriangle, UserX, Settings } from "lucide-react";
+import { getHrOverview } from "@/app/db/actions/hr-employee-actions";
+import { getAttendanceForPage } from "@/app/db/actions/hr-attendance-actions";
+import { listLeaveForPage } from "@/app/db/actions/hr-leave-actions";
+import { roleAllowed } from "@/lib/permissions";
+import { Users, Building2, Calendar, Banknote, Clock, UserCheck, AlertTriangle, Settings } from "lucide-react";
 
 export const metadata = { title: "HR | Dashboard" };
 
 const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
 
 async function HRStatsCards() {
-  const stats = await getHRStats();
+  const [{ stats }, pending] = await Promise.all([
+    getHrOverview(),
+    listLeaveForPage({ status: "submitted", limit: 1 }),
+  ]);
 
   const cards = [
-    { label: "Total Employees", value: stats.totalHeadcount, icon: Users, href: "/dashboard/hr/employees", color: "text-primary", bg: "bg-primary/10" },
-    { label: "Active", value: stats.totalActive, icon: UserCheck, href: "/dashboard/hr/employees?status=active", color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10" },
-    { label: "On Leave", value: stats.totalOnLeave, icon: Calendar, href: "/dashboard/hr/leave?status=approved", color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10" },
-    { label: "On Probation", value: stats.totalProbation, icon: Clock, href: "/dashboard/hr/employees?status=probation", color: "text-purple-600 dark:text-purple-400", bg: "bg-purple-500/10" },
-    { label: "Pending Approvals", value: stats.pendingLeaveApprovals, icon: Calendar, href: "/dashboard/hr/leave?status=submitted", color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
+    { label: "Total Employees", value: stats.headcount, icon: Users, href: "/dashboard/hr/employees", color: "text-primary", bg: "bg-primary/10" },
+    { label: "Active", value: stats.active, icon: UserCheck, href: "/dashboard/hr/employees?status=active", color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10" },
+    { label: "On Leave", value: stats.onLeave, icon: Calendar, href: "/dashboard/hr/leave?status=approved", color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10" },
+    { label: "On Probation", value: stats.probation, icon: Clock, href: "/dashboard/hr/employees?status=probation", color: "text-purple-600 dark:text-purple-400", bg: "bg-purple-500/10" },
+    { label: "Pending Approvals", value: pending.pagination.total, icon: Calendar, href: "/dashboard/hr/leave?status=submitted", color: "text-red-600 dark:text-red-400", bg: "bg-red-500/10" },
   ];
 
   return (
@@ -40,17 +46,17 @@ async function HRStatsCards() {
 }
 
 async function HeadcountByDept() {
-  const stats = await getHRStats();
+  const { stats } = await getHrOverview();
 
   return (
     <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
       <h3 className="mb-4 font-semibold text-foreground">Headcount by Department</h3>
-      {!stats.headcountByDept?.length ? (
+      {!stats.byDepartment?.length ? (
         <p className="text-sm text-muted-foreground">No department data yet.</p>
       ) : (
         <div className="space-y-3">
-          {stats.headcountByDept.map((dept) => {
-            const pct = stats.totalHeadcount > 0 ? (dept.count / stats.totalHeadcount) * 100 : 0;
+          {stats.byDepartment.map((dept) => {
+            const pct = stats.headcount > 0 ? (dept.count / stats.headcount) * 100 : 0;
             return (
               <div key={dept.departmentId || dept.department}>
                 <div className="mb-1 flex justify-between text-sm">
@@ -98,10 +104,10 @@ function QuickActions() {
 }
 
 async function TodayAttendanceWidget() {
-  const stats = await getTodayAttendanceStats();
-  if (stats.totalActive === 0) return null;
+  const { stats } = await getAttendanceForPage();
+  if (stats.headcount === 0) return null;
 
-  const presentPct = stats.totalActive > 0 ? Math.round((stats.present / stats.totalActive) * 100) : 0;
+  const presentPct = stats.headcount > 0 ? Math.round((stats.present / stats.headcount) * 100) : 0;
 
   return (
     <Link
@@ -114,7 +120,7 @@ async function TodayAttendanceWidget() {
       </div>
       <div className="mb-3 flex items-center justify-between text-sm">
         <span className="text-muted-foreground">{presentPct}% present</span>
-        <span className="text-xs text-muted-foreground">{stats.present} / {stats.totalActive}</span>
+        <span className="text-xs text-muted-foreground">{stats.present} / {stats.headcount}</span>
       </div>
       <div className="mb-4 h-2 w-full rounded-full bg-muted">
         <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${presentPct}%` }} />
@@ -138,7 +144,7 @@ async function TodayAttendanceWidget() {
 }
 
 async function ContractExpiryAlerts() {
-  const expiring = await getExpiringContracts(30);
+  const { expiringContracts: expiring } = await getHrOverview();
   if (!expiring.length) return null;
 
   return (
@@ -151,7 +157,7 @@ async function ContractExpiryAlerts() {
       </div>
       <div className="space-y-2">
         {expiring.map((e) => (
-          <div key={e._id} className="flex items-center justify-between gap-2 text-sm">
+          <div key={e.id} className="flex items-center justify-between gap-2 text-sm">
             <div>
               <span className="font-medium text-foreground">{e.name}</span>
               {e.department && <span className="ml-1 text-muted-foreground">· {e.department}</span>}
@@ -188,7 +194,7 @@ function StatsCardsSkeleton() {
 export default async function HRPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!HR_ROLES.includes(session.user.role)) redirect("/dashboard");
+  if (!roleAllowed(session.user.role, HR_ROLES)) redirect("/dashboard");
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

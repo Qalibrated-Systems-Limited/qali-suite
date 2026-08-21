@@ -3,10 +3,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, FileText, Download } from "lucide-react";
-import {
-  getMyPayslips,
-  getMyEmployeeProfile,
-} from "@/app/mongodb/queries/hr-queries";
+import { getMyPayslips } from "@/app/db/actions/hr-payroll-actions";
 
 export const metadata = { title: "My Payslips | HR" };
 
@@ -34,11 +31,10 @@ function StatusBadge({ status }) {
 
 async function PayslipList({ searchParams }) {
   const params = await searchParams;
-  const page = parseInt(params.page || "1");
-  const [profile, { payslips, pagination }] = await Promise.all([
-    getMyEmployeeProfile(),
-    getMyPayslips({ page, limit: 12 }),
-  ]);
+  const thisYear = new Date().getFullYear();
+  const { employee: profile, payslips } = await getMyPayslips(
+    params.year ? Number(params.year) : undefined,
+  );
 
   if (!profile) {
     return (
@@ -87,10 +83,10 @@ async function PayslipList({ searchParams }) {
             </thead>
             <tbody className="divide-y divide-border">
               {payslips.map((p) => (
-                <tr key={p._id} className="hover:bg-muted/50 transition-colors">
+                <tr key={p.id} className="hover:bg-muted/50 transition-colors">
                   <td className="px-4 py-3">
                     <p className="font-medium text-foreground">
-                      {p.period.label}
+                      {p.label}
                     </p>
                     {p.paidAt && (
                       <p className="text-xs text-muted-foreground">
@@ -104,19 +100,19 @@ async function PayslipList({ searchParams }) {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-foreground">
-                    {fmt(p.earnings.grossPay)}
+                    {fmt(p.grossPay)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-muted-foreground">
-                    {fmt(p.deductions.paye)}
+                    {fmt(p.paye)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-muted-foreground">
-                    {fmt(p.deductions.nssf)}
+                    {fmt(p.nssf)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-muted-foreground">
-                    {fmt(p.deductions.shif)}
+                    {fmt(p.shif)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-muted-foreground">
-                    {fmt(p.deductions.housingLevy)}
+                    {fmt(p.housingLevy)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono font-semibold text-foreground">
                     {fmt(p.netPay)}
@@ -127,13 +123,13 @@ async function PayslipList({ searchParams }) {
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <Link
-                        href={`/dashboard/hr/my-payslips/${p._id}`}
+                        href={`/dashboard/hr/my-payslips/${p.id}`}
                         className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
                       >
                         <FileText className="h-3 w-3" /> View
                       </Link>
                       <a
-                        href={`/api/hr/my-payslip/${p._id}`}
+                        href={`/api/hr/my-payslip/${p.id}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
@@ -153,13 +149,13 @@ async function PayslipList({ searchParams }) {
       <div className="space-y-3 md:hidden">
         {payslips.map((p) => (
           <div
-            key={p._id}
+            key={p.id}
             className="rounded-lg border border-border bg-card p-4 shadow-sm"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-semibold text-foreground">
-                  {p.period.label}
+                  {p.label}
                 </p>
                 {p.paidAt && (
                   <p className="text-xs text-muted-foreground">
@@ -177,7 +173,7 @@ async function PayslipList({ searchParams }) {
               <div>
                 <p className="text-muted-foreground">Gross</p>
                 <p className="font-mono font-medium text-foreground">
-                  {p.currency} {fmt(p.earnings.grossPay)}
+                  {p.currency} {fmt(p.grossPay)}
                 </p>
               </div>
               <div>
@@ -196,13 +192,13 @@ async function PayslipList({ searchParams }) {
             <div className="mt-3 border-t border-border pt-3">
               <div className="flex items-center gap-3">
                 <Link
-                  href={`/dashboard/hr/my-payslips/${p._id}`}
+                  href={`/dashboard/hr/my-payslips/${p.id}`}
                   className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                 >
                   <FileText className="h-3 w-3" /> View
                 </Link>
                 <a
-                  href={`/api/hr/my-payslip/${p._id}`}
+                  href={`/api/hr/my-payslip/${p.id}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
@@ -215,45 +211,34 @@ async function PayslipList({ searchParams }) {
         ))}
       </div>
 
-      {/* Pagination */}
-      {pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm">
-          <p className="text-muted-foreground">
-            Showing {(page - 1) * pagination.limit + 1}–
-            {Math.min(page * pagination.limit, pagination.total)} of{" "}
-            {pagination.total}
-          </p>
-          <div className="flex gap-2">
-            {page > 1 && (
-              <Link
-                href={`?page=${page - 1}`}
-                className="rounded-md border border-border bg-card px-3 py-1.5 text-xs hover:bg-accent"
-              >
-                Previous
-              </Link>
-            )}
-            {page < pagination.totalPages && (
-              <Link
-                href={`?page=${page + 1}`}
-                className="rounded-md border border-border bg-card px-3 py-1.5 text-xs hover:bg-accent"
-              >
-                Next
-              </Link>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Two years, which is what anybody actually looks back over. Filtering
+          by year is more useful here than paging through months. */}
+      <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 text-sm">
+        {[thisYear, thisYear - 1].map((y) => (
+          <Link
+            key={y}
+            href={`?year=${y}`}
+            className={`rounded-md px-3 py-1.5 transition-colors ${
+              String(y) === String(params.year || thisYear)
+                ? "bg-card font-medium text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {y}
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
 
 async function P9Link() {
-  const profile = await getMyEmployeeProfile();
+  const { employee: profile } = await getMyPayslips();
   if (!profile) return null;
   const year = new Date().getFullYear();
   return (
     <Link
-      href={`/dashboard/hr/p9/${profile._id}?year=${year}`}
+      href={`/dashboard/hr/p9/${profile.id}?year=${year}`}
       className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-accent shrink-0"
     >
       <Download className="h-4 w-4 text-muted-foreground" />

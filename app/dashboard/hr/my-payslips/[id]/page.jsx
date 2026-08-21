@@ -1,12 +1,8 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft, Printer, Download } from "lucide-react";
-import { getMyEmployeeProfile } from "@/app/mongodb/queries/hr-queries";
-import dbConnect from "@/app/config/dbConnect";
-import PayrollEntry from "@/app/models/payrollEntry";
-import EmployeeProfile from "@/app/models/employeeProfile";
-import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { ChevronLeft } from "lucide-react";
+import { getPayslipForPage } from "@/app/db/actions/hr-payroll-actions";
 import PayslipActions from "./PayslipActions";
 
 export const metadata = { title: "Payslip | HR" };
@@ -34,34 +30,15 @@ export default async function PayslipDetailPage({ params }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
-
-  // Find the employee's profile to verify ownership
-  const profile = await EmployeeProfile.findOne(
-    withTenantScope({ userId: session.user.id }, companyId, isSuperAdmin),
-    "_id"
-  ).lean();
-
-  if (!profile) notFound();
-
-  // Load the payroll entry — ensure it belongs to this employee
-  const entry = await PayrollEntry.findOne(
-    withTenantScope({ _id: id, profileId: profile._id }, companyId, isSuperAdmin)
-  ).lean();
-
-  if (!entry) notFound();
-
-  const allowances =
-    (entry.earnings?.housingAllowance || 0) +
-    (entry.earnings?.transportAllowance || 0) +
-    (entry.earnings?.medicalAllowance || 0) +
-    (entry.earnings?.overtime || 0) +
-    (entry.earnings?.bonus || 0) +
-    (entry.earnings?.commission || 0);
+  // The action refuses a payslip that is not the caller's, unless they hold
+  // an HR or finance role — so ownership is checked in one place rather than
+  // re-derived here.
+  const data = await getPayslipForPage(id);
+  if (!data) notFound();
+  const { entry } = data;
 
   const currency = entry.currency || "KES";
-  const periodLabel = entry.period?.label || `${entry.period?.month}/${entry.period?.year}`;
+  const periodLabel = entry.label;
 
   return (
     <div className="space-y-6 p-4 sm:p-6 max-w-2xl">
@@ -117,10 +94,10 @@ export default async function PayslipDetailPage({ params }) {
             <p className="font-medium text-foreground">{entry.designation || "—"}</p>
             <p className="text-muted-foreground">{entry.department || "—"}</p>
           </div>
-          {entry.workingDays?.total > 0 && (
+          {entry.workingDaysTotal > 0 && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Working Days</p>
-              <p className="text-foreground">{entry.workingDays.worked} / {entry.workingDays.total} days</p>
+              <p className="text-foreground">{entry.workingDaysWorked} / {entry.workingDaysTotal} days</p>
             </div>
           )}
         </div>
@@ -128,44 +105,53 @@ export default async function PayslipDetailPage({ params }) {
         {/* Earnings */}
         <div className="px-6 py-4 border-b border-border">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Earnings</p>
-          <Row label="Basic Salary" value={`${currency} ${fmt(entry.earnings?.basicSalary)}`} />
-          {(entry.earnings?.housingAllowance || 0) > 0 && (
-            <Row label="Housing Allowance" value={`${currency} ${fmt(entry.earnings.housingAllowance)}`} muted />
+          <Row label="Basic Salary" value={`${currency} ${fmt(entry.basicSalary)}`} />
+          {(entry.housingAllowance || 0) > 0 && (
+            <Row label="Housing Allowance" value={`${currency} ${fmt(entry.housingAllowance)}`} muted />
           )}
-          {(entry.earnings?.transportAllowance || 0) > 0 && (
-            <Row label="Transport Allowance" value={`${currency} ${fmt(entry.earnings.transportAllowance)}`} muted />
+          {(entry.transportAllowance || 0) > 0 && (
+            <Row label="Transport Allowance" value={`${currency} ${fmt(entry.transportAllowance)}`} muted />
           )}
-          {(entry.earnings?.medicalAllowance || 0) > 0 && (
-            <Row label="Medical Allowance" value={`${currency} ${fmt(entry.earnings.medicalAllowance)}`} muted />
+          {(entry.medicalAllowance || 0) > 0 && (
+            <Row label="Medical Allowance" value={`${currency} ${fmt(entry.medicalAllowance)}`} muted />
           )}
-          {(entry.earnings?.overtime || 0) > 0 && (
-            <Row label="Overtime" value={`${currency} ${fmt(entry.earnings.overtime)}`} muted />
+          {(entry.overtime || 0) > 0 && (
+            <Row label="Overtime" value={`${currency} ${fmt(entry.overtimePay)}`} muted />
           )}
-          {(entry.earnings?.bonus || 0) > 0 && (
-            <Row label="Bonus" value={`${currency} ${fmt(entry.earnings.bonus)}`} muted />
+          {(entry.bonus || 0) > 0 && (
+            <Row label="Bonus" value={`${currency} ${fmt(entry.bonus)}`} muted />
           )}
-          {(entry.earnings?.commission || 0) > 0 && (
-            <Row label="Commission" value={`${currency} ${fmt(entry.earnings.commission)}`} muted />
+          {(entry.commission || 0) > 0 && (
+            <Row label="Commission" value={`${currency} ${fmt(entry.commission)}`} muted />
           )}
           <Divider />
-          <Row label="Gross Pay" value={`${currency} ${fmt(entry.earnings?.grossPay)}`} bold />
+          {entry.otherAllowance > 0 && (
+            <Row label="Other Allowance" value={`${currency} ${fmt(entry.otherAllowance)}`} muted />
+          )}
+          {entry.additionalEarnings > 0 && (
+            <Row label="Other Earnings" value={`${currency} ${fmt(entry.additionalEarnings)}`} muted />
+          )}
+          <Row label="Gross Pay" value={`${currency} ${fmt(entry.grossPay)}`} bold />
         </div>
 
         {/* Deductions */}
         <div className="px-6 py-4 border-b border-border">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Deductions</p>
-          <Row label="PAYE (Income Tax)" value={`${currency} ${fmt(entry.deductions?.paye)}`} muted />
-          <Row label="NSSF" value={`${currency} ${fmt(entry.deductions?.nssf)}`} muted />
-          <Row label="SHIF" value={`${currency} ${fmt(entry.deductions?.shif)}`} muted />
-          <Row label="Affordable Housing Levy" value={`${currency} ${fmt(entry.deductions?.housingLevy)}`} muted />
-          {(entry.deductions?.loanRepayment || 0) > 0 && (
-            <Row label="Loan Repayment" value={`${currency} ${fmt(entry.deductions.loanRepayment)}`} muted />
+          <Row label="PAYE (Income Tax)" value={`${currency} ${fmt(entry.paye)}`} muted />
+          <Row label="NSSF" value={`${currency} ${fmt(entry.nssf)}`} muted />
+          <Row label="SHIF" value={`${currency} ${fmt(entry.shif)}`} muted />
+          <Row label="Affordable Housing Levy" value={`${currency} ${fmt(entry.housingLevy)}`} muted />
+          {(entry.loanRepayment || 0) > 0 && (
+            <Row label="Loan Repayment" value={`${currency} ${fmt(entry.loanRepayment)}`} muted />
           )}
-          {(entry.deductions?.saccoDeduction || 0) > 0 && (
-            <Row label="SACCO Deduction" value={`${currency} ${fmt(entry.deductions.saccoDeduction)}`} muted />
+          {(entry.saccoDeduction || 0) > 0 && (
+            <Row label="SACCO Deduction" value={`${currency} ${fmt(entry.saccoDeduction)}`} muted />
           )}
           <Divider />
-          <Row label="Total Deductions" value={`${currency} ${fmt(entry.deductions?.totalDeductions)}`} bold />
+          {entry.additionalDeductions > 0 && (
+            <Row label="Other Deductions" value={`${currency} ${fmt(entry.additionalDeductions)}`} muted />
+          )}
+          <Row label="Total Deductions" value={`${currency} ${fmt(entry.totalDeductions)}`} bold />
         </div>
 
         {/* Net Pay */}

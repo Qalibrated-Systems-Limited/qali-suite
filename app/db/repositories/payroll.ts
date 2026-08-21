@@ -1369,6 +1369,7 @@ export async function listEmployeePayslips(
 
   const rows = (await tx.execute(sql`
     SELECT e.id, e.gross_pay, e.total_deductions, e.net_pay, e.payment_status,
+           e.paye, e.nssf, e.shif, e.housing_levy,
            e.paid_at, r.id AS run_id, r.period_month, r.period_year, r.status AS run_status
       FROM payroll_entries e
       JOIN payroll_runs r ON r.id = e.payroll_run_id
@@ -1387,6 +1388,10 @@ export async function listEmployeePayslips(
     grossPay: Number(r.gross_pay),
     totalDeductions: Number(r.total_deductions),
     netPay: Number(r.net_pay),
+    paye: Number(r.paye),
+    nssf: Number(r.nssf),
+    shif: Number(r.shif),
+    housingLevy: Number(r.housing_levy),
     paymentStatus: String(r.payment_status),
     runStatus: String(r.run_status),
     paidAt: r.paid_at ? new Date(r.paid_at as string).toISOString() : null,
