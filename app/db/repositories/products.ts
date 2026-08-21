@@ -186,6 +186,162 @@ export async function receiveStock(
   return updated;
 }
 
+/**
+ * Goods have physically arrived but nobody has accepted them yet (0050).
+ *
+ * They are on the shelf, so `quantity_on_hand` rises; they are not issuable
+ * until Sales and Finance sign the receipt, so `quantity_on_hold` rises with
+ * it and `quantity_available` — a GENERATED column, `on_hand - committed -
+ * on_hold` — does not move at all.
+ *
+ * NOT re-costed here. The Inventory debit and the weighted average both belong
+ * to acceptance, because goods that are ultimately rejected never had a cost
+ * to average in.
+ */
+export async function receiveStockToHold(
+  tx: Tx,
+  productId: string,
+  quantity: string,
+) {
+  const [updated] = await tx
+    .update(products)
+    .set({
+      quantityOnHand: sql`${products.quantityOnHand} + ${quantity}::numeric(19,4)`,
+      quantityOnHold: sql`${products.quantityOnHold} + ${quantity}::numeric(19,4)`,
+      updatedAt: new Date(),
+    })
+    .where(eq(products.id, productId))
+    .returning();
+
+  if (!updated) throw new Error("Product not found");
+  return updated;
+}
+
+/**
+ * Accepted: the goods stay, and become issuable.
+ *
+ * Only the hold falls — `quantity_available` follows on its own because it is
+ * generated. The Mongo equivalent decrements onHold AND increments a stored
+ * quantityAvailable, which is the same movement counted twice in a value that
+ * a pre-save hook also recomputes from scratch; whichever wrote last decided
+ * what the number was.
+ *
+ * Re-costing is `receiveStock`'s job and is called alongside this one, so the
+ * weighted average sees only quantity that was actually admitted.
+ */
+export async function acceptStockFromHold(
+  tx: Tx,
+  productId: string,
+  quantity: string,
+) {
+  const [updated] = await tx
+    .update(products)
+    .set({
+      quantityOnHold: sql`${products.quantityOnHold} - ${quantity}::numeric(19,4)`,
+      updatedAt: new Date(),
+    })
+    .where(eq(products.id, productId))
+    .returning();
+
+  if (!updated) throw new Error("Product not found");
+  return updated;
+}
+
+/**
+ * Rejected: the goods leave, off the shelf and out of the hold together.
+ *
+ * No GREATEST(0, ...) clamp. Releasing a commitment can reasonably floor at
+ * zero — a double release is a bookkeeping slip. Rejecting more than is held
+ * is a claim that goods left which were never there, and the CHECK on
+ * `quantity_on_hold >= 0` should refuse it rather than quietly absorb it.
+ */
+export async function rejectStockFromHold(
+  tx: Tx,
+  productId: string,
+  quantity: string,
+) {
+  const [updated] = await tx
+    .update(products)
+    .set({
+      quantityOnHand: sql`${products.quantityOnHand} - ${quantity}::numeric(19,4)`,
+      quantityOnHold: sql`${products.quantityOnHold} - ${quantity}::numeric(19,4)`,
+      updatedAt: new Date(),
+    })
+    .where(eq(products.id, productId))
+    .returning();
+
+  if (!updated) throw new Error("Product not found");
+  return updated;
+}
+
+/**
+ * Re-costs a product for goods admitted from HOLD.
+ *
+ * `receiveStock` cannot be used at acceptance: the quantity went on hand at
+ * SUBMIT, so calling it would admit the same goods twice. This moves the
+ * weighted average only.
+ *
+ * The denominator is `quantity_on_hand - quantity_on_hold`, and the second term
+ * is the point. Goods sit on hand from the moment they are SUBMITTED, but they
+ * carry no cost until they are accepted — a receipt line held for a
+ * nonconformance disposition may sit there for weeks. Averaging against plain
+ * `quantity_on_hand` therefore divides real value by a quantity that includes
+ * uncosted units and drags the cost basis down: 20 units at 50 landing beside
+ * 20 held units comes out at 25, not 50, and every COGS figure downstream
+ * inherits it.
+ *
+ * `on_hand - on_hold` is the COSTED pool — and because the caller releases the
+ * accepted units from hold before calling this, it is exactly (pre + accepted)
+ * without needing to know what `pre` was. Two concurrent acceptances cannot
+ * both average from the same starting quantity, either.
+ *
+ * `stampProductCostFromReceipt` (grn-actions.js:104) does the same arithmetic
+ * in float64 across a read and a write, against `onHandAfter - acceptedQty`,
+ * with no notion of the hold bucket at all.
+ *
+ * FIFO and specific costing keep their layer cost, but a cost of ZERO is
+ * seeded from this receipt rather than left — a product created by a warehouse
+ * role starts at 0, and a zero cost basis silently turns every later sale into
+ * 100% margin and every valuation into an understatement.
+ */
+export async function recostFromAcceptedReceipt(
+  tx: Tx,
+  productId: string,
+  acceptedQuantity: string,
+  unitCost: string,
+  receivedOn?: string,
+) {
+  if (Number(unitCost) <= 0 || Number(acceptedQuantity) <= 0) {
+    return null;
+  }
+
+  const [updated] = await tx
+    .update(products)
+    .set({
+      costPrice: sql`CASE
+        WHEN ${products.costingMethod} <> 'average'
+          THEN CASE WHEN ${products.costPrice} <= 0
+                    THEN ${unitCost}::numeric(19,4)
+                    ELSE ${products.costPrice} END
+        WHEN ${products.quantityOnHand} - ${products.quantityOnHold} > 0
+          THEN ROUND(
+            ((${products.quantityOnHand} - ${products.quantityOnHold}
+              - ${acceptedQuantity}::numeric(19,4)) * ${products.costPrice}
+             + ${acceptedQuantity}::numeric(19,4) * ${unitCost}::numeric(19,4))
+            / (${products.quantityOnHand} - ${products.quantityOnHold}), 4)
+        ELSE ${unitCost}::numeric(19,4)
+      END`,
+      lastPurchaseCost: unitCost,
+      lastPurchaseDate: receivedOn ?? sql`CURRENT_DATE`,
+      updatedAt: new Date(),
+    })
+    .where(eq(products.id, productId))
+    .returning();
+
+  if (!updated) throw new Error("Product not found");
+  return updated;
+}
+
 /** Products at or below their reorder level. */
 export async function getLowStock(tx: Tx, limit = 50) {
   return tx.execute(sql`

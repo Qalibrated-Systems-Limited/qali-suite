@@ -66,6 +66,64 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   public_holidays_unique_recurring:
     "That holiday is already on the calendar.",
   public_holidays_unique_one_off: "That holiday is already on the calendar.",
+
+  // ── Procurement (0049-0051) ───────────────────────────────────────────────
+  purchase_orders_company_number_uq:
+    "A purchase order with that number already exists.",
+  purchase_orders_tolerance_range:
+    "The receipt tolerance is a percentage between 0 and 100.",
+  purchase_orders_valid_until_after_date:
+    "The validity date cannot fall before the order date.",
+  purchase_orders_cancelled_has_reason:
+    "Cancelling a purchase order needs a reason.",
+  purchase_orders_closed_has_reason:
+    "Closing a purchase order short needs a reason.",
+  purchase_orders_wht_rate_range:
+    "The withholding rate must be between 0 and 30 percent.",
+  purchase_order_lines_quantity_positive:
+    "A line must order more than nothing.",
+  purchase_order_lines_price_not_negative: "A unit price cannot be negative.",
+  purchase_order_lines_vat_is_a_percentage:
+    "VAT must be a percentage between 0 and 100.",
+
+  goods_receipts_company_number_uq:
+    "A goods receipt with that number already exists.",
+  goods_receipts_two_distinct_signatures:
+    "Sales and Finance must be signed by two different people.",
+  goods_receipts_receiver_does_not_sign:
+    "The person who received the goods cannot also accept them. Ask a colleague to sign.",
+  goods_receipts_finalised_is_signed_or_rejected:
+    "A receipt needs both the Sales and Finance signatures before it can be finalised.",
+  goods_receipts_sales_signature_complete:
+    "A signature needs both the signatory and the time.",
+  goods_receipts_finance_signature_complete:
+    "A signature needs both the signatory and the time.",
+  goods_receipts_source_matches_reference:
+    "The receipt names a source that does not match the document it points at.",
+  goods_receipts_voided_has_reason: "Voiding a receipt needs a reason.",
+  goods_receipt_lines_accepted_within_received:
+    "You cannot accept more than actually arrived.",
+  goods_receipt_lines_rejection_has_reason:
+    "Rejecting a line needs a reason — the nonconformance workflow starts from it.",
+  goods_receipt_lines_quantities_not_negative:
+    "A received or accepted quantity cannot be negative.",
+
+  nonconformances_company_number_uq:
+    "A nonconformance with that number already exists.",
+  nonconformances_raiser_does_not_propose:
+    "You cannot propose a disposition for a nonconformance you raised. Ask a colleague to review it.",
+  nonconformances_proposer_does_not_authorize:
+    "You proposed this disposition — ask another authority to approve it.",
+  nonconformances_proposed_has_disposition:
+    "A proposal needs an actual disposition and a reason.",
+  nonconformances_authorized_is_authorized:
+    "A nonconformance cannot be authorised before a disposition has been proposed.",
+  nonconformances_closed_is_executed:
+    "A nonconformance is closed once its authorised disposition has been carried out.",
+  nonconformances_cancelled_has_reason:
+    "Cancelling a nonconformance needs a reason.",
+  nonconformances_source_matches_reference:
+    "The nonconformance names a source that does not match the document it points at.",
 };
 
 interface PgLike {
