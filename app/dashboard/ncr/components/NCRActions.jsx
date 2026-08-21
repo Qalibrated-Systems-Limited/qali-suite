@@ -11,11 +11,16 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  proposeDisposition,
-  authorizeDisposition,
-  closeNCR,
-  cancelNCR,
-} from "@/app/mongodb/actions/ncr-actions";
+  proposeDispositionPg,
+  authorizeDispositionPg,
+  executeNonconformanceDispositionPg,
+  cancelNonconformancePg,
+} from "@/app/db/actions/ncr-actions";
+import { roleAllowed } from "@/lib/permissions";
+import {
+  NCR_PROPOSE_ROLES,
+  NCR_AUTHORIZE_ROLES,
+} from "@/lib/utils/role-gates";
 
 const DISPOSITION_OPTIONS = [
   { value: "return_to_supplier", label: "Return to supplier" },
@@ -42,15 +47,11 @@ export default function NCRActions({ ncr, currentUser }) {
   const [cancelReason, setCancelReason] = useState("");
 
   const role = currentUser?.role;
-  const canPropose = [
-    "SuperAdmin",
-    "Admin",
-    "Manager",
-    "Store Manager",
-    "CFO",
-    "Finance Manager",
-  ].includes(role);
-  const canAuthorize = ["SuperAdmin", "Admin", "CFO"].includes(role);
+  // The same lists the actions gate on — imported, not restated. Proposing and
+  // authorising are deliberately different sets: the SOP wants a recommendation
+  // from anyone senior enough to make one, and the decision from the MD.
+  const canPropose = roleAllowed(role, [...NCR_PROPOSE_ROLES]);
+  const canAuthorize = roleAllowed(role, [...NCR_AUTHORIZE_ROLES]);
 
   const run = (fn, msg) => {
     setError("");
@@ -104,7 +105,7 @@ export default function NCRActions({ ncr, currentUser }) {
                 <Button
                   onClick={() =>
                     run(
-                      () => proposeDisposition(ncr._id, dispoType, dispoReason),
+                      () => proposeDispositionPg(ncr._id, dispoType, dispoReason),
                       "Disposition proposed — awaiting authorization",
                     )
                   }
@@ -155,7 +156,7 @@ export default function NCRActions({ ncr, currentUser }) {
             <Button
               onClick={() =>
                 run(
-                  () => authorizeDisposition(ncr._id, authNotes),
+                  () => authorizeDispositionPg(ncr._id, authNotes),
                   "Disposition authorized",
                 )
               }
@@ -185,7 +186,7 @@ export default function NCRActions({ ncr, currentUser }) {
           />
           <Button
             onClick={() =>
-              run(() => closeNCR(ncr._id, closeNotes), "NCR closed")
+              run(() => executeNonconformanceDispositionPg(ncr._id, closeNotes), "NCR closed")
             }
             disabled={isPending || !closeNotes.trim()}
             className="gap-1.5"
@@ -226,7 +227,7 @@ export default function NCRActions({ ncr, currentUser }) {
                   variant="destructive"
                   onClick={() =>
                     run(
-                      () => cancelNCR(ncr._id, cancelReason),
+                      () => cancelNonconformancePg(ncr._id, cancelReason),
                       "NCR cancelled",
                     )
                   }

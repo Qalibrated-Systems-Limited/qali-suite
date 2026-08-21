@@ -7,10 +7,9 @@ import {
   getBillsAwaitingGRN,
 } from "@/app/db/actions/bill-actions";
 import {
-  getPurchaseOrderById,
-  getOpenPurchaseOrders,
-  fetchAllProducts,
-} from "@/app/mongodb/queries/purchase-order-queries";
+  getOpenPurchaseOrdersWithLinesPg,
+  getPurchaseOrderFormDataPg,
+} from "@/app/db/actions/purchase-order-actions";
 import GRNForm from "../components/GRNForm";
 
 export const metadata = { title: "New Goods Receipt Note" };
@@ -31,11 +30,15 @@ export default async function GRNCreatePage(props) {
   // Parallel: source pickers (POs / bills) + product catalogue for the
   // line picker. Same pattern POForm uses — pre-fetch once, filter on
   // the client. Avoids per-keystroke server hits on the GRN form.
-  const [openPOs, awaitingBills, products] = await Promise.all([
-    getOpenPurchaseOrders(),
+  const [openPOs, awaitingBills, formData] = await Promise.all([
+    // "Open" here means outstanding to RECEIVE — ordered less accepted — which
+    // is a different question from what is left to bill, and the reason the
+    // two are separate views rather than one counter.
+    getOpenPurchaseOrdersWithLinesPg(),
     getBillsAwaitingGRN(),
-    fetchAllProducts(),
+    getPurchaseOrderFormDataPg(),
   ]);
+  const products = formData.products;
 
   if (fromBillId) {
     // getBillById returns { bill, error }. This destructured nothing and then
@@ -56,11 +59,13 @@ export default async function GRNCreatePage(props) {
         lines: (bill.lines || [])
           .filter((l) => l.product?.id)
           .map((l) => ({
+            purchaseOrderLineId: null,
             productId: l.product.id,
             description: l.description || l.product.name || "",
             sku: l.product.sku || "",
             expectedQty: l.quantity || 0,
             receivedQty: l.quantity || 0,
+            unitCost: l.unitPrice || 0,
             unit: l.unit || "pcs",
             packagingCondition: "good",
             physicalCondition: "good",
@@ -72,41 +77,33 @@ export default async function GRNCreatePage(props) {
       prefillError = "bill";
     }
   } else if (fromPOId) {
-    const po = await getPurchaseOrderById(fromPOId);
+    // The same list the in-form picker uses, so arriving with ?fromPO= and
+    // choosing the order in the form produce identical lines. The outstanding
+    // quantity is derived (ordered less ACCEPTED) rather than computed here
+    // from a counter, which is what stopped partial receipts double-counting.
+    const po = openPOs.find((o) => o._id === fromPOId);
     if (po) {
-      // Lines on the PO that still have something outstanding to receive.
-      // line.quantity = ordered; line.receivedQuantity = already received.
-      // Default the GRN line to the *outstanding* qty so partial receipts
-      // don't accidentally double-count.
-      const lines = (po.lines || [])
-        .filter((l) => l.product?.id)
-        .map((l) => {
-          const ordered = l.quantity || 0;
-          const alreadyReceived = l.receivedQuantity || 0;
-          const outstanding = Math.max(0, ordered - alreadyReceived);
-          return {
-            productId: l.product.id?.toString?.() || l.product.id,
-            description: l.description || l.product.name || "",
-            sku: l.product.SKU || l.product.sku || "",
-            expectedQty: outstanding,
-            receivedQty: outstanding,
-            unit: l.unit || "pcs",
-            packagingCondition: "good",
-            physicalCondition: "good",
-            inspectionNotes: "",
-            storageLocation: "",
-          };
-        })
-        .filter((l) => l.expectedQty > 0);
-
       prefill = {
         sourceType: "purchase_order",
-        purchaseOrderId: po._id?.toString?.() || po._id,
+        purchaseOrderId: po._id,
         poNumber: po.poNumber,
-        supplierPartyId: po.supplier?.partyId?.toString?.() || po.supplier?.partyId,
+        supplierPartyId: po.supplier?.partyId,
         supplierName: po.supplier?.name,
         receivedDate: new Date().toISOString().slice(0, 10),
-        lines,
+        lines: po.availableLines.map((l) => ({
+          purchaseOrderLineId: l._id,
+          productId: l.product.id,
+          description: l.description || l.product.name || "",
+          sku: l.product.sku || "",
+          expectedQty: l.availableQuantity,
+          receivedQty: l.availableQuantity,
+          unitCost: l.unitPrice || 0,
+          unit: l.unit || "pcs",
+          packagingCondition: "good",
+          physicalCondition: "good",
+          inspectionNotes: "",
+          storageLocation: "",
+        })),
       };
     } else {
       prefillError = "po";

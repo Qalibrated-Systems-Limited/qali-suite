@@ -19,10 +19,10 @@ import {
 import { AlertsStrip, AlertsStripSkeleton } from "./AlertsStrip";
 import { cLowStockProducts } from "@/app/mongodb/queries/dashboard-cache";
 import {
-  getProcurementSummary,
-  getRecentPurchaseOrders,
-  getTopSuppliersBySpend,
-} from "@/app/mongodb/queries/procurement-queries";
+  getProcurementSummaryPg,
+  getRecentPurchaseOrdersPg,
+  getTopSuppliersBySpendPg,
+} from "@/app/db/actions/purchase-order-actions";
 
 // ============================================
 // PROCUREMENT OFFICER DASHBOARD
@@ -141,7 +141,7 @@ function POStatusPill({ status }: { status: string }) {
 // METRIC CARDS
 // ============================================
 async function ProcurementMetrics() {
-  const summary = await getProcurementSummary();
+  const summary = await getProcurementSummaryPg();
   if (!summary.success) {
     return (
       <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
@@ -224,7 +224,7 @@ async function ProcurementMetrics() {
 // RECENT POs
 // ============================================
 async function RecentPOs() {
-  const result = await getRecentPurchaseOrders(8);
+  const result = await getRecentPurchaseOrdersPg(8);
 
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
@@ -298,7 +298,7 @@ async function RecentPOs() {
 // TOP SUPPLIERS
 // ============================================
 async function TopSuppliersCard() {
-  const result = await getTopSuppliersBySpend(6);
+  const result = await getTopSuppliersBySpendPg(6);
 
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">

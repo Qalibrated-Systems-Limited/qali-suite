@@ -244,6 +244,243 @@ export async function getPurchaseOrderDetail(tx: Tx, purchaseOrderId: string) {
   return { ...po, lines, state: state ?? null, receipts, bills, deliveries };
 }
 
+/**
+ * The display status the screens expect.
+ *
+ * ANTI-CORRUPTION LAYER, and deliberately so. 0049 removed 'expired',
+ * 'partial' and 'received' as stored statuses because each was a computed
+ * value wearing one — expiry written by a pre-save hook that fired on any
+ * save, the other two by the counter that had two writers. `status` now holds
+ * only what a person chose.
+ *
+ * The screens still speak the old vocabulary: one string that drives a badge,
+ * a filter and half a dozen `includes()` guards. Translating here, at the
+ * boundary, is the standard shape for this — the alternative is teaching six
+ * components to combine two fields, which is the same logic copied six times.
+ *
+ * Precedence matters. A cancelled or closed order is that whatever its
+ * receipts say; a fully-received order is not "expired" merely because its
+ * validity has lapsed; and expiry only means anything while the order is still
+ * live. That ordering is the reason this is one function and not an
+ * expression.
+ */
+export function displayStatus(row: {
+  status?: unknown;
+  is_expired?: unknown;
+  receipt_state?: unknown;
+}): string {
+  const status = String(row.status ?? "draft");
+  if (status === "cancelled" || status === "closed") return status;
+  if (row.receipt_state === "complete") return "received";
+  if (row.receipt_state === "partial") return "partial";
+  if (row.is_expired) return "expired";
+  return status;
+}
+
+/**
+ * A purchase order as the detail page and the PDF render it.
+ *
+ * Shaped to the page rather than to the schema, on the `getBillDetail` (0016)
+ * and `getQuoteForDisplay` precedent: `amounts.total`, `supplier.name`,
+ * `lines[].vat.rate`, `linkedBills[]`. The markup does not change with the
+ * data source.
+ *
+ * `lines[].receivedQuantity` is the one to look at. In Mongo it is a stored
+ * counter incremented from two places that do not know about each other; here
+ * it is read from `purchase_order_line_received`, and the two other questions
+ * that counter was also being asked to answer — how much was ACCEPTED and how
+ * much was BILLED — come back as their own fields instead of being conflated
+ * into it.
+ */
+export async function getPurchaseOrderForDisplay(
+  tx: Tx,
+  purchaseOrderId: string,
+) {
+  const detail = await getPurchaseOrderDetail(tx, purchaseOrderId);
+  if (!detail) return null;
+
+  const state = (detail.state ?? {}) as Record<string, unknown>;
+  const receipts = detail.receipts as Array<Record<string, unknown>>;
+
+  // When the order became complete: the last receipt that made it so. The
+  // Mongo page reads `po.receivedAt` and the model never had such a field, so
+  // it has always rendered blank.
+  const finalised = receipts
+    .filter((r) => r.status === "finalised")
+    .map((r) => String(r.received_date))
+    .sort();
+  const receivedAt =
+    state.receipt_state === "complete" && finalised.length
+      ? finalised[finalised.length - 1]
+      : null;
+
+  return {
+    _id: detail.id,
+    id: detail.id,
+    poNumber: detail.poNumber,
+
+    /** What the badge and the filters read — see displayStatus above. */
+    status: displayStatus({
+      status: detail.status,
+      is_expired: state.is_expired,
+      receipt_state: state.receipt_state,
+    }),
+    /** What a person actually chose, when a caller needs to know. */
+    workflowStatus: detail.status,
+    isExpired: Boolean(state.is_expired),
+    receiptState: (state.receipt_state as string) ?? "none",
+    billState: (state.bill_state as string) ?? "none",
+
+    poDate: detail.poDate,
+    expectedDeliveryDate: detail.expectedDeliveryDate,
+    validUntil: detail.validUntil,
+    currency: detail.currency,
+    deliveryAddress: detail.deliveryAddress,
+    deliveryInstructions: detail.deliveryInstructions,
+    notes: detail.notes,
+    internalNotes: detail.internalNotes,
+    terms: detail.termsAndConditions,
+    termsAndConditions: detail.termsAndConditions,
+
+    supplier: {
+      partyId: detail.supplierId,
+      _id: detail.supplierId,
+      name: detail.supplierName,
+      email: detail.supplierEmail,
+      phone: detail.supplierPhone,
+      taxPin: detail.supplierTaxPin,
+      address: detail.supplierAddress,
+    },
+
+    whtApplicable: detail.whtApplicable,
+    whtRate: Number(detail.whtRate),
+    receiptTolerancePercentage: Number(detail.receiptTolerancePercentage),
+
+    amounts: {
+      subtotal: Number(detail.subtotal),
+      vatTotal: Number(detail.vatTotal),
+      vat: Number(detail.vatTotal),
+      total: Number(detail.total),
+      wht: Number(detail.whtAmount ?? 0),
+      netPayable: Number(detail.netPayable ?? 0),
+    },
+
+    lines: (detail.lines as Array<Record<string, any>>).map((l) => ({
+      _id: l.id,
+      id: l.id,
+      lineNumber: l.line_number,
+      product: l.product_id
+        ? { id: l.product_id, _id: l.product_id, name: l.product_name, sku: l.product_sku }
+        : null,
+      accountId: l.account_id,
+      description: l.description,
+      unit: l.unit,
+      quantity: Number(l.quantity),
+      unitPrice: Number(l.unit_price),
+      vat: { rate: Number(l.vat_rate), amount: Number(l.vat_amount ?? 0) },
+      amount: Number(l.amount ?? 0),
+      lineTotal: Number(l.line_total ?? 0),
+      // Three answers where the source kept one number.
+      receivedQuantity: Number(l.received_quantity ?? 0),
+      acceptedQuantity: Number(l.accepted_quantity ?? 0),
+      billedQuantity: Number(l.billed_quantity ?? 0),
+      remainingQuantity: Number(l.remaining_quantity ?? 0),
+      unbilledQuantity: Number(l.unbilled_quantity ?? 0),
+    })),
+
+    /**
+     * Joined through document_flow, not an embedded array the conversion
+     * pushed to — so a bill cancelled afterwards is not still listed as if it
+     * stood, and the amount shown is the bill's own total.
+     */
+    linkedBills: (detail.bills as Array<Record<string, any>>).map((b) => ({
+      billId: b.id,
+      _id: b.id,
+      billNumber: b.bill_number,
+      billDate: b.bill_date,
+      status: b.status,
+      amount: Number(b.total),
+      usedGrni: b.used_grni,
+      inventoryMoved: b.inventory_moved,
+    })),
+
+    receipts: receipts.map((r) => ({
+      _id: r.id,
+      grnNumber: r.grn_number,
+      status: r.status,
+      outcome: r.outcome,
+      receivedDate: r.received_date,
+      receivedQuantity: Number(r.received_quantity ?? 0),
+      acceptedQuantity: Number(r.accepted_quantity ?? 0),
+    })),
+
+    receivedAt,
+    sentAt: detail.sentAt,
+    sentBy: detail.sentByName ? { name: detail.sentByName } : null,
+    confirmedAt: detail.confirmedAt,
+    confirmedBy: detail.confirmedByName ? { name: detail.confirmedByName } : null,
+    cancelledAt: detail.cancelledAt,
+    cancelledBy: detail.cancelledByName ? { name: detail.cancelledByName } : null,
+    cancellationReason: detail.cancellationReason,
+    closedAt: detail.closedAt,
+    closedBy: detail.closedByName ? { name: detail.closedByName } : null,
+    closureReason: detail.closureReason,
+
+    createdAt: detail.createdAt,
+    createdBy: detail.createdByName ? { name: detail.createdByName } : null,
+    deliveries: detail.deliveries,
+  };
+}
+
+/** The list rows, in the shape POTable reads. */
+export async function listPurchaseOrdersForDisplay(
+  tx: Tx,
+  filters: ListPurchaseOrdersFilters = {},
+  page = 1,
+  pageSize = 20,
+) {
+  const rows = await listPurchaseOrders(tx, filters, page, pageSize);
+  if (!rows.length) return [];
+
+  // One query for every order's bill count rather than one per row.
+  const ids = rows.map((r) => String(r.id));
+  const counts = (await tx.execute(sql`
+    SELECT purchase_order_id, COUNT(*)::int AS n
+      FROM bills
+     WHERE purchase_order_id = ANY(${ids}::uuid[])
+       AND status <> 'cancelled'
+     GROUP BY purchase_order_id
+  `)) as unknown as Array<{ purchase_order_id: string; n: number }>;
+  const billCount = new Map(counts.map((c) => [c.purchase_order_id, c.n]));
+
+  return rows.map((r: Record<string, any>) => ({
+    _id: r.id,
+    id: r.id,
+    poNumber: r.po_number,
+    status: displayStatus(r),
+    workflowStatus: r.status,
+    isExpired: Boolean(r.is_expired),
+    receiptState: r.receipt_state ?? "none",
+    billState: r.bill_state ?? "none",
+    poDate: r.po_date,
+    expectedDeliveryDate: r.expected_delivery_date,
+    validUntil: r.valid_until,
+    supplier: {
+      partyId: r.supplier_id,
+      name: r.supplier_name,
+      taxPin: r.supplier_tax_pin,
+    },
+    amounts: {
+      subtotal: Number(r.subtotal),
+      vatTotal: Number(r.vat_total),
+      total: Number(r.total),
+      netPayable: Number(r.net_payable ?? 0),
+    },
+    // POTable only reads .length; the rows themselves are on the detail page.
+    linkedBills: Array.from({ length: billCount.get(String(r.id)) ?? 0 }),
+  }));
+}
+
 export interface ListPurchaseOrdersFilters {
   status?: string | string[] | null;
   supplierId?: string | null;
@@ -426,6 +663,97 @@ export async function getAvailableLines(tx: Tx, purchaseOrderId: string) {
        AND pol.quantity > b.billed_quantity
      ORDER BY pol.line_number
   `)) as unknown as Array<Record<string, unknown>>;
+}
+
+/**
+ * Open orders with what is still to ARRIVE on each, for the receipt form.
+ *
+ * The sibling of `getAvailableLines`, and the distinction is the whole point
+ * of the port: that one answers "what is left to BILL" (ordered less billed);
+ * this answers "what is left to RECEIVE" (ordered less accepted). Mongo has
+ * one counter for both, so the two questions returned the same wrong number.
+ *
+ * Each line carries its own id, which the receipt line stores. Without it a
+ * PO-sourced receipt links to nothing.
+ */
+export async function getOpenPurchaseOrdersWithLines(
+  tx: Tx,
+  supplierId?: string | null,
+  limit = 100,
+) {
+  const rows = (await tx.execute(sql`
+    SELECT po.id, po.po_number, po.supplier_id, po.supplier_name,
+           po.po_date::text AS po_date,
+           po.expected_delivery_date::text AS expected_delivery_date,
+           pol.id            AS line_id,
+           pol.line_number,
+           pol.product_id, pol.product_name, pol.product_sku,
+           pol.description, pol.unit,
+           pol.unit_price::text AS unit_price,
+           pol.vat_rate::text   AS vat_rate,
+           pol.quantity::text   AS ordered_quantity,
+           (pol.quantity - r.accepted_quantity)::text AS available_quantity
+      FROM purchase_orders po
+      JOIN purchase_order_lines pol ON pol.purchase_order_id = po.id
+      JOIN purchase_order_line_received r ON r.purchase_order_line_id = pol.id
+     WHERE po.status IN ('sent', 'confirmed')
+       AND pol.quantity > r.accepted_quantity
+       AND pol.product_id IS NOT NULL
+       ${supplierId ? sql`AND po.supplier_id = ${supplierId}::uuid` : sql``}
+     ORDER BY po.expected_delivery_date ASC NULLS LAST, po.po_number, pol.line_number
+     LIMIT ${Math.min(limit, 500) * 50}
+  `)) as unknown as Array<Record<string, any>>;
+
+  const orders = new Map<string, Record<string, any>>();
+  for (const r of rows) {
+    const id = String(r.id);
+    if (!orders.has(id)) {
+      orders.set(id, {
+        _id: id,
+        id,
+        poNumber: r.po_number,
+        poDate: r.po_date,
+        expectedDeliveryDate: r.expected_delivery_date,
+        supplier: { partyId: r.supplier_id, name: r.supplier_name },
+        availableLines: [],
+      });
+    }
+    orders.get(id)!.availableLines.push({
+      _id: r.line_id,
+      id: r.line_id,
+      lineNumber: r.line_number,
+      product: {
+        id: r.product_id,
+        _id: r.product_id,
+        name: r.product_name,
+        sku: r.product_sku,
+      },
+      description: r.description,
+      unit: r.unit,
+      unitPrice: Number(r.unit_price),
+      vatRate: Number(r.vat_rate),
+      orderedQuantity: Number(r.ordered_quantity),
+      availableQuantity: Number(r.available_quantity),
+    });
+  }
+  return [...orders.values()].slice(0, limit);
+}
+
+/**
+ * An order by its number — for integrations that quote a PO reference.
+ *
+ * The weighbridge gate sends `purchaseOrderRef` as a string and the connector
+ * resolves it to an id. That lookup was against Mongo, so once orders moved it
+ * matched nothing and every inbound ticket recorded a null purchase order —
+ * silently, because the connector treats a miss as soft (gate software may
+ * quote a PO before it is raised).
+ */
+export async function findPurchaseOrderByNumber(tx: Tx, poNumber: string) {
+  const [po] = await tx
+    .select({ id: purchaseOrders.id, poNumber: purchaseOrders.poNumber })
+    .from(purchaseOrders)
+    .where(eq(purchaseOrders.poNumber, poNumber));
+  return po ?? null;
 }
 
 export interface UpdatePurchaseOrderInput

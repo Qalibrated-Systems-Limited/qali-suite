@@ -26,9 +26,9 @@ import {
   Copy,
 } from "lucide-react";
 import {
-  sendPurchaseOrder,
-  confirmPurchaseOrder,
-} from "@/app/mongodb/actions/purchase-order-actions";
+  sendPurchaseOrderPg,
+  confirmPurchaseOrderPg,
+} from "@/app/db/actions/purchase-order-actions";
 
 // ============================================
 // ACTION BUTTON WITH FORM WRAPPER

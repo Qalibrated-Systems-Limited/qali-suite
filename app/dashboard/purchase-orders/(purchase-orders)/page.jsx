@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { canSeePurchasesNav } from "@/lib/permissions";
-import { getPurchaseOrderStats } from "@/app/mongodb/queries/purchase-order-queries";
+import { getPurchaseOrderStatsForDisplayPg } from "@/app/db/actions/purchase-order-actions";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -70,7 +70,7 @@ async function PurchaseOrdersPage(props) {
   };
 
   // Fetch stats for filter tabs (needed synchronously for tabs)
-  const stats = await getPurchaseOrderStats(filters);
+  const stats = await getPurchaseOrderStatsForDisplayPg(filters);
 
   // Check if any filters are active
   const hasActiveFilters = status !== "all" || startDate || endDate;

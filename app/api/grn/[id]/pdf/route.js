@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { auth } from "@/auth";
 import { safeErrorMessage } from "@/lib/safe-error";
-import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
-import { getGRNById } from "@/app/mongodb/queries/grn-queries";
+import { getGoodsReceiptForDisplayPg } from "@/app/db/actions/grn-actions";
 import { GoodsReceiptPDF } from "@/lib/pdf";
 
 // ============================================
@@ -23,10 +22,10 @@ export async function GET(_req, { params }) {
     }
 
     const { id } = await params;
-    await dbConnect();
 
-    // getGRNById returns a serialised tenant-scoped GRN or null.
-    const grn = await getGRNById(id);
+    // The same page shape the detail screen renders, so the PDF and the screen
+    // cannot disagree about what the receipt says. Tenant-scoped by RLS.
+    const grn = await getGoodsReceiptForDisplayPg(id);
     if (!grn) {
       return NextResponse.json({ error: "GRN not found" }, { status: 404 });
     }

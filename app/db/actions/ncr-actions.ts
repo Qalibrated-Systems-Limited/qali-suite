@@ -247,11 +247,9 @@ export async function executeNonconformanceDispositionPg(
 
 export async function cancelNonconformancePg(
   nonconformanceId: string,
-  _prevState: unknown,
-  formData: FormData,
+  reason: string,
 ): Promise<ActionResult> {
-  const reason = String(formData.get("reason") ?? "").trim();
-  if (!reason) {
+  if (!reason?.trim()) {
     return { success: false, error: "Cancelling a nonconformance needs a reason." };
   }
 
@@ -296,6 +294,107 @@ export async function getNonconformanceDetailPg(nonconformanceId: string) {
   return withAuthorizedTenant([], (tx) =>
     nonconformance.getNonconformanceDetail(tx, nonconformanceId),
   );
+}
+
+/** The report as the detail page renders it. */
+export async function getNonconformanceForDisplayPg(nonconformanceId: string) {
+  return withAuthorizedTenant([], (tx) =>
+    nonconformance.getNonconformanceForDisplay(tx, nonconformanceId),
+  );
+}
+
+/** The list rows, in the shape the NCR index reads. */
+export async function listNonconformancesForDisplayPg(
+  filters: nonconformance.ListNonconformancesFilters = {},
+  page = 1,
+  pageSize = 20,
+) {
+  return withAuthorizedTenant([], (tx) =>
+    nonconformance.listNonconformancesForDisplay(tx, filters, page, pageSize),
+  );
+}
+
+/**
+ * Nonconformances waiting for the MD's decision — for the approvals queue.
+ *
+ * The approvals dashboard counted these in Mongo. Once the register moved,
+ * that collection stopped being written to, so the queue reported an empty
+ * list however many were waiting — the same failure the HR port produced with
+ * leave and loans, and the reason `getPendingLoans` delegates to Postgres
+ * rather than querying a model.
+ *
+ * The row shape is the queue's, not the schema's.
+ */
+export async function listNonconformancesAwaitingAuthorisationPg(limit = 50) {
+  const rows = await withAuthorizedTenant([], (tx) =>
+    nonconformance.listNonconformances(
+      tx,
+      { status: "disposition_proposed" },
+      1,
+      Math.min(limit, 200),
+    ),
+  );
+
+  return rows.map((r: Record<string, any>) => ({
+    _id: r.id,
+    ref: r.ncr_number,
+    title: r.title || "—",
+    subtitle: r.disposition_type || r.category || "—",
+    submittedAt: r.proposed_at || r.updated_at,
+    submittedBy: r.proposed_by_name || "—",
+    href: `/dashboard/ncr/${r.id}`,
+    meta: r.source_reference || null,
+  }));
+}
+
+/** How many are waiting, for the badge beside the queue. */
+export async function countNonconformancesAwaitingAuthorisationPg() {
+  return withAuthorizedTenant([], (tx) =>
+    nonconformance.countNonconformances(tx, { status: "disposition_proposed" }),
+  );
+}
+
+const PAGE_SIZE = 20;
+
+/** The NCR index's query, in the shape the page destructures. */
+export async function getNonconformancesPagePg(
+  opts: { page?: number; status?: string; category?: string; search?: string } = {},
+) {
+  const page = Math.max(Number(opts.page) || 1, 1);
+  const filters: nonconformance.ListNonconformancesFilters = {
+    status: opts.status || null,
+    category: opts.category || null,
+    search: opts.search || null,
+  };
+
+  const { ncrs, total } = await withAuthorizedTenant([], async (tx) => ({
+    ncrs: await nonconformance.listNonconformancesForDisplay(tx, filters, page, PAGE_SIZE),
+    total: await nonconformance.countNonconformances(tx, filters),
+  }));
+
+  return {
+    ncrs,
+    pagination: { page, total, totalPages: Math.ceil(total / PAGE_SIZE) },
+  };
+}
+
+/** The stat cards, keyed as the index reads them. */
+export async function getNonconformanceStatsForDisplayPg() {
+  const raw = (await withAuthorizedTenant([], (tx) =>
+    nonconformance.getNonconformanceStats(tx),
+  )) as Record<string, string | number> | null;
+
+  const n = (k: string) => Number(raw?.[k] ?? 0);
+  return {
+    total: n("total"),
+    open: n("open"),
+    disposition_proposed: n("awaiting_authorisation"),
+    authorized: n("awaiting_execution"),
+    closed: n("closed"),
+    critical: n("critical"),
+    requiring_car: n("requiring_car"),
+    affectedValue: Number(raw?.affected_value ?? 0),
+  };
 }
 
 export async function getNonconformanceStatsPg() {

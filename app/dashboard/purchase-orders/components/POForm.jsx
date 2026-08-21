@@ -56,9 +56,9 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
-  createPurchaseOrder,
-  updatePurchaseOrder,
-} from "@/app/mongodb/actions/purchase-order-actions";
+  createPurchaseOrderPg,
+  updatePurchaseOrderPg,
+} from "@/app/db/actions/purchase-order-actions";
 import QuickCreatePartyDialog from "@/app/dashboard/invoices/components/QuickCreateCustomerDialog";
 
 // ============================================
@@ -605,8 +605,8 @@ export default function POForm({
   // Form State with useActionState
   // ----------------------------------------
   const action = isEdit
-    ? updatePurchaseOrder.bind(null, purchaseOrder._id)
-    : createPurchaseOrder;
+    ? updatePurchaseOrderPg.bind(null, purchaseOrder._id)
+    : createPurchaseOrderPg;
   const [state, formAction, isPending] = useActionState(action, initialState);
 
   // Normalize errors

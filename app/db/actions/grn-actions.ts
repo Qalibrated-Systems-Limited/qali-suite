@@ -1,5 +1,6 @@
 "use server";
 
+import { sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
@@ -10,6 +11,7 @@ import {
   GRN_REJECT_ROLES,
 } from "@/lib/utils/role-gates";
 import * as goodsReceipts from "../repositories/goodsReceipts";
+import * as nonconformance from "../repositories/nonconformance";
 import * as accountsRepo from "../repositories/accounts";
 import {
   goodsReceiptSchema,
@@ -102,7 +104,8 @@ export async function createGoodsReceiptPg(
   _prevState: unknown,
   formData: FormData,
 ): Promise<ActionResult> {
-  const parsed = parse(goodsReceiptSchema, formData);
+  // GRNForm posts under `payload`, not `data`.
+  const parsed = parse(goodsReceiptSchema, formData, "payload");
   if (!parsed.ok) {
     return { success: false, error: parsed.error, fieldErrors: parsed.fieldErrors };
   }
@@ -144,14 +147,55 @@ export async function submitGoodsReceiptPg(
   goodsReceiptId: string,
 ): Promise<ActionResult> {
   try {
-    const grn = await withAuthorizedTenant([...GRN_RECEIVE_ROLES], (tx, { user }) =>
-      goodsReceipts.submitGoodsReceipt(tx, goodsReceiptId, user.id, user.name),
+    const { grn, ncrNumber } = await withAuthorizedTenant(
+      [...GRN_RECEIVE_ROLES],
+      async (tx, { user }) => {
+        const grn = await goodsReceipts.submitGoodsReceipt(
+          tx,
+          goodsReceiptId,
+          user.id,
+          user.name,
+        );
+
+        /**
+         * SOP §10.6: a discrepancy on receipt goes on the Nonconformance
+         * Register immediately, so the MD and Finance see it without having to
+         * open the GRN. Raised in the SAME transaction as the submission — the
+         * goods and the report on them are one event.
+         *
+         * Idempotent by query rather than by a `grn.ncrId` back-pointer: Mongo
+         * keeps one, so a second report on the same receipt overwrote the
+         * first.
+         */
+        const existing = await nonconformance.listNonconformances(
+          tx,
+          { goodsReceiptId },
+          1,
+          1,
+        );
+        if (existing.length) return { grn, ncrNumber: null };
+
+        const [state] = (await tx.execute(sql`
+          SELECT has_discrepancy FROM goods_receipt_state
+           WHERE goods_receipt_id = ${goodsReceiptId}::uuid
+        `)) as unknown as Array<{ has_discrepancy: boolean }>;
+        if (!state?.has_discrepancy) return { grn, ncrNumber: null };
+
+        const ncr = await nonconformance.createFromGoodsReceipt(tx, goodsReceiptId, {
+          createdById: user.id,
+          createdByName: user.name,
+        });
+        return { grn, ncrNumber: ncr.ncrNumber };
+      },
     );
-    revalidateReceipt(goodsReceiptId, ["/dashboard/stocks"]);
+
+    revalidateReceipt(goodsReceiptId, ["/dashboard/stocks", "/dashboard/ncr"]);
     return {
       success: true,
       grnNumber: grn.grnNumber,
-      message: `${grn.grnNumber} submitted for acceptance`,
+      message: ncrNumber
+        ? `${grn.grnNumber} submitted — ${ncrNumber} raised for the discrepancy`
+        : `${grn.grnNumber} submitted for acceptance`,
     };
   } catch (err) {
     return { success: false, error: userMessage(err, "Could not submit the receipt.") };
@@ -248,11 +292,9 @@ export async function acceptGoodsReceiptPg(
 /** The whole delivery is refused: it all goes back, and nothing is posted. */
 export async function rejectGoodsReceiptPg(
   goodsReceiptId: string,
-  _prevState: unknown,
-  formData: FormData,
+  reason: string,
 ): Promise<ActionResult> {
-  const reason = String(formData.get("reason") ?? "").trim();
-  if (!reason) {
+  if (!reason?.trim()) {
     return { success: false, error: "Rejecting a delivery needs a reason." };
   }
 
@@ -270,11 +312,9 @@ export async function rejectGoodsReceiptPg(
 /** Raised in error. Drafts only — the state machine in 0050 enforces it. */
 export async function voidGoodsReceiptPg(
   goodsReceiptId: string,
-  _prevState: unknown,
-  formData: FormData,
+  reason: string,
 ): Promise<ActionResult> {
-  const reason = String(formData.get("reason") ?? "").trim();
-  if (!reason) {
+  if (!reason?.trim()) {
     return { success: false, error: "Voiding a receipt needs a reason." };
   }
 
@@ -315,8 +355,77 @@ export async function getGoodsReceiptDetailPg(goodsReceiptId: string) {
   );
 }
 
+/** The receipt as the detail page renders it. */
+export async function getGoodsReceiptForDisplayPg(goodsReceiptId: string) {
+  return withAuthorizedTenant([], (tx) =>
+    goodsReceipts.getGoodsReceiptForDisplay(tx, goodsReceiptId),
+  );
+}
+
+/** The list rows, in the shape the GRN index reads. */
+export async function listGoodsReceiptsForDisplayPg(
+  filters: goodsReceipts.ListGoodsReceiptsFilters = {},
+  page = 1,
+  pageSize = 20,
+) {
+  return withAuthorizedTenant([], (tx) =>
+    goodsReceipts.listGoodsReceiptsForDisplay(tx, filters, page, pageSize),
+  );
+}
+
 export async function getGoodsReceiptStatsPg() {
   return withAuthorizedTenant([], (tx) => goodsReceipts.getGoodsReceiptStats(tx));
+}
+
+const PAGE_SIZE = 20;
+
+/**
+ * The GRN index's query, in the shape the page destructures:
+ * `{ grns, pagination }`.
+ */
+export async function getGoodsReceiptsPagePg(
+  opts: { page?: number; status?: string; search?: string } = {},
+) {
+  const page = Math.max(Number(opts.page) || 1, 1);
+  const filters: goodsReceipts.ListGoodsReceiptsFilters = {
+    status: opts.status || null,
+    search: opts.search || null,
+  };
+
+  const { grns, total } = await withAuthorizedTenant([], async (tx) => ({
+    grns: await goodsReceipts.listGoodsReceiptsForDisplay(tx, filters, page, PAGE_SIZE),
+    total: await goodsReceipts.countGoodsReceipts(tx, filters),
+  }));
+
+  return {
+    grns,
+    pagination: { page, total, totalPages: Math.ceil(total / PAGE_SIZE) },
+  };
+}
+
+/**
+ * The stat cards, keyed as the index reads them.
+ *
+ * `pending_acceptance` is a status somebody set; `accepted`,
+ * `partially_accepted` and `rejected` are the OUTCOME derived from the lines
+ * (0050), which is why they do not come from the same column.
+ */
+export async function getGoodsReceiptStatsForDisplayPg() {
+  const raw = (await withAuthorizedTenant([], (tx) =>
+    goodsReceipts.getGoodsReceiptStats(tx),
+  )) as Record<string, string | number> | null;
+
+  const n = (k: string) => Number(raw?.[k] ?? 0);
+  return {
+    total: n("total"),
+    draft: n("draft"),
+    pending_acceptance: n("awaiting_acceptance"),
+    accepted: n("accepted"),
+    partially_accepted: n("partially_accepted"),
+    rejected: n("rejected"),
+    with_discrepancy: n("with_discrepancy"),
+    acceptedValue: Number(raw?.accepted_value ?? 0),
+  };
 }
 
 export async function getGoodsReceiptsForBillPg(billId: string) {

@@ -3,11 +3,7 @@ import Link from "next/link";
 import { ChevronLeft, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import POForm from "../components/POForm";
-import {
-  fetchActiveSuppliers,
-  fetchAllProducts,
-  fetchPurchaseAccounts,
-} from "@/app/mongodb/queries/purchase-order-queries";
+import { getPurchaseOrderFormDataPg } from "@/app/db/actions/purchase-order-actions";
 
 // ============================================
 // METADATA
@@ -21,11 +17,11 @@ export const metadata = {
 // FORM WRAPPER (Server Component)
 // ============================================
 async function POFormWrapper() {
-  const [suppliers, products, accounts] = await Promise.all([
-    fetchActiveSuppliers(),
-    fetchAllProducts(),
-    fetchPurchaseAccounts(),
-  ]);
+  // One call, scoped to the company this request is acting in. The Mongo
+  // pickers read through withTenantScope, which is UNSCOPED for a SuperAdmin —
+  // the same defect the quote pickers had, so this combobox listed every
+  // tenant's suppliers.
+  const { suppliers, products, accounts } = await getPurchaseOrderFormDataPg();
 
   // Check if we have required data
   if (suppliers.length === 0) {

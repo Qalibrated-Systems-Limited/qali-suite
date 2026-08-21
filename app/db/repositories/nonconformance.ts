@@ -284,6 +284,141 @@ export async function getNonconformanceDetail(
   return { ...ncr, lines, state: state ?? null };
 }
 
+/**
+ * A nonconformance as the detail page renders it.
+ *
+ * Shaped to the page — `source.reference`, `disposition.proposedBy.at`,
+ * `lines[].actualQty` — on the same precedent as orders and receipts.
+ *
+ * The disposition is reassembled into the nested object the markup walks. It
+ * is flat in the schema because each part is a separate decision by a separate
+ * person, and 0051 constrains them as such: the raiser cannot propose, the
+ * proposer cannot authorise, and a closed report has both signatures and the
+ * moment it was carried out.
+ */
+export async function getNonconformanceForDisplay(
+  tx: Tx,
+  nonconformanceId: string,
+) {
+  const detail = await getNonconformanceDetail(tx, nonconformanceId);
+  if (!detail) return null;
+
+  const state = (detail.state ?? {}) as Record<string, any>;
+  const who = (id: string | null, name: string | null, at: Date | null) =>
+    at ? { id, name: name ?? id, at } : null;
+
+  return {
+    _id: detail.id,
+    id: detail.id,
+    ncrNumber: detail.ncrNumber,
+    category: detail.category,
+    status: detail.status,
+    title: detail.title,
+    description: detail.description,
+    photoUrls: detail.photoUrls,
+    requiresCar: detail.requiresCar,
+    carRaisedAt: detail.carRaisedAt,
+    carNotes: detail.carNotes,
+
+    source: {
+      type: detail.sourceType,
+      grnId: detail.goodsReceiptId,
+      stockCountId: detail.stockCountId,
+      toolReturnId: detail.toolReturnId,
+      reference: detail.sourceReference,
+    },
+
+    supplier: detail.supplierId || detail.supplierName
+      ? { partyId: detail.supplierId, name: detail.supplierName }
+      : null,
+
+    /**
+     * What a person typed. `affectedValue` beside it is what the receipt lines
+     * say the goods cost — null, not zero, when nothing links to one, because
+     * "not computable" is not "worth nothing".
+     */
+    estimatedImpact:
+      detail.estimatedImpact === null ? null : Number(detail.estimatedImpact),
+    affectedValue:
+      state.affected_value === null || state.affected_value === undefined
+        ? null
+        : Number(state.affected_value),
+    maxSeverity: state.max_severity ?? "minor",
+    awaiting: state.awaiting ?? null,
+
+    disposition: {
+      type: detail.dispositionType,
+      reason: detail.dispositionReason,
+      proposedBy: who(detail.proposedById, detail.proposedByName, detail.proposedAt),
+      authorizedBy: detail.authorizedAt
+        ? {
+            id: detail.authorizedById,
+            name: detail.authorizedByName ?? detail.authorizedById,
+            at: detail.authorizedAt,
+            notes: detail.authorizationNotes,
+          }
+        : null,
+      executedAt: detail.executedAt,
+      executedBy: detail.executedByName ? { name: detail.executedByName } : null,
+      executionNotes: detail.executionNotes,
+    },
+
+    /** The write-off or debit-note entry. Mongo posts nothing at all. */
+    journalEntryId: detail.journalEntryId,
+
+    lines: (detail.lines as Array<Record<string, any>>).map((l) => ({
+      _id: l.id,
+      goodsReceiptLineId: l.goods_receipt_line_id,
+      productId: l.product_id,
+      sku: l.product_sku,
+      productName: l.product_name,
+      description: l.description,
+      unit: l.unit,
+      expectedQty: Number(l.expected_quantity),
+      actualQty: Number(l.actual_quantity),
+      variance: Number(l.variance ?? 0),
+      severity: l.severity,
+      notes: l.notes,
+      unitCost: l.unit_cost === null ? null : Number(l.unit_cost),
+      receiptLineStatus: l.receipt_line_status,
+    })),
+
+    cancelledAt: detail.cancelledAt,
+    cancellationReason: detail.cancellationReason,
+    createdAt: detail.createdAt,
+    createdBy: detail.createdByName ? { name: detail.createdByName } : null,
+  };
+}
+
+/** The list rows, in the shape the NCR index reads. */
+export async function listNonconformancesForDisplay(
+  tx: Tx,
+  filters: ListNonconformancesFilters = {},
+  page = 1,
+  pageSize = 20,
+) {
+  const rows = await listNonconformances(tx, filters, page, pageSize);
+  return rows.map((r: Record<string, any>) => ({
+    _id: r.id,
+    id: r.id,
+    ncrNumber: r.ncr_number,
+    category: r.category,
+    status: r.status,
+    title: r.title,
+    source: { type: r.source_type, grnId: r.goods_receipt_id, reference: r.source_reference },
+    supplier: r.supplier_name ? { partyId: r.supplier_id, name: r.supplier_name } : null,
+    disposition: { type: r.disposition_type },
+    maxSeverity: r.max_severity ?? "minor",
+    awaiting: r.awaiting ?? null,
+    affectedValue:
+      r.affected_value === null || r.affected_value === undefined
+        ? null
+        : Number(r.affected_value),
+    lineCount: r.line_count ?? 0,
+    createdAt: r.created_at,
+  }));
+}
+
 export interface ListNonconformancesFilters {
   status?: string | string[] | null;
   category?: string | null;

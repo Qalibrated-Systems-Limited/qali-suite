@@ -12,11 +12,16 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  submitGRN,
-  acceptGRN,
-  rejectGRN,
-  voidGRN,
-} from "@/app/mongodb/actions/grn-actions";
+  submitGoodsReceiptPg,
+  acceptGoodsReceiptPg,
+  rejectGoodsReceiptPg,
+  voidGoodsReceiptPg,
+} from "@/app/db/actions/grn-actions";
+import { roleAllowed } from "@/lib/permissions";
+import {
+  GRN_ACCEPT_SALES_ROLES,
+  GRN_ACCEPT_FINANCE_ROLES,
+} from "@/lib/utils/role-gates";
 
 export default function GRNActions({ grn, currentUser }) {
   const router = useRouter();
@@ -26,16 +31,18 @@ export default function GRNActions({ grn, currentUser }) {
   const [confirmingReject, setConfirmingReject] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
 
-  const isSales = ["SuperAdmin", "Admin", "Sales Manager", "Manager"].includes(
-    currentUser?.role,
-  );
-  const isFinance = [
-    "SuperAdmin",
-    "Admin",
-    "CFO",
-    "Finance Manager",
-    "Accountant",
-  ].includes(currentUser?.role);
+  /**
+   * Which sign-off buttons to OFFER. Not authorization — the action gates on
+   * the same two lists server-side, and the rules that depend on which person
+   * already signed (the receiver cannot sign; one person cannot sign both
+   * halves) are CHECK constraints, because only the row knows that.
+   *
+   * The lists are imported rather than written out: a second copy of an access
+   * rule drifts, and when it does the UI offers a button the server refuses.
+   * roleAllowed rather than .includes so SuperAdmin is granted in one place.
+   */
+  const isSales = roleAllowed(currentUser?.role, [...GRN_ACCEPT_SALES_ROLES]);
+  const isFinance = roleAllowed(currentUser?.role, [...GRN_ACCEPT_FINANCE_ROLES]);
 
   const flash = (fn, msg) => {
     setError("");
@@ -55,7 +62,7 @@ export default function GRNActions({ grn, currentUser }) {
     return (
       <div className="flex flex-wrap gap-2">
         <Button
-          onClick={() => flash(() => submitGRN(grn._id), "GRN submitted for acceptance")}
+          onClick={() => flash(() => submitGoodsReceiptPg(grn._id), "GRN submitted for acceptance")}
           disabled={isPending}
           className="gap-1.5"
         >
@@ -69,7 +76,7 @@ export default function GRNActions({ grn, currentUser }) {
         <Button
           variant="outline"
           onClick={() =>
-            flash(() => voidGRN(grn._id, "Created in error"), "GRN voided")
+            flash(() => voidGoodsReceiptPg(grn._id, "Created in error"), "GRN voided")
           }
           disabled={isPending}
           className="gap-1.5"
@@ -95,7 +102,7 @@ export default function GRNActions({ grn, currentUser }) {
             <Button
               onClick={() =>
                 flash(
-                  () => acceptGRN(grn._id, "sales", null, ""),
+                  () => acceptGoodsReceiptPg(grn._id, "sales"),
                   "Sales acceptance recorded",
                 )
               }
@@ -110,7 +117,7 @@ export default function GRNActions({ grn, currentUser }) {
             <Button
               onClick={() =>
                 flash(
-                  () => acceptGRN(grn._id, "finance", null, ""),
+                  () => acceptGoodsReceiptPg(grn._id, "finance"),
                   "Finance acceptance recorded",
                 )
               }
@@ -153,7 +160,7 @@ export default function GRNActions({ grn, currentUser }) {
                 size="sm"
                 onClick={() =>
                   flash(
-                    () => rejectGRN(grn._id, rejectReason),
+                    () => rejectGoodsReceiptPg(grn._id, rejectReason),
                     "GRN rejected",
                   )
                 }

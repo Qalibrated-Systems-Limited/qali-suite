@@ -16,10 +16,10 @@ import mongoose from "mongoose";
 import dbConnect from "@/app/config/dbConnect";
 import { listLeaveAwaitingApproval } from "@/app/db/actions/hr-leave-actions";
 import { listLoansAwaitingApproval } from "@/app/db/actions/hr-loan-actions";
+import { listNonconformancesAwaitingAuthorisationPg } from "@/app/db/actions/ncr-actions";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import Bill from "@/app/models/bill";
 import EmployeeClaim from "@/app/models/employeesClaims";
-import Nonconformance from "@/app/models/nonconformance";
 import Expense from "@/app/models/expenses";
 
 const { ObjectId } = mongoose.Types;
@@ -179,28 +179,14 @@ export async function getPendingOperatingExpenses(limit = DEFAULT_LIMIT) {
 // ============================================
 // NCR — status: disposition_proposed (awaiting MD authorisation)
 // ============================================
+/**
+ * Nonconformances awaiting the MD's decision.
+ *
+ * Delegated to Postgres, the way getPendingLoans is. The register moved with
+ * the procurement port, so counting the Mongo collection here would report an
+ * empty queue however many were waiting — which is exactly what happened to
+ * leave and loans when HR moved.
+ */
 export async function getPendingNCRs(limit = DEFAULT_LIMIT) {
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
-
-  return Nonconformance.find({
-    ...tenantFilter(companyId, isSuperAdmin),
-    status: "disposition_proposed",
-  })
-    .select("ncrNumber title category disposition source createdAt updatedAt")
-    .sort({ updatedAt: -1, createdAt: -1 })
-    .limit(limit)
-    .lean()
-    .then((rows) =>
-      rows.map((r) => ({
-        _id: r._id.toString(),
-        ref: r.ncrNumber,
-        title: r.title || "—",
-        subtitle: r.disposition?.type || r.category || "—",
-        submittedAt: r.disposition?.proposedBy?.at || r.updatedAt,
-        submittedBy: r.disposition?.proposedBy?.name || "—",
-        href: `/dashboard/ncr/${r._id}`,
-        meta: r.source?.reference || null,
-      })),
-    );
+  return listNonconformancesAwaitingAuthorisationPg(limit);
 }

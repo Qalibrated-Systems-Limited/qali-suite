@@ -30,18 +30,22 @@ import {
   Package,
   Receipt,
   Loader2,
+  CircleSlash,
   Trash2,
   RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  sendPurchaseOrder,
-  confirmPurchaseOrder,
-  cancelPurchaseOrder,
-  deletePurchaseOrder,
-  reopenPurchaseOrder,
-} from "@/app/mongodb/actions/purchase-order-actions";
+  sendPurchaseOrderPg,
+  confirmPurchaseOrderPg,
+  cancelPurchaseOrderPg,
+  closePurchaseOrderPg,
+  deletePurchaseOrderPg,
+  reopenPurchaseOrderPg,
+} from "@/app/db/actions/purchase-order-actions";
 import { ConvertToBillDialog } from "./ConvertToBillDialog";
+import { roleAllowed } from "@/lib/permissions";
+import { PROCUREMENT_ROLES } from "@/lib/utils/role-gates";
 
 export function PODetailActions({ purchaseOrder, userRole }) {
   const router = useRouter();
@@ -49,11 +53,16 @@ export function PODetailActions({ purchaseOrder, userRole }) {
 
   // Dialog states
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showBillDialog, setShowBillDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [closureReason, setClosureReason] = useState("");
 
-  const canManage = ["SuperAdmin", "Admin", "Manager", "Accountant"].includes(userRole);
+  // PROCUREMENT_ROLES, the list the order actions gate on. The inline literal
+  // this replaces named Accountant — who does not run procurement — and omitted
+  // CFO, Finance Manager and Procurement Officer, who do.
+  const canManage = roleAllowed(userRole, [...PROCUREMENT_ROLES]);
   const po = purchaseOrder;
 
   // ----------------------------------------
@@ -61,7 +70,7 @@ export function PODetailActions({ purchaseOrder, userRole }) {
   // ----------------------------------------
   const handleSend = () => {
     startTransition(async () => {
-      const result = await sendPurchaseOrder(po._id);
+      const result = await sendPurchaseOrderPg(po._id);
       if (result.success) {
         toast.success("Purchase order sent to supplier");
         router.refresh();
@@ -73,7 +82,14 @@ export function PODetailActions({ purchaseOrder, userRole }) {
 
   const handleReopen = () => {
     startTransition(async () => {
-      const result = await reopenPurchaseOrder(po._id);
+      // Reopening moves the validity date forward. The Mongo model did this
+      // inside reopen() to escape its own pre-save hook, which re-expired any
+      // order whose validUntil had passed; expiry is derived now, so the date
+      // is simply what the caller means by "open again".
+      const reopenedUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+      const result = await reopenPurchaseOrderPg(po._id, reopenedUntil);
       if (result.success) {
         toast.success("Purchase order reopened as draft");
         router.refresh();
@@ -85,7 +101,7 @@ export function PODetailActions({ purchaseOrder, userRole }) {
 
   const handleConfirm = () => {
     startTransition(async () => {
-      const result = await confirmPurchaseOrder(po._id);
+      const result = await confirmPurchaseOrderPg(po._id);
       if (result.success) {
         toast.success("Purchase order confirmed");
         router.refresh();
@@ -105,7 +121,7 @@ export function PODetailActions({ purchaseOrder, userRole }) {
     formData.append("reason", cancelReason);
 
     startTransition(async () => {
-      const result = await cancelPurchaseOrder(po._id, null, formData);
+      const result = await cancelPurchaseOrderPg(po._id, null, formData);
       if (result.success) {
         toast.success("Purchase order cancelled");
         setShowCancelDialog(false);
@@ -117,9 +133,41 @@ export function PODetailActions({ purchaseOrder, userRole }) {
     });
   };
 
+  /**
+   * Closes the order short.
+   *
+   * An order with receipts or bills against it can no longer be CANCELLED —
+   * cancelling would leave real documents pointing at something that says it
+   * never happened. Closing records that no more is expected without denying
+   * what already arrived. The Mongo module has no name for this move, so a
+   * part-delivered abandoned order sat in "partial" forever and every
+   * open-order report carried it.
+   */
+  const handleClose = () => {
+    if (!closureReason.trim()) {
+      toast.error("Please say why the order is being closed");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("reason", closureReason);
+
+    startTransition(async () => {
+      const result = await closePurchaseOrderPg(po._id, null, formData);
+      if (result.success) {
+        toast.success("Purchase order closed");
+        setShowCloseDialog(false);
+        setClosureReason("");
+        router.refresh();
+      } else {
+        toast.error(result.error || "Failed to close purchase order");
+      }
+    });
+  };
+
   const handleDelete = () => {
     startTransition(async () => {
-      const result = await deletePurchaseOrder(po._id);
+      const result = await deletePurchaseOrderPg(po._id);
       if (result.success) {
         toast.success("Purchase order deleted");
         router.push("/dashboard/purchase-orders");
@@ -210,8 +258,21 @@ export function PODetailActions({ purchaseOrder, userRole }) {
         </Button>
       )}
 
+      {/* Close short — the way out for an order that can no longer be cancelled */}
+      {["sent", "confirmed", "partial"].includes(po.status) && canManage && (
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => setShowCloseDialog(true)}
+          disabled={isPending}
+        >
+          <CircleSlash className="mr-2 h-4 w-4" />
+          Close Order Short
+        </Button>
+      )}
+
       {/* Cancel - Non-cancelled, non-received */}
-      {!["cancelled", "received", "expired"].includes(po.status) && canManage && (
+      {!["cancelled", "received", "expired", "closed"].includes(po.status) && canManage && (
         <Button
           variant="outline"
           className="w-full text-destructive hover:bg-destructive/10"
@@ -235,6 +296,49 @@ export function PODetailActions({ purchaseOrder, userRole }) {
           Delete PO
         </Button>
       )}
+
+      {/* Close Dialog */}
+      <Dialog open={showCloseDialog} onOpenChange={setShowCloseDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close order short</DialogTitle>
+            <DialogDescription>
+              Records that nothing further is expected against {po.poNumber}.
+              What has already been received and billed is kept.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="closureReason">Reason *</Label>
+            <Textarea
+              id="closureReason"
+              value={closureReason}
+              onChange={(e) => setClosureReason(e.target.value)}
+              placeholder="e.g. Supplier cannot deliver the balance"
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowCloseDialog(false)}
+              disabled={isPending}
+            >
+              Back
+            </Button>
+            <Button
+              onClick={handleClose}
+              disabled={isPending || !closureReason.trim()}
+            >
+              {isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <CircleSlash className="mr-2 h-4 w-4" />
+              )}
+              Close Order
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Cancel Dialog */}
       <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>

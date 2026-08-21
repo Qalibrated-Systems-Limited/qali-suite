@@ -19,41 +19,56 @@ const money = (n: number) => n.toFixed(4);
 
 // ── Purchase orders ──────────────────────────────────────────────────────────
 
+/** An empty string is what an untouched hidden input or <select> posts. */
+const blankToNull = z
+  .union([z.string(), z.null(), z.undefined()])
+  .transform((v) => (v ? String(v) : null));
+const optionalUuidField = blankToNull.refine(
+  (v) => v === null || /^[0-9a-f-]{36}$/i.test(v),
+  "Not a valid reference",
+);
+
+/** POForm's line, verbatim: `lines[0].description`, `lines[0].unitPrice`. */
 const poLineSchema = z.object({
-  productId: z.string().uuid().optional().nullable(),
-  productName: z.string().optional().nullable(),
-  productSku: z.string().optional().nullable(),
+  productId: optionalUuidField,
+  accountId: optionalUuidField,
   description: z.string().min(1, "Description is required"),
-  accountId: z.string().uuid().optional().nullable(),
   quantity: z.coerce.number().positive("Quantity must be greater than zero"),
   unit: z.string().default("pcs"),
   unitPrice: z.coerce.number().min(0, "A unit price cannot be negative"),
   vatRate: z.coerce.number().min(0).max(100).default(16),
 });
 
+/**
+ * The order header, in POForm's field names.
+ *
+ * The supplier arrives as an id ALONE — the form posts a hidden `supplierId`
+ * and nothing else about them — so the snapshot is resolved from the party row
+ * in the action. That is the right source regardless: what the document says
+ * about the supplier should come from the supplier record under RLS, not from
+ * what the browser sent.
+ */
 export const purchaseOrderSchema = z.object({
   supplierId: z.string().uuid("Choose a supplier"),
-  supplierName: z.string().min(1, "The supplier's name is required"),
-  supplierTaxPin: z.string().optional().nullable(),
-  supplierEmail: z.string().optional().nullable(),
-  supplierPhone: z.string().optional().nullable(),
-  supplierAddress: z.string().optional().nullable(),
   poDate: z.string().min(1, "The order date is required"),
-  expectedDeliveryDate: z.string().optional().nullable(),
-  validUntil: z.string().optional().nullable(),
+  expectedDeliveryDate: blankToNull,
+  validUntil: blankToNull,
+  reference: z.string().optional().nullable(),
   currency: z.string().default("KES"),
   whtApplicable: z.coerce.boolean().default(false),
   whtRate: z.coerce.number().min(0).max(30).default(0),
   /**
    * How much over the ordered quantity this order will accept. 0 — the
-   * default — means exactly what was ordered. The buyer grants slack here, in
-   * advance, or the dock cannot book an over-delivery at all.
+   * default, and what the form posts today — means exactly what was ordered.
+   * The buyer grants slack here, in advance, or the dock cannot book an
+   * over-delivery at all.
    */
   receiptTolerancePercentage: z.coerce.number().min(0).max(100).default(0),
   deliveryAddress: z.string().optional().nullable(),
   deliveryInstructions: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
-  termsAndConditions: z.string().optional().nullable(),
+  /** The form calls it `terms`. */
+  terms: z.string().optional().nullable(),
   internalNotes: z.string().optional().nullable(),
   lines: z.array(poLineSchema).min(1, "Add at least one line"),
 });
@@ -63,14 +78,9 @@ export type PurchaseOrderPayload = z.infer<typeof purchaseOrderSchema>;
 export function toPurchaseOrderInput(data: PurchaseOrderPayload) {
   return {
     supplierId: data.supplierId,
-    supplierName: data.supplierName,
-    supplierTaxPin: data.supplierTaxPin ?? null,
-    supplierEmail: data.supplierEmail ?? null,
-    supplierPhone: data.supplierPhone ?? null,
-    supplierAddress: data.supplierAddress ?? null,
     poDate: data.poDate,
-    expectedDeliveryDate: data.expectedDeliveryDate || null,
-    validUntil: data.validUntil || null,
+    expectedDeliveryDate: data.expectedDeliveryDate,
+    validUntil: data.validUntil,
     currency: data.currency,
     whtApplicable: data.whtApplicable,
     whtRate: money(data.whtRate),
@@ -78,14 +88,12 @@ export function toPurchaseOrderInput(data: PurchaseOrderPayload) {
     deliveryAddress: data.deliveryAddress ?? null,
     deliveryInstructions: data.deliveryInstructions ?? null,
     notes: data.notes ?? null,
-    termsAndConditions: data.termsAndConditions ?? null,
+    termsAndConditions: data.terms ?? null,
     internalNotes: data.internalNotes ?? null,
     lines: data.lines.map((l) => ({
-      productId: l.productId || null,
-      productName: l.productName ?? null,
-      productSku: l.productSku ?? null,
+      productId: l.productId,
       description: l.description,
-      accountId: l.accountId || null,
+      accountId: l.accountId,
       quantity: money(l.quantity),
       unit: l.unit,
       unitPrice: money(l.unitPrice),
@@ -94,18 +102,19 @@ export function toPurchaseOrderInput(data: PurchaseOrderPayload) {
   };
 }
 
+/** ConvertToBillDialog's fields: `lines[0][lineId]`, `lines[0][quantity]`. */
 export const convertToBillSchema = z.object({
   supplierInvoiceNumber: z.string().optional().nullable(),
   billDate: z.string().min(1, "The bill date is required"),
   dueDate: z.string().min(1, "The due date is required"),
   description: z.string().optional().nullable(),
   internalNotes: z.string().optional().nullable(),
-  defaultAccountId: z.string().uuid().optional().nullable(),
-  selections: z
+  defaultAccountId: optionalUuidField,
+  lines: z
     .array(
       z.object({
-        purchaseOrderLineId: z.string().uuid(),
-        quantity: z.coerce.number().positive(),
+        lineId: z.string().uuid(),
+        quantity: z.coerce.number(),
       }),
     )
     .min(1, "Choose at least one line to bill"),
@@ -115,15 +124,33 @@ export type ConvertToBillPayload = z.infer<typeof convertToBillSchema>;
 
 // ── Goods receipts ───────────────────────────────────────────────────────────
 
+/**
+ * GRNForm's line, verbatim — `receivedQty`, not `receivedQuantity`.
+ *
+ * The names here are the COMPONENT's. An empty string is what an untouched
+ * <select> posts, so the optional ids coerce it to null rather than failing a
+ * uuid check on a field the operator never filled.
+ */
 const grnLineSchema = z.object({
-  purchaseOrderLineId: z.string().uuid().optional().nullable(),
+  /**
+   * The order line this receives against. Without it a PO-sourced receipt
+   * links to nothing: the tolerance trigger cannot fire, and
+   * `purchase_order_line_received` reports the order as never delivered. The
+   * Mongo form never carried it, because that model matched lines by product.
+   */
+  purchaseOrderLineId: z
+    .string()
+    .uuid()
+    .optional()
+    .nullable()
+    .or(z.literal("").transform(() => null)),
   productId: z.string().uuid("Every receipt line names a product"),
-  productName: z.string().min(1),
-  productSku: z.string().optional().nullable(),
   description: z.string().min(1, "Description is required"),
+  sku: z.string().optional().nullable(),
+  productName: z.string().optional().nullable(),
   unit: z.string().default("pcs"),
-  expectedQuantity: z.coerce.number().min(0).default(0),
-  receivedQuantity: z.coerce.number().min(0, "Quantity cannot be negative"),
+  expectedQty: z.coerce.number().min(0).default(0),
+  receivedQty: z.coerce.number().min(0, "Quantity cannot be negative"),
   /**
    * What these goods cost. Carried on the line so acceptance posts a figure
    * decided while somebody could still see the delivery note, rather than
@@ -141,14 +168,21 @@ const grnLineSchema = z.object({
   storageLocation: z.string().optional().nullable(),
 });
 
+const optionalUuid = z
+  .union([z.string().uuid(), z.literal("")])
+  .optional()
+  .nullable()
+  .transform((v) => (v ? v : null));
+
 export const goodsReceiptSchema = z
   .object({
     sourceType: z.enum(["purchase_order", "bill", "unscheduled"]),
-    purchaseOrderId: z.string().uuid().optional().nullable(),
-    billId: z.string().uuid().optional().nullable(),
+    purchaseOrderId: optionalUuid,
+    billId: optionalUuid,
     proformaInvoiceNumber: z.string().optional().nullable(),
     packingListNumber: z.string().optional().nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    /** The form calls it supplierPartyId. */
+    supplierPartyId: optionalUuid,
     supplierName: z.string().optional().nullable(),
     receivedDate: z.string().min(1, "The date received is required"),
     notes: z.string().optional().nullable(),
@@ -174,19 +208,23 @@ export function toGoodsReceiptInput(data: GoodsReceiptPayload) {
     billId: data.billId || null,
     proformaInvoiceNumber: data.proformaInvoiceNumber ?? null,
     packingListNumber: data.packingListNumber ?? null,
-    supplierId: data.supplierId || null,
+    supplierId: data.supplierPartyId || null,
     supplierName: data.supplierName ?? null,
     receivedDate: data.receivedDate,
     notes: data.notes ?? null,
     lines: data.lines.map((l) => ({
       purchaseOrderLineId: l.purchaseOrderLineId || null,
       productId: l.productId,
-      productName: l.productName,
-      productSku: l.productSku ?? null,
+      // The form fills `description` and `sku` from the product on select, so
+      // the snapshot the receipt freezes is what the storekeeper was looking
+      // at. Falling back to the description keeps NOT NULL satisfiable when a
+      // line was typed rather than picked.
+      productName: l.productName || l.description,
+      productSku: l.sku ?? null,
       description: l.description,
       unit: l.unit,
-      expectedQuantity: money(l.expectedQuantity),
-      receivedQuantity: money(l.receivedQuantity),
+      expectedQuantity: money(l.expectedQty),
+      receivedQuantity: money(l.receivedQty),
       unitCost: money(l.unitCost),
       packagingCondition: l.packagingCondition,
       physicalCondition: l.physicalCondition,

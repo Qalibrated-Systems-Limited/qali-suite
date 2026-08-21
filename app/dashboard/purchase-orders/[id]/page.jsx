@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { getPurchaseOrderById } from "@/app/mongodb/queries/purchase-order-queries";
+import { getPurchaseOrderForDisplayPg } from "@/app/db/actions/purchase-order-actions";
 import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
 import { serializeBsonType, formatAddress } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,10 +28,12 @@ import {
 } from "lucide-react";
 import { PODetailActions } from "../components/PODetailActions";
 import { POPDFDownloadButton } from "../components/POPDFButton";
+import { roleAllowed } from "@/lib/permissions";
+import { PROCUREMENT_ROLES } from "@/lib/utils/role-gates";
 
 export async function generateMetadata({ params }) {
   const resolvedParams = await params;
-  const po = await getPurchaseOrderById(resolvedParams.id);
+  const po = await getPurchaseOrderForDisplayPg(resolvedParams.id);
 
   if (!po) {
     return { title: "Purchase Order Not Found" };
@@ -54,7 +56,7 @@ export default async function PurchaseOrderDetailPage({ params }) {
   const { user } = session;
 
   // Check permissions
-  if (!["SuperAdmin", "Admin", "Manager", "Accountant"].includes(user.role)) {
+  if (!roleAllowed(user.role, [...PROCUREMENT_ROLES])) {
     return (
       <div className="flex min-h-[400px] items-center justify-center">
         <div className="text-center">
@@ -69,7 +71,7 @@ export default async function PurchaseOrderDetailPage({ params }) {
     );
   }
 
-  let po = await getPurchaseOrderById(resolvedParams.id);
+  let po = await getPurchaseOrderForDisplayPg(resolvedParams.id);
 
   if (!po) {
     notFound();
@@ -146,6 +148,14 @@ export default async function PurchaseOrderDetailPage({ params }) {
         label: "Expired",
         className: "bg-muted text-muted-foreground",
         icon: Clock,
+      },
+      // Closed short — no more is expected, but what arrived is kept. Without
+      // an entry here the fallback below renders it as "Draft".
+      closed: {
+        label: "Closed Short",
+        className:
+          "bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/20",
+        icon: XCircle,
       },
     };
     return configs[status] || configs.draft;

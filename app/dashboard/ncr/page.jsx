@@ -17,7 +17,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import NCRStatusBadge, { NCRCategoryLabel } from "./components/NCRStatusBadge";
-import { getNCRs, getNCRStats } from "@/app/mongodb/queries/ncr-queries";
+import {
+  getNonconformancesPagePg,
+  getNonconformanceStatsForDisplayPg,
+} from "@/app/db/actions/ncr-actions";
 
 export const metadata = { title: "Nonconformance Register" };
 
@@ -26,7 +29,7 @@ function fmt(iso) {
 }
 
 async function StatsRow() {
-  const s = await getNCRStats();
+  const s = await getNonconformanceStatsForDisplayPg();
   const cards = [
     { label: "Open", value: s.open, icon: AlertTriangle, tone: "text-amber-600 dark:text-amber-400" },
     { label: "Awaiting authorization", value: s.disposition_proposed, icon: ShieldAlert, tone: "text-blue-600 dark:text-blue-400" },
@@ -56,7 +59,7 @@ async function NCRList({ searchParams }) {
   const category = params?.category || "";
   const search = params?.search || "";
   const page = Number(params?.page) || 1;
-  const { ncrs, pagination } = await getNCRs({ page, status, category, search });
+  const { ncrs, pagination } = await getNonconformancesPagePg({ page, status, category, search });
 
   if (ncrs.length === 0) {
     return (

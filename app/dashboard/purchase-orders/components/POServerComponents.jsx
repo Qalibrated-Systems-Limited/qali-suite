@@ -7,10 +7,10 @@ import {
   Clock,
 } from "lucide-react";
 import {
-  searchPurchaseOrders,
-  fetchPurchaseOrderPages,
-  getPurchaseOrderStats,
-} from "@/app/mongodb/queries/purchase-order-queries";
+  searchPurchaseOrdersPg,
+  countPurchaseOrderPagesPg,
+  getPurchaseOrderStatsForDisplayPg,
+} from "@/app/db/actions/purchase-order-actions";
 import { POTable } from "./POTable";
 import Pagination from "@/components/pagination";
 import { formatCurrency } from "@/lib/utils";
@@ -20,7 +20,7 @@ import { formatCurrency } from "@/lib/utils";
 // ============================================
 
 export async function POStatsCards({ filters }) {
-  const stats = await getPurchaseOrderStats(filters);
+  const stats = await getPurchaseOrderStatsForDisplayPg(filters);
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -140,7 +140,7 @@ export function POStatsSkeleton() {
 // ============================================
 
 export async function POTableServer({ query, page, filters }) {
-  const purchaseOrders = await searchPurchaseOrders(query, page, filters);
+  const purchaseOrders = await searchPurchaseOrdersPg(query, page, filters);
 
   return <POTable purchaseOrders={purchaseOrders} />;
 }
@@ -192,7 +192,7 @@ export function POTableSkeleton() {
 // ============================================
 
 export async function POPaginationServer({ query, filters }) {
-  const totalPages = await fetchPurchaseOrderPages(query, filters);
+  const totalPages = await countPurchaseOrderPagesPg(query, filters);
 
   if (totalPages <= 1) return null;
 
@@ -208,6 +208,6 @@ export async function POPaginationServer({ query, filters }) {
 // ============================================
 
 export async function POStatsForFilters({ filters }) {
-  const stats = await getPurchaseOrderStats(filters);
+  const stats = await getPurchaseOrderStatsForDisplayPg(filters);
   return stats;
 }

@@ -177,7 +177,230 @@ export async function getGoodsReceiptDetail(tx: Tx, goodsReceiptId: string) {
      ORDER BY n.created_at DESC
   `)) as unknown as Array<Record<string, unknown>>;
 
-  return { ...grn, lines, state: state ?? null, nonconformances: ncrs };
+  // What the receipt was raised against, by its number — what the PDF prints
+  // and what a storekeeper checks the delivery note against.
+  const [source] = (await tx.execute(sql`
+    SELECT COALESCE(po.po_number, b.bill_number) AS reference
+      FROM goods_receipts g
+      LEFT JOIN purchase_orders po ON po.id = g.purchase_order_id
+      LEFT JOIN bills b            ON b.id = g.bill_id
+     WHERE g.id = ${goodsReceiptId}::uuid
+  `)) as unknown as Array<{ reference: string | null }>;
+
+  return {
+    ...grn,
+    lines,
+    state: state ?? null,
+    nonconformances: ncrs,
+    sourceReference: source?.reference ?? null,
+  };
+}
+
+/**
+ * The display status the screens expect.
+ *
+ * Anti-corruption layer, same as `displayStatus` for orders and for the same
+ * reason. 0050 keeps `status` as what a person DID — draft, submitted,
+ * finalised, voided — and derives what the acceptance DECIDED, because Mongo
+ * stored 'accepted', 'partially_accepted' and 'rejected' on the header beside
+ * per-line decisions that said the same thing, and the two could disagree.
+ *
+ * The screens still read one string, so the two are recombined here: a
+ * finalised receipt reports its outcome, anything else reports its status.
+ */
+export function displayStatus(row: {
+  status?: unknown;
+  outcome?: unknown;
+}): string {
+  const status = String(row.status ?? "draft");
+  if (status !== "finalised") return status;
+  const outcome = String(row.outcome ?? "accepted");
+  return outcome === "voided" ? "voided" : outcome;
+}
+
+/**
+ * A goods receipt as the detail page renders it.
+ *
+ * Shaped to the page — `source.type`, `lines[].receivedQty`,
+ * `salesAccepted.{name,at,notes}` — on the `getBillDetail` precedent, so the
+ * markup does not change with the data source.
+ *
+ * `hasDiscrepancy` is read from the lines rather than from a stored flag, and
+ * the two sign-off stamps are assembled from their own columns: the SOP wants
+ * Sales AND Finance in writing, so each is a separate auditable fact rather
+ * than one "approved" boolean.
+ */
+export async function getGoodsReceiptForDisplay(
+  tx: Tx,
+  goodsReceiptId: string,
+) {
+  const detail = await getGoodsReceiptDetail(tx, goodsReceiptId);
+  if (!detail) return null;
+
+  const state = (detail.state ?? {}) as Record<string, any>;
+
+  const stamp = (
+    id: string | null,
+    name: string | null,
+    at: Date | null,
+    notes: string | null,
+  ) => (at ? { id, name: name ?? id, at, notes } : null);
+
+  return {
+    _id: detail.id,
+    id: detail.id,
+    grnNumber: detail.grnNumber,
+
+    status: displayStatus({ status: detail.status, outcome: state.outcome }),
+    workflowStatus: detail.status,
+    outcome: state.outcome ?? "pending",
+
+    source: {
+      type: detail.sourceType,
+      billId: detail.billId,
+      purchaseOrderId: detail.purchaseOrderId,
+      proformaInvoiceNumber: detail.proformaInvoiceNumber,
+      packingListNumber: detail.packingListNumber,
+      /** The order or bill number this receives against. */
+      reference: detail.sourceReference,
+    },
+
+    supplier: detail.supplierId || detail.supplierName
+      ? { partyId: detail.supplierId, _id: detail.supplierId, name: detail.supplierName }
+      : null,
+
+    receivedDate: detail.receivedDate,
+    receivedBy: detail.receivedByName
+      ? { id: detail.receivedById, name: detail.receivedByName }
+      : null,
+
+    // Derived from the lines (0050). Mongo stores both and neither is
+    // recomputed when a line changes.
+    hasDiscrepancy: Boolean(state.has_discrepancy),
+    hasOverReceipt: Boolean(state.has_over_receipt),
+    discrepancyNotes: detail.discrepancyNotes,
+    notes: detail.notes,
+
+    salesAccepted: stamp(
+      detail.salesAcceptedById,
+      detail.salesAcceptedByName,
+      detail.salesAcceptedAt,
+      detail.salesAcceptanceNotes,
+    ),
+    financeAccepted: stamp(
+      detail.financeAcceptedById,
+      detail.financeAcceptedByName,
+      detail.financeAcceptedAt,
+      detail.financeAcceptanceNotes,
+    ),
+    acceptedAt: detail.acceptedAt,
+
+    rejectedAt: detail.rejectedAt,
+    rejectedBy: detail.rejectedByName ? { name: detail.rejectedByName } : null,
+    // The page reads `rejectReason`; the column is `rejection_reason`.
+    rejectReason: detail.rejectionReason,
+    voidedAt: detail.voidedAt,
+    voidReason: detail.voidReason,
+
+    /** The acceptance posting, which Mongo creates and records nowhere. */
+    journalEntryId: detail.journalEntryId,
+
+    totals: {
+      received: Number(state.received_quantity ?? 0),
+      accepted: Number(state.accepted_quantity ?? 0),
+      rejected: Number(state.rejected_quantity ?? 0),
+      acceptedValue: Number(state.accepted_value ?? 0),
+    },
+
+    lines: detail.lines.map((l) => ({
+      _id: l.id,
+      id: l.id,
+      lineNumber: l.lineNumber,
+      purchaseOrderLineId: l.purchaseOrderLineId,
+      productId: l.productId,
+      sku: l.productSku,
+      productName: l.productName,
+      description: l.description,
+      unit: l.unit,
+      expectedQty: Number(l.expectedQuantity),
+      receivedQty: Number(l.receivedQuantity),
+      acceptedQty: Number(l.acceptedQuantity),
+      rejectedQty: Number(l.rejectedQuantity ?? 0),
+      unitCost: Number(l.unitCost),
+      acceptedValue: Number(l.acceptedValue ?? 0),
+      packagingCondition: l.packagingCondition,
+      physicalCondition: l.physicalCondition,
+      inspectionNotes: l.inspectionNotes,
+      photoUrls: l.photoUrls,
+      storageLocation: l.storageLocation,
+      lineStatus: l.lineStatus,
+      rejectReason: l.rejectReason,
+    })),
+
+    /**
+     * Every nonconformance raised against this receipt. Mongo keeps a single
+     * `grn.ncrId`, so the second one overwrote the first.
+     */
+    nonconformances: detail.nonconformances,
+
+    createdAt: detail.createdAt,
+    createdBy: detail.createdByName ? { name: detail.createdByName } : null,
+  };
+}
+
+/** The list rows, in the shape the GRN index reads. */
+export async function listGoodsReceiptsForDisplay(
+  tx: Tx,
+  filters: ListGoodsReceiptsFilters = {},
+  page = 1,
+  pageSize = 20,
+) {
+  const rows = await listGoodsReceipts(tx, filters, page, pageSize);
+  if (!rows.length) return [];
+
+  // The index shows a per-receipt line count and how many are discrepant, so
+  // the counts come back with the rows rather than as a query per row.
+  const ids = rows.map((r) => String(r.id));
+  const counts = (await tx.execute(sql`
+    SELECT goods_receipt_id,
+           COUNT(*)::int AS lines,
+           COUNT(*) FILTER (
+             WHERE received_quantity <> expected_quantity
+                OR packaging_condition <> 'good'
+                OR physical_condition <> 'good'
+           )::int AS discrepant
+      FROM goods_receipt_lines
+     WHERE goods_receipt_id = ANY(${ids}::uuid[])
+     GROUP BY goods_receipt_id
+  `)) as unknown as Array<{ goods_receipt_id: string; lines: number; discrepant: number }>;
+  const byId = new Map(counts.map((c) => [c.goods_receipt_id, c]));
+
+  return rows.map((r: Record<string, any>) => {
+    const c = byId.get(String(r.id)) ?? { lines: 0, discrepant: 0 };
+    return {
+      _id: r.id,
+      id: r.id,
+      grnNumber: r.grn_number,
+      status: displayStatus(r),
+      workflowStatus: r.status,
+      outcome: r.outcome,
+      source: {
+        type: r.source_type,
+        billId: r.bill_id,
+        purchaseOrderId: r.purchase_order_id,
+      },
+      supplier: r.supplier_name ? { partyId: r.supplier_id, name: r.supplier_name } : null,
+      receivedDate: r.received_date,
+      hasDiscrepancy: Boolean(r.has_discrepancy),
+      acceptedValue: Number(r.accepted_value ?? 0),
+      // The index reads `lines.length` and filters the discrepant ones; it
+      // never reads a line's contents, so it gets counts rather than rows.
+      lines: Array.from({ length: c.lines }, (_, i) => ({
+        _id: `${r.id}:${i}`,
+        hasDiscrepancy: i < c.discrepant,
+      })),
+    };
+  });
 }
 
 export interface ListGoodsReceiptsFilters {

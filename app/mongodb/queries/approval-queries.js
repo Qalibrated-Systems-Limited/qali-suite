@@ -14,7 +14,7 @@ import ApprovalRequest, {
 } from "@/app/models/approvalRequest";
 import Bill from "@/app/models/bill";
 import EmployeeClaim from "@/app/models/employeesClaims";
-import Nonconformance from "@/app/models/nonconformance";
+import { countNonconformancesAwaitingAuthorisationPg } from "@/app/db/actions/ncr-actions";
 import Expense from "@/app/models/expenses";
 import { StockRequest } from "@/app/models/requests";
 // Approver matrices imported from the central rules module. Single
@@ -102,12 +102,9 @@ export const cMyPendingApprovals = cache(async () => {
       );
     }
     if (NCR_AUTHORIZER_ROLES.has(role)) {
-      tasks.push(
-        Nonconformance.countDocuments({
-          ...tenantMatch,
-          status: "disposition_proposed",
-        }),
-      );
+      // Postgres since the procurement port — the Mongo collection this used
+      // to count is no longer written to, so it would always report zero.
+      tasks.push(countNonconformancesAwaitingAuthorisationPg());
     }
     if (OPERATING_EXPENSE_APPROVER_ROLES.has(role)) {
       tasks.push(

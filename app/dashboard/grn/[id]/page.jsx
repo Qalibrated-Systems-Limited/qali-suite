@@ -21,7 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { auth } from "@/auth";
-import { getGRNById } from "@/app/mongodb/queries/grn-queries";
+import { getGoodsReceiptForDisplayPg } from "@/app/db/actions/grn-actions";
 import GRNStatusBadge from "../components/GRNStatusBadge";
 import GRNActions from "../components/GRNActions";
 
@@ -68,7 +68,7 @@ function LineStatusPill({ status }) {
 
 export default async function GRNDetailPage({ params }) {
   const { id } = await params;
-  const grn = await getGRNById(id);
+  const grn = await getGoodsReceiptForDisplayPg(id);
   if (!grn) notFound();
 
   const session = await auth();

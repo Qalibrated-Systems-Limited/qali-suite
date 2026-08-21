@@ -19,7 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { auth } from "@/auth";
-import { getNCRById } from "@/app/mongodb/queries/ncr-queries";
+import { getNonconformanceForDisplayPg } from "@/app/db/actions/ncr-actions";
 import NCRStatusBadge, {
   NCRCategoryLabel,
   DispositionLabel,
@@ -51,7 +51,7 @@ function SeverityPill({ severity }) {
 
 export default async function NCRDetailPage({ params }) {
   const { id } = await params;
-  const ncr = await getNCRById(id);
+  const ncr = await getNonconformanceForDisplayPg(id);
   if (!ncr) notFound();
 
   const session = await auth();

@@ -12,7 +12,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import GRNStatusBadge from "./components/GRNStatusBadge";
-import { getGRNs, getGRNStats } from "@/app/mongodb/queries/grn-queries";
+import {
+  getGoodsReceiptsPagePg,
+  getGoodsReceiptStatsForDisplayPg,
+} from "@/app/db/actions/grn-actions";
 
 export const metadata = { title: "Goods Receipt Notes" };
 
@@ -25,7 +28,7 @@ async function GRNListSection({ searchParams }) {
   const status = params?.status || "";
   const search = params?.search || "";
   const page = Number(params?.page) || 1;
-  const { grns, pagination } = await getGRNs({ page, status, search });
+  const { grns, pagination } = await getGoodsReceiptsPagePg({ page, status, search });
 
   if (grns.length === 0) {
     return (
@@ -117,7 +120,7 @@ async function GRNListSection({ searchParams }) {
 }
 
 async function StatsRow() {
-  const stats = await getGRNStats();
+  const stats = await getGoodsReceiptStatsForDisplayPg();
   const cards = [
     {
       label: "Pending acceptance",

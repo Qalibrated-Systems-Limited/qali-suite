@@ -5,11 +5,9 @@ import { ChevronLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import POForm from "../../components/POForm";
 import {
-  getPurchaseOrderById,
-  fetchActiveSuppliers,
-  fetchAllProducts,
-  fetchPurchaseAccounts,
-} from "@/app/mongodb/queries/purchase-order-queries";
+  getPurchaseOrderForDisplayPg,
+  getPurchaseOrderFormDataPg,
+} from "@/app/db/actions/purchase-order-actions";
 import { auth } from "@/auth";
 import { PROCUREMENT_ROLES } from "@/lib/utils/role-gates";
 
@@ -18,7 +16,7 @@ import { PROCUREMENT_ROLES } from "@/lib/utils/role-gates";
 // ============================================
 export async function generateMetadata({ params }) {
   const resolvedParams = await params;
-  const po = await getPurchaseOrderById(resolvedParams.id);
+  const po = await getPurchaseOrderForDisplayPg(resolvedParams.id);
 
   if (!po) {
     return { title: "Purchase Order Not Found" };
@@ -34,19 +32,20 @@ export async function generateMetadata({ params }) {
 // FORM WRAPPER (Server Component)
 // ============================================
 async function POFormWrapper({ poId }) {
-  const [purchaseOrder, suppliers, products, accounts] = await Promise.all([
-    getPurchaseOrderById(poId),
-    fetchActiveSuppliers(),
-    fetchAllProducts(),
-    fetchPurchaseAccounts(),
+  const [purchaseOrder, formData] = await Promise.all([
+    getPurchaseOrderForDisplayPg(poId),
+    getPurchaseOrderFormDataPg(),
   ]);
+  const { suppliers, products, accounts } = formData;
 
   if (!purchaseOrder) {
     notFound();
   }
 
-  // Only draft POs can be edited
-  if (purchaseOrder.status !== "draft") {
+  // Only draft POs can be edited. `status` here is the DISPLAY status, which
+  // folds in receipt progress and expiry — `workflowStatus` is the one a
+  // person set, and it is the one the edit rule is about.
+  if (purchaseOrder.workflowStatus !== "draft") {
     redirect(`/dashboard/purchase-orders/${poId}`);
   }
 

@@ -28,17 +28,30 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { createGRN } from "@/app/mongodb/actions/grn-actions";
+import { createGoodsReceiptPg } from "@/app/db/actions/grn-actions";
 
 const PACKAGING = ["good", "damaged", "moisture", "tampered"];
 const PHYSICAL = ["good", "broken", "deformed", "defective"];
 
 const emptyLine = () => ({
+  /**
+   * The purchase order line this receives against, when there is one.
+   *
+   * A receipt line references its order line directly — that FK is what the
+   * over-receipt tolerance measures against and what
+   * `purchase_order_line_received` sums. Without it a PO-sourced receipt links
+   * to nothing and the order reads as never delivered. The Mongo model matched
+   * lines by product id instead, which picks the wrong one whenever an order
+   * carries the same product twice.
+   */
+  purchaseOrderLineId: null,
   productId: "",
   description: "",
   sku: "",
   expectedQty: 0,
   receivedQty: 0,
+  /** What the goods cost, frozen here so acceptance posts a decided figure. */
+  unitCost: 0,
   unit: "pcs",
   packagingCondition: "good",
   physicalCondition: "good",
@@ -205,11 +218,13 @@ export default function GRNForm({
     const lines = (bill.lines || [])
       .filter((l) => l.product?.id)
       .map((l) => ({
+        purchaseOrderLineId: null,
         productId: l.product.id?.toString?.() || l.product.id,
         description: l.description || l.product.name || "",
         sku: l.product.sku || "",
         expectedQty: l.quantity || 0,
         receivedQty: l.quantity || 0,
+        unitCost: l.unitPrice || 0,
         unit: l.unit || "pcs",
         packagingCondition: "good",
         physicalCondition: "good",
@@ -246,11 +261,14 @@ export default function GRNForm({
     const lines = (po.availableLines || [])
       .filter((l) => l.product?.id && l.availableQuantity > 0)
       .map((l) => ({
+        // The order line itself, not just its product — see emptyLine().
+        purchaseOrderLineId: l._id,
         productId: l.product.id,
         description: l.description || l.product.name || "",
         sku: l.product.sku || "",
         expectedQty: l.availableQuantity,
         receivedQty: l.availableQuantity,
+        unitCost: l.unitPrice || 0,
         unit: l.unit || "pcs",
         packagingCondition: "good",
         physicalCondition: "good",
@@ -328,10 +346,10 @@ export default function GRNForm({
           })),
         }),
       );
-      const res = await createGRN(null, fd);
+      const res = await createGoodsReceiptPg(null, fd);
       if (res?.success) {
         setSuccess("GRN created");
-        router.push(`/dashboard/grn/${res.grnId}`);
+        router.push(`/dashboard/grn/${res.goodsReceiptId}`);
       } else {
         setError(res?.error || "Failed to create GRN");
       }

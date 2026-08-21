@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Receipt, Loader2, AlertCircle, Package, Calendar } from "lucide-react";
-import { convertPOToBill } from "@/app/mongodb/actions/purchase-order-actions";
+import { convertPurchaseOrderToBillPg } from "@/app/db/actions/purchase-order-actions";
 import { formatCurrency } from "@/lib/utils";
 
 const initialState = {
@@ -27,14 +27,21 @@ const initialState = {
 export function ConvertToBillDialog({ purchaseOrder, open, onOpenChange }) {
   const po = purchaseOrder;
 
-  // Available lines = ordered but not yet received
-  const availableLines = po.lines.filter((line) => {
-    const receivedQty = line.receivedQuantity || 0;
-    return line.quantity > receivedQty;
-  });
+  /**
+   * Available to BILL = ordered less already billed.
+   *
+   * Not "less received". Those are different questions, and the gap between
+   * them is exactly what GR/IR holds: goods can arrive before the invoice does
+   * or after it. Measuring billable quantity against RECEIPTS meant an order
+   * fully delivered but not yet invoiced showed nothing available and could
+   * not be billed at all.
+   */
+  const availableLines = po.lines.filter(
+    (line) => (line.unbilledQuantity ?? line.quantity) > 0,
+  );
 
   // Server action bound with PO ID
-  const boundAction = convertPOToBill.bind(null, po._id);
+  const boundAction = convertPurchaseOrderToBillPg.bind(null, po._id);
   const [state, formAction, isPending] = useActionState(
     boundAction,
     initialState
@@ -156,7 +163,7 @@ export function ConvertToBillDialog({ purchaseOrder, open, onOpenChange }) {
               {availableLines.map((line, index) => {
                 const lineId = line._id?.toString();
                 const availableQty =
-                  line.quantity - (line.receivedQuantity || 0);
+                  line.unbilledQuantity ?? line.quantity;
 
                 return (
                   <LineItem
@@ -250,10 +257,13 @@ function LineItem({ line, lineId, index, availableQty, formatCurrency }) {
               Ordered: {line.quantity} {line.unit}
             </span>
             <span>
-              Received: {line.receivedQuantity || 0} {line.unit}
+              Received: {line.acceptedQuantity ?? 0} {line.unit}
             </span>
             <span>
-              Available: {availableQty} {line.unit}
+              Billed: {line.billedQuantity ?? 0} {line.unit}
+            </span>
+            <span>
+              Available to bill: {availableQty} {line.unit}
             </span>
             <span>@ {formatCurrency(line.unitPrice)}</span>
           </div>
