@@ -395,41 +395,6 @@ async function statusAction(
   }
 }
 
-export async function deleteQuotePg(quoteId: string): Promise<ActionResult> {
-  try {
-    await withAuthorizedTenant([...INVOICE_WRITE_ROLES], (tx) =>
-      quotes.deleteQuote(tx, quoteId),
-    );
-    revalidatePath("/dashboard/quotes");
-    return { success: true, message: "Quote deleted" };
-  } catch (err) {
-    return { success: false, error: toActionError(err) };
-  }
-}
-
-export async function cloneQuotePg(quoteId: string): Promise<ActionResult> {
-  try {
-    const clone = await withAuthorizedTenant(
-      [...INVOICE_WRITE_ROLES],
-      (tx, { user }) =>
-        quotes.cloneQuote(tx, quoteId, {
-          id: user.id,
-          name: user.name,
-          role: user.role,
-        }),
-    );
-    revalidatePath("/dashboard/quotes");
-    return {
-      success: true,
-      quoteId: clone.id,
-      quoteNumber: clone.quoteNumber,
-      message: `Quote ${clone.quoteNumber} created from ${quoteId.slice(0, 8)}`,
-    };
-  } catch (err) {
-    return { success: false, error: toActionError(err) };
-  }
-}
-
 /**
  * Turns the quote into an invoice — a POSTGRES invoice (§9E).
  *
@@ -582,15 +547,6 @@ export async function getQuoteFormData() {
 }
 
 
-export async function getQuotesPg(opts: {
-  limit?: number;
-  offset?: number;
-  status?: string;
-  customerId?: string;
-} = {}) {
-  return withAuthorizedTenant([], (tx) => quotes.listQuotes(tx, opts));
-}
-
 /**
  * The list page's query, with the visibility rule applied.
  *
@@ -644,10 +600,6 @@ export async function getQuotesWithAvailableItemsPg(customerId: string) {
   return withAuthorizedTenant([], (tx) =>
     quotes.getQuotesWithAvailableItems(tx, customerId),
   );
-}
-
-export async function getQuoteDetailPg(quoteId: string) {
-  return withAuthorizedTenant([], (tx) => quotes.getQuoteDetail(tx, quoteId));
 }
 
 export async function getQuoteStatsPg(
