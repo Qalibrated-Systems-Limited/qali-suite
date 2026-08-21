@@ -1,5 +1,6 @@
 import { getGeneralLedgerDataPg } from "@/app/db/actions/report-actions";
 import { getPostableAccountsPg } from "@/app/db/actions/journal-actions";
+import { toDayString } from "@/lib/utils/report-dates";
 import { GeneralLedgerClient } from "./GeneralLedgerClient";
 
 export const metadata = {
@@ -11,14 +12,17 @@ export default async function GeneralLedgerPage({ searchParams }) {
   const params = await searchParams;
   const accountId = params?.account || null;
 
-  // Default to current month
+  // Default to the current month, read off the LOCAL calendar. Building local
+  // midnight and then formatting it in UTC moved both ends back a day east of
+  // Greenwich, so the month started a day early and — worse — ended a day
+  // early, dropping the last day's postings out of the ledger.
   const now = new Date();
-  const defaultStartDate = new Date(now.getFullYear(), now.getMonth(), 1)
-    .toISOString()
-    .split("T")[0];
-  const defaultEndDate = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-    .toISOString()
-    .split("T")[0];
+  const defaultStartDate = toDayString(
+    new Date(now.getFullYear(), now.getMonth(), 1),
+  );
+  const defaultEndDate = toDayString(
+    new Date(now.getFullYear(), now.getMonth() + 1, 0),
+  );
 
   const startDate = params?.startDate || defaultStartDate;
   const endDate = params?.endDate || defaultEndDate;

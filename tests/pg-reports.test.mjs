@@ -258,6 +258,30 @@ suite("postgres reports", () => {
       expect(pl.summary.netMargin).toBe("60.00");
     });
 
+    it("includes both ends of the window", async () => {
+      // The boundary days are the ones that go missing when a range is built
+      // from local midnight and then formatted in UTC: the range starts a day
+      // early and, worse, ENDS a day early, so the last day of the month falls
+      // outside every report asked for that month. See lib/utils/report-dates.
+      await postEntry({
+        number: "JE-FIRST", date: "2026-08-01",
+        lines: [{ account: cash, debit: "100.0000" }, { account: sales, credit: "100.0000" }],
+      });
+      await postEntry({
+        number: "JE-LAST", date: "2026-08-31",
+        lines: [{ account: cash, debit: "250.0000" }, { account: sales, credit: "250.0000" }],
+      });
+      await postEntry({
+        number: "JE-AFTER", date: "2026-09-01",
+        lines: [{ account: cash, debit: "999.0000" }, { account: sales, credit: "999.0000" }],
+      });
+
+      const pl = await asTenant(companyA, (tx) =>
+        getProfitLoss(tx, "2026-08-01", "2026-08-31"),
+      );
+      expect(pl.revenue.total).toBe(350);
+    });
+
     it("omits accounts with no movement", async () => {
       await postEntry({
         number: "JE-1", date: "2026-08-05",

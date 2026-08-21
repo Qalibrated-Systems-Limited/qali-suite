@@ -1,4 +1,5 @@
 import { getTrialBalanceDataPg } from "@/app/db/actions/report-actions";
+import { today } from "@/lib/utils/report-dates";
 import { TrialBalanceClient } from "./TrialBalanceClient";
 
 export const metadata = {
@@ -8,7 +9,7 @@ export const metadata = {
 
 export default async function TrialBalancePage({ searchParams }) {
   const params = await searchParams;
-  const asOfDate = params?.asOf || new Date().toISOString().split("T")[0];
+  const asOfDate = params?.asOf || today();
   const showZeroBalances = params?.showZero === "true";
 
   let reportData = null;
