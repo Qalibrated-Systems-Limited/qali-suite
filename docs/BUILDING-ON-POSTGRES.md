@@ -57,6 +57,30 @@ other:
 The lesson for whatever is ported next: the danger is not the module you are
 moving, it is the module that talks to it.
 
+### Read this before touching claims, assets, petty cash or GRN
+
+**Four live modules still post journal entries into MongoDB**, and every ledger
+screen — the journal browser, trial balance, P&L, balance sheet, general
+ledger — reads Postgres:
+
+| Module | Screens | What is being lost |
+|---|---|---|
+| `claim-action.js` | 4 | every approved employee reimbursement |
+| `asset-actions.js` | 11 | acquisition, depreciation, disposal |
+| `petty-cash-actions.js` | 3 | every petty cash movement |
+| `grn-actions.js` | 2 | goods received, and GR/IR clearing |
+
+Nothing errors: the entry is created, validated and posted into a ledger no
+screen reads. If you are adding to one of these, post through
+`app/db/repositories/journal.ts` rather than the Mongoose model, or you are
+adding to the pile.
+
+GRN is the worst of the four, because `bills` is already ported WITH
+three-way match: a tenant with `require_grn` on gets bills posting to GR/IR
+clearing, and the only thing that could clear it lives in the other store. See
+POSTGRES-MIGRATION-PLAN.md §9G, which is also the argument for doing
+procurement next.
+
 ---
 
 ## The one rule

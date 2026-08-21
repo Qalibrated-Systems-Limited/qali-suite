@@ -1264,6 +1264,99 @@ EMI, equal principal) is carried over line for line.
 
 ---
 
+
+## 9G. Procurement is next, and the postings that go nowhere
+
+### The finding that decides the order
+
+**Four live modules post journal entries into MongoDB, and every ledger screen
+reads Postgres.** The journal browser, the trial balance, the P&L, the balance
+sheet and the general ledger all went to Postgres with the accounting core.
+These did not:
+
+| Module | Screens | Posts | What is lost |
+|---|---|---|---|
+| `claim-action.js` | 4 | 4 × `JournalEntry.post()` | every approved employee reimbursement |
+| `asset-actions.js` | 11 | 3 × `.post()` | acquisition, depreciation and disposal |
+| `petty-cash-actions.js` | 3 | 1 × `.post()` | every petty cash movement |
+| `grn-actions.js` | 2 | 2 × `.post()` | goods received, and the GR/IR clearing |
+
+Nothing errors. The entry is created, validated and posted — into a ledger no
+screen reads. The books are quietly short by exactly these four streams, and
+the longer it stands the more of a reconciliation it becomes.
+
+This is the §9E shape again (a writer and its readers in different stores),
+except it is not a single conversion path — it is money.
+
+### Why procurement rather than the largest of them
+
+Claims is the biggest of the four by transaction volume and asset depreciation
+is the most regular, but **procurement is the one that is already half-ported
+and therefore actively broken**, which is the same argument that put quotes
+ahead of larger modules in §9E.
+
+Bills went to Postgres in 0015. Three-way match went with them: `bills` has
+`used_grni`, `createBill` takes a `grniAccountId`, and `company_settings` has
+`require_grn`. So a tenant that turns three-way match on gets bills that post
+their inventory lines to **GR/IR clearing** — a suspense account whose only
+purpose is to be cleared when the goods are received.
+
+The goods receipt is in Mongo. Its clearing entry posts to the Mongo ledger.
+**GR/IR can therefore only accumulate.** It is a suspense account with no
+possible counterparty, growing on the balance sheet of any tenant who enabled
+the control the port itself shipped.
+
+Purchase orders come with it: a GRN receives against a PO, and porting the
+receipt without the order leaves the same seam one step further back.
+
+### Scope, enumerated
+
+| | |
+|---|---|
+| models | `purchaseOrder.js` (888), `goodsReceipt.js` (210), `nonconformance.js` (201) |
+| actions | `purchase-order-actions.js` (9 exported), `grn-actions.js` (5), `ncr-actions.js` (6) |
+| reads | `purchase-order-queries.js`, `grn-queries.js`, `ncr-queries.js`, `procurement-queries.js` |
+| pages | 24 across `purchase-orders`, `grn`, `ncr` |
+| API | `app/api/grn/[id]/pdf` |
+| cron | none |
+| already ported and waiting | `bills` (GR/IR), `stock_movements`, `parties`, `products`, the journal |
+
+Roughly 2,500 lines of action code against HR's 4,900 — and unlike HR it
+lands against a Postgres counterpart that already exists.
+
+### Design notes for the port
+
+- **GR/IR is the point.** Receiving debits inventory and credits GR/IR;
+  billing debits GR/IR and credits the supplier. The two must reference each
+  other, so the receipt line and the bill line need a link — `document_flow`
+  (0041) already models exactly this, and was built generic for it.
+- **Received quantity is DERIVED** (§9.3). `purchaseOrder.items[].receivedQty`
+  is a counter incremented by the receipt, which is the fifth instance of the
+  pattern HR just removed five of. It is the sum of the receipt lines against
+  that PO line, and `quote_line_invoiced` (0041) is the worked precedent.
+- **A receipt cannot exceed its order**, and an over-receipt is a decision
+  somebody makes rather than an arithmetic accident — a CHECK, plus an
+  explicit tolerance on the PO if the business wants one.
+- **The NCR is a rejection of received goods**, so it belongs with the receipt
+  rather than as a separate vertical; rejecting must reverse the inventory
+  side, not merely record an opinion.
+- **Snapshots stay** (§9.4): the supplier name and the agreed unit price on a
+  purchase order are what was ordered.
+
+### After procurement
+
+In descending order of what is currently lost to the wrong ledger: **claims**
+(also the module most entangled with HR, which now supplies its employee
+snapshot), **fixed assets** (depreciation, and the rollforward report already
+reads Postgres), then **petty cash** (small — 330 lines — and could be folded
+into either).
+
+`expenses` carries a smaller version of the same seam: it calls Mongo's
+`quickCreateParty`, so a supplier created while entering an expense is written
+to a store the party screens do not read.
+
+---
+
 ## 10. Explicitly out of scope
 
 - Redesigning the posting engine, fiscal periods, or COGS logic beyond the
