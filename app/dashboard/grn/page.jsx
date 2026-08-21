@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { format } from "date-fns";
-import { Plus, ClipboardCheck, AlertTriangle, Clock } from "lucide-react";
+import {
+  AlertTriangle,
+  ClipboardCheck,
+  Clock,
+  Plus,
+  Scale,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -176,12 +182,23 @@ export default async function GRNIndexPage(props) {
             Receive, inspect, and admit incoming stock
           </p>
         </div>
-        <Button asChild>
-          <Link href="/dashboard/grn/create">
-            <Plus className="h-4 w-4 mr-1.5" />
-            New GRN
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* The reconciliation this module exists to make answerable: what
+              has arrived that nobody has invoiced, and what has been invoiced
+              that never arrived. */}
+          <Button variant="outline" asChild>
+            <Link href="/dashboard/reports/gr-ir">
+              <Scale className="h-4 w-4 mr-1.5" />
+              GR/IR
+            </Link>
+          </Button>
+          <Button asChild>
+            <Link href="/dashboard/grn/create">
+              <Plus className="h-4 w-4 mr-1.5" />
+              New GRN
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* @ts-expect-error Async Server Component */}

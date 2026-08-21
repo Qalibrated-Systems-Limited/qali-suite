@@ -319,6 +319,80 @@ suite("procurement actions (end to end)", () => {
       expect(listed).toHaveLength(1);
     });
 
+    /**
+     * The path the buttons actually take.
+     *
+     * GRNActions signs without sending line decisions — the Mongo action took
+     * `lineDecisions = null` and fell back to accepting what arrived. Getting
+     * this wrong is silent: the receipt finalises, admits nothing, posts no
+     * entry, and leaves the goods on hold.
+     */
+    it("accepts what arrived when nobody decided a line", async () => {
+      const { purchaseOrderId, lineId } = await openOrderWithLine();
+      asRole("Storekeeper");
+      const created = await grnActions.createGoodsReceiptPg(
+        null,
+        receiptForm(receiptBody({ purchaseOrderId, lineId, receivedQty: 100 })),
+      );
+      await grnActions.submitGoodsReceiptPg(created.goodsReceiptId);
+
+      // No recordLineDecisionsPg call — straight to the two signatures.
+      asRole("Sales Manager");
+      await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "sales");
+      asRole("Finance Manager");
+      const done = await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "finance");
+
+      expect(done.success).toBe(true);
+      expect(done.journalEntryId).toBeTruthy();
+
+      const [line] = await admin`SELECT accepted_quantity::text AS accepted, line_status
+                                   FROM goods_receipt_lines
+                                  WHERE goods_receipt_id = ${created.goodsReceiptId}`;
+      expect(line.accepted).toBe("100.0000");
+      expect(line.line_status).toBe("accepted");
+
+      const [product] = await admin`SELECT quantity_on_hold::text AS on_hold,
+                                           quantity_available::text AS available
+                                      FROM products WHERE id = ${widgetId}`;
+      expect(product.on_hold).toBe("0.0000");
+      expect(product.available).toBe("100.0000");
+    });
+
+    it("leaves an explicitly held line held, and admits the rest", async () => {
+      const { purchaseOrderId, lineId } = await openOrderWithLine();
+      asRole("Storekeeper");
+      const created = await grnActions.createGoodsReceiptPg(
+        null,
+        receiptForm(receiptBody({ purchaseOrderId, lineId, receivedQty: 100 })),
+      );
+      await grnActions.submitGoodsReceiptPg(created.goodsReceiptId);
+
+      const lines = await admin`SELECT id FROM goods_receipt_lines
+                                 WHERE goods_receipt_id = ${created.goodsReceiptId}`;
+      asRole("Finance Manager");
+      const decisions = new FormData();
+      decisions.set("data", JSON.stringify([
+        { goodsReceiptLineId: lines[0].id, acceptedQuantity: 0, lineStatus: "hold" },
+      ]));
+      await grnActions.recordLineDecisionsPg(created.goodsReceiptId, null, decisions);
+
+      asRole("Sales Manager");
+      await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "sales");
+      asRole("Finance Manager");
+      const done = await grnActions.acceptGoodsReceiptPg(created.goodsReceiptId, "finance");
+      expect(done.success).toBe(true);
+      // Nothing bought: a held line awaits its disposition.
+      expect(done.journalEntryId).toBeNull();
+
+      const [line] = await admin`SELECT line_status FROM goods_receipt_lines
+                                  WHERE goods_receipt_id = ${created.goodsReceiptId}`;
+      expect(line.line_status).toBe("hold");
+
+      const [product] = await admin`SELECT quantity_on_hold::text AS on_hold
+                                      FROM products WHERE id = ${widgetId}`;
+      expect(product.on_hold).toBe("100.0000");
+    });
+
     it("posts the clearing entry when the second signature lands", async () => {
       const { purchaseOrderId, lineId } = await openOrderWithLine();
       asRole("Storekeeper");

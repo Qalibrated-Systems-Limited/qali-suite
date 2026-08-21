@@ -1,4 +1,4 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import { goodsReceipts, goodsReceiptLines } from "../schema/goodsReceipts";
 import { bills } from "../schema/bills";
@@ -689,6 +689,35 @@ export async function finaliseAcceptance(
       `${missing} has not signed this receipt yet. The SOP requires both.`,
     );
   }
+
+  /**
+   * A line nobody decided on is accepted in full.
+   *
+   * Both signatories have signed the receipt, and what the receipt RECORDS is
+   * what arrived — so silence on a line means nobody objected to it, not that
+   * nothing was accepted. Rejecting or holding a line is the deliberate act,
+   * and `recordLineDecisions` is where it is made.
+   *
+   * This is also the source's behaviour: acceptGRN takes `lineDecisions = null`
+   * and falls back to `decision?.acceptedQty ?? line.receivedQty`, and the UI
+   * passes null on the ordinary path. Without it, accepting a receipt through
+   * the buttons would admit nothing, post no entry, and strand the goods on
+   * hold — which is what the absence of a caller for recordLineDecisions
+   * revealed.
+   */
+  await tx
+    .update(goodsReceiptLines)
+    .set({
+      acceptedQuantity: sql`${goodsReceiptLines.receivedQuantity}`,
+      lineStatus: "accepted",
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(goodsReceiptLines.goodsReceiptId, goodsReceiptId),
+        eq(goodsReceiptLines.lineStatus, "pending"),
+      ),
+    );
 
   const lines = await getLines(tx, goodsReceiptId);
 
