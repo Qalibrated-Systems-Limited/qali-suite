@@ -3,7 +3,7 @@
 import { useState, useEffect, useTransition } from "react";
 import { Clock, LogIn, LogOut, Loader2, AlertCircle, MapPin, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { clockIn, clockOut, getMyTodayAttendance } from "@/app/mongodb/actions/hr-attendance-actions";
+import { clockIn, clockOut } from "@/app/db/actions/hr-attendance-actions";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -47,8 +47,8 @@ const STATUS_STYLE = {
   present:   "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
   late:      "bg-amber-500/15 text-amber-700 dark:text-amber-400",
   absent:    "bg-red-500/15 text-red-700 dark:text-red-400",
-  "half-day":"bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  "on-leave":"bg-purple-500/15 text-purple-700 dark:text-purple-400",
+  half_day:  "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  on_leave:  "bg-purple-500/15 text-purple-700 dark:text-purple-400",
 };
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -57,17 +57,17 @@ const STATUS_STYLE = {
 // Initialised from a server-side snapshot; keeps UI in sync client-side.
 // ══════════════════════════════════════════════════════════════════════════
 export default function ClockInWidget({ initial }) {
-  // `initial` = { profileId, record, config, noProfile }  (serialised from server)
-  const [record, setRecord]   = useState(initial?.record || null);
-  const [error, setError]     = useState(null);
+  // `initial` = { employee, today } from getMyAttendanceToday()
+  const [record, setRecord] = useState(initial?.today?.record || null);
+  const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [isPending, startTransition] = useTransition();
 
-  const profileId   = initial?.profileId;
-  const needsGeo    = initial?.config?.geoFenceEnabled;
-  const needsIpNote = initial?.config?.ipWhitelistEnabled;
+  const needsGeo = initial?.today?.geofenceEnabled;
+  const needsIpNote = initial?.today?.ipWhitelistEnabled;
 
-  if (initial?.noProfile) return null; // Not an employee — don't show widget
+  // Nobody without an employee record has anything to clock in against.
+  if (!initial?.employee) return null;
 
   // ── Acquire GPS coords if geofence is enabled ──────────────────────────
   function getLocation() {
@@ -87,9 +87,10 @@ export default function ClockInWidget({ initial }) {
     setSuccess(null);
     startTransition(async () => {
       const location = await getLocation();
-      // Best-effort IP detection: the server reads the real IP from request headers.
-      // We pass undefined here — the server action will capture it via Next.js internals.
-      const result = await clockIn({ profileId, method: "web", location });
+      // The IP is NOT sent from here: the action reads it from the request
+      // headers, so an IP whitelist cannot be satisfied by a client that
+      // simply claims the right address.
+      const result = await clockIn({ method: "web", location });
       if (result.success) {
         setRecord({ checkIn: result.checkIn, checkOut: null, status: result.status });
         setSuccess(`Clocked in at ${fmtTime(result.checkIn)}`);
@@ -104,14 +105,20 @@ export default function ClockInWidget({ initial }) {
     setError(null);
     setSuccess(null);
     startTransition(async () => {
-      const result = await clockOut({ profileId, method: "web" });
+      const result = await clockOut();
       if (result.success) {
         setRecord((prev) => ({
           ...prev,
           checkOut: new Date().toISOString(),
           hoursWorked: result.hoursWorked,
+          status: result.status,
         }));
-        setSuccess(`Clocked out · ${result.hoursWorked.toFixed(1)}h worked${result.overtime > 0 ? ` · OT: ${result.overtime.toFixed(1)}h` : ""}`);
+        setSuccess(
+          `Clocked out · ${result.hoursWorked.toFixed(1)}h worked` +
+            (result.overtimeHours > 0
+              ? ` · ${result.overtimeHours.toFixed(1)}h overtime`
+              : ""),
+        );
       } else {
         setError(result.error);
       }
@@ -140,7 +147,7 @@ export default function ClockInWidget({ initial }) {
               </p>
               {record?.status && (
                 <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium capitalize ${STATUS_STYLE[record.status] || "bg-muted text-muted-foreground"}`}>
-                  {record.status?.replace("-", " ")}
+                  {record.status?.replace("_", " ")}
                 </span>
               )}
             </div>

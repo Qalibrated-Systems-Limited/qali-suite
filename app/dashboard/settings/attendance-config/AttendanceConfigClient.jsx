@@ -3,7 +3,7 @@
 import { useActionState, useState } from "react";
 import { Loader2, AlertCircle, CheckCircle2, MapPin, Wifi, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { saveAttendanceConfig } from "@/app/mongodb/actions/hr-attendance-config-actions";
+import { saveAttendancePolicy } from "@/app/db/actions/hr-attendance-actions";
 
 const initial = { success: false, error: null };
 
@@ -40,7 +40,7 @@ function Field({ label, hint, children }) {
 const inputCls = "w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary";
 
 export default function AttendanceConfigClient({ config }) {
-  const [state, formAction, isPending] = useActionState(saveAttendanceConfig, initial);
+  const [state, formAction, isPending] = useActionState(saveAttendancePolicy, initial);
 
   const defaults = config || {};
   const [ipEnabled, setIpEnabled]   = useState(defaults.ipEnabled  || false);
@@ -86,6 +86,18 @@ export default function AttendanceConfigClient({ config }) {
           <Field label="Overtime Rate Multiplier" hint="e.g. 1.5 = time-and-a-half">
             <input name="overtimeRateMultiplier" type="number" min="1" max="3" step="0.1" defaultValue={defaults.overtimeRateMultiplier ?? 1.5} className={inputCls} />
           </Field>
+          {/* The zone every shift time and day boundary is read in. It has
+              always been stored and never been settable, so a tenant outside
+              East Africa had no way to correct it. */}
+          <Field label="Timezone" hint="Shift times and the working day are read in this zone">
+            <input
+              name="timezone"
+              type="text"
+              defaultValue={defaults.timezone || "Africa/Nairobi"}
+              placeholder="Africa/Nairobi"
+              className={inputCls}
+            />
+          </Field>
         </div>
 
         <Field label="Allowed Clock-In Methods" hint="Uncheck to block specific methods">
@@ -94,7 +106,8 @@ export default function AttendanceConfigClient({ config }) {
               <label key={key} className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
                 <input
                   type="checkbox"
-                  name={`method_${key}`}
+                  name="allowedMethods"
+                  value={key}
                   defaultChecked={defaults.allowedMethods ? defaults.allowedMethods.includes(key) : true}
                   className="rounded border-border"
                 />
@@ -110,7 +123,8 @@ export default function AttendanceConfigClient({ config }) {
         <label className="flex items-center gap-2 text-sm font-medium text-foreground cursor-pointer">
           <input
             type="checkbox"
-            name="ipEnabled"
+            name="ipWhitelistEnabled"
+            value="true"
             checked={ipEnabled}
             onChange={(e) => setIpEnabled(e.target.checked)}
             className="rounded border-border"
@@ -125,7 +139,7 @@ export default function AttendanceConfigClient({ config }) {
               hint="One IP per line. Use exact IPs (e.g. 41.139.0.5) or prefixes (e.g. 192.168.1.) to match a subnet."
             >
               <textarea
-                name="ips"
+                name="ipWhitelist"
                 rows={4}
                 defaultValue={defaults.ips || ""}
                 placeholder={"41.139.0.5\n192.168.1.\n10.0.0."}
@@ -133,7 +147,7 @@ export default function AttendanceConfigClient({ config }) {
               />
             </Field>
             <Field label="Network Label" hint="Shown to employees when their IP is rejected">
-              <input name="ipDescription" type="text" defaultValue={defaults.ipDescription || "Office network"} className={inputCls} />
+              <input name="ipWhitelistDescription" type="text" defaultValue={defaults.ipDescription || "Office network"} className={inputCls} />
             </Field>
           </div>
         )}
@@ -148,7 +162,8 @@ export default function AttendanceConfigClient({ config }) {
         <label className="flex items-center gap-2 text-sm font-medium text-foreground cursor-pointer">
           <input
             type="checkbox"
-            name="geoEnabled"
+            name="geofenceEnabled"
+            value="true"
             checked={geoEnabled}
             onChange={(e) => setGeoEnabled(e.target.checked)}
             className="rounded border-border"
@@ -160,10 +175,10 @@ export default function AttendanceConfigClient({ config }) {
           <div className="space-y-4 pt-1">
             <div className="grid grid-cols-2 gap-4">
               <Field label="Office Latitude">
-                <input id="geoLat" name="geoLat" type="number" step="any" defaultValue={defaults.geoLat || ""} placeholder="-1.286389" className={inputCls} />
+                <input id="geoLat" name="geofenceLat" type="number" step="any" defaultValue={defaults.geoLat || ""} placeholder="-1.286389" className={inputCls} />
               </Field>
               <Field label="Office Longitude">
-                <input id="geoLng" name="geoLng" type="number" step="any" defaultValue={defaults.geoLng || ""} placeholder="36.817223" className={inputCls} />
+                <input id="geoLng" name="geofenceLng" type="number" step="any" defaultValue={defaults.geoLng || ""} placeholder="36.817223" className={inputCls} />
               </Field>
             </div>
             <button
@@ -176,10 +191,10 @@ export default function AttendanceConfigClient({ config }) {
 
             <div className="grid grid-cols-2 gap-4">
               <Field label="Radius (metres)" hint="Employees must be within this distance">
-                <input name="geoRadius" type="number" min="50" max="5000" defaultValue={defaults.geoRadius || 200} className={inputCls} />
+                <input name="geofenceRadiusMetres" type="number" min="50" max="5000" defaultValue={defaults.geoRadius || 200} className={inputCls} />
               </Field>
               <Field label="Location Label" hint="Shown in error messages">
-                <input name="geoLabel" type="text" defaultValue={defaults.geoLabel || "Office"} placeholder="Head Office" className={inputCls} />
+                <input name="geofenceLabel" type="text" defaultValue={defaults.geoLabel || "Office"} placeholder="Head Office" className={inputCls} />
               </Field>
             </div>
           </div>

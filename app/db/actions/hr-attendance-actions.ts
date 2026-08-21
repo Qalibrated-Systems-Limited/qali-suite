@@ -163,10 +163,14 @@ export async function saveAttendancePolicy(
   _prevState: unknown,
   formData: FormData,
 ): Promise<ActionResult> {
+  // Checkboxes with the same name arrive as several entries; a textarea
+  // arrives as one string with newlines or commas. Both shapes end up as a
+  // list.
   const list = (key: string) =>
-    str(formData, key)
-      .split(",")
-      .map((s) => s.trim())
+    formData
+      .getAll(key)
+      .flatMap((v) => (typeof v === "string" ? v.split(/[\n,]/) : []))
+      .map((v) => v.trim())
       .filter(Boolean);
 
   try {

@@ -2,43 +2,38 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
-import AttendanceConfig from "@/app/models/attendanceConfig";
+import { getAttendancePolicy } from "@/app/db/actions/hr-attendance-actions";
+import { HR_ADMIN_ROLES } from "@/lib/utils/role-gates";
+import { roleAllowed } from "@/lib/permissions";
 import AttendanceConfigClient from "./AttendanceConfigClient";
 
 export const metadata = { title: "Attendance Config | Settings" };
 
-async function loadConfig() {
-  await dbConnect();
-  const { companyId } = await getTenantContext();
-  const config = await AttendanceConfig.getActive(companyId);
-  if (!config) return null;
-  // Serialise for client
-  return {
-    shiftStart:              config.shiftStart || "08:00",
-    shiftEnd:                config.shiftEnd || "17:00",
-    standardHours:           config.standardHours ?? 8,
-    lateGraceMinutes:        config.lateGraceMinutes ?? 15,
-    overtimeRateMultiplier:  config.overtimeRateMultiplier ?? 1.5,
-    allowedMethods:          config.enforcement?.allowedMethods || ["web","mobile","qr","biometric","manual"],
-    ipEnabled:               config.enforcement?.ipWhitelist?.enabled || false,
-    ips:                     (config.enforcement?.ipWhitelist?.ips || []).join("\n"),
-    ipDescription:           config.enforcement?.ipWhitelist?.description || "Office network",
-    geoEnabled:              config.enforcement?.geoFence?.enabled || false,
-    geoLat:                  config.enforcement?.geoFence?.lat ?? "",
-    geoLng:                  config.enforcement?.geoFence?.lng ?? "",
-    geoRadius:               config.enforcement?.geoFence?.radiusMeters ?? 200,
-    geoLabel:                config.enforcement?.geoFence?.label || "Office",
-  };
-}
-
 export default async function AttendanceConfigPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!["SuperAdmin", "Admin", "HR Manager"].includes(session.user.role)) redirect("/dashboard/settings");
+  if (!roleAllowed(session.user.role, HR_ADMIN_ROLES)) redirect("/dashboard/settings");
 
-  const config = await loadConfig();
+  // Always a policy: a company with none gets the defaults, which is what the
+  // clock-in path uses too.
+  const policy = await getAttendancePolicy();
+  const config = {
+    shiftStart: policy.shiftStart,
+    shiftEnd: policy.shiftEnd,
+    standardHours: policy.standardHours,
+    lateGraceMinutes: policy.lateGraceMinutes,
+    overtimeRateMultiplier: policy.overtimeRateMultiplier,
+    allowedMethods: policy.allowedMethods,
+    ipEnabled: policy.ipWhitelistEnabled,
+    ips: policy.ipWhitelist.join("\n"),
+    ipDescription: policy.ipWhitelistDescription,
+    geoEnabled: policy.geofenceEnabled,
+    geoLat: policy.geofenceLat ?? "",
+    geoLng: policy.geofenceLng ?? "",
+    geoRadius: policy.geofenceRadiusMetres,
+    geoLabel: policy.geofenceLabel,
+    timezone: policy.timezone,
+  };
 
   return (
     <div className="space-y-6 p-4 sm:p-6 max-w-2xl">
@@ -52,7 +47,12 @@ export default async function AttendanceConfigPage() {
 
       <div>
         <h1 className="text-xl font-bold text-foreground sm:text-2xl">Attendance Configuration</h1>
-        <p className="text-sm text-muted-foreground">Shift hours, late threshold, IP restriction, and geofencing.</p>
+        <p className="text-sm text-muted-foreground">
+          Shift hours, the late threshold, and where clocking in is allowed
+          from. A whitelist or a geofence that is switched on must actually
+          have addresses or a location — switched on and empty used to enforce
+          nothing.
+        </p>
       </div>
 
       <AttendanceConfigClient config={config} />
