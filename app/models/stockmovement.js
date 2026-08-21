@@ -162,9 +162,12 @@ const stockMovementSchema = new Schema(
         type: Schema.Types.ObjectId,
         ref: "ItemCheckout",
       },
+      // No `ref`: the PurchaseOrder model was deleted with the procurement
+      // port. Orders live in Postgres, and nothing populates this path — but a
+      // ref naming a model that no longer exists is a MissingSchemaError
+      // waiting for whoever adds the first .populate() to it.
       purchaseOrderId: {
         type: Schema.Types.ObjectId,
-        ref: "PurchaseOrder",
       },
       // NEW: Finance documents
       billId: {

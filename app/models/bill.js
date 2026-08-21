@@ -132,7 +132,8 @@ const billLineSchema = new Schema(
 
     // PO Reference (if from Purchase Order)
     poReference: {
-      poId: { type: Schema.Types.ObjectId, ref: "PurchaseOrder" },
+      // No `ref`: PurchaseOrder was deleted with the procurement port.
+      poId: { type: Schema.Types.ObjectId },
       poNumber: String,
       poLineIndex: Number,
     },
@@ -256,7 +257,8 @@ const billSchema = new Schema(
     // PURCHASE ORDER REFERENCE (optional)
     // ==========================================
     purchaseOrder: {
-      poId: { type: Schema.Types.ObjectId, ref: "PurchaseOrder" },
+      // No `ref`: PurchaseOrder was deleted with the procurement port.
+      poId: { type: Schema.Types.ObjectId },
       poNumber: String,
     },
 
