@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
-import { getQuoteById } from "@/app/mongodb/queries/quote-queries";
+import { getQuoteForDisplayPg } from "@/app/db/actions/quote-actions";
 import {
   fetchActiveCustomers,
   fetchAvailableProducts,
@@ -37,7 +37,7 @@ export default async function UpdateQuotePage({ params }) {
     );
   }
 
-  const quote = await getQuoteById(id);
+  const quote = await getQuoteForDisplayPg(id);
 
   if (!quote) {
     notFound();

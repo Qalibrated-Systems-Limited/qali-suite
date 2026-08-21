@@ -112,6 +112,57 @@ suite("quote actions (end to end)", () => {
     expect(row.status).toBe("draft");
   });
 
+  /**
+   * The bug the wiring closed.
+   *
+   * The screens called the Mongo actions while the list page counted Postgres,
+   * so a quote raised through the UI was written to one store and searched for
+   * in the other — invisible on the page it was created from. This is the round
+   * trip that was broken: raise it the way the form does, then find it the way
+   * the list does.
+   */
+  it("puts a new quote where the list page looks for it", async () => {
+    const res = await quoteActions.createQuotePg(
+      null,
+      form({ customerId, items: [serviceItem] }),
+    );
+    expect(res.success).toBe(true);
+
+    const found = await quoteActions.searchQuotesPg({ query: res.quoteNumber });
+    expect(found.rows).toHaveLength(1);
+    expect(found.rows[0]._id ?? found.rows[0].id).toBe(res.quoteId);
+
+    const stats = await quoteActions.getQuoteStatsPg();
+    expect(Number(stats.total)).toBeGreaterThan(0);
+  });
+
+  /**
+   * The customer snapshot used to be read from `formData.get("customerName")`
+   * with a fallback of the literal "Customer" — and the form posts a single
+   * `data` blob with no such field. Nothing caught it because nothing called
+   * the action.
+   */
+  it("snapshots the real customer, not the string \"Customer\"", async () => {
+    await admin`UPDATE parties SET email = 'buyer@acme.co', phone = '+254700000001',
+                    address_line1 = 'Enterprise Rd', city = 'Nairobi'
+                  WHERE id = ${customerId}`;
+
+    const res = await quoteActions.createQuotePg(
+      null,
+      form({ customerId, items: [serviceItem] }),
+    );
+
+    const [row] = await admin`SELECT customer_name, customer_email, customer_phone,
+                                     customer_address
+                                FROM quotes WHERE id = ${res.quoteId}`;
+    expect(row.customer_name).toBe("Acme Ltd");
+    expect(row.customer_name).not.toBe("Customer");
+    // Every one of these came off a formData field the form does not post.
+    expect(row.customer_email).toBe("buyer@acme.co");
+    expect(row.customer_phone).toBe("+254700000001");
+    expect(row.customer_address).toBe("Enterprise Rd, Nairobi");
+  });
+
   it("refuses a payload the schema rejects, with errors on the fields", async () => {
     const res = await quoteActions.createQuotePg(null, form({ customerId, items: [] }));
     expect(res.success).toBe(false);

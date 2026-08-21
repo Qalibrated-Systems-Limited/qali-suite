@@ -271,6 +271,129 @@ export async function getQuoteDetail(tx: Tx, quoteId: string) {
   };
 }
 
+/**
+ * A quote as the detail page, the update form and the PDF render it.
+ *
+ * Shaped to the page rather than to the schema — `customer.name`,
+ * `items[].product.sku`, `salesPerson.commission.rate`, `subtotal` — so the
+ * markup did not have to change with the data source. `getBillDetail` does the
+ * same thing for the same reason (0016), and the three consumers here read one
+ * shape between them rather than three.
+ *
+ * This exists because the quotes port stopped one step short: the repository,
+ * the actions and their tests all landed, and then nothing was pointed at
+ * them. The screens kept calling the Mongo actions, so quotes were written to
+ * one store while the list page counted the other — the §9E seam, inside the
+ * module §9E was written about.
+ *
+ * `_id` alongside `id` because the components pass `quote._id` into every
+ * action and PDF button. It is the same uuid; the alias is what lets those
+ * call sites stay as they are.
+ */
+export async function getQuoteForDisplay(tx: Tx, quoteId: string) {
+  const detail = await getQuoteDetail(tx, quoteId);
+  if (!detail) return null;
+
+  return {
+    _id: detail.id,
+    id: detail.id,
+    companyId: detail.companyId,
+    quoteNumber: detail.quoteNumber,
+    status: detail.status,
+    isExpired: detail.isExpired,
+    quoteDate: detail.quoteDate,
+    validUntil: detail.validUntil,
+    title: detail.title,
+    reference: detail.reference,
+    currency: detail.currency,
+    notes: detail.notes,
+    internalNotes: detail.internalNotes,
+    termsAndConditions: detail.terms,
+
+    customer: {
+      partyId: detail.customerId,
+      _id: detail.customerId,
+      name: detail.customerName,
+      email: detail.customerEmail,
+      phone: detail.customerPhone,
+      address: detail.customerAddress,
+      taxPin: detail.customerTaxPin,
+    },
+
+    /**
+     * The rate is the agreed term and lives on the deal; the amount is
+     * arithmetic and is a generated column (0041). Mongo stored both and
+     * recomputed the amount in a pre-save hook, so a quote edited by any path
+     * that skipped the hook kept a commission for a total it no longer had.
+     */
+    salesPerson: detail.salespersonPartyId
+      ? {
+          partyId: detail.salespersonPartyId,
+          name: detail.salespersonName,
+          employeeNumber: detail.salespersonEmployeeNumber,
+          commission: {
+            rate: Number(detail.commissionRate),
+            amount: Number(detail.commissionAmount ?? 0),
+          },
+        }
+      : null,
+
+    items: detail.lines.map((l) => ({
+      _id: l.id,
+      lineNumber: l.lineNumber,
+      itemType: l.itemType,
+      serviceCategory: l.serviceCategory,
+      // Null for a service line, and for a product since deleted — the
+      // snapshot is what keeps the line readable either way (§9.4).
+      product: l.productId
+        ? { id: l.productId, _id: l.productId, name: l.productName, sku: l.productSku }
+        : null,
+      description: l.description,
+      /**
+       * One description per line, on purpose. The form sends a short name and
+       * a longer `notes` for service lines, and validation/quotes.ts folds
+       * them — "notes is the longer text where the form sends both" — so there
+       * is no second column to read back. Null rather than absent because
+       * QuoteItemsTable dereferences it.
+       */
+      notes: null,
+      unit: l.unit,
+      quantity: Number(l.quantity),
+      unitPrice: Number(l.unitPrice),
+      discountPercentage: Number(l.discountPercentage),
+      taxRate: Number(l.taxRate),
+      amount: Number(l.netAmount ?? 0),
+      taxAmount: Number(l.taxAmount ?? 0),
+      lineTotal: Number(l.lineTotal ?? 0),
+      invoicedQuantity: Number(l.invoicedQuantity),
+    })),
+
+    subtotal: Number(detail.subtotal),
+    totalDiscount: Number(detail.discountTotal),
+    taxAmount: Number(detail.taxTotal),
+    total: Number(detail.total),
+
+    // Each is null until it happened, which is what the page keys its timeline
+    // off. `sentBy` comes from the delivery log rather than a column.
+    sentAt: detail.sentAt,
+    sentBy: detail.sentByName ? { name: detail.sentByName } : null,
+    acceptedAt: detail.acceptedAt,
+    acceptedBy: detail.acceptedByName ? { name: detail.acceptedByName } : null,
+    rejectedAt: detail.rejectedAt,
+    rejectionReason: detail.rejectionReason,
+    cancelledAt: detail.cancelledAt,
+    cancellationReason: detail.cancellationReason,
+    convertedAt: detail.convertedAt,
+
+    createdBy: detail.createdByName ? { name: detail.createdByName } : null,
+    createdAt: detail.createdAt,
+    updatedAt: detail.updatedAt,
+
+    invoices: detail.invoices,
+    delivery: detail.delivery,
+  };
+}
+
 export async function listQuotes(
   tx: Tx,
   opts: { limit?: number; offset?: number; status?: string; customerId?: string } = {},

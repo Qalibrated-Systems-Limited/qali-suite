@@ -28,13 +28,30 @@ import {
   ArrowRightCircle,
   Copy,
 } from "lucide-react";
-import { sendQuote, acceptQuote, rejectQuote, cancelQuote } from "@/app/mongodb/actions/quote-actions";
+import {
+  sendQuoteToCustomerPg,
+  acceptQuotePg,
+  rejectQuotePg,
+  cancelQuotePg,
+} from "@/app/db/actions/quote-actions";
 import { toast } from "sonner";
 
 // Action Button with form wrapper
 function QuoteActionButton({ quoteId, action, label, icon: Icon, className }) {
   const { pending } = useFormStatus();
-  const actionWithId = action.bind(null, quoteId);
+
+  /**
+   * Called with the id ALONE, deliberately.
+   *
+   * A <form action> hands its action a FormData as the next argument, and
+   * these actions read (quoteId, reason) — so `action.bind(null, quoteId)`
+   * passes a FormData object where a rejection or cancellation reason belongs,
+   * and it is stored as one. The table offers no reason field, so the right
+   * value is no value.
+   */
+  const actionWithId = async () => {
+    await action(quoteId);
+  };
 
   return (
     <form action={actionWithId}>
@@ -259,7 +276,7 @@ export function QuotesTable({ quotes }) {
                             <DropdownMenuSeparator />
                             <QuoteActionButton
                               quoteId={quote._id}
-                              action={sendQuote}
+                              action={sendQuoteToCustomerPg}
                               label="Send Quote"
                               icon={Send}
                               className="text-blue-600 dark:text-blue-400"
@@ -273,14 +290,14 @@ export function QuotesTable({ quotes }) {
                             <DropdownMenuSeparator />
                             <QuoteActionButton
                               quoteId={quote._id}
-                              action={acceptQuote}
+                              action={acceptQuotePg}
                               label="Mark Accepted"
                               icon={ThumbsUp}
                               className="text-green-600 dark:text-green-400"
                             />
                             <QuoteActionButton
                               quoteId={quote._id}
-                              action={rejectQuote}
+                              action={rejectQuotePg}
                               label="Mark Rejected"
                               icon={ThumbsDown}
                               className="text-red-600 dark:text-red-400"
@@ -322,7 +339,7 @@ export function QuotesTable({ quotes }) {
                             <DropdownMenuSeparator />
                             <QuoteActionButton
                               quoteId={quote._id}
-                              action={cancelQuote}
+                              action={cancelQuotePg}
                               label="Cancel Quote"
                               icon={XCircle}
                               className="text-red-600 dark:text-red-400"
@@ -387,7 +404,7 @@ export function QuotesTable({ quotes }) {
                       <DropdownMenuSeparator />
                       <QuoteActionButton
                         quoteId={quote._id}
-                        action={sendQuote}
+                        action={sendQuoteToCustomerPg}
                         label="Send Quote"
                         icon={Send}
                         className="text-blue-600 dark:text-blue-400"

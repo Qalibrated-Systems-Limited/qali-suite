@@ -30,11 +30,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
-  sendQuote,
-  acceptQuote,
-  rejectQuote,
-  cancelQuote,
-} from "@/app/mongodb/actions/quote-actions";
+  sendQuoteToCustomerPg,
+  acceptQuotePg,
+  rejectQuotePg,
+  cancelQuotePg,
+} from "@/app/db/actions/quote-actions";
 import { ConvertToInvoiceDialog } from "./ConvertToInvoiceDialog";
 import { QuotePDFDownloadButton } from "./QuotePDFButton";
 import { createSalesOrderFromQuote } from "@/app/mongodb/actions/sales-order-actions";
@@ -70,11 +70,22 @@ export function QuoteDetailActions({
   const [rejectReason, setRejectReason] = useState("");
   const [cancelReason, setCancelReason] = useState("");
 
-  // Bind quote ID to actions
-  const sendQuoteWithId = sendQuote.bind(null, quote._id);
-  const acceptQuoteWithId = acceptQuote.bind(null, quote._id);
-  const rejectQuoteWithId = rejectQuote.bind(null, quote._id, rejectReason);
-  const cancelQuoteWithId = cancelQuote.bind(null, quote._id, cancelReason);
+  /**
+   * Called with exactly the arguments each action takes, and no more.
+   *
+   * `useActionState` invokes its action as (prevState, formData), so
+   * `acceptQuotePg.bind(null, quote._id)` becomes
+   * `acceptQuotePg(id, prevState, formData)` — and the second parameter of
+   * that action is `acceptedByName`. The first click passes null and looks
+   * fine; a second passes the previous result object into a text column.
+   *
+   * The reasons are still captured: these close over the state the dialogs
+   * write, exactly as the bound versions did.
+   */
+  const sendQuoteWithId = async () => sendQuoteToCustomerPg(quote._id);
+  const acceptQuoteWithId = async () => acceptQuotePg(quote._id);
+  const rejectQuoteWithId = async () => rejectQuotePg(quote._id, rejectReason);
+  const cancelQuoteWithId = async () => cancelQuotePg(quote._id, cancelReason);
 
   // useActionState for form submissions
   const [sendState, sendAction, isSendPending] = useActionState(

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useActionState } from "react";
+import { useState, useEffect, useActionState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowRightCircle,
   Loader2,
@@ -23,12 +24,21 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/utils";
-import { convertQuoteToInvoice } from "@/app/mongodb/actions/quote-actions";
+import { convertQuoteToInvoiceFormPg } from "@/app/db/actions/quote-actions";
 
 export function ConvertToInvoiceDialog({ quote, open, onOpenChange }) {
   // Bind quote ID to action
-  const convertWithId = convertQuoteToInvoice.bind(null, quote._id);
+  const router = useRouter();
+  const convertWithId = convertQuoteToInvoiceFormPg.bind(null, quote._id);
   const [state, formAction, isPending] = useActionState(convertWithId, null);
+
+  // The Postgres action returns the new invoice rather than redirecting, so
+  // the navigation the success alert promises happens here.
+  useEffect(() => {
+    if (state?.success && state.invoiceId) {
+      router.push(`/dashboard/invoices/${state.invoiceId}`);
+    }
+  }, [state, router]);
 
   // Selected items - default all items with available quantity
   const [selectedItems, setSelectedItems] = useState(() => {
@@ -104,7 +114,6 @@ export function ConvertToInvoiceDialog({ quote, open, onOpenChange }) {
     dueDate,
   });
 
-  // Server action handles redirect on success
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

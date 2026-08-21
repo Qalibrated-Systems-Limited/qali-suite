@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { canSeeSalesNav } from "@/lib/permissions";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { getQuoteById } from "@/app/mongodb/queries/quote-queries";
+import { getQuoteForDisplayPg } from "@/app/db/actions/quote-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -56,7 +56,7 @@ export default async function QuoteDetailPage({ params, searchParams }) {
   // Independent queries — fetch in parallel so the page render (which is on
   // the critical path of every action's revalidation) isn't serialized.
   const [quote, companyRaw] = await Promise.all([
-    getQuoteById(id),
+    getQuoteForDisplayPg(id),
     user.companyId ? getCompanyById(user.companyId) : Promise.resolve(null),
   ]);
 

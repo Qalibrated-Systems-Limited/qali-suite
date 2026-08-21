@@ -8,6 +8,9 @@ import * as quotes from "../repositories/quotes";
 import * as partiesRepo from "../repositories/parties";
 import * as productsRepo from "../repositories/products";
 import { quoteDataSchema, toRepositoryInput } from "../validation/quotes";
+import { after } from "next/server";
+import { getCompanyForDocuments } from "../platform";
+import { sendQuoteEmail } from "@/lib/email";
 
 /**
  * Quote actions on Postgres (§9E).
@@ -46,6 +49,8 @@ function toActionError(err: unknown): string {
     message.includes("Cancel it instead") ||
     message.includes("cannot be cancelled") ||
     message.includes("Quote not found") ||
+    message.includes("no longer exists") ||
+    message.includes("no email on the quote") ||
     message.includes("permission")
   ) {
     return message;
@@ -84,20 +89,40 @@ export async function createQuotePg(
   try {
     const quote = await withAuthorizedTenant(
       [...INVOICE_WRITE_ROLES],
-      (tx, { user, companyId }) =>
-        quotes.createQuote(tx, {
+      async (tx, { user, companyId }) => {
+        /**
+         * The customer snapshot is resolved HERE, from the party row.
+         *
+         * It used to be read off `formData.get("customerName")` with a
+         * fallback of the literal string "Customer" — and CreateQuoteForm
+         * posts a single `data` blob and no such field, so every quote raised
+         * through this action would have been snapshotted as being for
+         * "Customer", with no email, phone or address on the document. Nothing
+         * caught it because nothing called the action; the defect only became
+         * reachable when the screens were pointed at it.
+         *
+         * Reading the party is also the right answer independently: what the
+         * document says about the customer should come from the customer
+         * record under RLS, not from whatever the browser sent.
+         */
+        const customer = await partiesRepo.getParty(tx, parsed.data.customerId);
+        if (!customer) throw new Error("That customer no longer exists.");
+
+        return quotes.createQuote(tx, {
           companyId,
           ...toRepositoryInput(parsed.data),
-          // The customer's name is snapshotted on the quote; the repository
-          // needs it because the document is printed from the row, not a join.
-          customerName: String(formData.get("customerName") ?? "Customer"),
-          customerEmail: (formData.get("customerEmail") as string) || null,
-          customerPhone: (formData.get("customerPhone") as string) || null,
-          customerAddress: (formData.get("customerAddress") as string) || null,
+          customerName: customer.name,
+          customerEmail: customer.email,
+          customerPhone: customer.phone,
+          customerAddress:
+            [customer.addressLine1, customer.city].filter(Boolean).join(", ") ||
+            null,
+          customerTaxPin: customer.taxPin,
           createdById: user.id,
           createdByName: user.name,
           createdByRole: user.role,
-        }),
+        });
+      },
     );
 
     revalidatePath("/dashboard/quotes");
@@ -125,12 +150,28 @@ export async function updateQuotePg(
   try {
     const quote = await withAuthorizedTenant(
       [...INVOICE_WRITE_ROLES],
-      (tx, { user }) =>
-        quotes.updateQuote(tx, quoteId, {
+      async (tx, { user }) => {
+        // Re-snapshotted for the same reason create resolves it: the payload
+        // carries `customerId` and no name, and updateQuote falls back to the
+        // name already on the row — so moving a quote to a different customer
+        // would change the reference and leave the OLD name printed on the
+        // document. The reference and the snapshot move together or not at all.
+        const customer = await partiesRepo.getParty(tx, parsed.data.customerId);
+        if (!customer) throw new Error("That customer no longer exists.");
+
+        return quotes.updateQuote(tx, quoteId, {
           ...toRepositoryInput(parsed.data),
+          customerName: customer.name,
+          customerEmail: customer.email,
+          customerPhone: customer.phone,
+          customerAddress:
+            [customer.addressLine1, customer.city].filter(Boolean).join(", ") ||
+            null,
+          customerTaxPin: customer.taxPin,
           createdById: user.id,
           createdByName: user.name,
-        }),
+        });
+      },
     );
 
     revalidatePath("/dashboard/quotes");
@@ -181,6 +222,137 @@ export async function sendQuotePg(
   } catch (err) {
     return { success: false, error: toActionError(err) };
   }
+}
+
+/**
+ * Sends the quote to the customer: flip the status, render the PDF, email it,
+ * and record what happened to the message.
+ *
+ * `sendQuotePg` above records a delivery ATTEMPT and moves the quote on. It
+ * does not email, because the repository has no business knowing about Resend
+ * — but that left the screens with nothing to call, which is part of why they
+ * were still calling the Mongo action. This is the composite the button needs.
+ *
+ * Three things it does differently from the Mongo original.
+ *
+ * The recipient comes from the QUOTE, not from a fresh lookup of the party.
+ * `customer_email` is snapshotted when the quote is raised (§9.4) — it is the
+ * address the document was drawn up for. Re-reading the party would send to
+ * whatever the record says today, which is a different question.
+ *
+ * The email goes out in `after()`, so the button returns immediately, and BOTH
+ * outcomes are recorded — a `delivered` row or a `failed` row with the reason.
+ * `document_deliveries` keeps one row per attempt (0041), so "what happened on
+ * the second try" is answerable; Mongo overwrote `lastDeliveryError` each time
+ * and could only ever describe the most recent one.
+ *
+ * A failure does NOT leave the quote as sent-but-undelivered with no trace:
+ * the repository refuses to advance the status on a failed attempt, so a quote
+ * nobody received is still a draft.
+ */
+export async function sendQuoteToCustomerPg(
+  quoteId: string,
+): Promise<ActionResult> {
+  try {
+    const prepared = await withAuthorizedTenant(
+      [...INVOICE_WRITE_ROLES],
+      async (tx, { user }) => {
+        const quote = await quotes.getQuoteForDisplay(tx, quoteId);
+        if (!quote) throw new Error("Quote not found");
+
+        const recipient = quote.customer.email?.trim();
+        if (!recipient) {
+          throw new Error(
+            "This customer has no email on the quote. Add one to the customer record, raise the quote again, and it will carry the address.",
+          );
+        }
+
+        // Queued, not sent: the message has not left yet. The `after()` block
+        // below records which it became.
+        await quotes.sendQuote(tx, quoteId, {
+          recipient,
+          status: "queued",
+          provider: "resend",
+          actorId: user.id,
+          actorName: user.name,
+        });
+
+        return { quote, recipient, user };
+      },
+    );
+
+    after(async () => {
+      const { quote, recipient, user } = prepared;
+      try {
+        const [{ renderToBuffer }, { QuotePDF }, company] = await Promise.all([
+          import("@react-pdf/renderer"),
+          import("@/lib/pdf"),
+          getCompanyForDocuments(String(quote.companyId ?? "")),
+        ]);
+
+        const pdfBuffer = await renderToBuffer(QuotePDF({ quote, company }));
+
+        await sendQuoteEmail({
+          to: recipient,
+          cc: undefined,
+          customMessage: undefined,
+          publicUrl: undefined,
+          replyTo: company?.email || undefined,
+          customerName: quote.customer.name,
+          senderCompany: company?.name || "Our Company",
+          quoteNumber: quote.quoteNumber,
+          quoteDate: quote.quoteDate,
+          validUntil: quote.validUntil,
+          total: quote.total,
+          currency: quote.currency || company?.settings?.currency || "KES",
+          pdfBuffer,
+        });
+
+        await withAuthorizedTenant([...INVOICE_WRITE_ROLES], (tx) =>
+          quotes.sendQuote(tx, quoteId, {
+            recipient,
+            status: "delivered",
+            provider: "resend",
+            actorId: user.id,
+            actorName: user.name,
+          }),
+        );
+      } catch (err) {
+        console.error("[sendQuoteToCustomerPg] delivery failed:", err);
+        await withAuthorizedTenant([...INVOICE_WRITE_ROLES], (tx) =>
+          quotes.sendQuote(tx, quoteId, {
+            recipient,
+            status: "failed",
+            provider: "resend",
+            error: err instanceof Error ? err.message : "Email send failed",
+            actorId: user.id,
+            actorName: user.name,
+          }),
+        ).catch((logErr) =>
+          console.error("[sendQuoteToCustomerPg] could not record the failure:", logErr),
+        );
+      }
+      revalidatePath(`/dashboard/quotes/${quoteId}`);
+    });
+
+    revalidatePath("/dashboard/quotes");
+    revalidatePath(`/dashboard/quotes/${quoteId}`);
+    return {
+      success: true,
+      quoteId,
+      quoteNumber: prepared.quote.quoteNumber,
+      message: `Quote ${prepared.quote.quoteNumber} sent to ${prepared.recipient}`,
+    };
+  } catch (err) {
+    return { success: false, error: toActionError(err) };
+  }
+}
+
+/** The quote as the detail page, the update form and the PDF want it. */
+export async function getQuoteForDisplayPg(quoteId: string) {
+  return withAuthorizedTenant([], (tx) =>
+    quotes.getQuoteForDisplay(tx, quoteId),
+  );
 }
 
 export async function acceptQuotePg(
@@ -327,6 +499,57 @@ export async function convertQuoteToInvoicePg(
  * invoice form pick from the same kind of list and should not disagree about
  * what a customer looks like.
  */
+/**
+ * `convertQuoteToInvoicePg` in the shape a <form> can call.
+ *
+ * ConvertToInvoiceDialog drives a `useActionState`, which means the action is
+ * called as (quoteId, prevState, formData) — while the action above takes a
+ * plain object because that is what a route handler or another action would
+ * want. This adapts the one to the other rather than making either pretend.
+ *
+ * `lineId` becomes `quoteLineId`: the dialog's key is named after the Mongo
+ * subdocument's `_id`, and the comment beside it in the component says so.
+ */
+export async function convertQuoteToInvoiceFormPg(
+  quoteId: string,
+  _prevState: unknown,
+  formData: FormData,
+): Promise<ActionResult> {
+  let raw: {
+    selectedItems?: Array<{ lineId?: string; quantity?: number }>;
+    invoiceDate?: string;
+    dueDate?: string | null;
+    notes?: string | null;
+  };
+  try {
+    raw = JSON.parse(String(formData.get("data") ?? "{}"));
+  } catch {
+    return { success: false, error: "Could not read the conversion data" };
+  }
+
+  if (!raw.invoiceDate) {
+    return { success: false, error: "An invoice date is required." };
+  }
+
+  const selection = (raw.selectedItems ?? [])
+    .filter((i) => i.lineId && Number(i.quantity) > 0)
+    .map((i) => ({
+      quoteLineId: String(i.lineId),
+      quantity: Number(i.quantity).toFixed(4),
+    }));
+
+  if (!selection.length) {
+    return { success: false, error: "Choose at least one line to invoice." };
+  }
+
+  return convertQuoteToInvoicePg(quoteId, {
+    invoiceDate: raw.invoiceDate,
+    dueDate: raw.dueDate ?? null,
+    notes: raw.notes ?? null,
+    selection,
+  });
+}
+
 export async function getQuoteFormData() {
   return withAuthorizedTenant([...INVOICE_WRITE_ROLES], async (tx) => {
     const [customers, products] = await Promise.all([

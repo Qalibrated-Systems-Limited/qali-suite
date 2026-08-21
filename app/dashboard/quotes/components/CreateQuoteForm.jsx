@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useActionState } from "react";
+import { useState, useEffect, useActionState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,7 @@ import {
   Percent,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { createQuote } from "@/app/mongodb/actions/quote-actions";
+import { createQuotePg } from "@/app/db/actions/quote-actions";
 import QuickCreatePartyDialog from "@/app/dashboard/invoices/components/QuickCreateCustomerDialog";
 
 // Default validity period (30 days)
@@ -115,8 +115,16 @@ export default function CreateQuoteForm({
 }) {
   const router = useRouter();
 
-  // Form action state - redirect happens in server action on success
-  const [state, formAction, isPending] = useActionState(createQuote, null);
+  // The Postgres action RETURNS rather than redirecting — a server action that
+  // redirects cannot also report a field error, and the caller has no way to
+  // tell "saved" from "threw" — so the navigation happens here on success.
+  const [state, formAction, isPending] = useActionState(createQuotePg, null);
+
+  useEffect(() => {
+    if (state?.success && state.quoteId) {
+      router.push(`/dashboard/quotes/${state.quoteId}`);
+    }
+  }, [state, router]);
 
   // Customer Selection - initialized from duplicate if present
   const [customerList, setCustomerList] = useState(initialCustomers);

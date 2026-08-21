@@ -40,7 +40,7 @@ import {
   Save,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { updateQuote } from "@/app/mongodb/actions/quote-actions";
+import { updateQuotePg } from "@/app/db/actions/quote-actions";
 
 // Helper to format date string
 function formatDateForInput(dateString) {
@@ -106,7 +106,7 @@ export default function UpdateQuoteForm({
   const router = useRouter();
 
   // Bind quote ID to action
-  const updateQuoteWithId = updateQuote.bind(null, quote._id);
+  const updateQuoteWithId = updateQuotePg.bind(null, quote._id);
   const [state, formAction, isPending] = useActionState(updateQuoteWithId, null);
 
   // Customer Selection

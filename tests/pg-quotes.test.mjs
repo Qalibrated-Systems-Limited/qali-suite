@@ -340,6 +340,112 @@ suite("quotes repository", () => {
     });
   });
 
+  /**
+   * The shape the screens actually read.
+   *
+   * This is the layer the quotes port stopped short of: the repository and its
+   * actions landed and nothing was pointed at them, so the screens kept
+   * writing to Mongo while the list page counted Postgres. These assertions
+   * are against the field names the detail page, the update form and the PDF
+   * dereference — if one drifts, the page renders blank rather than failing.
+   */
+  describe("the shape the pages render", () => {
+    it("gives the detail page every field it dereferences", async () => {
+      const quote = await asTenant(companyA, (tx) =>
+        quotesRepo.createQuote(tx, baseInput({
+          title: "Fit-out",
+          terms: "30 days",
+          notes: "Deliver to gate 2",
+          commissionRate: "5.0000",
+          salespersonPartyId: null,
+        })));
+
+      const shaped = await asTenant(companyA, (tx) =>
+        quotesRepo.getQuoteForDisplay(tx, quote.id));
+
+      // `_id` alongside `id`: every component passes `quote._id` into the
+      // actions and the PDF button.
+      expect(shaped._id).toBe(quote.id);
+      expect(shaped.quoteNumber).toBe(quote.quoteNumber);
+      expect(shaped.termsAndConditions).toBe("30 days");
+
+      // The page reads quote.customer.*, not quote.customerName.
+      expect(shaped.customer.name).toBe("Acme Ltd");
+      expect(shaped.customer.partyId).toBe(customer);
+
+      // ...and quote.items[], not quote.lines[].
+      expect(shaped.items).toHaveLength(1);
+      expect(shaped.items[0].description).toBe("Install");
+
+      // Totals are numbers here; the page formats them with formatCurrency.
+      expect(shaped.subtotal).toBe(900);
+      expect(shaped.taxAmount).toBe(144);
+      expect(shaped.total).toBe(1044);
+      expect(shaped.totalDiscount).toBe(100);
+    });
+
+    it("carries the product snapshot the duplicate form reads", async () => {
+      const quote = await asTenant(companyA, (tx) =>
+        quotesRepo.createQuote(tx, baseInput({
+          lines: [{
+            itemType: "product", productId: widget,
+            productName: "Widget", productSku: "WID-1",
+            description: "Widget", quantity: "2.0000",
+            unitPrice: "250.0000", taxRate: "16.0000",
+          }],
+        })));
+
+      const shaped = await asTenant(companyA, (tx) =>
+        quotesRepo.getQuoteForDisplay(tx, quote.id));
+
+      // initStockItems() matches on item.product.id and reads .name and .sku.
+      expect(shaped.items[0].product).toEqual({
+        id: widget, _id: widget, name: "Widget", sku: "WID-1",
+      });
+    });
+
+    it("leaves product null on a service line rather than an empty object", async () => {
+      const quote = await asTenant(companyA, (tx) =>
+        quotesRepo.createQuote(tx, baseInput()));
+      const shaped = await asTenant(companyA, (tx) =>
+        quotesRepo.getQuoteForDisplay(tx, quote.id));
+
+      // The form filters on itemType, but the PDF reads item.product?.name —
+      // an empty object would print an empty cell instead of the description.
+      expect(shaped.items[0].product).toBeNull();
+      expect(shaped.items[0].itemType).toBe("service");
+    });
+
+    it("reports commission as rate and amount, both derived", async () => {
+      const quote = await asTenant(companyA, (tx) =>
+        quotesRepo.createQuote(tx, baseInput({ commissionRate: "5.0000" })));
+      const shaped = await asTenant(companyA, (tx) =>
+        quotesRepo.getQuoteForDisplay(tx, quote.id));
+
+      // The page reads salesPerson.commission.rate — null when nobody is named,
+      // which is the case the optional chain in the markup covers.
+      expect(shaped.salesPerson).toBeNull();
+
+      const withRep = await asTenant(companyA, (tx) =>
+        quotesRepo.updateQuote(tx, quote.id, {
+          salespersonPartyId: customer,
+          salespersonName: "Rep",
+        }));
+      const shapedRep = await asTenant(companyA, (tx) =>
+        quotesRepo.getQuoteForDisplay(tx, withRep.id));
+      expect(shapedRep.salesPerson.commission.rate).toBe(5);
+      expect(shapedRep.salesPerson.commission.amount).toBe(45);
+    });
+
+    it("returns null for a quote that is not this tenant's", async () => {
+      const quote = await asTenant(companyA, (tx) =>
+        quotesRepo.createQuote(tx, baseInput()));
+      const shaped = await asTenant(otherCompany, (tx) =>
+        quotesRepo.getQuoteForDisplay(tx, quote.id));
+      expect(shaped).toBeNull();
+    });
+  });
+
   describe("tenant isolation", () => {
     it("shows a tenant only its own quotes, with nothing filtering them", async () => {
       await asTenant(companyA, (tx) => quotesRepo.createQuote(tx, baseInput()));

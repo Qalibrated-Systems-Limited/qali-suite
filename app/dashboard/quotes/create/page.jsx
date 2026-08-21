@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import {
   getQuoteFormData,
-  getQuoteDetailPg,
+  getQuoteForDisplayPg,
 } from "@/app/db/actions/quote-actions";
 import CreateQuoteForm from "../components/CreateQuoteForm";
 
@@ -41,7 +41,11 @@ export default async function CreateQuotePage({ searchParams }) {
   // Check if duplicating from existing quote
   let duplicateFrom = null;
   if (params.from) {
-    duplicateFrom = await getQuoteDetailPg(params.from);
+    // The PAGE shape, not the schema shape. CreateQuoteForm's duplicate
+    // initialisers read `items[].product.sku` and `termsAndConditions`;
+    // getQuoteDetail returns `lines[]` and `terms`, so duplicating a quote
+    // silently produced an empty form with no lines and no terms.
+    duplicateFrom = await getQuoteForDisplayPg(params.from);
   }
 
   return (
