@@ -2,21 +2,17 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, Printer } from "lucide-react";
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
-import EmployeeProfile from "@/app/models/employeeProfile";
-import PayrollEntry from "@/app/models/payrollEntry";
+import { getP9ForPage } from "@/app/db/actions/hr-payroll-actions";
 import { getCompanyForDocuments } from "@/app/db/platform";
+import { withAuthorizedTenant } from "@/app/db/tenant";
+import { HR_VIEW_ROLES } from "@/lib/utils/role-gates";
+import { roleAllowed } from "@/lib/permissions";
 
-export async function generateMetadata({ params, searchParams }) {
-  const { profileId } = await params;
+export async function generateMetadata({ searchParams }) {
   const sp = await searchParams;
   const year = sp.year || new Date().getFullYear();
   return { title: `P9 Certificate ${year} | HR` };
 }
-
-// Roles that can view any employee's P9
-const HR_ROLES = ["SuperAdmin", "Admin", "HR Manager", "Accountant"];
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -36,55 +32,37 @@ export default async function P9CertificatePage({ params, searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const isHR = HR_ROLES.includes(session.user.role);
-  const isEmployee = session.user.role === "Employee" || !isHR;
+  const isHR = roleAllowed(session.user.role, HR_VIEW_ROLES);
 
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
+  // The action decides who may see it: HR and finance may open anybody's, an
+  // employee only their own. It also leaves voided runs out — a payroll that
+  // was reversed out of the books is not income.
+  const data = await getP9ForPage(profileId, year);
+  if (!data) notFound();
 
-  // Load profile — HR can view any, employees can only view their own
-  const profileQuery = isEmployee
-    ? withTenantScope({ _id: profileId, userId: session.user.id }, companyId, isSuperAdmin)
-    : withTenantScope({ _id: profileId }, companyId, isSuperAdmin);
+  const { employee: profile, months } = data;
+  const companyId = await withAuthorizedTenant([], async (_tx, ctx) => ctx.companyId);
+  const company = await getCompanyForDocuments(companyId);
 
-  const profile = await EmployeeProfile.findOne(profileQuery)
-    .select(
-      "personalInfo.firstName personalInfo.lastName personalInfo.kraPin personalInfo.nationalId " +
-      "employeeNumber employment.department employment.designation companyId"
-    )
-    .lean();
-
-  if (!profile) notFound();
-
-  // Load all payroll entries for this employee for the year
-  const entries = await PayrollEntry.find(
-    withTenantScope(
-      { profileId: profile._id, "period.year": year },
-      companyId,
-      isSuperAdmin
-    )
-  )
-    .select("period.month earnings.basicSalary earnings.grossPay deductions.nssf deductions.paye deductions.housingLevy deductions.shif")
-    .sort({ "period.month": 1 })
-    .lean();
-
-  // Load company for employer details
-  const company = await getCompanyForDocuments(String(profile.companyId || companyId));
-
-  // Build month-by-month data (fill gaps with zeros)
+  // Personal relief is monthly and comes from the configuration; the source
+  // hard-codes 2,400.
   const monthData = MONTHS.map((name, i) => {
-    const monthNum = i + 1;
-    const entry = entries.find((e) => e.period?.month === monthNum);
-    if (!entry) return { name, gross: 0, nssf: 0, taxable: 0, paye: 0, relief: 2400, netTax: 0 };
-
-    const gross = entry.earnings?.grossPay || 0;
-    const nssf = entry.deductions?.nssf || 0;
-    const taxable = Math.max(0, gross - nssf);
-    const paye = entry.deductions?.paye || 0;
-    const relief = 2400; // KES 28,800 / 12 months personal relief
-    const netTax = Math.max(0, paye); // PAYE already net of relief in calculation
-
-    return { name, gross, nssf, taxable, paye, relief, netTax };
+    const m = months.find((x) => x.month === i + 1);
+    if (!m) {
+      return { name, gross: 0, nssf: 0, taxable: 0, paye: 0, relief: 0, netTax: 0 };
+    }
+    return {
+      name,
+      gross: m.grossPay,
+      nssf: m.nssf,
+      // Gross less NSSF, SHIF and the housing levy — all three allowable
+      // before PAYE since the Tax Laws (Amendment) Act 2024, and how the PAYE
+      // beside it was actually worked out.
+      taxable: m.taxablePay,
+      paye: m.paye,
+      relief: m.insuranceRelief,
+      netTax: m.paye,
+    };
   });
 
   const totals = monthData.reduce(
@@ -96,10 +74,10 @@ export default async function P9CertificatePage({ params, searchParams }) {
       relief: acc.relief + m.relief,
       netTax: acc.netTax + m.netTax,
     }),
-    { gross: 0, nssf: 0, taxable: 0, paye: 0, relief: 0, netTax: 0 }
+    { gross: 0, nssf: 0, taxable: 0, paye: 0, relief: 0, netTax: 0 },
   );
 
-  const employeeName = `${profile.personalInfo?.firstName || ""} ${profile.personalInfo?.lastName || ""}`.trim();
+  const employeeName = profile.fullName;
   const backHref = isHR
     ? `/dashboard/hr/employees/${profileId}`
     : `/dashboard/hr/my-payslips`;
@@ -166,13 +144,13 @@ export default async function P9CertificatePage({ params, searchParams }) {
                 </div>
                 <div className="flex gap-2">
                   <dt className="w-28 shrink-0 text-muted-foreground">KRA PIN</dt>
-                  <dd className="font-mono text-foreground">{profile.personalInfo?.kraPin || "—"}</dd>
+                  <dd className="font-mono text-foreground">{profile.kraPin || "—"}</dd>
                 </div>
                 <div className="flex gap-2">
                   <dt className="w-28 shrink-0 text-muted-foreground">National ID</dt>
-                  <dd className="font-mono text-foreground">{profile.personalInfo?.nationalId || "—"}</dd>
+                  <dd className="font-mono text-foreground">{profile.nationalId || "—"}</dd>
                 </div>
-                {profile.employment?.department && (
+                {profile.department && (
                   <div className="flex gap-2">
                     <dt className="w-28 shrink-0 text-muted-foreground">Department</dt>
                     <dd className="text-foreground">{profile.employment.department}</dd>
@@ -265,9 +243,9 @@ export default async function P9CertificatePage({ params, searchParams }) {
           </div>
 
           {/* No data notice */}
-          {entries.length === 0 && (
+          {months.length === 0 && (
             <div className="border-t border-border bg-amber-500/5 px-8 py-4 text-sm text-amber-700 dark:text-amber-400">
-              No payroll entries found for {employeeName} in {year}. Ensure payroll runs for this year have been processed and approved.
+              No payroll for {employeeName} in {year}. A run that was voided is left out — it is not income they received.
             </div>
           )}
         </div>

@@ -1,113 +1,81 @@
 import { NextResponse } from "next/server";
 import { safeErrorMessage } from "@/lib/safe-error";
-import dbConnect from "@/app/config/dbConnect";
-import Attendance from "@/app/models/attendance";
-import EmployeeProfile from "@/app/models/employeeProfile";
+import { withTenant } from "@/app/db/client";
+import { listAllCompanies } from "@/app/db/platform";
+import * as attendance from "@/app/db/repositories/attendance";
+import { getTimezone, getLocalYMD } from "@/lib/hr/time";
 
-// ============================================
-// CRON: AUTO-MARK ABSENT
-// ============================================
-// Called once daily after shift end time.
-// Marks any active employee with no attendance record for today as "absent".
-//
-// Protection: Authorization header must match CRON_SECRET env var.
-// Vercel Cron passes this automatically when configured in vercel.json.
-// External cron services (Railway, cron-job.org) must set the header manually.
-// ============================================
-
-function toDateKey(d) {
-  const dt = new Date(d);
-  dt.setUTCHours(0, 0, 0, 0);
-  return dt;
-}
-
+/**
+ * Nightly attendance close-out, for every tenant.
+ *
+ * Two things, in order:
+ *
+ *   1. CLOSE what was left open. Somebody who clocked in and never clocked out
+ *      is closed at their own shift end — the source caps them at
+ *      `checkIn + standardHours`, which records exactly a full day for
+ *      somebody who left after an hour.
+ *
+ *   2. MARK the day. Everybody with no record becomes absent, EXCEPT on a
+ *      weekend or a public holiday — the source marks Saturdays absent — and
+ *      except somebody on approved leave, who is marked as on leave rather
+ *      than as having failed to turn up.
+ *
+ * The date is each tenant's local one. A single UTC day key marks the wrong
+ * day for anybody far enough east or west.
+ *
+ * Protected by CRON_SECRET, as before.
+ */
 export async function GET(request) {
-  // ── Auth check ──────────────────────────────────────────────────────────
   const secret = process.env.CRON_SECRET;
   const authHeader = request.headers.get("authorization");
-
   if (!secret || authHeader !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    await dbConnect();
-
-    const now = new Date();
-    const dateKey = toDateKey(now);
-
-    // Get all non-SuperAdmin companies
-    const { listAllCompanies } = await import("@/app/db/platform");
     const companies = await listAllCompanies();
-
     const results = [];
 
-    // ── AUTO CLOCK-OUT: close any open sessions from today ──
-    // If employee forgot to clock out, cap their hours at standardHours (default 8).
-    const openRecords = await Attendance.find({
-      date: dateKey,
-      checkIn: { $exists: true, $ne: null },
-      checkOut: null,
-    });
-
-    let autoClockedOut = 0;
-    for (const record of openRecords) {
-      const maxHours = record.standardHours || 8;
-      const autoCheckOut = new Date(record.checkIn.getTime() + maxHours * 3_600_000);
-      record.checkOut = autoCheckOut;
-      record.hoursWorked = maxHours;
-      record.overtime = 0;
-      record.notes = (record.notes ? record.notes + " | " : "") + "Auto clock-out: employee did not clock out";
-      await record.save();
-      autoClockedOut++;
-    }
-
     for (const company of companies) {
-      const companyId = company._id;
+      try {
+        const result = await withTenant(company.id, async (tx) => {
+          const policy = await attendance.getPolicy(tx, company.id);
+          const workDate = getLocalYMD(new Date(), getTimezone(policy));
 
-      // Active employees for this company
-      const employees = await EmployeeProfile.find({
-        companyId,
-        "employment.status": { $in: ["active", "probation"] },
-      })
-        .select("_id partyId personalInfo employeeNumber employment companyId")
-        .lean();
+          const closed = await attendance.closeStaleAttendance(tx, company.id);
+          const marked = await attendance.markAbsentees(tx, {
+            companyId: company.id,
+            workDate,
+          });
 
-      if (!employees.length) continue;
+          return { workDate, closed: closed.closed, ...marked };
+        });
 
-      // Who already has a record today?
-      const existing = await Attendance.find({ companyId, date: dateKey })
-        .select("profileId")
-        .lean();
-
-      const existingIds = new Set(existing.map((r) => r.profileId.toString()));
-
-      const toCreate = employees
-        .filter((p) => !existingIds.has(p._id.toString()))
-        .map((p) => ({
-          companyId: p.companyId,
-          profileId: p._id,
-          partyId: p.partyId,
-          employeeName: `${p.personalInfo?.firstName || ""} ${p.personalInfo?.lastName || ""}`.trim(),
-          employeeNumber: p.employeeNumber,
-          department: p.employment?.department || "",
-          date: dateKey,
-          status: "absent",
-          method: "auto",
-          markedAbsentAt: new Date(),
-        }));
-
-      if (toCreate.length) {
-        await Attendance.insertMany(toCreate, { ordered: false });
+        results.push({ company: company.name, ...result });
+      } catch (err) {
+        // One tenant's failure must not stop the rest.
+        console.error(`[cron/mark-absent] ${company.name} failed:`, err);
+        results.push({ company: company.name, error: safeErrorMessage(err) });
       }
-
-      results.push({ company: company.name, marked: toCreate.length, total: employees.length });
     }
 
-    const totalMarked = results.reduce((s, r) => s + r.marked, 0);
-    console.log(`[cron/mark-absent] ${now.toISOString()} — marked ${totalMarked} absent, auto-clocked-out ${autoClockedOut} across ${companies.length} companies`);
+    const totals = results.reduce(
+      (acc, r) => ({
+        absent: acc.absent + (r.absent ?? 0),
+        onLeave: acc.onLeave + (r.onLeave ?? 0),
+        closed: acc.closed + (r.closed ?? 0),
+        failed: acc.failed + (r.error ? 1 : 0),
+      }),
+      { absent: 0, onLeave: 0, closed: 0, failed: 0 },
+    );
 
-    return NextResponse.json({ ok: true, date: dateKey, autoClockedOut, results });
+    console.log(
+      `[cron/mark-absent] ${new Date().toISOString()} — ${totals.absent} absent, ` +
+        `${totals.onLeave} on leave, ${totals.closed} auto-closed across ` +
+        `${companies.length} companies (${totals.failed} failed)`,
+    );
+
+    return NextResponse.json({ ok: true, totals, results });
   } catch (error) {
     console.error("[cron/mark-absent] error:", error);
     return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });

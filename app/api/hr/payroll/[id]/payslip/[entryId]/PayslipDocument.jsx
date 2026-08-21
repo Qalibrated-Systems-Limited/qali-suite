@@ -323,13 +323,21 @@ function DeductionRow({ label, value, isTotal, isLast }) {
 // PAYSLIP DOCUMENT
 // ============================================
 export function PayslipDocument({ run, entry, company }) {
-  const e = entry.earnings || {};
-  const d = entry.deductions || {};
-  const emp = entry.employerContributions || {};
-  const period = run.period?.label || `${run.period?.month}/${run.period?.year}`;
+  // Earnings, deductions and employer contributions are columns on the
+  // payslip now rather than three embedded objects, so all three views are
+  // the same row.
+  const e = entry;
+  const d = entry;
+  const emp = { nssf: entry.employerNssf, housingLevy: entry.employerHousingLevy };
+  const period = run.label;
 
-  const allowances = (e.housingAllowance || 0) + (e.transportAllowance || 0) + (e.medicalAllowance || 0);
-  const variableEarnings = (e.overtime || 0) + (e.bonus || 0) + (e.commission || 0);
+  const allowances =
+    entry.housingAllowance +
+    entry.transportAllowance +
+    entry.medicalAllowance +
+    entry.otherAllowance;
+  const variableEarnings =
+    entry.overtimePay + entry.bonus + entry.commission + entry.additionalEarnings;
 
   const companyAddress = company?.address
     ? [company.address.street, company.address.city, company.address.country].filter(Boolean).join(", ")
@@ -396,9 +404,13 @@ export function PayslipDocument({ run, entry, company }) {
                   {e.medicalAllowance > 0 && <EarningRow label="Medical Allowance" value={e.medicalAllowance} />}
                 </>
               )}
-              {e.overtime > 0 && <EarningRow label="Overtime" value={e.overtime} />}
+              {e.overtimePay > 0 && <EarningRow label="Overtime" value={e.overtimePay} />}
               {e.bonus > 0 && <EarningRow label="Bonus" value={e.bonus} />}
               {e.commission > 0 && <EarningRow label="Commission" value={e.commission} />}
+              {e.otherAllowance > 0 && <EarningRow label="Other Allowance" value={e.otherAllowance} />}
+              {e.additionalEarnings > 0 && (
+                <EarningRow label="Other Earnings" value={e.additionalEarnings} />
+              )}
               {(e.additional || []).map((item, i) => (
                 <EarningRow key={i} label={item.description} value={item.amount} />
               ))}
@@ -421,6 +433,9 @@ export function PayslipDocument({ run, entry, company }) {
               <DeductionRow label="Housing Levy (AHL)" value={d.housingLevy} />
               {d.loanRepayment > 0 && <DeductionRow label="Loan Repayment" value={d.loanRepayment} />}
               {d.saccoDeduction > 0 && <DeductionRow label="SACCO" value={d.saccoDeduction} />}
+              {d.additionalDeductions > 0 && (
+                <DeductionRow label="Other Deductions" value={d.additionalDeductions} />
+              )}
               {(d.additional || []).map((item, i) => (
                 <DeductionRow key={i} label={item.description} value={item.amount} />
               ))}

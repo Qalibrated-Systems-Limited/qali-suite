@@ -1,155 +1,134 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
-import { safeErrorMessage } from "@/lib/safe-error";
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
-import PayrollEntry from "@/app/models/payrollEntry";
-import EmployeeProfile from "@/app/models/employeeProfile";
+import { withAuthorizedTenant } from "@/app/db/tenant";
 import { checkPlanAccess } from "@/lib/plan-gate";
+import { safeErrorMessage } from "@/lib/safe-error";
+import {
+  PAYROLL_EXPORT_ROLES,
+  taxableIncome,
+  q,
+  n,
+} from "@/lib/hr/payroll-exports";
+import * as payroll from "@/app/db/repositories/payroll";
 
-const ALLOWED = ["SuperAdmin", "Admin", "HR Manager", "Accountant"];
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
 
-// ============================================
-// P9A ANNUAL PAYE CERTIFICATE — CSV
-// GET /api/hr/p9a?year=2026
-//
-// Per-employee annual summary:
-//   Month-by-month breakdown of gross pay, taxable income, PAYE.
-//   Required by KRA iTax for employer filing (due end of February).
-//   Each employee gets one row with 12 monthly breakdowns.
-//
-// Format: wide CSV — one row per employee, columns for each month.
-// ============================================
+const EMPTY_MONTH = {
+  grossPay: 0,
+  nssf: 0,
+  shif: 0,
+  housingLevy: 0,
+  paye: 0,
+  insuranceRelief: 0,
+  netPay: 0,
+};
+
+/**
+ * P9A — the annual PAYE certificate, for every employee at once.
+ *
+ * Two corrections carried from the shared export module:
+ *
+ *   - taxable income is gross less NSSF, SHIF AND the housing levy, which is
+ *     how the PAYE beside it was computed;
+ *   - voided runs are left out, because a payroll reversed out of the books
+ *     is not income anybody received.
+ */
 export async function GET(req) {
   try {
-    const session = await auth();
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (!ALLOWED.includes(session.user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
     const gate = await checkPlanAccess("hr");
     if (!gate.allowed) {
-      return NextResponse.json({ error: "This feature requires a plan upgrade" }, { status: 403 });
+      return NextResponse.json(
+        { error: "This feature requires a plan upgrade" },
+        { status: 403 },
+      );
     }
 
     const { searchParams } = new URL(req.url);
-    const year = parseInt(searchParams.get("year") || new Date().getFullYear());
+    const year = parseInt(searchParams.get("year") || `${new Date().getFullYear()}`, 10);
 
-    await dbConnect();
-    const { companyId, isSuperAdmin } = await getTenantContext();
+    const employees = await withAuthorizedTenant(PAYROLL_EXPORT_ROLES, (tx) =>
+      payroll.getAnnualPayrollByEmployee(tx, year),
+    );
 
-    // Fetch all payroll entries for the year (across all runs)
-    const entries = await PayrollEntry.find(
-      withTenantScope(
-        { "period.year": year },
-        companyId,
-        isSuperAdmin
-      )
-    )
-      .select("partyId profileId employeeName employeeNumber department period.month earnings.grossPay deductions.paye deductions.nssf deductions.shif deductions.housingLevy deductions.insuranceRelief")
-      .sort({ "period.month": 1 })
-      .lean();
-
-    if (entries.length === 0) {
-      return NextResponse.json({ error: `No payroll data found for ${year}` }, { status: 404 });
+    if (!employees.length) {
+      return NextResponse.json({ error: `No payroll data for ${year}.` }, { status: 404 });
     }
 
-    // Fetch KRA PINs from profiles
-    const profileIds = [...new Set(entries.map((e) => e.profileId?.toString()).filter(Boolean))];
-    const profiles = await EmployeeProfile.find({ _id: { $in: profileIds } })
-      .select("_id personalInfo.kraPin personalInfo.nationalId")
-      .lean();
-    const profileMap = Object.fromEntries(profiles.map((p) => [p._id.toString(), p]));
-
-    // Group entries by employee (partyId)
-    const employeeMap = {};
-    for (const entry of entries) {
-      const pid = entry.partyId?.toString();
-      if (!pid) continue;
-      if (!employeeMap[pid]) {
-        employeeMap[pid] = {
-          employeeName: entry.employeeName,
-          employeeNumber: entry.employeeNumber,
-          department: entry.department,
-          profileId: entry.profileId?.toString(),
-          months: {},
-        };
-      }
-      const m = entry.period?.month;
-      if (m) {
-        employeeMap[pid].months[m] = {
-          grossPay: entry.earnings?.grossPay || 0,
-          nssf: entry.deductions?.nssf || 0,
-          paye: entry.deductions?.paye || 0,
-          shif: entry.deductions?.shif || 0,
-          ahl: entry.deductions?.housingLevy || 0,
-          insuranceRelief: entry.deductions?.insuranceRelief || 0,
-        };
-      }
-    }
-
-    const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-    // Build headers: Employee info + per-month gross + taxable + paye, then annual totals
     const headers = [
-      "Employee Name", "Employee No", "KRA PIN", "National ID", "Department",
-      ...MONTH_NAMES.flatMap((m) => [`${m} Gross`, `${m} Taxable`, `${m} PAYE`, `${m} Ins Relief`]),
-      "Annual Gross", "Annual NSSF", "Annual Taxable", "Annual PAYE", "Annual Ins Relief",
+      "Employee Name",
+      "Employee No",
+      "KRA PIN",
+      "National ID",
+      "Department",
+      ...MONTH_NAMES.flatMap((m) => [
+        `${m} Gross`,
+        `${m} Taxable`,
+        `${m} PAYE`,
+        `${m} Ins Relief`,
+      ]),
+      "Annual Gross",
+      "Annual NSSF",
+      "Annual SHIF",
+      "Annual AHL",
+      "Annual Taxable",
+      "Annual PAYE",
+      "Annual Ins Relief",
     ];
 
-    const q = (s) => `"${(s || "").toString().replace(/"/g, '""')}"`;
-    const n = (v) => (v || 0).toFixed(2);
-
-    const rows = Object.values(employeeMap).map((emp) => {
-      const prof = profileMap[emp.profileId] || {};
-      const kraPin = prof.personalInfo?.kraPin || "";
-      const nationalId = prof.personalInfo?.nationalId || "";
-
-      let annualGross = 0, annualNSSF = 0, annualPAYE = 0, annualInsRelief = 0;
+    const rows = employees.map((emp) => {
+      const totals = {
+        gross: 0, nssf: 0, shif: 0, ahl: 0, taxable: 0, paye: 0, relief: 0,
+      };
       const monthCols = [];
 
       for (let m = 1; m <= 12; m++) {
-        const mo = emp.months[m] || { grossPay: 0, nssf: 0, paye: 0, insuranceRelief: 0 };
-        const taxable = Math.max(0, mo.grossPay - mo.nssf);
+        const mo = emp.months[m] ?? EMPTY_MONTH;
+        const taxable = taxableIncome(mo);
         monthCols.push(n(mo.grossPay), n(taxable), n(mo.paye), n(mo.insuranceRelief));
-        annualGross += mo.grossPay;
-        annualNSSF += mo.nssf;
-        annualPAYE += mo.paye;
-        annualInsRelief += mo.insuranceRelief;
+        totals.gross += mo.grossPay;
+        totals.nssf += mo.nssf;
+        totals.shif += mo.shif;
+        totals.ahl += mo.housingLevy;
+        totals.taxable += taxable;
+        totals.paye += mo.paye;
+        totals.relief += mo.insuranceRelief;
       }
-
-      const annualTaxable = Math.max(0, annualGross - annualNSSF);
 
       return [
         q(emp.employeeName),
         q(emp.employeeNumber),
-        q(kraPin),
-        q(nationalId),
+        q(emp.kraPin),
+        q(emp.nationalId),
         q(emp.department),
         ...monthCols,
-        n(annualGross),
-        n(annualNSSF),
-        n(annualTaxable),
-        n(annualPAYE),
-        n(annualInsRelief),
+        n(totals.gross),
+        n(totals.nssf),
+        n(totals.shif),
+        n(totals.ahl),
+        n(totals.taxable),
+        n(totals.paye),
+        n(totals.relief),
       ].join(",");
     });
 
     const csv = [
-      `"P9A Annual PAYE Certificate — Year ${year}"`,
+      q(`P9A Annual PAYE Certificate — Year ${year}`),
       headers.join(","),
       ...rows,
     ].join("\n");
-
-    const filename = `p9a-annual-paye-${year}.csv`;
 
     return new NextResponse(csv, {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `attachment; filename="p9a-annual-paye-${year}.csv"`,
       },
     });
   } catch (error) {
-    return NextResponse.json({ error: safeErrorMessage(error, "P9A generation failed") }, { status: 500 });
+    const message = safeErrorMessage(error, "The P9A could not be produced");
+    const status = /permission|authenticated/i.test(message) ? 403 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

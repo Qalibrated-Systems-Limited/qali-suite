@@ -1273,6 +1273,28 @@ export async function listEntries(
   return rows.map(mapEntry);
 }
 
+/**
+ * The payslips of a run, with the identifiers the statutory returns need.
+ *
+ * KRA PIN, NSSF and SHA numbers are snapshotted onto the payslip, so they are
+ * what was filed. The national ID is joined, because it is not a payroll fact
+ * and never changes.
+ */
+export async function listEntriesForExport(tx: Tx, runId: string) {
+  const rows = (await tx.execute(sql`
+    SELECT e.*, emp.national_id
+      FROM payroll_entries e
+      JOIN employees emp ON emp.id = e.employee_id
+     WHERE e.payroll_run_id = ${runId}::uuid
+     ORDER BY e.employee_name
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    ...mapEntry(r),
+    nationalId: (r.national_id as string) ?? null,
+  }));
+}
+
 export async function getEntry(tx: Tx, entryId: string) {
   const [r] = (await tx.execute(sql`
     SELECT e.*, r.payroll_number, r.period_month, r.period_year,
@@ -1396,6 +1418,79 @@ export async function listEmployeePayslips(
     runStatus: String(r.run_status),
     paidAt: r.paid_at ? new Date(r.paid_at as string).toISOString() : null,
   }));
+}
+
+/**
+ * Every employee's year, for the company-wide P9A return.
+ *
+ * Voided runs are excluded — the source's route has no status filter at all,
+ * so a payroll that was reversed out of the books is certified to KRA as
+ * income the employee received.
+ */
+export async function getAnnualPayrollByEmployee(tx: Tx, year: number) {
+  const rows = (await tx.execute(sql`
+    SELECT e.employee_id, e.employee_name, e.employee_number, e.department,
+           e.kra_pin, emp.national_id,
+           r.period_month,
+           e.gross_pay, e.nssf, e.shif, e.housing_levy, e.paye,
+           e.insurance_relief, e.net_pay
+      FROM payroll_entries e
+      JOIN payroll_runs r ON r.id = e.payroll_run_id
+      JOIN employees emp  ON emp.id = e.employee_id
+     WHERE r.period_year = ${year}
+       AND r.status <> 'voided'
+     ORDER BY e.employee_name, r.period_month
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const byEmployee = new Map<
+    string,
+    {
+      employeeId: string;
+      employeeName: string;
+      employeeNumber: string;
+      department: string | null;
+      kraPin: string | null;
+      nationalId: string | null;
+      months: Record<
+        number,
+        {
+          grossPay: number;
+          nssf: number;
+          shif: number;
+          housingLevy: number;
+          paye: number;
+          insuranceRelief: number;
+          netPay: number;
+        }
+      >;
+    }
+  >();
+
+  for (const r of rows) {
+    const id = String(r.employee_id);
+    if (!byEmployee.has(id)) {
+      byEmployee.set(id, {
+        employeeId: id,
+        employeeName: String(r.employee_name),
+        employeeNumber: String(r.employee_number),
+        department: (r.department as string) ?? null,
+        kraPin: (r.kra_pin as string) ?? null,
+        nationalId: (r.national_id as string) ?? null,
+        months: {},
+      });
+    }
+    byEmployee.get(id)!.months[Number(r.period_month)] = {
+      grossPay: Number(r.gross_pay),
+      nssf: Number(r.nssf),
+      shif: Number(r.shif),
+      housingLevy: Number(r.housing_levy),
+      paye: Number(r.paye),
+      insuranceRelief: Number(r.insurance_relief),
+      netPay: Number(r.net_pay),
+    };
+  }
+
+  return [...byEmployee.values()];
 }
 
 /**

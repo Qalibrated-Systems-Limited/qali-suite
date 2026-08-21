@@ -115,7 +115,7 @@ const fmt = (n) => (n || 0).toLocaleString("en-KE", { minimumFractionDigits: 2, 
 
 export function PayrollSummaryDocument({ run, entries, company }) {
   const t = run.totals || {};
-  const period = run.period?.label || `${run.period?.month}/${run.period?.year}`;
+  const period = run.label;
   const generatedAt = new Date().toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" });
 
   return (
@@ -145,19 +145,19 @@ export function PayrollSummaryDocument({ run, entries, company }) {
           </View>
           <View style={s.box}>
             <Text style={s.boxLabel}>Total Gross Pay (KES)</Text>
-            <Text style={s.boxValue}>{fmt(t.totalGrossPay)}</Text>
+            <Text style={s.boxValue}>{fmt(t.gross)}</Text>
           </View>
           <View style={s.box}>
             <Text style={s.boxLabel}>Total Deductions (KES)</Text>
-            <Text style={s.boxValue}>{fmt(t.totalDeductions)}</Text>
+            <Text style={s.boxValue}>{fmt(t.deductions)}</Text>
           </View>
           <View style={s.box}>
             <Text style={s.boxLabel}>Total Net Pay (KES)</Text>
-            <Text style={{ ...s.boxValue, color: "#1d4ed8" }}>{fmt(t.totalNetPay)}</Text>
+            <Text style={{ ...s.boxValue, color: "#1d4ed8" }}>{fmt(t.net)}</Text>
           </View>
           <View style={s.box}>
             <Text style={s.boxLabel}>Total PAYE (KES)</Text>
-            <Text style={s.boxValue}>{fmt(t.totalPAYE)}</Text>
+            <Text style={s.boxValue}>{fmt(t.paye)}</Text>
           </View>
         </View>
 
@@ -183,12 +183,12 @@ export function PayrollSummaryDocument({ run, entries, company }) {
             <Text style={{ ...s.colNo, ...s.tdGray }}>{idx + 1}</Text>
             <Text style={s.colName}>{e.employeeName}</Text>
             <Text style={{ ...s.colDept, ...s.tdGray }}>{e.department || "—"}</Text>
-            <Text style={s.colBasic}>{fmt(e.earnings?.basicSalary)}</Text>
-            <Text style={s.colGross}>{fmt(e.earnings?.grossPay)}</Text>
-            <Text style={s.colPAYE}>{fmt(e.deductions?.paye)}</Text>
-            <Text style={s.colNSSF}>{fmt(e.deductions?.nssf)}</Text>
-            <Text style={s.colSHIF}>{fmt(e.deductions?.shif)}</Text>
-            <Text style={s.colAHL}>{fmt(e.deductions?.housingLevy)}</Text>
+            <Text style={s.colBasic}>{fmt(e.basicSalary)}</Text>
+            <Text style={s.colGross}>{fmt(e.grossPay)}</Text>
+            <Text style={s.colPAYE}>{fmt(e.paye)}</Text>
+            <Text style={s.colNSSF}>{fmt(e.nssf)}</Text>
+            <Text style={s.colSHIF}>{fmt(e.shif)}</Text>
+            <Text style={s.colAHL}>{fmt(e.housingLevy)}</Text>
             <Text style={s.colNet}>{fmt(e.netPay)}</Text>
           </View>
         ))}
@@ -198,13 +198,13 @@ export function PayrollSummaryDocument({ run, entries, company }) {
           <Text style={{ ...s.colNo, ...s.th }}></Text>
           <Text style={{ ...s.colName, ...s.th }}>TOTAL ({entries.length})</Text>
           <Text style={s.colDept}></Text>
-          <Text style={{ ...s.colBasic, ...s.th }}>{fmt(t.totalBasicSalary)}</Text>
-          <Text style={{ ...s.colGross, ...s.th }}>{fmt(t.totalGrossPay)}</Text>
-          <Text style={{ ...s.colPAYE, ...s.th }}>{fmt(t.totalPAYE)}</Text>
-          <Text style={{ ...s.colNSSF, ...s.th }}>{fmt(t.totalNSSF)}</Text>
-          <Text style={{ ...s.colSHIF, ...s.th }}>{fmt(t.totalSHIF)}</Text>
-          <Text style={{ ...s.colAHL, ...s.th }}>{fmt(t.totalHousingLevy)}</Text>
-          <Text style={{ ...s.colNet, ...s.th, color: "#1d4ed8" }}>{fmt(t.totalNetPay)}</Text>
+          <Text style={{ ...s.colBasic, ...s.th }}>{fmt(t.basic)}</Text>
+          <Text style={{ ...s.colGross, ...s.th }}>{fmt(t.gross)}</Text>
+          <Text style={{ ...s.colPAYE, ...s.th }}>{fmt(t.paye)}</Text>
+          <Text style={{ ...s.colNSSF, ...s.th }}>{fmt(t.nssf)}</Text>
+          <Text style={{ ...s.colSHIF, ...s.th }}>{fmt(t.shif)}</Text>
+          <Text style={{ ...s.colAHL, ...s.th }}>{fmt(t.housingLevy)}</Text>
+          <Text style={{ ...s.colNet, ...s.th, color: "#1d4ed8" }}>{fmt(t.net)}</Text>
         </View>
 
         {/* Employer contributions */}
@@ -212,15 +212,15 @@ export function PayrollSummaryDocument({ run, entries, company }) {
         <View style={s.empBox}>
           <View style={{ flex: 1 }}>
             <Text style={s.empLabel}>Employer NSSF (KES)</Text>
-            <Text style={s.empValue}>{fmt(t.totalEmployerNSSF)}</Text>
+            <Text style={s.empValue}>{fmt(t.employerNssf)}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.empLabel}>Employer AHL (KES)</Text>
-            <Text style={s.empValue}>{fmt(t.totalEmployerAHL)}</Text>
+            <Text style={s.empValue}>{fmt(t.employerAhl)}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.empLabel}>Total Employer Cost (KES)</Text>
-            <Text style={s.empValue}>{fmt((t.totalGrossPay || 0) + (t.totalEmployerNSSF || 0) + (t.totalEmployerAHL || 0))}</Text>
+            <Text style={s.empValue}>{fmt((t.gross || 0) + (t.employerNssf || 0) + (t.employerAhl || 0))}</Text>
           </View>
         </View>
 

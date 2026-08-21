@@ -1,52 +1,53 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
-import { safeErrorMessage } from "@/lib/safe-error";
 import { renderToBuffer } from "@react-pdf/renderer";
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
-import PayrollRun from "@/app/models/payrollRun";
-import PayrollEntry from "@/app/models/payrollEntry";
 import { getCompanyForDocuments } from "@/app/db/platform";
-import { PayslipDocument } from "./PayslipDocument";
+import { safeErrorMessage } from "@/lib/safe-error";
+import { withAuthorizedTenant } from "@/app/db/tenant";
+import { getPayslipForPage } from "@/app/db/actions/hr-payroll-actions";
 import { checkPlanAccess } from "@/lib/plan-gate";
+import { PayslipDocument } from "./PayslipDocument";
 
-const ALLOWED = ["SuperAdmin", "Admin", "HR Manager", "Manager"];
-
+/**
+ * One payslip, as a PDF.
+ *
+ * Ownership is the action's rule: HR and finance may open any payslip, and an
+ * employee may open their own. The source gated on a role list alone, so an
+ * employee could not download the payslip they were shown — and a Manager
+ * could download anyone's.
+ *
+ * A payslip is available for a run still being prepared, deliberately: HR
+ * checks the figures before approval, and that is what the file is for.
+ */
 export async function GET(_req, { params }) {
-  try {
-    const session = await auth();
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (!ALLOWED.includes(session.user.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const { entryId } = await params;
 
+  try {
     const gate = await checkPlanAccess("hr");
     if (!gate.allowed) {
-      return NextResponse.json({ error: "This feature requires a plan upgrade" }, { status: 403 });
+      return NextResponse.json(
+        { error: "This feature requires a plan upgrade" },
+        { status: 403 },
+      );
     }
 
-    const { id, entryId } = await params;
-    await dbConnect();
+    const data = await getPayslipForPage(entryId);
+    if (!data) {
+      return NextResponse.json({ error: "Payslip not found" }, { status: 404 });
+    }
 
-    const { companyId, isSuperAdmin } = await getTenantContext();
+    const { entry } = data;
+    const companyId = await withAuthorizedTenant([], async (_tx, ctx) => ctx.companyId);
+    const company = await getCompanyForDocuments(companyId);
 
-    const run = await PayrollRun.findOne(
-      withTenantScope({ _id: id }, companyId, isSuperAdmin)
-    ).lean();
-    if (!run) return NextResponse.json({ error: "Payroll run not found" }, { status: 404 });
+    const run = {
+      label: entry.label,
+      payrollNumber: entry.payrollNumber,
+      periodFrom: entry.periodFrom,
+      periodTo: entry.periodTo,
+    };
 
-    const entry = await PayrollEntry.findOne({
-      _id: entryId,
-      payrollRunId: run._id,
-      companyId: run.companyId,
-    }).lean();
-    if (!entry) return NextResponse.json({ error: "Payroll entry not found" }, { status: 404 });
-
-    const company = await getCompanyForDocuments(String(run.companyId));
-
-    const buffer = await renderToBuffer(
-      PayslipDocument({ run, entry, company })
-    );
-
-    const filename = `payslip-${entry.employeeNumber || entry.employeeName}-${run.payrollNumber}.pdf`;
+    const buffer = await renderToBuffer(PayslipDocument({ run, entry, company }));
+    const filename = `payslip-${entry.employeeNumber}-${entry.payrollNumber}.pdf`;
 
     return new NextResponse(buffer, {
       status: 200,
@@ -55,8 +56,11 @@ export async function GET(_req, { params }) {
         "Content-Disposition": `inline; filename="${filename}"`,
       },
     });
-  } catch (error) {
-    console.error("Payslip generation error:", error);
-    return NextResponse.json({ error: safeErrorMessage(error, "Payslip generation failed") }, { status: 500 });
+  } catch (err) {
+    console.error("Payslip generation error:", err);
+    return NextResponse.json(
+      { error: safeErrorMessage(err, "The payslip could not be produced") },
+      { status: 500 },
+    );
   }
 }
