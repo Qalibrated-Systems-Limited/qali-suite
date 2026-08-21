@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 import Link from "next/link";
 import { ChevronLeft, Loader2, AlertCircle } from "lucide-react";
-import { createDepartment } from "@/app/mongodb/actions/hr-department-actions";
+import { createDepartment } from "@/app/db/actions/hr-department-actions";
 
 const initialState = { success: false, error: null, fieldErrors: null };
 

@@ -4,7 +4,7 @@ import { useState, useActionState } from "react";
 import Link from "next/link";
 import { Loader2, AlertCircle, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { updateDepartment } from "@/app/mongodb/actions/hr-department-actions";
+import { updateDepartment } from "@/app/db/actions/hr-department-actions";
 
 const initialState = { success: false, error: null, fieldErrors: null };
 
@@ -36,7 +36,7 @@ function Input({ name, defaultValue, placeholder, error, ...props }) {
   );
 }
 
-function EmployeePicker({ employees = [], defaultValue = null, onSelect }) {
+function EmployeePicker({ employees = [], onSelect }) {
   const [search, setSearch] = useState("");
   const [isOpen, setIsOpen] = useState(false);
 
@@ -67,7 +67,7 @@ function EmployeePicker({ employees = [], defaultValue = null, onSelect }) {
         <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-md border border-border bg-card shadow-lg">
           {filtered.slice(0, 20).map((emp) => (
             <button
-              key={emp.partyId}
+              key={emp.id}
               type="button"
               onClick={() => {
                 onSelect(emp);
@@ -97,17 +97,21 @@ export default function DepartmentEditForm({ department, employees = [] }) {
   const fe = state.fieldErrors || {};
 
   const [head, setHead] = useState(
-    department.head?.partyId
-      ? { partyId: department.head.partyId, name: department.head.name || "", employeeNumber: department.head.employeeNumber || "" }
-      : null
+    department.headEmployeeId
+      ? {
+          id: department.headEmployeeId,
+          name: department.headName || "",
+          employeeNumber: department.headEmployeeNumber || "",
+        }
+      : null,
   );
 
   return (
     <form action={formAction} className="max-w-xl space-y-6">
-      <input type="hidden" name="deptId" value={department._id} />
-      <input type="hidden" name="headPartyId" value={head?.partyId || ""} />
-      <input type="hidden" name="headName" value={head?.name || ""} />
-      <input type="hidden" name="headEmployeeNumber" value={head?.employeeNumber || ""} />
+      <input type="hidden" name="deptId" value={department.id} />
+      {/* The head is a REFERENCE. Mongo also posted the name and number
+          alongside it, which then went stale the moment either changed. */}
+      <input type="hidden" name="headEmployeeId" value={head?.id || ""} />
 
       {state.error && (
         <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
@@ -166,7 +170,7 @@ export default function DepartmentEditForm({ department, employees = [] }) {
 
       <div className="flex justify-end gap-3">
         <Button variant="outline" asChild>
-          <Link href={`/dashboard/hr/departments/${department._id}`}>Cancel</Link>
+          <Link href={`/dashboard/hr/departments/${department.id}`}>Cancel</Link>
         </Button>
         <Button type="submit" disabled={isPending}>
           {isPending && <Loader2 className="h-4 w-4 animate-spin" />}

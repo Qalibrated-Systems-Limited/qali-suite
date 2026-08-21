@@ -20,27 +20,30 @@ import {
 
 /**
  * ManagerCombobox
- * Searchable manager selector. Writes managerId (partyId) and managerName
- * as hidden form inputs consumed by the parent server action.
+ * Searchable manager selector. Writes managerId only — the manager is another
+ * EMPLOYEE of this company now, not a bare party with the name copied beside
+ * it, so the name is joined and cannot go stale (migration 0045).
+ *
+ * Each manager: { id, employeeNumber, name, designation }.
  */
 export default function ManagerCombobox({ managers = [], defaultValue = null, error }) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
-  // defaultValue: { partyId, name, designation }
+  // defaultValue: { id, name, designation }
   const [selected, setSelected] = React.useState(defaultValue);
 
   const filtered = managers.filter((m) => {
-    const full = `${m.personalInfo?.firstName || ""} ${m.personalInfo?.lastName || ""}`.toLowerCase();
-    const desig = (m.employment?.designation || "").toLowerCase();
-    const num = (m.employeeNumber || "").toLowerCase();
     const q = search.toLowerCase();
-    return full.includes(q) || desig.includes(q) || num.includes(q);
+    return (
+      (m.name || "").toLowerCase().includes(q) ||
+      (m.designation || "").toLowerCase().includes(q) ||
+      (m.employeeNumber || "").toLowerCase().includes(q)
+    );
   });
 
   function handleSelect(m) {
-    const full = `${m.personalInfo?.firstName || ""} ${m.personalInfo?.lastName || ""}`.trim();
-    const isSame = selected?.partyId === m.partyId;
-    setSelected(isSame ? null : { partyId: m.partyId, name: full, designation: m.employment?.designation || null });
+    const isSame = selected?.id === m.id;
+    setSelected(isSame ? null : { id: m.id, name: m.name, designation: m.designation || null });
     setOpen(false);
     setSearch("");
   }
@@ -52,9 +55,8 @@ export default function ManagerCombobox({ managers = [], defaultValue = null, er
 
   return (
     <div>
-      {/* Hidden inputs consumed by the form action */}
-      <input type="hidden" name="managerId"   value={selected?.partyId || ""} />
-      <input type="hidden" name="managerName" value={selected?.name    || ""} />
+      {/* Hidden input consumed by the form action */}
+      <input type="hidden" name="managerId" value={selected?.id || ""} />
 
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -108,20 +110,19 @@ export default function ManagerCombobox({ managers = [], defaultValue = null, er
               ) : (
                 <CommandGroup>
                   {filtered.map((m) => {
-                    const full = `${m.personalInfo?.firstName || ""} ${m.personalInfo?.lastName || ""}`.trim();
-                    const isSelected = selected?.partyId === m.partyId;
+                    const isSelected = selected?.id === m.id;
                     return (
                       <CommandItem
-                        key={m._id}
-                        value={full}
+                        key={m.id}
+                        value={m.name}
                         onSelect={() => handleSelect(m)}
                       >
                         <Check className={cn("mr-2 h-4 w-4 shrink-0", isSelected ? "opacity-100" : "opacity-0")} />
                         <div className="flex-1 min-w-0">
-                          <span className="font-medium">{full}</span>
-                          {m.employment?.designation && (
+                          <span className="font-medium">{m.name}</span>
+                          {m.designation && (
                             <span className="ml-1.5 text-xs text-muted-foreground">
-                              — {m.employment.designation}
+                              — {m.designation}
                             </span>
                           )}
                         </div>

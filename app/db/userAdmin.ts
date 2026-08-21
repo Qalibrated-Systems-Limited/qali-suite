@@ -381,6 +381,28 @@ export async function adminToggleStatus(userId: string) {
 }
 
 /**
+ * Deactivates a login outright, rather than toggling it.
+ *
+ * Termination calls this, and a toggle is the wrong verb for it: run twice —
+ * a double-submit, a retry — a toggle REACTIVATES the account of somebody who
+ * has just left. This is idempotent, and bumps token_version only when the
+ * status actually changed, so an already-inactive user's sessions are not
+ * churned for nothing.
+ */
+export async function deactivateUser(userId: string) {
+  const rows = (await privilegedDb().execute(sql`
+    UPDATE users
+       SET status = 'inactive',
+           token_version = token_version + 1,
+           updated_at = now()
+     WHERE id = ${String(userId)}
+       AND status <> 'inactive'
+    RETURNING status
+  `)) as unknown as Array<{ status: string }>;
+  return { changed: rows.length > 0 };
+}
+
+/**
  * Deletes a login.
  *
  * Refused when the person is the last active SuperAdmin — a platform with

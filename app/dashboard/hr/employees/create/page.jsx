@@ -3,56 +3,15 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
-import Department from "@/app/models/department";
-import EmployeeProfile from "@/app/models/employeeProfile";
+import { getEmployeeFormData } from "@/app/db/actions/hr-employee-actions";
+import { HR_WRITE_ROLES } from "@/lib/utils/role-gates";
+import { roleAllowed } from "@/lib/permissions";
 import EmployeeForm from "../../components/EmployeeForm";
 
 export const metadata = { title: "Add Employee | HR" };
 
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
-
-// ============================================
-// FETCH FORM DEPENDENCIES (server-only)
-// ============================================
-async function getFormData() {
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
-
-  const [departments, managers] = await Promise.all([
-    Department.find(withTenantScope({ isActive: true }, companyId, isSuperAdmin))
-      .select("_id name code")
-      .sort({ name: 1 })
-      .lean(),
-    EmployeeProfile.find(
-      withTenantScope(
-        { "employment.status": { $in: ["active", "probation"] } },
-        companyId,
-        isSuperAdmin
-      )
-    )
-      .select("partyId employeeNumber personalInfo.firstName personalInfo.lastName employment.designation")
-      .sort({ "personalInfo.lastName": 1 })
-      .lean(),
-  ]);
-
-  return {
-    departments: departments.map((d) => ({ _id: d._id.toString(), name: d.name, code: d.code })),
-    managers: managers.map((m) => ({
-      _id: m._id.toString(),
-      partyId: m.partyId.toString(),
-      personalInfo: {
-        firstName: m.personalInfo?.firstName || "",
-        lastName: m.personalInfo?.lastName || "",
-      },
-      employment: { designation: m.employment?.designation || null },
-    })),
-  };
-}
-
 async function FormWrapper({ defaults }) {
-  const { departments, managers } = await getFormData();
+  const { departments, managers } = await getEmployeeFormData();
   return <EmployeeForm departments={departments} managers={managers} defaults={defaults} />;
 }
 
@@ -62,7 +21,7 @@ async function FormWrapper({ defaults }) {
 export default async function CreateEmployeePage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!HR_ROLES.includes(session.user.role)) redirect("/dashboard/hr");
+  if (!roleAllowed(session.user.role, HR_WRITE_ROLES)) redirect("/dashboard/hr");
 
   const params = await searchParams;
   const linkedUserId = params.userId || null;

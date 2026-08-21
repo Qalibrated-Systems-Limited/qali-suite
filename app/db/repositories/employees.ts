@@ -1032,6 +1032,35 @@ export async function getExpiringContracts(tx: Tx, daysAhead = 30) {
   }));
 }
 
+/**
+ * Logins in this company with no employment record.
+ *
+ * They can sign in but have no leave balance, no payslip and nowhere to clock
+ * in from, which is a support ticket waiting to happen — so the staff list
+ * offers to create the missing record.
+ *
+ * No company filter: 0036's `visible_within_company` policy already restricts
+ * `users` to people holding an active grant in the company this request is
+ * scoped to.
+ */
+export async function listUsersWithoutEmployeeRecord(tx: Tx, limit = 20) {
+  const rows = (await tx.execute(sql`
+    SELECT u.id, u.name, u.email, u.role
+      FROM users u
+     WHERE u.status = 'active'
+       AND NOT EXISTS (SELECT 1 FROM employees e WHERE e.user_id = u.id)
+     ORDER BY u.name
+     LIMIT ${Math.min(Math.max(limit, 1), 100)}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    name: String(r.name),
+    email: String(r.email),
+    role: String(r.role),
+  }));
+}
+
 // ── History ──────────────────────────────────────────────────────────────────
 
 export async function listEmploymentEvents(tx: Tx, employeeId: string, limit = 50) {

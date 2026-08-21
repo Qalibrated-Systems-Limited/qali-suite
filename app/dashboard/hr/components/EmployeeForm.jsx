@@ -4,11 +4,18 @@ import { useActionState } from "react";
 import Link from "next/link";
 import { Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { createEmployee } from "@/app/mongodb/actions/hr-employee-actions";
+import { createEmployee } from "@/app/db/actions/hr-employee-actions";
 import DepartmentCombobox from "./DepartmentCombobox";
 import ManagerCombobox from "./ManagerCombobox";
 
-const initialState = { success: false, error: null, fieldErrors: null };
+const initialState = { success: false, error: null, fieldErrors: null, values: null };
+
+/** Today, on the LOCAL calendar. `toISOString()` is UTC, so east of Greenwich
+ *  the default hire date was yesterday for the first hours of every day. */
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 function FieldError({ error }) {
   if (!error) return null;
@@ -67,7 +74,9 @@ function SectionCard({ title, children, cols = 2 }) {
 export default function EmployeeForm({ departments = [], managers = [], defaults = null }) {
   const [state, formAction, isPending] = useActionState(createEmployee, initialState);
   const e = state.fieldErrors || {};
-  const d = defaults || {};
+  // What was typed on a rejected submit wins over the page's defaults, so one
+  // bad field does not cost the other twenty.
+  const d = { ...(defaults || {}), ...(state.values || {}) };
 
   return (
     <form action={formAction} className="space-y-6">
@@ -92,11 +101,11 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
         </div>
         <div>
           <Label>Date of Birth</Label>
-          <Input name="dateOfBirth" type="date" />
+          <Input name="dateOfBirth" type="date" defaultValue={d.dateOfBirth} />
         </div>
         <div>
           <Label>Gender</Label>
-          <Select name="gender">
+          <Select name="gender" defaultValue={d.gender}>
             <option value="">— Select —</option>
             <option value="male">Male</option>
             <option value="female">Female</option>
@@ -105,19 +114,19 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
         </div>
         <div>
           <Label>National ID</Label>
-          <Input name="nationalId" placeholder="12345678" />
+          <Input name="nationalId" placeholder="12345678" defaultValue={d.nationalId} />
         </div>
         <div>
           <Label>KRA PIN</Label>
-          <Input name="kraPin" placeholder="A000000000X" />
+          <Input name="kraPin" placeholder="A000000000X" defaultValue={d.kraPin} />
         </div>
         <div>
           <Label>NSSF Number</Label>
-          <Input name="nssfNumber" placeholder="NSSF number" />
+          <Input name="nssfNumber" placeholder="NSSF number" defaultValue={d.nssfNumber} />
         </div>
         <div>
           <Label>SHA Number</Label>
-          <Input name="shaNumber" placeholder="SHA number" />
+          <Input name="shaNumber" placeholder="SHA number" defaultValue={d.shaNumber} />
         </div>
       </SectionCard>
 
@@ -130,7 +139,7 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
         </div>
         <div>
           <Label>Phone</Label>
-          <Input name="phone" type="tel" placeholder="+254 7xx xxx xxx" />
+          <Input name="phone" type="tel" placeholder="+254 7xx xxx xxx" defaultValue={d.phone} />
         </div>
       </SectionCard>
 
@@ -138,8 +147,8 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
       <SectionCard title="Employment">
         <div>
           <Label>Employee Number</Label>
-          <Input name="employeeNumber" placeholder="Auto-generated if left blank" error={e.employeeNumber} />
-          <p className="mt-1 text-xs text-muted-foreground">Leave blank to auto-generate (e.g. EMP0001)</p>
+          <Input name="employeeNumber" placeholder="Auto-generated if left blank" defaultValue={d.employeeNumber} error={e.employeeNumber} />
+          <p className="mt-1 text-xs text-muted-foreground">Leave blank to auto-generate (e.g. EMP-00001)</p>
         </div>
         <div>
           <Label required>Hire Date</Label>
@@ -147,12 +156,12 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
             name="hireDate"
             type="date"
             error={e.hireDate}
-            defaultValue={new Date().toISOString().split("T")[0]}
+            defaultValue={d.hireDate || today()}
           />
         </div>
         <div>
           <Label>Employment Type</Label>
-          <Select name="employmentType" defaultValue="full_time">
+          <Select name="employmentType" defaultValue={d.employmentType || "full_time"}>
             <option value="full_time">Full Time</option>
             <option value="part_time">Part Time</option>
             <option value="contract">Contract</option>
@@ -166,15 +175,15 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
         </div>
         <div>
           <Label>Designation</Label>
-          <Input name="designation" placeholder="e.g. Senior Accountant" />
+          <Input name="designation" placeholder="e.g. Senior Accountant" defaultValue={d.designation} />
         </div>
         <div>
           <Label>Job Grade</Label>
-          <Input name="jobGrade" placeholder="e.g. G1, M2" />
+          <Input name="jobGrade" placeholder="e.g. G1, M2" defaultValue={d.jobGrade} />
         </div>
         <div>
           <Label>Work Location</Label>
-          <Input name="workLocation" placeholder="e.g. Nairobi HQ" />
+          <Input name="workLocation" placeholder="e.g. Nairobi HQ" defaultValue={d.workLocation} />
         </div>
         <div className="sm:col-span-2">
           <Label>Reporting Manager</Label>
@@ -186,19 +195,27 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
       <SectionCard title="Compensation">
         <div>
           <Label>Basic Salary (KES)</Label>
-          <Input name="basicSalary" type="number" min="0" step="1" placeholder="0" />
+          <Input name="basicSalary" type="number" min="0" step="1" placeholder="0" defaultValue={d.basicSalary} />
         </div>
         <div>
           <Label>Housing Allowance (KES)</Label>
-          <Input name="housingAllowance" type="number" min="0" step="1" placeholder="0" />
+          <Input name="housingAllowance" type="number" min="0" step="1" placeholder="0" defaultValue={d.housingAllowance} />
         </div>
         <div>
           <Label>Transport Allowance (KES)</Label>
-          <Input name="transportAllowance" type="number" min="0" step="1" placeholder="0" />
+          <Input name="transportAllowance" type="number" min="0" step="1" placeholder="0" defaultValue={d.transportAllowance} />
+        </div>
+        <div>
+          <Label>Medical Allowance (KES)</Label>
+          <Input name="medicalAllowance" type="number" min="0" step="1" placeholder="0" defaultValue={d.medicalAllowance} />
+        </div>
+        <div>
+          <Label>Other Allowance (KES)</Label>
+          <Input name="otherAllowance" type="number" min="0" step="1" placeholder="0" defaultValue={d.otherAllowance} />
         </div>
         <div>
           <Label>Payment Method</Label>
-          <Select name="paymentMethod" defaultValue="bank">
+          <Select name="paymentMethod" defaultValue={d.paymentMethod || "bank"}>
             <option value="bank">Bank Transfer</option>
             <option value="mpesa">M-Pesa</option>
             <option value="cash">Cash</option>
@@ -206,15 +223,15 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
         </div>
         <div>
           <Label>Bank Name</Label>
-          <Input name="bankName" placeholder="e.g. KCB Bank" />
+          <Input name="bankName" placeholder="e.g. KCB Bank" defaultValue={d.bankName} />
         </div>
         <div>
           <Label>Bank Account Number</Label>
-          <Input name="bankAccount" placeholder="Account number" />
+          <Input name="bankAccount" placeholder="Account number" defaultValue={d.bankAccount} />
         </div>
         <div>
           <Label>M-Pesa Number</Label>
-          <Input name="mpesaNumber" type="tel" placeholder="+254 7xx xxx xxx" />
+          <Input name="mpesaNumber" type="tel" placeholder="+254 7xx xxx xxx" defaultValue={d.mpesaNumber} />
         </div>
       </SectionCard>
 
@@ -222,15 +239,15 @@ export default function EmployeeForm({ departments = [], managers = [], defaults
       <SectionCard title="Emergency Contact" cols={3}>
         <div>
           <Label>Name</Label>
-          <Input name="emergencyName" placeholder="Contact name" />
+          <Input name="emergencyName" placeholder="Contact name" defaultValue={d.emergencyName} />
         </div>
         <div>
           <Label>Relationship</Label>
-          <Input name="emergencyRelationship" placeholder="e.g. Spouse" />
+          <Input name="emergencyRelationship" placeholder="e.g. Spouse" defaultValue={d.emergencyRelationship} />
         </div>
         <div>
           <Label>Phone</Label>
-          <Input name="emergencyPhone" type="tel" placeholder="+254 7xx xxx xxx" />
+          <Input name="emergencyPhone" type="tel" placeholder="+254 7xx xxx xxx" defaultValue={d.emergencyPhone} />
         </div>
       </SectionCard>
 

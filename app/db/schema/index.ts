@@ -25,3 +25,6 @@ export * from "./bills";
 export * from "./creditNotes";
 export * from "./taxTransactions";
 export * from "./hr";
+export * from "./hrLeave";
+export * from "./hrAttendance";
+export * from "./hrPayroll";

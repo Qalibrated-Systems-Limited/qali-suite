@@ -18,18 +18,22 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { createDepartmentQuick } from "@/app/mongodb/actions/hr-department-actions";
+import { createDepartmentQuick } from "@/app/db/actions/hr-department-actions";
 
 /**
  * DepartmentCombobox
  * Searchable department selector with create-on-the-fly.
- * Writes departmentId + department (name) as hidden form inputs.
+ *
+ * Writes departmentId only. The NAME is no longer posted: the employee record
+ * references the department, and the name is joined — so a rename reaches
+ * every employee instead of leaving everyone hired before it filed under the
+ * old one. See migration 0045.
  */
 export default function DepartmentCombobox({ initialDepartments = [], defaultValue = null, error }) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [departments, setDepartments] = React.useState(initialDepartments);
-  const [selected, setSelected] = React.useState(defaultValue); // { _id, name }
+  const [selected, setSelected] = React.useState(defaultValue); // { id, name }
   const [creating, setCreating] = React.useState(false);
   const [createError, setCreateError] = React.useState(null);
 
@@ -42,7 +46,7 @@ export default function DepartmentCombobox({ initialDepartments = [], defaultVal
     !departments.some((d) => d.name.toLowerCase() === search.toLowerCase().trim());
 
   function handleSelect(dept) {
-    setSelected(dept._id === selected?._id ? null : dept);
+    setSelected(dept.id === selected?.id ? null : dept);
     setOpen(false);
     setSearch("");
   }
@@ -66,9 +70,8 @@ export default function DepartmentCombobox({ initialDepartments = [], defaultVal
 
   return (
     <div>
-      {/* Hidden inputs consumed by the parent form action */}
-      <input type="hidden" name="departmentId" value={selected?._id || ""} />
-      <input type="hidden" name="department" value={selected?.name || ""} />
+      {/* Hidden input consumed by the parent form action */}
+      <input type="hidden" name="departmentId" value={selected?.id || ""} />
 
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -104,14 +107,14 @@ export default function DepartmentCombobox({ initialDepartments = [], defaultVal
                 <CommandGroup>
                   {filtered.map((dept) => (
                     <CommandItem
-                      key={dept._id}
+                      key={dept.id}
                       value={dept.name}
                       onSelect={() => handleSelect(dept)}
                     >
                       <Check
                         className={cn(
                           "mr-2 h-4 w-4",
-                          selected?._id === dept._id ? "opacity-100" : "opacity-0"
+                          selected?.id === dept.id ? "opacity-100" : "opacity-0"
                         )}
                       />
                       {dept.name}
