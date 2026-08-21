@@ -1,17 +1,28 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft, Calendar, User, Clock, FileText, CheckCircle2, XCircle, RotateCcw } from "lucide-react";
-import { getLeaveRequestById } from "@/app/mongodb/queries/hr-queries";
-import { LeaveDetailActions } from "@/app/dashboard/hr/components/LeaveDetailActions";
+import { ChevronLeft, CalendarDays, User } from "lucide-react";
+import { getLeaveRequestForPage } from "@/app/db/actions/hr-leave-actions";
+import { LeaveDetailActions } from "../../components/LeaveDetailActions";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
-  const { leaveRequest } = await getLeaveRequestById(id);
-  return { title: `${leaveRequest?.leaveNumber || "Leave Request"} | HR` };
+  const data = await getLeaveRequestForPage(id);
+  return { title: data ? `${data.request.leaveNumber} | Leave` : "Leave request" };
 }
 
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager", "Employee"];
+const day = (d) =>
+  d
+    ? new Date(`${d}T00:00:00`).toLocaleDateString("en-KE", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : "—";
+
+const stamp = (iso) =>
+  iso ? new Date(iso).toLocaleString("en-KE", { dateStyle: "medium", timeStyle: "short" }) : "—";
 
 function StatusBadge({ status }) {
   const map = {
@@ -19,60 +30,37 @@ function StatusBadge({ status }) {
     submitted: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
     approved: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
     rejected: "bg-red-500/15 text-red-700 dark:text-red-400",
-    recalled: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
     completed: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
     cancelled: "bg-muted text-muted-foreground",
   };
   return (
-    <span className={`inline-flex rounded-full px-3 py-1 text-sm font-medium capitalize ${map[status] || "bg-muted text-muted-foreground"}`}>
+    <span
+      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize ${map[status] || "bg-muted text-muted-foreground"}`}
+    >
       {status}
-    </span>
-  );
-}
-
-function LeaveTypeBadge({ type }) {
-  const map = {
-    annual: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-    sick: "bg-red-500/15 text-red-700 dark:text-red-400",
-    maternity: "bg-pink-500/15 text-pink-700 dark:text-pink-400",
-    paternity: "bg-purple-500/15 text-purple-700 dark:text-purple-400",
-    compassionate: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
-    study: "bg-teal-500/15 text-teal-700 dark:text-teal-400",
-    unpaid: "bg-muted text-muted-foreground",
-  };
-  return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium capitalize ${map[type] || "bg-muted text-muted-foreground"}`}>
-      {type}
     </span>
   );
 }
 
 function InfoRow({ label, children }) {
   return (
-    <div className="flex items-start justify-between py-3 border-b border-border last:border-0">
-      <dt className="text-sm text-muted-foreground w-40 shrink-0">{label}</dt>
-      <dd className="text-sm font-medium text-foreground text-right flex-1">{children}</dd>
+    <div className="flex justify-between gap-4 py-1.5 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="text-right font-medium text-foreground">{children}</span>
     </div>
   );
 }
 
-function formatDate(iso) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-function TimelineEvent({ icon: Icon, iconClass, title, date, note }) {
+function Step({ label, who, date, note }) {
   return (
-    <div className="flex gap-3">
-      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${iconClass}`}>
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="flex-1 pt-0.5">
-        <p className="text-sm font-medium text-foreground">{title}</p>
-        {date && <p className="text-xs text-muted-foreground">{formatDate(date)}</p>}
-        {note && <p className="mt-1 text-xs text-muted-foreground">{note}</p>}
-      </div>
-    </div>
+    <li className="border-l-2 border-border pl-4">
+      <p className="text-sm font-medium text-foreground">{label}</p>
+      <p className="text-xs text-muted-foreground">
+        {stamp(date)}
+        {who ? ` · ${who}` : ""}
+      </p>
+      {note && <p className="mt-1 text-xs text-muted-foreground">{note}</p>}
+    </li>
   );
 }
 
@@ -80,223 +68,213 @@ export default async function LeaveDetailPage({ params }) {
   const { id } = await params;
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!HR_ROLES.includes(session.user.role)) redirect("/dashboard");
 
-  const { leaveRequest: leave, error } = await getLeaveRequestById(id);
-  if (!leave || error) notFound();
+  const data = await getLeaveRequestForPage(id);
+  if (!data) notFound();
+
+  const { request: leave, balances, canApprove } = data;
+  const balance = balances.find((b) => b.leaveTypeId === leave.leaveTypeId);
 
   return (
-    <div className="space-y-6 p-4 sm:p-6 max-w-4xl">
-      {/* Breadcrumb */}
+    <div className="space-y-6 p-4 sm:p-6">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Link href="/dashboard/hr/leave" className="flex items-center gap-1 hover:text-foreground">
           <ChevronLeft className="h-4 w-4" /> Leave
         </Link>
         <span>/</span>
-        <span className="text-foreground font-mono">{leave.leaveNumber}</span>
+        <span className="font-mono text-foreground">{leave.leaveNumber}</span>
       </div>
 
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-bold text-foreground sm:text-2xl">{leave.leaveNumber}</h1>
+            <h1 className="text-xl font-bold text-foreground sm:text-2xl">
+              {leave.leaveNumber}
+            </h1>
             <StatusBadge status={leave.status} />
-            <LeaveTypeBadge type={leave.leaveType} />
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+              {leave.leaveTypeName}
+            </span>
+            {!leave.isPaid && (
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                unpaid — deducted from pay
+              </span>
+            )}
           </div>
-          <p className="mt-1 truncate text-sm text-muted-foreground">
-            {leave.employee?.name}
-            {leave.employee?.department ? <span className="hidden sm:inline"> · {leave.employee.department}</span> : null}
+          <p className="mt-1 text-sm text-muted-foreground">
+            {leave.employeeName}
+            {leave.department && <span className="hidden sm:inline"> · {leave.department}</span>}
           </p>
         </div>
-        <LeaveDetailActions leave={leave} userRole={session.user.role} />
+
+        <LeaveDetailActions
+          leave={leave}
+          userRole={session.user.role}
+          canApprove={canApprove}
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* ── Left: Details ── */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Leave dates */}
+        <div className="space-y-6 lg:col-span-2">
           <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-            <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Calendar className="h-4 w-4 text-muted-foreground" /> Leave Period
+            <h2 className="mb-4 flex items-center gap-2 font-semibold text-foreground">
+              <CalendarDays className="h-4 w-4 text-muted-foreground" /> The dates
             </h2>
-            <div className="grid grid-cols-3 gap-2 sm:gap-4">
-              <div className="rounded-lg bg-muted/50 p-3 sm:p-4 text-center">
-                <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wide">From</p>
-                <p className="mt-1 text-sm sm:text-base font-bold text-foreground">{formatDate(leave.dates?.from)}</p>
-              </div>
-              <div className="rounded-lg bg-muted/50 p-3 sm:p-4 text-center">
-                <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wide">To</p>
-                <p className="mt-1 text-sm sm:text-base font-bold text-foreground">{formatDate(leave.dates?.to)}</p>
-              </div>
-              <div className="rounded-lg bg-primary/5 p-3 sm:p-4 text-center">
-                <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wide">Duration</p>
-                <p className="mt-1 text-base sm:text-lg font-bold text-primary">
-                  {leave.dates?.totalDays} {leave.dates?.totalDays === 1 ? "day" : "days"}
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <p className="text-xs text-muted-foreground">From</p>
+                <p className="mt-1 text-sm font-bold text-foreground sm:text-base">
+                  {day(leave.fromDate)}
                 </p>
-                {leave.dates?.halfDay && <p className="text-xs text-muted-foreground">half day</p>}
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">To</p>
+                <p className="mt-1 text-sm font-bold text-foreground sm:text-base">
+                  {day(leave.toDate)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Working days</p>
+                <p className="mt-1 text-sm font-bold text-foreground sm:text-base">
+                  {leave.totalDays} {leave.totalDays === 1 ? "day" : "days"}
+                </p>
+                {leave.isHalfDay && (
+                  <p className="text-xs text-muted-foreground">
+                    half day, {leave.halfDayPeriod}
+                  </p>
+                )}
               </div>
             </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Weekends and public holidays are already excluded, and this is the
+              count that was agreed — adding a holiday later does not change it.
+            </p>
           </div>
 
-          {/* Reason */}
           {leave.reason && (
             <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-              <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
-                <FileText className="h-4 w-4 text-muted-foreground" /> Reason
-              </h2>
-              <p className="text-sm text-muted-foreground leading-relaxed">{leave.reason}</p>
+              <h2 className="mb-2 font-semibold text-foreground">Reason</h2>
+              <p className="text-sm leading-relaxed text-muted-foreground">{leave.reason}</p>
             </div>
           )}
 
-          {/* Rejection reason */}
+          {leave.handoverName && (
+            <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+              <h2 className="mb-2 font-semibold text-foreground">Handover</h2>
+              <p className="text-sm text-foreground">{leave.handoverName}</p>
+              {leave.handoverNotes && (
+                <p className="mt-1 text-sm text-muted-foreground">{leave.handoverNotes}</p>
+              )}
+            </div>
+          )}
+
           {leave.status === "rejected" && leave.rejectionReason && (
             <div className="rounded-lg border border-red-200 bg-red-500/5 p-5 dark:border-red-900">
-              <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-red-700 dark:text-red-400">
-                <XCircle className="h-4 w-4" /> Rejection Reason
+              <h2 className="mb-2 font-semibold text-red-700 dark:text-red-400">
+                Why it was rejected
               </h2>
-              <p className="text-sm text-red-700 dark:text-red-400 leading-relaxed">{leave.rejectionReason}</p>
+              <p className="text-sm leading-relaxed text-red-700 dark:text-red-400">
+                {leave.rejectionReason}
+              </p>
             </div>
           )}
 
-          {/* Balance snapshot */}
-          {leave.balanceSnapshot && (() => {
-            const entitled = leave.balanceSnapshot.entitledDays;
-            const usedBefore = leave.balanceSnapshot.usedDaysBefore ?? leave.balanceSnapshot.usedDays;
-            const balanceBefore = leave.balanceSnapshot.balanceBefore ?? leave.balanceSnapshot.balanceDays;
-            const totalDays = leave.dates?.totalDays || 0;
-            const usedAfter = usedBefore != null ? usedBefore + totalDays : null;
-            const balanceAfter = balanceBefore != null ? balanceBefore - totalDays : null;
+          {leave.status === "cancelled" && (
+            <div className="rounded-lg border border-border bg-muted/30 p-5">
+              <h2 className="mb-2 font-semibold text-foreground">Cancelled</h2>
+              <p className="text-sm text-muted-foreground">
+                {leave.cancellationReason || "No reason recorded."}
+                {leave.cancelledByName && ` — ${leave.cancelledByName}`}
+              </p>
+            </div>
+          )}
 
-            return (
-              <div className="rounded-lg border border-border bg-card p-5 shadow-sm space-y-4">
-                {/* Before */}
-                <div>
-                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Balance before this leave
-                  </h2>
-                  <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center text-sm">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Entitled</p>
-                      <p className="mt-1 text-lg font-bold text-foreground">{entitled ?? "—"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Used</p>
-                      <p className="mt-1 text-lg font-bold text-foreground">{usedBefore ?? "—"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Remaining</p>
-                      <p className="mt-1 text-lg font-bold text-foreground">{balanceBefore ?? "—"}</p>
-                    </div>
+          {balance && leave.affectsBalance && (
+            <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+              <h2 className="mb-3 font-semibold text-foreground">
+                {leave.leaveTypeName} balance, right now
+              </h2>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                {[
+                  ["Entitled", balance.entitledDays + balance.carryOverDays],
+                  ["Taken", balance.takenDays],
+                  ["Awaiting a decision", balance.pendingDays],
+                  ["Available", balance.availableDays],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="mt-1 text-lg font-bold text-foreground">{value}</p>
                   </div>
-                </div>
-
-                {/* Divider with leave days */}
-                <div className="flex items-center gap-3">
-                  <div className="h-px flex-1 bg-border" />
-                  <span className="text-xs font-medium text-primary bg-primary/10 px-2.5 py-0.5 rounded-full">
-                    −{totalDays} day{totalDays !== 1 ? "s" : ""}
-                  </span>
-                  <div className="h-px flex-1 bg-border" />
-                </div>
-
-                {/* After */}
-                <div>
-                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Balance after this leave
-                  </h2>
-                  <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center text-sm">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Entitled</p>
-                      <p className="mt-1 text-lg font-bold text-foreground">{entitled ?? "—"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Used</p>
-                      <p className="mt-1 text-lg font-bold text-foreground">{usedAfter ?? "—"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Remaining</p>
-                      <p className={`mt-1 text-lg font-bold ${balanceAfter != null && balanceAfter <= 3 ? "text-amber-600 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>
-                        {balanceAfter ?? "—"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                ))}
               </div>
-            );
-          })()}
+              <p className="mt-3 text-xs text-muted-foreground">
+                Counted from the leave requests themselves, so it is what it says
+                — including this one while it waits.
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* ── Right: Employee + Timeline ── */}
         <div className="space-y-6">
-          {/* Employee card */}
           <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-            <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">
+            <h2 className="mb-3 flex items-center gap-2 font-semibold text-foreground">
               <User className="h-4 w-4 text-muted-foreground" /> Employee
             </h2>
-            <dl>
-              <InfoRow label="Name">{leave.employee?.name || "—"}</InfoRow>
-              <InfoRow label="Employee No.">
-                <span className="font-mono text-xs">{leave.employee?.employeeNumber || "—"}</span>
-              </InfoRow>
-              <InfoRow label="Department">{leave.employee?.department || "—"}</InfoRow>
-            </dl>
-            {leave.employee?.profileId && (
-              <Link
-                href={`/dashboard/hr/employees/${leave.employee.profileId}`}
-                className="mt-3 block text-center text-xs text-primary hover:underline"
-              >
-                View employee profile →
-              </Link>
-            )}
+            <InfoRow label="Name">{leave.employeeName}</InfoRow>
+            <InfoRow label="Number">
+              <span className="font-mono text-xs">{leave.employeeNumber}</span>
+            </InfoRow>
+            <InfoRow label="Department">{leave.department || "—"}</InfoRow>
+            <InfoRow label="Designation">{leave.designation || "—"}</InfoRow>
+            <Link
+              href={`/dashboard/hr/employees/${leave.employeeId}`}
+              className="mt-3 inline-block text-sm text-primary hover:underline"
+            >
+              Open their record
+            </Link>
           </div>
 
-          {/* Timeline */}
           <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-            <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Clock className="h-4 w-4 text-muted-foreground" /> Timeline
-            </h2>
-            <div className="space-y-4">
-              <TimelineEvent
-                icon={FileText}
-                iconClass="bg-muted text-muted-foreground"
-                title="Created"
-                date={leave.createdAt}
-              />
+            <h2 className="mb-3 font-semibold text-foreground">What happened</h2>
+            <ol className="space-y-3">
+              <Step label="Raised" who={leave.createdByName} date={leave.createdAt} />
+              {leave.recalledAt && (
+                <Step
+                  label="Recalled to draft"
+                  date={leave.recalledAt}
+                  note="Pulled back for editing before a decision."
+                />
+              )}
               {leave.submittedAt && (
-                <TimelineEvent
-                  icon={CheckCircle2}
-                  iconClass="bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                  title="Submitted for approval"
-                  date={leave.submittedAt}
-                />
+                <Step label="Submitted" who={leave.submittedByName} date={leave.submittedAt} />
               )}
-              {leave.status === "approved" && leave.approvedAt && (
-                <TimelineEvent
-                  icon={CheckCircle2}
-                  iconClass="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                  title="Approved"
-                  date={leave.approvedAt}
-                />
+              {leave.approvedAt && (
+                <Step label="Approved" who={leave.approvedByName} date={leave.approvedAt} />
               )}
-              {leave.status === "rejected" && leave.rejectedAt && (
-                <TimelineEvent
-                  icon={XCircle}
-                  iconClass="bg-red-500/15 text-red-600 dark:text-red-400"
-                  title="Rejected"
+              {leave.rejectedAt && (
+                <Step
+                  label="Rejected"
+                  who={leave.rejectedByName}
                   date={leave.rejectedAt}
                   note={leave.rejectionReason}
                 />
               )}
-              {leave.status === "recalled" && (
-                <TimelineEvent
-                  icon={RotateCcw}
-                  iconClass="bg-orange-500/15 text-orange-600 dark:text-orange-400"
-                  title="Recalled"
-                  date={leave.updatedAt}
+              {leave.completedAt && (
+                <Step
+                  label="Completed"
+                  date={leave.completedAt}
+                  note="The leave period has ended."
                 />
               )}
-            </div>
+              {leave.cancelledAt && (
+                <Step
+                  label="Cancelled"
+                  who={leave.cancelledByName}
+                  date={leave.cancelledAt}
+                  note={leave.cancellationReason}
+                />
+              )}
+            </ol>
           </div>
         </div>
       </div>

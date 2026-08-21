@@ -1,152 +1,165 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useActionState } from "react";
 import { RefreshCw, TrendingUp, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { runLeaveCarryOver, runLeaveAccrual } from "@/app/mongodb/actions/hr-leave-admin-actions";
+import { runCarryOver, runAccrual } from "@/app/db/actions/hr-leave-actions";
 
-function ResultBanner({ result }) {
-  if (!result) return null;
-  if (!result.success) {
+const initial = { success: false, error: null, message: null };
+
+function Result({ state }) {
+  if (state.error) {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-500/5 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:text-red-400">
-        <AlertCircle className="h-4 w-4 shrink-0" /> {result.error}
+      <div className="mt-3 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+        {state.error}
       </div>
     );
   }
-  return (
-    <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900 dark:text-emerald-400">
-      <CheckCircle2 className="h-4 w-4 shrink-0" /> {result.message}
-    </div>
-  );
+  if (state.success && state.message) {
+    return (
+      <div className="mt-3 flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:border-emerald-900 dark:text-emerald-400">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+        {state.message}
+      </div>
+    );
+  }
+  return null;
 }
 
-export default function LeaveAdminClient() {
-  const router = useRouter();
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth() + 1;
+const field =
+  "w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary";
 
-  // Carry-over state
-  const [coFromYear, setCoFromYear] = useState(currentYear - 1);
-  const [coToYear, setCoToYear] = useState(currentYear);
-  const [coMax, setCoMax] = useState(10);
-  const [coResult, setCoResult] = useState(null);
-  const [coLoading, startCO] = useTransition();
+export default function LeaveAdminClient({ leaveTypes = [] }) {
+  const [carryState, carryAction, carryPending] = useActionState(runCarryOver, initial);
+  const [accrualState, accrualAction, accrualPending] = useActionState(runAccrual, initial);
 
-  // Accrual state
-  const [accYear, setAccYear] = useState(currentYear);
-  const [accMonth, setAccMonth] = useState(currentMonth);
-  const [accDays, setAccDays] = useState(1.75);
-  const [accResult, setAccResult] = useState(null);
-  const [accLoading, startAcc] = useTransition();
-
-  function handleCarryOver() {
-    if (!confirm(`Run leave carry-over from ${coFromYear} → ${coToYear}? This will update all active employees.`)) return;
-    startCO(async () => {
-      const result = await runLeaveCarryOver({ fromYear: coFromYear, toYear: coToYear, maxCarryOver: coMax });
-      setCoResult(result);
-      if (result.success) { toast.success(result.message); router.refresh(); }
-      else toast.error(result.error);
-    });
-  }
-
-  function handleAccrual() {
-    if (!confirm(`Run monthly accrual of ${accDays} days for ${accMonth}/${accYear}?`)) return;
-    startAcc(async () => {
-      const result = await runLeaveAccrual({ year: accYear, month: accMonth, accrualDays: accDays });
-      setAccResult(result);
-      if (result.success) { toast.success(result.message); router.refresh(); }
-      else toast.error(result.error);
-    });
-  }
-
-  const inputClass = "w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary";
+  const thisYear = new Date().getFullYear();
+  const thisMonth = new Date().getMonth() + 1;
+  const annual = leaveTypes.find((t) => t.code === "annual") ?? leaveTypes[0];
 
   return (
     <div className="space-y-6">
-      {/* Carry-over */}
-      <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <div>
-          <h2 className="font-semibold text-foreground flex items-center gap-2">
-            <RefreshCw className="h-4 w-4" /> Year-End Carry-Over
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Roll unused annual leave days into the new year. Runs once per year — usually in December or January.
-          </p>
+      <form action={carryAction} className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <h2 className="flex items-center gap-2 font-semibold text-foreground">
+          <RefreshCw className="h-4 w-4 text-muted-foreground" />
+          Carry unused leave into the new year
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Each leave type carries over up to its own configured maximum. Last
+          year&apos;s record is left exactly as it is — this writes a new row
+          for the new year, so running it twice gives the same answer.
+        </p>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-foreground">From</label>
+            <input name="fromYear" type="number" defaultValue={thisYear} className={field} />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-foreground">Into</label>
+            <input name="toYear" type="number" defaultValue={thisYear + 1} className={field} />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-foreground">
+              Leave type
+            </label>
+            <select name="leaveTypeId" className={field} defaultValue="">
+              <option value="">Every type that carries over</option>
+              {leaveTypes
+                .filter((t) => t.maxCarryOver > 0)
+                .map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} (max {t.maxCarryOver})
+                  </option>
+                ))}
+            </select>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-foreground">From Year</label>
-            <input type="number" value={coFromYear} onChange={(e) => setCoFromYear(parseInt(e.target.value))} className={inputClass} min="2020" max="2100" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-foreground">To Year</label>
-            <input type="number" value={coToYear} onChange={(e) => setCoToYear(parseInt(e.target.value))} className={inputClass} min="2020" max="2100" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-foreground">Max Carry-Over (days)</label>
-            <input type="number" value={coMax} onChange={(e) => setCoMax(parseInt(e.target.value))} className={inputClass} min="0" max="30" />
-          </div>
+        <Result state={carryState} />
+
+        <div className="mt-4 flex justify-end">
+          <Button type="submit" disabled={carryPending}>
+            {carryPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Run carry-over
+          </Button>
         </div>
+      </form>
 
-        <ResultBanner result={coResult} />
+      <form action={accrualAction} className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <h2 className="flex items-center gap-2 font-semibold text-foreground">
+          <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          Accrue leave month by month
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Sets the entitlement to what has been EARNED by the end of the month
+          you choose — Kenya&apos;s 21 days is 1.75 a month. Somebody hired in
+          April accrues from April. Running it again for the same month changes
+          nothing, and running it for a month you missed catches up.
+        </p>
 
-        <Button onClick={handleCarryOver} disabled={coLoading} variant="outline">
-          {coLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          Run Carry-Over
-        </Button>
-      </div>
-
-      {/* Monthly Accrual */}
-      <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <div>
-          <h2 className="font-semibold text-foreground flex items-center gap-2">
-            <TrendingUp className="h-4 w-4" /> Monthly Leave Accrual
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Credit employees with their monthly leave accrual (e.g. 1.75 days for 21-day annual entitlement).
-            Run once per month after payroll.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div className="mt-4 grid gap-4 sm:grid-cols-4">
           <div>
-            <label className="mb-1 block text-xs font-medium text-foreground">Year</label>
-            <input type="number" value={accYear} onChange={(e) => setAccYear(parseInt(e.target.value))} className={inputClass} min="2020" max="2100" />
+            <label className="mb-1 block text-sm font-medium text-foreground">Year</label>
+            <input name="year" type="number" defaultValue={thisYear} className={field} />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-foreground">Month</label>
-            <select value={accMonth} onChange={(e) => setAccMonth(parseInt(e.target.value))} className={inputClass}>
-              {["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => (
-                <option key={m} value={i + 1}>{m}</option>
+            <label className="mb-1 block text-sm font-medium text-foreground">
+              Accrued through
+            </label>
+            <select name="throughMonth" defaultValue={thisMonth} className={field}>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                <option key={m} value={m}>
+                  {new Date(2000, m - 1, 1).toLocaleDateString("en-KE", { month: "long" })}
+                </option>
               ))}
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-foreground">Accrual Days</label>
-            <input type="number" value={accDays} onChange={(e) => setAccDays(parseFloat(e.target.value))} className={inputClass} step="0.25" min="0" max="10" />
+            <label className="mb-1 block text-sm font-medium text-foreground">
+              Leave type
+            </label>
+            <select name="leaveTypeId" defaultValue={annual?.id ?? ""} className={field}>
+              {leaveTypes
+                .filter((t) => t.affectsBalance)
+                .map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-foreground">
+              Days per month
+            </label>
+            <input
+              name="daysPerMonth"
+              type="number"
+              step="0.25"
+              min="0.25"
+              defaultValue={1.75}
+              className={field}
+            />
           </div>
         </div>
 
-        <ResultBanner result={accResult} />
+        <Result state={accrualState} />
 
-        <Button onClick={handleAccrual} disabled={accLoading} variant="outline">
-          {accLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
-          Run Accrual
-        </Button>
-      </div>
+        <div className="mt-4 flex justify-end">
+          <Button type="submit" disabled={accrualPending}>
+            {accrualPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Run accrual
+          </Button>
+        </div>
+      </form>
 
-      {/* Encashment note */}
-      <div className="rounded-lg border border-border bg-muted/30 p-4">
-        <p className="text-sm font-medium text-foreground mb-1">Leave Encashment</p>
-        <p className="text-sm text-muted-foreground">
-          To encash unused leave for an employee, go to their profile → Leave Balances → Encash.
-          The encashment amount is added as an additional earning to their next payroll entry.
-        </p>
+      <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+        To pay out unused leave instead of taking it, open the employee&apos;s
+        record → Leave balances. The amount is reported back for you to add to
+        their next payslip as a one-off earning; encashed days reduce the
+        balance without being counted as days taken.
       </div>
     </div>
   );

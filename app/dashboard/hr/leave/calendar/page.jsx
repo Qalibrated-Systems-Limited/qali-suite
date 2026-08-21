@@ -3,22 +3,29 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
 import { List } from "lucide-react";
-import { getLeaveCalendarEvents } from "@/app/mongodb/queries/hr-queries";
+import { getLeaveCalendarForPage } from "@/app/db/actions/hr-leave-actions";
+import { HR_VIEW_ROLES } from "@/lib/utils/role-gates";
+import { roleAllowed } from "@/lib/permissions";
 import LeaveCalendarClient from "./LeaveCalendarClient";
 
 export const metadata = { title: "Leave Calendar | HR" };
 
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager", "Employee"];
-
 async function CalendarLoader({ month, year }) {
-  const events = await getLeaveCalendarEvents(month, year);
-  return <LeaveCalendarClient events={events} month={month} year={year} />;
+  const { events, holidays } = await getLeaveCalendarForPage(month, year);
+  return (
+    <LeaveCalendarClient
+      events={events}
+      holidays={holidays}
+      month={month}
+      year={year}
+    />
+  );
 }
 
 export default async function LeaveCalendarPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!HR_ROLES.includes(session.user.role)) redirect("/dashboard");
+  if (!roleAllowed(session.user.role, HR_VIEW_ROLES)) redirect("/dashboard/hr/my-leave");
 
   const params = await searchParams;
   const now = new Date();
@@ -30,7 +37,9 @@ export default async function LeaveCalendarPage({ searchParams }) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-foreground sm:text-2xl">Leave Calendar</h1>
-          <p className="hidden sm:block text-sm text-muted-foreground">Approved and pending leave at a glance</p>
+          <p className="hidden text-sm text-muted-foreground sm:block">
+            Approved leave and public holidays, side by side
+          </p>
         </div>
         <Link
           href="/dashboard/hr/leave"

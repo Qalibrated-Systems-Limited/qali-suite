@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 const LEAVE_COLORS = {
@@ -17,7 +17,7 @@ const DEFAULT_COLOR = "bg-muted/60 text-muted-foreground border-border";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-export default function LeaveCalendarClient({ events, month, year }) {
+export default function LeaveCalendarClient({ events, holidays = [], month, year }) {
   const router = useRouter();
 
   function navigate(dir) {
@@ -32,13 +32,16 @@ export default function LeaveCalendarClient({ events, month, year }) {
   const firstDay = new Date(year, month - 1, 1).getDay(); // 0=Sun
   const daysInMonth = new Date(year, month, 0).getDate();
 
-  // Map events to a Set of covered dates: dayNum → [events]
+  // Map events onto the days they cover.
+  //
+  // The dates are day strings, so they are parsed as LOCAL midnight —
+  // `new Date("2026-08-03")` is UTC midnight, which lands on the 2nd anywhere
+  // west of Greenwich and shifts every bar by a day.
   const dayMap = {};
   for (const ev of events) {
-    if (!ev.from || !ev.to) continue;
-    const from = new Date(ev.from);
-    const to = new Date(ev.to);
-    const cur = new Date(from);
+    if (!ev.fromDate || !ev.toDate) continue;
+    const cur = new Date(`${ev.fromDate}T00:00:00`);
+    const to = new Date(`${ev.toDate}T00:00:00`);
     while (cur <= to) {
       if (cur.getMonth() + 1 === month && cur.getFullYear() === year) {
         const d = cur.getDate();
@@ -46,6 +49,16 @@ export default function LeaveCalendarClient({ events, month, year }) {
         dayMap[d].push(ev);
       }
       cur.setDate(cur.getDate() + 1);
+    }
+  }
+
+  // Public holidays, so a gap in the calendar reads as a holiday rather than
+  // as nobody having booked leave.
+  const holidayMap = {};
+  for (const h of holidays) {
+    const d = new Date(`${h.date}T00:00:00`);
+    if (d.getMonth() + 1 === month && d.getFullYear() === year) {
+      holidayMap[d.getDate()] = h.name;
     }
   }
 
@@ -90,6 +103,9 @@ export default function LeaveCalendarClient({ events, month, year }) {
         <span className="inline-flex items-center gap-1 rounded border border-amber-400/40 bg-amber-500/20 px-2 py-0.5 text-amber-700 dark:text-amber-300">
           pending approval
         </span>
+        <span className="inline-flex items-center gap-1 rounded border border-rose-400/40 bg-rose-500/20 px-2 py-0.5 text-rose-700 dark:text-rose-300">
+          public holiday
+        </span>
       </div>
 
       {/* Calendar grid */}
@@ -109,13 +125,15 @@ export default function LeaveCalendarClient({ events, month, year }) {
             if (!day) return <div key={`blank-${idx}`} className="min-h-[80px] bg-muted/20" />;
 
             const eventsToday = dayMap[day] || [];
+            const holiday = holidayMap[day];
             const isToday = isCurrentMonth && today.getDate() === day;
             const isWeekend = ((firstDay + day - 1) % 7 === 0) || ((firstDay + day - 1) % 7 === 6);
 
             return (
               <div
                 key={day}
-                className={`min-h-[80px] p-1.5 ${isWeekend ? "bg-muted/30" : ""}`}
+                className={`min-h-[80px] p-1.5 ${holiday ? "bg-rose-500/10" : isWeekend ? "bg-muted/30" : ""}`}
+                title={holiday || undefined}
               >
                 <span className={`mb-1 inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
                   isToday
@@ -124,16 +142,21 @@ export default function LeaveCalendarClient({ events, month, year }) {
                 }`}>
                   {day}
                 </span>
+                {holiday && (
+                  <p className="truncate text-[10px] font-medium text-rose-700 dark:text-rose-300">
+                    {holiday}
+                  </p>
+                )}
                 <div className="space-y-0.5">
                   {eventsToday.slice(0, 3).map((ev, i) => (
                     <div
-                      key={`${ev._id}-${i}`}
+                      key={`${ev.id}-${i}`}
                       className={`truncate rounded border px-1 py-0.5 text-[10px] leading-tight ${
                         ev.status === "submitted"
                           ? "border-amber-400/40 bg-amber-500/20 text-amber-700 dark:text-amber-300"
-                          : (LEAVE_COLORS[ev.leaveType] || DEFAULT_COLOR)
+                          : (LEAVE_COLORS[ev.leaveTypeCode] || DEFAULT_COLOR)
                       }`}
-                      title={`${ev.employeeName} — ${ev.leaveType} (${ev.status})`}
+                      title={`${ev.employeeName} — ${ev.leaveTypeName} (${ev.status})`}
                     >
                       {ev.employeeName.split(" ")[0]}
                     </div>
@@ -158,12 +181,12 @@ export default function LeaveCalendarClient({ events, month, year }) {
           </div>
           <div className="divide-y divide-border">
             {events.map((ev) => (
-              <div key={ev._id} className="flex items-center gap-3 px-4 py-3">
+              <div key={ev.id} className="flex items-center gap-3 px-4 py-3">
                 <div className={`h-2 w-2 shrink-0 rounded-full ${ev.status === "submitted" ? "bg-amber-500" : "bg-emerald-500"}`} />
                 <div className="flex-1 min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">{ev.employeeName}</p>
                   <p className="text-xs text-muted-foreground capitalize">
-                    {ev.leaveType} · {ev.totalDays} {ev.totalDays === 1 ? "day" : "days"}
+                    {ev.leaveTypeName} · {ev.fromDate} – {ev.toDate}
                     {ev.department && ` · ${ev.department}`}
                   </p>
                 </div>

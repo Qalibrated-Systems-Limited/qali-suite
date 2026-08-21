@@ -32,11 +32,10 @@ import {
 } from "@/components/ui/select";
 
 import {
-  createLeaveType,
-  updateLeaveType,
+  saveLeaveType,
   deleteLeaveType,
   seedLeaveTypes,
-} from "@/app/mongodb/actions/leave-type-actions";
+} from "@/app/db/actions/hr-leave-actions";
 
 const GENDER_OPTIONS = [
   { value: "all", label: "All employees" },
@@ -50,7 +49,7 @@ function emptyForm() {
     name: "",
     defaultEntitlement: "0",
     maxCarryOver: "0",
-    paidLeave: true,
+    isPaid: true,
     requiresDocument: false,
     applicableGender: "all",
     sortOrder: "0",
@@ -86,7 +85,7 @@ export function LeaveTypesPage({ leaveTypes, loadError }) {
       name: row.name,
       defaultEntitlement: String(row.defaultEntitlement ?? 0),
       maxCarryOver: String(row.maxCarryOver ?? 0),
-      paidLeave: row.paidLeave !== false,
+      isPaid: row.isPaid !== false,
       requiresDocument: !!row.requiresDocument,
       applicableGender: row.applicableGender || "all",
       sortOrder: String(row.sortOrder ?? 0),
@@ -115,10 +114,10 @@ export function LeaveTypesPage({ leaveTypes, loadError }) {
     startTransition(async () => {
       let res;
       if (dialog === "create") {
-        res = await createLeaveType(undefined, fd);
+        res = await saveLeaveType(undefined, fd);
       } else if (dialog?.type === "edit") {
-        fd.append("leaveTypeId", dialog.row._id);
-        res = await updateLeaveType(undefined, fd);
+        fd.append("leaveTypeId", dialog.row.id);
+        res = await saveLeaveType(undefined, fd);
       }
       if (res?.success) {
         closeDialog();
@@ -134,7 +133,7 @@ export function LeaveTypesPage({ leaveTypes, loadError }) {
     if (dialog?.type !== "delete") return;
     setActionError("");
     startTransition(async () => {
-      const res = await deleteLeaveType(dialog.row._id);
+      const res = await deleteLeaveType(dialog.row.id);
       if (res?.success) {
         closeDialog();
         router.refresh();
@@ -224,7 +223,7 @@ export function LeaveTypesPage({ leaveTypes, loadError }) {
             <tbody>
               {sorted.map((row) => (
                 <tr
-                  key={row._id}
+                  key={row.id}
                   className="border-t border-border hover:bg-muted/30"
                 >
                   <td className="px-4 py-3 font-medium">{row.name}</td>
@@ -238,7 +237,7 @@ export function LeaveTypesPage({ leaveTypes, loadError }) {
                     {row.maxCarryOver ?? 0}
                   </td>
                   <td className="px-4 py-3">
-                    {row.paidLeave ? "Yes" : "No"}
+                    {row.isPaid ? "Yes" : "No"}
                   </td>
                   <td className="px-4 py-3">
                     {row.requiresDocument ? "Yes" : "—"}
@@ -424,7 +423,7 @@ export function LeaveTypesPage({ leaveTypes, loadError }) {
             <div className="flex flex-col gap-3 rounded-md border border-border p-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <Label htmlFor="paidLeave" className="cursor-pointer">
+                  <Label htmlFor="isPaid" className="cursor-pointer">
                     Paid leave
                   </Label>
                   <p className="text-xs text-muted-foreground">
@@ -432,10 +431,10 @@ export function LeaveTypesPage({ leaveTypes, loadError }) {
                   </p>
                 </div>
                 <Switch
-                  id="paidLeave"
-                  checked={form.paidLeave}
+                  id="isPaid"
+                  checked={form.isPaid}
                   onCheckedChange={(v) =>
-                    setForm((f) => ({ ...f, paidLeave: v }))
+                    setForm((f) => ({ ...f, isPaid: v }))
                   }
                 />
               </div>

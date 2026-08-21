@@ -246,6 +246,11 @@ export async function saveLeaveType(
     requiresDocument: formData.get("requiresDocument") === "true",
     applicableGender: str(formData, "applicableGender") || "all",
     sortOrder: Number(str(formData, "sortOrder") || 0),
+    // The form has always had this switch; the action never read it, so a
+    // leave type could be deactivated in the dialog and come back active.
+    ...(formData.has("isActive")
+      ? { isActive: formData.get("isActive") === "true" }
+      : {}),
   };
 
   try {
