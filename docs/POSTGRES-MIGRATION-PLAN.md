@@ -1148,6 +1148,65 @@ live inconsistency, and the conversion path is the reason to do it next.
 ---
 
 
+### The port stopped one step short, and nobody noticed for two modules
+
+Found while surveying procurement's screens, and it belongs here because it is
+this section's own module.
+
+**Every quote screen was still calling the Mongo actions.** The repository, the
+nine write actions and their tests all landed with §9E. Nothing was ever
+pointed at them: `createQuotePg`, `updateQuotePg`, `sendQuotePg`,
+`acceptQuotePg`, `rejectQuotePg`, `cancelQuotePg`, `deleteQuotePg`,
+`cloneQuotePg` and `convertQuoteToInvoicePg` had no caller outside their own
+file. Meanwhile `QuoteServerComponents` had been moved over, so the LIST page
+and the stats cards read Postgres.
+
+So a quote raised through the UI was written to Mongo and searched for in
+Postgres. **It never appeared on the page it was created from.** The detail
+page still worked, because it was Mongo too — so the quote existed, opened,
+edited and converted, and was simply missing from the list. Nothing errored,
+which is the §9E shape exactly, one layer higher: the port moved the writer and
+the reader in different steps and shipped between them.
+
+The tests did not catch it because `pg-quote-actions.test.mjs` calls the
+Postgres actions directly — which is precisely the layer nothing else called.
+A test that exercises a function nobody invokes proves the function works and
+says nothing about whether it runs.
+
+**Three defects were only reachable once the screens were wired**, which is
+worth stating plainly: an action nothing calls cannot be wrong in any way that
+shows.
+
+- `createQuotePg` read the customer snapshot from `formData.get("customerName")`
+  with a fallback of the literal string `"Customer"` — and CreateQuoteForm posts
+  a single `data` blob with no such field. Every quote would have been raised
+  for "Customer", with no email, phone or address on the document. It now
+  resolves the party under RLS, which is the right source anyway: what the
+  document says about the customer should not come from what the browser sent.
+- `updateQuotePg` passed `customerId` and no name, and the repository falls back
+  to the name already on the row — so moving a quote to a different customer
+  changed the reference and left the old name printed on it.
+- The duplicate path (`create?from=`) read `getQuoteDetail`, which is schema-
+  shaped, into a form whose initialisers read `items[].product.sku` and
+  `termsAndConditions`. Duplicating a quote produced an empty form.
+
+Two things were missing rather than wrong. `sendQuotePg` records a delivery
+attempt and moves the quote on, but does not email — correct for a repository
+action, and it left the send button with nothing to call, so
+`sendQuoteToCustomerPg` composes the two. And there was no page-shaped read at
+all, so `getQuoteForDisplay` was added on the `getBillDetail` precedent (0016):
+shaped to the page rather than the schema, so 672 lines of markup did not have
+to change with the data source.
+
+**BUILDING-ON-POSTGRES carries the grep that finds this class of bug** — any
+exported `*Pg` action with no caller outside its own file — and it should be
+run at the end of every port. Running it across all 22 ported action files
+found quotes and nothing else: bills, invoices, journal, parties, requests,
+reports and all seven HR files are fully wired, and the handful of stragglers
+elsewhere are single unused helpers rather than write paths.
+
+---
+
 ## 9F. HR — the largest vertical, and what it was hiding
 
 Enumerated before writing anything, per BUILDING-ON-POSTGRES.md's first step.

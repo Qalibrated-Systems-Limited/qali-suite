@@ -53,9 +53,32 @@ other:
   every link sent landed on "Invite Unavailable" (found porting HR)
 - the approvals dashboard counted leave and loans in Mongo collections
   nothing writes to, and reported an empty queue however many were waiting
+- **quotes: the port stopped one step short.** The repository, nine write
+  actions and their tests all landed, and then nothing was pointed at them —
+  every quote screen kept calling the Mongo action while the LIST page and the
+  stats cards read Postgres. So a quote raised through the UI was written to
+  one store and searched for in the other, and never appeared on the page it
+  was created from. Found while surveying procurement's screens, and it is the
+  §9E seam inside the module §9E was written about.
 
 The lesson for whatever is ported next: the danger is not the module you are
 moving, it is the module that talks to it.
+
+### Finding this one yourself
+
+A ported action nothing calls is invisible: it typechecks, its tests pass —
+because the tests call it directly, which is exactly the layer nothing else
+uses — and the screen goes on calling the Mongo action beside it. The module
+reads as done and is not.
+
+```bash
+node scripts/find-unwired-actions.mjs
+```
+
+Run it at the end of every port. READ the output rather than counting it: a
+form-data adapter, or a lower-level variant a route handler will want, can
+legitimately have no screen calling it. What you are looking for is **a whole
+file's worth at once** — that means the screens were never pointed at it.
 
 ### Read this before touching claims, assets, petty cash or GRN
 
