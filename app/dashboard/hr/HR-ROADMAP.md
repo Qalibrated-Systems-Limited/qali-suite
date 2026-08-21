@@ -1,5 +1,22 @@
 # HR Module — Implementation Roadmap
 
+> ⚠️ **STALE FOR `feat/postgres-migration`.** This roadmap describes the
+> Mongoose/MongoDB implementation, and every file path in it below Phase 1 has
+> been deleted on this branch. HR now runs on Postgres:
+>
+> | what it says | where it is now |
+> |---|---|
+> | `app/models/employeeProfile.js` and the other twelve | migrations 0045–0048, `app/db/schema/hr*.ts` |
+> | `app/mongodb/queries/hr-queries.js` | `app/db/repositories/{employees,departments,leave,attendance,payroll,loans}.ts` |
+> | `app/mongodb/actions/hr-*.js`, `loan-actions`, `leave-type-actions` | `app/db/actions/hr-*.ts` |
+> | `lib/hr/attendance-sweep.js`, `lib/hr/leave-sweep.js` | the repositories, called from the pages and the nightly cron |
+>
+> The design decisions, the invariants now in the schema, and the eleven
+> deliberate behaviour changes are written up in
+> **[docs/POSTGRES-MIGRATION-PLAN.md §9F](../../../docs/POSTGRES-MIGRATION-PLAN.md)**.
+> Phases 8 and 9 below (performance management, recruitment, training) are
+> still unbuilt and still describe what to build.
+
 ## Status Legend
 - ✅ Done
 - 🔧 In progress / partial

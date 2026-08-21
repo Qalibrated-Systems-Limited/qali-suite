@@ -1147,10 +1147,128 @@ live inconsistency, and the conversion path is the reason to do it next.
 
 ---
 
+
+## 9F. HR — the largest vertical, and what it was hiding
+
+Enumerated before writing anything, per BUILDING-ON-POSTGRES.md's first step.
+
+| | |
+|---|---|
+| models | 13: employeeProfile, department, leaveRequest, leaveType, publicHoliday, attendance, attendanceConfig, payrollRun, payrollEntry, payrollConfig, loan, employmentHistory, salaryHistory |
+| actions | 12 files, ~4,900 lines, 45 exported |
+| reads | `hr-queries.js` (1,055 lines, 28 exports) and `hr-alerts-queries.js` |
+| pages | 57 files under `app/dashboard/hr`, plus attendance and payroll settings |
+| API | 11 routes: payslip and summary PDFs, bank and M-Pesa files, P10, P9A, NSSF, SHIF and AHL returns |
+| cron | `app/api/cron/mark-absent` |
+| elsewhere | the dashboards, both alerts strips, the profile page, the sidebar clock, claims, KPIs, approvals, the invite accept page |
+
+Four migrations: 0045 people and structure, 0046 leave, 0047 attendance, 0048
+payroll and loans.
+
+### Why HR rather than something smaller
+
+It is the module the business runs on monthly and the one with the most money
+flowing through it — payroll is usually the largest recurring entry a business
+posts. It is also where the port's own rule bit hardest: HR touches nine other
+modules, and three of those seams were already broken before this work started.
+
+### The governing correction: a counter is not an answer
+
+§9.3 says a stored value that is a function of other rows is not stored. HR is
+where that rule earns its keep, because it had FIVE of them and each had a way
+of going wrong that the application could not detect:
+
+| Counter | Moved by | What went wrong |
+|---|---|---|
+| `leaveBalances[].usedDays / pendingDays / balanceDays` | four `$inc` calls across submit, approve, reject, recall | any failure, or any write not through the action, leaves a balance that no longer matches its own requests — and the counter IS the answer, so nothing notices |
+| `payrollRun.totals` (twelve numbers) | `syncRunTotals()`, when called | the accrual journal is built from them, so a run edited by a path that skipped the call posts a journal that disagrees with its own payslips |
+| `payrollEntry.grossPay / totalDeductions / netPay` | a pre-save hook | `generatePayrollEntries` writes with `findOneAndUpdate`, which does not fire it |
+| `loan.totalRepaid / outstandingBalance` | `recordRepayment()` | `voidPayrollRun` reverses the journal and NOT the instalments, so a voided payroll leaves a repayment that is no longer in the books — and the next run deducts the same month again |
+| `attendance.hoursWorked / overtime` | computed in three places | one of the three uses a hard-coded 8-hour day instead of the configured shift |
+
+All five are now views, generated columns or trigger-maintained totals.
+
+### The second correction: identity had three copies
+
+`employeeNumber`, name, `department` and `designation` live on the Party, on
+the EmployeeProfile AND on the User, kept in step by hand —
+`updateEmployee` carries eighty lines of "name didn't change but other fields
+did — still sync", and `terminateEmployee` has its own copy of the same dance.
+
+`employees` owns the employment relationship; `parties` keeps the identity the
+ledger references, because a party may exist without HR. One trigger maintains
+the overlap, so a rename reaches the ledger's copy with nothing to remember —
+and so does a DEPARTMENT rename, which the source could not do at all, since
+the department is a string copied at hire time.
+
+### Invariants pushed into the schema
+
+Per rule 3 of the vertical checklist. Each of these was previously either
+unchecked or checked in one of several call sites:
+
+- an org chart and a reporting line cannot contain a cycle — both are walked
+  recursively, and neither was checked at all
+- a termination date cannot precede a hire date, and "terminated" implies one
+- two people cannot hold the same employee number, and one person cannot hold
+  two employment records or two logins
+- overlapping leave is refused by an exclusion constraint; `hasOverlap()` was a
+  count followed by an insert, which two concurrent submissions both pass
+- one payroll configuration governs any given month, and its PAYE bands can
+  neither overlap nor leave a gap — a gap taxes that income at nothing
+- one attendance policy per company, by primary key
+- a geofence cannot be switched on without a location, and an IP whitelist
+  cannot be switched on empty. The source treats an empty list as "allow
+  everything", so turning the control ON enforced nothing
+- a public holiday on 31 April is refused, and so is a one-off with no year —
+  `getDateSet()` skips both silently, and leave days and payroll working days
+  are then quietly wrong
+
+### Deliberate behaviour changes
+
+Written down here per rule 2, because each is a fix rather than a translation:
+
+1. **Recall returns a request to draft.** The model's comment says "submitted →
+   recalled → draft"; `recall()` set 'recalled' and nothing moved it on, while
+   `submit()` accepts only a draft. Recalling stranded the request.
+2. **Cancelling approved leave exists.** The source defines the role list and
+   the status and implements neither.
+3. **Carry-over stops erasing last year.** It updated the existing row's year
+   in place and reset usedDays, destroying the record of what was taken.
+4. **Accrual is a total, not an increment.** `$inc` with no record of which
+   months ran means a second run double-credits, undetectably.
+5. **Encashment is not leave taken.** It was added to usedDays, making a payout
+   indistinguishable from an absence on every report.
+6. **Approval and posting are one transaction.** The source approves anyway on
+   a GL failure, leaving payroll approved, loans marked repaid, and nothing in
+   the books.
+7. **An unmapped account is refused by name.** The source drops the leg and
+   then infers "is a mapping missing?" from "is the entry unbalanced?" — a
+   small leg hides under the tolerance and posts; two missing legs can cancel.
+8. **Taxable income on the P10 and P9A** is gross less NSSF, SHIF and the
+   housing levy — all three allowable since the Tax Laws (Amendment) Act 2024,
+   and how the PAYE printed beside it is computed. Both subtracted NSSF alone.
+9. **The P9A excludes voided runs.** It had no status filter, so a payroll
+   reversed out of the books was certified to KRA as income received.
+10. **Marking the day skips weekends, holidays and approved leave.** The source
+    does none of the three.
+11. **A loan repayment above two thirds of monthly pay is refused** — the
+    statutory cap on deductions. Nothing checked, and the payslip came out
+    negative.
+
+### What was NOT changed
+
+The Kenyan statutory arithmetic in `lib/payroll/kenya-tax.js` — PAYE bands,
+NSSF tiers, SHIF, AHL — is unchanged and still unit-tested. Only where the
+rates come FROM has moved. The loan schedule maths (flat, reducing-balance
+EMI, equal principal) is carried over line for line.
+
+---
+
 ## 10. Explicitly out of scope
 
 - Redesigning the posting engine, fiscal periods, or COGS logic beyond the
   corrections in §8
 - Restructuring modules beyond moving DB access behind repositories
-- Migrating the other 64 models (priced after the slice)
+- Migrating the remaining models (claims, projects, assets, integrations, tax,
+  banking, KPIs and the rest — see the table in BUILDING-ON-POSTGRES.md)
 - `jeff-biz` — that branch stays on MongoDB

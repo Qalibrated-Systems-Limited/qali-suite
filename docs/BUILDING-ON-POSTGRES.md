@@ -18,11 +18,18 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 
 | on Postgres | still Mongo (files) |
 |---|---|
-| users, accounts (bar opening balances), invoices, bills, parties, requests, journal, statements, supplier-statements, credit-notes | **hr 47**, claims 13, settings 11, projects 11, integrations 11, assets 11, reports 9, purchase-orders 9, tax 8, banking 8, quotes 7, kpis 7, payments 6 |
+| **hr**, users, accounts (bar opening balances), invoices, bills, parties, requests, journal, statements, supplier-statements, credit-notes | claims 13, projects 11, integrations 11, assets 11, reports 9, purchase-orders 9, tax 8, banking 8, quotes 7, kpis 7, components 7, settings 6, payments 6 |
 
 Also on Postgres, below the screens: auth and sign-in, invitations, companies
 and provisioning, company access and the switcher, fiscal periods, payments,
-stock movements, tax transactions, fulfilment, and the reporting queries.
+stock movements, tax transactions, fulfilment, the reporting queries, and —
+with HR — the payroll exports, the payslip and P9 documents, and the nightly
+attendance cron.
+
+The `components` and `settings` counts above are mixed: the HR parts of the
+dashboard strips, the attendance policy, public holidays and payroll rates all
+read Postgres; what is left in those files belongs to claims, checkouts and
+other unported modules.
 
 **`docs/CURRENT-STATE.md` predates all of this** — it is a 2026-05-29 snapshot
 of `jeff-business-suite` and describes the stack as Mongoose/MongoDB. Do not
@@ -42,6 +49,10 @@ other:
 - the customer picker showed every tenant's customers, because Mongo's
   withTenantScope is unscoped for a SuperAdmin
 - the chart of accounts edited a store nothing else read
+- HR created invitations in Postgres while the accept page read Mongo, so
+  every link sent landed on "Invite Unavailable" (found porting HR)
+- the approvals dashboard counted leave and loans in Mongo collections
+  nothing writes to, and reported an empty queue however many were waiting
 
 The lesson for whatever is ported next: the danger is not the module you are
 moving, it is the module that talks to it.
