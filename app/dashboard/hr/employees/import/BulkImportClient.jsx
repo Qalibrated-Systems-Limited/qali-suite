@@ -5,25 +5,26 @@ import { useRouter } from "next/navigation";
 import { Upload, Download, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { bulkImportEmployees } from "@/app/mongodb/actions/hr-import-actions";
+import { bulkImportEmployees } from "@/app/db/actions/hr-employee-actions";
 
 // CSV template columns and sample row
 const CSV_HEADERS = [
   "firstName","lastName","email","phone",
   "nationalId","kraPin","nssfNumber","shaNumber","gender",
   "department","designation","employmentType","hireDate",
-  "basicSalary","paymentMethod","bankName","bankBranch","bankAccount","mpesaNumber",
+  "basicSalary","housingAllowance","transportAllowance",
+  "paymentMethod","bankName","bankBranch","bankAccount","mpesaNumber",
 ];
 
 const SAMPLE_ROWS = [
   ["Jane","Doe","jane.doe@company.com","0712345678",
    "12345678","A000000000X","1234567","12345678","female",
    "Finance","Accountant","full_time","2026-01-15",
-   "80000","bank","KCB Bank","Westlands","1234567890",""],
+   "80000","20000","10000","bank","KCB Bank","Westlands","1234567890",""],
   ["John","Kamau","john.kamau@company.com","0723456789",
    "87654321","B000000001Y","","","male",
    "Operations","Driver","full_time","2026-02-01",
-   "35000","mpesa","","","","0712000000"],
+   "35000","0","5000","mpesa","","","","0712000000"],
 ];
 
 function downloadTemplate() {

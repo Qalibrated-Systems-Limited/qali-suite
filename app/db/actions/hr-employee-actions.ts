@@ -11,7 +11,9 @@ import {
 import { userMessage } from "../errors";
 import * as employees from "../repositories/employees";
 import * as departments from "../repositories/departments";
+import * as leave from "../repositories/leave";
 import { deactivateUser } from "../userAdmin";
+import { sendInvitePg } from "./invite-actions";
 import cloudinary from "@/lib/cloudinary";
 
 /**
@@ -486,6 +488,247 @@ export async function deleteEmployeeDocument(
   } catch (err) {
     return { success: false, error: userMessage(err, "Could not delete the document.") };
   }
+}
+
+export interface ImportRow {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  nationalId?: string;
+  kraPin?: string;
+  nssfNumber?: string;
+  shaNumber?: string;
+  nhifNumber?: string;
+  gender?: string;
+  department?: string;
+  designation?: string;
+  employmentType?: string;
+  hireDate?: string;
+  basicSalary?: string;
+  housingAllowance?: string;
+  transportAllowance?: string;
+  paymentMethod?: string;
+  bankName?: string;
+  bankAccount?: string;
+  bankBranch?: string;
+  mpesaNumber?: string;
+}
+
+/**
+ * Bulk import from a CSV the client has already parsed.
+ *
+ * Two things the source does not do:
+ *
+ *   - THE DEPARTMENT BECOMES A REAL DEPARTMENT. The source writes the name as
+ *     a string and never resolves an id, so every imported employee lands with
+ *     a department no picker offers and no report groups by. Here the name is
+ *     matched against the existing departments, and created if it is new.
+ *
+ *   - EACH ROW IS ITS OWN TRANSACTION. One bad row does not take the other
+ *     199 with it, and a row that fails is reported by name rather than
+ *     counted.
+ *
+ * Leave entitlement for the current year is granted as part of the import, so
+ * an imported employee can request leave the same day.
+ */
+export async function bulkImportEmployees(rows: ImportRow[]) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { success: false as const, error: "There is nothing to import." };
+  }
+  if (rows.length > 200) {
+    return { success: false as const, error: "Import at most 200 rows at a time." };
+  }
+
+  const results: Array<{
+    row: number;
+    status: "created" | "skipped" | "error";
+    name?: string;
+    employeeNumber?: string;
+    message?: string;
+  }> = [];
+
+  const year = new Date().getFullYear();
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] ?? {};
+    // +2: one-indexed, plus the header row, so the number matches the
+    // spreadsheet the person is looking at.
+    const rowNumber = i + 2;
+    const firstName = (row.firstName ?? "").trim();
+    const lastName = (row.lastName ?? "").trim();
+    const name = `${firstName} ${lastName}`.trim();
+
+    if (!firstName || !lastName) {
+      results.push({
+        row: rowNumber,
+        status: "error",
+        message: "First name and last name are required",
+      });
+      continue;
+    }
+
+    try {
+      const created = await withAuthorizedTenant(
+        [...HR_ADMIN_ROLES],
+        async (tx, { user, companyId }) => {
+          const departmentName = (row.department ?? "").trim();
+          let departmentId: string | null = null;
+          if (departmentName) {
+            const existing = await departments.listActiveDepartments(tx);
+            const match = existing.find(
+              (d) => d.name.toLowerCase() === departmentName.toLowerCase(),
+            );
+            departmentId =
+              match?.id ??
+              (
+                await departments.createDepartment(tx, {
+                  companyId,
+                  name: departmentName,
+                  actor: { id: user.id, name: user.name },
+                })
+              ).id;
+          }
+
+          const employee = await employees.createEmployee(tx, {
+            companyId,
+            firstName,
+            lastName,
+            email: (row.email ?? "").trim().toLowerCase() || null,
+            phone: (row.phone ?? "").trim() || null,
+            nationalId: (row.nationalId ?? "").trim() || null,
+            kraPin: (row.kraPin ?? "").trim() || null,
+            nssfNumber: (row.nssfNumber ?? "").trim() || null,
+            shaNumber:
+              (row.shaNumber ?? "").trim() || (row.nhifNumber ?? "").trim() || null,
+            gender: ["male", "female", "other"].includes(
+              (row.gender ?? "").toLowerCase(),
+            )
+              ? (row.gender ?? "").toLowerCase()
+              : null,
+            departmentId,
+            designation: (row.designation ?? "").trim() || null,
+            employmentType: [
+              "full_time", "part_time", "contract", "intern", "casual",
+            ].includes((row.employmentType ?? "").trim())
+              ? (row.employmentType ?? "").trim()
+              : "full_time",
+            hireDate:
+              (row.hireDate ?? "").trim() || new Date().toISOString().slice(0, 10),
+            basicSalary: Number(row.basicSalary ?? 0) || 0,
+            allowanceHousing: Number(row.housingAllowance ?? 0) || 0,
+            allowanceTransport: Number(row.transportAllowance ?? 0) || 0,
+            paymentMethod: ["bank", "mpesa", "cash"].includes(
+              (row.paymentMethod ?? "").trim(),
+            )
+              ? (row.paymentMethod ?? "").trim()
+              : "bank",
+            bankName: (row.bankName ?? "").trim() || null,
+            bankAccount: (row.bankAccount ?? "").trim() || null,
+            bankBranch: (row.bankBranch ?? "").trim() || null,
+            mpesaNumber: (row.mpesaNumber ?? "").trim() || null,
+            actor: { id: user.id, name: user.name },
+          });
+
+          await leave.grantYearEntitlements(tx, {
+            companyId,
+            employeeId: employee.id,
+            year,
+            gender: employee.gender,
+          });
+
+          return employee;
+        },
+      );
+
+      results.push({
+        row: rowNumber,
+        status: "created",
+        name,
+        employeeNumber: created.employeeNumber,
+      });
+    } catch (err) {
+      const message = userMessage(err, "Could not import this row.");
+      // A duplicate is not a failure worth alarming anybody about; it is a
+      // row that was already there.
+      const duplicate = /already in use|already has an employee record/i.test(message);
+      results.push({
+        row: rowNumber,
+        status: duplicate ? "skipped" : "error",
+        name,
+        message,
+      });
+    }
+  }
+
+  revalidatePath("/dashboard/hr/employees");
+  return {
+    success: true as const,
+    created: results.filter((r) => r.status === "created").length,
+    skipped: results.filter((r) => r.status === "skipped").length,
+    errors: results.filter((r) => r.status === "error").length,
+    results,
+  };
+}
+
+/**
+ * Invites an employee to the portal.
+ *
+ * Their email lives on the party, so it is read from there rather than typed
+ * again — the source asks the caller for one and can therefore invite an
+ * address that is not the employee's.
+ *
+ * The invite carries the party id, so accepting it links the login back to the
+ * same person rather than creating a second identity.
+ */
+export async function inviteEmployeeToPortal(
+  employeeId: string,
+  role = "Employee",
+): Promise<ActionResult> {
+  const ALLOWED = [
+    "Employee", "Manager", "Accountant", "HR Manager", "Store Manager", "Admin",
+  ];
+  const inviteRole = ALLOWED.includes(role) ? role : "Employee";
+
+  let email: string;
+  let partyId: string;
+  try {
+    const employee = await withAuthorizedTenant([...HR_ADMIN_ROLES], (tx) =>
+      employees.getEmployee(tx, employeeId),
+    );
+    if (!employee) return { success: false, error: "Employee not found" };
+    if (employee.userId) {
+      return { success: false, error: "This employee already has a portal login." };
+    }
+    if (!employee.email) {
+      return {
+        success: false,
+        error: "This employee has no email address. Add one first, then invite them.",
+      };
+    }
+    email = employee.email;
+    partyId = employee.partyId;
+  } catch (err) {
+    return { success: false, error: userMessage(err, "Could not read the employee.") };
+  }
+
+  const formData = new FormData();
+  formData.set("email", email);
+  formData.set("role", inviteRole);
+  formData.set("partyId", partyId);
+
+  const result = await sendInvitePg(null, formData);
+  revalidatePath(`/dashboard/hr/employees/${employeeId}`);
+
+  if (result.success !== true) {
+    return { success: false, error: result.error };
+  }
+  return {
+    success: true,
+    id: employeeId,
+    message: result.message,
+    ...(result.warning ? { warning: result.warning } : {}),
+  };
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────────

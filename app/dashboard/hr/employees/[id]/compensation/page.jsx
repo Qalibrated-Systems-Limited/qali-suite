@@ -3,23 +3,24 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { getEmployeeById } from "@/app/mongodb/queries/hr-queries";
+import { getEmployeeForPage } from "@/app/db/actions/hr-employee-actions";
+import { HR_COMPENSATION_ROLES } from "@/lib/utils/role-gates";
+import { roleAllowed } from "@/lib/permissions";
 import CompensationEditForm from "../../../components/CompensationEditForm";
-
-const COMP_ROLES = ["SuperAdmin", "Admin", "HR Manager"];
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
-  const { employee } = await getEmployeeById(id);
-  if (!employee) return { title: "Employee Not Found" };
-  const name = `${employee.personalInfo?.firstName} ${employee.personalInfo?.lastName}`;
-  return { title: `Compensation — ${name} | HR` };
+  const data = await getEmployeeForPage(id);
+  if (!data) return { title: "Employee Not Found" };
+  return { title: `Compensation — ${data.employee.fullName} | HR` };
 }
 
 async function CompensationLoader({ id }) {
-  const { employee, error } = await getEmployeeById(id);
-  if (error || !employee) notFound();
-  return <CompensationEditForm employee={employee} />;
+  const data = await getEmployeeForPage(id);
+  if (!data) notFound();
+  // The pay history belongs beside the form that changes it — the source
+  // writes SalaryHistory and shows it nowhere.
+  return <CompensationEditForm employee={data.employee} history={data.salary} />;
 }
 
 function FormSkeleton() {
@@ -37,7 +38,9 @@ export default async function CompensationPage({ params }) {
 
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!COMP_ROLES.includes(session.user.role)) redirect(`/dashboard/hr/employees/${id}`);
+  if (!roleAllowed(session.user.role, HR_COMPENSATION_ROLES)) {
+    redirect(`/dashboard/hr/employees/${id}`);
+  }
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -54,7 +57,9 @@ export default async function CompensationPage({ params }) {
 
       <div>
         <h1 className="text-xl font-bold text-foreground sm:text-2xl">Edit Compensation</h1>
-        <p className="mt-1 hidden text-sm text-muted-foreground sm:block">Visible to Admin and HR only</p>
+        <p className="mt-1 hidden text-sm text-muted-foreground sm:block">
+          Visible to HR and finance leadership only. Every change is recorded.
+        </p>
       </div>
 
       <Suspense fallback={<FormSkeleton />}>

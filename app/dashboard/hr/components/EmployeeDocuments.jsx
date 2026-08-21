@@ -3,7 +3,9 @@
 import { useActionState, useTransition, useRef, useState } from "react";
 import { FileText, Upload, Trash2, Loader2, AlertCircle, CheckCircle2, ExternalLink, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { uploadEmployeeDocument, deleteEmployeeDocument } from "@/app/mongodb/actions/hr-employee-actions";
+import { uploadEmployeeDocument, deleteEmployeeDocument } from "@/app/db/actions/hr-employee-actions";
+import { HR_WRITE_ROLES, HR_ADMIN_ROLES } from "@/lib/utils/role-gates";
+import { roleAllowed } from "@/lib/permissions";
 
 const uploadInitial = { success: false, error: null };
 
@@ -22,7 +24,7 @@ const DOC_TYPES = [
   { value: "other", label: "Other" },
 ];
 
-function DocUploadForm({ profileId, onClose }) {
+function DocUploadForm({ employeeId, onClose }) {
   const [state, formAction, isPending] = useActionState(uploadEmployeeDocument, uploadInitial);
   const formRef = useRef(null);
 
@@ -30,7 +32,7 @@ function DocUploadForm({ profileId, onClose }) {
 
   return (
     <form ref={formRef} action={formAction} className="rounded-lg border border-border bg-card p-4 shadow-sm space-y-3">
-      <input type="hidden" name="profileId" value={profileId} />
+      <input type="hidden" name="employeeId" value={employeeId} />
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">Upload Document</h3>
         <button type="button" onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
@@ -75,6 +77,23 @@ function DocUploadForm({ profileId, onClose }) {
       </div>
 
       <div>
+        {/* Contracts, work permits and medical certificates expire, and the
+            column has always been there — the form never offered a way to set
+            it, so nothing could ever warn anybody. */}
+        <label className="mb-1 block text-xs font-medium text-foreground">
+          Expires on (optional)
+        </label>
+        <input
+          name="expiryDate"
+          type="date"
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          Set this for contracts, permits and certificates so HR is warned before they lapse.
+        </p>
+      </div>
+
+      <div>
         <label className="mb-1 block text-xs font-medium text-foreground">File (PDF, image — max 10MB)</label>
         <input
           name="file"
@@ -96,17 +115,21 @@ function DocUploadForm({ profileId, onClose }) {
   );
 }
 
-function DocRow({ profileId, doc, canDelete }) {
+function DocRow({ employeeId, doc, canDelete }) {
   const [isPending, startTransition] = useTransition();
 
   function handleDelete() {
     if (!confirm(`Delete "${doc.name || doc.docType}"?`)) return;
     startTransition(async () => {
-      await deleteEmployeeDocument(profileId, doc._id);
+      await deleteEmployeeDocument(employeeId, doc.id);
     });
   }
 
   const typeLabel = DOC_TYPES.find((t) => t.value === doc.docType)?.label || doc.docType;
+  const expiry = doc.expiryDate ? new Date(`${doc.expiryDate}T00:00:00`) : null;
+  const daysLeft = expiry
+    ? Math.ceil((expiry - new Date().setHours(0, 0, 0, 0)) / 86_400_000)
+    : null;
 
   return (
     <div className="flex items-center justify-between gap-3 py-3">
@@ -116,8 +139,25 @@ function DocRow({ profileId, doc, canDelete }) {
           <p className="truncate text-sm font-medium text-foreground">{doc.name || typeLabel}</p>
           <p className="text-xs text-muted-foreground">
             {typeLabel}
-            {doc.uploadedAt && ` · ${new Date(doc.uploadedAt).toLocaleDateString("en-KE")}`}
+            {doc.createdAt && ` · ${new Date(doc.createdAt).toLocaleDateString("en-KE")}`}
           </p>
+          {expiry && (
+            <p
+              className={`text-xs ${
+                daysLeft < 0
+                  ? "text-destructive"
+                  : daysLeft <= 30
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-muted-foreground"
+              }`}
+            >
+              {daysLeft < 0
+                ? `Expired ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? "" : "s"} ago`
+                : daysLeft === 0
+                  ? "Expires today"
+                  : `Expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"}`}
+            </p>
+          )}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
@@ -147,9 +187,9 @@ function DocRow({ profileId, doc, canDelete }) {
   );
 }
 
-export default function EmployeeDocuments({ profileId, documents = [], userRole }) {
-  const canUpload = ["SuperAdmin", "Admin", "HR Manager", "Manager"].includes(userRole);
-  const canDelete = ["SuperAdmin", "Admin", "HR Manager"].includes(userRole);
+export default function EmployeeDocuments({ employeeId, documents = [], userRole }) {
+  const canUpload = roleAllowed(userRole, HR_WRITE_ROLES);
+  const canDelete = roleAllowed(userRole, HR_ADMIN_ROLES);
   const [showForm, setShowForm] = useState(false);
 
   return (
@@ -173,7 +213,7 @@ export default function EmployeeDocuments({ profileId, documents = [], userRole 
         ) : (
           <div className="divide-y divide-border px-4">
             {documents.map((doc) => (
-              <DocRow key={doc._id} profileId={profileId} doc={doc} canDelete={canDelete} />
+              <DocRow key={doc.id} employeeId={employeeId} doc={doc} canDelete={canDelete} />
             ))}
           </div>
         )}
@@ -181,7 +221,7 @@ export default function EmployeeDocuments({ profileId, documents = [], userRole 
 
       {/* Upload form — shown on demand */}
       {canUpload && showForm && (
-        <DocUploadForm profileId={profileId} onClose={() => setShowForm(false)} />
+        <DocUploadForm employeeId={employeeId} onClose={() => setShowForm(false)} />
       )}
     </div>
   );

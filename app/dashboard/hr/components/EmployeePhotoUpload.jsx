@@ -3,11 +3,11 @@
 import { useActionState, useRef, useState } from "react";
 import { Camera, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { uploadEmployeePhoto } from "@/app/mongodb/actions/hr-employee-actions";
+import { uploadEmployeePhoto } from "@/app/db/actions/hr-employee-actions";
 
 const initialState = { success: false, error: null, url: null };
 
-export default function EmployeePhotoUpload({ profileId, currentPhotoUrl, initials }) {
+export default function EmployeePhotoUpload({ employeeId, currentPhotoUrl, initials }) {
   const [state, formAction, isPending] = useActionState(uploadEmployeePhoto, initialState);
   const [preview, setPreview] = useState(currentPhotoUrl || null);
   const fileRef = useRef(null);
@@ -22,7 +22,7 @@ export default function EmployeePhotoUpload({ profileId, currentPhotoUrl, initia
 
   return (
     <form action={formAction} className="flex flex-col items-center gap-3">
-      <input type="hidden" name="profileId" value={profileId} />
+      <input type="hidden" name="employeeId" value={employeeId} />
       <input
         ref={fileRef}
         type="file"

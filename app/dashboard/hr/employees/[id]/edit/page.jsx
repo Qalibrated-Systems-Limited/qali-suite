@@ -3,25 +3,34 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { getEmployeeById, getDepartments } from "@/app/mongodb/queries/hr-queries";
+import {
+  getEmployeeForPage,
+  getEmployeeFormData,
+} from "@/app/db/actions/hr-employee-actions";
+import { HR_WRITE_ROLES } from "@/lib/utils/role-gates";
+import { roleAllowed } from "@/lib/permissions";
 import EmployeeEditForm from "../../../components/EmployeeEditForm";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
-  const { employee } = await getEmployeeById(id);
-  if (!employee) return { title: "Employee Not Found" };
-  return { title: `Edit ${employee.personalInfo?.firstName} ${employee.personalInfo?.lastName} | HR` };
+  const data = await getEmployeeForPage(id);
+  if (!data) return { title: "Employee Not Found" };
+  return { title: `Edit ${data.employee.fullName} | HR` };
 }
 
-const EDIT_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
-
 async function EditFormLoader({ id }) {
-  const [{ employee, error }, { departments }] = await Promise.all([
-    getEmployeeById(id),
-    getDepartments({ limit: 100 }),
+  const [data, form] = await Promise.all([
+    getEmployeeForPage(id),
+    getEmployeeFormData(),
   ]);
-  if (error || !employee) notFound();
-  return <EmployeeEditForm employee={employee} departments={departments} />;
+  if (!data) notFound();
+  return (
+    <EmployeeEditForm
+      employee={data.employee}
+      departments={form.departments}
+      managers={form.managers.filter((m) => m.id !== id)}
+    />
+  );
 }
 
 function FormSkeleton() {
@@ -39,7 +48,9 @@ export default async function EmployeeEditPage({ params }) {
 
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!EDIT_ROLES.includes(session.user.role)) redirect(`/dashboard/hr/employees/${id}`);
+  if (!roleAllowed(session.user.role, HR_WRITE_ROLES)) {
+    redirect(`/dashboard/hr/employees/${id}`);
+  }
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

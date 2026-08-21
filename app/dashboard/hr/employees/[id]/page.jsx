@@ -2,24 +2,28 @@ import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft, Edit, User, Briefcase, Calendar, Banknote, FileText } from "lucide-react";
-import { getEmployeeById } from "@/app/mongodb/queries/hr-queries";
-import PayrollEntry from "@/app/models/payrollEntry";
-import dbConnect from "@/app/config/dbConnect";
+import {
+  ChevronLeft, Edit, User, Briefcase, Calendar, Banknote, FileText, History,
+} from "lucide-react";
+import { getEmployeeForPage } from "@/app/db/actions/hr-employee-actions";
+import { getEmployeeLeaveBalances } from "@/app/db/actions/hr-leave-actions";
+import { getEmployeePayslips as listPayslips } from "@/app/db/actions/hr-payroll-actions";
+import { HR_VIEW_ROLES, HR_COMPENSATION_ROLES, HR_ADMIN_ROLES } from "@/lib/utils/role-gates";
+import { roleAllowed } from "@/lib/permissions";
 import { EmployeeActions } from "../../components/EmployeeActions";
 import EmployeePhotoUpload from "../../components/EmployeePhotoUpload";
 import EmployeeDocuments from "../../components/EmployeeDocuments";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
-  const { employee } = await getEmployeeById(id);
-  if (!employee) return { title: "Employee Not Found" };
-  return { title: `${employee.personalInfo?.firstName} ${employee.personalInfo?.lastName} | HR` };
+  const data = await getEmployeeForPage(id);
+  if (!data) return { title: "Employee Not Found" };
+  return { title: `${data.employee.fullName} | HR` };
 }
 
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
+const money = (n) => `KES ${(n || 0).toLocaleString("en-KE")}`;
+const day = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString("en-KE") : "—");
 
-// ─── Status badge ───
 function StatusBadge({ status }) {
   const map = {
     active: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
@@ -29,13 +33,12 @@ function StatusBadge({ status }) {
     terminated: "bg-red-500/15 text-red-700 dark:text-red-400",
   };
   return (
-    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${map[status] || "bg-muted text-muted-foreground"}`}>
+    <span className={`rounded-full px-2.5 py-1 text-xs font-medium capitalize ${map[status] || "bg-muted text-muted-foreground"}`}>
       {status?.replace("_", " ")}
     </span>
   );
 }
 
-// ─── Info card ───
 function InfoCard({ title, icon: Icon, rows }) {
   return (
     <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
@@ -47,7 +50,7 @@ function InfoCard({ title, icon: Icon, rows }) {
         {rows.map(([label, value]) => (
           <div key={label} className="flex justify-between gap-4">
             <dt className="text-muted-foreground">{label}</dt>
-            <dd className="font-medium text-foreground text-right">{value}</dd>
+            <dd className="text-right font-medium text-foreground">{value}</dd>
           </div>
         ))}
       </dl>
@@ -55,61 +58,73 @@ function InfoCard({ title, icon: Icon, rows }) {
   );
 }
 
-// ─── Profile tab ───
-function ProfileTab({ employee }) {
-  const p = employee.personalInfo;
-  const e = employee.employment;
+function ProfileTab({ e, canSeePay }) {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <InfoCard
         title="Personal"
         icon={User}
         rows={[
-          ["Date of Birth", p?.dateOfBirth ? new Date(p.dateOfBirth).toLocaleDateString("en-KE") : "—"],
-          ["Gender", p?.gender || "—"],
-          ["National ID", p?.nationalId || "—"],
-          ["KRA PIN", p?.kraPin || "—"],
-          ["NSSF Number", p?.nssfNumber || "—"],
-          ["SHA Number", p?.shaNumber || "—"],
-          ["Nationality", p?.nationality || "—"],
+          ["Date of birth", day(e.dateOfBirth)],
+          ["Gender", e.gender || "—"],
+          ["National ID", e.nationalId || "—"],
+          ["KRA PIN", e.kraPin || "—"],
+          ["NSSF number", e.nssfNumber || "—"],
+          ["SHA number", e.shaNumber || "—"],
+          ["Nationality", e.nationality || "—"],
+          ["Email", e.email || "—"],
+          ["Phone", e.phone || "—"],
         ]}
       />
       <InfoCard
         title="Employment"
         icon={Briefcase}
         rows={[
-          ["Employee Number", employee.employeeNumber || "—"],
-          ["Department", e?.department || "—"],
-          ["Designation", e?.designation || "—"],
-          ["Type", e?.employmentType?.replace("_", " ") || "—"],
-          ["Hire Date", e?.hireDate ? new Date(e.hireDate).toLocaleDateString("en-KE") : "—"],
-          ["Confirmation Date", e?.confirmationDate ? new Date(e.confirmationDate).toLocaleDateString("en-KE") : "—"],
-          ["Job Grade", e?.jobGrade || "—"],
-          ["Work Location", e?.workLocation || "—"],
-          ["Manager", e?.managerName || "—"],
+          ["Employee number", e.employeeNumber],
+          ["Department", e.department || "—"],
+          ["Designation", e.designation || "—"],
+          ["Type", e.employmentType?.replace("_", " ") || "—"],
+          ["Hired", day(e.hireDate)],
+          ["Confirmed", day(e.confirmationDate)],
+          ["Job grade", e.jobGrade || "—"],
+          ["Work location", e.workLocation || "—"],
+          ["Manager", e.managerName || "—"],
+          ["Shift", e.shiftStart ? `${e.shiftStart}–${e.shiftEnd || "—"}` : "Company default"],
+          ...(e.contractEnd ? [["Contract ends", day(e.contractEnd)]] : []),
+          ...(e.terminationDate
+            ? [
+                ["Terminated", day(e.terminationDate)],
+                ["Reason", e.terminationReason || "—"],
+              ]
+            : []),
         ]}
       />
-      <InfoCard
-        title="Compensation"
-        icon={Banknote}
-        rows={[
-          ["Basic Salary", `KES ${(employee.compensation?.basicSalary || 0).toLocaleString()}`],
-          ["Housing Allowance", `KES ${(employee.compensation?.allowances?.housing || 0).toLocaleString()}`],
-          ["Transport Allowance", `KES ${(employee.compensation?.allowances?.transport || 0).toLocaleString()}`],
-          ["Medical Allowance", `KES ${(employee.compensation?.allowances?.medical || 0).toLocaleString()}`],
-          ["Payment Method", employee.compensation?.paymentMethod || "—"],
-          ["Bank", employee.compensation?.bankName || "—"],
-          ["Account", employee.compensation?.bankAccount || "—"],
-          ["M-Pesa", employee.compensation?.mpesaNumber || "—"],
-        ]}
-      />
-      {employee.emergencyContact?.name && (
+      {canSeePay && (
         <InfoCard
-          title="Emergency Contact"
+          title="Compensation"
+          icon={Banknote}
           rows={[
-            ["Name", employee.emergencyContact.name],
-            ["Relationship", employee.emergencyContact.relationship || "—"],
-            ["Phone", employee.emergencyContact.phone || "—"],
+            ["Basic salary", money(e.basicSalary)],
+            ["Housing", money(e.allowanceHousing)],
+            ["Transport", money(e.allowanceTransport)],
+            ["Medical", money(e.allowanceMedical)],
+            ["Other", money(e.allowanceOther)],
+            ["Gross", money(e.grossSalary)],
+            ["Paid by", e.paymentMethod || "—"],
+            ["Bank", e.bankName || "—"],
+            ["Account", e.bankAccount || "—"],
+            ["M-Pesa", e.mpesaNumber || "—"],
+            ["Last reviewed", day(e.lastReviewDate)],
+          ]}
+        />
+      )}
+      {e.emergencyName && (
+        <InfoCard
+          title="Emergency contact"
+          rows={[
+            ["Name", e.emergencyName],
+            ["Relationship", e.emergencyRelationship || "—"],
+            ["Phone", e.emergencyPhone || "—"],
           ]}
         />
       )}
@@ -117,57 +132,89 @@ function ProfileTab({ employee }) {
   );
 }
 
-// ─── Leave tab ───
-function LeaveTab({ leaveBalances }) {
-  if (!leaveBalances?.length) {
-    return <p className="text-sm text-muted-foreground">No leave balances configured.</p>;
+async function LeaveTab({ employeeId }) {
+  const { balances } = await getEmployeeLeaveBalances(employeeId);
+  const year = new Date().getFullYear();
+
+  if (!balances?.length) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No leave types are set up yet.{" "}
+        <Link href="/dashboard/hr/leave-types" className="text-primary hover:underline">
+          Configure them
+        </Link>
+        .
+      </p>
+    );
   }
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border bg-muted/50 text-left text-xs font-medium uppercase text-muted-foreground">
-            <th className="px-4 py-3">Leave Type</th>
-            <th className="px-4 py-3 text-right">Entitled</th>
-            <th className="px-4 py-3 text-right">Used</th>
-            <th className="px-4 py-3 text-right">Pending</th>
-            <th className="px-4 py-3 text-right">Balance</th>
-            <th className="px-4 py-3 text-right">Carry Over</th>
-            <th className="px-4 py-3 text-right">Year</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {leaveBalances.map((b) => (
-            <tr key={b.leaveType} className="hover:bg-muted/30">
-              <td className="px-4 py-3 font-medium capitalize text-foreground">{b.label || b.leaveType}</td>
-              <td className="px-4 py-3 text-right text-foreground">{b.entitledDays}</td>
-              <td className="px-4 py-3 text-right text-red-600 dark:text-red-400">{b.usedDays}</td>
-              <td className="px-4 py-3 text-right text-yellow-600 dark:text-yellow-400">{b.pendingDays}</td>
-              <td className={`px-4 py-3 text-right font-semibold ${b.balanceDays <= 0 ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400"}`}>
-                {b.balanceDays}
-              </td>
-              <td className="px-4 py-3 text-right text-muted-foreground">{b.carryOver}</td>
-              <td className="px-4 py-3 text-right text-muted-foreground">{b.year}</td>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">Balances for {year}</p>
+        <Link
+          href={`/dashboard/hr/employees/${employeeId}/leave-balances`}
+          className="text-sm text-primary hover:underline"
+        >
+          Adjust entitlements
+        </Link>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border bg-muted/50 text-left text-xs font-medium uppercase text-muted-foreground">
+              <th className="px-4 py-3">Leave type</th>
+              <th className="px-4 py-3 text-right">Entitled</th>
+              <th className="px-4 py-3 text-right">Brought forward</th>
+              <th className="px-4 py-3 text-right">Taken</th>
+              <th className="px-4 py-3 text-right">Pending</th>
+              <th className="px-4 py-3 text-right">Encashed</th>
+              <th className="px-4 py-3 text-right">Available</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {balances.map((b) => (
+              <tr key={b.leaveTypeId} className="hover:bg-muted/30">
+                <td className="px-4 py-3 font-medium text-foreground">
+                  {b.name}
+                  {!b.affectsBalance && (
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">
+                      no entitlement
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right text-foreground">{b.entitledDays}</td>
+                <td className="px-4 py-3 text-right text-muted-foreground">{b.carryOverDays}</td>
+                <td className="px-4 py-3 text-right text-red-600 dark:text-red-400">{b.takenDays}</td>
+                <td className="px-4 py-3 text-right text-yellow-600 dark:text-yellow-400">{b.pendingDays}</td>
+                <td className="px-4 py-3 text-right text-muted-foreground">{b.encashedDays}</td>
+                <td
+                  className={`px-4 py-3 text-right font-semibold ${
+                    b.availableDays <= 0
+                      ? "text-red-600 dark:text-red-400"
+                      : "text-emerald-700 dark:text-emerald-400"
+                  }`}
+                >
+                  {b.availableDays}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Available is what a new request is checked against: entitled plus brought
+        forward, less taken, encashed and anything still awaiting a decision.
+      </p>
     </div>
   );
 }
 
-// ─── Payroll History tab (async) ───
-async function PayrollHistoryTab({ partyId }) {
-  await dbConnect();
-  const history = await PayrollEntry.getEmployeeHistory(null, partyId, 12);
-
-  if (!history.length) {
-    return <p className="text-sm text-muted-foreground">No payroll history yet.</p>;
+async function PayrollTab({ employeeId }) {
+  const payslips = await listPayslips(employeeId);
+  if (!payslips.length) {
+    return <p className="text-sm text-muted-foreground">No payslips yet.</p>;
   }
-
-  const fmt = (n) => (n || 0).toLocaleString("en-KE");
-  const monthNames = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
@@ -175,33 +222,44 @@ async function PayrollHistoryTab({ partyId }) {
         <thead>
           <tr className="border-b border-border bg-muted/50 text-left text-xs font-medium uppercase text-muted-foreground">
             <th className="px-4 py-3">Period</th>
-            <th className="px-4 py-3 text-right">Gross Pay</th>
+            <th className="px-4 py-3 text-right">Gross</th>
             <th className="px-4 py-3 text-right">Deductions</th>
-            <th className="px-4 py-3 text-right">Net Pay</th>
+            <th className="px-4 py-3 text-right">Net</th>
             <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {history.map((entry) => (
-            <tr key={entry._id?.toString()} className="hover:bg-muted/30">
-              <td className="px-4 py-3 text-foreground">
-                {monthNames[entry.period?.month]} {entry.period?.year}
+          {payslips.map((p) => (
+            <tr key={p.id} className="hover:bg-muted/30">
+              <td className="px-4 py-3 text-foreground">{p.label}</td>
+              <td className="px-4 py-3 text-right text-foreground">
+                {p.grossPay.toLocaleString("en-KE")}
               </td>
-              <td className="px-4 py-3 text-right text-foreground">{fmt(entry.earnings?.grossPay)}</td>
               <td className="px-4 py-3 text-right text-red-600 dark:text-red-400">
-                ({fmt(entry.deductions?.totalDeductions)})
+                ({p.totalDeductions.toLocaleString("en-KE")})
               </td>
               <td className="px-4 py-3 text-right font-semibold text-emerald-700 dark:text-emerald-400">
-                {fmt(entry.netPay)}
+                {p.netPay.toLocaleString("en-KE")}
               </td>
               <td className="px-4 py-3">
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                  entry.paymentStatus === "paid"
-                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                    : "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400"
-                }`}>
-                  {entry.paymentStatus}
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                    p.paymentStatus === "paid"
+                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                      : "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400"
+                  }`}
+                >
+                  {p.paymentStatus}
                 </span>
+              </td>
+              <td className="px-4 py-3 text-right">
+                <Link
+                  href={`/dashboard/hr/payroll/${p.runId}`}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Open run
+                </Link>
               </td>
             </tr>
           ))}
@@ -211,9 +269,62 @@ async function PayrollHistoryTab({ partyId }) {
   );
 }
 
-// ============================================
-// PAGE
-// ============================================
+/**
+ * Employment events and pay changes, together.
+ *
+ * The source records history for confirmations and terminations only, and
+ * shows it nowhere — so a promotion or a transfer left no trace anybody could
+ * read.
+ */
+function HistoryTab({ events, salary, canSeePay }) {
+  const items = [
+    ...events.map((e) => ({
+      key: `e-${e.id}`,
+      date: e.effectiveDate,
+      title: e.eventType.replace(/_/g, " "),
+      detail:
+        e.previousValue || e.newValue
+          ? `${e.previousValue || "—"} → ${e.newValue || "—"}`
+          : null,
+      reason: e.reason,
+      by: e.changedByName,
+    })),
+    ...(canSeePay
+      ? salary.map((s) => ({
+          key: `s-${s.id}`,
+          date: s.effectiveDate,
+          title: "pay change",
+          detail: `${money(s.previousGross)} → ${money(s.newGross)} (${s.grossChange >= 0 ? "+" : ""}${s.grossChange.toLocaleString("en-KE")})`,
+          reason: s.reason,
+          by: s.changedByName,
+        }))
+      : []),
+  ].sort((a, b) => b.date.localeCompare(a.date));
+
+  if (!items.length) {
+    return <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>;
+  }
+
+  return (
+    <ol className="space-y-3">
+      {items.map((i) => (
+        <li
+          key={i.key}
+          className="rounded-lg border border-border bg-card p-4 shadow-sm"
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="font-medium capitalize text-foreground">{i.title}</p>
+            <p className="text-xs text-muted-foreground">{day(i.date)}</p>
+          </div>
+          {i.detail && <p className="mt-1 text-sm text-muted-foreground">{i.detail}</p>}
+          {i.reason && <p className="mt-1 text-sm text-muted-foreground">{i.reason}</p>}
+          {i.by && <p className="mt-1 text-xs text-muted-foreground">by {i.by}</p>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export default async function EmployeeDetailPage({ params, searchParams }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -221,68 +332,66 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
 
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!HR_ROLES.includes(session.user.role)) redirect("/dashboard/hr");
+  if (!roleAllowed(session.user.role, HR_VIEW_ROLES)) redirect("/dashboard/hr");
 
-  const { employee, error } = await getEmployeeById(id);
-  if (error || !employee) notFound();
+  const data = await getEmployeeForPage(id);
+  if (!data) notFound();
 
-  const fullName = `${employee.personalInfo?.firstName} ${employee.personalInfo?.lastName}`;
-  const initials = (employee.personalInfo?.firstName?.[0] || "") + (employee.personalInfo?.lastName?.[0] || "");
+  const { employee, documents, events, salary } = data;
+  const initials = (employee.firstName?.[0] || "") + (employee.lastName?.[0] || "");
+  const canSeePay = roleAllowed(session.user.role, HR_COMPENSATION_ROLES);
+  const canManageLeave = roleAllowed(session.user.role, HR_ADMIN_ROLES);
 
   const tabs = [
     { key: "profile", label: "Profile", icon: User },
     { key: "leave", label: "Leave", icon: Calendar },
     { key: "payroll", label: "Payroll", icon: Banknote },
+    { key: "history", label: "History", icon: History },
     { key: "documents", label: "Documents", icon: FileText },
   ];
 
-  const canEditCompensation = ["SuperAdmin", "Admin", "HR Manager"].includes(session.user.role);
-  const canManageLeave = ["SuperAdmin", "Admin", "HR Manager"].includes(session.user.role);
-
   return (
     <div className="space-y-6 p-4 sm:p-6">
-      {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Link href="/dashboard/hr/employees" className="flex items-center gap-1 hover:text-foreground">
           <ChevronLeft className="h-4 w-4" />
           Employees
         </Link>
         <span>/</span>
-        <span className="text-foreground">{fullName}</span>
+        <span className="text-foreground">{employee.fullName}</span>
       </div>
 
-      {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-center gap-4">
           <EmployeePhotoUpload
-            profileId={employee._id}
-            currentPhotoUrl={employee.personalInfo?.photo?.url}
+            employeeId={employee.id}
+            currentPhotoUrl={employee.photoUrl}
             initials={initials}
           />
           <div>
-            <h1 className="text-lg font-bold text-foreground sm:text-2xl">{fullName}</h1>
+            <h1 className="text-lg font-bold text-foreground sm:text-2xl">{employee.fullName}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
               <span className="font-mono">{employee.employeeNumber}</span>
               <span className="hidden sm:inline">·</span>
-              <span className="hidden sm:inline">{employee.employment?.designation || "No designation"}</span>
+              <span className="hidden sm:inline">{employee.designation || "No designation"}</span>
               <span className="hidden sm:inline">·</span>
-              <span>{employee.employment?.department || "No department"}</span>
-              <StatusBadge status={employee.employment?.status} />
+              <span>{employee.department || "No department"}</span>
+              <StatusBadge status={employee.status} />
             </div>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <EmployeeActions
-            profileId={employee._id}
-            status={employee.employment?.status}
-            hasLogin={!!employee.userId}
+            employeeId={employee.id}
+            status={employee.status}
+            hasLogin={Boolean(employee.userId)}
             userRole={session.user.role}
-            email={employee.contactEmail}
+            email={employee.email}
           />
-          {canEditCompensation && (
+          {canSeePay && (
             <Link
-              href={`/dashboard/hr/employees/${employee._id}/compensation`}
+              href={`/dashboard/hr/employees/${employee.id}/compensation`}
               className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
             >
               <Banknote className="h-4 w-4" />
@@ -291,7 +400,7 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
           )}
           {canManageLeave && (
             <Link
-              href={`/dashboard/hr/employees/${employee._id}/leave-balances`}
+              href={`/dashboard/hr/employees/${employee.id}/leave-balances`}
               className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
             >
               <Calendar className="h-4 w-4" />
@@ -299,14 +408,21 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
             </Link>
           )}
           <Link
-            href={`/dashboard/hr/p9/${employee._id}?year=${new Date().getFullYear()}`}
+            href={`/dashboard/hr/employees/${employee.id}/attendance`}
+            className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+          >
+            <Calendar className="h-4 w-4" />
+            <span className="hidden sm:inline">Attendance</span>
+          </Link>
+          <Link
+            href={`/dashboard/hr/p9/${employee.id}?year=${new Date().getFullYear()}`}
             className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
           >
             <FileText className="h-4 w-4" />
             <span className="hidden sm:inline">P9</span>
           </Link>
           <Link
-            href={`/dashboard/hr/employees/${employee._id}/edit`}
+            href={`/dashboard/hr/employees/${employee.id}/edit`}
             className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
           >
             <Edit className="h-4 w-4" />
@@ -315,15 +431,14 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 rounded-lg border border-border bg-muted/40 p-1 w-fit">
+      <div className="flex w-fit gap-1 rounded-lg border border-border bg-muted/40 p-1">
         {tabs.map((tab) => (
           <Link
             key={tab.key}
             href={`?tab=${tab.key}`}
             className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors ${
               activeTab === tab.key
-                ? "bg-card text-foreground font-medium shadow-sm"
+                ? "bg-card font-medium text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -333,23 +448,28 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
         ))}
       </div>
 
-      {/* Tab content */}
-      {activeTab === "profile" && <ProfileTab employee={employee} />}
+      {activeTab === "profile" && <ProfileTab e={employee} canSeePay={canSeePay} />}
 
       {activeTab === "leave" && (
-        <LeaveTab leaveBalances={employee.leaveBalances} />
+        <Suspense fallback={<div className="h-48 animate-pulse rounded-lg bg-muted" />}>
+          <LeaveTab employeeId={employee.id} />
+        </Suspense>
       )}
 
       {activeTab === "payroll" && (
         <Suspense fallback={<div className="h-48 animate-pulse rounded-lg bg-muted" />}>
-          <PayrollHistoryTab partyId={employee.partyId} />
+          <PayrollTab employeeId={employee.id} />
         </Suspense>
+      )}
+
+      {activeTab === "history" && (
+        <HistoryTab events={events} salary={salary} canSeePay={canSeePay} />
       )}
 
       {activeTab === "documents" && (
         <EmployeeDocuments
-          profileId={employee._id}
-          documents={employee.documents || []}
+          employeeId={employee.id}
+          documents={documents}
           userRole={session.user.role}
         />
       )}

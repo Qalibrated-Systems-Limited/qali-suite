@@ -31,7 +31,14 @@ import {
  */
 
 export type ActionResult =
-  | { success: true; inviteId?: string; rawToken?: string; message?: string }
+  | {
+      success: true;
+      inviteId?: string;
+      rawToken?: string;
+      message?: string;
+      /** The invite exists but its email did not leave. */
+      warning?: string;
+    }
   | { success: false; error: string; fieldErrors?: Record<string, string[]> };
 
 /** 32 random bytes emailed, its sha256 stored — as the source did. */
@@ -57,6 +64,46 @@ function fail(err: unknown): ActionResult {
   }
   console.error("[invite-action]", err);
   return { success: false, error: "Something went wrong. Please try again." };
+}
+
+/**
+ * Sends the invitation email.
+ *
+ * THE PORT DROPPED THIS. sendInvitePg creates the invite and hands the raw
+ * token back to its caller, and no caller sends anything — so on the Postgres
+ * path an invited person is never told they were invited, and the link that
+ * only exists in that response is lost when the dialog closes.
+ *
+ * Best-effort, as in the Mongo action: the invite is a real row whether or not
+ * the email leaves, and it can be resent. A failure is reported rather than
+ * swallowed, so nobody sits waiting for a message that was never sent.
+ */
+async function deliverInvite(input: {
+  email: string;
+  role: string;
+  rawToken: string;
+  inviterName: string;
+  companyId: string;
+}): Promise<{ delivered: boolean; warning?: string }> {
+  try {
+    const { getCompanySubscription } = await import("../platform");
+    const company = await getCompanySubscription(input.companyId);
+    const { sendInviteEmail } = await import("@/lib/email");
+    await sendInviteEmail({
+      to: input.email,
+      inviterName: input.inviterName,
+      companyName: company?.name || "Your company",
+      role: input.role,
+      rawToken: input.rawToken,
+    });
+    return { delivered: true };
+  } catch (err) {
+    console.error("[invite-action] the invitation email could not be sent:", err);
+    return {
+      delivered: false,
+      warning: `The invitation for ${input.email} was created, but the email could not be sent. Resend it from the users page once email is configured.`,
+    };
+  }
 }
 
 const inviteSchema = z.object({
@@ -108,13 +155,24 @@ export async function sendInvitePg(
             invitedByName: user.name,
           });
 
-          revalidatePath("/dashboard/users");
           // The RAW token goes in the email; only its hash is stored.
+          const delivery = await deliverInvite({
+            email: d.email,
+            role: d.role,
+            rawToken,
+            inviterName: user.name,
+            companyId,
+          });
+
+          revalidatePath("/dashboard/users");
           return {
             success: true as const,
             inviteId: invite.id,
             rawToken,
-            message: `Invitation sent to ${d.email}`,
+            ...(delivery.warning ? { warning: delivery.warning } : {}),
+            message: delivery.delivered
+              ? `Invitation sent to ${d.email}`
+              : `Invitation created for ${d.email}`,
           };
         } catch (err) {
           // 0044's partial unique index. The source checked first and raced;
@@ -269,12 +327,23 @@ export async function resendInvitePg(inviteId: string): Promise<ActionResult> {
           invitedByName: user.name,
         });
 
+        const delivery = await deliverInvite({
+          email: existing.email,
+          role: existing.role,
+          rawToken,
+          inviterName: user.name,
+          companyId,
+        });
+
         revalidatePath("/dashboard/users");
         return {
           success: true as const,
           inviteId: fresh.id,
           rawToken,
-          message: `Invitation resent to ${existing.email}`,
+          ...(delivery.warning ? { warning: delivery.warning } : {}),
+          message: delivery.delivered
+            ? `Invitation resent to ${existing.email}`
+            : `Invitation recreated for ${existing.email}`,
         };
       },
     );

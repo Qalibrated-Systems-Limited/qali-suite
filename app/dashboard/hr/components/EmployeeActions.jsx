@@ -8,8 +8,16 @@ import { Button } from "@/components/ui/button";
 import {
   confirmEmployee,
   terminateEmployee,
-  sendEmployeePortalInvite,
-} from "@/app/mongodb/actions/hr-employee-actions";
+  inviteEmployeeToPortal,
+} from "@/app/db/actions/hr-employee-actions";
+import { HR_WRITE_ROLES, HR_ADMIN_ROLES } from "@/lib/utils/role-gates";
+import { roleAllowed } from "@/lib/permissions";
+
+/** Today, on the LOCAL calendar — `toISOString()` is UTC and shifts the day. */
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 function ConfirmDialog({ open, onClose, title, description, confirmLabel, onConfirm, isPending, error, variant = "default" }) {
   if (!open) return null;
@@ -121,7 +129,8 @@ function TerminateDialog({ open, onClose, onConfirm, isPending, error }) {
       <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-xl">
         <h3 className="text-base font-semibold text-destructive">Terminate Employee</h3>
         <p className="mt-2 text-sm text-muted-foreground">
-          This will mark the employee as terminated and deactivate their account. Reversible by an Admin.
+          This ends the employment, deactivates their login immediately, and
+          closes their party record. It cannot be undone from here.
         </p>
         <div className="mt-4">
           <label className="mb-1 block text-sm font-medium text-foreground">Reason</label>
@@ -153,20 +162,23 @@ function TerminateDialog({ open, onClose, onConfirm, isPending, error }) {
   );
 }
 
-export function EmployeeActions({ profileId, status, hasLogin, userRole, email }) {
+export function EmployeeActions({ employeeId, status, hasLogin, userRole, email }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [dialog, setDialog] = useState(null);
   const [dialogError, setDialogError] = useState(null);
 
-  const canConfirm = status === "probation" && ["SuperAdmin", "Admin", "Manager", "HR Manager"].includes(userRole);
-  const canTerminate = status !== "terminated" && userRole === "Admin";
-  const canInvite = !hasLogin && ["SuperAdmin", "Admin", "HR Manager"].includes(userRole);
+  const canConfirm = status === "probation" && roleAllowed(userRole, HR_WRITE_ROLES);
+  // HR_ADMIN_ROLES, not `userRole === "Admin"`. The action has always allowed
+  // SuperAdmin and HR Manager to terminate; the button did not offer it to
+  // them, so the only way HR could end an employment was to ask an Admin.
+  const canTerminate = status !== "terminated" && roleAllowed(userRole, HR_ADMIN_ROLES);
+  const canInvite = !hasLogin && roleAllowed(userRole, HR_ADMIN_ROLES);
 
   function handleConfirm() {
     setDialogError(null);
     startTransition(async () => {
-      const result = await confirmEmployee(profileId);
+      const result = await confirmEmployee(employeeId);
       if (result?.success === false) {
         setDialogError(result.error);
       } else {
@@ -180,8 +192,8 @@ export function EmployeeActions({ profileId, status, hasLogin, userRole, email }
   function handleTerminate(reason) {
     setDialogError(null);
     const formData = new FormData();
-    formData.set("profileId", profileId);
-    formData.set("terminationDate", new Date().toISOString().split("T")[0]);
+    formData.set("employeeId", employeeId);
+    formData.set("terminationDate", today());
     formData.set("reason", reason);
     startTransition(async () => {
       const result = await terminateEmployee(null, formData);
@@ -189,7 +201,9 @@ export function EmployeeActions({ profileId, status, hasLogin, userRole, email }
         setDialogError(result.error);
       } else {
         setDialog(null);
-        toast.success("Employee terminated");
+        // The login is closed separately, and a failure there is worth saying.
+        if (result?.warning) toast.warning(result.warning);
+        else toast.success("Employment ended and the login deactivated");
         router.refresh();
       }
     });
@@ -198,7 +212,7 @@ export function EmployeeActions({ profileId, status, hasLogin, userRole, email }
   function handleInvite(selectedRole) {
     setDialogError(null);
     startTransition(async () => {
-      const result = await sendEmployeePortalInvite(profileId, selectedRole);
+      const result = await inviteEmployeeToPortal(employeeId, selectedRole);
       if (result?.success === false) {
         setDialogError(result.error);
       } else if (result?.warning) {
