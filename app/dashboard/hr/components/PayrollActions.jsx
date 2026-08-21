@@ -7,12 +7,13 @@ import { Play, CheckCircle2, XCircle, Loader2, AlertCircle, Banknote, Pencil, Do
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
-  generatePayrollEntries,
+  generatePayslips,
   approvePayrollRun,
+  submitForReview,
   voidPayrollRun,
   markPayrollPaid,
-  updatePayrollEntry,
-} from "@/app/mongodb/actions/hr-payroll-actions";
+  updatePayslip,
+} from "@/app/db/actions/hr-payroll-actions";
 
 const voidInitial = { success: false, error: null, fieldErrors: null };
 const entryInitial = { success: false, error: null };
@@ -29,7 +30,7 @@ function VoidDialog({ open, onClose, payrollRunId, onSuccess }) {
         <h3 className="text-base font-semibold text-foreground">Void Payroll Run</h3>
         <p className="mt-1 text-sm text-muted-foreground">This action cannot be undone. Provide a reason.</p>
         <form action={formAction} className="mt-4 space-y-3">
-          <input type="hidden" name="payrollRunId" value={payrollRunId} />
+          <input type="hidden" name="runId" value={payrollRunId} />
           {state.error && (
             <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-500/5 p-2 text-xs text-red-700 dark:border-red-900 dark:text-red-400">
               <AlertCircle className="h-3 w-3" /> {state.error}
@@ -57,12 +58,12 @@ function VoidDialog({ open, onClose, payrollRunId, onSuccess }) {
 
 // ─── Entry Edit Dialog ───────────────────────────────────────
 function EntryEditDialog({ entry, payrollRunId, open, onClose, onSuccess }) {
-  const [state, formAction, isPending] = useActionState(updatePayrollEntry, entryInitial);
+  const [state, formAction, isPending] = useActionState(updatePayslip, entryInitial);
   if (!open || !entry) return null;
   if (state.success) onSuccess?.();
 
-  const e = entry.earnings || {};
-  const d = entry.deductions || {};
+  const e = entry;
+  const d = entry;
 
   function NumInput({ name, label, defaultValue }) {
     return (
@@ -98,8 +99,8 @@ function EntryEditDialog({ entry, payrollRunId, open, onClose, onSuccess }) {
         )}
 
         <form action={formAction} className="space-y-5">
-          <input type="hidden" name="entryId" value={entry._id} />
-          <input type="hidden" name="payrollRunId" value={payrollRunId} />
+          <input type="hidden" name="entryId" value={entry.id} />
+          <input type="hidden" name="runId" value={payrollRunId} />
 
           {/* Earnings */}
           <div>
@@ -109,7 +110,7 @@ function EntryEditDialog({ entry, payrollRunId, open, onClose, onSuccess }) {
               <NumInput name="housingAllowance" label="Housing" defaultValue={e.housingAllowance} />
               <NumInput name="transportAllowance" label="Transport" defaultValue={e.transportAllowance} />
               <NumInput name="medicalAllowance" label="Medical" defaultValue={e.medicalAllowance} />
-              <NumInput name="overtime" label="Overtime" defaultValue={e.overtime} />
+              <NumInput name="overtimePay" label="Overtime" defaultValue={e.overtimePay} />
               <NumInput name="bonus" label="Bonus" defaultValue={e.bonus} />
               <NumInput name="commission" label="Commission" defaultValue={e.commission} />
             </div>
@@ -154,21 +155,26 @@ function EntryEditDialog({ entry, payrollRunId, open, onClose, onSuccess }) {
 }
 
 // ─── Main PayrollActions ─────────────────────────────────────
-export function PayrollActions({ payrollRun, userRole }) {
+export function PayrollActions({ payrollRun, can = {} }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [voidOpen, setVoidOpen] = useState(false);
 
-  const { _id: runId, status } = payrollRun;
+  const { id: runId, status } = payrollRun;
 
-  const canGenerate = ["draft", "processing"].includes(status) && ["SuperAdmin", "Admin", "HR Manager"].includes(userRole);
-  const canApprove = ["processing", "review"].includes(status) && userRole === "Admin";
-  const canMarkPaid = status === "approved" && userRole === "Admin";
-  const canVoid = !["paid", "voided"].includes(status) && userRole === "Admin";
+  // The action layer decides; these only choose which buttons to show. The
+  // source hard-coded `userRole === "Admin"` for approve, void and mark-paid,
+  // so a CFO or Finance Manager — who the ACTION has always allowed — had no
+  // button to press.
+  const canGenerate = ["draft", "processing", "review"].includes(status) && can.prepare;
+  const canReview = status === "processing" && can.prepare;
+  const canApprove = ["processing", "review"].includes(status) && can.approve;
+  const canMarkPaid = status === "approved" && can.approve;
+  const canVoid = !["paid", "voided"].includes(status) && can.void;
 
   function handleGenerate() {
     startTransition(async () => {
-      const result = await generatePayrollEntries(runId);
+      const result = await generatePayslips(runId);
       if (result?.success === false) {
         toast.error(result.error);
       } else {
@@ -198,7 +204,18 @@ export function PayrollActions({ payrollRun, userRole }) {
       if (result?.success === false) {
         toast.error(result.error);
       } else {
-        toast.success("Payroll run approved");
+        toast.success(result?.message || "Approved and posted");
+        router.refresh();
+      }
+    });
+  }
+
+  function handleReview() {
+    startTransition(async () => {
+      const result = await submitForReview(runId);
+      if (result?.success === false) toast.error(result.error);
+      else {
+        toast.success("Sent for review");
         router.refresh();
       }
     });
@@ -207,7 +224,9 @@ export function PayrollActions({ payrollRun, userRole }) {
   function handleMarkPaid() {
     if (!confirm("Mark this payroll run as paid? All entries will be updated.")) return;
     startTransition(async () => {
-      const result = await markPayrollPaid(runId);
+      const fd = new FormData();
+      fd.set("runId", runId);
+      const result = await markPayrollPaid(null, fd);
       if (result?.success === false) {
         toast.error(result.error);
       } else {
@@ -217,7 +236,7 @@ export function PayrollActions({ payrollRun, userRole }) {
     });
   }
 
-  if (!canGenerate && !canApprove && !canMarkPaid && !canVoid) return null;
+  if (!canGenerate && !canReview && !canApprove && !canMarkPaid && !canVoid) return null;
 
   return (
     <>
@@ -232,6 +251,17 @@ export function PayrollActions({ payrollRun, userRole }) {
           <Button onClick={handleApprove} disabled={isPending}>
             {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
             Approve
+          </Button>
+        )}
+        {canReview && (
+          <Button
+            variant="outline"
+            onClick={handleReview}
+            disabled={isPending}
+            title="Hand it to whoever approves payroll"
+          >
+            {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            <span className="hidden sm:inline">Send for review</span>
           </Button>
         )}
         {canMarkPaid && (
@@ -306,8 +336,8 @@ export function PayslipButton({ payrollRunId, entryId }) {
 }
 
 // ─── Payroll Export Buttons (bank CSV, M-Pesa CSV, statutory) ────
-export function PayrollExportButtons({ payrollRunId, userRole }) {
-  if (!["SuperAdmin", "Admin", "HR Manager"].includes(userRole)) return null;
+export function PayrollExportButtons({ payrollRunId, canExport = true }) {
+  if (!canExport) return null;
 
   const exportLink = (href, icon, label) => (
     <a

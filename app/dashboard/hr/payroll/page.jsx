@@ -2,12 +2,23 @@ import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getPayrollRuns } from "@/app/mongodb/queries/hr-queries";
+import { listPayrollRunsForPage } from "@/app/db/actions/hr-payroll-actions";
+import { roleAllowed } from "@/lib/permissions";
 import { Plus, Banknote, FileText } from "lucide-react";
 
 export const metadata = { title: "Payroll | HR" };
 
-const PAYROLL_ROLES = ["SuperAdmin", "Admin", "HR Manager"];
+// HR prepares, finance approves — so finance leadership must be able to open
+// the list. The source's PAYROLL_ROLES here omitted CFO and Finance Manager
+// while the ACTIONS allowed them, so the people who approve payroll could not
+// reach the page that holds it.
+const PAYROLL_ROLES = [
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "HR Manager",
+];
 
 function StatusBadge({ status }) {
   const map = {
@@ -28,10 +39,10 @@ function StatusBadge({ status }) {
 
 async function PayrollRunList({ searchParams }) {
   const params = await searchParams;
-  const { payrollRuns } = await getPayrollRuns({
+  const { runs: payrollRuns } = await listPayrollRunsForPage({
     page: parseInt(params.page || "1"),
     status: params.status || "",
-    year: params.year || String(new Date().getFullYear()),
+    year: params.year ? Number(params.year) : null,
   });
 
   const fmt = (n) => (n || 0).toLocaleString("en-KE", { minimumFractionDigits: 0 });
@@ -71,20 +82,20 @@ async function PayrollRunList({ searchParams }) {
           </thead>
           <tbody className="divide-y divide-border">
             {payrollRuns.map((run) => (
-              <tr key={run._id} className="hover:bg-muted/50 transition-colors">
+              <tr key={run.id} className="hover:bg-muted/50 transition-colors">
                 <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{run.payrollNumber}</td>
-                <td className="px-4 py-3 font-medium text-foreground">{run.period?.label}</td>
-                <td className="px-4 py-3 text-right text-foreground">{run.totals?.employeeCount || 0}</td>
-                <td className="px-4 py-3 text-right text-foreground">{fmt(run.totals?.totalGrossPay)}</td>
+                <td className="px-4 py-3 font-medium text-foreground">{run.label}</td>
+                <td className="px-4 py-3 text-right text-foreground">{run.employeeCount}</td>
+                <td className="px-4 py-3 text-right text-foreground">{fmt(run.totalGross)}</td>
                 <td className="px-4 py-3 text-right text-red-600 dark:text-red-400">
-                  ({fmt(run.totals?.totalDeductions)})
+                  ({fmt(run.totalDeductions)})
                 </td>
                 <td className="px-4 py-3 text-right font-semibold text-emerald-700 dark:text-emerald-400">
-                  {fmt(run.totals?.totalNetPay)}
+                  {fmt(run.totalNet)}
                 </td>
                 <td className="px-4 py-3"><StatusBadge status={run.status} /></td>
                 <td className="px-4 py-3 text-right">
-                  <Link href={`/dashboard/hr/payroll/${run._id}`} className="text-xs text-primary hover:underline">
+                  <Link href={`/dashboard/hr/payroll/${run.id}`} className="text-xs text-primary hover:underline">
                     View
                   </Link>
                 </td>
@@ -98,13 +109,13 @@ async function PayrollRunList({ searchParams }) {
       <div className="divide-y divide-border md:hidden">
         {payrollRuns.map((run) => (
           <Link
-            key={run._id}
-            href={`/dashboard/hr/payroll/${run._id}`}
+            key={run.id}
+            href={`/dashboard/hr/payroll/${run.id}`}
             className="block p-4 hover:bg-muted/50 transition-colors"
           >
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="font-medium text-foreground">{run.period?.label}</p>
+                <p className="font-medium text-foreground">{run.label}</p>
                 <p className="mt-0.5 font-mono text-xs text-muted-foreground">{run.payrollNumber}</p>
               </div>
               <StatusBadge status={run.status} />
@@ -112,15 +123,15 @@ async function PayrollRunList({ searchParams }) {
             <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border pt-3 text-xs">
               <div>
                 <p className="text-muted-foreground">Employees</p>
-                <p className="font-medium text-foreground">{run.totals?.employeeCount || 0}</p>
+                <p className="font-medium text-foreground">{run.employeeCount}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Gross</p>
-                <p className="font-medium text-foreground">{fmt(run.totals?.totalGrossPay)}</p>
+                <p className="font-medium text-foreground">{fmt(run.totalGross)}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Net Pay</p>
-                <p className="font-semibold text-emerald-700 dark:text-emerald-400">{fmt(run.totals?.totalNetPay)}</p>
+                <p className="font-semibold text-emerald-700 dark:text-emerald-400">{fmt(run.totalNet)}</p>
               </div>
             </div>
           </Link>
@@ -133,7 +144,7 @@ async function PayrollRunList({ searchParams }) {
 export default async function PayrollPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!PAYROLL_ROLES.includes(session.user.role)) redirect("/dashboard/hr");
+  if (!roleAllowed(session.user.role, PAYROLL_ROLES)) redirect("/dashboard/hr");
 
   const currentYear = new Date().getFullYear();
 
@@ -145,7 +156,7 @@ export default async function PayrollPage({ searchParams }) {
           <p className="hidden sm:block text-sm text-muted-foreground">Monthly payroll runs</p>
         </div>
         <div className="flex items-center gap-2">
-          {["SuperAdmin", "Admin", "HR Manager", "Accountant"].includes(session.user.role) && (
+          {roleAllowed(session.user.role, PAYROLL_ROLES) && (
             <a
               href={`/api/hr/p9a?year=${currentYear}`}
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground hover:bg-accent transition-colors"

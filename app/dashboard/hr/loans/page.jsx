@@ -3,11 +3,15 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Banknote, Plus, DollarSign, TrendingUp, Clock } from "lucide-react";
-import { getLoans } from "@/app/mongodb/actions/loan-actions";
+import { listLoansForPage } from "@/app/db/actions/hr-loan-actions";
+import { roleAllowed } from "@/lib/permissions";
 
 export const metadata = { title: "Loans & Advances | HR" };
 
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager", "Accountant", "Employee"];
+// Matches the action's gate. The source let an Accountant or an Employee open
+// this page while the QUERY behind it refused them, so it rendered an error
+// rather than a list. An employee reaches their own loans from their record.
+const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
 
 function StatusBadge({ status }) {
   const map = {
@@ -70,9 +74,9 @@ function StatsCards({ stats, canAdmin }) {
       <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="flex items-center gap-2 text-muted-foreground">
           <DollarSign className="h-4 w-4" />
-          <p className="text-xs font-medium uppercase tracking-wide">{canAdmin ? "Total Disbursed" : "Borrowed"}</p>
+          <p className="text-xs font-medium uppercase tracking-wide">Approved, not yet paid out</p>
         </div>
-        <p className="mt-2 text-2xl font-bold text-foreground">KES {formatCurrency(stats.totalDisbursed)}</p>
+        <p className="mt-2 text-2xl font-bold text-foreground">{stats.approved}</p>
       </div>
       <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="flex items-center gap-2 text-muted-foreground">
@@ -101,49 +105,22 @@ async function LoanList({ searchParams, canAdmin }) {
   const search = params.search || "";
   const limit = 20;
 
-  // Fetch filtered list
-  const result = await getLoans({
+  // One query for the page and one for the numbers above it. The source
+  // fetches a THOUSAND loans on every page load to add up three figures.
+  const { loans: serialized, stats: loanStats, pagination } = await listLoansForPage({
     page: currentPage,
     limit,
     status,
-    loanType,
     search,
   });
 
-  const loans = result.loans || [];
-  const total = result.total || 0;
-  const totalPages = Math.ceil(total / limit);
-
-  // Fetch unfiltered stats (active loans + pending count)
-  const [allResult, pendingResult] = await Promise.all([
-    getLoans({ page: 1, limit: 1000, status: "" }),
-    getLoans({ page: 1, limit: 1, status: "pending_approval" }),
-  ]);
-
-  const allLoans = allResult.loans || [];
-  const activeLoans = allLoans.filter((l) =>
-    ["active", "disbursed"].includes(l.status)
-  );
+  const totalPages = pagination.totalPages;
   const stats = {
-    totalActive: activeLoans.length,
-    totalDisbursed: activeLoans.reduce((s, l) => s + (l.principalAmount || 0), 0),
-    totalOutstanding: activeLoans.reduce((s, l) => s + (l.outstandingBalance || 0), 0),
-    pendingCount: pendingResult.total || 0,
+    totalActive: loanStats.active,
+    totalOutstanding: loanStats.outstanding,
+    pendingCount: loanStats.pending,
+    approved: loanStats.approved,
   };
-
-  // Serialize ObjectIds to strings for rendering
-  const serialized = loans.map((l) => ({
-    _id: l._id?.toString?.() ?? l._id,
-    loanNumber: l.loanNumber,
-    loanType: l.loanType,
-    employeeName: l.employeeName,
-    employeeNumber: l.employeeNumber,
-    department: l.department,
-    principalAmount: l.principalAmount,
-    outstandingBalance: l.outstandingBalance,
-    monthlyInstallment: l.monthlyInstallment,
-    status: l.status,
-  }));
 
   return (
     <>
@@ -156,9 +133,9 @@ async function LoanList({ searchParams, canAdmin }) {
             {status ? `No ${status.replace("_", " ")} loans` : canAdmin ? "No loans yet." : "You have no loan requests yet."}
           </p>
           {!canAdmin && !status && (
-            <a href="/dashboard/hr/loans/create" className="mt-3 inline-block text-sm text-primary hover:underline">
+            <Link href="/dashboard/hr/loans/create" className="mt-3 inline-block text-sm text-primary hover:underline">
               Request a salary advance or loan →
-            </a>
+            </Link>
           )}
         </div>
       ) : (
@@ -180,7 +157,7 @@ async function LoanList({ searchParams, canAdmin }) {
               </thead>
               <tbody className="divide-y divide-border">
                 {serialized.map((loan) => (
-                  <tr key={loan._id} className="hover:bg-muted/50 transition-colors">
+                  <tr key={loan.id} className="hover:bg-muted/50 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{loan.loanNumber}</td>
                     <td className="px-4 py-3">
                       <p className="font-medium text-foreground">{loan.employeeName}</p>
@@ -198,7 +175,7 @@ async function LoanList({ searchParams, canAdmin }) {
                     </td>
                     <td className="px-4 py-3"><StatusBadge status={loan.status} /></td>
                     <td className="px-4 py-3 text-right">
-                      <Link href={`/dashboard/hr/loans/${loan._id}`} className="text-xs text-primary hover:underline">
+                      <Link href={`/dashboard/hr/loans/${loan.id}`} className="text-xs text-primary hover:underline">
                         View
                       </Link>
                     </td>
@@ -212,8 +189,8 @@ async function LoanList({ searchParams, canAdmin }) {
           <div className="divide-y divide-border md:hidden">
             {serialized.map((loan) => (
               <Link
-                key={loan._id}
-                href={`/dashboard/hr/loans/${loan._id}`}
+                key={loan.id}
+                href={`/dashboard/hr/loans/${loan.id}`}
                 className="block p-4 hover:bg-muted/50 transition-colors"
               >
                 <div className="flex items-start justify-between gap-2">
@@ -238,7 +215,7 @@ async function LoanList({ searchParams, canAdmin }) {
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-              <p className="text-muted-foreground">{total} loans</p>
+              <p className="text-muted-foreground">{pagination.total} loans</p>
               <div className="flex gap-2">
                 {currentPage > 1 && (
                   <Link
@@ -268,10 +245,10 @@ async function LoanList({ searchParams, canAdmin }) {
 export default async function LoansPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!HR_ROLES.includes(session.user.role)) redirect("/dashboard");
+  if (!roleAllowed(session.user.role, HR_ROLES)) redirect("/dashboard");
 
   const params = await searchParams;
-  const canAdmin = ["SuperAdmin", "Admin", "Manager", "HR Manager"].includes(session.user.role);
+  const canAdmin = roleAllowed(session.user.role, HR_ROLES);
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

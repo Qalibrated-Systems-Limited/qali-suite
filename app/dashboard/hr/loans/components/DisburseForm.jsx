@@ -1,9 +1,9 @@
 "use client";
 
-import { useActionState, useState, useEffect } from "react";
+import { useActionState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { disburseLoan } from "@/app/mongodb/actions/loan-actions";
+import { disburseLoan } from "@/app/db/actions/hr-loan-actions";
 
 const DISBURSEMENT_METHODS = [
   { value: "bank", label: "Bank Transfer" },
@@ -14,31 +14,21 @@ const DISBURSEMENT_METHODS = [
 
 const initialState = { success: false, error: null, fieldErrors: null };
 
-export default function DisburseForm({ loanId, onSuccess, onCancel }) {
+/**
+ * Pays a loan out.
+ *
+ * The accounts come in as a prop. The source fetches them from a REST endpoint
+ * on mount, which means a spinner inside a modal, a second round trip, and no
+ * accounts at all if the request fails — with the note "let user type
+ * manually" beside a <select> nobody can type into.
+ *
+ * Both accounts are optional here: left blank, the payroll configuration's
+ * mapping is used, which is where they are set for everything else.
+ */
+export default function DisburseForm({ loanId, paymentAccounts = [], onSuccess, onCancel }) {
   const [state, formAction, isPending] = useActionState(disburseLoan, initialState);
-  const [accounts, setAccounts] = useState({ asset: [], bank: [] });
-  const [loadingAccounts, setLoadingAccounts] = useState(true);
-
-  // Fetch GL accounts on mount
-  useEffect(() => {
-    async function loadAccounts() {
-      try {
-        const res = await fetch("/api/accounts/by-type?types=asset,bank,cash");
-        if (res.ok) {
-          const data = await res.json();
-          setAccounts({
-            asset: data.asset || [],
-            bank: [...(data.bank || []), ...(data.cash || [])],
-          });
-        }
-      } catch {
-        // If API is not available, leave empty and let user type manually
-      } finally {
-        setLoadingAccounts(false);
-      }
-    }
-    loadAccounts();
-  }, []);
+  const accounts = { asset: paymentAccounts, bank: paymentAccounts };
+  const loadingAccounts = false;
 
   if (state.success) {
     onSuccess?.();
@@ -62,15 +52,15 @@ export default function DisburseForm({ loanId, onSuccess, onCancel }) {
           Disbursement Method <span className="text-destructive">*</span>
         </label>
         <select
-          name="disbursementMethod"
-          className={`w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${state.fieldErrors?.disbursementMethod ? "border-destructive" : "border-border"}`}
+          name="method"
+          className={`w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${state.fieldErrors?.method ? "border-destructive" : "border-border"}`}
         >
           <option value="">Select method...</option>
           {DISBURSEMENT_METHODS.map((m) => (
             <option key={m.value} value={m.value}>{m.label}</option>
           ))}
         </select>
-        {state.fieldErrors?.disbursementMethod && (
+        {state.fieldErrors?.method && (
           <p className="mt-1 text-xs text-destructive">{state.fieldErrors.disbursementMethod}</p>
         )}
       </div>
@@ -91,7 +81,7 @@ export default function DisburseForm({ loanId, onSuccess, onCancel }) {
       {/* Staff Loans Receivable Account */}
       <div>
         <label className="mb-1 block text-sm font-medium text-foreground">
-          Staff Loans Receivable Account <span className="text-destructive">*</span>
+          Staff loans account <span className="text-xs font-normal text-muted-foreground">(optional)</span>
         </label>
         {loadingAccounts ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
@@ -102,7 +92,7 @@ export default function DisburseForm({ loanId, onSuccess, onCancel }) {
             name="staffLoansAccountId"
             className={`w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${state.fieldErrors?.staffLoansAccountId ? "border-destructive" : "border-border"}`}
           >
-            <option value="">Select asset account...</option>
+            <option value="">Use the payroll configuration</option>
             {accounts.asset.map((a) => (
               <option key={a._id} value={a._id}>
                 {a.accountCode} - {a.accountName}
@@ -113,13 +103,13 @@ export default function DisburseForm({ loanId, onSuccess, onCancel }) {
         {state.fieldErrors?.staffLoansAccountId && (
           <p className="mt-1 text-xs text-destructive">{state.fieldErrors.staffLoansAccountId}</p>
         )}
-        <p className="mt-1 text-xs text-muted-foreground">Debit account (asset) to record the receivable</p>
+        <p className="mt-1 text-xs text-muted-foreground">Debited — the receivable this creates</p>
       </div>
 
       {/* Bank/Cash Account */}
       <div>
         <label className="mb-1 block text-sm font-medium text-foreground">
-          Bank / Cash Account <span className="text-destructive">*</span>
+          Bank or cash account <span className="text-xs font-normal text-muted-foreground">(optional)</span>
         </label>
         {loadingAccounts ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
@@ -130,7 +120,7 @@ export default function DisburseForm({ loanId, onSuccess, onCancel }) {
             name="bankAccountId"
             className={`w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${state.fieldErrors?.bankAccountId ? "border-destructive" : "border-border"}`}
           >
-            <option value="">Select bank/cash account...</option>
+            <option value="">Use the payroll configuration</option>
             {accounts.bank.map((a) => (
               <option key={a._id} value={a._id}>
                 {a.accountCode} - {a.accountName}
@@ -141,7 +131,7 @@ export default function DisburseForm({ loanId, onSuccess, onCancel }) {
         {state.fieldErrors?.bankAccountId && (
           <p className="mt-1 text-xs text-destructive">{state.fieldErrors.bankAccountId}</p>
         )}
-        <p className="mt-1 text-xs text-muted-foreground">Credit account (bank/cash) for the disbursement</p>
+        <p className="mt-1 text-xs text-muted-foreground">Credited — where the money leaves from</p>
       </div>
 
       {/* Actions */}

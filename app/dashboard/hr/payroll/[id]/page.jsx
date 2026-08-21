@@ -2,16 +2,24 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, Users, TrendingUp, BookOpen } from "lucide-react";
-import { getPayrollRunById } from "@/app/mongodb/queries/hr-queries";
+import { getPayrollRunForPage } from "@/app/db/actions/hr-payroll-actions";
 import { PayrollActions, EntryEditButton, PayrollExportButtons, PayslipButton } from "@/app/dashboard/hr/components/PayrollActions";
+import { roleAllowed } from "@/lib/permissions";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
-  const { payrollRun } = await getPayrollRunById(id);
-  return { title: `${payrollRun?.payrollNumber || "Payroll"} | HR` };
+  const data = await getPayrollRunForPage(id);
+  return { title: `${data?.run?.payrollNumber || "Payroll"} | HR` };
 }
 
-const HR_ROLES = ["SuperAdmin", "Admin", "HR Manager", "Manager"];
+// HR prepares, finance approves — both must be able to open the run.
+const HR_ROLES = [
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "HR Manager",
+];
 
 function StatusBadge({ status }) {
   const map = {
@@ -49,12 +57,13 @@ export default async function PayrollRunDetailPage({ params }) {
   const { id } = await params;
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!HR_ROLES.includes(session.user.role)) redirect("/dashboard/hr");
+  if (!roleAllowed(session.user.role, HR_ROLES)) redirect("/dashboard/hr");
 
-  const { payrollRun: run, entries, error } = await getPayrollRunById(id);
-  if (!run || error) notFound();
+  const data = await getPayrollRunForPage(id);
+  if (!data) notFound();
 
-  const canEditEntries = ["SuperAdmin", "Admin", "HR Manager"].includes(session.user.role) && !["paid", "voided"].includes(run.status);
+  const { run, entries, can } = data;
+  const canEditEntries = can.prepare && !["approved", "paid", "voided"].includes(run.status);
 
   const currency = run.currency || "KES";
   const totals = run.totals || {};
@@ -74,31 +83,31 @@ export default async function PayrollRunDetailPage({ params }) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-bold text-foreground sm:text-2xl">{run.period?.label}</h1>
+            <h1 className="text-xl font-bold text-foreground sm:text-2xl">{run.label}</h1>
             <StatusBadge status={run.status} />
           </div>
           <p className="mt-1 font-mono text-sm text-muted-foreground">{run.payrollNumber}</p>
           {run.notes && <p className="mt-0.5 truncate text-sm text-muted-foreground">{run.notes}</p>}
         </div>
-        <PayrollActions payrollRun={run} userRole={session.user.role} />
+        <PayrollActions payrollRun={run} can={can} />
       </div>
 
       {/* Export buttons */}
       {["approved", "paid"].includes(run.status) && entries.length > 0 && (
-        <PayrollExportButtons payrollRunId={run._id} userRole={session.user.role} />
+        <PayrollExportButtons payrollRunId={run.id} canExport={can.prepare} />
       )}
 
       {/* Totals grid */}
       {totals.employeeCount > 0 && (
         <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
           <TotalsCard label="Employees" value={totals.employeeCount} sub="in this run" />
-          <TotalsCard label="Gross Pay" value={`${currency} ${fmt(totals.totalGrossPay)}`} sub="before deductions" />
+          <TotalsCard label="Gross Pay" value={`${currency} ${fmt(totals.gross)}`} sub="before deductions" />
           <TotalsCard
             label="Deductions"
-            value={`${currency} ${fmt(totals.totalDeductions)}`}
-            sub={<span className="hidden sm:inline">PAYE {fmt(totals.totalPAYE)} · NSSF {fmt(totals.totalNSSF)} · SHIF {fmt(totals.totalSHIF)}</span>}
+            value={`${currency} ${fmt(totals.deductions)}`}
+            sub={<span className="hidden sm:inline">PAYE {fmt(totals.paye)} · NSSF {fmt(totals.nssf)} · SHIF {fmt(totals.shif)}</span>}
           />
-          <TotalsCard label="Net Pay" value={`${currency} ${fmt(totals.totalNetPay)}`} highlight />
+          <TotalsCard label="Net Pay" value={`${currency} ${fmt(totals.net)}`} highlight />
         </div>
       )}
 
@@ -113,26 +122,28 @@ export default async function PayrollRunDetailPage({ params }) {
       )}
 
       {/* Approval info */}
-      {run.approvedBy && (
+      {run.approvedByName && (
         <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900 dark:text-emerald-400">
           <Users className="h-4 w-4 shrink-0" />
-          Approved by <strong>{run.approvedBy.name}</strong>
+          Approved by <strong>{run.approvedByName}</strong>
           {run.approvedAt && <> on {new Date(run.approvedAt).toLocaleDateString("en-KE")}</>}
         </div>
       )}
 
-      {/* GL Journal Entries */}
-      {run.journalEntryIds?.length > 0 && (
+      {/* What this run put in the books. Each entry says WHICH it is, rather
+          than the reader inferring it from position in an array. */}
+      {run.journals.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 text-sm shadow-sm">
-          <BookOpen className="h-4 w-4 text-muted-foreground shrink-0" />
-          <span className="text-muted-foreground">Journal entries:</span>
-          {run.journalEntryIds.map((jeId, i) => (
+          <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="text-muted-foreground">In the ledger:</span>
+          {run.journals.map((j) => (
             <Link
-              key={jeId}
-              href={`/dashboard/journal/${jeId}`}
+              key={j.id}
+              href={`/dashboard/journal/${j.id}`}
               className="font-mono text-xs text-primary hover:underline"
+              title={`${j.kind} · ${j.status}`}
             >
-              {i === 0 ? "Accrual" : "Payment"} JE
+              {j.entryNumber} ({j.kind})
             </Link>
           ))}
         </div>
@@ -168,47 +179,48 @@ export default async function PayrollRunDetailPage({ params }) {
                 <tbody className="divide-y divide-border">
                   {entries.map((entry) => {
                     const allowances =
-                      (entry.earnings?.housingAllowance || 0) +
-                      (entry.earnings?.transportAllowance || 0) +
-                      (entry.earnings?.medicalAllowance || 0);
+                      entry.housingAllowance +
+                      entry.transportAllowance +
+                      entry.medicalAllowance +
+                      entry.otherAllowance;
                     return (
-                      <tr key={entry._id} className="hover:bg-muted/50 transition-colors">
+                      <tr key={entry.id} className="hover:bg-muted/50 transition-colors">
                         <td className="px-4 py-3">
                           <p className="font-medium text-foreground">{entry.employeeName}</p>
                           <p className="text-xs text-muted-foreground">
                             {entry.employeeNumber}{entry.department ? ` · ${entry.department}` : ""}
                           </p>
                         </td>
-                        <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(entry.earnings?.basicSalary)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(entry.basicSalary)}</td>
                         <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(allowances)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-xs font-medium text-foreground">{fmt(entry.earnings?.grossPay)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(entry.deductions?.paye)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(entry.deductions?.nssf)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(entry.deductions?.shif)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(entry.deductions?.housingLevy)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-xs font-medium text-foreground">{fmt(entry.grossPay)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(entry.paye)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(entry.nssf)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(entry.shif)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(entry.housingLevy)}</td>
                         <td className="px-4 py-3 text-right font-mono text-sm font-bold text-primary">{fmt(entry.netPay)}</td>
                         <td className="px-4 py-3 text-center">
                           <div className="flex items-center justify-center gap-1">
-                            <PayslipButton payrollRunId={run._id} entryId={entry._id} />
-                            <EntryEditButton entry={entry} payrollRunId={run._id} canEdit={canEditEntries} />
+                            <PayslipButton payrollRunId={run.id} entryId={entry.id} />
+                            <EntryEditButton entry={entry} payrollRunId={run.id} canEdit={canEditEntries} />
                           </div>
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
-                {totals.totalNetPay > 0 && (
+                {totals.net > 0 && (
                   <tfoot>
                     <tr className="border-t-2 border-border bg-muted/50 font-semibold">
                       <td className="px-4 py-3 text-xs uppercase text-muted-foreground">Total ({entries.length})</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(totals.totalBasicSalary)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(totals.totalAllowances)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(totals.totalGrossPay)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(totals.totalPAYE)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(totals.totalNSSF)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(totals.totalSHIF)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(totals.totalHousingLevy)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-sm font-bold text-primary">{fmt(totals.totalNetPay)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(totals.basic)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(totals.allowances)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(totals.gross)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(totals.paye)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(totals.nssf)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(totals.shif)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{fmt(totals.housingLevy)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-sm font-bold text-primary">{fmt(totals.net)}</td>
                     </tr>
                   </tfoot>
                 )}
@@ -218,30 +230,30 @@ export default async function PayrollRunDetailPage({ params }) {
             {/* Mobile cards */}
             <div className="divide-y divide-border md:hidden">
               {entries.map((entry) => (
-                <div key={entry._id} className="p-4">
+                <div key={entry.id} className="p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-medium text-foreground truncate">{entry.employeeName}</p>
                       <p className="text-xs text-muted-foreground">{entry.department || entry.employeeNumber}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <PayslipButton payrollRunId={run._id} entryId={entry._id} />
+                      <PayslipButton payrollRunId={run.id} entryId={entry.id} />
                       <p className="font-bold text-primary tabular-nums">{fmt(entry.netPay)}</p>
                     </div>
                   </div>
                   <div className="mt-3 grid grid-cols-3 gap-2">
                     <div className="rounded bg-muted/50 p-2 text-center">
                       <p className="text-[10px] text-muted-foreground">Gross</p>
-                      <p className="text-xs font-semibold text-foreground tabular-nums">{fmt(entry.earnings?.grossPay)}</p>
+                      <p className="text-xs font-semibold text-foreground tabular-nums">{fmt(entry.grossPay)}</p>
                     </div>
                     <div className="rounded bg-red-500/5 p-2 text-center">
                       <p className="text-[10px] text-muted-foreground">PAYE</p>
-                      <p className="text-xs font-semibold text-red-600 dark:text-red-400 tabular-nums">{fmt(entry.deductions?.paye)}</p>
+                      <p className="text-xs font-semibold text-red-600 dark:text-red-400 tabular-nums">{fmt(entry.paye)}</p>
                     </div>
                     <div className="rounded bg-red-500/5 p-2 text-center">
                       <p className="text-[10px] text-muted-foreground">NSSF+SHIF</p>
                       <p className="text-xs font-semibold text-red-600 dark:text-red-400 tabular-nums">
-                        {fmt((entry.deductions?.nssf || 0) + (entry.deductions?.shif || 0))}
+                        {fmt(entry.nssf + entry.shif)}
                       </p>
                     </div>
                   </div>

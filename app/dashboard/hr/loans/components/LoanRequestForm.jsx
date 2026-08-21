@@ -4,7 +4,7 @@ import { useActionState, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, AlertCircle, ChevronsUpDown, Check } from "lucide-react";
-import { createLoanRequest } from "@/app/mongodb/actions/loan-actions";
+import { createLoanRequest } from "@/app/db/actions/hr-loan-actions";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
@@ -31,7 +31,7 @@ function EmployeeCombobox({ employees, value, onChange, hasError }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  const selected = employees.find((e) => e.partyId === value) || null;
+  const selected = employees.find((e) => e.id === value) || null;
   const filtered = search
     ? employees.filter((e) =>
         `${e.name} ${e.employeeNumber} ${e.department}`.toLowerCase().includes(search.toLowerCase())
@@ -71,15 +71,15 @@ function EmployeeCombobox({ employees, value, onChange, hasError }) {
             <CommandGroup>
               {filtered.map((emp) => (
                 <CommandItem
-                  key={emp.partyId}
-                  value={emp.partyId}
+                  key={emp.id}
+                  value={emp.id}
                   onSelect={() => {
                     onChange(emp);
                     setOpen(false);
                     setSearch("");
                   }}
                 >
-                  <Check className={`mr-2 h-4 w-4 shrink-0 ${value === emp.partyId ? "opacity-100" : "opacity-0"}`} />
+                  <Check className={`mr-2 h-4 w-4 shrink-0 ${value === emp.id ? "opacity-100" : "opacity-0"}`} />
                   <div className="min-w-0">
                     <span className="font-medium">{emp.name}</span>
                     {emp.employeeNumber && <span className="ml-2 text-xs text-muted-foreground">{emp.employeeNumber}</span>}
@@ -139,11 +139,11 @@ function computeSchedulePreview(principalAmount, tenure, interestRate, interestT
   return schedule;
 }
 
-export default function LoanRequestForm({ employees = [], selfProfile = null, isAdmin = false }) {
+export default function LoanRequestForm({ employees = [], selfEmployee = null, isAdmin = false }) {
   const router = useRouter();
   const [state, formAction, isPending] = useActionState(createLoanRequest, initialState);
 
-  const [selectedPartyId, setSelectedPartyId] = useState(selfProfile?.partyId || "");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState(selfEmployee?.id || "");
   const [loanType, setLoanType] = useState("salary_advance");
   const [principalAmount, setPrincipalAmount] = useState("");
   const [tenure, setTenure] = useState("");
@@ -173,8 +173,7 @@ export default function LoanRequestForm({ employees = [], selfProfile = null, is
 
   return (
     <form action={formAction} className="space-y-6">
-      {/* Hidden partyId field for form submission */}
-      <input type="hidden" name="partyId" value={selectedPartyId} />
+      <input type="hidden" name="employeeId" value={selectedEmployeeId} />
       <input type="hidden" name="interestRate" value={loanType === "staff_loan" ? (parseFloat(interestRate) / 100 || 0) : 0} />
       <input type="hidden" name="interestType" value={loanType === "staff_loan" ? interestType : "none"} />
 
@@ -195,19 +194,19 @@ export default function LoanRequestForm({ employees = [], selfProfile = null, is
             </label>
             <EmployeeCombobox
               employees={employees}
-              value={selectedPartyId}
-              onChange={(emp) => setSelectedPartyId(emp.partyId)}
+              value={selectedEmployeeId}
+              onChange={(emp) => setSelectedEmployeeId(emp.id)}
               hasError={!!state.fieldErrors?.partyId}
             />
             {state.fieldErrors?.partyId && (
               <p className="mt-1 text-xs text-destructive">{state.fieldErrors.partyId}</p>
             )}
           </div>
-        ) : selfProfile ? (
+        ) : selfEmployee ? (
           <div className="rounded-md bg-muted/50 p-3">
-            <p className="font-medium text-foreground">{selfProfile.name}</p>
+            <p className="font-medium text-foreground">{selfEmployee.name}</p>
             <p className="text-xs text-muted-foreground">
-              {selfProfile.employeeNumber} {selfProfile.department && `- ${selfProfile.department}`}
+              {selfEmployee.employeeNumber} {selfEmployee.department && `- ${selfEmployee.department}`}
             </p>
           </div>
         ) : (
@@ -289,15 +288,15 @@ export default function LoanRequestForm({ employees = [], selfProfile = null, is
             </label>
             <input
               type="number"
-              name="tenure"
+              name="tenureMonths"
               value={tenure}
               onChange={(e) => setTenure(e.target.value)}
               min="1"
               max={loanType === "salary_advance" ? 3 : 120}
               placeholder={loanType === "salary_advance" ? "1-3" : loanType === "sacco_deduction" ? "e.g. 12" : "1-60"}
-              className={`w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary ${state.fieldErrors?.tenure ? "border-destructive" : "border-border"}`}
+              className={`w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary ${state.fieldErrors?.tenureMonths ? "border-destructive" : "border-border"}`}
             />
-            {state.fieldErrors?.tenure && (
+            {state.fieldErrors?.tenureMonths && (
               <p className="mt-1 text-xs text-destructive">{state.fieldErrors.tenure}</p>
             )}
           </div>

@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 import Link from "next/link";
 import { ChevronLeft, Loader2, AlertCircle } from "lucide-react";
-import { createPayrollRun } from "@/app/mongodb/actions/hr-payroll-actions";
+import { createPayrollRun } from "@/app/db/actions/hr-payroll-actions";
 
 const MONTH_NAMES = [
   "", "January", "February", "March", "April", "May", "June",

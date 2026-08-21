@@ -2,69 +2,14 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, Banknote, User, Clock, FileText, CheckCircle2, XCircle, DollarSign, Calendar } from "lucide-react";
-import { getLoanById } from "@/app/mongodb/actions/loan-actions";
+import { getLoanForPage, getLoanFormData } from "@/app/db/actions/hr-loan-actions";
 import { LoanDetailActions } from "@/app/dashboard/hr/loans/components/LoanDetailActions";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
-  const result = await getLoanById(id);
-  return { title: `${result.loan?.loanNumber || "Loan"} | HR` };
+  const data = await getLoanForPage(id);
+  return { title: `${data?.loan?.loanNumber || "Loan"} | HR` };
 }
-
-/** Serialize Mongoose lean doc to plain JSON safe for React */
-function serializeLoan(raw) {
-  if (!raw) return null;
-  return {
-    _id: raw._id?.toString?.() ?? raw._id,
-    loanNumber: raw.loanNumber,
-    loanType: raw.loanType,
-    partyId: raw.partyId?.toString?.() ?? raw.partyId,
-    profileId: raw.profileId?.toString?.() ?? raw.profileId,
-    employeeName: raw.employeeName,
-    employeeNumber: raw.employeeNumber,
-    department: raw.department,
-    principalAmount: raw.principalAmount,
-    interestRate: raw.interestRate,
-    interestType: raw.interestType,
-    tenure: raw.tenure,
-    monthlyInstallment: raw.monthlyInstallment,
-    startMonth: raw.startMonth,
-    startYear: raw.startYear,
-    totalRepaid: raw.totalRepaid || 0,
-    totalInterestPaid: raw.totalInterestPaid || 0,
-    outstandingBalance: raw.outstandingBalance || 0,
-    status: raw.status,
-    purpose: raw.purpose,
-    notes: raw.notes,
-    currency: raw.currency || "KES",
-    rejectionReason: raw.rejectionReason,
-    disbursementMethod: raw.disbursementMethod,
-    disbursementRef: raw.disbursementRef,
-    requestedAt: raw.requestedAt?.toISOString?.() ?? raw.requestedAt ?? null,
-    requestedBy: raw.requestedBy || null,
-    approvedAt: raw.approvedAt?.toISOString?.() ?? raw.approvedAt ?? null,
-    approvedBy: raw.approvedBy || null,
-    rejectedAt: raw.rejectedAt?.toISOString?.() ?? raw.rejectedAt ?? null,
-    disbursedAt: raw.disbursedAt?.toISOString?.() ?? raw.disbursedAt ?? null,
-    disbursedBy: raw.disbursedBy || null,
-    disbursementJournalId: raw.disbursementJournalId?.toString?.() ?? raw.disbursementJournalId ?? null,
-    journalEntryIds: (raw.journalEntryIds || []).map((id) => id?.toString?.() ?? id),
-    installments: (raw.installments || []).map((inst) => ({
-      month: inst.month,
-      year: inst.year,
-      principal: inst.principal,
-      interest: inst.interest,
-      total: inst.total,
-      status: inst.status,
-      payrollRunId: inst.payrollRunId?.toString?.() ?? inst.payrollRunId ?? null,
-      paidAt: inst.paidAt?.toISOString?.() ?? inst.paidAt ?? null,
-    })),
-    createdAt: raw.createdAt?.toISOString?.() ?? raw.createdAt ?? null,
-    updatedAt: raw.updatedAt?.toISOString?.() ?? raw.updatedAt ?? null,
-  };
-}
-
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager", "Accountant", "Employee"];
 
 const MONTH_NAMES = [
   "", "January", "February", "March", "April", "May", "June",
@@ -152,17 +97,20 @@ export default async function LoanDetailPage({ params }) {
   const { id } = await params;
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!HR_ROLES.includes(session.user.role)) redirect("/dashboard");
+  const data = await getLoanForPage(id);
+  if (!data) notFound();
+  const { loan, can } = data;
 
-  const result = await getLoanById(id);
-  if (!result.loan || result.error) notFound();
-  const loan = serializeLoan(result.loan);
+  // The accounts are only needed to pay one out.
+  const paymentAccounts = can.disburse
+    ? (await getLoanFormData()).paymentAccounts
+    : [];
 
   const now = new Date();
   const currentMonth = now.getMonth() + 1;
   const currentYear = now.getFullYear();
 
-  const repaidAmount = loan.totalRepaid + loan.totalInterestPaid;
+  const repaidAmount = loan.totalRepaid;
   const progressPercent = loan.principalAmount > 0
     ? Math.min(100, Math.round((loan.totalRepaid / loan.principalAmount) * 100))
     : 0;
@@ -191,7 +139,7 @@ export default async function LoanDetailPage({ params }) {
             {loan.department ? <span className="hidden sm:inline"> - {loan.department}</span> : null}
           </p>
         </div>
-        <LoanDetailActions loan={loan} userRole={session.user.role} />
+        <LoanDetailActions loan={loan} can={can} paymentAccounts={paymentAccounts} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -252,7 +200,7 @@ export default async function LoanDetailPage({ params }) {
               <FileText className="h-4 w-4 text-muted-foreground" /> Details
             </h2>
             <dl>
-              <InfoRow label="Tenure">{loan.tenure} months</InfoRow>
+              <InfoRow label="Tenure">{loan.tenureMonths} months</InfoRow>
               {loan.interestRate > 0 && (
                 <InfoRow label="Interest Rate">{(loan.interestRate * 100).toFixed(1)}% p.a.</InfoRow>
               )}
@@ -267,7 +215,7 @@ export default async function LoanDetailPage({ params }) {
               {loan.disbursementMethod && (
                 <InfoRow label="Disbursement">
                   {loan.disbursementMethod.toUpperCase()}
-                  {loan.disbursementRef && ` - ${loan.disbursementRef}`}
+                  {loan.disbursementReference && ` - ${loan.disbursementReference}`}
                 </InfoRow>
               )}
             </dl>
@@ -294,7 +242,7 @@ export default async function LoanDetailPage({ params }) {
           )}
 
           {/* Installment Schedule */}
-          {loan.installments && loan.installments.length > 0 && (
+          {loan.schedule && loan.schedule.length > 0 && (
             <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
               <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Calendar className="h-4 w-4 text-muted-foreground" /> Installment Schedule
@@ -314,7 +262,7 @@ export default async function LoanDetailPage({ params }) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {loan.installments.map((inst, i) => {
+                    {loan.schedule.map((inst, i) => {
                       const isCurrent = inst.month === currentMonth && inst.year === currentYear;
                       const isDeducted = inst.status === "deducted";
                       return (
@@ -359,7 +307,7 @@ export default async function LoanDetailPage({ params }) {
 
               {/* Mobile list */}
               <div className="divide-y divide-border sm:hidden">
-                {loan.installments.map((inst, i) => {
+                {loan.schedule.map((inst, i) => {
                   const isCurrent = inst.month === currentMonth && inst.year === currentYear;
                   const isDeducted = inst.status === "deducted";
                   return (
@@ -486,7 +434,7 @@ export default async function LoanDetailPage({ params }) {
                   iconClass="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                   title={`Disbursed${loan.disbursedBy?.name ? ` by ${loan.disbursedBy.name}` : ""}`}
                   date={loan.disbursedAt}
-                  note={loan.disbursementMethod ? `via ${loan.disbursementMethod.toUpperCase()}${loan.disbursementRef ? ` (${loan.disbursementRef})` : ""}` : null}
+                  note={loan.disbursementMethod ? `via ${loan.disbursementMethod.toUpperCase()}${loan.disbursementReference ? ` (${loan.disbursementReference})` : ""}` : null}
                 />
               )}
               {loan.status === "fully_repaid" && (

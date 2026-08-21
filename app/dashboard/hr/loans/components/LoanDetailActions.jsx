@@ -6,7 +6,7 @@ import { CheckCircle2, XCircle, Loader2, AlertCircle, Ban } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useActionState } from "react";
-import { approveLoan, rejectLoan, cancelLoan } from "@/app/mongodb/actions/loan-actions";
+import { approveLoan, rejectLoan, cancelLoan } from "@/app/db/actions/hr-loan-actions";
 import DisburseForm from "./DisburseForm";
 
 const rejectInitial = { success: false, error: null, fieldErrors: null };
@@ -57,7 +57,7 @@ function RejectDialog({ open, onClose, loanId, onSuccess }) {
   );
 }
 
-function DisburseDialog({ open, onClose, loan, onSuccess }) {
+function DisburseDialog({ open, onClose, loan, paymentAccounts, onSuccess }) {
   if (!open) return null;
 
   return (
@@ -68,31 +68,36 @@ function DisburseDialog({ open, onClose, loan, onSuccess }) {
           Disburse KES {(loan.principalAmount || 0).toLocaleString("en-KE")} to {loan.employeeName}
         </p>
         <div className="mt-4">
-          <DisburseForm loanId={loan._id} onSuccess={onSuccess} onCancel={onClose} />
+          <DisburseForm loanId={loan.id} paymentAccounts={paymentAccounts} onSuccess={onSuccess} onCancel={onClose} />
         </div>
       </div>
     </div>
   );
 }
 
-export function LoanDetailActions({ loan, userRole }) {
+export function LoanDetailActions({ loan, can = {}, paymentAccounts = [] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [rejectOpen, setRejectOpen] = useState(false);
   const [disburseOpen, setDisburseOpen] = useState(false);
 
-  const canApprove = loan.status === "pending_approval" && ["SuperAdmin", "Admin", "HR Manager"].includes(userRole);
-  const canReject = loan.status === "pending_approval" && ["SuperAdmin", "Admin", "HR Manager"].includes(userRole);
-  const canDisburse = loan.status === "approved" && ["SuperAdmin", "Admin"].includes(userRole);
-  const hasDeductions = loan.installments?.some((i) => i.status === "deducted");
+  // The action decides; these choose which buttons to show. Approving a loan
+  // is a financial commitment, so it is finance leadership — the source gave
+  // it to HR and gave disbursement to Admin alone.
+  const canApprove = loan.status === "pending_approval" && can.approve;
+  const canReject = loan.status === "pending_approval" && can.approve;
+  const canDisburse = loan.status === "approved" && can.disburse;
+  const hasDeductions = loan.totalRepaid > 0;
+  // A loan that has been repaid into cannot simply be cancelled — the money
+  // has moved. The repository refuses it too; this keeps the button honest.
   const canCancel =
-    ["pending_approval", "approved", "active"].includes(loan.status) &&
+    ["pending_approval", "approved", "active", "disbursed"].includes(loan.status) &&
     !hasDeductions &&
-    ["SuperAdmin", "Admin", "HR Manager"].includes(userRole);
+    can.approve;
 
   function handleApprove() {
     startTransition(async () => {
-      const result = await approveLoan(loan._id);
+      const result = await approveLoan(loan.id);
       if (result?.success === false) {
         toast.error(result.error);
       } else {
@@ -105,7 +110,9 @@ export function LoanDetailActions({ loan, userRole }) {
   function handleCancel() {
     if (!confirm("Are you sure you want to cancel this loan?")) return;
     startTransition(async () => {
-      const result = await cancelLoan(loan._id);
+      const fd = new FormData();
+      fd.set("loanId", loan.id);
+      const result = await cancelLoan(null, fd);
       if (result?.success === false) {
         toast.error(result.error);
       } else {
@@ -160,11 +167,12 @@ export function LoanDetailActions({ loan, userRole }) {
       <RejectDialog
         open={rejectOpen}
         onClose={() => setRejectOpen(false)}
-        loanId={loan._id}
+        loanId={loan.id}
         onSuccess={() => { setRejectOpen(false); router.refresh(); }}
       />
 
       <DisburseDialog
+        paymentAccounts={paymentAccounts}
         open={disburseOpen}
         onClose={() => setDisburseOpen(false)}
         loan={loan}
