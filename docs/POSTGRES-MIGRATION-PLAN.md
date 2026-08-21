@@ -1343,6 +1343,126 @@ lands against a Postgres counterpart that already exists.
 - **Snapshots stay** (§9.4): the supplier name and the agreed unit price on a
   purchase order are what was ordered.
 
+### Notes from the schema — 0049, 0050, 0051
+
+The three migrations are in and both databases carry them. What building them
+found, and where it departed from the plan above.
+
+**The counter is worse than this section said.** §9G described
+`purchaseOrder.lines[].receivedQty` as one stored value that should be derived.
+It is one stored value with TWO writers that do not know about each other:
+`convertToBill()` calls `recordReceiving()` (purchaseOrder.js:751) on the
+theory that "in this model, receiving happens when creating a bill", and
+`acceptGRN()` increments the same field (grn-actions.js:1071). Nothing prevents
+both. An order that is billed and then goods-received counts the same units
+twice, and because `getAvailableLines()` gates on `quantity - receivedQuantity`
+the order then refuses to bill quantity nobody billed.
+
+The reason the two writers were ever plausible is that one number was answering
+two questions — how much has ARRIVED and how much has been INVOICED — and the
+gap between those is precisely what GR/IR exists to hold. They are now two
+views: `purchase_order_line_received` and `purchase_order_line_billed`.
+
+**`document_flow` was the wrong tool for the order-to-receipt link.** §9G
+planned it on the `quote_line_invoiced` precedent. A document_flow line row
+must carry a quantity, and that precedent works because an invoice line's
+quantity never moves once written. A goods receipt line's does — received
+first, accepted later, by different people, as a separate decision — so
+storing it in the flow makes a second, drifting copy of a value that lives on
+the receipt line. That is the fault the port exists to remove, so the receipt
+line references its order line directly, the way SAP's material document
+references the PO item. `document_flow` still carries the receipt-to-bill
+pairing, which is genuinely many-to-many and where the quantity IS frozen.
+Decision 1 of 0050 has the full argument.
+
+**Three places match documents by product id.** `postGRNAcceptanceJournal`
+finds the bill line whose `product.id` matches the receipt line;
+`acceptGRN` finds the PO line the same way; `closeNCR` builds a Map keyed on
+product id to find the receipt line. Each throws or silently takes the first
+match when a document carries the same product twice — two pallets at two
+prices, which for a nonconformance is the ORDINARY case, not the edge one. All
+three are now foreign keys, and the unit cost is frozen on the receipt line so
+acceptance has nothing to look up.
+
+**The GRN's journal entry was never recorded anywhere.** grn-actions creates
+it, posts it, and stores no reference — so a receipt cannot show what it
+posted and the ledger cannot be walked back to the receipt. Every other posting
+document in this schema carries its entry; `goods_receipts.journal_entry_id`
+now does too.
+
+**The NCR posts nothing at all, and says so.** This is a different fault from
+the four modules in the table above — those post to the wrong store; this one
+does not post. `closeNCR` moves goods out of HOLD per the disposition and
+carries the comment "journal-entry posting for return/scrap is intentionally
+out of scope here — separate ledger work". Stock is scrapped, it physically
+leaves, and its value stays on the balance sheet.
+`nonconformances.journal_entry_id` and `executeDisposition()` are that work.
+The rule that decides the entry is not keep-or-discard but who ends up OWNING
+the goods, because that is what says whether the supplier's invoice is owed —
+see the repository for the three cases.
+
+**Held stock was dragging the cost basis down.** The weighted average at
+acceptance divides by quantity on hand — but goods are on hand from SUBMIT,
+before anything is costed, and a line held for a disposition may sit there for
+weeks. Twenty units at 50 landing beside twenty held units average out at 25.
+The denominator is `quantity_on_hand - quantity_on_hold`, the costed pool. The
+Mongo version has no notion of the hold bucket in its costing at all.
+
+**Scope was under-counted.** §9G says "roughly 2,500 lines of action code".
+The actual figure is 3,066 — `purchase-order-actions.js` 1,282, `grn-actions.js`
+1,276, `ncr-actions.js` 508 — plus 1,006 lines of queries and 1,299 of models.
+Closer to HR than this section claimed. The argument for the ordering is
+unaffected: it is about what is broken, not what is small.
+
+#### Invariants pushed into the schema
+
+Each of these was a guard at one call site, which is not a control:
+
+- **Separation of duties on the receipt.** The person who received the goods
+  cannot sign for them, and one person cannot sign both the Sales and the
+  Finance half. Two CHECK constraints.
+- **Separation of duties on the nonconformance.** The person who raised it
+  cannot propose the disposition; the proposer cannot authorise it.
+- **Over-receipt.** Refused unless the ORDER granted a tolerance in advance,
+  measured cumulatively across every live receipt against the line — three
+  deliveries of 40 against an order for 100 is an over-receipt on the third,
+  and only a cumulative test sees it.
+- **Immutability.** Order lines are frozen outside draft; what a receipt
+  RECORDS as arrived is frozen at submit, while the acceptance decision about
+  it stays open.
+- **State machines.** Orders, receipts and nonconformances each move forward
+  along a stated path. Voiding a receipt is confined to drafts, which the
+  derived views depend on: a voided receipt contributes nothing, so voiding a
+  finalised one would withdraw accepted quantity while the stock stayed.
+
+#### Deliberate behaviour changes
+
+- **Over-receipt is refused by default** (tolerance 0). Mongo accepts any
+  quantity and sets a flag nobody has to act on.
+- **'expired', 'partial' and 'received' are no longer statuses.** They were
+  computed values wearing a status — the first written by a pre-save hook that
+  re-expired an order on ANY save, which `reopen()` had to work around by
+  pushing `validUntil` forward to escape its own hook.
+- **An order with receipts or bills against it cannot be CANCELLED.** It is
+  closed short instead, which records that no more is expected without denying
+  what already arrived. The source has no name for that move, so a
+  part-delivered abandoned order sits in 'partial' forever.
+- **'repair' releases the goods.** Mongo maps it to a no-op that leaves them on
+  HOLD "until the repair workflow completes" — a workflow that does not exist,
+  so the stock is held indefinitely. Closing an NCR means its disposition has
+  been carried out; an unfinished repair is an NCR that is not closed yet.
+- **Scrapped goods are recorded as ACCEPTED on the receipt line.** They were
+  still bought — the supplier will invoice for them — so recording them as
+  rejected would leave the order looking short by quantity that is owed for,
+  and GR/IR would never net.
+
+#### What is not done yet
+
+The schema and repositories are in, with 47 tests passing. The actions, the 24
+screens, the GRN PDF route and the seams into bills, products and the
+procurement dashboard are not — so `grn-actions.js` and its siblings are still
+live, and still posting into Mongo, until they are replaced.
+
 ### After procurement
 
 In descending order of what is currently lost to the wrong ledger: **claims**

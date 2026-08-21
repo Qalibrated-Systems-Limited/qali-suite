@@ -81,6 +81,15 @@ clearing, and the only thing that could clear it lives in the other store. See
 POSTGRES-MIGRATION-PLAN.md §9G, which is also the argument for doing
 procurement next.
 
+**Procurement is mid-port.** Migrations 0049-0051 are in, and so are
+`app/db/repositories/purchaseOrders.ts`, `goodsReceipts.ts` and
+`nonconformance.ts` — `finaliseAcceptance()` posts the clearing entry and
+`gr_ir_open_items` reports what has not netted. The ACTIONS and SCREENS are
+not ported, so `grn-actions.js` is still the live path and still posts into
+Mongo. If you are working in procurement, build against the repositories; if
+you have to touch `grn-actions.js` before the actions land, know that anything
+it posts is going nowhere.
+
 ---
 
 ## The one rule
