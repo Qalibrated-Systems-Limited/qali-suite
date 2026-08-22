@@ -461,6 +461,65 @@ suite("fixed assets", () => {
     expect(Number(schedule[0].depreciationAmount)).toBe(50000);
   });
 
+  it("cancelling a posting reverses the entry and frees the period", async () => {
+    const { before, after, schedule, entries } = await asTenant(companyA, async (tx) => {
+      const created = await vehicle(tx);
+      await assetsRepo.postDepreciationForAsset(tx, created.id, "2026-01", depAccounts(), { name: "Fay" });
+      const before = await assetsRepo.getAsset(tx, created.id);
+
+      await assetsRepo.cancelDepreciationPosting(tx, created.id, "2026-01", {
+        reason: "Posted to the wrong period",
+        by: { name: "Fay" },
+      });
+
+      return {
+        before,
+        after: await assetsRepo.getAsset(tx, created.id),
+        schedule: await assetsRepo.listSchedule(tx, created.id),
+        entries: await tx.execute(sql`
+          SELECT COALESCE(SUM(credit - debit), 0)::float8 AS net FROM journal_lines
+           WHERE account_id = ${accumDepAcct}::uuid`),
+      };
+    });
+
+    expect(before.accumulatedDepreciation).toBe(20000);
+    // The register stops counting it...
+    expect(after.accumulatedDepreciation).toBe(0);
+    expect(after.bookValue).toBe(1200000);
+    // ...and the ledger nets to zero for that period, rather than being edited.
+    expect(Number(entries[0].net)).toBe(0);
+    // The month is free to be posted again.
+    expect(schedule[0].status).toBe("pending");
+    expect(schedule[0].journalEntryId).toBeNull();
+  });
+
+  it("only the most recent posted period can be cancelled", async () => {
+    await failsWith(
+      () =>
+        asTenant(companyA, async (tx) => {
+          const created = await vehicle(tx);
+          await assetsRepo.postDepreciationForAsset(tx, created.id, "2026-01", depAccounts(), { name: "Fay" });
+          await assetsRepo.postDepreciationForAsset(tx, created.id, "2026-02", depAccounts(), { name: "Fay" });
+          // Cancelling January would leave a hole mid-schedule.
+          return assetsRepo.cancelDepreciationPosting(tx, created.id, "2026-01", {
+            by: { name: "Fay" },
+          });
+        }),
+      /most recent posted period/i,
+    );
+  });
+
+  it("a cancelled period can be posted again", async () => {
+    const asset = await asTenant(companyA, async (tx) => {
+      const created = await vehicle(tx);
+      await assetsRepo.postDepreciationForAsset(tx, created.id, "2026-01", depAccounts(), { name: "Fay" });
+      await assetsRepo.cancelDepreciationPosting(tx, created.id, "2026-01", { by: { name: "Fay" } });
+      await assetsRepo.postDepreciationForAsset(tx, created.id, "2026-01", depAccounts(), { name: "Fay" });
+      return assetsRepo.getAsset(tx, created.id);
+    });
+    expect(asset.accumulatedDepreciation).toBe(20000);
+  });
+
   // ───────────────────────────────────────────────────────────────────────────
   // Derived state
   // ───────────────────────────────────────────────────────────────────────────

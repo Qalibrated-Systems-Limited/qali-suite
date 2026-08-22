@@ -9,7 +9,7 @@ import {
   assetDocuments,
   assetJournalEntries,
 } from "../schema/assets";
-import { createJournalEntry } from "./journal";
+import { createJournalEntry, reverseJournalEntry } from "./journal";
 
 /**
  * Fixed assets (0056) — the register, and the three entries it raises.
@@ -1385,4 +1385,64 @@ export async function listComplianceDue(tx: Tx, withinDays = 60) {
     insuranceExpiryDate: (r.insurance_expiry_date as string) ?? null,
     inspectionNextDueDate: (r.inspection_next_due_date as string) ?? null,
   }));
+}
+
+/**
+ * Undoes a posted month: reverses the entry, and returns the row to pending.
+ *
+ * Only the MOST RECENT posted period, as Mongo allows — cancelling an earlier
+ * one would leave a hole in the middle of the schedule, which is the shape
+ * decision 1 exists to prevent.
+ *
+ * The reversing entry stays in the ledger, so that period nets to zero there;
+ * `asset_state` stops counting the row because it is no longer posted. Both
+ * sides move together and neither is rewritten.
+ */
+export async function cancelDepreciationPosting(
+  tx: Tx,
+  assetId: string,
+  period: string,
+  input: { reason?: string | null; by: { id?: string | null; name?: string | null } },
+) {
+  const asset = await getAsset(tx, assetId);
+  if (!asset) throw new Error("Asset not found");
+
+  const posted = (await tx.execute(sql`
+    SELECT id, period, journal_entry_id FROM asset_depreciation_schedule
+     WHERE asset_id = ${assetId}::uuid AND status = 'posted'
+     ORDER BY year DESC, month DESC
+  `)) as unknown as Array<{ id: string; period: string; journal_entry_id: string }>;
+
+  if (!posted.length) {
+    throw new Error("No posted depreciation entries exist for this asset");
+  }
+  if (posted[0].period !== period) {
+    throw new Error(
+      `Can only cancel the most recent posted period. The most recent is ${posted[0].period}.`,
+    );
+  }
+
+  const target = posted[0];
+  const reversal = await reverseJournalEntry(
+    tx,
+    target.journal_entry_id,
+    input.by.id ?? "system",
+    input.reason || `Cancel depreciation for ${period}`,
+  );
+
+  await tx.execute(sql`
+    UPDATE asset_depreciation_schedule
+       SET status = 'pending', journal_entry_id = NULL, posted_at = NULL
+     WHERE id = ${target.id}::uuid
+  `);
+
+  // The link row named an entry that is now reversed; the reversal is the
+  // record, and the period may be posted again.
+  await tx.execute(sql`
+    DELETE FROM asset_journal_entries
+     WHERE asset_id = ${assetId}::uuid
+       AND journal_entry_id = ${target.journal_entry_id}::uuid
+  `);
+
+  return { reversal, asset: await getAsset(tx, assetId) };
 }

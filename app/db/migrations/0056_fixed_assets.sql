@@ -48,7 +48,7 @@
 --    a unique index on (asset_id, period), so the second one cannot be
 --    written at all.
 --
--- 3. A POSTED PERIOD IS IMMUTABLE.
+-- 3. A POSTED PERIOD IS IMMUTABLE, EXCEPT TO BE CANCELLED.
 --    An impairment REWRITES the remaining schedule (`applyImpairment`, IFRS
 --    revised carrying amount), and it filters on `status === "pending"` to
 --    avoid touching history. That is a filter in application code over an
@@ -454,6 +454,23 @@ BEGIN
       'Depreciation for % has been posted to the ledger and cannot be deleted.',
       OLD.period
       USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- One transition out of `posted` is allowed, and it is a CANCELLATION:
+  -- back to `pending`, with the entry link cleared, and the figures untouched.
+  -- `cancelDepreciationPosting` reverses the journal entry and does exactly
+  -- this. The reversing entry stays in the ledger — the period nets to zero
+  -- there, and `asset_state` stops counting it because it is no longer posted,
+  -- so the two agree again without either being rewritten.
+  IF NEW.status = 'pending'
+     AND NEW.journal_entry_id IS NULL
+     AND NEW.posted_at IS NULL
+     AND NEW.depreciation_amount = OLD.depreciation_amount
+     AND NEW.accumulated_depreciation = OLD.accumulated_depreciation
+     AND NEW.book_value = OLD.book_value
+     AND NEW.period = OLD.period
+  THEN
+    RETURN NEW;
   END IF;
 
   IF NEW.depreciation_amount IS DISTINCT FROM OLD.depreciation_amount
