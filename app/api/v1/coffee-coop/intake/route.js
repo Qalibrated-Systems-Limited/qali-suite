@@ -1,5 +1,5 @@
-import dbConnect from "@/app/config/dbConnect";
-import FarmerIntakeEntry from "@/app/models/farmerIntakeEntry";
+import { sql } from "drizzle-orm";
+import { withApiKeyTenant } from "@/app/db/apiTenant";
 import { CoffeeCoopConnector } from "@/lib/integrations/connectors/coffee-coop";
 import { apiKeyAuth } from "@/lib/integrations/middleware/apiKeyAuth";
 import {
@@ -81,8 +81,9 @@ export async function POST(request) {
     );
   }
 
-  await dbConnect();
-
+  // No dbConnect: the connector opens its own tenant-scoped Postgres
+  // transaction. Its integration log still lives in Mongo, which is what
+  // BaseConnector.process() reaches for.
   const connector = new CoffeeCoopConnector(ctx.companyId, ctx.keyId);
 
   // Use externalRef as idempotency key when provided
@@ -105,70 +106,73 @@ export async function POST(request) {
 }
 
 export async function GET(request) {
-  const ctx = await apiKeyAuth(request, { requireScope: "inventory:read" });
-  if (!ctx.ok) return ctx.response;
+  return withApiKeyTenant(
+    request,
+    { requireScope: "inventory:read" },
+    async (tx, ctx) => {
+      const { searchParams } = new URL(request.url);
+      const seasonId = searchParams.get("seasonId");
+      const farmerCode = searchParams.get("farmerCode");
+      const grade = searchParams.get("grade");
+      const paymentStatus = searchParams.get("paymentStatus");
+      const status = searchParams.get("status");
+      const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 200);
+      const offset = parseInt(searchParams.get("offset") || "0");
 
-  await dbConnect();
+      // POSTGRES since 0058 — no companyId filter, and none is needed. RLS
+      // scopes this to the key's tenant; the Mongo version wrote the filter by
+      // hand on every branch.
+      const rows = await tx.execute(sql`
+        SELECT e.*,
+               e.gross_weight::float8 AS gross_w, e.deduction_weight::float8 AS ded_w,
+               e.net_weight::float8 AS net_w, e.unit_price::float8 AS unit_p,
+               e.total_amount::float8 AS total_a, e.amount_paid::float8 AS paid_a,
+               COUNT(*) OVER ()::int AS full_count
+          FROM farmer_intake_entries e
+         WHERE TRUE
+           ${seasonId ? sql`AND e.season_id = ${seasonId}::uuid` : sql``}
+           ${farmerCode ? sql`AND e.farmer_code = ${farmerCode}` : sql``}
+           ${grade ? sql`AND e.grade = ${grade}` : sql``}
+           ${paymentStatus ? sql`AND e.payment_status = ${paymentStatus}::farmer_payment_status` : sql``}
+           ${status ? sql`AND e.status = ${status}::farmer_intake_status` : sql``}
+         ORDER BY e.created_at DESC
+         LIMIT ${limit} OFFSET ${offset}
+      `);
 
-  const { searchParams } = new URL(request.url);
-  const seasonId      = searchParams.get("seasonId");
-  const farmerCode    = searchParams.get("farmerCode");
-  const grade         = searchParams.get("grade");
-  const paymentStatus = searchParams.get("paymentStatus");
-  const status        = searchParams.get("status");
-  const limit  = Math.min(parseInt(searchParams.get("limit")  || "50"), 200);
-  const offset =          parseInt(searchParams.get("offset") || "0");
-
-  const query = { companyId: ctx.companyId };
-  if (seasonId)      query.seasonId      = seasonId;
-  if (farmerCode)    query.farmerCode    = farmerCode;
-  if (grade)         query.grade         = grade;
-  if (paymentStatus) query.paymentStatus = paymentStatus;
-  if (status)        query.status        = status;
-
-  const [entries, total] = await Promise.all([
-    FarmerIntakeEntry.find(query)
-      .sort({ createdAt: -1 })
-      .skip(offset)
-      .limit(limit)
-      .lean(),
-    FarmerIntakeEntry.countDocuments(query),
-  ]);
-
-  return listResponse(entries.map(serializeEntry), { total, limit, offset });
+      const total = rows.length ? Number(rows[0].full_count) : 0;
+      return listResponse(rows.map(serializeEntry), { total, limit, offset });
+    },
+  );
 }
 
 function serializeEntry(e) {
   return {
-    id:                 e._id.toString(),
-    entryNumber:        e.entryNumber,
-    externalRef:        e.externalRef,
-    seasonId:           e.seasonId?.toString(),
-    seasonName:         e.seasonName,
-    farmerCode:         e.farmerCode,
-    farmerName:         e.farmerName,
-    farmerPhone:        e.farmerPhone,
-    coffeeType:         e.coffeeType,
-    grade:              e.grade,
-    grossWeight:        e.grossWeight,
-    moisture:           e.moisture,
-    deductionWeight:    e.deductionWeight,
-    netWeight:          e.netWeight,
-    unitPrice:          e.unitPrice,
-    currency:           e.currency,
-    totalAmount:        e.totalAmount,
-    paymentMethod:      e.paymentMethod,
-    paymentStatus:      e.paymentStatus,
-    amountPaid:         e.amountPaid,
-    paymentRef:         e.paymentRef,
-    paidAt:             e.paidAt?.toISOString() ?? null,
-    productId:          e.productId?.toString() ?? null,
-    productName:        e.productSnapshot?.name ?? null,
-    journalEntryNumber: e.journalEntryNumber,
-    status:             e.status,
-    warnings:           e.warnings ?? [],
-    notes:              e.notes,
-    receivedAt:         e.receivedAt?.toISOString() ?? null,
-    createdAt:          e.createdAt.toISOString(),
+    id: String(e.id),
+    entryNumber: e.entry_number,
+    externalRef: e.external_ref,
+    seasonId: e.season_id,
+    seasonName: e.season_name_at_intake,
+    farmerCode: e.farmer_code,
+    farmerName: e.farmer_name,
+    farmerPhone: e.farmer_phone,
+    coffeeType: e.coffee_type,
+    grade: e.grade,
+    grossWeight: e.gross_w,
+    moisture: Number(e.moisture),
+    deductionWeight: e.ded_w,
+    netWeight: e.net_w,
+    unitPrice: e.unit_p,
+    currency: e.currency,
+    totalAmount: e.total_a,
+    paymentMethod: e.payment_method,
+    paymentStatus: e.payment_status,
+    amountPaid: e.paid_a,
+    paymentRef: e.payment_ref,
+    status: e.status,
+    journalEntryId: e.journal_entry_id,
+    stockMovementId: e.stock_movement_id,
+    warnings: e.warnings ?? [],
+    createdAt: e.created_at,
   };
 }
+

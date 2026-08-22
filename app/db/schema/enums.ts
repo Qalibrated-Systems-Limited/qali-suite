@@ -534,3 +534,29 @@ export const kraClassEnum = pgEnum("kra_class", [
 ]);
 
 export const usageUnitEnum = pgEnum("usage_unit", ["km", "miles", "hours"]);
+
+// ── Coffee cooperative (0058) ────────────────────────────────────────────────
+
+/** What arrived at the gate. Cherry is wet; parchment and mbuni are dried. */
+export const coffeeTypeEnum = pgEnum("coffee_type", [
+  "cherry",
+  "parchment",
+  "mbuni",
+]);
+
+export const coffeeSeasonTypeEnum = pgEnum("coffee_season_type", [
+  "main",
+  "fly",
+  "early",
+]);
+
+export const farmerIntakeStatusEnum = pgEnum("farmer_intake_status", [
+  "recorded",
+  "voided",
+]);
+
+export const farmerPaymentStatusEnum = pgEnum("farmer_payment_status", [
+  "unpaid",
+  "partial",
+  "paid",
+]);

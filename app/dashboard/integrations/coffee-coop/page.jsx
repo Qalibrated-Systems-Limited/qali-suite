@@ -9,7 +9,7 @@ import {
   AlertTriangle,
   Leaf,
 } from "lucide-react";
-import { getCoffeeIntakes, getCoffeeCoopStats, getCoffeeSeasons } from "@/app/mongodb/actions/coffee-coop-actions";
+import { getCoffeeIntakes, getCoffeeCoopStats, getCoffeeSeasons } from "@/app/db/actions/coffee-actions";
 
 export const metadata = { title: "Coffee Collection | Integrations" };
 

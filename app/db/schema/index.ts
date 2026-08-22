@@ -33,3 +33,4 @@ export * from "./hrAttendance";
 export * from "./hrPayroll";
 export * from "./claims";
 export * from "./assets";
+export * from "./coffee";
