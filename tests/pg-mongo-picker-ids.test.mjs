@@ -26,13 +26,18 @@ vi.mock("@/lib/utils/tenant-utils", () => ({ getTenantContext: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 const billsRepo = await import("@/app/db/repositories/bills");
+const invoicesRepo = await import("@/app/db/repositories/invoices");
+const fulfilmentRepo = await import("@/app/db/repositories/fulfilment");
+const { invoiceDataSchema, toRepositoryInput } = await import(
+  "@/app/db/validation/invoices"
+);
 
 /** What `getActiveProjects()` and the asset picker actually hand back. */
 const MONGO_OBJECT_ID = "507f1f77bcf86cd799439011";
 
 suite("Mongo picker ids reaching Postgres columns", () => {
   let admin, client, db;
-  let companyA, supplier, expenseAcct, apAcct;
+  let companyA, supplier, customer, widget, expenseAcct, apAcct;
 
   const asTenant = (companyId, fn) =>
     db.transaction(async (tx) => {
@@ -56,6 +61,8 @@ suite("Mongo picker ids reaching Postgres columns", () => {
 
     companyA = randomUUID();
     supplier = randomUUID();
+    customer = randomUUID();
+    widget = randomUUID();
     expenseAcct = randomUUID();
     apAcct = randomUUID();
 
@@ -64,13 +71,23 @@ suite("Mongo picker ids reaching Postgres columns", () => {
 
     await asTenant(companyA, async (tx) => {
       await tx.execute(sql`
-        INSERT INTO parties (id, company_id, primary_type, is_supplier, name)
-        VALUES (${supplier}::uuid, ${companyA}::uuid, 'supplier', true, 'Steel Supplies Ltd')`);
+        INSERT INTO parties (id, company_id, primary_type, is_supplier, is_customer, name)
+        VALUES
+          (${supplier}::uuid, ${companyA}::uuid, 'supplier', true,  false, 'Steel Supplies Ltd'),
+          (${customer}::uuid, ${companyA}::uuid, 'customer', false, true,  'Acme Builders')`);
+      await tx.execute(sql`
+        INSERT INTO products (id, company_id, sku, name, cost_price, selling_price, quantity_on_hand)
+        VALUES (${widget}::uuid, ${companyA}::uuid, 'RB-12', 'Rebar 12mm', 100, 500, 50)`);
       await tx.execute(sql`
         INSERT INTO accounts (id, company_id, account_code, account_name, account_type, can_post, system_account)
         VALUES
           (${expenseAcct}::uuid, ${companyA}::uuid, '6200', 'Repairs',          'expense',   true, NULL),
-          (${apAcct}::uuid,      ${companyA}::uuid, '2100', 'Accounts Payable', 'liability', true, 'accounts_payable')`);
+          (${apAcct}::uuid,      ${companyA}::uuid, '2100', 'Accounts Payable', 'liability', true, 'accounts_payable'),
+          (${randomUUID()}::uuid, ${companyA}::uuid, '1100', 'Accounts Receivable', 'asset', true, 'accounts_receivable'),
+          (${randomUUID()}::uuid, ${companyA}::uuid, '4000', 'Sales Revenue',    'revenue',   true, 'sales_revenue'),
+          (${randomUUID()}::uuid, ${companyA}::uuid, '2200', 'VAT Payable',      'liability', true, 'vat_payable'),
+          (${randomUUID()}::uuid, ${companyA}::uuid, '1200', 'Inventory',        'asset',     true, 'inventory'),
+          (${randomUUID()}::uuid, ${companyA}::uuid, '5000', 'COGS',             'expense',   true, 'cogs')`);
       await tx.execute(sql`
         INSERT INTO fiscal_periods
           (company_id, year, month, period_name, period_code, start_date, end_date, status)
@@ -99,6 +116,59 @@ suite("Mongo picker ids reaching Postgres columns", () => {
       },
     ],
     ...(extra.header ?? {}),
+  });
+
+  it("an invoice tagged to a project keeps the link", async () => {
+    // CreateInvoiceForm puts projectId in the JSON payload it posts. Until
+    // 0054 there was no column and no schema field, so the link was dropped
+    // in silence — the save succeeded and the project was simply gone.
+    const parsed = invoiceDataSchema.safeParse({
+      customerId: customer,
+      invoiceDate: "2026-08-10",
+      projectId: MONGO_OBJECT_ID,
+      stockItems: [
+        {
+          productId: widget,
+          quantity: 2,
+          sellingPrice: 500,
+          taxRate: 16,
+          name: "Rebar 12mm",
+        },
+      ],
+      serviceItems: [],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data.projectId).toBe(MONGO_OBJECT_ID);
+
+    const invoice = await asTenant(companyA, (tx) =>
+      invoicesRepo.createInvoice(tx, {
+        companyId: companyA,
+        ...toRepositoryInput(parsed.data),
+      }),
+    );
+
+    const [row] = await admin`
+      SELECT project_id FROM invoices WHERE id = ${invoice.id}::uuid`;
+    expect(row.project_id).toBe(MONGO_OBJECT_ID);
+  });
+
+  it("a stock request tagged to a project keeps the link", async () => {
+    // The column has existed since 0020 and mapRequest already reads it back
+    // out; nothing ever wrote it, so it rendered NULL from the day it shipped.
+    const request = await asTenant(companyA, (tx) =>
+      fulfilmentRepo.createStockRequest(tx, {
+        companyId: companyA,
+        requestType: "internal",
+        requesterName: "Sam Stores",
+        requesterDepartment: "Technical",
+        projectId: MONGO_OBJECT_ID,
+        items: [{ productId: widget, requestedQuantity: "3.0000", unitPrice: "0.0000" }],
+      }),
+    );
+
+    const [row] = await admin`
+      SELECT project_id FROM stock_requests WHERE id = ${request.id}::uuid`;
+    expect(row.project_id).toBe(MONGO_OBJECT_ID);
   });
 
   it("a bill tagged to a project saves", async () => {

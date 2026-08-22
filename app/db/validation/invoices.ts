@@ -56,6 +56,12 @@ export const invoiceDataSchema = z
     notes: z.string().optional().nullable(),
     stockItems: z.array(stockItemSchema).default([]),
     serviceItems: z.array(serviceItemSchema).default([]),
+    /**
+     * CreateInvoiceForm has posted this since it was written and there was no
+     * column to receive it, so every project a user linked an invoice to was
+     * dropped here (0054). A Mongo ObjectId — projects are not ported.
+     */
+    projectId: z.string().optional().nullable(),
   })
   .refine((d) => d.stockItems.length + d.serviceItems.length > 0, {
     message: "Add at least one item or service",
@@ -81,6 +87,7 @@ export function toRepositoryInput(d: z.infer<typeof invoiceDataSchema>) {
     dueDate: toDateOnly(d.dueDate) ?? null,
     title: d.title ?? null,
     notes: d.notes ?? null,
+    projectId: d.projectId ?? null,
     lines: [
       ...d.stockItems.map((it) => ({
         itemType: "product" as const,

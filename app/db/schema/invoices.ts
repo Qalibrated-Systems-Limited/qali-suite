@@ -61,6 +61,16 @@ export const invoices = pgTable(
     dueDate: date("due_date"),
 
     customerId: uuid("customer_id").notNull(),
+    /**
+     * The project this invoice bills against (0054). `CreateInvoiceForm` has
+     * posted a `projectId` since it was written and there was no column to put
+     * it in, so every link a user picked was dropped on the way in.
+     *
+     * text, not uuid — projects are not ported, so this is a Mongo ObjectId.
+     */
+    projectId: text("project_id"),
+    projectNumberAtInvoice: text("project_number_at_invoice"),
+    projectNameAtInvoice: text("project_name_at_invoice"),
     title: text("title"),
     notes: text("notes"),
 
@@ -121,6 +131,9 @@ export const invoices = pgTable(
     uniqueIndex("invoices_company_number_uq").on(t.companyId, t.invoiceNumber),
     uniqueIndex("invoices_id_company_uq").on(t.id, t.companyId),
     index("invoices_company_customer_idx").on(t.companyId, t.customerId),
+    index("invoices_company_project_idx")
+      .on(t.companyId, t.projectId)
+      .where(sql`${t.projectId} IS NOT NULL AND ${t.projectId} <> ''`),
     index("invoices_company_date_status_idx").on(
       t.companyId,
       t.invoiceDate.desc(),

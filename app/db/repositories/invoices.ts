@@ -76,6 +76,8 @@ export interface CreateInvoiceInput {
   dueDate?: string | null;
   title?: string | null;
   notes?: string | null;
+  /** A Mongo ObjectId — projects are not ported. See 0054. */
+  projectId?: string | null;
   lines: InvoiceLineInput[];
   createdById?: string | null;
   createdByName?: string | null;
@@ -207,6 +209,7 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
       customerId: input.customerId,
       title: input.title ?? null,
       notes: input.notes ?? null,
+      projectId: input.projectId ?? null,
       subtotal,
       taxAmount: taxTotal,
       total,
@@ -794,6 +797,7 @@ export async function updateInvoice(
       dueDate: input.dueDate ?? null,
       title: input.title ?? null,
       notes: input.notes ?? null,
+      projectId: input.projectId ?? null,
       subtotal,
       taxAmount: taxTotal,
       total,

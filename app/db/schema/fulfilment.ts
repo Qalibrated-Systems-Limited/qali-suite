@@ -134,11 +134,14 @@ export const stockRequests = pgTable(
       withTimezone: true,
     }),
 
-    /** Deferred references — `projects` is not ported. See bills.project_id. */
-    projectId: uuid("project_id"),
+    /**
+     * Deferred references — `projects` is not ported. See bills.project_id.
+     * text, not uuid (0054): the value is a Mongo ObjectId until projects move.
+     */
+    projectId: text("project_id"),
     projectNumberAtRequest: text("project_number_at_request"),
     projectNameAtRequest: text("project_name_at_request"),
-    costCodeId: uuid("cost_code_id"),
+    costCodeId: text("cost_code_id"),
     costCodeAtRequest: text("cost_code_at_request"),
 
     createdById: text("created_by_id"),

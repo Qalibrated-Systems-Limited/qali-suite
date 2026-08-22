@@ -76,6 +76,11 @@ export interface CreateStockRequestInput {
   priority?: "low" | "normal" | "high" | "urgent";
   requiredByDate?: string | null;
   notes?: string | null;
+  /**
+   * A Mongo ObjectId — projects are not ported. The column has existed since
+   * 0020 and `mapRequest` already reads it back out; nothing ever wrote it.
+   */
+  projectId?: string | null;
   createdById?: string | null;
 }
 
@@ -141,6 +146,7 @@ export async function createStockRequest(
       requesterPhone: input.requesterPhone ?? null,
       requiredByDate: input.requiredByDate ?? null,
       notes: input.notes ?? null,
+      projectId: input.projectId ?? null,
       createdById: input.createdById ?? null,
     })
     .returning();

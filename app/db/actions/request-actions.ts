@@ -86,6 +86,9 @@ const createSchema = z
     priority: z.enum(["low", "normal", "high", "urgent"]).default("normal"),
     requiredByDate: z.string().optional().nullable(),
     notes: z.string().optional(),
+    // CreateRequestForm has posted this since it was written; nothing read it,
+    // so every project a requester picked was dropped here (0054).
+    projectId: z.string().optional().nullable(),
     items: z.array(itemSchema).min(1, "Add at least one item"),
   })
   .refine(
@@ -158,6 +161,7 @@ export async function createStockRequest(
           priority: d.priority,
           requiredByDate: d.requiredByDate ? d.requiredByDate.slice(0, 10) : null,
           notes: blank(d.notes),
+          projectId: blank(d.projectId),
           createdById: user.id,
           items: d.items.map((i) => ({
             productId: i.productId,
