@@ -1382,6 +1382,13 @@ seventh sits inside `closeSettlementt` — 573 lines, three t's, and nothing
 imports it. `CloseSettlementDialog` binds `closeSettlement`. Do not port the
 twin.
 
+**All six are now closed except petty cash.** Procurement (§9G), claims (§9H),
+fixed assets (§9I), and both connectors (§9J). The table above is kept as it
+was written, because the count going from four to five to six is the point of
+it — but two of its rows are wrong in ways worth carrying forward: assets does
+NOT post on acquisition (§9I), and the weighbridge's Postgres half already
+existed (§9J).
+
 ### Why procurement rather than the largest of them
 
 Claims is the biggest of them by transaction volume and asset depreciation
@@ -1923,6 +1930,82 @@ events, and Postgres refuses to alter a table while any are outstanding.
 has its counterparty already in Postgres; take the coffee co-op connector with
 it, since porting the connector layer once is cheaper than twice. Then **petty
 cash**, 330 lines, which could fold into either.
+
+---
+
+## 9J. The two connectors — and one half already built
+
+Migration 0058, and for the weighbridge, none at all.
+
+### The weighbridge needed no schema
+
+§9G called this "the GRN bug in mirror image": the connector posts
+DR Inventory / CR GR/IR into Mongo while `bill_lines.weighbridge_ticket_id`
+exists in Postgres so an approved bill can clear exactly that position. Half of
+each pair in each store, so the clearing account could only grow.
+
+What the section did not know is that **the whole Postgres half was already
+built**. `weighbridge_tickets`, its constraints and its repository functions
+all shipped with fulfilment in 0020-0022, and nothing had ever called them. The
+port is the connector pointed at what was already there.
+
+That is worth remembering before porting anything else: check whether the
+Postgres side exists first.
+
+What it bought beyond the ledger:
+
+- **The gate's reference is an idempotency key.** Unique per company in
+  Postgres; Mongo indexes it *without* uniqueness, so a retried gate call opens
+  a second ticket for one trip — and then a second stock movement and a second
+  journal entry when it completes.
+- **Net weight cannot disagree with the weighings.** The model documents it as
+  `|first − second|` and then stores it as an independent number; it is a
+  generated column here.
+- **A recorded weighing is immutable.** Mongo overwrites `firstWeight` in place
+  on a re-send, and the net weight, the stock movement and the GL entry all
+  follow from it.
+- **One counter moves, not two.** `quantity_available` is generated, so the
+  five-branch hand-maintained onHand/available/committed dance is one call.
+- **Inbound re-costs.** Mongo increments the quantity and leaves `cost_price`
+  alone, so a delivery at a different price never reaches the valuation.
+
+### Coffee had nothing, and four things open
+
+The opposite case: no Postgres table, no repository, nothing. 0058 adds the
+season, the price schedule and the intake, and closes four gaps:
+
+- **`net_weight` and `total_amount` are generated.** The model documents both
+  as derived — `gross − deduction`, `net × unitPrice` — and then stores them as
+  independent numbers the connector computed in JavaScript. Correct the weight
+  afterwards and they stayed where they were, while the stock movement and the
+  farmer's money had already been struck from them.
+- **One active season.** `isActive` is a boolean with nothing stopping two, and
+  the connector prices an intake from "the active season" — so with two, what a
+  farmer is paid depends on which document the query returned first.
+- **One price per grade per type per season.** The schedule is an embedded
+  array; nothing stopped two entries for AA parchment at different prices.
+- **The station's reference is an idempotency key** — same fault as the
+  weighbridge, same consequence.
+
+And a quieter one: **`farmer_payable` is a valid system-account type that the
+default chart never creates**, so the connector's own guard fired and most
+intakes posted nothing at all, quite apart from posting it to the wrong store.
+
+### The registry entries that threw
+
+Recorded in this branch's first commit and fixed here. `logistics` and `miller`
+were registered against `./logistics.js` and `./miller.js`, neither of which
+exists — and `getConnector` picks the loader by key *before* it can fall back
+to `generic`, so naming either type threw on the dynamic import rather than
+degrading to the connector the fallback was written for. An unbuilt vertical
+belongs out of the registry, not in it pointing at nothing.
+
+### After the connectors
+
+**Petty cash** — 330 lines, 3 screens, and the last module posting into the
+Mongo ledger. After that the remaining Mongo modules (projects, integrations,
+tax, banking, KPIs, expenses, checkouts) hold no journal postings at all, and
+the "half the pair in each store" class of bug is closed.
 
 ---
 

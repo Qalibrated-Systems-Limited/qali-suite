@@ -106,22 +106,31 @@ form-data adapter, or a lower-level variant a route handler will want, can
 legitimately have no screen calling it. What you are looking for is **a whole
 file's worth at once** — that means the screens were never pointed at it.
 
-### Read this before touching petty cash or a connector
+### Read this before touching petty cash
 
-**Three live modules still post journal entries into MongoDB**, and every
-ledger screen — the journal browser, trial balance, P&L, balance sheet, general
+**One live module still posts journal entries into MongoDB**, and every ledger
+screen — the journal browser, trial balance, P&L, balance sheet, general
 ledger — reads Postgres:
 
 | Module | Screens | What is being lost |
 |---|---|---|
 | `petty-cash-actions.js` | 3 | every petty cash movement |
-| `lib/integrations/connectors/weighbridge.js` | API | every weighed-in purchase, sale and transfer |
-| `lib/integrations/connectors/coffee-coop.js` | API | every farmer coffee intake |
+
+That is the last of the six. It started as four, became five when the sweep
+was redone across `lib/`, and six when the coffee co-op connector turned up in
+the same directory.
 
 Nothing errors: the entry is created, validated and posted into a ledger no
 screen reads. If you are adding to one of these, post through
 `app/db/repositories/journal.ts` rather than the Mongoose model, or you are
 adding to the pile.
+
+**Both connectors are done** — the weighbridge and the coffee co-op. The
+weighbridge needed no migration at all: its Postgres half (the
+`weighbridge_tickets` table, its constraints and its repository functions) had
+shipped with fulfilment in 0020-0022 and nothing had ever used it. Worth
+knowing before porting anything else under `lib/` — check whether the
+Postgres side is already sitting there.
 
 **Fixed assets are done** — migrations 0056 and 0057, all 11 screens, the
 rollforward report, and four seams. Note the correction while you are here:
