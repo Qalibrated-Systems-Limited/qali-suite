@@ -80,9 +80,9 @@ form-data adapter, or a lower-level variant a route handler will want, can
 legitimately have no screen calling it. What you are looking for is **a whole
 file's worth at once** — that means the screens were never pointed at it.
 
-### Read this before touching claims, assets, petty cash or the weighbridge
+### Read this before touching claims, assets, petty cash or a connector
 
-**Four live modules still post journal entries into MongoDB**, and every ledger
+**Five live modules still post journal entries into MongoDB**, and every ledger
 screen — the journal browser, trial balance, P&L, balance sheet, general
 ledger — reads Postgres:
 
@@ -92,6 +92,7 @@ ledger — reads Postgres:
 | `asset-actions.js` | 11 | acquisition, depreciation, disposal |
 | `petty-cash-actions.js` | 3 | every petty cash movement |
 | `lib/integrations/connectors/weighbridge.js` | API | every weighed-in purchase, sale and transfer |
+| `lib/integrations/connectors/coffee-coop.js` | API | every farmer coffee intake |
 
 Nothing errors: the entry is created, validated and posted into a ledger no
 screen reads. If you are adding to one of these, post through
@@ -111,6 +112,26 @@ maps `purchase` to DR Inventory / CR GR/IR — the receipt's own entry — while
 clear exactly that position. Half the pair is in each store, which is the GRN
 bug in mirror image. Its products, invoices, accounts and stock movements are on
 Mongo too, so it is a vertical rather than a stray call.
+
+**And the coffee co-op connector is the sixth.** Same directory the sweep never
+read, same fault: `_createJournalEntry` posts DR Inventory / CR Farmer Payable
+through the Mongo model (`coffee-coop.js:399`), and it is reachable — registered
+in `lib/integrations/connectors/registry.js` and called by the live route
+`app/api/v1/coffee-coop/intake`. Its farmer intake entries, products, accounts
+and stock movements are all on Mongo. It does not have the weighbridge's
+split-pair problem, because no half of it is in Postgres yet; it is simply a
+purchase stream that no ledger screen can see.
+
+**So sweep by the write, not by the directory.** The query that finds all six is
+a grep for `.post(` against the Mongoose entry across `app/` AND `lib/` — not a
+listing of `app/mongodb/actions/`. Two of the six live under `lib/`, and both
+were invisible to the original count for that reason alone.
+
+While reading the registry: `logistics` and `miller` are mapped to
+`./logistics.js` and `./miller.js`, and neither file exists. `getConnector`
+picks the loader by key before it can fall back to `generic`, so those two
+types throw on dynamic import rather than degrading. Unrelated to the ledger,
+but it is in the file you will be editing.
 
 ---
 

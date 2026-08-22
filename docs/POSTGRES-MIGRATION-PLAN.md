@@ -1328,16 +1328,18 @@ EMI, equal principal) is carried over line for line.
 
 ### The finding that decides the order
 
-**Four live modules post journal entries into MongoDB, and every ledger screen
+**Five live modules post journal entries into MongoDB, and every ledger screen
 reads Postgres.** The journal browser, the trial balance, the P&L, the balance
 sheet and the general ledger all went to Postgres with the accounting core.
 These did not:
 
 | Module | Screens | Posts | What is lost |
 |---|---|---|---|
-| `claim-action.js` | 4 | 4 × `JournalEntry.post()` | every approved employee reimbursement |
+| `claim-action.js` | 8 | 6 × `JournalEntry.post()` | every approved employee reimbursement |
 | `asset-actions.js` | 11 | 3 × `.post()` | acquisition, depreciation and disposal |
 | `petty-cash-actions.js` | 3 | 1 × `.post()` | every petty cash movement |
+| `connectors/weighbridge.js` | API | 1 × `.post()` | every weighed-in purchase, sale and transfer |
+| `connectors/coffee-coop.js` | API | 1 × `.post()` | every farmer coffee intake |
 | ~~`grn-actions.js`~~ | — | — | **closed — see "Done" below** |
 
 **The count was four and it is five.** `lib/integrations/connectors/weighbridge.js`
@@ -1356,16 +1358,33 @@ nothing credits, and its Inventory debit never reaches the real books at all.
 The connector also resolves products, invoices and accounts against Mongo, and
 writes its stock movements there. It is a whole vertical, not a stray call.
 
+**Then it was six.** `lib/integrations/connectors/coffee-coop.js:399` posts
+DR Inventory / CR Farmer Payable through the same Mongo model, from the same
+directory the sweep never read, and it is live: registered in
+`connectors/registry.js` and called by `app/api/v1/coffee-coop/intake`. It has
+no split pair — no half of coffee intake is in Postgres — so it is the simpler
+fault: a purchase stream posting to a ledger nothing reads.
+
+**Sweep by the write, not by the directory.** What finds all six is a grep for
+`.post(` on the Mongoose entry across `app/` and `lib/` together. Both misses
+lived under `lib/`, and that is the only thing they had in common.
+
 Nothing errors. The entry is created, validated and posted — into a ledger no
-screen reads. The books are quietly short by exactly these four streams, and
+screen reads. The books are quietly short by exactly these five streams, and
 the longer it stands the more of a reconciliation it becomes.
 
 This is the §9E shape again (a writer and its readers in different stores),
 except it is not a single conversion path — it is money.
 
+The claims row was counted low. There are eight screens (seven under
+`claims`, plus `my-claims`) and seven `.post()` sites, six of them live: the
+seventh sits inside `closeSettlementt` — 573 lines, three t's, and nothing
+imports it. `CloseSettlementDialog` binds `closeSettlement`. Do not port the
+twin.
+
 ### Why procurement rather than the largest of them
 
-Claims is the biggest of the four by transaction volume and asset depreciation
+Claims is the biggest of them by transaction volume and asset depreciation
 is the most regular, but **procurement is the one that is already half-ported
 and therefore actively broken**, which is the same argument that put quotes
 ahead of larger modules in §9E.
@@ -1466,7 +1485,7 @@ document in this schema carries its entry; `goods_receipts.journal_entry_id`
 now does too.
 
 **The NCR posts nothing at all, and says so.** This is a different fault from
-the four modules in the table above — those post to the wrong store; this one
+the five modules in the table above — those post to the wrong store; this one
 does not post. `closeNCR` moves goods out of HOLD per the disposition and
 carries the comment "journal-entry posting for return/scrap is intentionally
 out of scope here — separate ledger work". Stock is scrapped, it physically
@@ -1568,8 +1587,16 @@ freeze, were absent. Both are resolved from the row under RLS now.
 In descending order of what is currently lost to the wrong ledger: **claims**
 (also the module most entangled with HR, which now supplies its employee
 snapshot), **fixed assets** (depreciation, and the rollforward report already
-reads Postgres), then **petty cash** (small — 330 lines — and could be folded
-into either).
+reads Postgres), **the weighbridge** (a whole vertical, and the only one of the
+five whose entry has its counterparty already in Postgres), then **petty cash**
+(small — 330 lines — and could be folded into either of the first two).
+
+**The coffee co-op connector is not in that order, deliberately.** It is one
+posting helper against `farmerIntakeEntry`, a vertical with no Postgres
+counterpart and no screens beyond its own integrations page. It moves when the
+weighbridge does — both are connectors resolving products, accounts and stock
+movements against Mongo, and porting the connector layer once is cheaper than
+twice.
 
 `expenses` carries a smaller version of the same seam: it calls Mongo's
 `quickCreateParty`, so a supplier created while entering an expense is written
