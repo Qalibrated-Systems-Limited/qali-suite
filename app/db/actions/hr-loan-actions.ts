@@ -101,13 +101,17 @@ export async function rejectLoan(
   formData: FormData,
 ): Promise<ActionResult> {
   const id = str(formData, "loanId");
-  const reason = str(formData, "reason");
+  // LoanDetailActions posts `rejectionReason`. Reading `reason` meant every
+  // rejection failed with "A rejection needs a reason" and the reason typed in
+  // was never received — and the form renders `fieldErrors.rejectionReason`,
+  // so the error did not appear under the box either.
+  const reason = str(formData, "rejectionReason") || str(formData, "reason");
   if (!id) return { success: false, error: "Loan ID is required" };
   if (!reason) {
     return {
       success: false,
       error: "A rejection needs a reason",
-      fieldErrors: { reason: "Required" },
+      fieldErrors: { rejectionReason: "Required", reason: "Required" },
     };
   }
 
@@ -135,7 +139,10 @@ export async function disburseLoan(
         companyId,
         id,
         method: (str(formData, "method") || "bank") as "bank" | "mpesa" | "cash" | "cheque",
-        reference: str(formData, "reference") || null,
+        // DisburseForm posts `disbursementRef`; `reference` was never sent, so
+        // `disbursement_reference` stayed NULL on every payout.
+        reference:
+          str(formData, "disbursementRef") || str(formData, "reference") || null,
         bankAccountId: str(formData, "bankAccountId") || null,
         staffLoansAccountId: str(formData, "staffLoansAccountId") || null,
         actor: { id: user.id, name: user.name },

@@ -201,6 +201,10 @@ export async function approveStockRequest(
   formData: FormData,
 ): Promise<ActionResult> {
   const comments = String(formData.get("comments") ?? "").trim() || null;
+  // The dialog posts these and nothing read them: `approval_conditions` has a
+  // column that `mapRequest` already displays, and each line has a `notes_<id>`
+  // box. Both went nowhere.
+  const conditions = String(formData.get("conditions") ?? "").trim() || null;
 
   try {
     const request = await withAuthorizedTenant(
@@ -212,12 +216,14 @@ export async function approveStockRequest(
         const approvals = existing.items.map((item) => {
           const raw = formData.get(`approved_${item.id}`);
           const value = raw === null || String(raw).trim() === "" ? null : Number(raw);
+          const note = formData.get(`notes_${item.id}`);
           return {
             itemId: item.id,
             approvedQuantity:
               value === null || Number.isNaN(value)
                 ? item.requestedQuantity
                 : qty(value),
+            notes: note === null ? null : String(note).trim() || null,
           };
         });
 
@@ -225,6 +231,7 @@ export async function approveStockRequest(
           approvedById: user.id,
           approverName: user.name,
           comments,
+          conditions,
         });
       },
     );

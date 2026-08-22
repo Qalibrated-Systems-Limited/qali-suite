@@ -216,8 +216,22 @@ export async function getStockRequest(tx: Tx, requestId: string) {
 export async function approveStockRequest(
   tx: Tx,
   requestId: string,
-  approvals: Array<{ itemId: string; approvedQuantity: string }>,
-  opts: { approvedById: string; approverName: string; comments?: string | null },
+  approvals: Array<{
+    itemId: string;
+    approvedQuantity: string;
+    notes?: string | null;
+  }>,
+  opts: {
+    approvedById: string;
+    approverName: string;
+    comments?: string | null;
+    /**
+     * Conditions attached to the approval. `approval_conditions` has existed
+     * since 0020 and `mapRequest` reads it back out to display; nothing ever
+     * wrote it, so it rendered NULL from the day it shipped.
+     */
+    conditions?: string | null;
+  },
 ) {
   const [request] = await tx
     .select()
@@ -230,7 +244,13 @@ export async function approveStockRequest(
   for (const a of approvals) {
     await tx
       .update(stockRequestItems)
-      .set({ approvedQuantity: a.approvedQuantity })
+      .set({
+        approvedQuantity: a.approvedQuantity,
+        // The approve dialog posts `notes_<itemId>` per line and nothing read
+        // them. Only overwrite when the approver actually typed something —
+        // an approval should not blank the requester's own note.
+        ...(a.notes != null ? { notes: a.notes } : {}),
+      })
       .where(eq(stockRequestItems.id, a.itemId));
   }
 
@@ -242,6 +262,7 @@ export async function approveStockRequest(
       approvedByNameAtApproval: opts.approverName,
       approvedAt: new Date(),
       approvalComments: opts.comments ?? null,
+      approvalConditions: opts.conditions ?? null,
       updatedAt: new Date(),
     })
     .where(eq(stockRequests.id, requestId))

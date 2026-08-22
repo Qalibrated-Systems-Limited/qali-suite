@@ -52,7 +52,14 @@ function parse(formData: FormData) {
     accountName: formData.get("accountName"),
     accountType: formData.get("accountType"),
     subType: formData.get("subType") || null,
-    parentId: formData.get("parentId") || null,
+    // accountForm posts `parentAccount`, NOT `parentId` — and deliberately:
+    // its own comment records that the name was changed to match the Mongoose
+    // schema path, because `parentId` "the model has no path for, so Mongoose
+    // dropped it on save and the parent never persisted". The Postgres action
+    // then read `parentId` again, so the parent stopped persisting again.
+    // Both names are accepted so neither side can break the other.
+    parentId:
+      formData.get("parentAccount") || formData.get("parentId") || null,
     description: formData.get("description") || null,
     canPost: formData.get("canPost") ?? undefined,
   });
