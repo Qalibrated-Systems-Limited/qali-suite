@@ -18,14 +18,20 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 
 | on Postgres | still Mongo (files) |
 |---|---|
-| **hr**, users, accounts (bar opening balances), invoices, bills, parties, requests, journal, statements, supplier-statements, credit-notes, quotes, purchase-orders | projects 11, integrations 11, assets 11, reports 9, tax 8, banking 8, kpis 7, components 7, settings 6, payments 6, **claims 4** |
+| **hr**, **claims**, **assets**, users, accounts (bar opening balances), invoices, bills, parties, requests, journal, statements, supplier-statements, credit-notes, quotes, purchase-orders | projects 11, integrations 11, tax 8, reports 8, banking 8, kpis 7, components 7, settings 6, payments 6, stocks 5, petty-cash 5, expenses 5, **claims 4**, **assets 2** |
+
+**Assets reads 2, and both are the expenses side.** `fleet-insights-queries`
+and `asset-cost-queries` merge spend from Mongo expenses with bills and the
+register from Postgres — that seam is real until expenses move, and
+`asset-cost-queries.js` deliberately lives on the Mongo side so it goes with
+them.
 
 **Claims reads 4, and all four are the project picker.** Every claim, item,
 receipt, journal entry and count is on Postgres (§9H); what is left is
 `getActiveProjects` and `ProjectContextCard`, which read Mongo because PROJECTS
 are on Mongo. They go when projects do. This is the one case where a non-zero
-count is not a half-ported module — check what the import actually is before
-reading the number as a verdict.
+count is not a half-ported module — assets is the other. Check what the import
+actually is before reading the number as a verdict.
 
 Also on Postgres, below the screens: auth and sign-in, invitations, companies
 and provisioning, company access and the switcher, fiscal periods, payments,
@@ -74,6 +80,10 @@ other:
   them was not a display: `project-actions` guards project deletion on a count
   of linked claims, so a project with claims against it would have been
   deletable. See §9H's table.
+- **assets: three of its four seams were already broken.** The GL account
+  dropdowns on the asset form had matched nothing since they were written, the
+  bill asset picker read a collection nothing writes, and tagging an expense to
+  an asset would have thrown a CastError the moment assets became UUIDs. §9I.
 
 The lesson for whatever is ported next: the danger is not the module you are
 moving, it is the module that talks to it. Grep for the MODEL name, not the
@@ -96,7 +106,7 @@ form-data adapter, or a lower-level variant a route handler will want, can
 legitimately have no screen calling it. What you are looking for is **a whole
 file's worth at once** — that means the screens were never pointed at it.
 
-### Read this before touching assets, petty cash or a connector
+### Read this before touching petty cash or a connector
 
 **Three live modules still post journal entries into MongoDB**, and every
 ledger screen — the journal browser, trial balance, P&L, balance sheet, general
@@ -104,7 +114,6 @@ ledger — reads Postgres:
 
 | Module | Screens | What is being lost |
 |---|---|---|
-| `asset-actions.js` | 11 | acquisition, depreciation, disposal |
 | `petty-cash-actions.js` | 3 | every petty cash movement |
 | `lib/integrations/connectors/weighbridge.js` | API | every weighed-in purchase, sale and transfer |
 | `lib/integrations/connectors/coffee-coop.js` | API | every farmer coffee intake |
@@ -113,6 +122,14 @@ Nothing errors: the entry is created, validated and posted into a ledger no
 screen reads. If you are adding to one of these, post through
 `app/db/repositories/journal.ts` rather than the Mongoose model, or you are
 adding to the pile.
+
+**Fixed assets are done** — migrations 0056 and 0057, all 11 screens, the
+rollforward report, and four seams. Note the correction while you are here:
+that table used to say assets posted "acquisition, depreciation, disposal".
+Acquisition posts NOTHING — the bill already raised DR Fixed Asset / CR
+Accounts Payable — and the third entry is impairment. §9I also records three
+defects found by auditing the arithmetic rather than comparing it to Mongo,
+which is worth reading before porting anything with sums in it.
 
 **Claims was the largest of them and it is done** — migration 0052, the
 repository, twelve actions, all 21 screens and components (bar the project

@@ -1771,11 +1771,166 @@ then **petty cash** (330 lines, and could fold into either).
 
 ---
 
+## 9I. Fixed assets — three postings, and a register that disagreed with the ledger
+
+Migrations 0056 and 0057. The last of the modules with screens.
+
+### The postings, and the one the table invented
+
+**`asset-actions.js` raises three journal entries, not the three §9G names.**
+
+| | | |
+|---|---|---|
+| `postDepreciation` | DR Depreciation Expense | CR Accumulated Depreciation |
+| `impairAsset` | DR Impairment Loss | CR Accumulated Depreciation |
+| `disposeAsset` | DR Bank, DR Accum. Dep., DR Loss | CR Fixed Asset, CR Gain |
+
+§9G and BUILDING-ON-POSTGRES both list "acquisition, depreciation, disposal".
+**Acquisition posts nothing.** `createAsset` tags the bill line with
+`capitalizedAssetId` and stops, because the bill already posted DR Fixed Asset
+/ CR Accounts Payable when it was approved — raising a second entry would
+double the asset. The third is impairment. Both documents are corrected.
+
+### The correction that matters
+
+`recordDepreciation` sets the running total from the SCHEDULE ROW:
+
+```js
+this.accumulatedDepreciation = entry.accumulatedDepreciation;
+```
+
+That figure is a projection of every month up to that point. And
+`postDepreciation` takes its period from the form and looks only for a pending
+row in that month:
+
+```js
+depreciationSchedule: { $elemMatch: { period, status: "pending" } }
+```
+
+with no check that earlier periods were posted. **Run month-end for March
+having missed January and February, and the ledger receives one month of
+depreciation while the asset register claims three.** The balance sheet's
+Accumulated Depreciation and the register then disagree, permanently, and
+nothing reconciles them.
+
+`asset_state` sums the rows that were actually POSTED, plus impairments. There
+is no second place for the figure to live. `periods_missed` counts the months
+that fell through, which nothing could see before.
+
+### Three defects found by auditing rather than comparing
+
+Reconciling against Mongo proves the transcription; it does not prove the
+arithmetic. Checked on its own terms, three things were wrong:
+
+**1. Reducing balance did not charge the rate it stated.** The monthly rate was
+`depreciationRate / 12`, which compounds to less than the annual figure:
+
+| stated | charged in year one |
+|---|---|
+| 37.5% | 31.68% |
+| 30.0% | 26.20% |
+| 25.0% | 22.33% |
+| 12.5% | 11.81% |
+
+Those are the KRA wear-and-tear classes, and KRA computes wear-and-tear
+*annually* on the reducing balance — so book depreciation ran about 11% under
+the tax computation it is named after, on every reducing-balance asset. The
+monthly rate that compounds to `r` is `1 - (1 - r)^(1/12)`, and that is what
+the port uses. **A deliberate divergence**; the tests assert the corrected
+figures and say so.
+
+**2. The residue was carried in silence.** Reducing balance is asymptotic and
+the schedule simply stops at the useful life — after 60 months at 25%,
+**282,745 of a 1,000,000 asset** is still on the books against a zero salvage
+value, and nothing writes it off. Left as-is, on the grounds that changing it
+would turn the final month into a large catch-up charge, but
+`asset_state.unwritten_residue` now reports it.
+
+**3. The asset-account fallback could never resolve.**
+`resolveAccount(companyId, ..., "fixed_asset")` looks for a SYSTEM ACCOUNT
+called `fixed_asset`. There is no such system account — `fixed_asset` is a
+**sub-type**, held by several accounts (Property Plant & Equipment, Motor
+Vehicles, Furniture & Fittings). So any asset without an explicit mapping
+failed disposal with a message about depreciation accounts, which were fine.
+
+And it always lacked one, because of the next item.
+
+### The dropdowns that were always empty
+
+The asset create page filtered
+
+```js
+accountType: { $in: ["fixed_asset", "accumulated_depreciation", "depreciation_expense"] }
+```
+
+but `accountType` only ever holds `asset`, `liability`, `equity`, `revenue` or
+`expense` (`lib/utils.js:373`). **The query matched nothing, so all three GL
+dropdowns were blank, so no asset ever carried a mapping** — which is why the
+dead fallback in the previous item mattered at all. Both pages also read the
+Mongo `Account` collection, which the chart of accounts stopped writing to when
+it ported.
+
+### Invariants pushed into the schema
+
+- **One posting per asset per period** — a unique index on
+  `(asset_id, period)`, not a find-then-write two runs of a month-end job both
+  pass.
+- **A posted period is immutable**, with exactly one exception: a
+  cancellation, which returns the row to `pending` with the entry link cleared
+  and the figures untouched. The reversing entry stays in the ledger, so the
+  period nets to zero there while `asset_state` stops counting it — both sides
+  move together and neither is rewritten.
+- **An asset is disposed of once.** `journalEntryIds` was an unconstrained
+  array; a second disposal would credit the asset cost twice.
+- **Nothing is recorded against a disposed asset**, and disposal marks the
+  remaining months skipped rather than leaving them pending.
+- **Depreciation cannot cross the salvage value**, whatever writes the row.
+- **Terms freeze once anything is posted** — changing cost, life or method
+  would rewrite months the ledger has seen. Impair it instead.
+
+### The seams
+
+Four, and three were already broken before this port touched them: the GL
+pickers above; the bill asset pickers reading a collection nothing writes;
+fleet insights aggregating Mongo assets and Mongo bills; and —
+
+**expenses could not have tagged an asset at all.** `expenses.asset.id` is
+`Schema.Types.ObjectId`, and asset ids are UUIDs now, which Mongoose cannot
+cast. It is a `String`, and `resolveAssetSnapshot` reads the register. The
+mirror of the bills trap 0053 fixed, in the other direction.
+
+`asset-cost-queries.js` is new and deliberately sits on the Mongo side: it is
+the one query spanning both stores — bills and the register from Postgres,
+expenses from Mongo — and it is the half that gets deleted when expenses move.
+
+### 0057, and a migration lesson
+
+`bill_lines.asset_id` and `capitalized_asset_id` became real foreign keys,
+which is the deal 0053 wrote down. Worth recording: the data cleanup and the
+type change cannot sit in one migration without help —
+
+```
+cannot ALTER TABLE "bill_lines" because it has pending trigger events
+```
+
+The UPDATEs that clear non-uuid values queue DEFERRED constraint-trigger
+events, and Postgres refuses to alter a table while any are outstanding.
+`SET CONSTRAINTS ALL IMMEDIATE` between the two flushes the queue.
+
+### After assets
+
+**The weighbridge** — a whole vertical, and the only remaining one whose entry
+has its counterparty already in Postgres; take the coffee co-op connector with
+it, since porting the connector layer once is cheaper than twice. Then **petty
+cash**, 330 lines, which could fold into either.
+
+---
+
 ## 10. Explicitly out of scope
 
 - Redesigning the posting engine, fiscal periods, or COGS logic beyond the
   corrections in §8
 - Restructuring modules beyond moving DB access behind repositories
-- Migrating the remaining models (projects, assets, integrations, tax,
+- Migrating the remaining models (projects, integrations, tax,
   banking, KPIs and the rest — see the table in BUILDING-ON-POSTGRES.md)
 - `jeff-biz` — that branch stays on MongoDB
