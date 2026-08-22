@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import ExpenseForm from "../components/ExpenseForm";
 import Account from "@/app/models/account";
 import Party from "@/app/models/parties";
-import Asset from "@/app/models/asset";
+import { getAssets } from "@/app/db/actions/asset-actions";
 import dbConnect from "@/app/config/dbConnect";
 import { getExpenseCategories } from "@/app/mongodb/queries/expense-queries";
 import { getTenantContext, tenantFilter } from "@/lib/utils/tenant-utils";
@@ -24,7 +24,7 @@ async function getFormData() {
   const tenant = tenantFilter(companyId, isSuperAdmin);
 
   // Fetch all data in parallel
-  const [expenseAccounts, paymentAccounts, vendors, employees, assets] = await Promise.all(
+  const [expenseAccounts, paymentAccounts, vendors, employees] = await Promise.all(
     [
       // Expense accounts (for expense posting)
       Account.find({
@@ -68,16 +68,22 @@ async function getFormData() {
         .sort({ name: 1 })
         .lean(),
 
-      // Active fixed assets (optional — for tagging fuel/repairs/maintenance)
-      Asset.find({
-        ...tenant,
-        status: { $in: ["active", "idle", "in_maintenance"] },
-      })
-        .select("_id assetNumber name registrationNumber")
-        .sort({ assetNumber: 1 })
-        .lean(),
     ]
   );
+
+  // Active fixed assets (optional — for tagging fuel/repairs/maintenance).
+  // POSTGRES since 0056: the Mongo collection is no longer written to, so this
+  // picker would have been permanently empty.
+  const { assets: assetRows } = await getAssets({
+    status: ["active", "idle", "in_maintenance"],
+    limit: 200,
+  });
+  const assets = assetRows.map((a) => ({
+    _id: a.id,
+    assetNumber: a.assetNumber,
+    name: a.name,
+    registrationNumber: a.registrationNumber || "",
+  }));
 
   return {
     accounts: expenseAccounts.map((a) => ({
@@ -105,12 +111,8 @@ async function getFormData() {
       phone: e.phone || "",
       email: e.email || "",
     })),
-    assets: assets.map((a) => ({
-      _id: a._id.toString(),
-      assetNumber: a.assetNumber,
-      name: a.name,
-      registrationNumber: a.registrationNumber || "",
-    })),
+    // Already in the shape the picker reads; the ids are UUIDs now.
+    assets,
   };
 }
 

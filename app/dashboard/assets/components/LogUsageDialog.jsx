@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, AlertCircle, Gauge, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { recordUsageReading } from "@/app/mongodb/actions/asset-actions";
+import { recordUsageReadingPg as recordUsageReading } from "@/app/db/actions/asset-actions";
 
 const initialState = { success: false, error: null, fieldErrors: null };
 

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, AlertCircle, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { impairAsset } from "@/app/mongodb/actions/asset-actions";
+import { impairAssetPg as impairAsset } from "@/app/db/actions/asset-actions";
 
 const initialState = {
   success: false,

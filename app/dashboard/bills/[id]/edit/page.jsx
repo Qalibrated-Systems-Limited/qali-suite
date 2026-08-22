@@ -7,10 +7,8 @@ import { ChevronLeft, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BillForm from "../../components/BillForm";
 import { getBillById, getBillFormData } from "@/app/db/actions/bill-actions";
-import Asset from "@/app/models/asset";
-import dbConnect from "@/app/config/dbConnect";
+import { getAssets } from "@/app/db/actions/asset-actions";
 import { auth } from "@/auth";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
 // ============================================
@@ -33,23 +31,15 @@ export async function generateMetadata({ params }) {
 // ============================================
 // DATA FETCHING
 // ============================================
-/**
- * Fixed assets are not ported (§10) and stay on Mongo; see the create page.
- */
-async function getMongoOnlyFormData() {
-  await dbConnect();
-  const { companyId } = await getTenantContext();
-
-  const assets = await Asset.find({
-    companyId,
-    status: { $in: ["active", "idle", "in_maintenance"] },
-  })
-    .select("_id assetNumber name registrationNumber")
-    .sort({ assetNumber: 1 })
-    .lean();
-
+async function getAssetPickerOptions() {
+  // POSTGRES since 0056. Assets moved, the Mongo collection is no longer
+  // written to, and this picker would have been permanently empty.
+  const { assets } = await getAssets({
+    status: ["active", "idle", "in_maintenance"],
+    limit: 200,
+  });
   return assets.map((a) => ({
-    _id: a._id.toString(),
+    _id: a.id,
     assetNumber: a.assetNumber,
     name: a.name,
     registrationNumber: a.registrationNumber || "",
@@ -63,7 +53,7 @@ async function BillEditFormWrapper({ billId }) {
   const [{ bill, error }, formData, assets, projects] = await Promise.all([
     getBillById(billId),
     getBillFormData(),
-    getMongoOnlyFormData(),
+    getAssetPickerOptions(),
     getActiveProjects(),
   ]);
 

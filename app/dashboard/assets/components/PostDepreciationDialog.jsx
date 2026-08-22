@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, AlertCircle, CheckCircle2, Calendar } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { postDepreciation } from "@/app/mongodb/actions/asset-actions";
+import { postDepreciationPg as postDepreciation } from "@/app/db/actions/asset-actions";
 
 const MONTHS = [
   { value: "01", label: "January" },

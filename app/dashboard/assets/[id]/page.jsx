@@ -42,17 +42,21 @@ import {
 } from "@/components/ui/tabs";
 import {
   getAssetById,
+  getAssetGlAccounts,
+} from "@/app/db/actions/asset-actions";
+// Bills and the register are on Postgres; expenses are not. This is the one
+// query that spans both, and it lives on the Mongo side because that is the
+// half that gets deleted when expenses move.
+import {
   getAssetExpenses,
   getAssetRunningCosts,
-} from "@/app/mongodb/actions/asset-actions";
+} from "@/app/mongodb/queries/asset-cost-queries";
 import DisposeAssetDialog from "@/app/dashboard/assets/components/DisposeAssetDialog";
 import CancelDepreciationButton from "@/app/dashboard/assets/components/CancelDepreciationButton";
 import TransferAssetDialog from "@/app/dashboard/assets/components/TransferAssetDialog";
 import ImpairAssetDialog from "@/app/dashboard/assets/components/ImpairAssetDialog";
 import LogUsageDialog from "@/app/dashboard/assets/components/LogUsageDialog";
-import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
-import Account from "@/app/models/account";
 
 const VIEW_ROLES = ["SuperAdmin", "Admin", "Viewer", "CFO", "Finance Manager", "Accountant", "Manager"];
 const ADMIN_ROLES = ["SuperAdmin", "Admin"];
@@ -502,14 +506,9 @@ function BucketBar({ bucketTotals, total }) {
 }
 
 async function getAccountMap() {
-  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const accounts = await Account.find(
-    withTenantScope({ isActive: true }, companyId, isSuperAdmin)
-  )
-    .select("accountCode accountName accountType systemAccount")
-    .lean();
-  return accounts;
+  // POSTGRES — see the note on getAssetGlAccounts.
+  return getAssetGlAccounts();
 }
 
 export default async function AssetDetailPage({ params }) {

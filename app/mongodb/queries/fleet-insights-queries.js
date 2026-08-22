@@ -1,16 +1,18 @@
 import "server-only";
 import { cache } from "react";
-import mongoose from "mongoose";
 
 import dbConnect from "@/app/config/dbConnect";
+import {
+  countFleetAssetsPg,
+  getFleetUsagePg,
+  sumAssetBillCostsPg,
+} from "@/app/db/actions/asset-actions";
 import {
   getTenantContext,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
 import { requirePlanAccess } from "@/lib/plan-gate";
 import { safeErrorMessage } from "@/lib/safe-error";
-import Asset from "@/app/models/asset";
-import Bill from "@/app/models/bill";
 import Expense from "@/app/models/expenses";
 
 // ============================================
@@ -56,66 +58,46 @@ function emptySummary() {
  * pair of aggregations. Indexed on (companyId, lines.asset.id, billDate) and
  * (companyId, asset.id, expenseDate).
  */
-async function rollupRunningCosts({
-  assetIds,
-  start,
-  end,
-  companyId,
-  isSuperAdmin,
-}) {
+/**
+ * What each asset has cost inside the window.
+ *
+ * BILLS ARE ON POSTGRES since the port, and so is the asset register (0056).
+ * EXPENSES ARE STILL ON MONGO. Aggregating the Mongo bills collection here
+ * would have reported nothing, because nothing writes to it.
+ */
+async function rollupRunningCosts({ assetIds, start, end, companyId, isSuperAdmin }) {
   if (assetIds.length === 0) return new Map();
 
-  const idObjs = assetIds.map((id) => new mongoose.Types.ObjectId(id));
-  const tenantClause = isSuperAdmin ? {} : { companyId };
+  const since = start.toISOString().slice(0, 10);
+  const until = end.toISOString().slice(0, 10);
 
-  const [billRows, expenseRows] = await Promise.all([
-    Bill.aggregate([
-      {
-        $match: {
-          ...tenantClause,
-          status: { $ne: "cancelled" },
-          billDate: { $gte: start, $lte: end },
-          "lines.asset.id": { $in: idObjs },
-        },
+  const billTotals = await sumAssetBillCostsPg({ assetIds, since, until });
+
+  const tenantClause = isSuperAdmin ? {} : { companyId };
+  const expenseRows = await Expense.aggregate([
+    {
+      $match: {
+        ...tenantClause,
+        status: { $nin: ["void", "rejected"] },
+        expenseDate: { $gte: start, $lte: end },
+        // A String now: asset ids are UUIDs. See app/models/expenses.js.
+        "asset.id": { $in: assetIds },
       },
-      { $unwind: "$lines" },
-      { $match: { "lines.asset.id": { $in: idObjs } } },
-      {
-        $group: {
-          _id: "$lines.asset.id",
-          total: { $sum: { $ifNull: ["$lines.amount", 0] } },
-        },
+    },
+    {
+      $group: {
+        _id: "$asset.id",
+        total: { $sum: { $ifNull: ["$total", { $ifNull: ["$amount", 0] }] } },
       },
-    ]),
-    Expense.aggregate([
-      {
-        $match: {
-          ...tenantClause,
-          status: { $nin: ["void", "rejected"] },
-          expenseDate: { $gte: start, $lte: end },
-          "asset.id": { $in: idObjs },
-        },
-      },
-      {
-        $group: {
-          _id: "$asset.id",
-          total: { $sum: { $ifNull: ["$total", "$amount"] } },
-        },
-      },
-    ]),
+    },
   ]);
 
-  const result = new Map();
-  for (const id of assetIds) result.set(id.toString(), 0);
-  for (const row of billRows) {
-    const k = row._id.toString();
-    result.set(k, (result.get(k) || 0) + (row.total || 0));
-  }
+  const totals = new Map(Object.entries(billTotals));
   for (const row of expenseRows) {
-    const k = row._id.toString();
-    result.set(k, (result.get(k) || 0) + (row.total || 0));
+    const key = String(row._id);
+    totals.set(key, (totals.get(key) || 0) + (row.total || 0));
   }
-  return result;
+  return totals;
 }
 
 // ============================================
@@ -134,17 +116,9 @@ export const loadFleetAssetCount = cache(async (category = "") => {
     if (!authorized(user)) {
       return { success: false, error: "Access denied", count: 0 };
     }
-    await dbConnect();
-
-    const filter = withTenantScope(
-      {
-        status: { $in: ACTIVE_STATUSES },
-        ...(category ? { category } : {}),
-      },
-      companyId,
-      isSuperAdmin,
-    );
-    const count = await Asset.countDocuments(filter);
+    // POSTGRES since 0056. Counting the Mongo collection would report zero
+    // however many assets are in service.
+    const count = await countFleetAssetsPg(category);
     return { success: true, count };
   } catch (error) {
     console.error("loadFleetAssetCount error:", error);
@@ -184,62 +158,18 @@ export const loadFleetInsights = cache(async (category = "") => {
     const windowStart = new Date(now);
     windowStart.setFullYear(windowStart.getFullYear() - 1);
 
-    const filter = withTenantScope(
-      {
-        status: { $in: ACTIVE_STATUSES },
-        ...(category ? { category } : {}),
-      },
-      companyId,
-      isSuperAdmin,
-    );
-
-    // Aggregation that projects only readings inside the window — keeps
-    // payload small for assets with hundreds of historical readings.
-    const assets = await Asset.aggregate([
-      { $match: filter },
-      {
-        $project: {
-          assetNumber: 1,
-          name: 1,
-          category: 1,
-          status: 1,
-          bookValue: 1,
-          acquisitionCost: 1,
-          usageUnit: 1,
-          currentUsage: 1,
-          registrationNumber: 1,
-          lastReadingAt: 1,
-          windowReadings: {
-            $filter: {
-              input: { $ifNull: ["$usageReadings", []] },
-              as: "r",
-              cond: {
-                $and: [
-                  { $gte: ["$$r.recordedAt", windowStart] },
-                  { $lte: ["$$r.recordedAt", windowEnd] },
-                ],
-              },
-            },
-          },
-        },
-      },
-    ]);
-
-    if (assets.length === 0) {
-      return {
-        success: true,
-        rows: [],
-        categoryMedians: {},
-        summary: emptySummary(),
-        window: {
-          start: windowStart.toISOString(),
-          end: windowEnd.toISOString(),
-        },
-      };
-    }
+    // POSTGRES. The Mongo version is one aggregation with a $filter over the
+    // embedded usageReadings array; readings are rows now, and only the first
+    // and last inside the window are needed to derive distance, so that is all
+    // listFleetUsage returns.
+    const assets = await getFleetUsagePg({
+      category: category || undefined,
+      since: windowStart.toISOString(),
+      until: windowEnd.toISOString(),
+    });
 
     const totals = await rollupRunningCosts({
-      assetIds: assets.map((a) => a._id.toString()),
+      assetIds: assets.map((a) => a._id),
       start: windowStart,
       end: windowEnd,
       companyId,
@@ -249,7 +179,7 @@ export const loadFleetInsights = cache(async (category = "") => {
     // Per-category peer medians, computed only over assets with spend > 0.
     const categoryGroups = new Map();
     for (const a of assets) {
-      const total = totals.get(a._id.toString()) || 0;
+      const total = totals.get(a._id) || 0;
       if (!categoryGroups.has(a.category)) categoryGroups.set(a.category, []);
       if (total > 0) categoryGroups.get(a.category).push(total);
     }
@@ -259,7 +189,7 @@ export const loadFleetInsights = cache(async (category = "") => {
     }
 
     const rows = assets.map((a) => {
-      const total = totals.get(a._id.toString()) || 0;
+      const total = totals.get(a._id) || 0;
       const bookValue = Number(a.bookValue) || 0;
       const peerMedian = categoryMedians.get(a.category) ?? null;
       const ratio =
@@ -267,23 +197,10 @@ export const loadFleetInsights = cache(async (category = "") => {
       const totalPctOfBook =
         bookValue > 0 ? (total / bookValue) * 100 : null;
 
-      // windowReadings is projected pre-sorted-by-insert; sort defensively.
-      const inWindow = (a.windowReadings || []).slice().sort((x, y) => {
-        const dx = x.recordedAt ? new Date(x.recordedAt).getTime() : 0;
-        const dy = y.recordedAt ? new Date(y.recordedAt).getTime() : 0;
-        return dx - dy;
-      });
-      let costPerUnit = null;
-      let distance = null;
-      if (inWindow.length >= 2) {
-        const delta =
-          (inWindow[inWindow.length - 1].reading || 0) -
-          (inWindow[0].reading || 0);
-        if (delta > 0) {
-          distance = delta;
-          costPerUnit = total / delta;
-        }
-      }
+      // Distance covered inside the window, derived in SQL from the first and
+      // last readings — see listFleetUsage. Null unless there are two.
+      const distance = a.windowDistance ?? null;
+      const costPerUnit = distance && distance > 0 ? total / distance : null;
 
       let health = "healthy";
       if (ratio !== null && ratio > 1.5) health = "high";
@@ -296,7 +213,7 @@ export const loadFleetInsights = cache(async (category = "") => {
         : null;
 
       return {
-        _id: a._id.toString(),
+        _id: a._id,
         assetNumber: a.assetNumber,
         name: a.name,
         category: a.category,

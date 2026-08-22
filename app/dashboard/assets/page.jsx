@@ -25,7 +25,7 @@ import {
 import {
   getAssets,
   getAssetsTotals,
-} from "@/app/mongodb/actions/asset-actions";
+} from "@/app/db/actions/asset-actions";
 import PostDepreciationDialog from "@/app/dashboard/assets/components/PostDepreciationDialog";
 
 export const metadata = { title: "Fixed Assets" };

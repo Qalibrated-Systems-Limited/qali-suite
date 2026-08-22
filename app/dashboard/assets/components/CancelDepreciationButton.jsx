@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, AlertCircle, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { cancelDepreciationPosting } from "@/app/mongodb/actions/asset-actions";
+import { cancelDepreciationPostingPg as cancelDepreciationPosting } from "@/app/db/actions/asset-actions";
 
 const initialState = {
   success: false,

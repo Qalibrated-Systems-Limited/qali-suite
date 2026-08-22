@@ -91,7 +91,11 @@ const expenseSchema = new Schema(
     // specific asset to track its running costs). Snapshots assetNumber/name
     // so display survives asset rename.
     asset: {
-      id: { type: Schema.Types.ObjectId, ref: "Asset", default: null },
+      // String, not ObjectId. Fixed assets moved to Postgres (0056) and their
+      // ids are UUIDs — 36 characters with dashes — which Mongoose cannot cast
+      // to an ObjectId, so tagging an expense to an asset would throw a
+      // CastError. Same trap bills hit in the other direction (0053).
+      id: { type: String, ref: "Asset", default: null },
       assetNumber: { type: String, default: null },
       name: { type: String, default: null },
     },

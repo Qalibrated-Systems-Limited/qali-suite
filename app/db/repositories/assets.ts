@@ -1360,32 +1360,6 @@ export async function getAssetRollforward(
   return { rows: mapped, totals, period: opts };
 }
 
-/** Assets whose insurance or inspection falls due inside a window. */
-export async function listComplianceDue(tx: Tx, withinDays = 60) {
-  const rows = (await tx.execute(sql`
-    SELECT a.id, a.asset_number, a.name, a.registration_number,
-           a.insurance_expiry_date, a.inspection_next_due_date
-      FROM assets a
-     WHERE a.status NOT IN ('disposed', 'written_off')
-       AND (
-         a.insurance_expiry_date <= CURRENT_DATE + ${withinDays}::int
-         OR a.inspection_next_due_date <= CURRENT_DATE + ${withinDays}::int
-       )
-     ORDER BY LEAST(
-       COALESCE(a.insurance_expiry_date, 'infinity'::date),
-       COALESCE(a.inspection_next_due_date, 'infinity'::date)
-     )
-  `)) as unknown as Array<Record<string, unknown>>;
-
-  return rows.map((r) => ({
-    id: String(r.id),
-    assetNumber: String(r.asset_number),
-    name: String(r.name),
-    registrationNumber: (r.registration_number as string) ?? null,
-    insuranceExpiryDate: (r.insurance_expiry_date as string) ?? null,
-    inspectionNextDueDate: (r.inspection_next_due_date as string) ?? null,
-  }));
-}
 
 /**
  * Undoes a posted month: reverses the entry, and returns the row to pending.
@@ -1445,4 +1419,144 @@ export async function cancelDepreciationPosting(
   `);
 
   return { reversal, asset: await getAsset(tx, assetId) };
+}
+
+/**
+ * What has been spent ON this asset, from the bills side.
+ *
+ * Bill lines carry `asset_id` — a tag put there when the bill was entered, so
+ * fuel, servicing and repairs can be attributed to the vehicle they were for.
+ * The expenses half of this lives in Mongo until expenses move; the caller
+ * merges them.
+ */
+export async function listAssetBillCosts(tx: Tx, assetId: string) {
+  const rows = (await tx.execute(sql`
+    SELECT b.id            AS bill_id,
+           b.bill_number,
+           b.bill_date::text AS bill_date,
+           b.status::text   AS bill_status,
+           b.payment_status::text AS payment_status,
+           b.supplier_name_at_bill AS supplier_name,
+           l.description    AS line_description,
+           l.line_total,
+           a.account_code, a.account_name
+      FROM bill_lines l
+      JOIN bills b    ON b.id = l.bill_id
+      LEFT JOIN accounts a ON a.id = l.account_id
+     WHERE l.asset_id = ${String(assetId)}
+       AND b.status <> 'cancelled'
+     ORDER BY b.bill_date DESC
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => {
+    const amount = Number(r.line_total ?? 0);
+    return {
+      source: "bill" as const,
+      billId: String(r.bill_id),
+      billNumber: String(r.bill_number),
+      billDate: (r.bill_date as string) ?? null,
+      billStatus: String(r.bill_status),
+      paymentStatus: (r.payment_status as string) ?? null,
+      supplierName: (r.supplier_name as string) ?? "—",
+      lineDescription: (r.line_description as string) ?? "",
+      accountName: (r.account_name as string) ?? "",
+      accountCode: (r.account_code as string) ?? "",
+      amount,
+      lineTotal: amount,
+    };
+  });
+}
+
+/**
+ * Fleet analytics: every in-service asset with its readings inside a window.
+ *
+ * The Mongo version is one aggregation with a `$filter` over the embedded
+ * `usageReadings` array, projecting only the readings in range to keep the
+ * payload small for an asset with hundreds of them. Here the readings are
+ * rows, so it is a join with a WHERE — and only the two that matter (the
+ * first and last in the window) are needed to derive distance, so that is all
+ * this returns.
+ */
+export async function listFleetUsage(
+  tx: Tx,
+  opts: { category?: string; since: string; until: string },
+) {
+  const rows = (await tx.execute(sql`
+    WITH win AS (
+      SELECT r.asset_id,
+             MIN(r.reading) FILTER (WHERE r.rn_first = 1) AS first_reading,
+             MIN(r.reading) FILTER (WHERE r.rn_last = 1)  AS last_reading,
+             COUNT(*)::integer                            AS reading_count
+        FROM (
+          SELECT ur.asset_id, ur.reading,
+                 ROW_NUMBER() OVER (PARTITION BY ur.asset_id ORDER BY ur.recorded_at ASC,  ur.id ASC)  AS rn_first,
+                 ROW_NUMBER() OVER (PARTITION BY ur.asset_id ORDER BY ur.recorded_at DESC, ur.id DESC) AS rn_last
+            FROM asset_usage_readings ur
+           WHERE ur.recorded_at >= ${opts.since}::timestamptz
+             AND ur.recorded_at <= ${opts.until}::timestamptz
+        ) r
+       GROUP BY r.asset_id
+    )
+    SELECT a.id, a.asset_number, a.name, a.category::text AS category,
+           a.status::text AS status, a.registration_number, a.usage_unit::text AS usage_unit,
+           s.book_value, a.acquisition_cost, s.current_usage, s.last_reading_at,
+           w.first_reading, w.last_reading, COALESCE(w.reading_count, 0) AS reading_count
+      FROM assets a
+      JOIN asset_state s ON s.asset_id = a.id
+      LEFT JOIN win w ON w.asset_id = a.id
+     WHERE a.status IN ('active', 'idle', 'in_maintenance')
+       ${opts.category ? sql`AND a.category = ${opts.category}::asset_category` : sql``}
+     ORDER BY a.asset_number
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => {
+    const first = r.first_reading != null ? Number(r.first_reading) : null;
+    const last = r.last_reading != null ? Number(r.last_reading) : null;
+    return {
+      _id: String(r.id),
+      id: String(r.id),
+      assetNumber: String(r.asset_number),
+      name: String(r.name),
+      category: String(r.category),
+      status: String(r.status),
+      registrationNumber: (r.registration_number as string) ?? null,
+      usageUnit: String(r.usage_unit),
+      bookValue: Number(r.book_value ?? 0),
+      acquisitionCost: Number(r.acquisition_cost ?? 0),
+      currentUsage: r.current_usage != null ? Number(r.current_usage) : 0,
+      lastReadingAt: (r.last_reading_at as Date) ?? null,
+      readingCount: Number(r.reading_count ?? 0),
+      /** Distance covered inside the window, not the odometer figure. */
+      windowDistance:
+        first != null && last != null && last > first ? last - first : null,
+    };
+  });
+}
+
+export async function countFleetAssets(tx: Tx, category?: string) {
+  const rows = (await tx.execute(sql`
+    SELECT COUNT(*)::int AS n FROM assets
+     WHERE status IN ('active', 'idle', 'in_maintenance')
+       ${category ? sql`AND category = ${category}::asset_category` : sql``}
+  `)) as unknown as Array<{ n: number }>;
+  return rows[0]?.n ?? 0;
+}
+
+/** Spend per asset from the bills side, inside a window. */
+export async function sumAssetBillCosts(
+  tx: Tx,
+  opts: { assetIds: string[]; since: string; until: string },
+) {
+  if (!opts.assetIds.length) return new Map<string, number>();
+  const rows = (await tx.execute(sql`
+    SELECT l.asset_id, SUM(l.line_total)::float8 AS total
+      FROM bill_lines l
+      JOIN bills b ON b.id = l.bill_id
+     WHERE l.asset_id = ANY(${opts.assetIds}::text[])
+       AND b.status <> 'cancelled'
+       AND b.bill_date BETWEEN ${opts.since}::date AND ${opts.until}::date
+     GROUP BY l.asset_id
+  `)) as unknown as Array<{ asset_id: string; total: number }>;
+
+  return new Map(rows.map((r) => [String(r.asset_id), Number(r.total ?? 0)]));
 }

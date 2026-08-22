@@ -9,7 +9,6 @@ import mongoose from "mongoose";
 import Expense from "@/app/models/expenses";
 import Account from "@/app/models/account";
 import Project from "@/app/models/project";
-import Asset from "@/app/models/asset";
 import dbConnect from "@/app/config/dbConnect";
 import {
   getTenantContext,
@@ -90,22 +89,29 @@ const expenseSchema = z.object({
 // ============================================
 // Returns { snapshot } on success or { error } if assetId is set but invalid
 // for this tenant. Returning a null snapshot clears any existing link.
-async function resolveAssetSnapshot(rawAssetId, companyId, isSuperAdmin) {
+/**
+ * The asset an expense is tagged to.
+ *
+ * Reads POSTGRES since 0056 — assets moved, and the Mongo collection is no
+ * longer written to, so looking there would report "Asset not found" for
+ * every asset in the register. The id is a UUID now, which is why
+ * `expenses.asset.id` is a String rather than an ObjectId.
+ */
+async function resolveAssetSnapshot(rawAssetId) {
   if (!rawAssetId) return { snapshot: null };
   const trimmed = rawAssetId.toString().trim();
   if (!trimmed || trimmed === "none") return { snapshot: null };
-  if (!mongoose.Types.ObjectId.isValid(trimmed)) {
+  if (!/^[0-9a-f-]{36}$/i.test(trimmed)) {
     return { error: "Invalid asset reference" };
   }
-  const asset = await Asset.findOne(
-    withTenantScope({ _id: trimmed }, companyId, isSuperAdmin)
-  )
-    .select("_id assetNumber name status")
-    .lean();
+
+  const { getAssetById } = await import("@/app/db/actions/asset-actions");
+  const asset = await getAssetById(trimmed);
   if (!asset) return { error: "Asset not found" };
+
   return {
     snapshot: {
-      id: asset._id,
+      id: asset.id,
       assetNumber: asset.assetNumber,
       name: asset.name,
     },
@@ -215,11 +221,7 @@ export async function createExpense(prevState, formData) {
     }
 
     // Resolve linked asset (optional — fuel/repairs/maintenance tracking)
-    const assetResolution = await resolveAssetSnapshot(
-      validatedData.assetId,
-      companyId,
-      isSuperAdmin
-    );
+    const assetResolution = await resolveAssetSnapshot(validatedData.assetId);
     if (assetResolution.error) {
       return {
         errors: { assetId: [assetResolution.error] },
@@ -390,11 +392,7 @@ export async function updateExpense(expenseId, prevState, formData) {
     }
 
     // Update linked asset (optional)
-    const assetResolution = await resolveAssetSnapshot(
-      validatedData.assetId,
-      companyId,
-      isSuperAdmin
-    );
+    const assetResolution = await resolveAssetSnapshot(validatedData.assetId);
     if (assetResolution.error) {
       return {
         errors: { assetId: [assetResolution.error] },

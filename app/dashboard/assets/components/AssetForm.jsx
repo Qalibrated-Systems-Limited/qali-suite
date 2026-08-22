@@ -10,7 +10,7 @@ import {
   ChevronUp,
   FileText,
 } from "lucide-react";
-import { createAsset } from "@/app/mongodb/actions/asset-actions";
+import { createAssetPg as createAsset } from "@/app/db/actions/asset-actions";
 
 // Industry-standard PPE categories (IFRS / IAS 16 alignment).
 // Order: long-life tangibles → movable → short-life consumables.

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { canSeeReportsNav } from "@/lib/permissions";
 import Link from "next/link";
 import { ChevronLeft, Calendar, AlertTriangle } from "lucide-react";
-import { getAssetRollforward } from "@/app/mongodb/actions/asset-actions";
+import { getAssetRollforward } from "@/app/db/actions/asset-actions";
 
 export const metadata = { title: "Asset Rollforward | Reports" };
 

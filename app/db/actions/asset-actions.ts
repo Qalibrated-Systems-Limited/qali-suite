@@ -567,12 +567,158 @@ export async function getAssetRollforward(opts: {
   }
 }
 
-export async function getAssetComplianceDue(withinDays = 60) {
+
+/** The bills half of an asset's running costs. See asset-cost-queries.js. */
+export async function listAssetBillCostsPg(assetId: string) {
   try {
     return await withAuthorizedTenant([], (tx) =>
-      assetsRepo.listComplianceDue(tx, withinDays),
+      assetsRepo.listAssetBillCosts(tx, assetId),
     );
   } catch {
     return [];
+  }
+}
+
+/**
+ * The bill line an asset is being capitalised from, and whether it may be.
+ *
+ * Four rules, all of them Mongo's: the bill must be APPROVED (a draft has not
+ * posted DR Fixed Asset / CR Accounts Payable yet, so there is nothing to
+ * capitalise), the line must be charged to an ASSET account, and it must not
+ * already carry an asset. The `billLineId` returned is the plain line id —
+ * Mongo compounds it as `billId:lineId` because its lines are subdocuments;
+ * here a line has its own primary key.
+ */
+export async function loadBillLineForCapitalization(billLineRef: string) {
+  // Tolerate Mongo's `billId:lineId` shape as well as a bare line id.
+  const lineId = String(billLineRef ?? "").split(":").pop() ?? "";
+  if (!/^[0-9a-f-]{36}$/i.test(lineId)) {
+    return { error: "Invalid bill line reference" };
+  }
+
+  try {
+    return await withAuthorizedTenant(
+      [...ASSET_WRITE_ROLES],
+      async (tx) => {
+        const rows = (await tx.execute(sql`
+          SELECT l.id, l.description, l.line_total, l.capitalized_asset_id,
+                 b.id AS bill_id, b.bill_number, b.bill_date::text AS bill_date,
+                 b.status::text AS bill_status,
+                 a.account_type::text AS account_type
+            FROM bill_lines l
+            JOIN bills b ON b.id = l.bill_id
+            LEFT JOIN accounts a ON a.id = l.account_id
+           WHERE l.id = ${lineId}::uuid
+        `)) as unknown as Array<Record<string, unknown>>;
+
+        if (!rows.length) return { error: "Bill line not found" };
+        const r = rows[0];
+
+        if (r.bill_status !== "approved") {
+          return {
+            error: `Bill must be approved before capitalizing. Current status: ${r.bill_status}.`,
+          };
+        }
+        if (r.account_type !== "asset") {
+          return {
+            error:
+              "Only asset-type lines can be capitalized. Re-classify the line first.",
+          };
+        }
+        if (r.capitalized_asset_id) {
+          return {
+            error: "This line has already been capitalized",
+            alreadyCapitalizedAssetId: String(r.capitalized_asset_id),
+          };
+        }
+
+        const description = (r.description as string) ?? "";
+        return {
+          prefill: {
+            name: description.slice(0, 200),
+            description,
+            acquisitionCost: Number(r.line_total ?? 0),
+            acquisitionDate: (r.bill_date as string) ?? null,
+            sourceType: "bill" as const,
+            sourceId: String(r.bill_id),
+            sourceReference: String(r.bill_number),
+            billLineId: String(r.id),
+          },
+        };
+      },
+    );
+  } catch (err) {
+    return { error: userMessage(err, "Failed to load bill line") };
+  }
+}
+
+/**
+ * The chart of accounts, for the GL pickers on the asset form and dialogs.
+ *
+ * POSTGRES. Both pages read the Mongo `Account` collection, which the chart
+ * of accounts stopped writing to when it ported — so the Fixed Asset,
+ * Accumulated Depreciation, Depreciation Expense, gain, loss and impairment
+ * dropdowns have been offering a stale list, or none at all.
+ */
+export async function getAssetGlAccounts() {
+  try {
+    return await withAuthorizedTenant([], async (tx) => {
+      const rows = await accountsRepo.listAccounts(tx, {
+        activeOnly: true,
+        postableOnly: true,
+      });
+      return rows.map((a) => ({
+        _id: a.id,
+        id: a.id,
+        accountCode: a.accountCode,
+        accountName: a.accountName,
+        accountType: a.accountType,
+        subType: a.subType,
+        systemAccount: a.systemAccount,
+      }));
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** Fleet analytics: in-service assets and their usage inside a window. */
+export async function getFleetUsagePg(opts: {
+  category?: string;
+  since: string;
+  until: string;
+}) {
+  try {
+    return await withAuthorizedTenant([], (tx) =>
+      assetsRepo.listFleetUsage(tx, opts),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function countFleetAssetsPg(category?: string) {
+  try {
+    return await withAuthorizedTenant([], (tx) =>
+      assetsRepo.countFleetAssets(tx, category || undefined),
+    );
+  } catch {
+    return 0;
+  }
+}
+
+/** Spend per asset from the bills side; expenses are merged on the Mongo side. */
+export async function sumAssetBillCostsPg(opts: {
+  assetIds: string[];
+  since: string;
+  until: string;
+}) {
+  try {
+    const map = await withAuthorizedTenant([], (tx) =>
+      assetsRepo.sumAssetBillCosts(tx, opts),
+    );
+    return Object.fromEntries(map);
+  } catch {
+    return {};
   }
 }

@@ -3,18 +3,18 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, AlertTriangle } from "lucide-react";
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
-import Account from "@/app/models/account";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 import AssetForm from "@/app/dashboard/assets/components/AssetForm";
-import { loadBillLineForCapitalization } from "@/app/mongodb/actions/asset-actions";
+import {
+  loadBillLineForCapitalization,
+  getAssetGlAccounts,
+} from "@/app/db/actions/asset-actions";
 
 export const metadata = { title: "New Asset | Fixed Assets" };
 
 const CREATE_ROLES = ["SuperAdmin", "Admin", "Accountant"];
 
 async function AssetFormLoader({ fromBillLine }) {
-  await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
 
   // The capitalisation threshold (soft policy), from Postgres (0035).
@@ -24,31 +24,34 @@ async function AssetFormLoader({ fromBillLine }) {
     ? Number((await getSettingsFor(String(companyId))).capitalizationThreshold)
     : 0;
 
-  const accountTypes = [
-    "fixed_asset",
-    "accumulated_depreciation",
-    "depreciation_expense",
-  ];
+  // POSTGRES. The chart of accounts stopped writing to the Mongo collection
+  // when it ported, so these dropdowns were reading a store nothing maintains.
+  //
+  // And the grouping was wrong before that. It filtered
+  // `accountType: { $in: ["fixed_asset", "accumulated_depreciation",
+  // "depreciation_expense"] }` — but `accountType` only ever holds asset,
+  // liability, equity, revenue or expense (lib/utils.js:373). So the query
+  // matched nothing and all three dropdowns were empty, which is why no asset
+  // ever carried a GL mapping and why disposal kept failing to resolve one.
+  //
+  // Fixed asset accounts are a SUB-TYPE; the other two are system accounts
+  // with a fallback to anything of the right type, so a company that keeps
+  // several can choose.
+  const accounts = await getAssetGlAccounts();
 
-  const query = withTenantScope(
-    { accountType: { $in: accountTypes }, isActive: true },
-    companyId,
-    isSuperAdmin
-  );
-  const accounts = await Account.find(query)
-    .select("accountCode accountName accountType")
-    .sort({ accountCode: 1 })
-    .lean();
-
-  const accountsByType = Object.fromEntries(accountTypes.map((t) => [t, []]));
-  for (const a of accounts) {
-    accountsByType[a.accountType]?.push({
-      _id: a._id.toString(),
-      accountCode: a.accountCode,
-      accountName: a.accountName,
-      accountType: a.accountType,
-    });
-  }
+  const accountsByType = {
+    fixed_asset: accounts.filter((a) => a.subType === "fixed_asset"),
+    accumulated_depreciation: accounts.filter(
+      (a) =>
+        a.systemAccount === "accumulated_depreciation" ||
+        a.subType === "contra",
+    ),
+    depreciation_expense: accounts.filter(
+      (a) =>
+        a.systemAccount === "depreciation_expense" ||
+        a.accountType === "expense",
+    ),
+  };
 
   // Optional capitalize-from-bill prefill
   let initialValues = null;
