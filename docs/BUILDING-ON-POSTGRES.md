@@ -18,7 +18,14 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 
 | on Postgres | still Mongo (files) |
 |---|---|
-| **hr**, users, accounts (bar opening balances), invoices, bills, parties, requests, journal, statements, supplier-statements, credit-notes | claims 13, projects 11, integrations 11, assets 11, reports 9, purchase-orders 9, tax 8, banking 8, quotes 7, kpis 7, components 7, settings 6, payments 6 |
+| **hr**, users, accounts (bar opening balances), invoices, bills, parties, requests, journal, statements, supplier-statements, credit-notes, quotes, purchase-orders | projects 11, integrations 11, assets 11, reports 9, tax 8, banking 8, kpis 7, components 7, settings 6, payments 6, **claims 4** |
+
+**Claims reads 4, and all four are the project picker.** Every claim, item,
+receipt, journal entry and count is on Postgres (§9H); what is left is
+`getActiveProjects` and `ProjectContextCard`, which read Mongo because PROJECTS
+are on Mongo. They go when projects do. This is the one case where a non-zero
+count is not a half-ported module — check what the import actually is before
+reading the number as a verdict.
 
 Also on Postgres, below the screens: auth and sign-in, invitations, companies
 and provisioning, company access and the switcher, fiscal periods, payments,
@@ -28,8 +35,8 @@ attendance cron.
 
 The `components` and `settings` counts above are mixed: the HR parts of the
 dashboard strips, the attendance policy, public holidays and payroll rates all
-read Postgres; what is left in those files belongs to claims, checkouts and
-other unported modules.
+read Postgres; what is left in those files belongs to checkouts and other
+unported modules. The claims parts of those strips moved with §9H.
 
 **`docs/CURRENT-STATE.md` predates all of this** — it is a 2026-05-29 snapshot
 of `jeff-business-suite` and describes the stack as Mongoose/MongoDB. Do not
@@ -61,8 +68,17 @@ other:
   was created from. Found while surveying procurement's screens, and it is the
   §9E seam inside the module §9E was written about.
 
+- **claims: eleven readers outside the module**, and each would have reported
+  zero rather than erroring — an empty approvals queue, every dashboard tile at
+  zero, every project's claim spend gone, claims unfindable in search. One of
+  them was not a display: `project-actions` guards project deletion on a count
+  of linked claims, so a project with claims against it would have been
+  deletable. See §9H's table.
+
 The lesson for whatever is ported next: the danger is not the module you are
-moving, it is the module that talks to it.
+moving, it is the module that talks to it. Grep for the MODEL name, not the
+action file — `grep -rn "EmployeeClaim" app/ lib/` found all eleven, and the
+screens found none of them.
 
 ### Finding this one yourself
 
@@ -80,15 +96,14 @@ form-data adapter, or a lower-level variant a route handler will want, can
 legitimately have no screen calling it. What you are looking for is **a whole
 file's worth at once** — that means the screens were never pointed at it.
 
-### Read this before touching claims, assets, petty cash or a connector
+### Read this before touching assets, petty cash or a connector
 
-**Five live modules still post journal entries into MongoDB**, and every ledger
-screen — the journal browser, trial balance, P&L, balance sheet, general
+**Three live modules still post journal entries into MongoDB**, and every
+ledger screen — the journal browser, trial balance, P&L, balance sheet, general
 ledger — reads Postgres:
 
 | Module | Screens | What is being lost |
 |---|---|---|
-| `claim-action.js` | 4 | every approved employee reimbursement |
 | `asset-actions.js` | 11 | acquisition, depreciation, disposal |
 | `petty-cash-actions.js` | 3 | every petty cash movement |
 | `lib/integrations/connectors/weighbridge.js` | API | every weighed-in purchase, sale and transfer |
@@ -98,6 +113,14 @@ Nothing errors: the entry is created, validated and posted into a ledger no
 screen reads. If you are adding to one of these, post through
 `app/db/repositories/journal.ts` rather than the Mongoose model, or you are
 adding to the pile.
+
+**Claims was the largest of them and it is done** — migration 0052, the
+repository, twelve actions, all 21 screens and components (bar the project
+picker, which reads Mongo because projects do), and the eleven places outside
+the module that read claims. All six postings go into the ledger
+the trial balance opens. See §9H, and read the seam table there before porting
+anything else: repointing the module took a morning, and repointing everything
+that TALKED to it took the rest of the day.
 
 **GRN was the fourth and it is done** — migrations 0049-0051, the repositories,
 the actions and all 24 screens. Acceptance posts DR Inventory / CR GR/IR into

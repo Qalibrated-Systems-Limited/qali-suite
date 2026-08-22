@@ -29,9 +29,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import {
-  createAdvanceRequest,
-  updateClaim,
-} from "@/app/mongodb/actions/claim-action";
+  createAdvanceRequestPg as createAdvanceRequest,
+  updateClaimPg as updateClaim,
+} from "@/app/db/actions/claim-actions";
 import { toast } from "sonner";
 import { ADVANCE_TYPES } from "@/lib/utils";
 import ProjectPicker from "@/components/project-picker";

@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
-import { getClaimById } from "@/app/mongodb/queries/claimQueries";
+import { getClaimById } from "@/app/db/actions/claim-actions";
 import { getSignedUrl } from "@/lib/cloudinary";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

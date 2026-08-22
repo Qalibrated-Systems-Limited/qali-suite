@@ -19,9 +19,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import {
-  createReimbursement,
-  updateClaim,
-} from "@/app/mongodb/actions/claim-action";
+  createReimbursementPg as createReimbursement,
+  updateClaimPg as updateClaim,
+} from "@/app/db/actions/claim-actions";
 import { toast } from "sonner";
 import { useActionState } from "react";
 import { FileUpload } from "@/components/file-upload";

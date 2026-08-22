@@ -33,7 +33,7 @@ import { getUnallocatedCount, getBankStatements } from "@/app/mongodb/queries/ba
 import { fetchFiscalPeriodStats } from "@/app/mongodb/actions/fiscal-period-actions";
 import Invoice from "../../models/invoice";
 import Bill from "../../models/bill";
-import EmployeeClaim from "../../models/employeesClaims";
+import { listClaimsPg } from "@/app/db/actions/claim-actions";
 import Expense from "../../models/expenses";
 
 // Utils
@@ -344,15 +344,13 @@ async function ClaimsToPayCard() {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
-  const claims = await EmployeeClaim.find({
-    ...tenantMatch,
+  // `paidAt: null` is gone with the port: 'paid' is its own status now, so an
+  // approved claim is by definition one that has not been paid.
+  const { claims } = await listClaimsPg({
     status: "approved",
-    paidAt: null,
-  })
-    .sort({ approvedAt: -1 })
-    .limit(5)
-    .select("_id claimNumber claimType approvedAt totalAmount status employee.name")
-    .lean();
+    orderBy: "approvedAt",
+    limit: 5,
+  });
 
   const formatDate = (date: Date) => {
     const now = new Date();

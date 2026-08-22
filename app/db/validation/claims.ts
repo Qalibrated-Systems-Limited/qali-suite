@@ -22,11 +22,6 @@ const blankToNull = z
   .union([z.string(), z.null(), z.undefined()])
   .transform((v) => (v ? String(v) : null));
 
-const optionalUuid = blankToNull.refine(
-  (v) => v === null || /^[0-9a-f-]{36}$/i.test(v),
-  "Not a valid reference",
-);
-
 const optionalText = z.preprocess(
   (v) => (v === null || v === "" ? undefined : v),
   z.string().optional(),
@@ -112,7 +107,7 @@ export const advanceRequestSchema = z
     ),
     travelFromDate: optionalText,
     travelToDate: optionalText,
-    projectId: optionalUuid,
+    projectId: blankToNull,
     estimatedExpenses: optionalText.pipe(
       z.string().max(200, "Estimated expenses too long").optional(),
     ),
@@ -169,7 +164,7 @@ export const reimbursementSchema = z.object({
   notes: optionalText.pipe(
     z.string().max(500, "Notes must be at most 500 characters long").optional(),
   ),
-  projectId: optionalUuid,
+  projectId: blankToNull,
   items: itemsField,
   receipts: attachmentsField,
 });

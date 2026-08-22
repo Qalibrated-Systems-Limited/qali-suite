@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { recallEmployeeClaim } from "../../../mongodb/actions/claim-action";
+import { recallEmployeeClaimPg as recallEmployeeClaim } from "@/app/db/actions/claim-actions";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,

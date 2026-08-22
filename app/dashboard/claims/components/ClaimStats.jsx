@@ -1,4 +1,4 @@
-import { getClaimStats } from "@/app/mongodb/queries/claimQueries";
+import { getClaimStats } from "@/app/db/actions/claim-actions";
 import { formatCurrency } from "@/lib/utils";
 
 function Stat({ label, value, sub, accent }) {

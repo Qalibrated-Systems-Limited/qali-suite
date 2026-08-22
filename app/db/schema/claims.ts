@@ -86,11 +86,17 @@ export const employeeClaims = pgTable(
      * Deferred references — projects are not ported (§10), so these carry the
      * value without a foreign key rather than dropping it. Same treatment
      * bills gave purchase_order_id in 0015.
+     *
+     * `text`, not `uuid`. A project id today is a Mongo ObjectId — 24 hex
+     * characters — which no uuid column accepts, so typing it as uuid would
+     * have rejected every claim linked through the project picker the create
+     * form already ships. When projects move, this becomes a uuid with a
+     * foreign key; until then the column says what the value is.
      */
-    projectId: uuid("project_id"),
+    projectId: text("project_id"),
     projectNumber: text("project_number"),
     projectName: text("project_name"),
-    costCodeId: uuid("cost_code_id"),
+    costCodeId: text("cost_code_id"),
     costCodeCode: text("cost_code_code"),
     costCodeName: text("cost_code_name"),
 
@@ -199,7 +205,7 @@ export const employeeClaims = pgTable(
     index("employee_claims_type_idx").on(t.companyId, t.claimType, t.status),
     index("employee_claims_project_idx")
       .on(t.companyId, t.projectId)
-      .where(sql`${t.projectId} IS NOT NULL`),
+      .where(sql`${t.projectId} IS NOT NULL AND ${t.projectId} <> ''`),
 
     /**
      * What each claim type is required to carry. In Mongo these were

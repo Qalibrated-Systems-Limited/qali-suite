@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
-import { fetchUserClaimPages } from "@/app/mongodb/queries/claimQueries";
+import { fetchUserClaimPages } from "@/app/db/actions/claim-actions";
 import Pagination from "@/components/pagination";
 import { ClaimsListSkeleton } from "../claims/components/ClaimListWithFilter";
 import { Suspense } from "react";

@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { resubmitEmployeeClaim } from "../../../mongodb/actions/claim-action";
+import { resubmitEmployeeClaimPg as resubmitEmployeeClaim } from "@/app/db/actions/claim-actions";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,

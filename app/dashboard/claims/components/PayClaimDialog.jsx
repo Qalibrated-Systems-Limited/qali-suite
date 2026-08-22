@@ -32,9 +32,9 @@ import {
   Building2,
 } from "lucide-react";
 import {
-  payAdvance,
-  payReimbursement,
-} from "../../../mongodb/actions/claim-action";
+  payAdvancePg as payAdvance,
+  payReimbursementPg as payReimbursement,
+} from "@/app/db/actions/claim-actions";
 import { toast } from "sonner";
 
 const SUBTYPE_ICONS = {

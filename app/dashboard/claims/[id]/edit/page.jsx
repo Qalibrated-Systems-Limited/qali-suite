@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import {
   getClaimById,
   getExpenseAccountsForCategories,
-} from "@/app/mongodb/queries/claimQueries";
+} from "@/app/db/actions/claim-actions";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 import { AdvanceRequestForm } from "../../components/AdvanceRequestForm";
 import { ReimbursementForm } from "../../components/ReimbursementForm";

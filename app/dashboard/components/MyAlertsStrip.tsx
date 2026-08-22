@@ -12,7 +12,7 @@ import mongoose from "mongoose";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { countMyUpcomingLeave } from "@/app/db/actions/hr-leave-actions";
-import EmployeeClaim from "@/app/models/employeesClaims";
+import { countMyOpenClaimsPg } from "@/app/db/actions/claim-actions";
 import { ItemCheckout } from "@/app/models/checkouts";
 
 // ============================================
@@ -45,11 +45,9 @@ const cMyAlerts = cache(async (userId) => {
       myOverdueCheckouts,
       myUpcomingLeave,
     ] = await Promise.all([
-      EmployeeClaim.countDocuments({
-        ...tenantMatch,
-        "employee.userId": userId,
-        status: { $in: ["submitted", "approved"] },
-      }),
+      // Postgres since the claims port. The Mongo collection is no longer
+      // written to, so counting it would show every employee a clean slate.
+      countMyOpenClaimsPg(userId),
       ItemCheckout.countDocuments({
         ...tenantMatch,
         "checkedOutTo.id": userId,

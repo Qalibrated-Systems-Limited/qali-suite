@@ -296,9 +296,23 @@ export interface ListClaimsOptions {
   search?: string;
   from?: string;
   to?: string;
+  /**
+   * The dashboard cards each want a different "most recent": submitted for an
+   * approvals queue, approved for a to-pay list, updated for an activity feed.
+   * An allow-list, because this reaches an ORDER BY.
+   */
+  orderBy?: "claimDate" | "submittedAt" | "approvedAt" | "updatedAt" | "createdAt";
   limit?: number;
   offset?: number;
 }
+
+const ORDER_COLUMNS = {
+  claimDate: sql`c.claim_date DESC, c.created_at DESC`,
+  submittedAt: sql`c.submitted_at DESC NULLS LAST`,
+  approvedAt: sql`c.approved_at DESC NULLS LAST`,
+  updatedAt: sql`c.updated_at DESC`,
+  createdAt: sql`c.created_at DESC`,
+} as const;
 
 /**
  * The list page, the my-claims page and the approvals queue are one query.
@@ -318,7 +332,7 @@ export async function listClaims(tx: Tx, opts: ListClaimsOptions = {}) {
     ${opts.claimType ? sql`AND c.claim_type = ${opts.claimType}::employee_claim_type` : sql``}
     ${opts.partyId ? sql`AND c.party_id = ${opts.partyId}::uuid` : sql``}
     ${opts.userId ? sql`AND c.employee_user_id = ${String(opts.userId)}` : sql``}
-    ${opts.projectId ? sql`AND c.project_id = ${opts.projectId}::uuid` : sql``}
+    ${opts.projectId ? sql`AND c.project_id = ${String(opts.projectId)}` : sql``}
     ${opts.from ? sql`AND c.claim_date >= ${opts.from}::date` : sql``}
     ${opts.to ? sql`AND c.claim_date <= ${opts.to}::date` : sql``}
     ${
@@ -332,7 +346,7 @@ export async function listClaims(tx: Tx, opts: ListClaimsOptions = {}) {
   const [rows, totals] = await Promise.all([
     tx.execute(sql`
       SELECT ${CLAIM_SELECT} ${CLAIM_FROM} ${where}
-       ORDER BY c.claim_date DESC, c.created_at DESC
+       ORDER BY ${ORDER_COLUMNS[opts.orderBy ?? "claimDate"]}
        LIMIT ${limit} OFFSET ${offset}
     `) as unknown as Promise<Array<Record<string, unknown>>>,
     tx.execute(sql`
@@ -387,56 +401,190 @@ export async function getClaimStats(tx: Tx) {
   };
 }
 
-/** How many claims are waiting on somebody — the approvals badge. */
-export async function countClaimsAwaitingApproval(tx: Tx) {
+/**
+ * A count, for a badge or a dashboard strip.
+ *
+ * No `company_id` filter and none is needed — RLS. Every dashboard that used
+ * to count the Mongo collection calls this instead, or it reports zero
+ * forever: the collection is no longer written to. That is the failure the
+ * approvals dashboard already had for leave and loans, and the reason
+ * `countNonconformancesAwaitingAuthorisationPg` exists beside it.
+ */
+export async function countClaims(
+  tx: Tx,
+  opts: {
+    status?: string | string[];
+    claimType?: string | string[];
+    userId?: string;
+    projectId?: string;
+  } = {},
+) {
+  const statuses =
+    typeof opts.status === "string" ? [opts.status] : (opts.status ?? []);
+  const types =
+    typeof opts.claimType === "string"
+      ? [opts.claimType]
+      : (opts.claimType ?? []);
+
   const rows = (await tx.execute(sql`
-    SELECT COUNT(*)::int AS n FROM employee_claims WHERE status = 'submitted'
+    SELECT COUNT(*)::int AS n FROM employee_claims WHERE TRUE
+      ${statuses.length ? sql`AND status = ANY(${statuses}::employee_claim_status[])` : sql``}
+      ${types.length ? sql`AND claim_type = ANY(${types}::employee_claim_type[])` : sql``}
+      ${opts.userId ? sql`AND employee_user_id = ${String(opts.userId)}` : sql``}
+      ${opts.projectId ? sql`AND project_id = ${String(opts.projectId)}` : sql``}
   `)) as unknown as Array<{ n: number }>;
   return rows[0]?.n ?? 0;
 }
 
 /**
- * What a project has spent through claims.
+ * How many claims match, and what they add up to.
  *
- * Projects are still on Mongo, so its financial rollup used to aggregate the
- * Mongo claims collection. It reads this instead — otherwise a project's
- * committed and actual figures go to zero the moment claims move stores.
+ * One query per dashboard tile instead of a `countDocuments` and an
+ * `aggregate` side by side, and the total comes from `employee_claim_state` —
+ * so it is a sum of the receipts rather than of a stored `totalAmount` that
+ * three `validate*` methods were supposed to keep current.
+ */
+export async function sumClaims(
+  tx: Tx,
+  opts: {
+    status?: string | string[];
+    claimType?: string | string[];
+    userId?: string;
+    projectId?: string;
+    /** Only advances that nothing has settled yet. */
+    unsettledOnly?: boolean;
+    approvedSince?: string;
+    rejectedSince?: string;
+    paidSince?: string;
+  } = {},
+) {
+  const statuses =
+    typeof opts.status === "string" ? [opts.status] : (opts.status ?? []);
+  const types =
+    typeof opts.claimType === "string"
+      ? [opts.claimType]
+      : (opts.claimType ?? []);
+
+  const rows = (await tx.execute(sql`
+    SELECT COUNT(*)::int AS n,
+           COALESCE(SUM(s.total_amount), 0)::float8 AS total
+      FROM employee_claims c
+      JOIN employee_claim_state s ON s.claim_id = c.id
+     WHERE TRUE
+      ${statuses.length ? sql`AND c.status = ANY(${statuses}::employee_claim_status[])` : sql``}
+      ${types.length ? sql`AND c.claim_type = ANY(${types}::employee_claim_type[])` : sql``}
+      ${opts.userId ? sql`AND c.employee_user_id = ${String(opts.userId)}` : sql``}
+      ${opts.projectId ? sql`AND c.project_id = ${String(opts.projectId)}` : sql``}
+      ${opts.approvedSince ? sql`AND c.approved_at >= ${opts.approvedSince}::timestamptz` : sql``}
+      ${opts.rejectedSince ? sql`AND c.rejected_at >= ${opts.rejectedSince}::timestamptz` : sql``}
+      ${opts.paidSince ? sql`AND c.paid_at >= ${opts.paidSince}::timestamptz` : sql``}
+      ${
+        opts.unsettledOnly
+          ? sql`AND NOT EXISTS (
+                  SELECT 1 FROM employee_claims st
+                   WHERE st.advance_claim_id = c.id AND st.status <> 'rejected'
+                )`
+          : sql``
+      }
+  `)) as unknown as Array<{ n: number; total: number }>;
+
+  return { count: rows[0]?.n ?? 0, total: rows[0]?.total ?? 0 };
+}
+
+/** How many claims are waiting on somebody — the approvals badge. */
+export async function countClaimsAwaitingApproval(
+  tx: Tx,
+  claimType?: string | string[],
+) {
+  return countClaims(tx, { status: "submitted", claimType });
+}
+
+/**
+ * What a project has cost through claims: spent, and promised.
+ *
+ * Projects are still on Mongo and its rollup used to aggregate the Mongo
+ * claims collection, which nothing writes to any more — so without this every
+ * project's claim spend would read zero.
+ *
+ * Settlements are excluded, as they were in Mongo: an `advance_return` is the
+ * reconciliation of an advance whose cost was already counted when it was
+ * paid, so counting it again would double the project's spend.
+ *
+ * The Mongo version's actuals filter is `status: { $in: ["paid", "settled"] }`
+ * and "settled" is not a status a claim can hold — it is not in the enum. So
+ * that arm never matched. Here the second status is `closed`, which is what a
+ * fully-settled claim actually reaches.
  */
 export async function getProjectClaimTotals(tx: Tx, projectId: string) {
   const rows = (await tx.execute(sql`
     SELECT
       COUNT(*)::int                                                AS claim_count,
       COALESCE(SUM(s.total_amount) FILTER (
-        WHERE c.status IN ('approved', 'paid', 'pending_return', 'pending_payment', 'closed')
-      ), 0)::numeric(19,4)                                         AS committed,
+        WHERE c.status IN ('submitted', 'approved')
+      ), 0)::float8                                                AS committed,
       COALESCE(SUM(s.total_amount) FILTER (
         WHERE c.status IN ('paid', 'closed')
-      ), 0)::numeric(19,4)                                         AS actual
+      ), 0)::float8                                                AS actual
       FROM employee_claims c
       JOIN employee_claim_state s ON s.claim_id = c.id
-     WHERE c.project_id = ${projectId}::uuid
+     WHERE c.project_id = ${String(projectId)}
+       AND c.claim_type <> 'advance_return'
   `)) as unknown as Array<Record<string, unknown>>;
 
   const r = rows[0] ?? {};
   return {
     claimCount: Number(r.claim_count ?? 0),
-    committed: String(r.committed ?? "0"),
-    actual: String(r.actual ?? "0"),
+    committed: Number(r.committed ?? 0),
+    actual: Number(r.actual ?? 0),
   };
 }
 
-/** Global search: claim number, description or employee name. */
+/**
+ * A project's claim spend broken down by expense account.
+ *
+ * The Mongo version `$unwind`s the items array; here the items are rows, so it
+ * is a GROUP BY. Returns `{ _id, total }` per account because that is what the
+ * budget page's reducer reads.
+ */
+export async function getProjectClaimsByAccount(tx: Tx, projectId: string) {
+  const rows = (await tx.execute(sql`
+    SELECT i.expense_account_id::text                       AS account_id,
+           COALESCE(SUM(i.amount) FILTER (
+             WHERE c.status IN ('paid', 'closed')
+           ), 0)::float8                                    AS actual,
+           COALESCE(SUM(i.amount) FILTER (
+             WHERE c.status IN ('submitted', 'approved')
+           ), 0)::float8                                    AS committed
+      FROM employee_claim_items i
+      JOIN employee_claims c ON c.id = i.claim_id
+     WHERE c.project_id = ${String(projectId)}
+       AND c.claim_type <> 'advance_return'
+     GROUP BY i.expense_account_id
+  `)) as unknown as Array<{
+    account_id: string;
+    actual: number;
+    committed: number;
+  }>;
+
+  return {
+    actuals: rows
+      .filter((r) => r.actual !== 0)
+      .map((r) => ({ _id: r.account_id, total: r.actual })),
+    committed: rows
+      .filter((r) => r.committed !== 0)
+      .map((r) => ({ _id: r.account_id, total: r.committed })),
+  };
+}
+
+/**
+ * Global search: claim number, description or employee name.
+ *
+ * Returns the screen shape, because the command palette reads `c._id` and
+ * `c.employee?.name` — it renders these rows straight from the action.
+ */
 export async function searchClaims(tx: Tx, query: string, limit = 5) {
-  const { claims } = await listClaims(tx, { search: query, limit });
-  return claims.map((c) => ({
-    id: c.id,
-    claimNumber: c.claimNumber,
-    description: c.description,
-    employeeName: c.employeeName,
-    status: c.status,
-    totalAmount: c.totalAmount,
-    claimDate: c.claimDate,
-  }));
+  const { claims } = await listClaimsForScreen(tx, { search: query, limit });
+  return claims;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1534,4 +1682,176 @@ export async function payReimbursement(
     .returning();
 
   return { claim: updated, expenseEntry, paymentEntry };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The shape the claims screens read
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A claim, named as the thirteen claim components already read it.
+ *
+ * They address `claim._id`, `claim.employee.name`,
+ * `claim.advanceDetails.travelDates.from` and `claim.returnDetails.balance` —
+ * the Mongo document's shape. The same choice `getBillDetail` made in 0015,
+ * and for the same reason: the alternative is rewriting every screen in the
+ * module in the same commit that moves its data, which is how a port acquires
+ * bugs that have nothing to do with the port.
+ *
+ * The nesting is presentational only. Nothing writes through this shape, and
+ * the derived figures inside it — `totalAmount`, `returnDetails.totalSpent`,
+ * `returnDetails.balance` — come from `employee_claim_state`, not from stored
+ * columns, so they are correct here in a way they were not in Mongo.
+ */
+export function toClaimViewModel(
+  claim: Claim,
+  extras: {
+    items?: Awaited<ReturnType<typeof listClaimItems>>;
+    attachments?: Array<Record<string, unknown>>;
+    settlementClaimId?: string | null;
+  } = {},
+) {
+  const audit = (name: string | null, id?: string | null) =>
+    name ? { name, id: id ?? null } : null;
+
+  return {
+    _id: claim.id,
+    id: claim.id,
+    companyId: claim.companyId,
+    claimNumber: claim.claimNumber,
+    claimDate: claim.claimDate,
+    claimType: claim.claimType,
+    status: claim.status,
+    description: claim.description,
+    notes: claim.notes,
+    currency: claim.currency,
+    totalAmount: Number(claim.totalAmount),
+
+    employee: {
+      partyId: claim.partyId,
+      userId: claim.employeeUserId,
+      name: claim.employeeName,
+      email: claim.employeeEmail,
+      employeeNumber: claim.employeeNumber,
+      department: claim.department,
+    },
+
+    projectId: claim.projectId,
+    project: claim.projectId
+      ? { projectNumber: claim.projectNumber, name: claim.projectName }
+      : null,
+    costCodeId: claim.costCodeId,
+    costCode: claim.costCodeId
+      ? { code: claim.costCodeCode, name: claim.costCodeName }
+      : null,
+
+    advanceDetails: {
+      advanceType: claim.advanceType,
+      requestedAmount:
+        claim.requestedAmount != null ? Number(claim.requestedAmount) : null,
+      purpose: claim.purpose,
+      destination: claim.destination,
+      estimatedExpenses: claim.estimatedExpenses,
+      travelDates: { from: claim.travelFrom, to: claim.travelTo },
+      approvedAmount:
+        claim.approvedAmount != null ? Number(claim.approvedAmount) : null,
+      disbursedAmount:
+        claim.disbursedAmount != null ? Number(claim.disbursedAmount) : null,
+      disbursementDate: claim.disbursementDate,
+    },
+
+    returnDetails: {
+      advanceClaimId: claim.advanceClaimId,
+      advanceAmount:
+        claim.advanceAmount != null ? Number(claim.advanceAmount) : null,
+      totalSpent: claim.totalSpent != null ? Number(claim.totalSpent) : null,
+      balance: claim.balance != null ? Number(claim.balance) : null,
+      balanceOutstanding:
+        claim.balanceOutstanding != null
+          ? Number(claim.balanceOutstanding)
+          : null,
+      amountReturned: Number(claim.amountReturned ?? 0),
+      amountPaidToEmployee: Number(claim.amountPaidToEmployee ?? 0),
+      returnRecordedAt: claim.returnRecordedAt,
+      extraPaidAt: claim.extraPaidAt,
+    },
+
+    /**
+     * Derived by looking for the settlement that points HERE, rather than
+     * stored on both rows. §8.2 — the reverse pointer is the one that can go
+     * out of step, so there isn't one.
+     */
+    settlementClaimId: extras.settlementClaimId ?? null,
+
+    items: (extras.items ?? []).map((i) => ({
+      _id: i.id,
+      date: i.itemDate,
+      category: i.category,
+      expenseAccountId: i.expenseAccountId,
+      accountCode: i.accountCode,
+      accountName: i.accountName,
+      description: i.description,
+      amount: Number(i.amount),
+      notes: i.notes,
+      receipt: i.receiptUrl
+        ? { filename: i.receiptFilename, url: i.receiptUrl }
+        : null,
+    })),
+
+    receipts: (extras.attachments ?? []).map((a) => ({
+      _id: String(a.id),
+      filename: a.filename,
+      url: a.url,
+      size: a.size != null ? Number(a.size) : null,
+      mimeType: a.mimeType,
+      uploadedAt: a.uploadedAt,
+      uploadedBy: audit(
+        (a.uploadedByName as string) ?? null,
+        (a.uploadedById as string) ?? null,
+      ),
+    })),
+
+    submittedAt: claim.submittedAt,
+    submittedBy: audit(claim.submittedByName),
+    approvedAt: claim.approvedAt,
+    approvedBy: audit(claim.approvedByName),
+    rejectedAt: claim.rejectedAt,
+    rejectedBy: audit(claim.rejectedByName),
+    rejectionReason: claim.rejectionReason,
+    paidAt: claim.paidAt,
+    createdAt: claim.createdAt,
+    createdBy: audit(claim.createdByName, claim.createdById),
+
+    // Derived, and not in the Mongo shape: what this claim is waiting on.
+    awaiting: claim.awaiting,
+    itemCount: claim.itemCount,
+  };
+}
+
+/** The list page, already in the shape its rows read. */
+export async function listClaimsForScreen(
+  tx: Tx,
+  opts: ListClaimsOptions = {},
+) {
+  const { claims: rows, total } = await listClaims(tx, opts);
+  return { claims: rows.map((c) => toClaimViewModel(c)), total };
+}
+
+/** The detail page: the claim, its items, its receipts, and its counterpart. */
+export async function getClaimForScreen(tx: Tx, claimId: string) {
+  const detail = await getClaimDetail(tx, claimId);
+  if (!detail) return null;
+
+  return {
+    ...toClaimViewModel(detail, {
+      items: detail.items,
+      attachments: detail.attachments as unknown as Array<
+        Record<string, unknown>
+      >,
+      settlementClaimId: detail.settlement?.id ?? null,
+    }),
+    journalEntries: detail.journalEntries,
+    settlement: detail.settlement ? toClaimViewModel(detail.settlement) : null,
+    advance: detail.advance ? toClaimViewModel(detail.advance) : null,
+  };
 }

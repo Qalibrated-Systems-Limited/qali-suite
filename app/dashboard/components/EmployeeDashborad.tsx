@@ -25,7 +25,7 @@ import {
 } from "@/app/mongodb/queries/erp-dashboard-queries";
 import MyHRStrip from "./MyHRStrip";
 import { MyAlertsStrip, MyAlertsStripSkeleton } from "./MyAlertsStrip";
-import EmployeeClaim from "../../models/employeesClaims";
+import { listClaimsPg } from "@/app/db/actions/claim-actions";
 import { StockRequest } from "../../models/requests";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 
@@ -218,15 +218,11 @@ async function EmployeeStatsCards({ userId }: { userId: string }) {
 // ============================================
 async function MyRecentClaimsCard({ userId }: { userId: string }) {
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const claims = await EmployeeClaim.find(
-    withTenantScope({ "employee.userId": userId }, companyId, isSuperAdmin),
-  )
-    .sort({ createdAt: -1 })
-    .limit(5)
-    .select(
-      "claimNumber claimType status totalAmount createdAt employee.name advanceDetails.destination",
-    )
-    .lean();
+  const { claims } = await listClaimsPg({
+    userId,
+    orderBy: "createdAt",
+    limit: 5,
+  });
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {

@@ -4,7 +4,7 @@ import { canReviewClaims } from "@/lib/permissions";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
-import { fetchClaimPages } from "@/app/mongodb/queries/claimQueries";
+import { fetchClaimPages } from "@/app/db/actions/claim-actions";
 import Pagination from "@/components/pagination";
 import { ClaimsListSkeleton } from "../components/ClaimListWithFilter";
 

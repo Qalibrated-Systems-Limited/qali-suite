@@ -13,7 +13,7 @@ import ApprovalRequest, {
   APPROVER_MATRIX,
 } from "@/app/models/approvalRequest";
 import Bill from "@/app/models/bill";
-import EmployeeClaim from "@/app/models/employeesClaims";
+import { countClaimsAwaitingApprovalPg } from "@/app/db/actions/claim-actions";
 import { countNonconformancesAwaitingAuthorisationPg } from "@/app/db/actions/ncr-actions";
 import Expense from "@/app/models/expenses";
 import { StockRequest } from "@/app/models/requests";
@@ -93,12 +93,11 @@ export const cMyPendingApprovals = cache(async () => {
       tasks.push(countLoansAwaitingApproval());
     }
     if (CLAIM_APPROVER_ROLES.has(role)) {
+      // Postgres since the claims port — the Mongo collection this used to
+      // count is no longer written to, so it would always report zero. Same
+      // as leave, loans and NCRs above.
       tasks.push(
-        EmployeeClaim.countDocuments({
-          ...tenantMatch,
-          status: "submitted",
-          claimType: { $in: ["advance_request", "reimbursement"] },
-        }),
+        countClaimsAwaitingApprovalPg(["advance_request", "reimbursement"]),
       );
     }
     if (NCR_AUTHORIZER_ROLES.has(role)) {

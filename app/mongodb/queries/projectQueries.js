@@ -3,7 +3,11 @@ import Project from "../../models/project";
 import ProjectBudget from "../../models/projectBudget";
 import ProjectCostCode from "../../models/projectCostCode";
 import ProjectAssignment from "../../models/projectAssignment";
-import EmployeeClaim from "../../models/employeesClaims";
+import {
+  getProjectClaimTotalsPg,
+  getProjectClaimsByAccountPg,
+  listClaimsPg,
+} from "@/app/db/actions/claim-actions";
 import Invoice from "../../models/invoice";
 import CreditNote from "../../models/creditNote";
 import Bill from "../../models/bill";
@@ -262,7 +266,7 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
   }).distinct("_id");
 
   const [
-    claimCosts, claimCommitted,
+    claimTotals,
     revenuePipeline,
     creditNotes,
     billCosts, billCommitted,
@@ -271,16 +275,11 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
     invoiceCOGS,
     returnedCOGS,
   ] = await Promise.all([
-    // Paid claims (actual costs) — exclude settlements (advance_return is reconciliation, cost already counted at advance payment)
-    EmployeeClaim.aggregate([
-      { $match: { ...tenantMatch, projectId: pid, claimType: { $ne: "advance_return" }, status: { $in: ["paid", "settled"] } } },
-      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
-    ]),
-    // Committed claims (submitted/approved but not paid) — exclude settlements
-    EmployeeClaim.aggregate([
-      { $match: { ...tenantMatch, projectId: pid, claimType: { $ne: "advance_return" }, status: { $in: ["submitted", "approved"] } } },
-      { $group: { _id: null, total: { $sum: "$totalAmount" } } },
-    ]),
+    // Claims come from Postgres since the port — the Mongo collection is no
+    // longer written to, so aggregating it would zero every project's claim
+    // spend. Settlements stay excluded: an advance_return reconciles an
+    // advance whose cost was counted when it was paid.
+    getProjectClaimTotalsPg(String(pid)),
     // Revenue from invoices
     Invoice.aggregate([
       { $match: { ...tenantMatch, projectId: pid, status: { $in: ["completed", "posted"] } } },
@@ -347,7 +346,7 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
 
   const costs = Math.max(
     0,
-    (claimCosts[0]?.total || 0) +
+    claimTotals.actual +
       (billCosts[0]?.total || 0) +
       (expenseCosts[0]?.total || 0) +
       (invoiceCOGS[0]?.total || 0) -
@@ -356,7 +355,11 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
 
   return {
     costs,
-    committed: (claimCommitted[0]?.total || 0) + (billCommitted[0]?.total || 0) + (expenseCommitted[0]?.total || 0) + (requestCommitted[0]?.total || 0),
+    committed:
+      claimTotals.committed +
+      (billCommitted[0]?.total || 0) +
+      (expenseCommitted[0]?.total || 0) +
+      (requestCommitted[0]?.total || 0),
     revenue,
   };
 };
@@ -386,22 +389,12 @@ export const getProjectBudgetVsActual = async (projectId) => {
 
   // Aggregate actuals and committed from all cost sources per expense account
   const [
-    claimActuals, claimCommitted,
+    claimsByAccount,
     billActuals, billCommitted,
     expenseActuals, expenseCommitted,
   ] = await Promise.all([
-    // Claims — paid (actual) — exclude settlements
-    EmployeeClaim.aggregate([
-      { $match: { ...tenantMatch, projectId: pid, claimType: { $ne: "advance_return" }, status: { $in: ["paid", "settled"] } } },
-      { $unwind: "$items" },
-      { $group: { _id: "$items.expenseAccountId", total: { $sum: "$items.amount" } } },
-    ]),
-    // Claims — committed — exclude settlements
-    EmployeeClaim.aggregate([
-      { $match: { ...tenantMatch, projectId: pid, claimType: { $ne: "advance_return" }, status: { $in: ["submitted", "approved"] } } },
-      { $unwind: "$items" },
-      { $group: { _id: "$items.expenseAccountId", total: { $sum: "$items.amount" } } },
-    ]),
+    // One call for both arms; the $unwind is a GROUP BY now that items are rows.
+    getProjectClaimsByAccountPg(String(projectId)),
     // Bills — paid (actual) per line account
     Bill.aggregate([
       { $match: { ...tenantMatch, projectId: pid, paymentStatus: "paid" } },
@@ -439,11 +432,11 @@ export const getProjectBudgetVsActual = async (projectId) => {
     });
   };
 
-  addToMap(actualMap, claimActuals);
+  addToMap(actualMap, claimsByAccount.actuals);
   addToMap(actualMap, billActuals);
   addToMap(actualMap, expenseActuals);
 
-  addToMap(committedMap, claimCommitted);
+  addToMap(committedMap, claimsByAccount.committed);
   addToMap(committedMap, billCommitted);
   addToMap(committedMap, expenseCommitted);
 
@@ -492,17 +485,8 @@ export const getProjectTransactions = async (projectId, type = "all", limit = 20
   const results = {};
 
   if (type === "all" || type === "claims") {
-    const claims = await EmployeeClaim.find({
-      ...tenantMatch,
-      projectId: pid,
-    })
-      .select(
-        "claimNumber claimType status totalAmount employee.name claimDate description",
-      )
-      .sort({ claimDate: -1 })
-      .limit(limit)
-      .lean();
-    results.claims = serializeBsonType(claims);
+    const { claims } = await listClaimsPg({ projectId: String(projectId), limit });
+    results.claims = claims;
   }
 
   if (type === "all" || type === "invoices") {

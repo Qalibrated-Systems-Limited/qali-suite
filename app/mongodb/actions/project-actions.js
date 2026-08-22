@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
+import { countClaimsPg } from "@/app/db/actions/claim-actions";
 import { redirect } from "next/navigation";
 import mongoose from "mongoose";
 import dbConnect from "../../config/dbConnect";
@@ -534,10 +535,12 @@ export async function deleteProject(projectId) {
       };
     }
 
-    // Check for linked transactions
-    const EmployeeClaim = mongoose.model("EmployeeClaim");
-    const linkedClaims = await EmployeeClaim.countDocuments({
-      projectId: project._id,
+    // Check for linked transactions. Postgres since the claims port — reading
+    // the Mongo collection here would report no linked claims however many
+    // there were, and let the project be deleted out from under them. It also
+    // gains tenant scoping on the way: the Mongo count had none.
+    const linkedClaims = await countClaimsPg({
+      projectId: String(project._id),
     });
 
     if (linkedClaims > 0) {

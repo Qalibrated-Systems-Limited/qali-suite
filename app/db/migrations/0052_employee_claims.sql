@@ -166,10 +166,17 @@ CREATE TABLE "employee_claims" (
 
   -- Projects are not ported (§10) — carried without a foreign key, the way
   -- bills carry purchase_order_id in 0015.
-  "project_id" uuid,
+  --
+  -- text, NOT uuid, and that is the whole point. A project id today is a Mongo
+  -- ObjectId: 24 hex characters, which no uuid column will accept. Typing this
+  -- as uuid would have looked right and then rejected every claim anybody
+  -- linked to a project, at the picker the create form already ships. When
+  -- projects move, this becomes a uuid and gains its foreign key; until then
+  -- the column says what the value actually is.
+  "project_id" text,
   "project_number" text,
   "project_name" text,
-  "cost_code_id" uuid,
+  "cost_code_id" text,
   "cost_code_code" text,
   "cost_code_name" text,
 
@@ -340,7 +347,7 @@ CREATE INDEX "employee_claims_type_idx"
   ON "employee_claims" ("company_id", "claim_type", "status");--> statement-breakpoint
 CREATE INDEX "employee_claims_project_idx"
   ON "employee_claims" ("company_id", "project_id")
-  WHERE "project_id" IS NOT NULL;--> statement-breakpoint
+  WHERE "project_id" IS NOT NULL AND "project_id" <> '';--> statement-breakpoint
 
 CREATE TABLE "employee_claim_items" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,

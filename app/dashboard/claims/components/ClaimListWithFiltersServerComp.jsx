@@ -1,7 +1,7 @@
 import {
   searchClaims,
   searchUserClaims,
-} from "@/app/mongodb/queries/claimQueries";
+} from "@/app/db/actions/claim-actions";
 import { auth } from "@/auth";
 import React from "react";
 import { ClaimsListWithFilters } from "./ClaimListWithFilter";

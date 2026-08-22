@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import {
   getClaimById,
   getExpenseAccountsForCategories,
-} from "@/app/mongodb/queries/claimQueries";
+} from "@/app/db/actions/claim-actions";
 import { AdvanceSettlementForm } from "../../components/AdvanceSettleForm";
 import { serializeBsonType } from "@/lib/utils";
 

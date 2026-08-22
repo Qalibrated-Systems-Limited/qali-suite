@@ -19,7 +19,7 @@ import { listLoansAwaitingApproval } from "@/app/db/actions/hr-loan-actions";
 import { listNonconformancesAwaitingAuthorisationPg } from "@/app/db/actions/ncr-actions";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import Bill from "@/app/models/bill";
-import EmployeeClaim from "@/app/models/employeesClaims";
+import { listClaimsPg } from "@/app/db/actions/claim-actions";
 import Expense from "@/app/models/expenses";
 
 const { ObjectId } = mongoose.Types;
@@ -94,37 +94,32 @@ export async function getPendingLoans(limit = DEFAULT_LIMIT) {
 // `claimType` distinguishes the two so we can render appropriate labels.
 // ============================================
 async function getPendingClaimsByType(claimType, limit) {
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  return EmployeeClaim.find({
-    ...tenantFilter(companyId, isSuperAdmin),
+  // Postgres since the claims port. Reading the Mongo collection here would
+  // report an empty queue however many claims were waiting — which is exactly
+  // what this dashboard already did for leave and loans.
+  //
+  // The amount is also right now. The Mongo version reads
+  // `r.totals?.totalAmount || r.totals?.requestedAmount || ...` and there is
+  // no `totals` field on the claim schema at all, so a REIMBURSEMENT fell all
+  // the way through to `advanceDetails?.requestedAmount`, which a
+  // reimbursement never has, and showed 0.
+  const { claims } = await listClaimsPg({
     status: "submitted",
     claimType,
-  })
-    .select(
-      "claimNumber claimType employee totals submittedAt submittedBy advanceDetails createdAt",
-    )
-    .sort({ submittedAt: -1, createdAt: -1 })
-    .limit(limit)
-    .lean()
-    .then((rows) =>
-      rows.map((r) => ({
-        _id: r._id.toString(),
-        ref: r.claimNumber,
-        title: r.employee?.name || r.submittedBy?.name || "—",
-        amount:
-          r.totals?.totalAmount ||
-          r.totals?.requestedAmount ||
-          r.advanceDetails?.requestedAmount ||
-          0,
-        submittedAt: r.submittedAt || r.createdAt,
-        submittedBy: r.submittedBy?.name || "—",
-        href: `/dashboard/claims/${r._id}`,
-        meta:
-          claimType === "advance_request"
-            ? r.advanceDetails?.advanceType
-            : null,
-      })),
-    );
+    orderBy: "submittedAt",
+    limit,
+  });
+
+  return claims.map((c) => ({
+    _id: c._id,
+    ref: c.claimNumber,
+    title: c.employee?.name || c.submittedBy?.name || "—",
+    amount: c.totalAmount,
+    submittedAt: c.submittedAt || c.createdAt,
+    submittedBy: c.submittedBy?.name || "—",
+    href: `/dashboard/claims/${c._id}`,
+    meta: claimType === "advance_request" ? c.advanceDetails?.advanceType : null,
+  }));
 }
 
 export async function getPendingReimbursements(limit = DEFAULT_LIMIT) {

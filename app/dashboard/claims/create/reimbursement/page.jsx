@@ -1,5 +1,5 @@
 import { ReimbursementForm } from "../../components/ReimbursementForm";
-import { getExpenseAccountsForCategories } from "@/app/mongodb/queries/claimQueries";
+import { getExpenseAccountsForCategories } from "@/app/db/actions/claim-actions";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
 export const metadata = {

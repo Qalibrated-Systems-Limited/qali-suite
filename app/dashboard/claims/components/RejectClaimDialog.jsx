@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { XCircle, Loader2 } from "lucide-react";
-import { rejectEmployeeClaim } from "@/app/mongodb/actions/claim-action";
+import { rejectEmployeeClaimPg as rejectEmployeeClaim } from "@/app/db/actions/claim-actions";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";

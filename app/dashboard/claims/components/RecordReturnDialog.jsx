@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useActionState } from "react";
-import { recordAdvanceReturn } from "../../../mongodb/actions/claim-action";
+import { recordAdvanceReturnPg as recordAdvanceReturn } from "@/app/db/actions/claim-actions";
 import {
   Dialog,
   DialogContent,

@@ -15,7 +15,10 @@ import { cn } from "@/lib/utils";
 
 // Queries
 import { StockRequest } from "../../../models/requests";
-import EmployeeClaim from "../../../models/employeesClaims";
+import {
+  countClaimsAwaitingApprovalPg,
+  listClaimsPg,
+} from "@/app/db/actions/claim-actions";
 
 // Tenant Scoping
 import { getTenantContext } from "@/lib/utils/tenant-utils";
@@ -73,7 +76,9 @@ async function OperationsStats() {
   const [pendingRequests, pendingClaims, todayApproved, todayRejected] =
     await Promise.all([
       StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
-      EmployeeClaim.countDocuments({ ...tenantMatch, status: "submitted" }),
+      // Postgres since the claims port; the Mongo collection is not written
+      // to any more, so this tile would sit permanently at zero.
+      countClaimsAwaitingApprovalPg(),
       StockRequest.countDocuments({
         ...tenantMatch,
         status: "approved",
@@ -326,10 +331,11 @@ async function PendingClaimsCard() {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
-  const claims = await EmployeeClaim.find({ ...tenantMatch, status: "submitted" })
-    .sort({ submittedAt: -1 })
-    .limit(5)
-    .lean();
+  const { claims } = await listClaimsPg({
+    status: "submitted",
+    orderBy: "submittedAt",
+    limit: 5,
+  });
 
   const getTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
@@ -452,10 +458,11 @@ async function RecentActivityCard() {
       .sort({ updatedAt: -1 })
       .limit(3)
       .lean(),
-    EmployeeClaim.find({ ...tenantMatch, status: { $in: ["approved", "rejected", "paid"] } })
-      .sort({ updatedAt: -1 })
-      .limit(3)
-      .lean(),
+    listClaimsPg({
+      status: ["approved", "rejected", "paid"],
+      orderBy: "updatedAt",
+      limit: 3,
+    }).then((r) => r.claims),
   ]);
 
   // Combine and sort

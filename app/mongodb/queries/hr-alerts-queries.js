@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
-import EmployeeClaim from "@/app/models/employeesClaims";
+import { countClaimsAwaitingApprovalPg } from "@/app/db/actions/claim-actions";
 import { getHrAlertCounts } from "@/app/db/actions/hr-employee-actions";
 
 // ============================================
@@ -20,14 +20,12 @@ export const cHRAlerts = cache(async () => {
       ? {}
       : { companyId: new mongoose.Types.ObjectId(companyId) };
 
-    // Leave, contracts and who is away today all come from Postgres. Claims
-    // have not moved yet, so they are still counted here.
+    // Leave, contracts, who is away today — and now claims — all come from
+    // Postgres. Counting the Mongo collection here would report zero, because
+    // nothing writes to it any more.
     const [hr, pendingClaims] = await Promise.all([
       getHrAlertCounts(),
-      EmployeeClaim.countDocuments({
-        ...tenantMatch,
-        status: "submitted",
-      }),
+      countClaimsAwaitingApprovalPg(),
     ]);
     const { pendingLeave, contractsExpiring, onLeaveToday } = hr;
 

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useActionState } from "react";
-import { closeSettlement } from "../../../mongodb/actions/claim-action";
+import { closeSettlementPg as closeSettlement } from "@/app/db/actions/claim-actions";
 import {
   Dialog,
   DialogContent,

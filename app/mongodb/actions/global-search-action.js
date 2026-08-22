@@ -6,7 +6,7 @@ import Invoice from "@/app/models/invoice";
 import Quote from "@/app/models/quote";
 import Bill from "@/app/models/bill";
 import Party from "@/app/models/parties";
-import EmployeeClaim from "@/app/models/employeesClaims";
+import { searchClaimsPg } from "@/app/db/actions/claim-actions";
 import { StockRequest } from "@/app/models/requests";
 import Project from "@/app/models/project";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
@@ -125,23 +125,10 @@ export async function globalSearch(searchTerm) {
         .limit(LIMIT)
         .lean(),
 
-      // Claims: claimNumber + employee.name
-      EmployeeClaim.find(
-        withTenantScope(
-          {
-            $or: [
-              { claimNumber: regex },
-              { "employee.name": regex },
-            ],
-          },
-          companyId,
-          isSuperAdmin
-        )
-      )
-        .select("claimNumber employee.name claimType totalAmount status")
-        .sort({ createdAt: -1 })
-        .limit(LIMIT)
-        .lean(),
+      // Claims: claimNumber, description or employee name. Postgres since the
+      // claims port — searching the Mongo collection would find nothing that
+      // has been raised since.
+      searchClaimsPg(safe, LIMIT),
 
       // Stock Requests: requestNumber + requester.name
       StockRequest.find(

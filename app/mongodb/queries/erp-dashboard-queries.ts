@@ -3,7 +3,10 @@ import Product from "../../models/product";
 import { StockRequest } from "../../models/requests";
 import { ItemCheckout } from "../../models/checkouts";
 import { StockMovement } from "../../models/stockmovement";
-import EmployeeClaim from "../../models/employeesClaims";
+import {
+  countClaimsAwaitingApprovalPg,
+  sumClaimsPg,
+} from "@/app/db/actions/claim-actions";
 import Invoice from "../../models/invoice";
 import Bill from "../../models/bill";
 import JournalEntry from "../../models/JournalEntry";
@@ -224,7 +227,7 @@ export const getKeyMetrics = async () => {
     ),
 
     // Claims Pending
-    EmployeeClaim.countDocuments({ ...tenantMatch, status: "submitted" }),
+    countClaimsAwaitingApprovalPg(),
 
     // Low Stock Items (at or below reorder level)
     Product.aggregate([
@@ -410,7 +413,7 @@ export const getPendingApprovals = async (role: string) => {
   if (role === "Manager" || role === "Admin") {
     [results.stockRequests, results.claims] = await Promise.all([
       StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
-      EmployeeClaim.countDocuments({ ...tenantMatch, status: "submitted" }),
+      countClaimsAwaitingApprovalPg(),
     ]);
   }
 
@@ -444,27 +447,25 @@ export const getManagerWorkload = async () => {
     rejectedClaimsToday,
   ] = await Promise.all([
     StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
-    EmployeeClaim.countDocuments({ ...tenantMatch, status: "submitted" }),
+    countClaimsAwaitingApprovalPg(),
     StockRequest.countDocuments({
       ...tenantMatch,
       status: "approved",
       updatedAt: { $gte: today },
     }),
-    EmployeeClaim.countDocuments({
-      ...tenantMatch,
+    sumClaimsPg({
       status: "approved",
-      approvedAt: { $gte: today },
-    }),
+      approvedSince: today.toISOString(),
+    }).then((r) => r.count),
     StockRequest.countDocuments({
       ...tenantMatch,
       status: "rejected",
       updatedAt: { $gte: today },
     }),
-    EmployeeClaim.countDocuments({
-      ...tenantMatch,
+    sumClaimsPg({
       status: "rejected",
-      rejectedAt: { $gte: today },
-    }),
+      rejectedSince: today.toISOString(),
+    }).then((r) => r.count),
   ]);
 
   return {
@@ -512,21 +513,14 @@ export const getAccountantWorkload = async () => {
           count: invoices.length,
           total: invoices.reduce((sum, inv: any) => sum + inv.amountDue, 0),
         })),
-      EmployeeClaim.find({
-        ...tenantMatch,
-        status: "approved",
-        paidAt: null,
-      })
-        .lean()
-        .then((claims) => ({
-          count: claims.length,
-          total: claims.reduce((sum, claim: any) => sum + claim.totalAmount, 0),
-        })),
-      EmployeeClaim.countDocuments({
-        ...tenantMatch,
+      // `paidAt: null` is redundant now: 'paid' is its own status, so an
+      // approved claim has not been paid. The total is a sum of the receipts
+      // rather than of a stored totalAmount.
+      sumClaimsPg({ status: "approved" }),
+      sumClaimsPg({
         status: "paid",
-        paidAt: { $gte: todayStart },
-      }),
+        paidSince: todayStart.toISOString(),
+      }).then((r) => r.count),
     ]);
 
   return {
@@ -549,40 +543,20 @@ export const getEmployeeFinancialSummary = async (userId: string) => {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const [advancesGiven, reimbursedMTD] = await Promise.all([
-    EmployeeClaim.aggregate([
-      {
-        $match: {
-          ...baseMatch,
-          "employee.userId": userId,
-          claimType: "advance_request",
-          status: "paid",
-          settlementClaimId: null,
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$totalAmount" },
-        },
-      },
-    ]).then((result) => result[0]?.total || 0),
-    EmployeeClaim.aggregate([
-      {
-        $match: {
-          ...baseMatch,
-          "employee.userId": userId,
-          claimType: "reimbursement",
-          status: "paid",
-          paidAt: { $gte: startOfMonth },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$totalAmount" },
-        },
-      },
-    ]).then((result) => result[0]?.total || 0),
+    // `settlementClaimId: null` becomes "nothing points at this advance".
+    // The reverse pointer is gone with the port — see §8.2.
+    sumClaimsPg({
+      userId,
+      claimType: "advance_request",
+      status: "paid",
+      unsettledOnly: true,
+    }).then((r) => r.total),
+    sumClaimsPg({
+      userId,
+      claimType: "reimbursement",
+      status: "paid",
+      paidSince: startOfMonth.toISOString(),
+    }).then((r) => r.total),
   ]);
 
   return {
@@ -1211,7 +1185,7 @@ export async function getDashboardAlerts() {
     ]),
 
     // Pending claims
-    EmployeeClaim.countDocuments({ ...tenantMatch, status: "submitted" }),
+    countClaimsAwaitingApprovalPg(),
 
     // Overdue checkouts
     ItemCheckout.countDocuments({
@@ -1363,39 +1337,21 @@ export async function getEmployeeSummary(userId: string) {
 
   const [pendingClaims, approvedClaims, paidClaims, totalAdvances] =
     await Promise.all([
-      EmployeeClaim.countDocuments({
-        ...tenantMatch,
-        "employee.userId": userId,
-        status: "submitted",
-      }),
-      EmployeeClaim.countDocuments({
-        ...tenantMatch,
-        "employee.userId": userId,
-        status: "approved",
-      }),
-      EmployeeClaim.countDocuments({
-        ...tenantMatch,
-        "employee.userId": userId,
-        status: "paid",
-      }),
-      EmployeeClaim.aggregate([
-        {
-          $match: {
-            ...baseMatch,
-            "employee.userId": userId,
-            claimType: "advance_request",
-            status: { $in: ["approved", "paid"] },
-          },
-        },
-        { $group: { _id: null, total: { $sum: "$totalAmount" } } },
-      ]),
+      sumClaimsPg({ userId, status: "submitted" }).then((r) => r.count),
+      sumClaimsPg({ userId, status: "approved" }).then((r) => r.count),
+      sumClaimsPg({ userId, status: "paid" }).then((r) => r.count),
+      sumClaimsPg({
+        userId,
+        claimType: "advance_request",
+        status: ["approved", "paid"],
+      }).then((r) => r.total),
     ]);
 
   return {
     pendingClaims,
     approvedClaims,
     paidClaims,
-    totalAdvances: totalAdvances[0]?.total || 0,
+    totalAdvances,
   };
 }
 

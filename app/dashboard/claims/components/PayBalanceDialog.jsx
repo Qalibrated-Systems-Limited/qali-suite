@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useActionState } from "react";
-import { paySettlementBalance } from "../../../mongodb/actions/claim-action";
+import { paySettlementBalancePg as paySettlementBalance } from "@/app/db/actions/claim-actions";
 import {
   Dialog,
   DialogContent,

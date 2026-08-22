@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Loader2 } from "lucide-react";
-import { approveEmployeeClaim } from "@/app/mongodb/actions/claim-action";
+import { approveEmployeeClaimPg as approveEmployeeClaim } from "@/app/db/actions/claim-actions";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";

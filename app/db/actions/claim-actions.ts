@@ -645,7 +645,9 @@ export async function paySettlementBalancePg(
 
 export async function listClaimsPg(opts: claims.ListClaimsOptions = {}) {
   try {
-    return await withAuthorizedTenant([], (tx) => claims.listClaims(tx, opts));
+    return await withAuthorizedTenant([], (tx) =>
+      claims.listClaimsForScreen(tx, opts),
+    );
   } catch {
     return { claims: [], total: 0 };
   }
@@ -654,7 +656,7 @@ export async function listClaimsPg(opts: claims.ListClaimsOptions = {}) {
 export async function getClaimDetailPg(claimId: string) {
   try {
     return await withAuthorizedTenant([], (tx) =>
-      claims.getClaimDetail(tx, claimId),
+      claims.getClaimForScreen(tx, claimId),
     );
   } catch {
     return null;
@@ -673,7 +675,7 @@ export async function getClaimStatsPg() {
 export async function listMyClaimsPg(opts: claims.ListClaimsOptions = {}) {
   try {
     return await withAuthorizedTenant([], (tx, { user }) =>
-      claims.listClaims(tx, { ...opts, userId: user.id }),
+      claims.listClaimsForScreen(tx, { ...opts, userId: user.id }),
     );
   } catch {
     return { claims: [], total: 0 };
@@ -681,14 +683,43 @@ export async function listMyClaimsPg(opts: claims.ListClaimsOptions = {}) {
 }
 
 /** The approvals badge and the dashboard strips. */
-export async function countClaimsAwaitingApprovalPg() {
+export async function countClaimsAwaitingApprovalPg(
+  claimType?: string | string[],
+) {
   try {
     return await withAuthorizedTenant([], (tx) =>
-      claims.countClaimsAwaitingApproval(tx),
+      claims.countClaimsAwaitingApproval(tx, claimType),
     );
   } catch {
     return 0;
   }
+}
+
+/** Any count a dashboard needs, without another round trip per tile. */
+export async function countClaimsPg(
+  opts: Parameters<typeof claims.countClaims>[1] = {},
+) {
+  try {
+    return await withAuthorizedTenant([], (tx) => claims.countClaims(tx, opts));
+  } catch {
+    return 0;
+  }
+}
+
+/** How many claims match, and what they add up to. */
+export async function sumClaimsPg(
+  opts: Parameters<typeof claims.sumClaims>[1] = {},
+) {
+  try {
+    return await withAuthorizedTenant([], (tx) => claims.sumClaims(tx, opts));
+  } catch {
+    return { count: 0, total: 0 };
+  }
+}
+
+/** What one person still has in flight — the "my alerts" strip. */
+export async function countMyOpenClaimsPg(userId: string) {
+  return countClaimsPg({ status: ["submitted", "approved"], userId });
 }
 
 /**
@@ -704,7 +735,18 @@ export async function getProjectClaimTotalsPg(projectId: string) {
       claims.getProjectClaimTotals(tx, projectId),
     );
   } catch {
-    return { claimCount: 0, committed: "0", actual: "0" };
+    return { claimCount: 0, committed: 0, actual: 0 };
+  }
+}
+
+/** The budget page's per-account breakdown of a project's claim spend. */
+export async function getProjectClaimsByAccountPg(projectId: string) {
+  try {
+    return await withAuthorizedTenant([], (tx) =>
+      claims.getProjectClaimsByAccount(tx, projectId),
+    );
+  } catch {
+    return { actuals: [], committed: [] };
   }
 }
 
@@ -713,6 +755,225 @@ export async function searchClaimsPg(query: string, limit = 5) {
     return await withAuthorizedTenant([], (tx) =>
       claims.searchClaims(tx, query, limit),
     );
+  } catch {
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The read functions the pages import
+//
+// Same names and same signatures as `app/mongodb/queries/claimQueries.js`, so
+// a page moves to Postgres by changing one import line. Exported from here
+// rather than a query module because these need a session-scoped transaction,
+// and `withAuthorizedTenant` is the door for that.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ITEMS_PER_PAGE = 20;
+
+interface ClaimFilters {
+  status?: string;
+  claimType?: string;
+  userId?: string;
+  userRole?: string;
+}
+
+/**
+ * Employees see their own claims; everybody else sees the company's.
+ *
+ * The Mongo pair got this subtly different from each other — `fetchClaimPages`
+ * scopes on `userRole === "employee" || "user"`, while `searchClaims` scopes on
+ * that OR a truthy `userId`, so the page COUNT and the page CONTENTS could
+ * disagree about whose claims were being listed. One helper, used by both.
+ */
+function scopeFor(filters: ClaimFilters): claims.ListClaimsOptions {
+  const role = (filters.userRole ?? "").toLowerCase();
+  const ownClaimsOnly = role === "employee" || role === "user";
+  return {
+    status: filters.status && filters.status !== "all" ? filters.status : undefined,
+    claimType:
+      filters.claimType && filters.claimType !== "all"
+        ? filters.claimType
+        : undefined,
+    userId: ownClaimsOnly || filters.userId ? filters.userId : undefined,
+  };
+}
+
+export async function fetchClaimPages(searchTerm = "", filters: ClaimFilters = {}) {
+  try {
+    const { total } = await withAuthorizedTenant([], (tx) =>
+      claims.listClaims(tx, {
+        ...scopeFor(filters),
+        search: searchTerm || undefined,
+        limit: 1,
+      }),
+    );
+    return Math.max(Math.ceil(total / ITEMS_PER_PAGE), 1);
+  } catch {
+    return 1;
+  }
+}
+
+export async function searchClaims(
+  searchTerm = "",
+  page = 1,
+  filters: ClaimFilters = {},
+) {
+  try {
+    const { claims: rows } = await withAuthorizedTenant([], (tx) =>
+      claims.listClaimsForScreen(tx, {
+        ...scopeFor(filters),
+        search: searchTerm || undefined,
+        limit: ITEMS_PER_PAGE,
+        offset: (Math.max(page, 1) - 1) * ITEMS_PER_PAGE,
+      }),
+    );
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+export async function getPendingApprovalClaims(searchTerm = "", page = 1) {
+  return searchClaims(searchTerm, page, { status: "submitted" });
+}
+
+export async function getPendingPaymentClaims(searchTerm = "", page = 1) {
+  return searchClaims(searchTerm, page, { status: "approved" });
+}
+
+export async function getUserClaims(userId: string, page = 1, filters: ClaimFilters = {}) {
+  return searchClaims("", page, { ...filters, userId });
+}
+
+export async function searchUserClaims(
+  userId: string,
+  userRole: string,
+  searchTerm = "",
+  page = 1,
+  filters: ClaimFilters = {},
+) {
+  return searchClaims(searchTerm, page, { ...filters, userId, userRole });
+}
+
+export async function fetchUserClaimPages(
+  userId: string,
+  userRole: string,
+  searchTerm = "",
+  filters: ClaimFilters = {},
+) {
+  return fetchClaimPages(searchTerm, { ...filters, userId, userRole });
+}
+
+/** The stats strip, in the shape ClaimStats renders. */
+export async function getClaimStats(userId: string | null = null) {
+  const empty = {
+    total: 0,
+    pending: 0,
+    approved: 0,
+    paid: 0,
+    rejected: 0,
+    totalPendingAmount: 0,
+    totalApprovedAmount: 0,
+    totalPaidAmount: 0,
+  };
+
+  try {
+    return await withAuthorizedTenant([], async (tx) => {
+      const rows = (await tx.execute(sql`
+        SELECT c.status::text AS status,
+               COUNT(*)::int AS n,
+               COALESCE(SUM(s.total_amount), 0)::float8 AS amount
+          FROM employee_claims c
+          JOIN employee_claim_state s ON s.claim_id = c.id
+         ${userId ? sql`WHERE c.employee_user_id = ${String(userId)}` : sql``}
+         GROUP BY c.status
+      `)) as unknown as Array<{ status: string; n: number; amount: number }>;
+
+      const by = Object.fromEntries(rows.map((r) => [r.status, r]));
+      const count = (s: string) => by[s]?.n ?? 0;
+      const amount = (s: string) => by[s]?.amount ?? 0;
+
+      return {
+        total: rows.reduce((sum, r) => sum + r.n, 0),
+        pending: count("submitted"),
+        approved: count("approved"),
+        paid: count("paid"),
+        rejected: count("rejected"),
+        totalPendingAmount: amount("submitted"),
+        totalApprovedAmount: amount("approved"),
+        totalPaidAmount: amount("paid"),
+      };
+    });
+  } catch {
+    return empty;
+  }
+}
+
+export async function getClaimById(claimId: string) {
+  if (!claimId || !/^[0-9a-f-]{36}$/i.test(claimId)) return null;
+  return getClaimDetailPg(claimId);
+}
+
+export async function getClaimsByType(claimType: string, page = 1) {
+  return searchClaims("", page, { claimType });
+}
+
+/**
+ * Advances this person has drawn and not yet settled.
+ *
+ * One query. Mongo runs the list and then a `findOne` PER ROW, matching on
+ * `returnDetails.advancePaymentId` — a field that holds a journal entry id
+ * copied from another field that also holds a journal entry id, in a pair of
+ * columns both declared `ref: "Payment"`. Here the settlement points at its
+ * advance and the absence of one is a LEFT JOIN.
+ */
+export async function getAdvancesNeedingSettlement(userId: string) {
+  try {
+    return await withAuthorizedTenant([], async (tx) => {
+      const rows = (await tx.execute(sql`
+        SELECT a.id
+          FROM employee_claims a
+          LEFT JOIN employee_claims s
+                 ON s.advance_claim_id = a.id AND s.status <> 'rejected'
+         WHERE a.claim_type = 'advance_request'
+           AND a.status = 'paid'
+           AND a.employee_user_id = ${String(userId)}
+           AND s.id IS NULL
+         ORDER BY a.claim_date DESC
+      `)) as unknown as Array<{ id: string }>;
+
+      const found = await Promise.all(
+        rows.map((r) => claims.getClaim(tx, r.id)),
+      );
+      return found
+        .filter((c): c is NonNullable<typeof c> => c != null)
+        .map((c) => claims.toClaimViewModel(c));
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** The expense accounts a claim line may be charged to. */
+export async function getExpenseAccountsForCategories() {
+  try {
+    return await withAuthorizedTenant([], async (tx) => {
+      const rows = (await tx.execute(sql`
+        SELECT id, account_code, account_name, sub_type
+          FROM accounts
+         WHERE account_type = 'expense' AND can_post = true AND is_active = true
+         ORDER BY account_code
+      `)) as unknown as Array<Record<string, string>>;
+
+      return rows.map((r) => ({
+        _id: r.id,
+        id: r.id,
+        accountCode: r.account_code,
+        accountName: r.account_name,
+        subType: r.sub_type,
+      }));
+    });
   } catch {
     return [];
   }

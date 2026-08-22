@@ -8,7 +8,7 @@ import {
   getProjectById,
   getProjectBudgets,
 } from "@/app/mongodb/queries/projectQueries";
-import { getExpenseAccountsForCategories } from "@/app/mongodb/queries/claimQueries";
+import { getExpenseAccountsForCategories } from "@/app/db/actions/claim-actions";
 import {
   PROJECT_MANAGE_ROLES,
   FINANCE_WRITE_ROLES,

@@ -1604,11 +1604,178 @@ to a store the party screens do not read.
 
 ---
 
+## 9H. Claims — the largest of the six, and the advance nobody could draw twice
+
+Migration 0052. The biggest of the modules posting into the wrong ledger:
+seven `JournalEntry.post()` calls, six of them reachable, against a module of
+3,448 action lines, 8 screens and 13 components.
+
+### The six postings
+
+Every one of them was created, validated and posted into a ledger no screen
+reads.
+
+| | | |
+|---|---|---|
+| `payAdvance` | DR Employee Advance | CR Bank |
+| `closeSettlement` | DR Expense accounts | CR Employee Advance (+ Payables if overspent) |
+| `recordAdvanceReturn` | DR Bank | CR Employee Advance |
+| `paySettlementBalance` | DR Employee Payables | CR Bank |
+| `payReimbursement` #1 | DR Expense accounts | CR Employee Payables |
+| `payReimbursement` #2 | DR Employee Payables | CR Bank |
+
+The seventh is inside `closeSettlementt` — three t's, 573 lines, nothing
+imports it, `CloseSettlementDialog` binds `closeSettlement`. It was not ported:
+a duplicate of a money path kept alive by a typo is worth less than the
+confusion it causes.
+
+### The bug that only appears when you read two rules together
+
+`createAdvanceRequest` refuses a new advance while the employee has one that is
+not `rejected` or `closed` — "unsettled advances are company assets and must
+not pile up", which is a sound rule.
+
+Nothing in the module ever moves an advance out of `paid`. `closeSettlement`
+closes the SETTLEMENT and leaves its parent where it was; every other
+assignment to `advanceClaim.` is a read except `settlementClaimId` and
+`lastModifiedBy`.
+
+**So the first advance an employee takes is the last one they can ever take.**
+Neither half is wrong on its own, which is why it survived: you have to read
+`createAdvanceRequest` and `closeSettlement` together to see it, and they are
+1,600 lines apart.
+
+The rule is kept, as a partial unique index. What makes it livable is
+`closeParentAdvance`: an advance closes when its settlement closes, which is
+why `paid → closed` exists in the status machine. Settle your advance and you
+may draw another.
+
+### The crash waiting on an unaccounted receipt
+
+Both journal builders group items with
+
+```js
+const key = item.expenseAccountId?.toString() || item.category;
+```
+
+and then look each group up in the map `resolveExpenseAccounts` built — which
+only ever keys by **account id**, because it skips items that have none. So an
+item saved without an expense account produces a key that is a category name,
+`expenseAccountMap[category]` is `undefined`, and `account._id` throws
+TypeError partway through posting. The claim is approved, the payment is
+half-made, and nothing reaches the ledger.
+
+The item schema says `expenseAccountId` is required; the action then writes
+`item.expenseAccountId || null` and the database accepts it. `expense_account_id`
+is `NOT NULL` with a foreign key now, so the failure happens at the form, where
+somebody can still fix it.
+
+### Invariants pushed into the schema
+
+- **An advance is settled once.** The Mongo schema carries this as a comment on
+  `settlementClaimId` — "Prevents double settlement" — and nothing enforced it.
+  The duplicate check is a read-then-write two concurrent callers both pass;
+  each would then credit Employee Advance in full. Now a partial unique index,
+  excluding rejected settlements exactly as that check intended.
+- **One entry per purpose per claim.** `journalEntryIds` was an unconstrained
+  array, so a second `payAdvance` appended a second DR Employee Advance behind
+  a `status !== "approved"` read — §8.3's shape again.
+- **Totals are derived.** `totalAmount`, `returnDetails.totalSpent` and
+  `returnDetails.balance` were stored, recomputed by three `validate*` methods
+  that ran from `submit()` and `approve()` and nowhere else. They are columns
+  of `employee_claim_state` (§4.4).
+- **Items freeze at approval**, so a late edit cannot change what the ledger was
+  told. `updateClaim` guards this at one call site of several.
+- **Neither side of a settlement may be overpaid.** `recordAdvanceReturn` and
+  `paySettlementBalance` each check the SIGN of the balance and neither checks
+  the amount against it, so a typo returns more than was ever advanced and
+  Employee Advance goes credit.
+- **A rejection has to say why** — ten characters, as the action required.
+- **The status machine** replaces six guards in six functions, any seventh
+  writer having skipped all of them.
+
+### Identity, again
+
+`employee.{userId, partyId, name, employeeNumber, department, email}` — six
+fields, four of them copies. `getEmployeeHRSnapshot` already read Postgres for
+the last two, so they were never a historical snapshot, only a stale copy of
+current HR refreshed whenever a claim happened to be written.
+
+`party_id` is required and `employee_id` is nullable, because
+`getEmployeeSnapshotByParty` says the rule outright: "a claim raised by
+somebody with no HR record is still a claim." Name, email, number and
+department are joined. §9F's correction, applied to the module that had the
+same fault.
+
+### Deliberate behaviour changes
+
+- **A settled advance closes**, rather than sitting on `paid` inside the
+  outstanding-advances figure forever. See above for what this unblocks.
+- **`advance_payment_id` is left NULL.** `payAdvance` assigns
+  `claim.advancePaymentId = journalEntry[0]._id` — a journal entry id, into a
+  field Mongo declares `ref: "Payment"` — and `settleAdvance` copies it onward
+  as though it were one. Neither path creates a payment document. Which entry
+  funded the advance is `employee_claim_journal_entries.purpose = 'advance'`.
+- **`project_id` is `text`, not `uuid`.** A project id is a Mongo ObjectId
+  today — 24 hex characters — because projects are not ported. Typing the
+  column as `uuid` would have looked right and rejected every claim anybody
+  linked through the project picker the create form already ships.
+- **Reimbursement amounts appear in the approvals queue.** It read
+  `r.totals?.totalAmount || r.totals?.requestedAmount ||
+  r.advanceDetails?.requestedAmount || 0`, and there is no `totals` field on
+  the claim schema at all — so a reimbursement fell through to a field only an
+  advance has, and showed 0.
+- **The page count and the page contents now agree about whose claims they
+  are.** `fetchClaimPages` scopes to the caller on `userRole`; `searchClaims`
+  scopes on `userRole` OR a truthy `userId`. One helper serves both.
+
+### What was NOT changed
+
+**A manager may still approve a claim they submitted themselves.** 0051 pushed
+three-hands separation into nonconformance and the same argument applies here,
+but claims are raised in one-person tenants where the admin is also the
+claimant. Making it a constraint would break a live flow to fix a control
+weakness nobody has reported. Recorded, not done.
+
+### The seams — which were most of the work
+
+Claims is read from eleven places outside its own screens, and every one of
+them would have reported zero: the collection is no longer written to. This is
+the failure the approvals dashboard already had for leave and loans.
+
+| Reader | What it would have shown |
+|---|---|
+| `approval-queries` | an empty approvals queue |
+| `pending-approvals-queries` | no claims waiting, ever |
+| `hr-alerts-queries` | no pending claims |
+| `MyAlertsStrip` | every employee a clean slate |
+| `AccountantDashboard` | nothing to pay |
+| `FinanceTab`, `OperationlTabs` | empty cards, zero counters |
+| `EmployeeDashborad` | no recent claims |
+| `erp-dashboard-queries` (12 sites) | zeroes across every role's dashboard |
+| `global-search` | claims unfindable |
+| `projectQueries` | every project's claim spend at zero |
+| `project-actions` | **a project with claims deletable** |
+
+The last one is not a display bug. It is a delete guard reading a store the
+thing it guards no longer lives in — and it was unscoped as well, so it counted
+across tenants.
+
+### After claims
+
+In descending order of what is still lost to the wrong ledger: **fixed assets**
+(depreciation, and the rollforward report already reads Postgres), **the
+weighbridge** (a whole vertical, and the only one whose entry has its
+counterparty already in Postgres — take the coffee co-op connector with it),
+then **petty cash** (330 lines, and could fold into either).
+
+---
+
 ## 10. Explicitly out of scope
 
 - Redesigning the posting engine, fiscal periods, or COGS logic beyond the
   corrections in §8
 - Restructuring modules beyond moving DB access behind repositories
-- Migrating the remaining models (claims, projects, assets, integrations, tax,
+- Migrating the remaining models (projects, assets, integrations, tax,
   banking, KPIs and the rest — see the table in BUILDING-ON-POSTGRES.md)
 - `jeff-biz` — that branch stays on MongoDB

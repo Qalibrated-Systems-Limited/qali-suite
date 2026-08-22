@@ -24,7 +24,7 @@ import {
   getDashboardAlerts,
 } from "@/app/mongodb/queries/erp-dashboard-queries";
 import Invoice from "../../../models/invoice";
-import EmployeeClaim from "../../../models/employeesClaims";
+import { listClaimsPg } from "@/app/db/actions/claim-actions";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import mongoose from "mongoose";
 
@@ -348,13 +348,11 @@ async function PendingClaimsCard() {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
 
-  const claims = await EmployeeClaim.find({
-    ...tenantMatch,
-    status: { $in: ["submitted", "approved"] },
-  })
-    .sort({ submittedAt: -1 })
-    .limit(4)
-    .lean();
+  const { claims } = await listClaimsPg({
+    status: ["submitted", "approved"],
+    orderBy: "submittedAt",
+    limit: 4,
+  });
 
   const getTypeLabel = (type: string) => {
     const labels: Record<string, string> = {

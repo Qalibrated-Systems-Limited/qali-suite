@@ -24,7 +24,7 @@ import {
   Info,
 } from "lucide-react";
 import Link from "next/link";
-import { settleAdvance } from "../../../mongodb/actions/claim-action";
+import { settleAdvancePg as settleAdvance } from "@/app/db/actions/claim-actions";
 import { toast } from "sonner";
 import { FileUpload } from "@/components/file-upload";
 import { format, isAfter, isBefore, parseISO } from "date-fns";
