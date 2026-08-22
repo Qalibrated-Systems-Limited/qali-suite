@@ -88,6 +88,8 @@ export const sourceDocumentTypeEnum = pgEnum("source_document_type", [
   "nonconformance",
   /** 0052 — an advance, its settlement, or a reimbursement. */
   "employee_claim",
+  /** 0056 — depreciation, impairment or disposal of a registered asset. */
+  "fixed_asset",
 ]);
 
 // ── Invoices slice ───────────────────────────────────────────────────────────
@@ -460,3 +462,75 @@ export const employeeClaimStatusEnum = pgEnum("employee_claim_status", [
   "pending_payment",
   "closed",
 ]);
+
+// ── Fixed assets (0056) ──────────────────────────────────────────────────────
+
+/**
+ * Property, plant and equipment, in roughly IFRS balance-sheet order:
+ * long-life tangibles first, then movable, then short-life.
+ */
+export const assetCategoryEnum = pgEnum("asset_category", [
+  "land",
+  "building",
+  /** Tenant improvements, amortised over the lease term. */
+  "leasehold_improvement",
+  "vehicle",
+  "machinery",
+  "office_equipment",
+  "computer",
+  "furniture",
+  "equipment",
+  "other",
+]);
+
+export const assetStatusEnum = pgEnum("asset_status", [
+  "active",
+  "idle",
+  "in_maintenance",
+  "disposed",
+  "written_off",
+]);
+
+/** `none` is what land uses — it does not depreciate. */
+export const depreciationMethodEnum = pgEnum("depreciation_method", [
+  "straight_line",
+  "reducing_balance",
+  "none",
+]);
+
+/**
+ * The first-period convention. `full_month` charges a whole month however late
+ * in it the asset arrived; `pro_rata` charges the days it was actually held and
+ * bleeds the remainder into an extra final month.
+ */
+export const depreciationConventionEnum = pgEnum("depreciation_convention", [
+  "full_month",
+  "pro_rata",
+]);
+
+export const depreciationPeriodStatusEnum = pgEnum(
+  "depreciation_period_status",
+  ["pending", "posted", "skipped"],
+);
+
+export const disposalMethodEnum = pgEnum("disposal_method", [
+  "sold",
+  "scrapped",
+  "donated",
+  "lost",
+  "stolen",
+]);
+
+/**
+ * KRA wear-and-tear classes. I 37.5% (heavy machinery), II 30% (computers),
+ * III 25% (commercial vehicles), IV 12.5% (furniture and the rest).
+ */
+export const kraClassEnum = pgEnum("kra_class", [
+  "class_I",
+  "class_II",
+  "class_III",
+  "class_IV",
+  "none",
+]);
+
+export const usageUnitEnum = pgEnum("usage_unit", ["km", "miles", "hours"]);
