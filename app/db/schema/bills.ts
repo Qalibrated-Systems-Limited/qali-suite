@@ -167,7 +167,12 @@ export const bills = pgTable(
      */
     purchaseOrderId: uuid("purchase_order_id"),
     purchaseOrderNumberAtBill: text("purchase_order_number_at_bill"),
-    projectId: uuid("project_id"),
+    /**
+     * text, not uuid — 0053. Projects are not ported, so this holds a Mongo
+     * ObjectId, and a uuid column rejected every bill the project picker
+     * touched. Becomes a uuid with a foreign key when projects move.
+     */
+    projectId: text("project_id"),
     projectNumberAtBill: text("project_number_at_bill"),
     projectNameAtBill: text("project_name_at_bill"),
     costCodeId: uuid("cost_code_id"),
@@ -302,11 +307,15 @@ export const billLines = pgTable(
     /** Deferred references — see the note on bills.purchase_order_id. */
     purchaseOrderId: uuid("purchase_order_id"),
     purchaseOrderLineNumber: integer("purchase_order_line_number"),
-    assetId: uuid("asset_id"),
+    /** text, not uuid — 0053, same reason as bills.project_id. */
+    assetId: text("asset_id"),
     assetNumberAtBill: text("asset_number_at_bill"),
     assetNameAtBill: text("asset_name_at_bill"),
-    /** Set once this asset line has been capitalised; blocks doing it twice. */
-    capitalizedAssetId: uuid("capitalized_asset_id"),
+    /**
+     * Set once this asset line has been capitalised; blocks doing it twice.
+     * text — it holds whatever id the asset store issues (0053).
+     */
+    capitalizedAssetId: text("capitalized_asset_id"),
 
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
