@@ -442,8 +442,11 @@ CREATE INDEX "asset_journal_entries_entry_idx"
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION asset_depreciation_row_immutable() RETURNS trigger AS $$
 BEGIN
+  -- COALESCE, not NEW. In a BEFORE DELETE trigger NEW is NULL, and returning
+  -- NULL cancels the row silently — which made every schedule rebuild a no-op
+  -- and then collided on the unique index. The tests caught it.
   IF OLD.status <> 'posted' THEN
-    RETURN NEW;
+    RETURN COALESCE(NEW, OLD);
   END IF;
 
   IF TG_OP = 'DELETE' THEN

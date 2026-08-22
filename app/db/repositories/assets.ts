@@ -784,3 +784,605 @@ export async function postDepreciationForAsset(
 
   return { entry, amount };
 }
+
+export interface ImpairmentAccounts {
+  impairmentLossAccountId: string;
+  accumulatedDepreciationAccountId: string;
+}
+
+/**
+ * Writes an asset down, and revises what is left of its schedule.
+ *
+ *   DR Impairment Loss           (an expense)
+ *   CR Accumulated Depreciation
+ *
+ * The remaining months are re-spread over the same horizon — IFRS revised
+ * carrying amount, `asset.js:508`. Posted months are untouched, which was a
+ * filter in JavaScript and is a trigger here.
+ */
+export async function impairAsset(
+  tx: Tx,
+  assetId: string,
+  input: {
+    amount: MoneyString;
+    reason: string;
+    impairedAt?: string | null;
+    accounts: ImpairmentAccounts;
+    by: { id?: string | null; name?: string | null };
+  },
+) {
+  const asset = await getAsset(tx, assetId);
+  if (!asset) throw new Error("Asset not found");
+  if (asset.status === "disposed" || asset.status === "written_off") {
+    throw new Error(
+      `Asset ${asset.assetNumber} is ${asset.status}, so it cannot be impaired.`,
+    );
+  }
+
+  const amount = Number(input.amount);
+  if (amount <= 0) throw new Error("An impairment must be more than nothing.");
+  if (amount > asset.bookValue - asset.salvageValue) {
+    throw new Error(
+      `An impairment of ${amount} would take ${asset.assetNumber} below its salvage value. Its book value is ${asset.bookValue}.`,
+    );
+  }
+
+  const impairedAt = input.impairedAt
+    ? new Date(input.impairedAt)
+    : new Date();
+  const description = `Impairment — ${asset.name} (${asset.assetNumber})`;
+
+  const entry = await createJournalEntry(tx, {
+    companyId: asset.companyId,
+    entryDate: impairedAt.toISOString().slice(0, 10),
+    entryType: "impairment",
+    description,
+    reference: asset.assetNumber,
+    sourceType: "fixed_asset",
+    sourceId: asset.id,
+    lines: [
+      {
+        accountId: input.accounts.impairmentLossAccountId,
+        debit: input.amount,
+        description,
+      },
+      {
+        accountId: input.accounts.accumulatedDepreciationAccountId,
+        credit: input.amount,
+        description,
+      },
+    ],
+    createdById: input.by.id ?? null,
+    postImmediately: true,
+  });
+
+  await tx.insert(assetImpairments).values({
+    companyId: asset.companyId,
+    assetId: asset.id,
+    impairedAt,
+    amount: input.amount,
+    reason: input.reason,
+    journalEntryId: entry.id,
+    impairedById: input.by.id ?? null,
+    impairedByName: input.by.name ?? null,
+  });
+
+  await linkEntry(tx, {
+    companyId: asset.companyId,
+    assetId: asset.id,
+    journalEntryId: entry.id,
+    purpose: "impairment",
+  });
+
+  // Re-spread what is left. Read AFTER the impairment row lands so the new
+  // book value is the derived one, not one computed here.
+  const pending = (await tx.execute(sql`
+    SELECT id FROM asset_depreciation_schedule
+     WHERE asset_id = ${assetId}::uuid AND status = 'pending'
+     ORDER BY year, month
+  `)) as unknown as Array<{ id: string }>;
+
+  const after = await getAsset(tx, assetId);
+  const revised = reviseSchedule({
+    pendingCount: pending.length,
+    bookValue: after!.bookValue,
+    salvageValue: after!.salvageValue,
+    accumulatedDepreciation: after!.accumulatedDepreciation,
+    depreciationMethod: after!.depreciationMethod as ScheduleInput["depreciationMethod"],
+    depreciationRate: after!.depreciationRate,
+  });
+
+  for (let i = 0; i < pending.length; i++) {
+    const r = revised[i];
+    await tx.execute(sql`
+      UPDATE asset_depreciation_schedule
+         SET depreciation_amount = ${r.depreciationAmount}::numeric,
+             accumulated_depreciation = ${r.accumulatedDepreciation}::numeric,
+             book_value = ${r.bookValue}::numeric,
+             status = ${r.skip ? "skipped" : "pending"}::depreciation_period_status
+       WHERE id = ${pending[i].id}::uuid
+    `);
+  }
+
+  return { entry, asset: await getAsset(tx, assetId) };
+}
+
+export interface DisposalAccounts {
+  assetAccountId: string;
+  accumulatedDepreciationAccountId: string;
+  bankAccountId?: string | null;
+  gainAccountId?: string | null;
+  lossAccountId?: string | null;
+}
+
+/**
+ * Retires an asset and clears it off the balance sheet.
+ *
+ *   DR Bank                      proceeds, where it was sold for something
+ *   DR Accumulated Depreciation  the balance built up against it
+ *   DR Loss on disposal          where the proceeds fell short of book value
+ *   CR Fixed Asset               the original cost, in full
+ *   CR Gain on disposal          where they exceeded it
+ *
+ * The gain or loss is proceeds less book value, and book value is derived —
+ * so a disposal cannot be computed against depreciation the ledger never saw.
+ * `asset_journal_entries_disposal_once` makes a second disposal impossible;
+ * in Mongo the entry ids were an unconstrained array and a repeat would have
+ * credited the asset cost twice.
+ */
+export async function disposeAsset(
+  tx: Tx,
+  assetId: string,
+  input: {
+    disposalMethod: "sold" | "scrapped" | "donated" | "lost" | "stolen";
+    disposalAmount?: MoneyString;
+    disposalDate?: string | null;
+    notes?: string | null;
+    accounts: DisposalAccounts;
+    by: { id?: string | null; name?: string | null };
+  },
+) {
+  const asset = await getAsset(tx, assetId);
+  if (!asset) throw new Error("Asset not found");
+  if (asset.status === "disposed" || asset.status === "written_off") {
+    throw new Error(`Asset ${asset.assetNumber} has already been disposed of.`);
+  }
+
+  const proceeds =
+    input.disposalMethod === "sold" ? Number(input.disposalAmount ?? 0) : 0;
+  const cost = asset.acquisitionCost;
+  const accumDep = asset.accumulatedDepreciation;
+  const bookValue = asset.bookValue;
+  const gainOrLoss = proceeds - bookValue;
+
+  const disposalDate = input.disposalDate
+    ? new Date(input.disposalDate)
+    : new Date();
+  const refLabel = `${asset.name} (${asset.assetNumber})`;
+
+  const lines: Array<{
+    accountId: string;
+    debit?: string;
+    credit?: string;
+    description: string;
+  }> = [];
+
+  if (proceeds > 0) {
+    if (!input.accounts.bankAccountId) {
+      throw new Error(
+        "A sale needs the account the proceeds were received into.",
+      );
+    }
+    lines.push({
+      accountId: input.accounts.bankAccountId,
+      debit: proceeds.toFixed(4),
+      description: `Proceeds from disposal — ${refLabel}`,
+    });
+  }
+  if (accumDep > 0) {
+    lines.push({
+      accountId: input.accounts.accumulatedDepreciationAccountId,
+      debit: accumDep.toFixed(4),
+      description: `Remove accumulated depreciation — ${refLabel}`,
+    });
+  }
+  if (gainOrLoss < 0) {
+    if (!input.accounts.lossAccountId) {
+      throw new Error("A disposal at a loss needs a loss-on-disposal account.");
+    }
+    lines.push({
+      accountId: input.accounts.lossAccountId,
+      debit: Math.abs(gainOrLoss).toFixed(4),
+      description: `Loss on disposal — ${refLabel}`,
+    });
+  }
+  if (cost > 0) {
+    lines.push({
+      accountId: input.accounts.assetAccountId,
+      credit: cost.toFixed(4),
+      description: `Dispose fixed asset cost — ${refLabel}`,
+    });
+  }
+  if (gainOrLoss > 0) {
+    if (!input.accounts.gainAccountId) {
+      throw new Error("A disposal at a gain needs a gain-on-disposal account.");
+    }
+    lines.push({
+      accountId: input.accounts.gainAccountId,
+      credit: gainOrLoss.toFixed(4),
+      description: `Gain on disposal — ${refLabel}`,
+    });
+  }
+
+  if (lines.length < 2) {
+    throw new Error(
+      "There is nothing to post for this disposal — the asset has no cost, no depreciation and no proceeds.",
+    );
+  }
+
+  const entry = await createJournalEntry(tx, {
+    companyId: asset.companyId,
+    entryDate: disposalDate.toISOString().slice(0, 10),
+    entryType: "asset_disposal",
+    description: `Asset disposal — ${refLabel} — ${input.disposalMethod}`,
+    reference: asset.assetNumber,
+    sourceType: "fixed_asset",
+    sourceId: asset.id,
+    lines,
+    createdById: input.by.id ?? null,
+    postImmediately: true,
+  });
+
+  await linkEntry(tx, {
+    companyId: asset.companyId,
+    assetId: asset.id,
+    journalEntryId: entry.id,
+    purpose: "disposal",
+  });
+
+  // Months after the disposal will never be charged; say so rather than
+  // leaving them pending for a month-end run to trip over.
+  await tx.execute(sql`
+    UPDATE asset_depreciation_schedule
+       SET status = 'skipped'
+     WHERE asset_id = ${assetId}::uuid AND status = 'pending'
+  `);
+
+  const [updated] = await tx
+    .update(assets)
+    .set({
+      status: "disposed",
+      disposedAt: disposalDate,
+      disposedById: input.by.id ?? null,
+      disposedByName: input.by.name ?? null,
+      disposalMethod: input.disposalMethod,
+      disposalAmount: proceeds.toFixed(4),
+      disposalNotes: input.notes ?? null,
+      updatedAt: new Date(),
+    })
+    .where(eq(assets.id, assetId))
+    .returning();
+
+  return { asset: updated, entry, gainOrLoss, bookValue, accumDep };
+}
+
+/** Location, department or custodian change. Append-only history. */
+export async function transferAsset(
+  tx: Tx,
+  assetId: string,
+  input: {
+    toLocation?: string | null;
+    toDepartment?: string | null;
+    toAssignedToName?: string | null;
+    toAssignedToPartyId?: string | null;
+    transferredAt?: string | null;
+    reason?: string | null;
+    by: { id?: string | null; name?: string | null };
+  },
+) {
+  const asset = await getAsset(tx, assetId);
+  if (!asset) throw new Error("Asset not found");
+
+  await tx.insert(assetTransfers).values({
+    companyId: asset.companyId,
+    assetId,
+    transferredAt: input.transferredAt
+      ? new Date(input.transferredAt)
+      : new Date(),
+    fromLocation: asset.location,
+    toLocation: input.toLocation ?? asset.location,
+    fromDepartment: asset.department,
+    toDepartment: input.toDepartment ?? asset.department,
+    fromAssignedToName: asset.assignedToName,
+    toAssignedToName: input.toAssignedToName ?? asset.assignedToName,
+    reason: input.reason ?? null,
+    transferredById: input.by.id ?? null,
+    transferredByName: input.by.name ?? null,
+  });
+
+  const [updated] = await tx
+    .update(assets)
+    .set({
+      location: input.toLocation ?? asset.location,
+      department: input.toDepartment ?? asset.department,
+      assignedToPartyId:
+        input.toAssignedToPartyId !== undefined
+          ? input.toAssignedToPartyId
+          : asset.assignedToPartyId,
+      updatedAt: new Date(),
+    })
+    .where(eq(assets.id, assetId))
+    .returning();
+
+  return updated;
+}
+
+/** An odometer or hours-meter reading. `current_usage` is derived from these. */
+export async function recordUsageReading(
+  tx: Tx,
+  assetId: string,
+  input: {
+    reading: MoneyString;
+    recordedAt?: string | null;
+    source?: string | null;
+    sourceKind?: string | null;
+    sourceRefId?: string | null;
+    notes?: string | null;
+    by: { id?: string | null; name?: string | null };
+  },
+) {
+  const asset = await getAsset(tx, assetId);
+  if (!asset) throw new Error("Asset not found");
+
+  const [row] = await tx
+    .insert(assetUsageReadings)
+    .values({
+      companyId: asset.companyId,
+      assetId,
+      recordedAt: input.recordedAt ? new Date(input.recordedAt) : new Date(),
+      reading: input.reading,
+      unit: asset.usageUnit as never,
+      source: input.source ?? "manual",
+      sourceKind: input.sourceKind ?? null,
+      sourceRefId: input.sourceRefId ?? null,
+      notes: input.notes ?? null,
+      recordedById: input.by.id ?? null,
+      recordedByName: input.by.name ?? null,
+    })
+    .returning();
+
+  return row;
+}
+
+export interface UpdateAssetInput {
+  name?: string;
+  description?: string | null;
+  category?: string;
+  status?: string;
+  serialNumber?: string | null;
+  model?: string | null;
+  manufacturer?: string | null;
+  registrationNumber?: string | null;
+  location?: string | null;
+  department?: string | null;
+  assignedToPartyId?: string | null;
+  notes?: string | null;
+  photoUrl?: string | null;
+  kraClass?: string;
+  assetAccountId?: string | null;
+  accumulatedDepreciationAccountId?: string | null;
+  depreciationExpenseAccountId?: string | null;
+  insuranceProvider?: string | null;
+  insurancePolicyNumber?: string | null;
+  insuranceExpiryDate?: string | null;
+  insurancePremium?: MoneyString | null;
+  inspectionLastDate?: string | null;
+  inspectionNextDueDate?: string | null;
+  /** Changing any of these re-lays the schedule — only while nothing is posted. */
+  acquisitionCost?: MoneyString;
+  salvageValue?: MoneyString;
+  usefulLifeMonths?: number;
+  depreciationMethod?: "straight_line" | "reducing_balance" | "none";
+  depreciationRate?: MoneyString;
+  depreciationStartDate?: string;
+  depreciationConvention?: "full_month" | "pro_rata";
+  lastModifiedById?: string | null;
+  lastModifiedByName?: string | null;
+}
+
+/** Fields that change what the schedule looks like. */
+const SCHEDULE_FIELDS = [
+  "acquisitionCost",
+  "salvageValue",
+  "usefulLifeMonths",
+  "depreciationMethod",
+  "depreciationRate",
+  "depreciationStartDate",
+  "depreciationConvention",
+] as const;
+
+export async function updateAsset(
+  tx: Tx,
+  assetId: string,
+  input: UpdateAssetInput,
+) {
+  const existing = await getAsset(tx, assetId);
+  if (!existing) throw new Error("Asset not found");
+
+  const touchesSchedule = SCHEDULE_FIELDS.some(
+    (f) => input[f] !== undefined,
+  );
+  if (touchesSchedule && existing.periodsPosted > 0) {
+    throw new Error(
+      `Asset ${existing.assetNumber} already has depreciation posted, so its cost, life and method can no longer be changed. Impair it instead.`,
+    );
+  }
+
+  const patch: Record<string, unknown> = {
+    updatedAt: new Date(),
+    lastModifiedById: input.lastModifiedById ?? null,
+    lastModifiedByName: input.lastModifiedByName ?? null,
+  };
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined) continue;
+    if (key === "lastModifiedById" || key === "lastModifiedByName") continue;
+    patch[key] = value;
+  }
+
+  const [updated] = await tx
+    .update(assets)
+    .set(patch)
+    .where(eq(assets.id, assetId))
+    .returning();
+
+  if (touchesSchedule) await regenerateSchedule(tx, assetId);
+  return updated;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reports
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The rollforward: opening, additions, depreciation, disposals, closing.
+ *
+ * Everything here is a sum over what actually happened — additions from the
+ * acquisition date, depreciation from POSTED schedule rows, disposals from the
+ * disposal date. Nothing reads a stored running total, so the report cannot
+ * disagree with the ledger it is summarising.
+ */
+export async function getAssetRollforward(
+  tx: Tx,
+  opts: { startDate: string; endDate: string },
+) {
+  const rows = (await tx.execute(sql`
+    WITH bounds AS (
+      SELECT ${opts.startDate}::date AS start_date, ${opts.endDate}::date AS end_date
+    ),
+    dep AS (
+      SELECT s.asset_id,
+             SUM(s.depreciation_amount) FILTER (
+               WHERE make_date(s.year, s.month, 1) < (SELECT start_date FROM bounds)
+             )                                              AS dep_before,
+             SUM(s.depreciation_amount) FILTER (
+               WHERE make_date(s.year, s.month, 1)
+                     BETWEEN (SELECT start_date FROM bounds) AND (SELECT end_date FROM bounds)
+             )                                              AS dep_during
+        FROM asset_depreciation_schedule s
+       WHERE s.status = 'posted'
+       GROUP BY s.asset_id
+    ),
+    imp AS (
+      SELECT i.asset_id,
+             SUM(i.amount) FILTER (WHERE i.impaired_at::date < (SELECT start_date FROM bounds)) AS imp_before,
+             SUM(i.amount) FILTER (
+               WHERE i.impaired_at::date BETWEEN (SELECT start_date FROM bounds) AND (SELECT end_date FROM bounds)
+             )                                              AS imp_during
+        FROM asset_impairments i
+       GROUP BY i.asset_id
+    )
+    SELECT a.id, a.asset_number, a.name, a.category::text AS category,
+           a.acquisition_date, a.acquisition_cost,
+           a.status::text AS status, a.disposed_at,
+
+           -- Cost brought forward: nil if it was acquired inside the window.
+           (CASE WHEN a.acquisition_date < (SELECT start_date FROM bounds)
+                 THEN a.acquisition_cost ELSE 0 END)::float8         AS opening_cost,
+           (CASE WHEN a.acquisition_date BETWEEN (SELECT start_date FROM bounds)
+                                             AND (SELECT end_date FROM bounds)
+                 THEN a.acquisition_cost ELSE 0 END)::float8         AS additions,
+           (CASE WHEN a.disposed_at IS NOT NULL
+                  AND a.disposed_at::date BETWEEN (SELECT start_date FROM bounds)
+                                              AND (SELECT end_date FROM bounds)
+                 THEN a.acquisition_cost ELSE 0 END)::float8         AS disposals,
+
+           COALESCE(dep.dep_before, 0)::float8 + COALESCE(imp.imp_before, 0)::float8
+                                                                    AS opening_depreciation,
+           COALESCE(dep.dep_during, 0)::float8                      AS depreciation_charge,
+           COALESCE(imp.imp_during, 0)::float8                      AS impairment_charge
+      FROM assets a
+      LEFT JOIN dep ON dep.asset_id = a.id
+      LEFT JOIN imp ON imp.asset_id = a.id
+     WHERE a.acquisition_date <= (SELECT end_date FROM bounds)
+     ORDER BY a.category, a.asset_number
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const mapped = rows.map((r) => {
+    const n = (k: string) => Number(r[k] ?? 0);
+    const openingCost = n("opening_cost");
+    const additions = n("additions");
+    const disposals = n("disposals");
+    const openingDep = n("opening_depreciation");
+    const charge = n("depreciation_charge") + n("impairment_charge");
+    const closingCost = openingCost + additions - disposals;
+    // Depreciation leaves with the asset it belonged to.
+    const closingDep = disposals > 0 ? 0 : openingDep + charge;
+    return {
+      id: String(r.id),
+      assetNumber: String(r.asset_number),
+      name: String(r.name),
+      category: String(r.category),
+      status: String(r.status),
+      acquisitionDate: String(r.acquisition_date),
+      openingCost,
+      additions,
+      disposals,
+      closingCost,
+      openingDepreciation: openingDep,
+      depreciationCharge: n("depreciation_charge"),
+      impairmentCharge: n("impairment_charge"),
+      closingDepreciation: closingDep,
+      openingNetBookValue: openingCost - openingDep,
+      closingNetBookValue: closingCost - closingDep,
+    };
+  });
+
+  const totals = mapped.reduce(
+    (t, r) => ({
+      openingCost: t.openingCost + r.openingCost,
+      additions: t.additions + r.additions,
+      disposals: t.disposals + r.disposals,
+      closingCost: t.closingCost + r.closingCost,
+      openingDepreciation: t.openingDepreciation + r.openingDepreciation,
+      depreciationCharge: t.depreciationCharge + r.depreciationCharge,
+      impairmentCharge: t.impairmentCharge + r.impairmentCharge,
+      closingDepreciation: t.closingDepreciation + r.closingDepreciation,
+      openingNetBookValue: t.openingNetBookValue + r.openingNetBookValue,
+      closingNetBookValue: t.closingNetBookValue + r.closingNetBookValue,
+    }),
+    {
+      openingCost: 0, additions: 0, disposals: 0, closingCost: 0,
+      openingDepreciation: 0, depreciationCharge: 0, impairmentCharge: 0,
+      closingDepreciation: 0, openingNetBookValue: 0, closingNetBookValue: 0,
+    },
+  );
+
+  return { rows: mapped, totals, period: opts };
+}
+
+/** Assets whose insurance or inspection falls due inside a window. */
+export async function listComplianceDue(tx: Tx, withinDays = 60) {
+  const rows = (await tx.execute(sql`
+    SELECT a.id, a.asset_number, a.name, a.registration_number,
+           a.insurance_expiry_date, a.inspection_next_due_date
+      FROM assets a
+     WHERE a.status NOT IN ('disposed', 'written_off')
+       AND (
+         a.insurance_expiry_date <= CURRENT_DATE + ${withinDays}::int
+         OR a.inspection_next_due_date <= CURRENT_DATE + ${withinDays}::int
+       )
+     ORDER BY LEAST(
+       COALESCE(a.insurance_expiry_date, 'infinity'::date),
+       COALESCE(a.inspection_next_due_date, 'infinity'::date)
+     )
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    assetNumber: String(r.asset_number),
+    name: String(r.name),
+    registrationNumber: (r.registration_number as string) ?? null,
+    insuranceExpiryDate: (r.insurance_expiry_date as string) ?? null,
+    inspectionNextDueDate: (r.inspection_next_due_date as string) ?? null,
+  }));
+}
