@@ -180,15 +180,26 @@ suite("Mongo picker ids reaching Postgres columns", () => {
     expect(bill.projectId).toBe(MONGO_OBJECT_ID);
   });
 
-  it("a bill line tagged to a fixed asset saves", async () => {
-    // Same form, AssetCombobox, fed by an Asset.find() on Mongo.
+  it("a bill line tagged to a fixed asset points at the register", async () => {
+    // Assets moved to Postgres in 0056 and bill_lines.asset_id became a real
+    // foreign key in 0057 — so this is no longer a Mongo picker at all. The
+    // id must be a register row, and a made-up one is refused.
+    const asset = randomUUID();
+    await asTenant(companyA, (tx) =>
+      tx.execute(sql`
+        INSERT INTO assets (id, company_id, asset_number, name, category,
+                            acquisition_date, acquisition_cost, depreciation_start_date)
+        VALUES (${asset}::uuid, ${companyA}::uuid, 'AST-0001', 'Toyota Hilux',
+                'vehicle', '2026-01-01', 1200000, '2026-01-01')`),
+    );
+
     const bill = await asTenant(companyA, (tx) =>
       billsRepo.createBill(
         tx,
         billInput({
           line: {
-            assetId: MONGO_OBJECT_ID,
-            assetNumber: "FA-0007",
+            assetId: asset,
+            assetNumber: "AST-0001",
             assetName: "Toyota Hilux",
           },
         }),
@@ -198,7 +209,18 @@ suite("Mongo picker ids reaching Postgres columns", () => {
     const [line] = await admin`
       SELECT asset_id, asset_number_at_bill FROM bill_lines
        WHERE bill_id = ${bill.id}::uuid`;
-    expect(line.asset_id).toBe(MONGO_OBJECT_ID);
-    expect(line.asset_number_at_bill).toBe("FA-0007");
+    expect(line.asset_id).toBe(asset);
+    expect(line.asset_number_at_bill).toBe("AST-0001");
+  });
+
+  it("a bill line cannot be tagged to an asset that does not exist", async () => {
+    await expect(
+      asTenant(companyA, (tx) =>
+        billsRepo.createBill(
+          tx,
+          billInput({ line: { assetId: randomUUID(), assetNumber: "AST-9999" } }),
+        ),
+      ),
+    ).rejects.toThrow();
   });
 });

@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { companies } from "./companies";
+import { assets } from "./assets";
 import { products } from "./products";
 import { journalEntries } from "./journal";
 import {
@@ -307,15 +308,23 @@ export const billLines = pgTable(
     /** Deferred references — see the note on bills.purchase_order_id. */
     purchaseOrderId: uuid("purchase_order_id"),
     purchaseOrderLineNumber: integer("purchase_order_line_number"),
-    /** text, not uuid — 0053, same reason as bills.project_id. */
-    assetId: text("asset_id"),
+    /**
+     * The asset this line was for — fuel, servicing, repairs. A real foreign
+     * key since 0057, which is what 0053 said would happen when assets landed.
+     */
+    assetId: uuid("asset_id").references(() => assets.id, {
+      onDelete: "set null",
+    }),
     assetNumberAtBill: text("asset_number_at_bill"),
     assetNameAtBill: text("asset_name_at_bill"),
     /**
-     * Set once this asset line has been capitalised; blocks doing it twice.
-     * text — it holds whatever id the asset store issues (0053).
+     * Set once this line has been capitalised into a register entry; the
+     * unique index on it is what blocks doing so twice (0057).
      */
-    capitalizedAssetId: text("capitalized_asset_id"),
+    capitalizedAssetId: uuid("capitalized_asset_id").references(
+      () => assets.id,
+      { onDelete: "set null" },
+    ),
 
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
