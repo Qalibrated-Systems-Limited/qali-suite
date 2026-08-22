@@ -2,7 +2,8 @@
  * The depreciation schedule, reconciled against the MongoDB implementation.
  *
  * `buildSchedule` in the repository is a transcription of `generateSchedule`
- * in app/models/asset.js. The reference below is that method's body, copied
+ * in app/models/asset.js, which the port deleted — the reference below is
+ * that method's body, copied
  * verbatim and made standalone — so this compares the port against the thing
  * it was ported from, across a spread of inputs, rather than against my own
  * reading of it.
@@ -15,7 +16,8 @@ import { describe, it, expect } from "vitest";
 const { buildSchedule } = await import("@/app/db/repositories/assets");
 
 /**
- * app/models/asset.js:387, verbatim apart from `this` becoming `a` and the
+ * app/models/asset.js:387 as it stood before the port (see git history),
+ * verbatim apart from `this` becoming `a` and the
  * result being returned instead of assigned.
  */
 function mongoGenerateSchedule(a) {

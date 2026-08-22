@@ -95,7 +95,10 @@ const expenseSchema = new Schema(
       // ids are UUIDs — 36 characters with dashes — which Mongoose cannot cast
       // to an ObjectId, so tagging an expense to an asset would throw a
       // CastError. Same trap bills hit in the other direction (0053).
-      id: { type: String, ref: "Asset", default: null },
+      // No `ref`: the Asset model is gone with the port, and nothing
+      // populates this — the register is read through
+      // app/db/actions/asset-actions.ts.
+      id: { type: String, default: null },
       assetNumber: { type: String, default: null },
       name: { type: String, default: null },
     },

@@ -6,7 +6,7 @@
  * duties, system-account resolution, posting — and the shapes the list page
  * actually renders.
  *
- * app/mongodb/actions/bill-actions.js is the reference for behaviour. Three
+ * The Mongo bill layer (in git history) is the reference for behaviour. Three
  * things it gets wrong are asserted here as NOT carried across: a bill due
  * today counted as overdue, money added as JavaScript values, and a list
  * ordered by a column the page does not show.

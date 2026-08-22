@@ -20,7 +20,8 @@ import * as paymentsRepo from "../repositories/payments";
  *
  * Money is strings end to end. Never Number() these values.
  *
- * app/mongodb/actions/bill-actions.js is the reference for BEHAVIOUR, not for
+ * The Mongo bill layer (deleted with the assets port; see git history) is the
+ * reference for BEHAVIOUR, not for
  * implementation. Where it is wrong, this does not follow it; each such point
  * is called out at the site.
  */
