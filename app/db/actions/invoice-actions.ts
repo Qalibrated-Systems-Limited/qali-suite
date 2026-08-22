@@ -8,7 +8,10 @@ import {
   toDateOnly,
   toRepositoryInput,
 } from "../validation/invoices";
-import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
+import {
+  INVOICE_WRITE_ROLES,
+  PRICING_OVERRIDE_ROLES,
+} from "@/lib/utils/role-gates";
 import * as invoices from "../repositories/invoices";
 import * as accountsRepo from "../repositories/accounts";
 import * as payments from "../repositories/payments";
@@ -70,7 +73,12 @@ function toActionError(err: unknown): string {
     message.includes("not active") ||
     message.includes("credit note") ||
     message.includes("over-allocated") ||
-    message.includes("already cancelled")
+    message.includes("already cancelled") ||
+    // The discount cap (0055). It names the figure and the way out, so it is
+    // no use to anybody hidden behind "Something went wrong".
+    message.includes("cap for your role") ||
+    message.includes("discount_percentage") ||
+    message.includes("discount_within_subtotal")
   ) {
     return message;
   }
@@ -82,6 +90,37 @@ function toActionError(err: unknown): string {
  * Maps the form's payload to repository input. Shared by create and update so
  * an edited invoice is built by exactly the rules that created it.
  */
+
+/**
+ * The discount cap Mongo enforced and the port dropped.
+ *
+ * `app/mongodb/invoice-actions.js:685-713` refuses any discount above the
+ * company's `discountCapPercent` unless the caller holds a pricing-policy
+ * role. That check stayed in the Mongo action when the invoice screens moved,
+ * so on Postgres ANY discount from ANYONE was accepted — and then silently
+ * discarded, which is the only reason nobody noticed.
+ *
+ * Its own comment records that an earlier version read an unseeded settings
+ * sub-doc as "no cap" and so FAILED OPEN. `discount_cap_percent` is NOT NULL
+ * with a default since 0035 and the row is created with the company, so there
+ * is nothing to fall back to and this fails closed.
+ */
+async function checkDiscountCap(
+  companyId: string,
+  user: { role?: string },
+  discountPercentage: number,
+): Promise<string | null> {
+  if (!discountPercentage) return null;
+  if (PRICING_OVERRIDE_ROLES.includes(user.role ?? "")) return null;
+
+  const { getCompanyThresholds } = await import("@/app/db/companyConfig");
+  const { discountCapPercent } = await getCompanyThresholds(String(companyId));
+
+  if (discountPercentage > discountCapPercent) {
+    return `Discount ${discountPercentage}% exceeds the ${discountCapPercent}% cap for your role. Reduce the discount or have finance approve the invoice.`;
+  }
+  return null;
+}
 
 export async function createInvoicePg(
   _prevState: unknown,
@@ -108,19 +147,29 @@ export async function createInvoicePg(
   try {
     const invoice = await withAuthorizedTenant(
       [...INVOICE_WRITE_ROLES],
-      (tx, { user, companyId }) =>
-        invoices.createInvoice(tx, {
+      async (tx, { user, companyId }) => {
+        const capError = await checkDiscountCap(
+          companyId,
+          user,
+          d.discountPercentage ?? 0,
+        );
+        if (capError) throw new Error(capError);
+
+        return invoices.createInvoice(tx, {
           companyId,
           customerId: d.customerId,
           invoiceDate: toDateOnly(d.invoiceDate)!,
           dueDate: toDateOnly(d.dueDate) ?? null,
           title: d.title ?? null,
           notes: d.notes ?? null,
+          projectId: d.projectId ?? null,
+          discountPercentage: (d.discountPercentage ?? 0).toFixed(4),
           lines,
           createdById: user.id,
           createdByName: user.name,
           createdByRole: user.role,
-        }),
+        });
+      },
     );
 
     revalidatePath("/dashboard/invoices");
@@ -165,7 +214,22 @@ export async function updateInvoicePg(
   try {
     const invoice = await withAuthorizedTenant(
       [...INVOICE_WRITE_ROLES],
-      (tx) => invoices.updateInvoice(tx, invoiceId, toRepositoryInput(parsed.data)),
+      async (tx, { user, companyId }) => {
+        // The same cap as create — editing a draft down to 90% off is the
+        // obvious way around a check that only guards the first save.
+        const capError = await checkDiscountCap(
+          companyId,
+          user,
+          parsed.data.discountPercentage ?? 0,
+        );
+        if (capError) throw new Error(capError);
+
+        return invoices.updateInvoice(
+          tx,
+          invoiceId,
+          toRepositoryInput(parsed.data),
+        );
+      },
     );
     revalidatePath("/dashboard/invoices");
     revalidatePath(`/dashboard/invoices/${invoiceId}`);

@@ -62,6 +62,16 @@ export const invoiceDataSchema = z
      * dropped here (0054). A Mongo ObjectId — projects are not ported.
      */
     projectId: z.string().optional().nullable(),
+    /**
+     * The header discount (0055). Shown on the form since it was written,
+     * dropped here until now. The role-based CAP that bounds it lives in the
+     * action, which is where the caller's role is known.
+     */
+    discountPercentage: z.coerce
+      .number()
+      .min(0, "A discount cannot be negative")
+      .max(100, "A discount cannot exceed 100%")
+      .default(0),
   })
   .refine((d) => d.stockItems.length + d.serviceItems.length > 0, {
     message: "Add at least one item or service",
@@ -88,6 +98,7 @@ export function toRepositoryInput(d: z.infer<typeof invoiceDataSchema>) {
     title: d.title ?? null,
     notes: d.notes ?? null,
     projectId: d.projectId ?? null,
+    discountPercentage: (d.discountPercentage ?? 0).toFixed(4),
     lines: [
       ...d.stockItems.map((it) => ({
         itemType: "product" as const,

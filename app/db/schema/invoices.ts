@@ -75,6 +75,13 @@ export const invoices = pgTable(
     notes: text("notes"),
 
     subtotal: money("subtotal").notNull().default("0"),
+    /**
+     * The header discount the form has always shown and the port never stored
+     * (0055). Mongo keeps both the percentage and the money; so does this.
+     */
+    discountPercentage: numeric("discount_percentage", { precision: 9, scale: 4 })
+      .notNull()
+      .default("0"),
     discountTotal: money("discount_total").notNull().default("0"),
     taxAmount: money("tax_amount").notNull().default("0"),
     total: money("total").notNull().default("0"),

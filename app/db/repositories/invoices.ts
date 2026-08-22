@@ -78,6 +78,12 @@ export interface CreateInvoiceInput {
   notes?: string | null;
   /** A Mongo ObjectId — projects are not ported. See 0054. */
   projectId?: string | null;
+  /**
+   * Header discount, 0-100. The form has always shown one; nothing stored it
+   * until 0055. The cap that bounds it is enforced in the action, where the
+   * caller's role is known.
+   */
+  discountPercentage?: string | null;
   lines: InvoiceLineInput[];
   createdById?: string | null;
   createdByName?: string | null;
@@ -180,6 +186,63 @@ async function resolveInvoiceLines(tx: Tx, inputs: InvoiceLineInput[]) {
 }
 
 /**
+ * Applies a header discount the way Mongo does — and the way the form has been
+ * telling users it works all along.
+ *
+ * `invoice.js:767-800`: the discount comes off the subtotal, and the tax is
+ * scaled by the resulting factor rather than recomputed, because a line's own
+ * `tax_amount` is stored PRE-discount for audit. So:
+ *
+ *     discount = subtotal x pct/100
+ *     factor   = (subtotal - discount) / subtotal
+ *     tax      = sum(line tax) x factor
+ *     total    = subtotal - discount + tax
+ *
+ * Done in NUMERIC, not JavaScript. `factor` is a division and usually a
+ * repeating decimal; running it through float is precisely the drift §2.1 is
+ * about. Mongo rounds to 2dp at each step in `lib/money.js` and has to.
+ */
+async function applyHeaderDiscount(
+  tx: Tx,
+  amounts: { subtotal: string; taxTotal: string },
+  discountPercentage?: string | null,
+) {
+  const pct = discountPercentage ?? "0";
+
+  const [row] = (await tx.execute(sql`
+    WITH base AS (
+      SELECT ${amounts.subtotal}::numeric(19,4) AS subtotal,
+             ${amounts.taxTotal}::numeric(19,4) AS tax_total,
+             ${pct}::numeric(9,4)               AS pct
+    ), d AS (
+      SELECT subtotal, tax_total, pct,
+             ROUND(subtotal * pct / 100, 4)::numeric(19,4) AS discount_total
+        FROM base
+    )
+    SELECT discount_total::text AS discount_total,
+           (CASE WHEN subtotal = 0 THEN tax_total
+                 ELSE ROUND(tax_total * (subtotal - discount_total) / subtotal, 4)
+            END)::numeric(19,4)::text AS tax_amount,
+           (subtotal - discount_total +
+             CASE WHEN subtotal = 0 THEN tax_total
+                  ELSE ROUND(tax_total * (subtotal - discount_total) / subtotal, 4)
+             END)::numeric(19,4)::text AS total
+      FROM d
+  `)) as unknown as Array<{
+    discount_total: string;
+    tax_amount: string;
+    total: string;
+  }>;
+
+  return {
+    discountPercentage: pct,
+    discountTotal: row.discount_total,
+    taxAmount: row.tax_amount,
+    total: row.total,
+  };
+}
+
+/**
  * Creates a draft invoice with its lines and commits the stock they reserve.
  *
  * Line totals are computed in Postgres, not JavaScript — summing money in JS
@@ -196,8 +259,15 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
     ) AS invoice_number`,
   )) as unknown as Array<{ invoice_number: string }>;
 
-  const { lines: resolved, subtotal, taxTotal, total } =
-    await resolveInvoiceLines(tx, input.lines);
+  const { lines: resolved, subtotal, taxTotal } = await resolveInvoiceLines(
+    tx,
+    input.lines,
+  );
+  const discounted = await applyHeaderDiscount(
+    tx,
+    { subtotal, taxTotal },
+    input.discountPercentage,
+  );
 
   const [invoice] = await tx
     .insert(invoices)
@@ -211,8 +281,10 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
       notes: input.notes ?? null,
       projectId: input.projectId ?? null,
       subtotal,
-      taxAmount: taxTotal,
-      total,
+      discountPercentage: discounted.discountPercentage,
+      discountTotal: discounted.discountTotal,
+      taxAmount: discounted.taxAmount,
+      total: discounted.total,
       status: "draft",
       createdById: input.createdById ?? null,
       createdByName: input.createdByName ?? null,
@@ -752,9 +824,14 @@ export async function updateInvoice(
 
   await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, invoiceId));
 
-  const { lines, subtotal, taxTotal, total } = await resolveInvoiceLines(
+  const { lines, subtotal, taxTotal } = await resolveInvoiceLines(
     tx,
     input.lines,
+  );
+  const discounted = await applyHeaderDiscount(
+    tx,
+    { subtotal, taxTotal },
+    input.discountPercentage,
   );
 
   let n = 0;
@@ -799,8 +876,10 @@ export async function updateInvoice(
       notes: input.notes ?? null,
       projectId: input.projectId ?? null,
       subtotal,
-      taxAmount: taxTotal,
-      total,
+      discountPercentage: discounted.discountPercentage,
+      discountTotal: discounted.discountTotal,
+      taxAmount: discounted.taxAmount,
+      total: discounted.total,
       updatedAt: new Date(),
     })
     .where(eq(invoices.id, invoiceId))
@@ -818,6 +897,7 @@ export async function getInvoiceDetail(tx: Tx, invoiceId: string) {
            i.status::text          AS status,
            i.payment_status::text  AS payment_status,
            i.subtotal::text        AS subtotal,
+           i.discount_percentage::text AS discount_percentage,
            i.discount_total::text  AS discount_total,
            i.tax_amount::text      AS tax_amount,
            i.total::text           AS total,
@@ -884,6 +964,10 @@ export async function getInvoiceDetail(tx: Tx, invoiceId: string) {
     status: inv.status,
     paymentStatus: inv.payment_status,
     subtotal: inv.subtotal,
+    // EditInvoiceForm pre-fills its discount box from `discountPercentage`.
+    // Without it the box reads 0 on every edit, and saving would quietly strip
+    // a discount the invoice already carried (0055).
+    discountPercentage: Number(inv.discount_percentage ?? 0),
     discountAmount: inv.discount_total,
     totalDiscount: inv.discount_total,
     taxAmount: inv.tax_amount,
