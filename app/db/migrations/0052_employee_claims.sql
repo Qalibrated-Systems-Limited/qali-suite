@@ -307,6 +307,29 @@ CREATE UNIQUE INDEX "employee_claims_advance_settled_once"
   ON "employee_claims" ("company_id", "advance_claim_id")
   WHERE "advance_claim_id" IS NOT NULL AND "status" <> 'rejected';--> statement-breakpoint
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- One open advance per person — and the deadlock that rule is currently in.
+--
+-- `createAdvanceRequest` refuses a new advance while the employee has one that
+-- is not rejected or closed: "unsettled advances are company assets and must
+-- not pile up." Sound rule. But NOTHING in the Mongo module ever moves an
+-- advance_request out of 'paid' — `closeSettlement` closes the SETTLEMENT and
+-- leaves its parent exactly where it was, and no other writer touches it.
+--
+-- So the first advance an employee takes is the last one they can ever take.
+-- Grep for it: every assignment to `advanceClaim.` is a read except
+-- `settlementClaimId` and `lastModifiedBy`.
+--
+-- The rule is kept, as this index. What makes it livable is the other half:
+-- `closeParentAdvance` closes the advance when its settlement closes, which is
+-- why 'paid' -> 'closed' exists in the status machine above. Settle your
+-- advance and you may draw another; do not, and you may not.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE UNIQUE INDEX "employee_claims_one_open_advance"
+  ON "employee_claims" ("company_id", "party_id")
+  WHERE "claim_type" = 'advance_request'
+    AND "status" NOT IN ('rejected', 'closed');--> statement-breakpoint
+
 CREATE INDEX "employee_claims_list_idx"
   ON "employee_claims" ("company_id", "claim_date", "status");--> statement-breakpoint
 CREATE INDEX "employee_claims_party_idx"

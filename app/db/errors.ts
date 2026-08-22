@@ -88,6 +88,8 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
 
   // ── Employee claims (0052) ────────────────────────────────────────────────
   employee_claims_number_unique: "A claim with that number already exists.",
+  employee_claims_one_open_advance:
+    "That employee already has an advance outstanding. It has to be settled before another can be drawn.",
   employee_claims_advance_settled_once:
     "That advance has already been settled. You cannot submit another settlement for it.",
   employee_claims_advance_fields:

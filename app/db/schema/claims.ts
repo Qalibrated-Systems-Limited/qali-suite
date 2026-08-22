@@ -177,6 +177,18 @@ export const employeeClaims = pgTable(
     uniqueIndex("employee_claims_advance_settled_once")
       .on(t.companyId, t.advanceClaimId)
       .where(sql`${t.advanceClaimId} IS NOT NULL AND ${t.status} <> 'rejected'`),
+    /**
+     * One open advance per person. `createAdvanceRequest` enforces this in
+     * application code — and in Mongo it is a trap, because nothing ever moves
+     * an advance out of 'paid', so the first advance an employee takes is the
+     * last one they can take. `closeParentAdvance` is the other half: settle
+     * the advance and it closes, freeing the next.
+     */
+    uniqueIndex("employee_claims_one_open_advance")
+      .on(t.companyId, t.partyId)
+      .where(
+        sql`${t.claimType} = 'advance_request' AND ${t.status} NOT IN ('rejected', 'closed')`,
+      ),
     index("employee_claims_list_idx").on(t.companyId, t.claimDate, t.status),
     index("employee_claims_party_idx").on(t.companyId, t.partyId, t.status),
     index("employee_claims_user_idx").on(

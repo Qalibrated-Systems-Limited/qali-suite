@@ -535,6 +535,51 @@ suite("employee claims", () => {
     );
   });
 
+  it("an employee cannot hold two open advances at once", async () => {
+    await failsWith(
+      () =>
+        asTenant(companyA, async (tx) => {
+          await approvedAdvance(tx, "10000.0000");
+          return claims.createAdvanceRequest(tx, {
+            companyId: companyA,
+            partyId: employeeParty,
+            claimDate: today(),
+            advanceType: "travel",
+            requestedAmount: "5000.0000",
+            purpose: "Another trip",
+            description: "Second advance",
+          });
+        }),
+      /already has an advance outstanding/i,
+    );
+  });
+
+  it("...but may draw another once the first is settled", async () => {
+    // In Mongo this is impossible: nothing ever moves an advance out of
+    // 'paid', and the one-open-advance rule blocks anything not rejected or
+    // closed, so the first advance an employee takes is their last.
+    const second = await asTenant(companyA, async (tx) => {
+      const approved = await approvedAdvance(tx, "20000.0000");
+      const { claim: paid } = await claims.payAdvance(tx, approved.id, { paymentAccountId: bankAcct });
+      const settlement = await claims.openSettlement(tx, paid.id, {
+        items: receipts("15000.0000", "5000.0000"),
+      });
+      await claims.approveClaim(tx, settlement.id, { name: "Manager" });
+      await claims.closeSettlement(tx, settlement.id, { name: "Finance" });
+
+      return claims.createAdvanceRequest(tx, {
+        companyId: companyA,
+        partyId: employeeParty,
+        claimDate: today(),
+        advanceType: "travel",
+        requestedAmount: "5000.0000",
+        purpose: "Next trip",
+        description: "Second advance",
+      });
+    });
+    expect(second.status).toBe("draft");
+  });
+
   // ───────────────────────────────────────────────────────────────────────────
   // Derived totals
   // ───────────────────────────────────────────────────────────────────────────
