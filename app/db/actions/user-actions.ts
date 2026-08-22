@@ -42,7 +42,12 @@ const userSchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters").optional(),
 });
 
-function fail(err: unknown): ActionResult {
+/** Only ever returns a failure — typed as one, so callers can read `.error`. */
+function fail(err: unknown): {
+  success: false;
+  error: string;
+  fieldErrors?: Record<string, string[]>;
+} {
   const message = err instanceof Error ? err.message : String(err);
   if (
     message.includes("no longer exists") ||
@@ -158,13 +163,65 @@ export async function updateUserPg(
   }
 }
 
+/**
+ * Result shape ResetPasswordDialog reads: it renders `state.message` for the
+ * banner and `state.errors.newPassword` / `state.errors.confirmPassword` under
+ * the fields.
+ */
+export type ResetPasswordResult =
+  | { success: true; userId?: string; message?: string }
+  | {
+      success: false;
+      error: string;
+      message: string;
+      errors?: Record<string, string[]>;
+    };
+
+/**
+ * Sets a user's password, as an admin.
+ *
+ * SIGNATURE MATTERS HERE. `ResetPasswordDialog` does
+ * `resetUserPasswordPg.bind(null, user._id)` and hands the result to
+ * `useActionState`, so React calls it as `(userId, prevState, formData)`. The
+ * previous signature was `(userId, password: string)` — so `password` received
+ * PREVSTATE, an object.
+ *
+ * That did not fail loudly, which is the interesting part. The guard was
+ * `!password || password.length < 6`: an object is truthy, `.length` is
+ * `undefined`, and `undefined < 6` is false — so the length check passed an
+ * object straight through to bcrypt, which threw `Illegal arguments: object,
+ * number` into a catch that reports a generic failure. Admin password reset
+ * has therefore never worked from the UI, and never read `newPassword` at all.
+ *
+ * It failed CLOSED — no password was ever set from a bad value — which is the
+ * only reason this is a broken feature and not a security incident.
+ */
 export async function resetUserPasswordPg(
   userId: string,
-  password: string,
-): Promise<ActionResult> {
-  if (!password || password.length < 6) {
-    return { success: false, error: "Password must be at least 6 characters" };
+  _prevState: unknown,
+  formData: FormData,
+): Promise<ResetPasswordResult> {
+  const password = String(formData.get("newPassword") ?? "");
+  const confirmPassword = String(formData.get("confirmPassword") ?? "");
+
+  const errors: Record<string, string[]> = {};
+  if (password.length < 6) {
+    errors.newPassword = ["Password must be at least 6 characters"];
   }
+  // The dialog lists "Both passwords must match" as a rule and neither side
+  // checked it. Confirmation is only worth collecting if something compares it.
+  if (password !== confirmPassword) {
+    errors.confirmPassword = ["Both passwords must match"];
+  }
+  if (Object.keys(errors).length) {
+    return {
+      success: false,
+      error: "Please correct the highlighted fields",
+      message: "Please correct the highlighted fields",
+      errors,
+    };
+  }
+
   try {
     return await withAuthorizedTenant([...ADMIN_ROLES], async () => {
       await adminSetPassword(userId, await bcrypt.hash(password, 10));
@@ -176,7 +233,8 @@ export async function resetUserPasswordPg(
       };
     });
   } catch (err) {
-    return fail(err);
+    const { error } = fail(err);
+    return { success: false, error, message: error };
   }
 }
 
