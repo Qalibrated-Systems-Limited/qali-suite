@@ -31,3 +31,4 @@ export * from "./hr";
 export * from "./hrLeave";
 export * from "./hrAttendance";
 export * from "./hrPayroll";
+export * from "./claims";

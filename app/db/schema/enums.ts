@@ -70,6 +70,8 @@ export const journalEntryTypeEnum = pgEnum("journal_entry_type", [
   "asset_disposal",
   "impairment",
   "other",
+  /** 0052 — cash handed back from an advance the employee did not spend. */
+  "advance_return",
 ]);
 
 // Replaces the 12 nullable *Id fields under JournalEntry.relatedDocuments.
@@ -84,6 +86,8 @@ export const sourceDocumentTypeEnum = pgEnum("source_document_type", [
   "goods_receipt",
   /** 0051 — the write-off or supplier debit-note a disposition raises. */
   "nonconformance",
+  /** 0052 — an advance, its settlement, or a reimbursement. */
+  "employee_claim",
 ]);
 
 // ── Invoices slice ───────────────────────────────────────────────────────────
@@ -427,4 +431,32 @@ export const movementStatusEnum = pgEnum("movement_status", [
   "pending",
   "completed",
   "reversed",
+]);
+
+// ── Employee claims (0052) ───────────────────────────────────────────────────
+
+export const employeeClaimTypeEnum = pgEnum("employee_claim_type", [
+  /** Money asked for up front. */
+  "advance_request",
+  /** The settlement of one: receipts in, balance either way. */
+  "advance_return",
+  /** Money already spent out of pocket. */
+  "reimbursement",
+]);
+
+/**
+ * `pending_return` and `pending_payment` are the two ways a settled advance can
+ * end: the employee owes the company, or the company owes the employee. They
+ * are not stages of one queue, which is why the status machine in 0052 lets
+ * `closeSettlement` reach either and nothing reach both.
+ */
+export const employeeClaimStatusEnum = pgEnum("employee_claim_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
+  "paid",
+  "pending_return",
+  "pending_payment",
+  "closed",
 ]);

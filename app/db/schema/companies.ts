@@ -155,6 +155,12 @@ export const companySettings = pgTable(
     billPrefix: text("bill_prefix").notNull().default("BILL"),
     quotePrefix: text("quote_prefix").notNull().default("QT"),
     poPrefix: text("po_prefix").notNull().default("PO"),
+    // 0050 and 0051 added these in raw SQL and never came back to the
+    // schema, so `drizzle-kit generate` wanted to drop them. 0052 adds
+    // claim_prefix and closes the drift in the same pass.
+    grnPrefix: text("grn_prefix").notNull().default("GRN"),
+    ncrPrefix: text("ncr_prefix").notNull().default("NCR"),
+    claimPrefix: text("claim_prefix").notNull().default("CLAIM"),
 
     defaultCostingMethod: text("default_costing_method").notNull().default("average"),
     lowStockThreshold: numeric("low_stock_threshold", { precision: 18, scale: 4 })

@@ -86,6 +86,29 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   purchase_order_lines_vat_is_a_percentage:
     "VAT must be a percentage between 0 and 100.",
 
+  // ── Employee claims (0052) ────────────────────────────────────────────────
+  employee_claims_number_unique: "A claim with that number already exists.",
+  employee_claims_advance_settled_once:
+    "That advance has already been settled. You cannot submit another settlement for it.",
+  employee_claims_advance_fields:
+    "An advance request needs an amount and a purpose.",
+  employee_claims_return_fields:
+    "A settlement has to say which advance it settles, and for how much.",
+  employee_claims_settlement_only_amounts:
+    "Only a settlement can record cash returned or paid to the employee.",
+  employee_claims_amounts_non_negative: "An amount cannot be negative.",
+  employee_claims_rejection_has_reason:
+    "Rejecting a claim needs a reason of at least ten characters.",
+  employee_claims_travel_dates_ordered:
+    "The return date cannot fall before the departure date.",
+  employee_claim_items_amount_positive:
+    "An expense line must be worth more than nothing.",
+  employee_claim_items_line_unique: "That line number is already used on this claim.",
+  employee_claim_items_expense_account_id_fk:
+    "That expense account does not exist, or belongs to another company.",
+  employee_claim_journal_entries_purpose_unique:
+    "That has already been posted for this claim.",
+
   goods_receipts_company_number_uq:
     "A goods receipt with that number already exists.",
   goods_receipts_two_distinct_signatures:
