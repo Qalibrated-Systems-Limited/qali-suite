@@ -1190,3 +1190,24 @@ export async function listInvoices(
     .limit(limit)
     .offset(opts.offset ?? 0);
 }
+
+/**
+ * An invoice by its number.
+ *
+ * The weighbridge gate quotes an `invoiceRef` and the connector links the
+ * ticket to it; it also reads the status, because an invoice that already
+ * posted has taken COGS and the stock with it.
+ */
+export async function findInvoiceByNumber(tx: Tx, invoiceNumber: string) {
+  const rows = (await tx.execute(sql`
+    SELECT id, invoice_number, status::text AS status
+      FROM invoices WHERE invoice_number = ${invoiceNumber} LIMIT 1
+  `)) as unknown as Array<Record<string, string>>;
+
+  if (!rows.length) return null;
+  return {
+    id: String(rows[0].id),
+    invoiceNumber: String(rows[0].invoice_number),
+    status: String(rows[0].status),
+  };
+}

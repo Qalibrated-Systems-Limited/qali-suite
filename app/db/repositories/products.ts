@@ -354,3 +354,30 @@ export async function getLowStock(tx: Tx, limit = 50) {
      LIMIT ${Math.min(limit, 200)}
   `);
 }
+
+/**
+ * A product by SKU, or failing that by exact name.
+ *
+ * The weighbridge gate sends a `productCode` that may be either — Mongo's
+ * lookup is `$or: [{ SKU }, { name: /^code$/i }]`, and this is that, with the
+ * case-insensitive name match kept.
+ */
+export async function findProductByCodeOrName(tx: Tx, code: string) {
+  const rows = (await tx.execute(sql`
+    SELECT id, name, sku, unit, cost_price
+      FROM products
+     WHERE sku = ${code} OR lower(name) = lower(${code})
+     ORDER BY (sku = ${code}) DESC
+     LIMIT 1
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  if (!rows.length) return null;
+  const r = rows[0];
+  return {
+    id: String(r.id),
+    name: String(r.name),
+    sku: (r.sku as string) ?? null,
+    unit: (r.unit as string) ?? null,
+    costPrice: String(r.cost_price ?? "0"),
+  };
+}

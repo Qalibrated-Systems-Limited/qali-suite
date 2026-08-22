@@ -630,10 +630,16 @@ export async function openWeighbridgeTicket(
     invoiceRef?: string | null;
     transferRef?: string | null;
     ticketDate?: string | null;
+    /**
+     * What the gate called the product when it does not match the catalogue.
+     * Snapshotted so the completed ticket can say WHICH code was unknown —
+     * without it the warning has nothing to name.
+     */
+    productCodeAtTicket?: string | null;
   },
 ) {
   let productName: string | null = null;
-  let productCode: string | null = null;
+  let productCode: string | null = input.productCodeAtTicket ?? null;
   if (input.productId) {
     const [product] = await tx
       .select({ name: products.name, sku: products.sku })
@@ -1274,4 +1280,66 @@ export async function fulfilStockRequest(
     .where(eq(stockRequests.id, requestId));
 
   return { request: updated, issued: results.length };
+}
+
+/**
+ * A weighbridge ticket by the gate's own reference.
+ *
+ * That reference is the idempotency key for a trip: first weight opens the
+ * ticket under it, second weight finds it again. Unique per company where
+ * present (0022) — Mongo indexes it WITHOUT uniqueness, which is what lets a
+ * retried gate call open a second ticket for one truck.
+ */
+export async function getWeighbridgeTicketByExternalRef(
+  tx: Tx,
+  externalRef: string,
+) {
+  const [ticket] = await tx
+    .select()
+    .from(weighbridgeTickets)
+    .where(eq(weighbridgeTickets.externalRef, externalRef));
+  return ticket ?? null;
+}
+
+/**
+ * What the connector knows once the truck has left: which document the trip
+ * produced, which invoice it turned out to belong to, and anything worth
+ * telling a person about.
+ *
+ * The weights are NOT here. A recorded weighing is immutable and `net_weight`
+ * is generated — both in 0022 — so completion records consequences, never
+ * figures.
+ */
+export async function completeWeighbridgeTicket(
+  tx: Tx,
+  ticketId: string,
+  patch: {
+    internalRef?: string | null;
+    internalId?: string | null;
+    invoiceId?: string | null;
+    invoiceRef?: string | null;
+    partyName?: string | null;
+    billId?: string | null;
+    billRef?: string | null;
+    warnings?: string[];
+    completedAt?: Date;
+  },
+) {
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  if (patch.internalRef !== undefined) set.internalRef = patch.internalRef;
+  if (patch.internalId !== undefined) set.internalId = patch.internalId;
+  if (patch.invoiceId !== undefined) set.invoiceId = patch.invoiceId;
+  if (patch.invoiceRef !== undefined) set.invoiceRef = patch.invoiceRef;
+  if (patch.partyName !== undefined) set.partyNameAtTicket = patch.partyName;
+  if (patch.billId !== undefined) set.billId = patch.billId;
+  if (patch.billRef !== undefined) set.billRef = patch.billRef;
+  if (patch.warnings !== undefined) set.warnings = patch.warnings;
+  set.completedAt = patch.completedAt ?? new Date();
+
+  const [updated] = await tx
+    .update(weighbridgeTickets)
+    .set(set)
+    .where(eq(weighbridgeTickets.id, ticketId))
+    .returning();
+  return updated;
 }
