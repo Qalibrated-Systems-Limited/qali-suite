@@ -19,7 +19,8 @@ import "@/app/models/invoice";
 import "@/app/models/creditNote";
 import "@/app/models/bill";
 import "@/app/models/expenses";
-import "@/app/models/employeesClaims";
+// employeesClaims is gone: claims are on Postgres, and computeProjectActuals
+// reads them through getProjectClaimTotalsPg rather than aggregating Mongo.
 import "@/app/models/requests";
 import "@/app/models/stockmovement";
 

@@ -219,28 +219,33 @@ export async function getClaimDetail(tx: Tx, claimId: string) {
   const claim = await getClaim(tx, claimId);
   if (!claim) return null;
 
-  const [items, attachments, entries, settlement] = await Promise.all([
-    listClaimItems(tx, claimId),
-    tx
-      .select()
-      .from(employeeClaimAttachments)
-      .where(eq(employeeClaimAttachments.claimId, claimId))
-      .orderBy(asc(employeeClaimAttachments.uploadedAt)),
-    tx.execute(sql`
-      SELECT l.purpose, j.id, j.entry_number, j.entry_date, j.status,
-             j.description
-        FROM employee_claim_journal_entries l
-        JOIN journal_entries j ON j.id = l.journal_entry_id
-       WHERE l.claim_id = ${claimId}::uuid
-       ORDER BY l.created_at
-    `) as unknown as Promise<Array<Record<string, unknown>>>,
-    // The settlement raised against this advance, if there is one. Read from
-    // the settlement's own advance_claim_id — one direction, one truth (§8.2).
-    tx.execute(sql`
-      SELECT ${CLAIM_SELECT} ${CLAIM_FROM}
-       WHERE c.advance_claim_id = ${claimId}::uuid
-    `) as unknown as Promise<Array<Record<string, unknown>>>,
-  ]);
+  // Sequential, not Promise.all. These share one connection inside one
+  // transaction, so concurrency buys nothing and pipelines statements the
+  // driver would rather serialise — which is why every other repository here
+  // does it this way too.
+  const items = await listClaimItems(tx, claimId);
+
+  const attachments = await tx
+    .select()
+    .from(employeeClaimAttachments)
+    .where(eq(employeeClaimAttachments.claimId, claimId))
+    .orderBy(asc(employeeClaimAttachments.uploadedAt));
+
+  const entries = (await tx.execute(sql`
+    SELECT l.purpose, j.id, j.entry_number, j.entry_date, j.status,
+           j.description
+      FROM employee_claim_journal_entries l
+      JOIN journal_entries j ON j.id = l.journal_entry_id
+     WHERE l.claim_id = ${claimId}::uuid
+     ORDER BY l.created_at
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  // The settlement raised against this advance, if there is one. Read from the
+  // settlement's own advance_claim_id — one direction, one truth (§8.2).
+  const settlement = (await tx.execute(sql`
+    SELECT ${CLAIM_SELECT} ${CLAIM_FROM}
+     WHERE c.advance_claim_id = ${claimId}::uuid
+  `)) as unknown as Array<Record<string, unknown>>;
 
   return {
     ...claim,
@@ -343,16 +348,15 @@ export async function listClaims(tx: Tx, opts: ListClaimsOptions = {}) {
         : sql``
     }`;
 
-  const [rows, totals] = await Promise.all([
-    tx.execute(sql`
-      SELECT ${CLAIM_SELECT} ${CLAIM_FROM} ${where}
-       ORDER BY ${ORDER_COLUMNS[opts.orderBy ?? "claimDate"]}
-       LIMIT ${limit} OFFSET ${offset}
-    `) as unknown as Promise<Array<Record<string, unknown>>>,
-    tx.execute(sql`
-      SELECT COUNT(*)::int AS total ${CLAIM_FROM} ${where}
-    `) as unknown as Promise<Array<{ total: number }>>,
-  ]);
+  const rows = (await tx.execute(sql`
+    SELECT ${CLAIM_SELECT} ${CLAIM_FROM} ${where}
+     ORDER BY ${ORDER_COLUMNS[opts.orderBy ?? "claimDate"]}
+     LIMIT ${limit} OFFSET ${offset}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const totals = (await tx.execute(sql`
+    SELECT COUNT(*)::int AS total ${CLAIM_FROM} ${where}
+  `)) as unknown as Array<{ total: number }>;
 
   return { claims: rows.map(mapClaim), total: totals[0]?.total ?? 0 };
 }

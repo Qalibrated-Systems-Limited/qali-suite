@@ -581,6 +581,110 @@ suite("employee claims", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
+  // The shape the screens read
+  //
+  // Thirteen components address claim._id, claim.employee.name,
+  // claim.advanceDetails.travelDates.from and claim.returnDetails.balance. If
+  // this shape drifts they render blanks, silently — which is the whole class
+  // of bug this port keeps finding.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  it("the detail page gets a claim in the shape its components read", async () => {
+    const view = await asTenant(companyA, async (tx) => {
+      const created = await claims.createAdvanceRequest(tx, {
+        companyId: companyA,
+        partyId: employeeParty,
+        claimDate: today(),
+        advanceType: "travel",
+        requestedAmount: "50000.0000",
+        purpose: "Site visit to Nakuru",
+        description: "Travel advance",
+        destination: "Nakuru",
+        travelFrom: "2026-08-10",
+        travelTo: "2026-08-14",
+        submit: true,
+        createdByName: "Asha Wanjiru",
+      });
+      await claims.approveClaim(tx, created.id, { name: "Manager" });
+      await claims.payAdvance(tx, created.id, { paymentAccountId: bankAcct });
+      return claims.getClaimForScreen(tx, created.id);
+    });
+
+    expect(view._id).toBe(view.id);
+    expect(view.employee.name).toBe("Asha Wanjiru");
+    expect(view.employee.email).toBe("asha@example.com");
+    expect(view.advanceDetails.travelDates).toEqual({
+      from: "2026-08-10",
+      to: "2026-08-14",
+    });
+    expect(view.advanceDetails.destination).toBe("Nakuru");
+    expect(view.advanceDetails.requestedAmount).toBe(50000);
+    // Derived: what actually left the bank, not what was asked for.
+    expect(view.advanceDetails.disbursedAmount).toBe(50000);
+    expect(view.totalAmount).toBe(50000);
+    expect(view.status).toBe("paid");
+    expect(view.awaiting).toBe("awaiting settlement");
+    // The advance's own entry, addressable from the claim.
+    expect(view.journalEntries).toHaveLength(1);
+    expect(view.journalEntries[0].purpose).toBe("advance");
+    expect(view.journalEntries[0].status).toBe("posted");
+  });
+
+  it("a settlement carries its balance, and its advance knows about it", async () => {
+    const { settlementView, advanceView } = await asTenant(companyA, async (tx) => {
+      const approved = await approvedAdvance(tx, "50000.0000");
+      const { claim: paid } = await claims.payAdvance(tx, approved.id, {
+        paymentAccountId: bankAcct,
+      });
+      const settlement = await claims.openSettlement(tx, paid.id, {
+        items: receipts("30000.0000", "5000.0000"),
+      });
+      await claims.approveClaim(tx, settlement.id, { name: "Manager" });
+      await claims.closeSettlement(tx, settlement.id, { name: "Finance" });
+
+      return {
+        settlementView: await claims.getClaimForScreen(tx, settlement.id),
+        advanceView: await claims.getClaimForScreen(tx, paid.id),
+      };
+    });
+
+    expect(settlementView.returnDetails.advanceAmount).toBe(50000);
+    expect(settlementView.returnDetails.totalSpent).toBe(35000);
+    expect(settlementView.returnDetails.balance).toBe(15000);
+    expect(settlementView.items).toHaveLength(2);
+    // The line carries its account, which is what the detail page prints.
+    expect(settlementView.items[0].accountCode).toBe("6100");
+    expect(settlementView.advance.claimNumber).toBe(advanceView.claimNumber);
+
+    // settlementClaimId is DERIVED from the settlement pointing here — there
+    // is no reverse pointer to go out of step (§8.2).
+    expect(advanceView.settlementClaimId).toBe(settlementView.id);
+    expect(advanceView.settlement.claimNumber).toBe(settlementView.claimNumber);
+  });
+
+  it("a reimbursement is not given advance fields it does not have", async () => {
+    const view = await asTenant(companyA, async (tx) => {
+      const created = await claims.createReimbursement(tx, {
+        companyId: companyA,
+        partyId: employeeParty,
+        claimDate: today(),
+        description: "Client visit costs",
+        items: receipts("4000.0000", "1500.0000"),
+        submit: true,
+      });
+      return claims.getClaimForScreen(tx, created.id);
+    });
+
+    expect(view.totalAmount).toBe(5500);
+    expect(view.advanceDetails.requestedAmount).toBeNull();
+    // NULL, not 0. "Not applicable" is a different answer from "worth nothing"
+    // — the distinction 0051 drew for affected_value.
+    expect(view.returnDetails.balance).toBeNull();
+    expect(view.returnDetails.totalSpent).toBeNull();
+    expect(view.awaiting).toBe("awaiting approval");
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
   // Derived totals
   // ───────────────────────────────────────────────────────────────────────────
 
