@@ -1,4 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
+import { createJournalEntry } from "./journal";
 import type { Tx } from "../client";
 import {
   stockRequests,
@@ -508,6 +509,17 @@ export async function returnCheckout(
     returnMovementId?: string | null;
     notes?: string | null;
     returnDate?: string;
+    /**
+     * The value coming back, and the two accounts it moves between. All three
+     * required to post; omit them and the return records no entry.
+     *
+     * The cost is passed IN rather than read here: `item_checkouts` carries no
+     * unit cost, and the Mongo path takes it from the stock movement. The
+     * repository must not decide what stock is worth.
+     */
+    totalCost?: string | null;
+    inventoryAccountId?: string | null;
+    technicianStockAccountId?: string | null;
   },
 ) {
   const [updated] = await tx
@@ -533,16 +545,62 @@ export async function returnCheckout(
       FROM item_checkouts WHERE id = ${checkoutId}
   `)) as unknown as Array<{ settled: boolean }>;
 
+  /**
+   * DR Inventory / CR Technician Stock — the value coming back off the person
+   * who had it.
+   *
+   * NEW. This function moved the quantities and closed the row and posted
+   * NOTHING, so returned stock came back into the warehouse while its value
+   * stayed sitting on the technician-stock account for ever. The Mongo path
+   * posts it (checkout-action.js:587); the Postgres half never did, and nobody
+   * noticed because nothing called this function.
+   *
+   * Skipped when the accounts are not configured, or when the checkout carries
+   * no unit cost — a return worth nothing needs no entry, and refusing the
+   * return over a missing account would strand the stock.
+   */
+  let entry = null;
+  if (
+    Number(input.totalCost ?? 0) > 0 &&
+    input.inventoryAccountId &&
+    input.technicianStockAccountId
+  ) {
+    const value = Number(input.totalCost).toFixed(4);
+    entry = await createJournalEntry(tx, {
+      companyId: updated.companyId,
+      entryDate: input.returnDate ?? new Date().toISOString().slice(0, 10),
+      entryType: "inventory_adjustment",
+      description: `Return to stock — ${updated.checkoutNumber}`,
+      reference: updated.checkoutNumber,
+      sourceType: "stock_movement",
+      sourceId: input.returnMovementId ?? null,
+      lines: [
+        {
+          accountId: input.inventoryAccountId,
+          debit: value,
+          description: `Returned — ${updated.productNameAtCheckout ?? "item"}`,
+        },
+        {
+          accountId: input.technicianStockAccountId,
+          credit: value,
+          description: `From technician — ${updated.checkedOutToNameAtCheckout}`,
+        },
+      ],
+      createdById: input.returnedById ?? null,
+      postImmediately: true,
+    });
+  }
+
   if (settled) {
     const [closed] = await tx
       .update(itemCheckouts)
       .set({ status: "returned", updatedAt: new Date() })
       .where(eq(itemCheckouts.id, checkoutId))
       .returning();
-    return closed;
+    return { checkout: closed, entry };
   }
 
-  return updated;
+  return { checkout: updated, entry };
 }
 
 /**
@@ -1341,5 +1399,178 @@ export async function completeWeighbridgeTicket(
     .set(set)
     .where(eq(weighbridgeTickets.id, ticketId))
     .returning();
+  return updated;
+}
+
+/**
+ * Converts checked-out stock into an expense: DR Expense / CR Technician Stock.
+ *
+ * The technician did not bring it back and is not being billed for it — it was
+ * consumed. The value has to leave technician stock and land somewhere, and
+ * that somewhere is an expense account the person choosing picks.
+ *
+ * NEW in the Postgres half. The columns have been on `item_checkouts` since
+ * the fulfilment port — `expensed`, `expensed_at`, `expense_account_id`,
+ * `expense_journal_entry_id`, `quantity_expensed`, `expense_total_cost` — and
+ * nothing ever wrote any of them.
+ *
+ * The `quantity_sold + quantity_returned + quantity_expensed <= quantity`
+ * CHECK is what stops a checkout disposing of more than went out, however the
+ * three are combined. Mongo tracks the same three counters with nothing
+ * reconciling them.
+ */
+export async function expenseCheckout(
+  tx: Tx,
+  checkoutId: string,
+  input: {
+    quantity: string;
+    totalCost: string;
+    expenseAccountId: string;
+    expenseAccountCode: string;
+    expenseAccountName: string;
+    technicianStockAccountId: string;
+    reason: string;
+    expensedById?: string | null;
+  },
+) {
+  const [checkout] = await tx
+    .select()
+    .from(itemCheckouts)
+    .where(eq(itemCheckouts.id, checkoutId));
+  if (!checkout) throw new Error("Checkout not found");
+  if (checkout.status === "returned") {
+    throw new Error("That checkout has already been fully returned.");
+  }
+  if (!input.reason?.trim()) {
+    throw new Error("Say what the stock was used for.");
+  }
+
+  const entry = await createJournalEntry(tx, {
+    companyId: checkout.companyId,
+    entryDate: new Date().toISOString().slice(0, 10),
+    entryType: "expense",
+    description: `Internal use expense — ${checkout.productNameAtCheckout ?? "item"}`,
+    reference: checkout.checkoutNumber,
+    lines: [
+      {
+        accountId: input.expenseAccountId,
+        debit: input.totalCost,
+        description: `${checkout.productNameAtCheckout ?? "item"} — ${input.reason.trim()}`,
+      },
+      {
+        accountId: input.technicianStockAccountId,
+        credit: input.totalCost,
+        description: `From technician stock — ${checkout.checkoutNumber}`,
+      },
+    ],
+    createdById: input.expensedById ?? null,
+    postImmediately: true,
+  });
+
+  const [updated] = await tx
+    .update(itemCheckouts)
+    .set({
+      quantityExpensed: sql`${itemCheckouts.quantityExpensed} + ${input.quantity}::numeric(19,4)`,
+      expenseTotalCost: sql`${itemCheckouts.expenseTotalCost} + ${input.totalCost}::numeric(19,4)`,
+      expensed: true,
+      expensedAt: new Date(),
+      expensedById: input.expensedById ?? null,
+      expenseAccountId: input.expenseAccountId,
+      // §9.4 — what the account was called when the cost was booked to it.
+      expenseAccountCodeAtExpense: input.expenseAccountCode,
+      expenseAccountNameAtExpense: input.expenseAccountName,
+      expenseJournalEntryId: entry.id,
+      expenseReason: input.reason.trim(),
+      updatedAt: new Date(),
+    })
+    .where(eq(itemCheckouts.id, checkoutId))
+    .returning();
+
+  // Fully accounted for, whichever way the quantity was disposed of.
+  const [{ settled }] = (await tx.execute(sql`
+    SELECT (quantity_sold + quantity_returned + quantity_expensed = quantity) AS settled
+      FROM item_checkouts WHERE id = ${checkoutId}
+  `)) as unknown as Array<{ settled: boolean }>;
+
+  if (settled) {
+    const [closed] = await tx
+      .update(itemCheckouts)
+      .set({ status: "expensed", updatedAt: new Date() })
+      .where(eq(itemCheckouts.id, checkoutId))
+      .returning();
+    return { checkout: closed, entry };
+  }
+
+  return { checkout: updated, entry };
+}
+
+/** Flags a checkout for someone else's attention. Posts nothing. */
+export async function escalateCheckout(
+  tx: Tx,
+  checkoutId: string,
+  input: {
+    escalatedToId: string;
+    escalatedToName: string;
+    reason?: string | null;
+  },
+) {
+  const [updated] = await tx
+    .update(itemCheckouts)
+    .set({
+      isEscalated: true,
+      escalatedToId: input.escalatedToId,
+      escalatedToNameAtEscalation: input.escalatedToName,
+      escalatedAt: new Date(),
+      escalationReason: input.reason?.trim() || null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(itemCheckouts.id, checkoutId),
+        eq(itemCheckouts.status, "checked_out"),
+      ),
+    )
+    .returning();
+
+  if (!updated) {
+    throw new Error("Only a checkout that is still out can be escalated.");
+  }
+  return updated;
+}
+
+/**
+ * Marks a checkout lost, damaged or overdue.
+ *
+ * NOT a route to `returned` or `expensed`: those move value and must go
+ * through the function that posts the entry. The status set here changes what
+ * the screen says, not what the ledger holds — which is why the list is
+ * narrower than the enum.
+ */
+export async function setCheckoutStatus(
+  tx: Tx,
+  checkoutId: string,
+  status: "overdue" | "lost" | "damaged",
+  input: { damageDetails?: string | null } = {},
+) {
+  const [updated] = await tx
+    .update(itemCheckouts)
+    .set({
+      status,
+      damageDetails: input.damageDetails ?? null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(itemCheckouts.id, checkoutId),
+        sql`${itemCheckouts.status} IN ('checked_out', 'overdue', 'lost', 'damaged')`,
+      ),
+    )
+    .returning();
+
+  if (!updated) {
+    throw new Error(
+      "That checkout has been returned or expensed — its status is settled.",
+    );
+  }
   return updated;
 }
