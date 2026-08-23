@@ -71,7 +71,6 @@ const PAGES = [
 
   // ── Sales ──────────────────────────────────────────
   { label: "Quotes", href: "/dashboard/quotes", icon: FileText, category: "Sales" },
-  { label: "Sales Orders", href: "/dashboard/sales-orders", icon: ClipboardList, category: "Sales", aliases: ["so", "orders", "backlog", "order backlog"] },
   { label: "Invoices", href: "/dashboard/invoices", icon: Receipt, category: "Sales" },
   { label: "Credit Notes", href: "/dashboard/credit-notes", icon: Receipt, category: "Sales", aliases: ["refund", "return"] },
   { label: "Customers", href: "/dashboard/customers", icon: Users, category: "Sales" },

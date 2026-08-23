@@ -414,6 +414,13 @@
       "when": 1787049131566,
       "tag": "0058_coffee_intake",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1787049132566,
+      "tag": "0059_expenses",
+      "breakpoints": true
     }
   ]
 }

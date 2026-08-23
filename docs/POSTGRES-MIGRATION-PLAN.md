@@ -2033,6 +2033,40 @@ outside importers), then **petty cash** (330 + 249 lines, 3 screens, one
 posting), which becomes a single-store query once expenses have moved. After
 those two, no Mongo module holds a journal posting.
 
+### §9K — Sales orders, and a different kind of gap
+
+Not a ledger gap. `sales-order-actions.js` posts nothing, and the sweep for
+`.post(` is right to pass over it. It is **stranded**: the module reads and
+writes three stores that have all moved out from under it, and only one of the
+four failures is loud.
+
+Reported from the running app as "create sales order from quote: invalid id".
+That is the first failure and the only visible one:
+
+| Line | Reaches for | State |
+|---|---|---|
+| `:56` | `ObjectId.isValid(quoteId)` | the quote id is a Postgres uuid since §9E — rejected |
+| `:64` | Mongo `Quote` | nothing writes Mongo quotes; nothing imports `mongodb/actions/quote-actions` or `quote-queries`. Always a miss. |
+| `:187` | Mongo `Product` counters | products are Postgres — the stock reservation is taken from a store the inventory screens do not read |
+| `:392` | `Invoice.create` | a **Mongo** invoice, while every invoice screen reads Postgres — §9E exactly, surviving here |
+
+Relaxing the id check alone changes the error message without making the
+feature work, and moves the failure from step one to step four, where nothing
+shows it. So the entry points are switched off instead —
+`lib/unported-modules.js`, one flag, five guards, all findable with
+`grep -rn SALES_ORDERS_AVAILABLE`. The two routes render a notice rather than
+404ing, and rather than listing a Mongo collection whose every row points at
+documents that have moved.
+
+**The general shape, worth naming**: a module that posts nothing can still be
+broken by a port, and the ledger sweep will never find it. The question that
+finds this class is not "what posts?" but **"what reads a collection nothing
+writes any more?"** Sales orders is the first one caught. It is unlikely to be
+the only one — `mongodb/queries/` still holds modules whose sources have moved.
+
+Scope when it is ported: 466 action lines, a 270-line model, three screens,
+and the convert-to-invoice path joining the Postgres invoice flow.
+
 ---
 
 ## 10. Explicitly out of scope

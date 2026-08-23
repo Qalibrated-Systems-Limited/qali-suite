@@ -186,7 +186,6 @@ const MORE_GROUPS: NavGroup[] = [
       { label: "Leads", href: "/dashboard/leads", icon: Target },
       { label: "Pipeline", href: "/dashboard/opportunities", icon: Briefcase },
       { label: "Quotes", href: "/dashboard/quotes", icon: FileText },
-      { label: "Sales Orders", href: "/dashboard/sales-orders", icon: ClipboardCheck },
       { label: "Invoices", href: "/dashboard/invoices", icon: Receipt },
       { label: "Customers", href: "/dashboard/customers", icon: Users },
     ],

@@ -1,4 +1,8 @@
 import Link from "next/link";
+import {
+  SALES_ORDERS_AVAILABLE,
+  SALES_ORDERS_UNAVAILABLE_REASON,
+} from "@/lib/unported-modules";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { canSeeSalesNav } from "@/lib/permissions";
@@ -32,7 +36,37 @@ const fmtDate = (iso) =>
     ? new Date(iso).toLocaleDateString("en-KE", { dateStyle: "medium" })
     : "—";
 
+/**
+ * The module is switched off — see lib/unported-modules.js.
+ *
+ * Rendered instead of the list/detail rather than 404ing, because a bookmark
+ * or a link in an old email should say what happened. And rather than showing
+ * the list, because the list reads a Mongo collection whose contents were
+ * created against quotes and products that have since moved: every row on it
+ * points at documents that are no longer where it thinks they are.
+ */
+function SalesOrdersUnavailable() {
+  return (
+    <div className="flex min-h-100 items-center justify-center">
+      <div className="max-w-md text-center space-y-3">
+        <h2 className="text-2xl font-bold text-foreground">
+          Sales orders are unavailable
+        </h2>
+        <p className="text-muted-foreground">{SALES_ORDERS_UNAVAILABLE_REASON}</p>
+        <Link
+          href="/dashboard/quotes"
+          className="inline-block text-yellow-500 hover:underline"
+        >
+          Go to Quotes
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export default async function SalesOrdersPage({ searchParams }) {
+  if (!SALES_ORDERS_AVAILABLE) return <SalesOrdersUnavailable />;
+
   const session = await auth();
   if (!session?.user) redirect("/login");
   if (!canSeeSalesNav(session.user.role))

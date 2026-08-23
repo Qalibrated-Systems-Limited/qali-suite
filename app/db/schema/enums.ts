@@ -560,3 +560,61 @@ export const farmerPaymentStatusEnum = pgEnum("farmer_payment_status", [
   "partial",
   "paid",
 ]);
+
+// ── Expenses (0059) ──────────────────────────────────────────────────────────
+
+/**
+ * The four states the flow actually produces.
+ *
+ * Mongo's enum also carries `pending`, `approved` and `rejected` under a
+ * comment saying they are "no longer created by the current workflow" — true,
+ * and yet approval-queries.js:110 and pending-approvals-queries.js:144 still
+ * filter on `status: "pending"`, so two screens have been counting a state
+ * that cannot occur.
+ */
+export const expenseStatusEnum = pgEnum("expense_status", [
+  "draft",
+  "posted",
+  "paid",
+  "void",
+]);
+
+export const expenseCategoryEnum = pgEnum("expense_category", [
+  "utilities",
+  "rent",
+  "salaries",
+  "transport",
+  "office_supplies",
+  "insurance",
+  "maintenance",
+  "marketing",
+  "legal_professional",
+  "bank_charges",
+  "depreciation",
+  "meals_entertainment",
+  "telecommunications",
+  "training",
+  "materials",
+  "subscriptions",
+  "security",
+  "cleaning",
+  "licenses_permits",
+  "printing_stationery",
+  "courier_postage",
+  "other",
+]);
+
+/**
+ * Mongo's list minus "unpaid". "unpaid" is not a payment method, it is the
+ * absence of one — and conflating them is what allows an expense to carry
+ * `paymentMethod: "cash"` with no account behind it, the state
+ * postLegacyExpense has a special case for. Here the column is NULL until
+ * money moves.
+ */
+export const expensePaymentMethodEnum = pgEnum("expense_payment_method", [
+  "cash",
+  "mpesa",
+  "bank_transfer",
+  "cheque",
+  "card",
+]);

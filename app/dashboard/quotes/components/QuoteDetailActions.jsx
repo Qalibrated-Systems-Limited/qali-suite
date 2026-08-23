@@ -38,6 +38,7 @@ import {
 import { ConvertToInvoiceDialog } from "./ConvertToInvoiceDialog";
 import { QuotePDFDownloadButton } from "./QuotePDFButton";
 import { createSalesOrderFromQuote } from "@/app/mongodb/actions/sales-order-actions";
+import { SALES_ORDERS_AVAILABLE } from "@/lib/unported-modules";
 
 export function QuoteDetailActions({
   quote,
@@ -48,6 +49,8 @@ export function QuoteDetailActions({
   const router = useRouter();
   const [isSoPending, startSoTransition] = useTransition();
 
+  // Unreachable while SALES_ORDERS_AVAILABLE is false — kept, rather than
+  // deleted, because it is what gets restored when the module is ported.
   const onCreateSalesOrder = () =>
     startSoTransition(async () => {
       const res = await createSalesOrderFromQuote(quote._id);
@@ -58,6 +61,7 @@ export function QuoteDetailActions({
         toast.error(res?.error || "Failed to create sales order");
       }
     });
+
 
   // Dialog states
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
@@ -186,9 +190,13 @@ export function QuoteDetailActions({
         </Button>
       )}
 
-      {/* Create Sales Order — confirmed-commitment path: reserves stock on
-          confirm, then invoices. Same eligibility as direct conversion. */}
-      {canConvert && (
+      {/* Create Sales Order — the confirmed-commitment path: reserve stock on
+          confirm, then invoice. Switched off: createSalesOrderFromQuote reads
+          the quote from MONGO, and quotes have been Postgres since §9E, so it
+          rejects the id before it can even miss the lookup. See
+          lib/unported-modules.js for the three failures behind that one.
+          Direct conversion to an invoice below is the working path. */}
+      {canConvert && SALES_ORDERS_AVAILABLE && (
         <Button
           variant="outline"
           onClick={onCreateSalesOrder}

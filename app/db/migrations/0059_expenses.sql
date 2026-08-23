@@ -251,5 +251,28 @@ CREATE TABLE "expense_receipts" (
 
 CREATE INDEX "expense_receipts_expense_idx" ON "expense_receipts" ("expense_id");--> statement-breakpoint
 
-ALTER TABLE "expenses" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
-ALTER TABLE "expense_receipts" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Row-level security.
+--
+-- FORCE as well as ENABLE, so the policy binds the table owner too — the same
+-- pattern every slice since 0001 uses. Note what this replaces: the Mongo
+-- action layer wraps every read in `withTenantScope(...)` by hand, and that
+-- helper returns the filter UNSCOPED for a SuperAdmin. Here the tenant filter
+-- is not something a query can forget to apply.
+-- ─────────────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['expenses', 'expense_receipts'] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
+    EXECUTE format($f$
+      CREATE POLICY tenant_isolation ON %I
+        USING (company_id = NULLIF(current_setting('app.company_id', true), '')::uuid)
+        WITH CHECK (company_id = NULLIF(current_setting('app.company_id', true), '')::uuid)
+    $f$, t);
+  END LOOP;
+END $$;--> statement-breakpoint
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON "expenses" TO app_user;--> statement-breakpoint
+GRANT SELECT, INSERT, UPDATE, DELETE ON "expense_receipts" TO app_user;

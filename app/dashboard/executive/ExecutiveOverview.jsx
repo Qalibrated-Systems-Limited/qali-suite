@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SALES_ORDERS_AVAILABLE } from "@/lib/unported-modules";
 import {
   TrendingUp,
   TrendingDown,
@@ -161,13 +162,19 @@ export default async function ExecutiveOverview() {
           icon={Briefcase}
           href="/dashboard/opportunities"
         />
-        <Kpi
-          label="Order backlog"
-          value={s.backlog.total}
-          sub={`${s.backlog.count} confirmed order${s.backlog.count === 1 ? "" : "s"} awaiting invoice`}
-          icon={ClipboardCheck}
-          href="/dashboard/sales-orders"
-        />
+        {/* Order backlog — aggregates the MONGO SalesOrder collection, which
+            nothing can add to while the module is switched off, so the figure
+            can only go stale. Hidden with the rest of the entry points; see
+            lib/unported-modules.js. */}
+        {SALES_ORDERS_AVAILABLE && (
+          <Kpi
+            label="Order backlog"
+            value={s.backlog.total}
+            sub={`${s.backlog.count} confirmed order${s.backlog.count === 1 ? "" : "s"} awaiting invoice`}
+            icon={ClipboardCheck}
+            href="/dashboard/sales-orders"
+          />
+        )}
       </div>
 
       {/* Drill-down */}
