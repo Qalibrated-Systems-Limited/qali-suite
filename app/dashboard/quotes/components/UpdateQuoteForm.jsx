@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useActionState } from "react";
+import { useState, useEffect, useActionState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -113,6 +113,17 @@ export default function UpdateQuoteForm({
   // Bind quote ID to action
   const updateQuoteWithId = updateQuotePg.bind(null, quote._id);
   const [state, formAction, isPending] = useActionState(updateQuoteWithId, null);
+
+  // The Postgres action RETURNS rather than redirecting, exactly as
+  // CreateQuoteForm's comment says of its own — so the navigation has to
+  // happen here. It did not: `router` was declared and never used, and the
+  // success alert below says "Redirecting..." while nothing navigates. The
+  // save had worked; the page just sat there.
+  useEffect(() => {
+    if (state?.success && state.quoteId) {
+      router.push(`/dashboard/quotes/${state.quoteId}`);
+    }
+  }, [state, router]);
 
   // Customer Selection
   const [selectedCustomer, setSelectedCustomer] = useState(
@@ -356,7 +367,6 @@ export default function UpdateQuoteForm({
     items: buildItems(),
   });
 
-  // Server action handles redirect on success
 
   return (
     <form action={formAction} className="space-y-6">
