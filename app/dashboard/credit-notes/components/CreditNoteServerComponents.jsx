@@ -12,9 +12,9 @@ import {
   ArrowRight,
 } from "lucide-react";
 import {
-  getCreditNotes,
-  getCreditNoteStats,
-} from "@/app/mongodb/queries/credit-note-queries";
+  getCreditNotesPg,
+  getCreditNoteStatsPg,
+} from "@/app/db/actions/credit-note-actions";
 import { serializeBsonType } from "@/lib/utils";
 
 // ============================================
@@ -22,7 +22,7 @@ import { serializeBsonType } from "@/lib/utils";
 // ============================================
 
 export async function CreditNoteStatsCards() {
-  const statsResult = await getCreditNoteStats();
+  const statsResult = await getCreditNoteStatsPg();
   const stats = serializeBsonType(statsResult);
 
   const formatCurrency = (amount) => {
@@ -130,7 +130,7 @@ export function CreditNoteStatsSkeleton() {
 // ============================================
 
 export async function CreditNotesTableServer({ filters }) {
-  const creditNotesResult = await getCreditNotes(filters, 50);
+  const creditNotesResult = await getCreditNotesPg(filters, 50);
   const { creditNotes } = serializeBsonType(creditNotesResult);
 
   const formatCurrency = (amount) => {

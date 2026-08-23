@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lt, lte, or, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import {
   creditNotes,
@@ -480,18 +480,29 @@ export async function listCreditNotes(
     offset?: number;
     status?: "draft" | "issued" | "applied" | "void";
     invoiceId?: string;
+    /** The list page's search box: number, customer or invoice number. */
+    search?: string;
   } = {},
 ) {
   const limit = Math.min(opts.limit ?? 50, 200);
 
+  const term = opts.search?.trim() ? `%${opts.search.trim()}%` : null;
   const filters = [
     opts.status ? eq(creditNotes.status, opts.status) : undefined,
     opts.invoiceId ? eq(creditNotes.invoiceId, opts.invoiceId) : undefined,
+    term
+      ? or(
+          ilike(creditNotes.creditNoteNumber, term),
+          ilike(creditNotes.customerNameAtIssue, term),
+          ilike(creditNotes.invoiceNumberAtIssue, term),
+        )
+      : undefined,
   ].filter(Boolean);
 
   return tx
     .select({
       id: creditNotes.id,
+      invoiceId: creditNotes.invoiceId,
       creditNoteNumber: creditNotes.creditNoteNumber,
       creditNoteDate: creditNotes.creditNoteDate,
       invoiceNumber: creditNotes.invoiceNumberAtIssue,
@@ -507,4 +518,205 @@ export async function listCreditNotes(
     .orderBy(desc(creditNotes.creditNoteDate), desc(creditNotes.creditNoteNumber))
     .limit(limit)
     .offset(opts.offset ?? 0);
+}
+
+/**
+ * Deletes a DRAFT credit note.
+ *
+ * Draft only, and the status is in the WHERE clause rather than in a
+ * read-then-check: `deleteDraftCreditNote` in the Mongo action loads the note,
+ * tests `status !== "draft"`, and then deletes — so a note issued between the
+ * two statements was deleted anyway, taking its journal entry's source with
+ * it. Here the delete simply matches nothing.
+ */
+export async function deleteDraftCreditNote(tx: Tx, noteId: string) {
+  const [deleted] = await tx
+    .delete(creditNotes)
+    .where(and(eq(creditNotes.id, noteId), eq(creditNotes.status, "draft")))
+    .returning();
+
+  if (!deleted) {
+    throw new Error(
+      "Credit note not found, or not in draft status — only a draft can be deleted",
+    );
+  }
+  return deleted;
+}
+
+/**
+ * The list page's summary tiles, in the shape it already reads:
+ * `{ draft, issued, applied, void, totalCount, totalValue }`.
+ *
+ * One grouped query rather than an aggregate plus a JavaScript fold, and the
+ * money stays a string until the screen formats it.
+ */
+export async function getCreditNoteStats(tx: Tx) {
+  const rows = await tx
+    .select({
+      status: creditNotes.status,
+      count: sql<number>`count(*)::int`,
+      total: sql<string>`coalesce(sum(${creditNotes.total}), 0)::text`,
+    })
+    .from(creditNotes)
+    .groupBy(creditNotes.status);
+
+  const stats: Record<string, { count: number; total: number }> = {
+    draft: { count: 0, total: 0 },
+    issued: { count: 0, total: 0 },
+    applied: { count: 0, total: 0 },
+    void: { count: 0, total: 0 },
+  };
+  let totalCount = 0;
+  let totalValue = 0;
+
+  for (const row of rows) {
+    const bucket = stats[row.status] ?? { count: 0, total: 0 };
+    bucket.count = row.count;
+    bucket.total = Number(row.total);
+    stats[row.status] = bucket;
+    totalCount += row.count;
+    // A void credit note is not value — it was cancelled before it did
+    // anything. The Mongo version adds it in, so the "total credited" tile
+    // counted notes that credited nobody.
+    if (row.status !== "void") totalValue += Number(row.total);
+  }
+
+  return { ...stats, totalCount, totalValue };
+}
+
+/**
+ * The detail page's shape.
+ *
+ * Named for what it is — the PAGE shape, not the row. The screen reads
+ * `customer.name`, `invoice.invoiceNumber`, `items[]`, `amountApplied` and
+ * `amountRemaining`; the table has `customer_name_at_note`, a join to the
+ * invoice, `lines[]` and a generated remaining balance.
+ */
+export async function getCreditNoteForDisplay(tx: Tx, noteId: string) {
+  const note = await getCreditNote(tx, noteId);
+  if (!note) return null;
+
+  const [inv] = note.invoiceId
+    ? await tx
+        .select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber })
+        .from(invoices)
+        .where(eq(invoices.id, note.invoiceId))
+    : [];
+
+  return {
+    _id: note.id,
+    id: note.id,
+    creditNoteNumber: note.creditNoteNumber,
+    creditNoteDate: note.creditNoteDate,
+    status: note.status,
+    reason: note.reason,
+    reasonDescription: note.reasonDescription,
+    notes: note.notes,
+
+    // §9.4 — what the document said, not what the party record says today.
+    customer: {
+      id: note.customerId,
+      name: note.customerNameAtIssue,
+      email: note.customerEmailAtIssue,
+      phone: note.customerPhoneAtIssue,
+    },
+    invoice: inv ? { id: inv.id, invoiceNumber: inv.invoiceNumber } : null,
+
+    subtotal: note.subtotal,
+    taxAmount: note.taxAmount,
+    total: note.total,
+    amountApplied: note.amountApplied,
+    amountRemaining: note.amountRemaining,
+
+    items: note.lines.map((l) => ({
+      _id: l.id,
+      description: l.description,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      // `amount` and `taxAmount` are both generated columns; the screen's
+      // "lineTotal" is the two together.
+      amount: l.amount,
+      taxAmount: l.taxAmount,
+      lineTotal: (Number(l.amount) + Number(l.taxAmount)).toFixed(4),
+      restoreInventory: l.restoreInventory,
+    })),
+
+    voidReason: note.voidReason,
+    voidedAt: note.voidedAt,
+    issuedAt: note.issuedAt,
+    createdAt: note.createdAt,
+  };
+}
+
+/**
+ * Credit raised against a set of invoices — the figure that REVERSES revenue.
+ *
+ * `issued` and `applied` only: a draft has credited nobody and a void one was
+ * cancelled before it did. Used by the project P&L, which without it counts
+ * revenue that was given back.
+ */
+export async function sumCreditForInvoices(tx: Tx, invoiceIds: string[]) {
+  if (!invoiceIds.length) return "0";
+  const [row] = await tx
+    .select({
+      total: sql<string>`coalesce(sum(${creditNotes.total}), 0)::text`,
+    })
+    .from(creditNotes)
+    .where(
+      and(
+        inArray(creditNotes.invoiceId, invoiceIds),
+        inArray(creditNotes.status, ["issued", "applied"]),
+      ),
+    );
+  return row?.total ?? "0";
+}
+
+/** A customer's credit notes, for the statement of account. */
+export async function listCreditNotesForCustomer(
+  tx: Tx,
+  customerId: string,
+  opts: { from?: string; to?: string } = {},
+) {
+  const conditions = [
+    eq(creditNotes.customerId, customerId),
+    inArray(creditNotes.status, ["issued", "applied"]),
+  ];
+  if (opts.from) conditions.push(gte(creditNotes.creditNoteDate, opts.from));
+  if (opts.to) conditions.push(lte(creditNotes.creditNoteDate, opts.to));
+
+  return tx
+    .select({
+      id: creditNotes.id,
+      creditNoteNumber: creditNotes.creditNoteNumber,
+      creditNoteDate: creditNotes.creditNoteDate,
+      reason: creditNotes.reason,
+      total: creditNotes.total,
+      status: creditNotes.status,
+      // The statement labels each row with the invoice it credits.
+      invoiceNumber: creditNotes.invoiceNumberAtIssue,
+    })
+    .from(creditNotes)
+    .where(and(...conditions))
+    .orderBy(creditNotes.creditNoteDate);
+}
+
+/** Credit raised for a customer BEFORE a date — the statement's opening figure. */
+export async function sumCustomerCreditBefore(
+  tx: Tx,
+  customerId: string,
+  before: string,
+) {
+  const [row] = await tx
+    .select({
+      total: sql<string>`coalesce(sum(${creditNotes.total}), 0)::text`,
+    })
+    .from(creditNotes)
+    .where(
+      and(
+        eq(creditNotes.customerId, customerId),
+        inArray(creditNotes.status, ["issued", "applied"]),
+        lt(creditNotes.creditNoteDate, before),
+      ),
+    );
+  return row?.total ?? "0";
 }

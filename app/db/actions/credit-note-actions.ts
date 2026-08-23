@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { withAuthorizedTenant } from "../tenant";
-import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
+import { userMessage } from "../errors";
+import { FINANCE_WRITE_ROLES, ADMIN_ROLES } from "@/lib/utils/role-gates";
 import * as creditNotes from "../repositories/creditNotes";
 import * as accountsRepo from "../repositories/accounts";
 
@@ -218,10 +219,238 @@ export async function createCreditNotePg(
   }
 }
 
-export async function getCreditNotesPg(
-  opts: { invoiceId?: string; limit?: number } = {},
-) {
-  return withAuthorizedTenant([...FINANCE_WRITE_ROLES], (tx) =>
-    creditNotes.listCreditNotes(tx, opts),
+/**
+ * Issues a draft credit note: DR Revenue, DR VAT Output, CR Accounts
+ * Receivable — plus DR Inventory / CR COGS for lines that restore stock.
+ *
+ * The repository has done this since the credit-note port; what was missing
+ * was any way for a screen to reach it. `CreditNoteActions.jsx` called the
+ * MONGO `issueCreditNote`, which posts into a ledger no screen reads (§9L).
+ *
+ * The system accounts are resolved here rather than in the repository, which
+ * must not read configuration — the same split completeInvoicePg uses.
+ */
+export async function issueCreditNotePg(
+  creditNoteId: string,
+): Promise<ActionResult> {
+  try {
+    const result = await withAuthorizedTenant(
+      [...FINANCE_WRITE_ROLES],
+      async (tx, { user }) => {
+        const ar = await accountsRepo.getSystemAccount(tx, "accounts_receivable");
+        const revenue = await accountsRepo.getSystemAccount(tx, "sales_revenue");
+        if (!ar || !revenue) {
+          throw new Error(
+            "Accounts Receivable or Sales Revenue system account not configured",
+          );
+        }
+        // Optional: a note with no tax needs no VAT account, and one that
+        // restores no stock needs neither inventory nor COGS. The repository
+        // raises if a note actually needs one that is missing.
+        const vatOutput = await accountsRepo.getSystemAccount(tx, "vat_output");
+        const inventory = await accountsRepo.getSystemAccount(tx, "inventory");
+        const cogs = await accountsRepo.getSystemAccount(tx, "cogs");
+
+        return creditNotes.issueCreditNote(tx, creditNoteId, {
+          arAccountId: ar.id,
+          revenueAccountId: revenue.id,
+          vatOutputAccountId: vatOutput?.id ?? null,
+          inventoryAccountId: inventory?.id ?? null,
+          cogsAccountId: cogs?.id ?? null,
+          issuedById: user.id,
+        });
+      },
+    );
+
+    revalidatePath("/dashboard/credit-notes");
+    revalidatePath(`/dashboard/credit-notes/${creditNoteId}`);
+    revalidatePath("/dashboard/journal");
+    return {
+      success: true,
+      creditNoteId,
+      message: "Credit note issued",
+    };
+  } catch (err) {
+    return { success: false, error: userMessage(err) };
+  }
+}
+
+/**
+ * Voids a DRAFT credit note.
+ *
+ * An ISSUED one is not voidable — it has posted, and posting is undone by
+ * reversal, not by a status change. The repository puts the status in the
+ * WHERE clause, so the guard is the update itself.
+ *
+ * Signature matches the form's `useActionState` — (id, prevState, formData).
+ */
+export async function voidDraftCreditNotePg(
+  creditNoteId: string,
+  reason: string,
+): Promise<ActionResult> {
+  const trimmed = reason?.trim() ?? "";
+  if (trimmed.length < 3) {
+    return { success: false, error: "Say why the credit note is being voided" };
+  }
+
+  try {
+    await withAuthorizedTenant([...ADMIN_ROLES, "CFO"], (tx, { user }) =>
+      creditNotes.voidCreditNote(tx, creditNoteId, user.id, trimmed),
+    );
+
+    revalidatePath("/dashboard/credit-notes");
+    revalidatePath(`/dashboard/credit-notes/${creditNoteId}`);
+    return { success: true, creditNoteId, message: "Credit note voided" };
+  } catch (err) {
+    return { success: false, error: userMessage(err) };
+  }
+}
+
+/** The same thing in the shape `useActionState` calls. */
+export async function voidCreditNotePg(
+  creditNoteId: string,
+  _prevState: unknown,
+  formData: FormData,
+): Promise<ActionResult> {
+  return voidDraftCreditNotePg(
+    creditNoteId,
+    String(formData.get("reason") ?? ""),
   );
+}
+
+export async function deleteDraftCreditNotePg(
+  creditNoteId: string,
+): Promise<ActionResult> {
+  try {
+    await withAuthorizedTenant([...FINANCE_WRITE_ROLES], (tx) =>
+      creditNotes.deleteDraftCreditNote(tx, creditNoteId),
+    );
+    revalidatePath("/dashboard/credit-notes");
+    return { success: true, message: "Draft deleted" };
+  } catch (err) {
+    return { success: false, error: userMessage(err) };
+  }
+}
+
+export async function getCreditNoteByIdPg(creditNoteId: string) {
+  return withAuthorizedTenant([], (tx) =>
+    creditNotes.getCreditNoteForDisplay(tx, creditNoteId),
+  );
+}
+
+/**
+ * Readers for modules that are still Mongo.
+ *
+ * The project P&L nets credit notes off revenue and the customer statement
+ * lists them; both aggregated the MONGO CreditNote collection, which nothing
+ * writes now. Left alone they would have reported no credit at all — revenue
+ * overstated on every project, and statements showing customers owing money
+ * they had been credited. §9K's question, arriving from the inside.
+ *
+ * They degrade rather than throw, like the project expense reads: a page with
+ * plenty else to render should not fail over one figure. They log, because a
+ * silent zero here is a wrong number, not a missing one.
+ */
+async function orFallback<T>(label: string, fn: () => Promise<T>, fallback: T) {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`[credit-note-actions] ${label} failed:`, err);
+    return fallback;
+  }
+}
+
+export async function sumCreditForInvoicesPg(invoiceIds: string[]) {
+  return orFallback(
+    "sumCreditForInvoices",
+    () =>
+      withAuthorizedTenant([], (tx) =>
+        creditNotes.sumCreditForInvoices(tx, invoiceIds),
+      ),
+    "0",
+  );
+}
+
+export async function listCreditNotesForCustomerPg(
+  customerId: string,
+  opts: { from?: string; to?: string } = {},
+) {
+  return orFallback(
+    "listCreditNotesForCustomer",
+    () =>
+      withAuthorizedTenant([], (tx) =>
+        creditNotes.listCreditNotesForCustomer(tx, customerId, opts),
+      ),
+    [] as Awaited<ReturnType<typeof creditNotes.listCreditNotesForCustomer>>,
+  );
+}
+
+export async function sumCustomerCreditBeforePg(
+  customerId: string,
+  before: string,
+) {
+  return orFallback(
+    "sumCustomerCreditBefore",
+    () =>
+      withAuthorizedTenant([], (tx) =>
+        creditNotes.sumCustomerCreditBefore(tx, customerId, before),
+      ),
+    "0",
+  );
+}
+
+export async function getCreditNoteStatsPg() {
+  return withAuthorizedTenant([], (tx) => creditNotes.getCreditNoteStats(tx));
+}
+
+/**
+ * The list page's rows, in the shape it already reads.
+ *
+ * `filters.status` arrives as "all" from the page when nothing is selected —
+ * an enum value the column does not have, so it is dropped rather than
+ * matched. `search` is passed through to the repository instead of being
+ * ignored, which is what happened when the screen was pointed here without
+ * anyone checking the signature.
+ *
+ * Returns `{ creditNotes, hasMore, nextCursor }` because that is what the
+ * Mongo query returned and what the component destructures. `hasMore` is
+ * computed by asking for one more row than the page needs.
+ */
+export async function getCreditNotesPg(
+  filters: {
+    status?: string;
+    search?: string;
+    invoiceId?: string;
+  } = {},
+  limit = 50,
+) {
+  const status =
+    filters.status && filters.status !== "all" ? filters.status : undefined;
+
+  const rows = await withAuthorizedTenant([...FINANCE_WRITE_ROLES], (tx) =>
+    creditNotes.listCreditNotes(tx, {
+      status: status as "draft" | "issued" | "applied" | "void" | undefined,
+      search: filters.search,
+      invoiceId: filters.invoiceId,
+      limit: limit + 1,
+    }),
+  );
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+
+  return {
+    creditNotes: page.map((r) => ({
+      ...r,
+      _id: r.id,
+      // Nested, because the table reads `cn.customer?.name` and
+      // `cn.invoice?.invoiceNumber` — the document shape, not the row shape.
+      customer: { name: r.customerName },
+      invoice: r.invoiceId
+        ? { id: r.invoiceId, invoiceNumber: r.invoiceNumber }
+        : null,
+    })),
+    hasMore,
+    nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
+  };
 }

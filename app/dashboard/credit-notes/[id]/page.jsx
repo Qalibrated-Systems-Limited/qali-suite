@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { canSeeSalesNav } from "@/lib/permissions";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { getCreditNoteById } from "@/app/mongodb/queries/credit-note-queries";
+import { getCreditNoteByIdPg } from "@/app/db/actions/credit-note-actions";
 import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
 import { serializeBsonType } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,7 +48,7 @@ export default async function CreditNoteDetailPage({ params }) {
     );
   }
 
-  let creditNote = await getCreditNoteById(resolvedParams.id);
+  let creditNote = await getCreditNoteByIdPg(resolvedParams.id);
 
   if (!creditNote) {
     notFound();

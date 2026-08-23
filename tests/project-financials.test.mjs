@@ -38,6 +38,20 @@ vi.mock("@/lib/plan-gate", () => ({ requirePlanAccess: vi.fn(async () => {}) }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 
+/**
+ * Credit notes moved to Postgres (§9L), so computeProjectActuals nets them off
+ * revenue through sumCreditForInvoicesPg rather than by aggregating Mongo.
+ *
+ * Stubbed rather than seeded: what this test is about is the NETTING — that
+ * issued credit reverses revenue and draft credit does not — and that
+ * arithmetic is the same whichever store the figure comes from. The Postgres
+ * query itself is covered by tests/pg-credit-notes.test.mjs.
+ */
+const creditForInvoices = vi.fn(async () => "0");
+vi.mock("@/app/db/actions/credit-note-actions", () => ({
+  sumCreditForInvoicesPg: (...a) => creditForInvoices(...a),
+}));
+
 const { recomputeProjectFinancials } = await import(
   "@/app/mongodb/actions/project-actions.js"
 );
@@ -98,12 +112,10 @@ describe("recomputeProjectFinancials", () => {
       { _id: inv1, companyId, projectId, status: "completed", total: 1000, items: [] },
       { _id: inv2, companyId, projectId, status: "completed", total: 1000, items: [] },
     ]);
-    // A KES 300 credit note issued against invoice 1 → reverses revenue.
-    await rawInsert("CreditNote", [
-      { companyId, invoice: { id: inv1 }, status: "issued", total: 300 },
-      // a draft credit note must NOT count
-      { companyId, invoice: { id: inv2 }, status: "draft", total: 500 },
-    ]);
+    // A KES 300 credit note ISSUED against invoice 1 reverses revenue; a draft
+    // one does not. The repository applies that status filter — see
+    // sumCreditForInvoices — so what arrives here is the issued total alone.
+    creditForInvoices.mockResolvedValueOnce("300");
     await rawInsert("Bill", [
       // real cost
       { companyId, projectId, status: "approved", paymentStatus: "paid", amounts: { netPayable: 500 } },

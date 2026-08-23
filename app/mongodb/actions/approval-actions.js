@@ -22,7 +22,6 @@ import ErpCounter from "@/app/models/erp-counter";
 import Product from "@/app/models/product";
 import InventoryAdjustment from "@/app/models/inventoryAdjustment";
 import Payment from "@/app/models/payment";
-import CreditNote from "@/app/models/creditNote";
 import Project from "@/app/models/project";
 
 // ============================================
@@ -67,11 +66,13 @@ async function voidApprovalTarget(approval, user, action) {
       });
       if (doc?.status === "draft") await doc.cancel(by, reason);
     } else if (ref.kind === "CreditNote") {
-      const doc = await CreditNote.findOne({
-        _id: ref.id,
-        companyId: approval.companyId,
-      });
-      if (doc?.status === "draft") await doc.void(by, reason);
+      // POSTGRES since §9L. This voided the MONGO CreditNote, so rejecting an
+      // approval left the real draft — the Postgres one the screens show —
+      // sitting there as though nothing had happened.
+      const { voidDraftCreditNotePg } = await import(
+        "@/app/db/actions/credit-note-actions"
+      );
+      await voidDraftCreditNotePg(String(ref.id), reason);
     } else if (ref.kind === "InventoryAdjustment") {
       const doc = await InventoryAdjustment.findOne({
         _id: ref.id,
@@ -580,28 +581,29 @@ async function applyCreditNote(approval, user) {
     return { success: false, error: "Missing credit note reference" };
   }
 
-  const creditNote = await CreditNote.findOne({
-    _id: creditNoteId,
-    companyId: approval.companyId,
-  });
-  if (!creditNote) return { success: false, error: "Credit note not found" };
+  /**
+   * POSTGRES since §9L. This loaded the Mongo CreditNote and called its
+   * `issue()`, which posts DR Revenue / DR VAT Output / CR Accounts Receivable
+   * into the MONGO ledger — so a credit note raised for approval, approved and
+   * released posted where no ledger screen looks.
+   *
+   * The draft-status guard, the tenant scope and the system-account lookups
+   * all live inside the action and the repository now; RLS makes the tenant
+   * scope structural rather than a filter this function has to remember.
+   */
+  const { issueCreditNotePg } = await import(
+    "@/app/db/actions/credit-note-actions"
+  );
+  const result = await issueCreditNotePg(String(creditNoteId));
 
-  if (creditNote.status !== "draft") {
-    return {
-      success: false,
-      error: `Credit note is already ${creditNote.status}; cannot re-issue.`,
-    };
+  if (!result?.success) {
+    return { success: false, error: result?.error || "Failed to issue credit note" };
   }
-
-  await creditNote.issue({
-    name: user.name || user.email || "Approver",
-    id: user.id,
-  });
 
   return {
     success: true,
     appliedAt: new Date(),
-    appliedRef: { kind: "CreditNote", id: creditNote._id },
+    appliedRef: { kind: "CreditNote", id: creditNoteId },
   };
 }
 

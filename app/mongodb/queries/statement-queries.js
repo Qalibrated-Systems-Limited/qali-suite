@@ -2,7 +2,10 @@ import dbConnect from "@/app/config/dbConnect";
 import Invoice from "@/app/models/invoice";
 import Bill from "@/app/models/bill";
 import Payment from "@/app/models/payment";
-import CreditNote from "@/app/models/creditNote";
+import {
+  listCreditNotesForCustomerPg,
+  sumCustomerCreditBeforePg,
+} from "@/app/db/actions/credit-note-actions";
 import Party from "@/app/models/parties";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
@@ -79,19 +82,19 @@ export async function getStatementOfAccount(
     .sort({ paymentDate: 1 })
     .lean();
 
-  // Get credit notes
-  const creditNoteQuery = {
-    ...baseQuery,
-    "customer.id": customerId,
-    status: { $in: ["issued", "applied"] },
-  };
-  if (startDate || endDate) {
-    creditNoteQuery.creditNoteDate = dateFilter;
-  }
-
-  const creditNotes = await CreditNote.find(creditNoteQuery)
-    .sort({ creditNoteDate: 1 })
-    .lean();
+  // Credit notes — POSTGRES since §9L. The Mongo collection is no longer
+  // written to, so this listed nothing and every statement showed customers
+  // owing money they had already been credited.
+  const creditNoteRows = await listCreditNotesForCustomerPg(String(customerId), {
+    from: startDate ? new Date(startDate).toISOString().slice(0, 10) : undefined,
+    to: endDate ? new Date(endDate).toISOString().slice(0, 10) : undefined,
+  });
+  const creditNotes = creditNoteRows.map((cn) => ({
+    ...cn,
+    _id: cn.id,
+    total: Number(cn.total),
+    invoice: cn.invoiceNumber ? { invoiceNumber: cn.invoiceNumber } : null,
+  }));
 
   // Build transactions list
   const transactions = [];
@@ -183,26 +186,14 @@ export async function getStatementOfAccount(
     ]);
 
     // Sum credit notes before start date
-    const priorCreditNotes = await CreditNote.aggregate([
-      {
-        $match: {
-          ...baseQuery,
-          "customer.id": customerId,
-          status: { $in: ["issued", "applied"] },
-          creditNoteDate: { $lt: new Date(startDate) },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$total" },
-        },
-      },
-    ]);
+    const priorCreditTotal = await sumCustomerCreditBeforePg(
+      String(customerId),
+      new Date(startDate).toISOString().slice(0, 10),
+    );
 
     const invoiceTotal = priorInvoices[0]?.total || 0;
     const paymentTotal = priorPayments[0]?.total || 0;
-    const creditNoteTotal = priorCreditNotes[0]?.total || 0;
+    const creditNoteTotal = Number(priorCreditTotal || 0);
 
     openingBalance = invoiceTotal - paymentTotal - creditNoteTotal;
   }

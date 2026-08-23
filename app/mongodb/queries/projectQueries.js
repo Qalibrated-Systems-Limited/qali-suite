@@ -9,8 +9,8 @@ import {
   listClaimsPg,
 } from "@/app/db/actions/claim-actions";
 import Invoice from "../../models/invoice";
-import CreditNote from "../../models/creditNote";
 import Bill from "../../models/bill";
+import { sumCreditForInvoicesPg } from "@/app/db/actions/credit-note-actions";
 import {
   getProjectExpenseTotalsPg,
   getProjectExpensesByAccountPg,
@@ -291,10 +291,10 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
     ]),
     // Credit notes raised against this project's invoices — REVERSE revenue.
     // issued + applied are economically real; draft/void are not.
-    CreditNote.aggregate([
-      { $match: { ...tenantMatch, "invoice.id": { $in: projectInvoiceIds }, status: { $in: ["issued", "applied"] } } },
-      { $group: { _id: null, total: { $sum: "$total" } } },
-    ]),
+    // Postgres since §9L. The Mongo CreditNote collection is no longer
+    // written to, so this returned nothing and every project's revenue was
+    // overstated by whatever had been credited back.
+    sumCreditForInvoicesPg(projectInvoiceIds.map(String)),
     // Bill costs (paid) — exclude cancelled bills that were paid before cancellation
     Bill.aggregate([
       { $match: { ...tenantMatch, projectId: pid, paymentStatus: "paid", status: { $ne: "cancelled" } } },
@@ -345,7 +345,8 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
 
   const revenue = Math.max(
     0,
-    (revenuePipeline[0]?.total || 0) - (creditNotes[0]?.total || 0),
+    // A string from numeric(19,4), not a one-element aggregate array.
+    (revenuePipeline[0]?.total || 0) - Number(creditNotes || 0),
   );
 
   const costs = Math.max(

@@ -21,10 +21,10 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
-  issueCreditNote,
-  voidCreditNote,
-  deleteDraftCreditNote,
-} from "@/app/mongodb/actions/credit-note-actions";
+  issueCreditNotePg as issueCreditNote,
+  voidCreditNotePg as voidCreditNote,
+  deleteDraftCreditNotePg as deleteDraftCreditNote,
+} from "@/app/db/actions/credit-note-actions";
 import { toast } from "sonner";
 
 export function CreditNoteActions({ creditNote, userRole }) {
