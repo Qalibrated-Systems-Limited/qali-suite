@@ -548,7 +548,7 @@ export async function getAccountLedger(
 /**
  * An account's opening and closing position over a window, from POSTED lines.
  *
- * Built for the petty cash statement (0060), which calls the GL "the single
+ * Built for the petty cash statement, which calls the GL "the single
  * source of truth for the balances" and then computes them from a Mongo
  * aggregate. Opening is the net of every posted line dated BEFORE `from`, so
  * opening balances and prior periods are reflected without being seeded;

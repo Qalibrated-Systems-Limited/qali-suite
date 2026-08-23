@@ -2035,7 +2035,9 @@ those two, no Mongo module holds a journal posting.
 
 ### §9J closed — expenses are on Postgres
 
-Migration 0059, and 0060 for the petty cash statement that read them. Six
+Migration 0059. The petty cash statement that read them moved in the same
+work and needed no migration of its own — the ledger half was already
+Postgres, the function was just still asking Mongo for it. Six
 decisions are in 0059's header; what the port turned up is worth keeping
 separate, because almost none of it was a transcription problem.
 

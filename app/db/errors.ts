@@ -149,6 +149,37 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
     "Cancelling a nonconformance needs a reason.",
   nonconformances_source_matches_reference:
     "The nonconformance names a source that does not match the document it points at.",
+
+  // ── Expenses (0059) ───────────────────────────────────────────────────────
+  expenses_number_unique: "An expense with that number already exists.",
+  expenses_amount_positive: "An expense must be worth more than nothing.",
+  expenses_tax_non_negative: "Tax and withholding cannot be negative.",
+  expenses_total_non_negative:
+    "Withholding tax cannot be more than the expense plus its tax.",
+  expenses_payment_is_whole:
+    "A payment needs a method, an account and a date — or none of the three.",
+  expenses_posted_has_entry:
+    "A posted expense must have a journal entry, and a draft must not.",
+  expenses_clearing_needs_payment:
+    "An expense that was never paid cannot have a payment clearing entry.",
+  journal_entries_party_pair:
+    "A journal entry names a party without saying what kind, or the other way round.",
+
+  // ── Petty cash (0060) ─────────────────────────────────────────────────────
+  petty_cash_returns_number_unique:
+    "A petty cash return with that number already exists.",
+  petty_cash_returns_no_overlap:
+    "A return already covers part of that period for this float. Open the existing one, or choose different dates.",
+  petty_cash_returns_period_ordered:
+    "The period cannot end before it starts.",
+  petty_cash_returns_rejection_has_reason:
+    "Sending a return back needs a reason.",
+  petty_cash_returns_freeze_is_whole:
+    "The signed figures on a return move together or not at all.",
+  petty_cash_returns_submitted_is_frozen:
+    "A return that has been submitted must carry the figures it was submitted with.",
+  petty_cash_returns_totals_non_negative:
+    "A return's totals cannot be negative.",
 };
 
 interface PgLike {

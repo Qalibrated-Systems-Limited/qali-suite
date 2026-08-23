@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Banknote, Loader2 } from "lucide-react";
-import { fundPettyCash } from "@/app/mongodb/actions/petty-cash-actions";
+import { fundPettyCashPg } from "@/app/db/actions/petty-cash-actions";
 import { toast } from "sonner";
 
 const fmt = (n) =>
@@ -25,7 +25,7 @@ export default function PettyCashLedger({ returnId, rows = [], sourceAccounts = 
     if (!fund.sourceAccountId) return toast.error("Select the source bank");
     if (!fund.amount || Number(fund.amount) <= 0) return toast.error("Enter an amount");
     startTransition(async () => {
-      const res = await fundPettyCash(returnId, {
+      const res = await fundPettyCashPg(returnId, {
         sourceAccountId: fund.sourceAccountId,
         amount: Number(fund.amount),
       });

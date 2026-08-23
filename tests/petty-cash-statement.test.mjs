@@ -1,12 +1,13 @@
 /**
  * Petty cash STATEMENT — the return is derived from the GL, not typed.
  *
- * computePettyCashStatement aggregates the float account's activity over a date
+ * buildStatement aggregates the float account's activity over a date
  * range: CR = every Expense paid from the float, DR = posted JE lines that debit
  * the float (top-ups). This proves the core logic (rows, DR/CR split, running
  * balance, project/category labels).
  *
- * POSTGRES on both halves since 0059/0060, and that pairing is the point.
+ * POSTGRES on both halves: the expenses half moved in 0059 and the returns in
+ * 0060, and that pairing is the point.
  * This function is why the plan said expenses had to move BEFORE petty cash:
  * it takes the float's opening and closing position from the GL and the spend
  * rows from expenses, so moving one without the other would have split the
@@ -27,34 +28,16 @@ const suite = DATABASE_URL ? describe : describe.skip;
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-// petty-cash-queries.js still imports the Mongo tenant helpers for its OTHER
-// exports (float accounts, returns). Stubbed so importing the module does not
-// drag next-auth in — the statement itself no longer uses them.
-vi.mock("@/lib/utils/tenant-utils", () => ({
-  getTenantContext: vi.fn(async () => ({})),
-}));
-vi.mock("@/app/config/dbConnect", () => ({ default: vi.fn(async () => {}) }));
 
-let companyId;
-// The statement's reads run through withAuthorizedTenant. Stubbed to the
-// company under test, with a transaction that sets app.company_id the way the
-// real helper does — so RLS is live, not bypassed.
-let db;
-vi.mock("@/app/db/tenant", () => ({
-  withAuthorizedTenant: vi.fn(async (_roles, fn) =>
-    db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.company_id', ${companyId}, true)`);
-      return fn(tx, { user: { id: "u1", name: "T", role: "Accountant" }, companyId });
-    }),
-  ),
-}));
+let companyId, db;
 
-const { computePettyCashStatement } = await import(
-  "@/app/mongodb/queries/petty-cash-queries.js"
-);
+// buildStatement takes a `tx`, so there is no tenant helper to stub — the
+// test opens its own transaction with app.company_id set, exactly as
+// withAuthorizedTenant does, and RLS is live.
+const pettyCash = await import("@/app/db/repositories/pettyCash");
 const expensesRepo = await import("@/app/db/repositories/expenses");
 
-suite("computePettyCashStatement", () => {
+suite("petty cash statement", () => {
   let admin, client;
   let floatId, bankId, fuelAcct, userId;
 
@@ -178,12 +161,12 @@ suite("computePettyCashStatement", () => {
       paidFromAccountId: bankId,
     });
 
-    const { rows, totals } = await computePettyCashStatement(
-      null,
-      floatId,
-      "2026-02-01",
-      "2026-02-28",
-      0,
+    const { rows, totals } = await asTenant((tx) =>
+      pettyCash.buildStatement(tx, floatId, {
+        from: "2026-02-01",
+        to: "2026-02-28",
+        openingOverride: "0",
+      }),
     );
 
     expect(rows).toHaveLength(3); // 1 top-up + 2 in-range PAID float expenses
@@ -211,11 +194,8 @@ suite("computePettyCashStatement", () => {
     await spend(); // 2,000 from the float, in period
 
     // No explicit opening passed → GL-derived.
-    const { rows, openingBalance, totals } = await computePettyCashStatement(
-      null,
-      floatId,
-      "2026-02-01",
-      "2026-02-28",
+    const { rows, openingBalance, totals } = await asTenant((tx) =>
+      pettyCash.buildStatement(tx, floatId, { from: "2026-02-01", to: "2026-02-28" }),
     );
 
     expect(openingBalance).toBe(10000); // the Jan opening entry, not zero
@@ -233,11 +213,8 @@ suite("computePettyCashStatement", () => {
     await spend({ amount: "1333.3300", description: "Odd amount" });
     await spend({ amount: "666.6700", description: "Another" });
 
-    const { totals } = await computePettyCashStatement(
-      null,
-      floatId,
-      "2026-02-01",
-      "2026-02-28",
+    const { totals } = await asTenant((tx) =>
+      pettyCash.buildStatement(tx, floatId, { from: "2026-02-01", to: "2026-02-28" }),
     );
 
     expect(totals.credits).toBe(2000);
@@ -256,11 +233,8 @@ suite("computePettyCashStatement", () => {
       }),
     );
 
-    const { rows, totals } = await computePettyCashStatement(
-      null,
-      floatId,
-      "2026-02-01",
-      "2026-02-28",
+    const { rows, totals } = await asTenant((tx) =>
+      pettyCash.buildStatement(tx, floatId, { from: "2026-02-01", to: "2026-02-28" }),
     );
 
     // Off the statement, and off the GL too — the void reversed the posting,

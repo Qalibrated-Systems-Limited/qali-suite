@@ -117,7 +117,7 @@ ledger — reads Postgres:
 | `petty-cash-actions.js` | 3 | every petty cash movement |
 
 Expenses was the seventh and is done (0059). Its statement half — the float's
-GL position and the expenses paid out of the tin — moved with it (0060), so
+GL position and the expenses paid out of the tin — moved with it, so
 petty cash's postings are all that is left. When they move,
 `app/db/actions/petty-cash-reads.ts` folds into the petty cash actions and
 stops existing.

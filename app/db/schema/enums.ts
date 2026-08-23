@@ -90,6 +90,8 @@ export const sourceDocumentTypeEnum = pgEnum("source_document_type", [
   "employee_claim",
   /** 0056 — depreciation, impairment or disposal of a registered asset. */
   "fixed_asset",
+  /** 0060 — the transfer that puts money into a petty cash tin. */
+  "petty_cash_return",
 ]);
 
 // ── Invoices slice ───────────────────────────────────────────────────────────
@@ -617,4 +619,22 @@ export const expensePaymentMethodEnum = pgEnum("expense_payment_method", [
   "bank_transfer",
   "cheque",
   "card",
+]);
+
+// ── Petty cash (0060) ────────────────────────────────────────────────────────
+
+/**
+ * Four states, and `rejected` is now one of them in practice.
+ *
+ * `rejectPettyCashReturn` sets `status = "draft"`, so the Mongo enum's fourth
+ * value was never written and a rejected return was indistinguishable from one
+ * that had never been submitted — except by a `rejectionReason` string the
+ * draft it became did not clear. The eighth dead enum value this migration
+ * series has turned up; see the expense statuses in §9J for the pattern.
+ */
+export const pettyCashReturnStatusEnum = pgEnum("petty_cash_return_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
 ]);

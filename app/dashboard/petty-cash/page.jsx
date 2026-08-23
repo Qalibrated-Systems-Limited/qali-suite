@@ -3,9 +3,9 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { canSeeFinanceNav } from "@/lib/permissions";
 import {
-  getPettyCashReturns,
-  getPettyCashFloatAccounts,
-} from "@/app/mongodb/queries/petty-cash-queries";
+  getPettyCashReturnsPg,
+  getPettyCashFloatAccountsPg,
+} from "@/app/db/actions/petty-cash-actions";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import NewPettyCashReturn from "./components/NewPettyCashReturn";
@@ -30,8 +30,8 @@ export default async function PettyCashPage() {
   if (!canSeeFinanceNav(session.user.role)) redirect("/dashboard");
 
   const [returns, floats] = await Promise.all([
-    getPettyCashReturns(),
-    getPettyCashFloatAccounts(),
+    getPettyCashReturnsPg(),
+    getPettyCashFloatAccountsPg(),
   ]);
 
   return (
@@ -72,11 +72,20 @@ export default async function PettyCashPage() {
                   {r.custodian?.name ? ` · ${r.custodian.name}` : ""}
                 </p>
               </div>
+              {/* A draft has no frozen figure. It used to show KES 0.00,
+                  which reads as "nothing was spent" rather than "not yet
+                  submitted". */}
               <div className="text-right shrink-0">
-                <p className="text-sm font-semibold">{fmt(r.totals?.credits)}</p>
-                <p className="text-xs text-muted-foreground">
-                  bal {fmt(r.totals?.closing)}
-                </p>
+                {r.totals ? (
+                  <>
+                    <p className="text-sm font-semibold">{fmt(r.totals.credits)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      bal {fmt(r.totals.closing)}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">not submitted</p>
+                )}
               </div>
             </Link>
           ))}

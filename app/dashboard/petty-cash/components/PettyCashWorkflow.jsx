@@ -4,10 +4,10 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Send, Check, RotateCcw, Loader2 } from "lucide-react";
 import {
-  submitPettyCashReturn,
-  approvePettyCashReturn,
-  rejectPettyCashReturn,
-} from "@/app/mongodb/actions/petty-cash-actions";
+  submitPettyCashReturnPg,
+  approvePettyCashReturnPg,
+  rejectPettyCashReturnPg,
+} from "@/app/db/actions/petty-cash-actions";
 import { PDFDownloadButton } from "@/components/pdf";
 import { PettyCashReturnPDF } from "@/lib/pdf/documents";
 import { toast } from "sonner";
@@ -38,7 +38,7 @@ export default function PettyCashWorkflow({ data, company, canSubmit, canApprove
 
       {canSubmit && status === "draft" && (
         <Button
-          onClick={() => run(() => submitPettyCashReturn(returnId), "Submitted for approval")}
+          onClick={() => run(() => submitPettyCashReturnPg(returnId), "Submitted for approval")}
           disabled={isPending}
         >
           {isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
@@ -49,7 +49,7 @@ export default function PettyCashWorkflow({ data, company, canSubmit, canApprove
       {canApprove && status === "submitted" && (
         <>
           <Button
-            onClick={() => run(() => approvePettyCashReturn(returnId), "Approved")}
+            onClick={() => run(() => approvePettyCashReturnPg(returnId), "Approved")}
             disabled={isPending}
           >
             <Check className="h-4 w-4 mr-1" /> Approve
@@ -57,8 +57,20 @@ export default function PettyCashWorkflow({ data, company, canSubmit, canApprove
           <Button
             variant="outline"
             onClick={() => {
-              const reason = window.prompt("Reason for sending back (optional):") || "";
-              run(() => rejectPettyCashReturn(returnId, reason), "Sent back to custodian");
+              // The reason is REQUIRED now, in the schema and in the database
+              // (petty_cash_returns_rejection_has_reason). It was "optional"
+              // here and defaulted server-side to "Returned for correction",
+              // which sends a custodian back to a form with nothing to fix.
+              const reason = window.prompt("Why is this being sent back?");
+              if (reason === null) return; // cancelled
+              if (reason.trim().length < 3) {
+                window.alert("Give the custodian a reason to work from.");
+                return;
+              }
+              run(
+                () => rejectPettyCashReturnPg(returnId, reason.trim()),
+                "Sent back to custodian",
+              );
             }}
             disabled={isPending}
           >

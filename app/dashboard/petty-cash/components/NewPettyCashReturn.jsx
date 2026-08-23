@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Loader2 } from "lucide-react";
-import { createPettyCashReturn } from "@/app/mongodb/actions/petty-cash-actions";
+import { createPettyCashReturnPg } from "@/app/db/actions/petty-cash-actions";
 import { toast } from "sonner";
 
 // Opens a new petty cash return for a date range against a chosen float, then
@@ -23,7 +23,7 @@ export default function NewPettyCashReturn({ floats = [] }) {
     if (!from || !to) return toast.error("Pick a from and to date");
     if (new Date(from) > new Date(to)) return toast.error("From date is after to date");
     startTransition(async () => {
-      const res = await createPettyCashReturn({
+      const res = await createPettyCashReturnPg({
         floatAccountId,
         from: new Date(from).toISOString(),
         to: new Date(to).toISOString(),
