@@ -1267,7 +1267,12 @@ export async function createOpeningBalanceInvoice(
       // `bills` snapshots the supplier. Not changed here — a difference that
       // predates this and belongs to whoever reconciles the two.
       isOpeningBalance: true,
+      // subtotal AND total. `invoices.total` is a plain stored column written
+      // by whoever creates the invoice — there is no trigger recomputing it
+      // from the lines, and an opening invoice has no lines. Setting only
+      // subtotal left the document worth nothing.
       subtotal: input.amount,
+      total: input.amount,
       status: "completed",
       createdById: input.createdById ?? null,
     })

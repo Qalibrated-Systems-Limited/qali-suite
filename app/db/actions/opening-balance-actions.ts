@@ -50,6 +50,9 @@ function fail(err: unknown): ActionResult {
     message.includes("already reversed") ||
     message.includes("greater than zero") ||
     message.includes("not configured") ||
+    message.includes("conversion date") ||
+    message.includes("date is required") ||
+    message.includes("date is invalid") ||
     message.includes("permission")
   ) {
     return { success: false, error: message };
@@ -143,6 +146,42 @@ export async function setConversionDatePg(input: {
   }
 }
 
+/**
+ * The window an opening document must fall in.
+ *
+ * Two rules, both carried over from `resolveConversionWindow`: there must BE a
+ * cutover date, and the document must fall on or before it. An opening
+ * document dated after the cutover is not an opening balance — it is a real
+ * transaction wearing the wrong label, and it would post to Opening Balance
+ * Equity instead of to revenue or an expense.
+ *
+ * The Mongo version read the date from Mongo on purpose, with a comment
+ * explaining that reading it from Postgres while the rule was checked against
+ * the Mongo ledger "puts the rule's data in a different store from the rule's
+ * subject". Both are Postgres now, so that reason has expired.
+ */
+async function conversionWindow(companyId: string, docDate: string, label: string) {
+  if (!docDate) return { error: `A ${label} date is required.` as const };
+  const d = new Date(docDate);
+  if (Number.isNaN(d.getTime())) {
+    return { error: `The ${label} date is invalid.` as const };
+  }
+
+  const conversion = await getConversion(companyId);
+  if (!conversion?.date) {
+    return {
+      error:
+        "Set your conversion (cutover) date before entering opening documents." as const,
+    };
+  }
+  if (docDate.slice(0, 10) > String(conversion.date).slice(0, 10)) {
+    return {
+      error: `The ${label} date must be on or before the conversion date.` as const,
+    };
+  }
+  return { docDate: docDate.slice(0, 10) };
+}
+
 /** An opening receivable: Dr Accounts Receivable / Cr Opening Balance Equity. */
 export async function createOpeningInvoicePg(input: {
   customerId: string;
@@ -154,12 +193,15 @@ export async function createOpeningInvoicePg(input: {
     const { invoice } = await withAuthorizedTenant(
       [...FINANCE_WRITE_ROLES],
       async (tx, { user, companyId }) => {
+        const win = await conversionWindow(companyId, input.invoiceDate, "invoice");
+        if ("error" in win) throw new Error(win.error);
+
         const ar = await accountsRepo.getSystemAccount(tx, "accounts_receivable");
         if (!ar) {
           throw new Error("Accounts Receivable account is not configured.");
         }
         const obe = await openingEquityOrThrow(tx);
-        const date = input.invoiceDate.slice(0, 10);
+        const date = win.docDate;
 
         return invoicesRepo.createOpeningBalanceInvoice(tx, {
           companyId,
@@ -193,12 +235,15 @@ export async function createOpeningBillPg(input: {
     const { bill } = await withAuthorizedTenant(
       [...FINANCE_WRITE_ROLES],
       async (tx, { user, companyId }) => {
+        const win = await conversionWindow(companyId, input.billDate, "bill");
+        if ("error" in win) throw new Error(win.error);
+
         const ap = await accountsRepo.getSystemAccount(tx, "accounts_payable");
         if (!ap) {
           throw new Error("Accounts Payable account is not configured.");
         }
         const obe = await openingEquityOrThrow(tx);
-        const date = input.billDate.slice(0, 10);
+        const date = win.docDate;
 
         return billsRepo.createOpeningBalanceBill(tx, {
           companyId,

@@ -1,4 +1,4 @@
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import {
   accounts,
@@ -104,11 +104,16 @@ export async function postOpeningBalances(
 
   // Every account must be postable and in this tenant. RLS handles the tenant;
   // `can_post` is checked here so the failure names the account.
+  // inArray, not a `= ANY(...)::uuid[]` fragment. Interpolating a JS array into
+  // a Drizzle query-builder fragment expands it to a parameter TUPLE —
+  // ($1, $2) — which ::uuid[] cannot cast, and Postgres rejects it with 42846.
+  // The raw-SQL form in assets.ts works only because tx.execute serialises the
+  // array differently. See tests/pg-array-literal.test.mjs.
   const ids = cleaned.map((l) => l.accountId);
   const postable = await tx
     .select({ id: accounts.id, name: accounts.accountName, canPost: accounts.canPost })
     .from(accounts)
-    .where(sql`${accounts.id} = ANY(${ids}::uuid[])`);
+    .where(inArray(accounts.id, ids));
   const byId = new Map(postable.map((a) => [a.id, a]));
   for (const line of cleaned) {
     const account = byId.get(line.accountId);
@@ -156,7 +161,11 @@ export async function postOpeningBalances(
     postImmediately: true,
   });
 
-  return { entry, openingBalanceEquity: -diff };
+  // `diff`, not `-diff`. A positive diff means debits exceed credits, so the
+  // plug CREDITS Opening Balance Equity by that amount — and OBE is
+  // credit-normal, so its resulting balance IS diff. Negating it reported the
+  // equity carried in as a negative.
+  return { entry, openingBalanceEquity: diff };
 }
 
 /**

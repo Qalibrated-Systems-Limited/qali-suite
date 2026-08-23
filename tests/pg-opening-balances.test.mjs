@@ -25,7 +25,29 @@ const suite = DATABASE_URL ? describe : describe.skip;
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+/**
+ * The conversion-window rules live in the ACTION layer, because they read the
+ * cutover date off `companies` — outside the tenant-scoped tables. Stubbed to
+ * the company under test, with app.company_id set the way the real helper
+ * does, so RLS stays live.
+ */
+let tenantCompanyId, tenantDb;
+vi.mock("@/app/db/tenant", () => ({
+  withAuthorizedTenant: vi.fn(async (_roles, fn) =>
+    tenantDb.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT set_config('app.company_id', ${tenantCompanyId}, true)`,
+      );
+      return fn(tx, {
+        user: { id: "u1", name: "Ann", role: "Accountant" },
+        companyId: tenantCompanyId,
+      });
+    }),
+  ),
+}));
+
 const ob = await import("@/app/db/repositories/openingBalances");
+const obActions = await import("@/app/db/actions/opening-balance-actions");
 const invoicesRepo = await import("@/app/db/repositories/invoices");
 const billsRepo = await import("@/app/db/repositories/bills");
 
@@ -73,6 +95,8 @@ suite("opening balances", () => {
     await admin`TRUNCATE companies CASCADE`;
     await admin`TRUNCATE entry_counters`;
     companyId = randomUUID();
+    tenantCompanyId = companyId;
+    tenantDb = db;
     cashAcct = randomUUID(); loanAcct = randomUUID(); arAcct = randomUUID();
     apAcct = randomUUID(); obeAcct = randomUUID(); revenueAcct = randomUUID();
     customer = randomUUID(); supplier = randomUUID(); userId = randomUUID();
@@ -308,7 +332,81 @@ suite("opening balances", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
+  describe("the conversion window", () => {
+    // These two rules were LOST in the port and restored only because the
+    // Mongo suite they came from still asserted them. resolveConversionWindow
+    // enforced both; the first draft of the Postgres action enforced neither.
+    const setCutover = (date) =>
+      admin`UPDATE companies SET conversion_date = ${date} WHERE id = ${companyId}`;
+
+    it("refuses an opening document before a cutover date is set", async () => {
+      const res = await obActions.createOpeningInvoicePg({
+        customerId: customer,
+        invoiceDate: "2026-01-01",
+        amount: 5000,
+      });
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/conversion \(cutover\) date/i);
+    });
+
+    it("refuses a document dated after the cutover", async () => {
+      await setCutover("2026-01-31");
+      const res = await obActions.createOpeningInvoicePg({
+        customerId: customer,
+        invoiceDate: "2026-02-15",
+        amount: 5000,
+      });
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/on or before the conversion date/i);
+    });
+
+    it("accepts a document dated on the cutover itself", async () => {
+      await setCutover("2026-01-31");
+      const res = await obActions.createOpeningInvoicePg({
+        customerId: customer,
+        invoiceDate: "2026-01-31",
+        amount: 5000,
+      });
+      expect(res.success).toBe(true);
+      expect(await accountNet(arAcct)).toBe(5000);
+    });
+
+    it("applies the same rule to opening bills", async () => {
+      await setCutover("2026-01-31");
+      const res = await obActions.createOpeningBillPg({
+        supplierId: supplier,
+        billDate: "2026-03-01",
+        amount: 5000,
+      });
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/on or before the conversion date/i);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
   describe("the setup screen's data", () => {
+    it("opening documents do NOT block the lump", async () => {
+      // The lump is the entry with no source; opening documents set one. If
+      // the guard could not tell them apart, entering an opening invoice would
+      // lock the trial-balance grid.
+      await asTenant((tx) =>
+        invoicesRepo.createOpeningBalanceInvoice(tx, {
+          companyId, customerId: customer, invoiceDate: "2026-01-01",
+          dueDate: "2026-01-31", amount: "25000.0000",
+          arAccountId: arAcct, openingEquityAccountId: obeAcct, createdById: userId,
+        }),
+      );
+
+      const setup = await asTenant((tx) => ob.getOpeningBalanceSetup(tx));
+      expect(setup.alreadyPosted).toBeNull();
+
+      // And the lump still books.
+      const { entry } = await postLump([
+        { accountId: cashAcct, debit: "100.0000", credit: "0.0000" },
+      ]);
+      expect(entry.entryNumber).toBeTruthy();
+    });
+
     it("reports the live lock once a real transaction has posted", async () => {
       let setup = await asTenant((tx) => ob.getOpeningBalanceSetup(tx));
       expect(setup.liveLocked).toBe(false);
