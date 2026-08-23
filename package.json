@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "lint:ci": "eslint . --quiet",
     "test": "vitest run",
+    "ledger-sweep": "node scripts/ledger-sweep.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
