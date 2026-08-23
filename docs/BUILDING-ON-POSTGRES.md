@@ -101,7 +101,21 @@ reads as done and is not.
 node scripts/find-unwired-actions.mjs
 ```
 
-Run it at the end of every port. READ the output rather than counting it: a
+Run it at the end of every port. READ the output rather than counting it —
+scanning the list for "a whole file's worth" nearly produced three false
+alarms in one sitting: purchase-orders (9 unwired) and grn (7) turned out to
+have ZERO Mongo imports, their unwired entries being read helpers the screens
+reach through server components; and claims (8) is the project picker, which is
+Mongo because PROJECTS are. Check what the screens actually import before
+reading a count as a verdict.
+
+A genuine hit looks different: **the action was already dead before the port.**
+`setCheckoutStatusPg` is flagged, and so was the `updateCheckoutStatus` it was
+ported from — no screen has ever called either. Porting dead code faithfully
+produces dead code, so run this BEFORE a port as well as after, and decide
+then whether the thing deserves a UI or a deletion.
+
+More context: a
 form-data adapter, or a lower-level variant a route handler will want, can
 legitimately have no screen calling it. What you are looking for is **a whole
 file's worth at once** — that means the screens were never pointed at it.

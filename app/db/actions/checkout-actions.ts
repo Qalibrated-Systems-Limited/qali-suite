@@ -232,6 +232,13 @@ export async function escalateCheckoutPg(
 /**
  * Marks a checkout overdue, lost or damaged.
  *
+ * NO SCREEN CALLS THIS, and none called the Mongo `updateCheckoutStatus` it
+ * was ported from either — `find-unwired-actions.mjs` flags it, and checking
+ * the history shows it was already dead before the port. It is kept rather
+ * than dropped because "lost" and "damaged" are real states the enum carries
+ * and the list filters on, so the gap is a missing UI rather than a dead idea.
+ * If no screen wants it, delete this and the two enum values together.
+ *
  * `returned` and `expensed` are NOT reachable here — they move value, and the
  * Mongo action let a store manager set them from a dropdown, which changed the
  * status without posting anything or touching a quantity counter.
