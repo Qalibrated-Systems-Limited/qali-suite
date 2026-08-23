@@ -4,68 +4,182 @@
  * computePettyCashStatement aggregates the float account's activity over a date
  * range: CR = every Expense paid from the float, DR = posted JE lines that debit
  * the float (top-ups). This proves the core logic (rows, DR/CR split, running
- * balance, project/category labels) in isolation.
+ * balance, project/category labels).
+ *
+ * POSTGRES on both halves since 0059/0060, and that pairing is the point.
+ * This function is why the plan said expenses had to move BEFORE petty cash:
+ * it takes the float's opening and closing position from the GL and the spend
+ * rows from expenses, so moving one without the other would have split the
+ * statement across two stores — balances from one, spend from the other,
+ * disagreeing about the same tin.
+ *
+ * Skipped unless DATABASE_URL is set.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import mongoose from "mongoose";
-import Account from "@/app/models/account";
-import Project from "@/app/models/project";
-import "@/app/models/expenses";
-import "@/app/models/JournalEntry";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+
+const DATABASE_URL = process.env.DATABASE_URL;
+const ADMIN_URL = process.env.DIRECT_DATABASE_URL || DATABASE_URL;
+const suite = DATABASE_URL ? describe : describe.skip;
 
 vi.mock("server-only", () => ({}));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// petty-cash-queries.js still imports the Mongo tenant helpers for its OTHER
+// exports (float accounts, returns). Stubbed so importing the module does not
+// drag next-auth in — the statement itself no longer uses them.
 vi.mock("@/lib/utils/tenant-utils", () => ({
   getTenantContext: vi.fn(async () => ({})),
 }));
 vi.mock("@/app/config/dbConnect", () => ({ default: vi.fn(async () => {}) }));
 
+let companyId;
+// The statement's reads run through withAuthorizedTenant. Stubbed to the
+// company under test, with a transaction that sets app.company_id the way the
+// real helper does — so RLS is live, not bypassed.
+let db;
+vi.mock("@/app/db/tenant", () => ({
+  withAuthorizedTenant: vi.fn(async (_roles, fn) =>
+    db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.company_id', ${companyId}, true)`);
+      return fn(tx, { user: { id: "u1", name: "T", role: "Accountant" }, companyId });
+    }),
+  ),
+}));
+
 const { computePettyCashStatement } = await import(
   "@/app/mongodb/queries/petty-cash-queries.js"
 );
+const expensesRepo = await import("@/app/db/repositories/expenses");
 
-const { ObjectId } = mongoose.Types;
-let seq = 0;
-async function raw(model, docs) {
-  const NUM = { Expense: "expenseNumber", JournalEntry: "entryNumber" };
-  const f = NUM[model];
-  await mongoose
-    .model(model)
-    .collection.insertMany(docs.map((d) => (f && d[f] == null ? { ...d, [f]: `${f}-${++seq}` } : d)));
-}
+suite("computePettyCashStatement", () => {
+  let admin, client;
+  let floatId, bankId, fuelAcct, userId;
 
-describe("computePettyCashStatement", () => {
-  let companyId, floatId, bankId, project;
+  const asTenant = (fn) =>
+    db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.company_id', ${companyId}, true)`);
+      return fn(tx);
+    });
+
+  /** A posted entry that moves money between two accounts. */
+  const postEntry = async (date, description, debitAcct, creditAcct, amount) => {
+    const entryId = randomUUID();
+    await asTenant(async (tx) => {
+      await tx.execute(sql`
+        INSERT INTO journal_entries
+          (id, company_id, entry_number, entry_date, entry_type, description, status, posted_at)
+        VALUES (${entryId}::uuid, ${companyId}::uuid,
+                ${"JE-" + entryId.slice(0, 8)}, ${date}::date, 'transfer',
+                ${description}, 'posted', now())`);
+      await tx.execute(sql`
+        INSERT INTO journal_lines (company_id, entry_id, account_id, line_number, debit, credit)
+        VALUES
+          (${companyId}::uuid, ${entryId}::uuid, ${debitAcct}::uuid,  1, ${amount}, 0),
+          (${companyId}::uuid, ${entryId}::uuid, ${creditAcct}::uuid, 2, 0, ${amount})`);
+    });
+    return entryId;
+  };
+
+  const spend = (over = {}) =>
+    asTenant((tx) =>
+      expensesRepo.createAndPostExpense(tx, {
+        companyId,
+        expenseDate: "2026-02-10",
+        category: "transport",
+        accountId: fuelAcct,
+        amount: "2000.0000",
+        payeeName: "Tom",
+        description: "Fuel",
+        paymentMethod: "cash",
+        paidFromAccountId: floatId,
+        createdById: userId,
+        ...over,
+      }),
+    );
+
+  beforeAll(async () => {
+    admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
+    client = postgres(process.env.PG_TEST_URL ?? DATABASE_URL, { max: 1, onnotice: () => {} });
+    db = drizzle(client);
+  });
+  afterAll(async () => {
+    if (client) await client.end();
+    if (admin) await admin.end();
+  });
 
   beforeEach(async () => {
-    companyId = new ObjectId();
-    floatId = (await Account.create({ companyId, accountCode: "1000", accountName: "Petty Cash", accountType: "asset", subType: "cash", systemAccount: "petty_cash", canPost: true, isActive: true }))._id;
-    bankId = (await Account.create({ companyId, accountCode: "1010", accountName: "KCB", accountType: "asset", subType: "bank", canPost: true, isActive: true }))._id;
-    project = await Project.create({ companyId, name: "Tom Project", projectNumber: `PRJ-${Date.now()}`, status: "active" });
+    await admin`TRUNCATE companies CASCADE`;
+    await admin`TRUNCATE entry_counters`;
+    companyId = randomUUID();
+    floatId = randomUUID();
+    bankId = randomUUID();
+    fuelAcct = randomUUID();
+    userId = randomUUID();
+
+    await admin`INSERT INTO companies (id, name, slug)
+      VALUES (${companyId}, 'Acme Ltd', ${"a-" + companyId.slice(0, 8)})`;
+    await admin`INSERT INTO users (id, home_company_id, name, email, role)
+      VALUES (${userId}, ${companyId}, 'Tom', ${userId + "@x.test"}, 'Accountant')`;
+
+    await asTenant(async (tx) => {
+      await tx.execute(sql`
+        INSERT INTO accounts
+          (id, company_id, account_code, account_name, account_type, sub_type, can_post, system_account)
+        VALUES
+          (${floatId}::uuid,  ${companyId}::uuid, '1000', 'Petty Cash',       'asset',     'cash', true, 'petty_cash'),
+          (${bankId}::uuid,   ${companyId}::uuid, '1010', 'KCB',              'asset',     'bank', true, NULL),
+          (${fuelAcct}::uuid, ${companyId}::uuid, '6200', 'Transport & Fuel', 'expense',   NULL,   true, NULL),
+          (${randomUUID()}::uuid, ${companyId}::uuid, '2170', 'Accrued Expenses', 'liability', NULL, true, 'accrued_expenses')`);
+      await tx.execute(sql`
+        INSERT INTO fiscal_periods
+          (company_id, year, month, period_name, period_code, start_date, end_date, status)
+        SELECT ${companyId}::uuid, y, m,
+               to_char(make_date(y, m, 1), 'FMMonth YYYY'),
+               to_char(make_date(y, m, 1), 'YYYY-MM'),
+               make_date(y, m, 1),
+               (make_date(y, m, 1) + interval '1 month - 1 day')::date, 'open'
+          FROM generate_series(2025, 2032) AS y, generate_series(1, 12) AS m`);
+    });
   });
 
   it("lists float top-ups (DR) + expenses paid from the float (CR) with running balance", async () => {
-    const inRange = new Date("2026-02-10");
-    // Top-up: a posted JE that debits the float by 50,000.
-    await raw("JournalEntry", [
-      { companyId, status: "posted", entryDate: new Date("2026-02-01"), description: "Float received",
-        lines: [
-          { accountId: floatId, debit: 50000, credit: 0, accountType: "asset" },
-          { accountId: bankId, debit: 0, credit: 50000, accountType: "asset" },
-        ] },
-    ]);
-    // Two spends actually PAID from the float — one project-tagged, one category overhead.
-    await raw("Expense", [
-      { companyId, paidFrom: floatId, status: "paid", expenseDate: inRange, total: 2000, description: "Fuel", projectId: project._id, vendor: { name: "Tom" } },
-      { companyId, paidFrom: floatId, status: "paid", expenseDate: inRange, total: 780, description: "Kitchen", category: "office_supplies", vendor: { name: "Sophie" } },
-      // unpaid accrual against the float (in range) — NOT cash out, must NOT appear
-      { companyId, paidFrom: floatId, status: "posted", expenseDate: inRange, total: 5000, description: "Accrued, unpaid", vendor: { name: "Z" } },
-      // out of range / different account — must NOT appear
-      { companyId, paidFrom: floatId, status: "paid", expenseDate: new Date("2026-03-05"), total: 999, description: "Next month", vendor: { name: "X" } },
-      { companyId, paidFrom: bankId, status: "paid", expenseDate: inRange, total: 888, description: "Paid from bank", vendor: { name: "Y" } },
-    ]);
+    await postEntry("2026-02-01", "Float received", floatId, bankId, 50000);
+
+    // Two spends actually PAID from the float — one project-tagged, one
+    // category overhead.
+    await spend({
+      total: undefined,
+      projectId: "65f0000000000000000000aa",
+      projectName: "Tom Project",
+    });
+    await spend({
+      amount: "780.0000",
+      category: "office_supplies",
+      description: "Kitchen",
+      payeeName: "Sophie",
+    });
+    // An unpaid accrual against the float, in range — NOT cash out.
+    await spend({
+      amount: "5000.0000",
+      description: "Accrued, unpaid",
+      payeeName: "Z",
+      paymentMethod: null,
+      paidFromAccountId: null,
+    });
+    // Out of range, and paid from a different account — neither may appear.
+    await spend({ expenseDate: "2026-03-05", amount: "999.0000", description: "Next month" });
+    await spend({
+      amount: "888.0000",
+      description: "Paid from bank",
+      paymentMethod: "bank_transfer",
+      paidFromAccountId: bankId,
+    });
 
     const { rows, totals } = await computePettyCashStatement(
-      { companyId },
+      null,
       floatId,
       "2026-02-01",
       "2026-02-28",
@@ -74,56 +188,31 @@ describe("computePettyCashStatement", () => {
 
     expect(rows).toHaveLength(3); // 1 top-up + 2 in-range PAID float expenses
     expect(totals.debits).toBe(50000);
-    expect(totals.credits).toBe(2780); // 2000 + 780 — the 5000 unpaid accrual is excluded
+    expect(totals.credits).toBe(2780); // 2000 + 780 — the 5000 accrual is excluded
     expect(totals.closing).toBe(47220);
-    // The unpaid accrual must not appear as cash out of the tin.
     expect(rows.some((r) => r.amount === 5000)).toBe(false);
 
     const topup = rows.find((r) => r.direction === "debit");
     expect(topup.amount).toBe(50000);
 
-    const fuel = rows.find((r) => r.ref?.includes("expenseNumber") && r.amount === 2000);
-    expect(fuel.projectLabel).toBe("Tom Project"); // project name
+    const fuel = rows.find((r) => r.amount === 2000);
+    // The project NAME is snapshotted on the expense, so labelling a row no
+    // longer means loading every project in the company.
+    expect(fuel.projectLabel).toBe("Tom Project");
     const kitchen = rows.find((r) => r.amount === 780);
     expect(kitchen.projectLabel).toBe("office_supplies"); // category fallback
 
-    // running balance ends at the closing figure
     expect(rows[rows.length - 1].balance).toBe(47220);
   });
 
   it("opens at the float's GL balance (incl. a pre-period opening-balance entry)", async () => {
-    // Opening balance booked BEFORE the period: Dr Petty Cash 10,000.
-    await raw("JournalEntry", [
-      {
-        companyId,
-        status: "posted",
-        entryDate: new Date("2026-01-15"),
-        description: "Opening balance",
-        lines: [
-          { accountId: floatId, debit: 10000, credit: 0, accountType: "asset" },
-          { accountId: bankId, debit: 0, credit: 10000, accountType: "asset" },
-        ],
-      },
-      // In-period top-up of 5,000.
-      {
-        companyId,
-        status: "posted",
-        entryDate: new Date("2026-02-05"),
-        description: "Float top-up",
-        lines: [
-          { accountId: floatId, debit: 5000, credit: 0, accountType: "asset" },
-          { accountId: bankId, debit: 0, credit: 5000, accountType: "asset" },
-        ],
-      },
-    ]);
-    // One spend of 2,000 paid from the float, in period.
-    await raw("Expense", [
-      { companyId, paidFrom: floatId, status: "paid", expenseDate: new Date("2026-02-10"), total: 2000, description: "Fuel", vendor: { name: "Tom" } },
-    ]);
+    await postEntry("2026-01-15", "Opening balance", floatId, bankId, 10000);
+    await postEntry("2026-02-05", "Float top-up", floatId, bankId, 5000);
+    await spend(); // 2,000 from the float, in period
 
     // No explicit opening passed → GL-derived.
     const { rows, openingBalance, totals } = await computePettyCashStatement(
-      { companyId },
+      null,
       floatId,
       "2026-02-01",
       "2026-02-28",
@@ -134,5 +223,50 @@ describe("computePettyCashStatement", () => {
     expect(totals.debits).toBe(5000);
     expect(totals.credits).toBe(2000);
     expect(totals.closing).toBe(13000); // 10,000 + 5,000 - 2,000
+  });
+
+  it("reconciles: the GL closing and the accounted closing agree", async () => {
+    // The variance exists to catch cash movements the expense list does not
+    // capture. With none, it must be exactly zero — and it is exact, because
+    // both sides are summed in the database rather than accumulated in a float.
+    await postEntry("2026-02-01", "Float received", floatId, bankId, 50000);
+    await spend({ amount: "1333.3300", description: "Odd amount" });
+    await spend({ amount: "666.6700", description: "Another" });
+
+    const { totals } = await computePettyCashStatement(
+      null,
+      floatId,
+      "2026-02-01",
+      "2026-02-28",
+    );
+
+    expect(totals.credits).toBe(2000);
+    expect(totals.variance).toBe(0);
+    expect(totals.glClosing).toBe(totals.closing);
+  });
+
+  it("a voided expense stops being money out of the tin", async () => {
+    await postEntry("2026-02-01", "Float received", floatId, bankId, 50000);
+    const { expense } = await spend();
+
+    await asTenant((tx) =>
+      expensesRepo.voidExpense(tx, expense.id, {
+        reason: "Entered twice",
+        voidedById: userId,
+      }),
+    );
+
+    const { rows, totals } = await computePettyCashStatement(
+      null,
+      floatId,
+      "2026-02-01",
+      "2026-02-28",
+    );
+
+    // Off the statement, and off the GL too — the void reversed the posting,
+    // so the accounted and GL closings still agree.
+    expect(rows.filter((r) => r.kind === "expense")).toHaveLength(0);
+    expect(totals.credits).toBe(0);
+    expect(totals.variance).toBe(0);
   });
 });

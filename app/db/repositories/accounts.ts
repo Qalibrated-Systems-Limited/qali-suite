@@ -544,3 +544,74 @@ export async function getAccountLedger(
     runningBalance: Number(r.running_balance ?? 0),
   }));
 }
+
+/**
+ * An account's opening and closing position over a window, from POSTED lines.
+ *
+ * Built for the petty cash statement (0060), which calls the GL "the single
+ * source of truth for the balances" and then computes them from a Mongo
+ * aggregate. Opening is the net of every posted line dated BEFORE `from`, so
+ * opening balances and prior periods are reflected without being seeded;
+ * closing is the net through `to`. One pass, split by date.
+ *
+ * Returns strings — numeric(19,4), summed in the database, so a float never
+ * touches the figure.
+ */
+export async function getAccountPosition(
+  tx: Tx,
+  accountId: string,
+  opts: { from: string; to: string },
+) {
+  const [row] = (await tx.execute(sql`
+    SELECT
+      COALESCE(SUM(jl.debit - jl.credit)
+               FILTER (WHERE je.entry_date < ${opts.from}::date), 0)::text AS opening,
+      COALESCE(SUM(jl.debit - jl.credit), 0)::text                          AS closing,
+      COALESCE(SUM(jl.debit)
+               FILTER (WHERE je.entry_date BETWEEN ${opts.from}::date AND ${opts.to}::date), 0)::text AS period_debit,
+      COALESCE(SUM(jl.credit)
+               FILTER (WHERE je.entry_date BETWEEN ${opts.from}::date AND ${opts.to}::date), 0)::text AS period_credit
+      FROM journal_lines jl
+      JOIN journal_entries je ON je.id = jl.entry_id
+     WHERE jl.account_id = ${accountId}::uuid
+       AND je.status = 'posted'
+       AND je.entry_date <= ${opts.to}::date
+  `)) as unknown as Array<Record<string, string>>;
+
+  return {
+    opening: row?.opening ?? "0",
+    closing: row?.closing ?? "0",
+    periodDebit: row?.period_debit ?? "0",
+    periodCredit: row?.period_credit ?? "0",
+  };
+}
+
+/**
+ * Posted entries that DEBIT an account over a window — money in.
+ *
+ * The petty cash statement's top-up rows: a float receipt is any posted entry
+ * that debits the float, whatever raised it.
+ */
+export async function listAccountDebits(
+  tx: Tx,
+  accountId: string,
+  opts: { from: string; to: string },
+) {
+  const rows = (await tx.execute(sql`
+    SELECT je.entry_number, je.entry_date, je.description, jl.debit
+      FROM journal_lines jl
+      JOIN journal_entries je ON je.id = jl.entry_id
+     WHERE jl.account_id = ${accountId}::uuid
+       AND je.status = 'posted'
+       AND jl.debit > 0
+       AND je.entry_date BETWEEN ${opts.from}::date AND ${opts.to}::date
+     ORDER BY je.entry_date, je.entry_number
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    entryNumber: String(r.entry_number),
+    entryDate: r.entry_date as Date,
+    description: (r.description as string) ?? null,
+    amount: String(r.debit ?? "0"),
+  }));
+}

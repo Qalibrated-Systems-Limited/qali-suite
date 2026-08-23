@@ -1,9 +1,11 @@
 import mongoose from "mongoose";
 import PettyCashReturn from "../../models/pettyCashReturn";
 import Account from "../../models/account";
-import Project from "../../models/project";
-import Expense from "../../models/expenses";
-import JournalEntry from "../../models/JournalEntry";
+import {
+  listExpensesPaidFromPg,
+  getAccountPositionPg,
+  listAccountDebitsPg,
+} from "@/app/db/actions/petty-cash-reads";
 import dbConnect from "../../config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { serializeBsonType } from "@/lib/utils";
@@ -23,86 +25,64 @@ function tenantMatch(companyId, isSuperAdmin) {
 // Expenses, they already post to the GL and feed project cost — the statement
 // only DISPLAYS them, so nothing is double-counted or re-typed.
 //
-// `tm` is the resolved tenant match; `floatId`/`from`/`to` are normalised.
+// BOTH HALVES ARE POSTGRES NOW (0059/0060).
+//
+// This function is why the plan said expenses had to move first. It reads the
+// GL for the float's opening and closing position AND the expense rows for the
+// spend, and until 0059 both were Mongo — so it was self-consistent inside one
+// store even while the ledger screens read another. Porting petty cash's
+// postings without porting expenses would have split it across two stores:
+// balances from one, spend rows from the other, disagreeing on the same float.
+//
+// `tm` is kept in the signature and ignored: tenant scope is RLS now, not a
+// match object the caller assembles and every query has to remember to spread.
+// The parameter stays so petty-cash-actions.js does not have to change in the
+// same commit as the store.
 export async function computePettyCashStatement(tm, floatId, from, to, opening = null) {
-  const fromD = new Date(from);
-  const toD = new Date(to);
-  const r2 = (n) => Math.round((n || 0) * 100) / 100;
+  const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const day = (d) =>
+    d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10);
+  const fromD = day(from);
+  const toD = day(to);
 
-  const [expenses, topupAgg, projects, glAgg] = await Promise.all([
-    // Spends OUT of the tin — expenses actually PAID from this account.
-    // Only "paid" is real cash disbursed: a "posted" expense is an unpaid
-    // accrual (the model sets status="posted"/paymentStatus="unpaid" together),
-    // so counting it as money out would understate the float balance.
-    Expense.find({
-      ...tm,
-      paidFrom: floatId,
-      status: "paid",
-      expenseDate: { $gte: fromD, $lte: toD },
-    })
-      .select("expenseDate description category projectId accountName vendor total expenseNumber")
-      .lean(),
-    // Money IN — any posted JE that debits the float (float receipts/top-ups).
-    JournalEntry.aggregate([
-      { $match: { ...tm, status: "posted", entryDate: { $gte: fromD, $lte: toD } } },
-      { $unwind: "$lines" },
-      { $match: { "lines.accountId": floatId, "lines.debit": { $gt: 0 } } },
-      { $project: { date: "$entryDate", description: 1, amount: "$lines.debit", entryNumber: 1 } },
-    ]),
-    Project.find({ ...tm }).select("name projectNumber").lean(),
-    // GL position of the float — the single source of truth for the balances.
-    // Opening = net of every posted line dated BEFORE `from` (so opening
-    // balances and prior periods are reflected automatically); closing = net
-    // through `to`. One pass, split by date with $cond.
-    JournalEntry.aggregate([
-      { $match: { ...tm, status: "posted", "lines.accountId": floatId, entryDate: { $lte: toD } } },
-      { $unwind: "$lines" },
-      { $match: { "lines.accountId": floatId } },
-      {
-        $group: {
-          _id: null,
-          openDebit: { $sum: { $cond: [{ $lt: ["$entryDate", fromD] }, "$lines.debit", 0] } },
-          openCredit: { $sum: { $cond: [{ $lt: ["$entryDate", fromD] }, "$lines.credit", 0] } },
-          totDebit: { $sum: "$lines.debit" },
-          totCredit: { $sum: "$lines.credit" },
-        },
-      },
-    ]),
+  const [spend, topups, position] = await Promise.all([
+    listExpensesPaidFromPg(floatId, { from: fromD, to: toD }),
+    listAccountDebitsPg(floatId, { from: fromD, to: toD }),
+    getAccountPositionPg(floatId, { from: fromD, to: toD }),
   ]);
 
-  const gl = glAgg[0] || { openDebit: 0, openCredit: 0, totDebit: 0, totCredit: 0 };
-  const glOpening = r2(gl.openDebit - gl.openCredit); // float is debit-normal
-  const glClosing = r2(gl.totDebit - gl.totCredit);
+  // The float is debit-normal.
+  const glOpening = r2(position.opening);
+  const glClosing = r2(position.closing);
 
   // Opening is GL-derived by default; an explicit value overrides it (kept for
   // back-compat and inception seeding).
   const openingBalance = opening != null ? opening : glOpening;
 
-  const projName = new Map(projects.map((p) => [p._id.toString(), p.name]));
-
   const rows = [
-    ...topupAgg.map((t) => ({
+    ...topups.map((t) => ({
       kind: "topup",
-      date: t.date,
+      date: t.entryDate,
       name: "Float received",
       description: t.description || "Float top-up",
       projectLabel: "",
       direction: "debit",
-      amount: t.amount,
+      amount: r2(t.amount),
       ref: t.entryNumber,
     })),
-    ...expenses.map((e) => ({
+    ...spend.map((e) => ({
       kind: "expense",
       date: e.expenseDate,
-      name: e.vendor?.name || "",
+      name: e.payeeName || "",
       description: e.description || e.accountName || "",
-      projectLabel: e.projectId
-        ? projName.get(e.projectId.toString()) || ""
-        : e.category || "",
+      // The project NAME is snapshotted on the expense now, so the statement
+      // no longer has to load every project in the company to label a handful
+      // of rows — and a project since renamed still reads as it did.
+      projectLabel: e.projectName || e.category || "",
       direction: "credit",
-      amount: e.total,
+      amount: r2(e.total),
       ref: e.expenseNumber,
-      expenseId: e._id,
+      expenseId: e.id,
     })),
   ].sort((a, b) => new Date(a.date) - new Date(b.date));
 

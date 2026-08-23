@@ -173,6 +173,23 @@ suite("expenses on postgres", () => {
       expect(await accountNet(accruedAcct)).toBe(-950);
     });
 
+    it("posts an expense whose payee is not on file", async () => {
+      // `vendor.name` is required on the Mongo schema and `vendor.id` is not,
+      // so a cash purchase from someone with no party record is ordinary. The
+      // journal entry then has a party NAME and no party — and
+      // `journal_entries_party_pair` requires party_type and party_id to be
+      // both set or both null, so tagging it 'supplier' with nothing to point
+      // at fails the check. Found by the petty cash statement suite.
+      const { expense, entry } = await create({ payeePartyId: null });
+
+      expect(expense.payeeNameAtExpense).toBe("Text Book Centre");
+      expect(expense.payeePartyId).toBeNull();
+      const [je] = await admin`
+        SELECT party_type, party_id FROM journal_entries WHERE id = ${entry.id}`;
+      expect(je.party_type).toBeNull();
+      expect(je.party_id).toBeNull();
+    });
+
     it("refuses a non-expense account", async () => {
       await expect(create({ accountId: revenueAcct })).rejects.toThrow(
         /must be an expense account/i,

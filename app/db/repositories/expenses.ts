@@ -294,7 +294,12 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
     entryType: "expense",
     description: `Expense: ${input.description}`,
     reference: input.reference ?? expenseNumber,
-    partyType: input.payeeType ?? "supplier",
+    // Both or neither — `journal_entries_party_pair`. The payee NAME is
+    // required on an expense but the party is not (Mongo's `vendor.name` is
+    // required, `vendor.id` is not), so a cash purchase from someone who is
+    // not on file has a name and no party, and tagging the entry
+    // 'supplier' with nothing to point at would fail the check.
+    partyType: input.payeePartyId ? (input.payeeType ?? "supplier") : null,
     partyId: input.payeePartyId ?? null,
     sourceType: "expense",
     sourceId: row.id,
@@ -371,7 +376,7 @@ export async function recordExpensePayment(
     entryType: "expense",
     description: `Payment clearing — ${expense.expenseNumber}: ${expense.description}`,
     reference: expense.expenseNumber,
-    partyType: expense.payeeType,
+    partyType: expense.payeePartyId ? expense.payeeType : null,
     partyId: expense.payeePartyId,
     sourceType: "expense",
     sourceId: expense.id,
@@ -1029,4 +1034,45 @@ export async function sumExpensesForPeriod(
       ),
     );
   return row;
+}
+
+/**
+ * Expenses actually PAID out of one account, over a window.
+ *
+ * The petty cash statement's spend rows. Only paid expenses are money out: a
+ * `posted` expense is an unpaid accrual, and counting one as cash disbursed
+ * would understate the float. The Mongo query says the same thing by filtering
+ * `status: "paid"`; here `payment_status` is a generated column, so it cannot
+ * disagree with `paid_at`.
+ */
+export async function listExpensesPaidFrom(
+  tx: Tx,
+  accountId: string,
+  opts: { from: string; to: string },
+) {
+  return tx
+    .select({
+      id: expenses.id,
+      expenseNumber: expenses.expenseNumber,
+      expenseDate: expenses.expenseDate,
+      paidAt: expenses.paidAt,
+      description: expenses.description,
+      category: expenses.category,
+      accountName: expenses.accountNameAtExpense,
+      payeeName: expenses.payeeNameAtExpense,
+      projectId: expenses.projectId,
+      projectName: expenses.projectNameAtExpense,
+      total: expenses.total,
+    })
+    .from(expenses)
+    .where(
+      and(
+        eq(expenses.paidFromAccountId, accountId),
+        eq(expenses.paymentStatus, "paid"),
+        sql`${expenses.status} <> 'void'`,
+        gte(expenses.expenseDate, opts.from),
+        lte(expenses.expenseDate, opts.to),
+      ),
+    )
+    .orderBy(asc(expenses.expenseDate));
 }
