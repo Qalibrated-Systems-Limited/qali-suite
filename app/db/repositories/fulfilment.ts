@@ -572,7 +572,11 @@ export async function returnCheckout(
       entryType: "inventory_adjustment",
       description: `Return to stock — ${updated.checkoutNumber}`,
       reference: updated.checkoutNumber,
-      sourceType: "stock_movement",
+      // Both or neither — `journal_entries_source_pair`. A return recorded
+      // without a stock movement has nothing to point at, and naming the type
+      // with a null id fails the check. The same pair trap as party_type /
+      // party_id on the expense postings.
+      sourceType: input.returnMovementId ? "stock_movement" : null,
       sourceId: input.returnMovementId ?? null,
       lines: [
         {
@@ -1731,5 +1735,6 @@ export async function getCheckoutStats(tx: Tx) {
       count(*)::int                                      AS total
     FROM item_checkouts
   `)) as unknown as Array<Record<string, number>>;
-  return row;
+  // `due_soon` → `dueSoon`: the stat tiles read camelCase.
+  return { ...row, dueSoon: row.due_soon };
 }
