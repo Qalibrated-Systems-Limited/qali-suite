@@ -5,25 +5,24 @@
  * directly; above the configurable threshold the release is routed for sign-off
  * (CFO/Finance Manager/Admin) — segregation of duties. This isolates the GATE
  * decision: who routes for approval vs. who pays through.
+ *
+ * POSTGRES since 0059. The gate itself did not change, but two things around
+ * it did, and both are asserted below:
+ *
+ *   - the amount is read from the Postgres row's `total`, a GENERATED column,
+ *     rather than from a Mongo field that a write could leave stale;
+ *   - releasing an APPROVED payment goes through a separate action that does
+ *     NOT re-check the threshold. Re-checking it would refuse the payment for
+ *     needing the approval it has just been given.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import mongoose from "mongoose";
-import "@/app/models/expenses";
-
-const { ObjectId } = mongoose.Types;
-const ctx = { companyId: null, isSuperAdmin: false, user: null };
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/utils/tenant-utils", () => ({
-  getTenantContext: vi.fn(async () => ({ ...ctx })),
-  withTenantScope: (q, companyId, isSuperAdmin) =>
-    isSuperAdmin ? q : { ...q, companyId: new ObjectId(companyId) },
-}));
-vi.mock("@/app/config/dbConnect", () => ({ default: vi.fn(async () => {}) }));
-vi.mock("@/lib/plan-gate", () => ({ requirePlanAccess: vi.fn(async () => {}) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
-// Threshold pinned; submitApproval mocked so we observe routing without its internals.
+
+// Threshold pinned; submitApproval mocked so we observe routing without its
+// internals. Both are still Mongo — approvals are their own unported module,
+// and that seam is the point of the dynamic imports in the action.
 vi.mock("@/app/mongodb/queries/threshold-queries", () => ({
   getCompanyThresholds: vi.fn(async () => ({ expensePaymentValue: 50_000 })),
 }));
@@ -31,74 +30,134 @@ const submitApproval = vi.fn(async () => ({
   success: true,
   approval: { _id: "appr1", requestNumber: "APR-0001" },
 }));
-vi.mock("@/app/mongodb/actions/approval-actions", () => ({ submitApproval: (...a) => submitApproval(...a) }));
+vi.mock("@/app/mongodb/actions/approval-actions", () => ({
+  submitApproval: (...a) => submitApproval(...a),
+}));
 
-const { recordExpensePayment } = await import(
-  "@/app/mongodb/actions/expense-actions.js"
+// The tenant layer is stubbed so the gate is what is under test, not RLS —
+// that is covered by tests/pg-expenses.test.mjs.
+const ctx = { role: "Accountant", expense: null };
+vi.mock("@/app/db/tenant", () => ({
+  withAuthorizedTenant: vi.fn(async (_roles, fn) =>
+    fn({}, { user: { id: "u1", name: "Acc", role: ctx.role }, companyId: "c1" }),
+  ),
+}));
+
+const recordPayment = vi.fn(async () => ({
+  expense: {
+    id: ctx.expense.id,
+    expenseNumber: ctx.expense.expenseNumber,
+    projectId: null,
+    total: ctx.expense.total,
+  },
+}));
+vi.mock("@/app/db/repositories/expenses", () => ({
+  getExpense: vi.fn(async () => ctx.expense),
+  recordExpensePayment: (...a) => recordPayment(...a),
+}));
+
+const { recordExpensePaymentPg, applyApprovedExpensePaymentPg } = await import(
+  "@/app/db/actions/expense-actions"
 );
 
-let companyId;
-async function seedExpense(total) {
-  const Expense = mongoose.model("Expense");
-  const [e] = await Expense.collection.insertMany([
-    {
-      companyId,
-      expenseNumber: `EXP-${Date.now()}-${Math.round(total)}`,
-      status: "posted",
-      paymentStatus: "unpaid",
-      total,
-      vendor: { name: "Mombasa Computers" },
-    },
-  ]).then((r) => Expense.find({ _id: { $in: Object.values(r.insertedIds) } }));
-  return e._id;
+const ACCOUNT = "11111111-2222-3333-4444-555555555555";
+
+function seedExpense(total) {
+  ctx.expense = {
+    id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    companyId: "c1",
+    expenseNumber: "EXP-00001",
+    // A string, because numeric(19,4) is a string in Drizzle — the gate has to
+    // Number() it, and getting that wrong would compare "80000" to 50000 as
+    // strings and route nothing.
+    total: String(total),
+    payeeNameAtExpense: "Mombasa Computers",
+    paymentStatus: "unpaid",
+    status: "posted",
+  };
+  return ctx.expense;
 }
 
 function payForm() {
   const fd = new FormData();
   fd.set("paymentMethod", "bank_transfer");
-  fd.set("paidFrom", new ObjectId().toString());
+  fd.set("paidFrom", ACCOUNT);
   return fd;
 }
 
 describe("expense payment threshold gate", () => {
   beforeEach(() => {
-    companyId = new ObjectId();
-    ctx.companyId = companyId.toString();
-    ctx.isSuperAdmin = false;
+    ctx.role = "Accountant";
     submitApproval.mockClear();
+    recordPayment.mockClear();
   });
 
   it("routes an over-threshold payment for approval (Accountant can't release it)", async () => {
-    ctx.user = { name: "Acc", id: new ObjectId().toString(), role: "Accountant" };
-    const id = await seedExpense(80_000); // > 50,000
+    const e = seedExpense(80_000); // > 50,000
 
-    const res = await recordExpensePayment(id.toString(), null, payForm());
+    const res = await recordExpensePaymentPg(e.id, null, payForm());
 
     expect(submitApproval).toHaveBeenCalledTimes(1);
     expect(submitApproval.mock.calls[0][0].type).toBe("expense_payment");
-    expect(submitApproval.mock.calls[0][0].payload.expenseId).toBe(id.toString());
+    expect(submitApproval.mock.calls[0][0].payload.expenseId).toBe(e.id);
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/approval threshold/i);
     expect(res.pendingApprovalNumber).toBe("APR-0001");
 
-    // still unpaid — nothing was released
-    const e = await mongoose.model("Expense").findById(id).lean();
-    expect(e.paymentStatus).toBe("unpaid");
+    // Nothing was released.
+    expect(recordPayment).not.toHaveBeenCalled();
   });
 
   it("does NOT route a payment at/below the threshold", async () => {
-    ctx.user = { name: "Acc", id: new ObjectId().toString(), role: "Accountant" };
-    const id = await seedExpense(30_000); // <= 50,000
+    const e = seedExpense(30_000); // <= 50,000
 
-    await recordExpensePayment(id.toString(), null, payForm());
-    expect(submitApproval).not.toHaveBeenCalled(); // pays through the direct path
+    const res = await recordExpensePaymentPg(e.id, null, payForm());
+
+    expect(submitApproval).not.toHaveBeenCalled();
+    expect(recordPayment).toHaveBeenCalledTimes(1);
+    expect(res.success).toBe(true);
   });
 
   it("lets a bypass role (CFO) release any amount without approval", async () => {
-    ctx.user = { name: "Boss", id: new ObjectId().toString(), role: "CFO" };
-    const id = await seedExpense(200_000); // huge, but CFO bypasses
+    ctx.role = "CFO";
+    const e = seedExpense(200_000); // huge, but CFO bypasses
 
-    await recordExpensePayment(id.toString(), null, payForm());
+    await recordExpensePaymentPg(e.id, null, payForm());
+
     expect(submitApproval).not.toHaveBeenCalled();
+    expect(recordPayment).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases an approved payment WITHOUT re-checking the threshold", async () => {
+    // The approval engine calls this after sign-off. Running the gate again
+    // here would refuse the payment on the grounds that it needs the approval
+    // it has just received.
+    const e = seedExpense(200_000);
+
+    const res = await applyApprovedExpensePaymentPg(e.id, {
+      paymentMethod: "bank_transfer",
+      paidFrom: ACCOUNT,
+      paidAt: null,
+    });
+
+    expect(submitApproval).not.toHaveBeenCalled();
+    expect(recordPayment).toHaveBeenCalledTimes(1);
+    expect(res.success).toBe(true);
+    // The approval engine still has to move a MONGO project's committed cost,
+    // and takes the amount from the Postgres row rather than guessing.
+    expect(res.total).toBe("200000");
+  });
+
+  it("refuses a payment account that is not a uuid", async () => {
+    seedExpense(1_000);
+    const fd = new FormData();
+    fd.set("paymentMethod", "bank_transfer");
+    fd.set("paidFrom", "507f1f77bcf86cd799439011"); // a Mongo ObjectId
+
+    const res = await recordExpensePaymentPg(ctx.expense.id, null, fd);
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/not a valid payment account/i);
+    expect(recordPayment).not.toHaveBeenCalled();
   });
 });
