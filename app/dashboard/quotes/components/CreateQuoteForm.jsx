@@ -72,7 +72,12 @@ function initStockItems(duplicateFrom, products) {
         name: item.product?.name || item.description,
         SKU: item.product?.sku,
         unit: item.unit,
-        availableStock: product?.stock || 999,
+        // The picker shape has never had a flat `stock` — Mongo's exposed
+        // inventory.quantityAvailable and Postgres's does the same — so this
+        // read every existing line as 999. `?? 0` matches addStockItem below,
+        // and a line whose product has since been deleted now says 0 rather
+        // than claiming stock that is not there. Display only.
+        availableStock: product?.inventory?.quantityAvailable ?? 0,
         quantity: item.quantity,
         costPrice: item.costPrice || item.unitPrice,
         sellingPrice: item.unitPrice,

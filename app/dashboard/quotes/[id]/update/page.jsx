@@ -2,11 +2,10 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
-import { getQuoteForDisplayPg } from "@/app/db/actions/quote-actions";
 import {
-  fetchActiveCustomers,
-  fetchAvailableProducts,
-} from "@/app/mongodb/queries/invoice-queries";
+  getQuoteForDisplayPg,
+  getQuoteFormData,
+} from "@/app/db/actions/quote-actions";
 import { ArrowLeft } from "lucide-react";
 import UpdateQuoteForm from "../../components/UpdateQuoteForm";
 
@@ -63,11 +62,17 @@ export default async function UpdateQuotePage({ params }) {
     );
   }
 
-  // Fetch customers and products
-  const [customers, products] = await Promise.all([
-    fetchActiveCustomers(),
-    fetchAvailableProducts(),
-  ]);
+  // The SAME pickers the create form uses, reading the store this form writes
+  // to. They were still the Mongo ones: the quote comes from Postgres, so
+  // `quote.customer.partyId` and every `items[].product.id` are Postgres uuids,
+  // and no Mongo `_id` could ever equal one. The customer combobox therefore
+  // opened blank on a quote that has a customer, and each product line lost its
+  // stock figure to the `|| 999` fallback. Choosing from those lists sent a
+  // Mongo ObjectId as `customerId`/`productId` into a uuid column.
+  //
+  // They were also UNSCOPED for a SuperAdmin — see getQuoteFormData, whose
+  // docblock already claims both forms. Only the create page was switched.
+  const { customers, products } = await getQuoteFormData();
 
   return (
     <div className="space-y-6">
