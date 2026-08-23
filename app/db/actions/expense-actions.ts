@@ -488,21 +488,57 @@ export async function getExpensesByAssetPg(
   );
 }
 
+/**
+ * The three project reads below degrade rather than throw, matching
+ * getProjectClaimTotalsPg / getProjectClaimsByAccountPg in claim-actions.ts.
+ *
+ * They are called from `app/mongodb/queries/projectQueries.js`, which is still
+ * Mongo — so they are cross-store reads inside a page that has plenty of other
+ * things to render. A project page that 500s because one figure could not be
+ * fetched is worse than one showing that figure as zero.
+ *
+ * It DOES hide a failure, which is why each logs. If a project's expense
+ * column reads zero and should not, look here first.
+ */
+async function orZero<T>(label: string, fn: () => Promise<T>, fallback: T) {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`[expense-actions] ${label} failed:`, err);
+    return fallback;
+  }
+}
+
 export async function getProjectExpenseTotalsPg(projectId: string) {
-  return withAuthorizedTenant([], (tx) =>
-    expensesRepo.getProjectExpenseTotals(tx, projectId),
+  return orZero(
+    "getProjectExpenseTotals",
+    () =>
+      withAuthorizedTenant([], (tx) =>
+        expensesRepo.getProjectExpenseTotals(tx, projectId),
+      ),
+    { count: 0, total: "0", paid: "0", committed: "0" },
   );
 }
 
 export async function getProjectExpensesByAccountPg(projectId: string) {
-  return withAuthorizedTenant([], (tx) =>
-    expensesRepo.getProjectExpensesByAccount(tx, projectId),
+  return orZero(
+    "getProjectExpensesByAccount",
+    () =>
+      withAuthorizedTenant([], (tx) =>
+        expensesRepo.getProjectExpensesByAccount(tx, projectId),
+      ),
+    [] as Awaited<ReturnType<typeof expensesRepo.getProjectExpensesByAccount>>,
   );
 }
 
 export async function listProjectExpensesPg(projectId: string, limit = 50) {
-  return withAuthorizedTenant([], (tx) =>
-    expensesRepo.listProjectExpenses(tx, projectId, limit),
+  return orZero(
+    "listProjectExpenses",
+    () =>
+      withAuthorizedTenant([], (tx) =>
+        expensesRepo.listProjectExpenses(tx, projectId, limit),
+      ),
+    [] as Awaited<ReturnType<typeof expensesRepo.listProjectExpenses>>,
   );
 }
 
