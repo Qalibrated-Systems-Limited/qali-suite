@@ -106,39 +106,41 @@ form-data adapter, or a lower-level variant a route handler will want, can
 legitimately have no screen calling it. What you are looking for is **a whole
 file's worth at once** — that means the screens were never pointed at it.
 
-### Read this before touching expenses or petty cash
+### Read this before touching petty cash
 
-**Two live modules still post journal entries into MongoDB**, and every ledger
+**ONE live module still posts journal entries into MongoDB**, and every ledger
 screen — the journal browser, trial balance, P&L, balance sheet, general
 ledger — reads Postgres:
 
 | Module | Screens | What is being lost |
 |---|---|---|
-| `app/models/expenses.js` | 7 | **every expense, and its clearing entry** |
 | `petty-cash-actions.js` | 3 | every petty cash movement |
 
-**Expenses is the SEVENTH, and the sweep missed it three times.** The count
-went four → five → six as the search widened from `app/mongodb/actions/` to
-`lib/`, and expenses was never in either: its `.post()` calls are in the
-**MODEL** (`expenses.js:608` and `:695`), reached through an action that looks
-like a thin wrapper. §9G mentions expenses — but as a PARTY seam, because it
-calls Mongo's `quickCreateParty`, so nobody read further.
+Expenses was the seventh and is done (0059). Its statement half — the float's
+GL position and the expenses paid out of the tin — moved with it (0060), so
+petty cash's postings are all that is left. When they move,
+`app/db/actions/petty-cash-reads.ts` folds into the petty cash actions and
+stops existing.
 
-The lesson, finally stated properly: **sweep `app/models/` too.** A model
-method that posts is invisible to any grep of the action layer, and the action
-that calls it gives no sign.
+**The lesson expenses cost three sweeps: sweep `app/models/` too.** The count
+went four → five → six as the search widened from `app/mongodb/actions/` to
+`lib/`, and expenses was in neither — its `.post()` calls were in the MODEL,
+reached through an action that looked like a thin wrapper. §9G even named
+expenses, but as a PARTY seam, so nobody read further.
 
 ```bash
 grep -rn "\.post(" app/models app/mongodb lib | grep -v node_modules
 ```
 
-**They are coupled, so do expenses FIRST.**
-`computePettyCashStatement` calls the GL "the single source of truth for the
-balances" and reads the MONGO ledger for the float's opening and closing
-position — and Mongo expenses for the spend rows. Petty cash is therefore
-self-consistent inside Mongo today. Move its postings to Postgres without
-moving expenses and the statement straddles two stores: balances from one,
-spend rows from the other, disagreeing.
+**And a second question, which the `.post(` sweep will never answer** (§9K):
+
+> What reads a collection nothing writes any more?
+
+Sales orders was the first module caught by it — 466 lines reading Mongo
+quotes, products and invoices, all three of which had moved. It posts no
+journal entries, so every ledger sweep passed it by, and only one of its four
+failure points was loud. Its entry points are switched off in
+`lib/unported-modules.js`.
 
 Nothing errors: the entry is created, validated and posted into a ledger no
 screen reads. If you are adding to one of these, post through

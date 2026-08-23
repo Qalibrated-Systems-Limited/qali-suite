@@ -2033,6 +2033,60 @@ outside importers), then **petty cash** (330 + 249 lines, 3 screens, one
 posting), which becomes a single-store query once expenses have moved. After
 those two, no Mongo module holds a journal posting.
 
+### §9J closed — expenses are on Postgres
+
+Migration 0059, and 0060 for the petty cash statement that read them. Six
+decisions are in 0059's header; what the port turned up is worth keeping
+separate, because almost none of it was a transcription problem.
+
+**The legacy statuses were not inert.** `pending`, `approved` and `rejected`
+sat in the Mongo enum under a comment saying nothing creates them any more —
+true — and SEVEN places were still asking for them:
+
+| Where | What it produced |
+|---|---|
+| `approval-queries.js:110` | approvals badge counted a status that cannot occur |
+| `pending-approvals-queries.js:144` | a whole "Pending operating expenses" section, always empty |
+| `AccountantDashboard.tsx:561` | "Approve pending expenses: 0", linking to a filter that never matches |
+| `ExpenseList` summary cards | two dead terms in `posted + approved + pending` |
+| `projectQueries.js:310` | project committed cost from expenses, ALWAYS ZERO |
+| `projectQueries.js:416` | same, per account — and summing `amount` where the cost is `total` |
+| `executive-queries.js:84` | month-on-month spend, also summing `amount` |
+
+Three of those were reporting a wrong number rather than an empty one, and had
+been since the one-step flow replaced the approval workflow. Carrying an enum
+value "for backward compatibility with existing data" cost five wrong figures
+on a deployment with no existing data.
+
+**Two features existed only as fields.** `void` had a status, `voidedAt`,
+`voidedBy` and `voidReason`, and a comment reading "reversed (JE reversed)" —
+and nothing anywhere wrote any of them. `deleteExpense` refused a posted
+expense with "Cannot delete posted expense — void it instead", pointing at
+that. And since every expense auto-posts at creation, delete could never
+succeed either: **an expense, once entered, could not be removed or reversed
+by any path in the application.** `voidExpense` is new.
+
+`updateExpense` was the mirror image: 130 lines accepting only `status ===
+"draft"`, a state nothing produces, reachable from no route. Dropped. The
+correction path is a void and a re-entry, which is what double-entry requires.
+
+**A bug the expense tests missed and the petty cash tests found.**
+`createAndPostExpense` set `party_type` to 'supplier' unconditionally, but the
+payee NAME is required on an expense and the party is not — a cash purchase
+from someone not on file is ordinary. `journal_entries_party_pair` requires
+both or neither, so every expense without a payee record failed at the check.
+The expense suite always seeded a supplier. Worth remembering: a suite that
+builds its fixtures one way tests one shape.
+
+**What the port deleted rather than moved:** 90 lines of expense-number
+generation (a retry loop, an exists() re-check after each attempt, exponential
+backoff, a regex-scan fallback and a timestamp-plus-random last resort — all
+to survive a counter that is not atomic); three fallbacks that rewrote the
+chart of accounts from inside a posting; and a `post("init")` read hook whose
+job was repairing a stored value on every single read.
+
+---
+
 ### §9K — Sales orders, and a different kind of gap
 
 Not a ledger gap. `sales-order-actions.js` posts nothing, and the sweep for
