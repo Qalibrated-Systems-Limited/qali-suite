@@ -144,7 +144,7 @@ grep -n "^export async function" app/db/repositories/<thing>.ts
 
 ```bash
 # 1. What still posts into the Mongo ledger?
-grep -rn "\.post(" app/models app/mongodb lib | grep -v node_modules
+npm run ledger-sweep
 
 # 2 & 3. What do the screens import from Mongo — and is there already a
 #        Postgres twin that covers it?
@@ -167,7 +167,17 @@ functions that moved data and posted nothing: `createOpeningBalanceBill`
 brought stock back into the warehouse and left its value on the
 technician-stock account for ever.
 
-Question 1 misses anything whose posting is in the MODEL rather than the
+**Question 1 is a script, not a grep, and that matters.** `grep -rn "\.post("`
+has been wrong four times, each time declaring a module "the last one". A
+posting is usually WRAPPED in a domain verb — `payment.confirm()`,
+`adjustment.approve()`, `movement.reverse()`, `invoice.complete()` each post an
+entry by calling something else inside the model — so grepping the CALL SITES
+for `.post(` finds none of them. `scripts/ledger-sweep.mjs` resolves the
+transitive set and prints every hit with its line, because a name-based match
+cannot tell `movement.reverse()` from `array.reverse()`, and a sweep that
+silently filters is how you get a fifth wrong "last one".
+
+Question 1 also misses anything whose posting is in the MODEL rather than the
 action layer — that is how expenses survived three sweeps. Questions 2 and 3
 find what question 1 cannot see at all:
 
