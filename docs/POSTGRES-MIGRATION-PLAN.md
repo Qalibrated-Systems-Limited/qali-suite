@@ -2000,12 +2000,38 @@ to `generic`, so naming either type threw on the dynamic import rather than
 degrading to the connector the fallback was written for. An unbuilt vertical
 belongs out of the registry, not in it pointing at nothing.
 
-### After the connectors
+### After the connectors — and the seventh module
 
-**Petty cash** — 330 lines, 3 screens, and the last module posting into the
-Mongo ledger. After that the remaining Mongo modules (projects, integrations,
-tax, banking, KPIs, expenses, checkouts) hold no journal postings at all, and
-the "half the pair in each store" class of bug is closed.
+Petty cash was supposed to be the last. It is not.
+
+**`app/models/expenses.js` posts three journal entries through the Mongo model**
+— the expense itself at `:608`, its clearing entry at `:695` — and the path is
+live: `ExpenseForm` → `expense-actions.js` → `expense.post()`. So every expense
+a user enters lands in a ledger no screen reads.
+
+The sweep missed it three times over, and the reason is worth stating because
+it is the same reason twice before. The count went four → five → six as the
+search widened from `app/mongodb/actions/` to `lib/` — and expenses is in
+NEITHER. Its postings are in the **model**, called from an action that reads
+like a wrapper. §9G names expenses, but as a party seam (`quickCreateParty`),
+so nobody looked at what it posts.
+
+**Sweep `app/models/` as well.** A model method that posts is invisible to any
+grep of the action layer:
+
+    grep -rn "\.post(" app/models app/mongodb lib
+
+**And expenses must go before petty cash**, because petty cash reads it.
+`computePettyCashStatement` calls the GL "the single source of truth for the
+balances" and aggregates the MONGO ledger for the float's opening and closing
+position, with the spend rows coming from Mongo expenses. That makes petty cash
+internally consistent today — and porting its postings alone would split the
+statement across two stores, balances in one and spend in the other.
+
+Order, then: **expenses** (675 action lines, 859 model lines, 7 screens, 12
+outside importers), then **petty cash** (330 + 249 lines, 3 screens, one
+posting), which becomes a single-store query once expenses have moved. After
+those two, no Mongo module holds a journal posting.
 
 ---
 

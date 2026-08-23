@@ -106,19 +106,39 @@ form-data adapter, or a lower-level variant a route handler will want, can
 legitimately have no screen calling it. What you are looking for is **a whole
 file's worth at once** — that means the screens were never pointed at it.
 
-### Read this before touching petty cash
+### Read this before touching expenses or petty cash
 
-**One live module still posts journal entries into MongoDB**, and every ledger
+**Two live modules still post journal entries into MongoDB**, and every ledger
 screen — the journal browser, trial balance, P&L, balance sheet, general
 ledger — reads Postgres:
 
 | Module | Screens | What is being lost |
 |---|---|---|
+| `app/models/expenses.js` | 7 | **every expense, and its clearing entry** |
 | `petty-cash-actions.js` | 3 | every petty cash movement |
 
-That is the last of the six. It started as four, became five when the sweep
-was redone across `lib/`, and six when the coffee co-op connector turned up in
-the same directory.
+**Expenses is the SEVENTH, and the sweep missed it three times.** The count
+went four → five → six as the search widened from `app/mongodb/actions/` to
+`lib/`, and expenses was never in either: its `.post()` calls are in the
+**MODEL** (`expenses.js:608` and `:695`), reached through an action that looks
+like a thin wrapper. §9G mentions expenses — but as a PARTY seam, because it
+calls Mongo's `quickCreateParty`, so nobody read further.
+
+The lesson, finally stated properly: **sweep `app/models/` too.** A model
+method that posts is invisible to any grep of the action layer, and the action
+that calls it gives no sign.
+
+```bash
+grep -rn "\.post(" app/models app/mongodb lib | grep -v node_modules
+```
+
+**They are coupled, so do expenses FIRST.**
+`computePettyCashStatement` calls the GL "the single source of truth for the
+balances" and reads the MONGO ledger for the float's opening and closing
+position — and Mongo expenses for the spend rows. Petty cash is therefore
+self-consistent inside Mongo today. Move its postings to Postgres without
+moving expenses and the statement straddles two stores: balances from one,
+spend rows from the other, disagreeing.
 
 Nothing errors: the entry is created, validated and posted into a ledger no
 screen reads. If you are adding to one of these, post through
