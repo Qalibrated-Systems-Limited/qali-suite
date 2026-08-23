@@ -25,9 +25,8 @@ import {
   getPendingReimbursements,
   getPendingAdvances,
   getPendingNCRs,
-  getPendingOperatingExpenses,
 } from "@/app/mongodb/queries/pending-approvals-queries";
-import { Banknote, CalendarDays, Coins, HandCoins, FileWarning, Wallet } from "lucide-react";
+import { Banknote, CalendarDays, Coins, HandCoins, FileWarning } from "lucide-react";
 import ApprovalDecisionForm from "./components/ApprovalDecisionForm";
 
 // Per-domain approver allowlists imported from the central rules
@@ -41,7 +40,6 @@ import {
   LOAN_APPROVER_ROLES,
   CLAIM_APPROVER_ROLES,
   NCR_AUTHORIZER_ROLES,
-  OPERATING_EXPENSE_APPROVER_ROLES,
 } from "@/lib/business-rules";
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -624,17 +622,15 @@ async function PendingReimbursements({ role }: { role: string }) {
   );
 }
 
-async function PendingOperatingExpensesSection({ role }: { role: string }) {
-  if (!OPERATING_EXPENSE_APPROVER_ROLES.has(role)) return null;
-  const rows = await getPendingOperatingExpenses(50);
-  return (
-    <PendingSectionShell
-      title="Pending operating expenses"
-      Icon={Wallet}
-      rows={rows}
-    />
-  );
-}
+/*
+ * "Pending operating expenses" is gone (0059).
+ *
+ * It listed expenses with `status: "pending"` — a legacy status the one-step
+ * flow stopped producing, so the section has been rendering empty. And it was
+ * the wrong question: an expense that needs sign-off is not a pending
+ * EXPENSE, it is a submitted ApprovalRequest of type `expense_payment`
+ * (approvalRequest.js:187), which cApprovalQueue above already lists.
+ */
 
 async function PendingNCRsSection({ role }: { role: string }) {
   if (!NCR_AUTHORIZER_ROLES.has(role)) return null;
@@ -789,7 +785,6 @@ export default async function ApprovalsPage() {
       </Suspense>
 
       <Suspense fallback={null}>
-        <PendingOperatingExpensesSection role={role} />
       </Suspense>
 
       <Suspense fallback={null}>

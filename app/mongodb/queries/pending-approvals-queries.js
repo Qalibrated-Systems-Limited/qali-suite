@@ -20,7 +20,6 @@ import { listNonconformancesAwaitingAuthorisationPg } from "@/app/db/actions/ncr
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import Bill from "@/app/models/bill";
 import { listClaimsPg } from "@/app/db/actions/claim-actions";
-import Expense from "@/app/models/expenses";
 
 const { ObjectId } = mongoose.Types;
 const DEFAULT_LIMIT = 50;
@@ -130,45 +129,6 @@ export async function getPendingReimbursements(limit = DEFAULT_LIMIT) {
 export async function getPendingAdvances(limit = DEFAULT_LIMIT) {
   await dbConnect();
   return getPendingClaimsByType("advance_request", limit);
-}
-
-// ============================================
-// OPERATING EXPENSES — status: pending
-// (utilities, rent, payroll, transport, etc — distinct from
-//  EmployeeClaim's advance/reimbursement flow)
-// ============================================
-export async function getPendingOperatingExpenses(limit = DEFAULT_LIMIT) {
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
-
-  return Expense.find({
-    ...tenantFilter(companyId, isSuperAdmin),
-    status: "pending",
-  })
-    .select(
-      "expenseNumber category total vendor description submittedAt submittedBy expenseDate isReimbursable createdAt",
-    )
-    .sort({ submittedAt: -1, createdAt: -1 })
-    .limit(limit)
-    .lean()
-    .then((rows) =>
-      rows.map((r) => ({
-        _id: r._id.toString(),
-        ref: r.expenseNumber,
-        title: r.vendor?.name || r.description || "—",
-        subtitle: r.category,
-        amount: r.total || 0,
-        submittedAt: r.submittedAt || r.createdAt,
-        submittedBy: r.submittedBy?.name || "—",
-        href: `/dashboard/expenses/${r._id}`,
-        meta: r.expenseDate
-          ? new Date(r.expenseDate).toLocaleDateString("en-KE", {
-              day: "numeric",
-              month: "short",
-            })
-          : null,
-      })),
-    );
 }
 
 // ============================================

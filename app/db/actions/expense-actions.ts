@@ -35,7 +35,19 @@ import {
  */
 
 export type ActionResult =
-  | { success: true; expenseId?: string; expenseNumber?: string; message?: string }
+  | {
+      success: true;
+      expenseId?: string;
+      expenseNumber?: string;
+      message?: string;
+      /**
+       * For the approval engine, which still has to move the cost from
+       * committed to actual on a MONGO project. The amount comes from the
+       * Postgres row so the two stores agree on what was paid.
+       */
+      projectId?: string | null;
+      total?: string | null;
+    }
   | {
       success: false;
       error: string;
@@ -237,6 +249,67 @@ export async function recordExpensePaymentPg(
       success: true,
       expenseId,
       message: `Payment recorded for ${updated.expenseNumber}`,
+    };
+  } catch (err) {
+    return { success: false, error: toActionError(err) };
+  }
+}
+
+/**
+ * Releases a payment the approval engine has already signed off.
+ *
+ * Separate from `recordExpensePaymentPg` for one reason: it must NOT consult
+ * the threshold. The threshold is what raised the approval in the first
+ * place, and re-checking it here would refuse the payment on the grounds that
+ * it needs the approval it just received.
+ *
+ * Called from `app/mongodb/actions/approval-actions.js` — the approval engine
+ * is not ported, so this is the seam. It replaces a call to
+ * `expense.recordPayment()`, which wrote the clearing entry into the MONGO
+ * ledger: an approved payment was signed off, recorded, and then posted where
+ * no ledger screen would ever show it.
+ */
+export async function applyApprovedExpensePaymentPg(
+  expenseId: string,
+  payment: { paymentMethod: string; paidFrom: string; paidAt?: string | null },
+): Promise<ActionResult> {
+  const parsed = expensePaymentSchema.safeParse({
+    paymentMethod: payment.paymentMethod,
+    paidFrom: payment.paidFrom,
+    paidAt: payment.paidAt ?? undefined,
+  });
+  if (!parsed.success) {
+    return {
+      success: false,
+      error:
+        Object.values(parsed.error.flatten().fieldErrors)[0]?.[0] ??
+        "The approved payment details are no longer valid.",
+    };
+  }
+
+  try {
+    const { expense } = await withAuthorizedTenant(
+      [...EXPENSE_PAY_ROLES],
+      (tx, { user }) =>
+        expensesRepo.recordExpensePayment(tx, expenseId, {
+          paymentMethod: parsed.data.paymentMethod,
+          paidFromAccountId: parsed.data.paidFrom,
+          paidAt: parsed.data.paidAt ? new Date(parsed.data.paidAt) : null,
+          paidById: user.id,
+        }),
+    );
+
+    revalidatePath("/dashboard/expenses");
+    revalidatePath(`/dashboard/expenses/${expenseId}`);
+    revalidatePath("/dashboard/journal");
+
+    return {
+      success: true,
+      expenseId,
+      expenseNumber: expense.expenseNumber,
+      message: `Payment recorded for ${expense.expenseNumber}`,
+      projectId: expense.projectId,
+      total: expense.total,
     };
   } catch (err) {
     return { success: false, error: toActionError(err) };

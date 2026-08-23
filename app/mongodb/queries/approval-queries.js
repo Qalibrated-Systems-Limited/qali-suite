@@ -15,7 +15,6 @@ import ApprovalRequest, {
 import Bill from "@/app/models/bill";
 import { countClaimsAwaitingApprovalPg } from "@/app/db/actions/claim-actions";
 import { countNonconformancesAwaitingAuthorisationPg } from "@/app/db/actions/ncr-actions";
-import Expense from "@/app/models/expenses";
 import { StockRequest } from "@/app/models/requests";
 // Approver matrices imported from the central rules module. Single
 // source of truth for these gates — every consumer (this query, the
@@ -27,7 +26,6 @@ import {
   LOAN_APPROVER_ROLES,
   CLAIM_APPROVER_ROLES,
   NCR_AUTHORIZER_ROLES,
-  OPERATING_EXPENSE_APPROVER_ROLES,
 } from "@/lib/business-rules";
 
 // ============================================
@@ -105,11 +103,12 @@ export const cMyPendingApprovals = cache(async () => {
       // to count is no longer written to, so it would always report zero.
       tasks.push(countNonconformancesAwaitingAuthorisationPg());
     }
-    if (OPERATING_EXPENSE_APPROVER_ROLES.has(role)) {
-      tasks.push(
-        Expense.countDocuments({ ...tenantMatch, status: "pending" }),
-      );
-    }
+    // Expenses are NOT counted here any more, and never should have been.
+    // This counted `status: "pending"` — a legacy status the one-step flow
+    // stopped producing long ago, so the number was always zero. And it was
+    // redundant even if it had worked: an expense that needs sign-off is an
+    // ApprovalRequest of type `expense_payment`, which the engine count above
+    // already includes (approvalRequest.js:187). 0059 removes the status.
 
     if (tasks.length === 0) return 0;
 

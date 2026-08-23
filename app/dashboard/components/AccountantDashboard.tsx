@@ -34,7 +34,7 @@ import { fetchFiscalPeriodStats } from "@/app/mongodb/actions/fiscal-period-acti
 import Invoice from "../../models/invoice";
 import Bill from "../../models/bill";
 import { listClaimsPg } from "@/app/db/actions/claim-actions";
-import Expense from "../../models/expenses";
+import { getExpenseSummaryPg } from "@/app/db/actions/expense-actions";
 
 // Utils
 import { formatCurrency } from "@/lib/utils";
@@ -552,23 +552,30 @@ async function PeriodEndChecklistCard() {
   const periodResult = await fetchFiscalPeriodStats();
   const currentPeriod = periodResult.success ? periodResult.stats?.currentPeriod : null;
 
-  // Get pending items counts in parallel
-  const [
-    pendingExpenses,
-    pendingBills,
-    unreconciledCount,
-  ] = await Promise.all([
-    Expense.countDocuments({ ...tenantMatch, status: "pending" }),
+  /**
+   * Expenses awaiting PAYMENT, not approval.
+   *
+   * This counted `Expense.countDocuments({ status: "pending" })` — a legacy
+   * status the one-step flow stopped producing, so the checklist line read
+   * "Approve pending expenses: 0" permanently, and its link went to
+   * `?status=pending`, a filter that could never match anything. There is no
+   * expense approval step: a paid expense posts, an unpaid one accrues, and
+   * what an accountant actually has outstanding is the accruals still to be
+   * settled. That is what is counted now.
+   */
+  const [expenseSummary, pendingBills, unreconciledCount] = await Promise.all([
+    getExpenseSummaryPg(),
     Bill.countDocuments({ ...tenantMatch, status: "pending" }),
     getUnallocatedCount(),
   ]);
+  const unpaidExpenses = expenseSummary.byStatus?.posted?.count ?? 0;
 
   const checklistItems = [
     {
-      label: "Approve pending expenses",
-      count: pendingExpenses,
-      completed: pendingExpenses === 0,
-      href: "/dashboard/expenses?status=pending",
+      label: "Settle accrued expenses",
+      count: unpaidExpenses,
+      completed: unpaidExpenses === 0,
+      href: "/dashboard/expenses?status=posted",
     },
     {
       label: "Approve pending bills",

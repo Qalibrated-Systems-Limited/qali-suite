@@ -23,7 +23,6 @@ import Product from "@/app/models/product";
 import InventoryAdjustment from "@/app/models/inventoryAdjustment";
 import Payment from "@/app/models/payment";
 import CreditNote from "@/app/models/creditNote";
-import Expense from "@/app/models/expenses";
 import Project from "@/app/models/project";
 
 // ============================================
@@ -520,47 +519,44 @@ async function applyExpensePayment(approval, user) {
   const expenseId = approval.targetRef?.id || approval.payload?.expenseId;
   if (!expenseId) return { success: false, error: "Missing expense reference" };
 
-  const expense = await Expense.findOne({
-    _id: expenseId,
-    companyId: approval.companyId,
-  });
-  if (!expense) return { success: false, error: "Expense not found" };
-  if (expense.paymentStatus === "paid") {
-    return { success: false, error: "Expense is already paid" };
-  }
-
   const p = approval.payload || {};
 
-  // Re-validate the payment account against the approval's tenant before
-  // posting — recordPayment() resolves paidFrom with an unscoped findById,
-  // and the payload was captured from user input at submission time.
-  const Account = mongoose.model("Account");
-  const payAccount = await Account.findOne({
-    _id: p.paidFrom,
-    companyId: approval.companyId,
-  }).select("_id canPost");
-  if (!payAccount) {
-    return { success: false, error: "Payment account not found" };
-  }
-  if (payAccount.canPost === false) {
-    return { success: false, error: "Selected account cannot be posted to" };
-  }
-
-  await expense.recordPayment(
-    { name: user.name, id: user.id },
-    {
-      paymentMethod: p.paymentMethod,
-      paidFrom: p.paidFrom,
-      paidAt: p.paidAt ? new Date(p.paidAt) : new Date(),
-    },
+  /**
+   * POSTGRES since 0059. This used to load the Mongo Expense and call
+   * `expense.recordPayment()`, which wrote the clearing entry (DR Accrued
+   * Expenses / CR Cash) into the MONGO ledger — so an over-threshold payment
+   * was raised for approval, approved, released, and then posted into a
+   * ledger no screen reads.
+   *
+   * The tenant scope, the payment-account check and the "already paid" guard
+   * all live inside the action and the repository now; RLS makes the first of
+   * them structural rather than a filter this function has to remember. What
+   * is NOT re-checked is the threshold: it is what raised this approval, and
+   * checking it again would refuse the payment for needing the approval it
+   * has just been given.
+   */
+  const { applyApprovedExpensePaymentPg } = await import(
+    "@/app/db/actions/expense-actions"
   );
+  const result = await applyApprovedExpensePaymentPg(String(expenseId), {
+    paymentMethod: p.paymentMethod,
+    paidFrom: p.paidFrom,
+    paidAt: p.paidAt || null,
+  });
 
-  // Payment moves the cost from committed to actual on the project.
-  if (expense.projectId) {
-    await Project.findByIdAndUpdate(expense.projectId, {
+  if (!result?.success) {
+    return { success: false, error: result?.error || "Failed to record payment" };
+  }
+
+  // Payment moves the cost from committed to actual on the project. Projects
+  // are still Mongo, so this stays where it is — but the amount now comes back
+  // from the Postgres row rather than from a Mongo document that no longer
+  // exists.
+  if (result.projectId) {
+    await Project.findByIdAndUpdate(result.projectId, {
       $inc: {
-        "financials.totalCosts": expense.total,
-        "financials.totalCommitted": -expense.total,
+        "financials.totalCosts": Number(result.total ?? 0),
+        "financials.totalCommitted": -Number(result.total ?? 0),
       },
     });
   }
@@ -568,7 +564,7 @@ async function applyExpensePayment(approval, user) {
   return {
     success: true,
     appliedAt: new Date(),
-    appliedRef: { kind: "Expense", id: expense._id },
+    appliedRef: { kind: "Expense", id: expenseId },
   };
 }
 
