@@ -108,20 +108,23 @@ file's worth at once** — that means the screens were never pointed at it.
 
 ### Read this before adding to any module
 
-**Three live modules still post journal entries into MongoDB**, and every
-ledger screen — the journal browser, trial balance, P&L, balance sheet,
-general ledger — reads Postgres:
+**Two modules of substance still post journal entries into MongoDB**, and
+every ledger screen — the journal browser, trial balance, P&L, balance sheet,
+general ledger — reads Postgres. Regenerate this with `npm run ledger-sweep`
+rather than trusting the table:
 
-| Module | Reached from | Postings |
+| What posts | Reached from | Screens |
 |---|---|---|
-| `checkout-action.js` | three checkout dialogs | 2 |
-| `credit-note-actions.js` | `CreditNoteActions.jsx` (issue, void) | 2 |
-| `opening-balance-actions.js` | `OpeningBalancesClient.jsx` | 1 |
+| `payment.confirm()` | `payment-actions.js:656`, `approval-actions.js:505` | 5 |
+| `adjustment.approve()` | `stock-actions.js:371`, `adjustment-actions.js:210`, `approval-actions.js:457` | 5, 1, 1 |
+| `movement.reverse()` | `integration-actions.js:467` | 10 |
 
-Expenses (0059) and petty cash (0060) are done. Credit notes are the awkward
-one: **half the module is on Postgres**. `createCreditNotePg` and
-`getCreditNotesPg` exist and are used; issue, void, delete and the detail page
-are still Mongo. See §9L.
+So: **payments** and **inventory adjustments**. `approval-actions` and
+`integration-actions` are callers that follow once those two move.
+
+Done: expenses (0059), petty cash (0060), credit notes (§9L), opening balances
+(0061), checkouts. Sales orders is switched off rather than ported —
+`lib/unported-modules.js`, see §9K.
 
 **Before estimating a port, measure the DESTINATION, not the source.**
 
@@ -158,6 +161,11 @@ involved:
 # 4. Which exported repository functions does nothing import?
 grep -n "^export async function" app/db/repositories/<thing>.ts   # then grep each name
 ```
+
+This is `find-unwired-actions.mjs` one layer deeper. That script finds ported
+ACTIONS nothing calls; this question finds ported REPOSITORY FUNCTIONS no
+action calls — the same failure one level further down, and the one that hides
+better, because an action at least looks like something a screen should use.
 
 An exported repository function with no callers is either dead code or an
 UNFINISHED PORT — and the unfinished ones look complete in a file listing
