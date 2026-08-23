@@ -11,6 +11,7 @@ import {
 import * as expensesRepo from "../repositories/expenses";
 import * as accountsRepo from "../repositories/accounts";
 import * as partiesRepo from "../repositories/parties";
+import * as assetsRepo from "../repositories/assets";
 import {
   expenseSchema,
   expensePaymentSchema,
@@ -451,27 +452,12 @@ export async function getExpenseFormData() {
         partiesRepo.listParties(tx, { role: "employee", limit: 200 }),
       ]);
 
-    const account = (a: { id: string; accountCode: string; accountName: string }) => ({
-      _id: a.id,
-      id: a.id,
-      accountCode: a.accountCode,
-      accountName: a.accountName,
-    });
-
-    // listPaymentAccounts already returns { _id, name, code, subType }; the
-    // form reads accountCode/accountName, so it is renamed here rather than
-    // changing a shape four other screens depend on.
-    const payAccount = (a: {
-      _id: string;
-      name: string;
-      code: string;
-      subType: string | null;
-    }) => ({
-      _id: a._id,
-      id: a._id,
-      accountCode: a.code,
-      accountName: a.name,
-      subType: a.subType,
+    // Fixed assets, for tagging fuel/repairs/maintenance to the thing that
+    // incurred them. Postgres since 0056 — this picker was already reading
+    // the right store before the rest of the module did.
+    const { assets: assetRows } = await assetsRepo.listAssets(tx, {
+      status: ["active", "idle", "in_maintenance"],
+      limit: 200,
     });
 
     const party = (p: {
@@ -489,11 +475,33 @@ export async function getExpenseFormData() {
       taxPin: p.taxPin ?? "",
     });
 
+    // The key names are the page's: `accounts`, `paymentAccounts`, `vendors`,
+    // `employees`, `assets`. Same shape in, same shape out — the screen moves
+    // store without being rewritten.
     return {
-      expenseAccounts: expenseAccounts.map(account),
-      paymentAccounts: paymentAccounts.map(payAccount),
+      accounts: expenseAccounts.map((a) => ({
+        _id: a.id,
+        id: a.id,
+        accountCode: a.accountCode,
+        accountName: a.accountName,
+        subType: a.subType ?? "",
+      })),
+      paymentAccounts: paymentAccounts.map((a) => ({
+        _id: a._id,
+        id: a._id,
+        accountCode: a.code,
+        accountName: a.name,
+        subType: a.subType,
+      })),
       vendors: suppliers.map(party),
       employees: employees.map(party),
+      assets: assetRows.map((a) => ({
+        _id: a.id,
+        id: a.id,
+        assetNumber: a.assetNumber,
+        name: a.name,
+        registrationNumber: a.registrationNumber ?? "",
+      })),
       categories: expensesRepo.getExpenseCategories(),
     };
   });

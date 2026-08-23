@@ -1,6 +1,14 @@
 import { and, asc, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
 import type { Tx } from "../client";
-import { expenses, expenseReceipts, accounts, parties, journalEntries } from "../schema";
+import {
+  expenses,
+  expenseReceipts,
+  accounts,
+  parties,
+  journalEntries,
+  users,
+} from "../schema";
+import { alias } from "drizzle-orm/pg-core";
 import {
   createJournalEntry,
   reverseJournalEntry,
@@ -557,15 +565,27 @@ export async function getExpense(tx: Tx, expenseId: string) {
  * function that returns `lines[]`, silently rendering nothing.
  */
 export async function getExpenseForDisplay(tx: Tx, expenseId: string) {
+  // Three aliases of `users`, because one row can name three different people
+  // and a single join would pick whichever the planner reached first.
+  const createdBy = alias(users, "created_by");
+  const postedBy = alias(users, "posted_by");
+  const voidedBy = alias(users, "voided_by");
+
   const [row] = await tx
     .select({
       expense: expenses,
       payeeName: parties.name,
       entryNumber: journalEntries.entryNumber,
+      createdByName: createdBy.name,
+      postedByName: postedBy.name,
+      voidedByName: voidedBy.name,
     })
     .from(expenses)
     .leftJoin(parties, eq(parties.id, expenses.payeePartyId))
     .leftJoin(journalEntries, eq(journalEntries.id, expenses.journalEntryId))
+    .leftJoin(createdBy, eq(createdBy.id, expenses.createdById))
+    .leftJoin(postedBy, eq(postedBy.id, expenses.postedById))
+    .leftJoin(voidedBy, eq(voidedBy.id, expenses.voidedById))
     .where(eq(expenses.id, expenseId));
 
   if (!row) return null;
@@ -653,8 +673,18 @@ export async function getExpenseForDisplay(tx: Tx, expenseId: string) {
     journalEntryNumber: row.entryNumber,
     clearingJournalEntryId: e.clearingJournalEntryId,
 
+    /**
+     * `{ name }` objects, because that is what the detail page renders
+     * (`expense.createdBy?.name`). Mongo stored a denormalised name-and-id
+     * pair on the document; here it is a join, so a user who is renamed is
+     * named correctly on every expense they ever entered rather than only on
+     * the ones entered after.
+     */
+    createdBy: row.createdByName ? { name: row.createdByName } : null,
     postedAt: e.postedAt,
+    postedBy: row.postedByName ? { name: row.postedByName } : null,
     voidedAt: e.voidedAt,
+    voidedBy: row.voidedByName ? { name: row.voidedByName } : null,
     voidReason: e.voidReason,
 
     receipts: receipts.map((r) => ({
@@ -761,46 +791,92 @@ export async function listExpenses(tx: Tx, opts: ListExpensesOptions = {}) {
 }
 
 /**
- * The list page's summary cards.
+ * The list page's summary cards, in the shape `ExpenseList` already reads:
+ * `{ period, byStatus, byCategory, totals }`.
  *
- * Void expenses are excluded from every figure. Mongo's `getExpensesByCategory`
- * filters `status: "paid"` and so leaves ACCRUED expenses out of the category
- * breakdown entirely — an unpaid expense is a cost the moment it is incurred,
- * and the P&L already says so. Here the breakdown covers everything posted,
- * and paid-vs-unpaid is reported alongside rather than in place of it.
+ * Two things change from the Mongo version.
+ *
+ * `byStatus` no longer carries `pending` and `approved`. Nothing creates
+ * those statuses, so the screen's `(posted.count || 0) + (approved.count || 0)
+ * + (pending.count || 0)` was two dead terms in a sum — see the enum comment
+ * in schema/enums.ts. The screen is updated with it.
+ *
+ * `byCategory` covers everything not void, where Mongo filters
+ * `status: "paid"` and so leaves ACCRUED expenses out of the breakdown
+ * entirely. An unpaid expense is a cost the moment it is incurred; the P&L
+ * already says so, and a category chart that disagrees with the P&L is worse
+ * than no chart. Paid-versus-unpaid is reported alongside instead.
+ *
+ * `byStatus` is all-time and `totals`/`byCategory` are for the period — the
+ * split the Mongo version has and the screen's labels assume ("This month").
  */
 export async function getExpenseSummary(
   tx: Tx,
   opts: { startDate?: string; endDate?: string } = {},
 ) {
-  const conditions = [sql`${expenses.status} <> 'void'`];
-  if (opts.startDate) conditions.push(gte(expenses.expenseDate, opts.startDate));
-  if (opts.endDate) conditions.push(lte(expenses.expenseDate, opts.endDate));
-  const where = and(...conditions);
+  const now = new Date();
+  const startDate =
+    opts.startDate ??
+    new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  const endDate =
+    opts.endDate ??
+    new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
 
-  const [totals] = await tx
-    .select({
-      count: sql<number>`count(*)::int`,
-      total: sql<string>`coalesce(sum(${expenses.total}), 0)::text`,
-      paid: sql<string>`coalesce(sum(${expenses.total}) FILTER (WHERE ${expenses.paymentStatus} = 'paid'), 0)::text`,
-      unpaid: sql<string>`coalesce(sum(${expenses.total}) FILTER (WHERE ${expenses.paymentStatus} = 'unpaid'), 0)::text`,
-      taxTotal: sql<string>`coalesce(sum(${expenses.taxAmount}), 0)::text`,
-    })
-    .from(expenses)
-    .where(where);
+  const periodWhere = and(
+    sql`${expenses.status} <> 'void'`,
+    gte(expenses.expenseDate, startDate),
+    lte(expenses.expenseDate, endDate),
+  );
 
-  const byCategory = await tx
-    .select({
-      category: expenses.category,
-      count: sql<number>`count(*)::int`,
-      total: sql<string>`coalesce(sum(${expenses.total}), 0)::text`,
-    })
-    .from(expenses)
-    .where(where)
-    .groupBy(expenses.category)
-    .orderBy(sql`sum(${expenses.total}) DESC`);
+  const [statusRows, byCategory, totalsRows] = await Promise.all([
+    tx
+      .select({
+        status: expenses.status,
+        count: sql<number>`count(*)::int`,
+        total: sql<string>`coalesce(sum(${expenses.total}), 0)::text`,
+      })
+      .from(expenses)
+      .groupBy(expenses.status),
 
-  return { ...totals, byCategory };
+    tx
+      .select({
+        category: expenses.category,
+        count: sql<number>`count(*)::int`,
+        total: sql<string>`coalesce(sum(${expenses.total}), 0)::text`,
+      })
+      .from(expenses)
+      .where(periodWhere)
+      .groupBy(expenses.category)
+      .orderBy(sql`sum(${expenses.total}) DESC`),
+
+    tx
+      .select({
+        count: sql<number>`count(*)::int`,
+        totalAmount: sql<string>`coalesce(sum(${expenses.total}), 0)::text`,
+        totalTax: sql<string>`coalesce(sum(${expenses.taxAmount}), 0)::text`,
+        totalWHT: sql<string>`coalesce(sum(${expenses.withholdingTax}), 0)::text`,
+        totalPaid: sql<string>`coalesce(sum(${expenses.total}) FILTER (WHERE ${expenses.paymentStatus} = 'paid'), 0)::text`,
+        totalUnpaid: sql<string>`coalesce(sum(${expenses.total}) FILTER (WHERE ${expenses.paymentStatus} = 'unpaid'), 0)::text`,
+      })
+      .from(expenses)
+      .where(periodWhere),
+  ]);
+
+  const byStatus: Record<string, { count: number; total: string }> = {};
+  for (const row of statusRows) {
+    byStatus[row.status] = { count: row.count, total: row.total };
+  }
+
+  return {
+    period: { startDate, endDate },
+    byStatus,
+    byCategory: byCategory.map((c) => ({
+      category: c.category,
+      count: c.count,
+      total: c.total,
+    })),
+    totals: totalsRows[0],
+  };
 }
 
 /** Running costs for one asset — the roll-up `getAssetExpenses` does. */

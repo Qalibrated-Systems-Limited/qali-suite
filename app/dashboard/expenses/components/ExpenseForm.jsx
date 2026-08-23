@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
-import { useState, useEffect } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Receipt,
@@ -54,7 +54,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { createExpense, updateExpense } from "@/app/mongodb/actions/expense-actions";
+import { createExpensePg } from "@/app/db/actions/expense-actions";
 import { FileUpload } from "@/components/file-upload";
 import ProjectPicker from "@/components/project-picker";
 import ExpenseAccountCombobox from "@/components/expense-account-combobox";
@@ -757,7 +757,7 @@ export default function ExpenseForm({
   projects = [],
   assets = [],
 }) {
-  const isEditing = !!expense;
+  const router = useRouter();
 
   // Form state
   const [amount, setAmount] = useState(expense?.amount || "");
@@ -802,25 +802,40 @@ export default function ExpenseForm({
   const subtotal = parseFloat(amount) || 0;
   const total = subtotal + taxAmount - withholdingTax;
 
-  // Action handler — single path: create + auto-post (or update + auto-post)
-  const actionFn = isEditing
-    ? updateExpense.bind(null, expense._id)
-    : createExpense;
+  /**
+   * Create + auto-post. There is no update path any more, and there was not
+   * really one before: `updateExpense` accepted only `status === "draft"`,
+   * every expense is auto-posted the moment it is created, and no route ever
+   * rendered this form in edit mode. It was unreachable code guarded by a
+   * state that could not occur.
+   *
+   * Correcting a posted expense is a VOID and a re-entry, which is what
+   * double-entry requires — you do not edit an entry that is already in the
+   * ledger, you reverse it. voidExpensePg is the path, and it is new: Mongo
+   * carried the `void` status and its three audit fields and never wrote any
+   * of them.
+   */
+  const [state, formAction, isPending] = useActionState(createExpensePg, null);
 
-  const [state, formAction, isPending] = useActionState(actionFn, null);
+  // The action RETURNS rather than redirecting — see the header of
+  // app/db/actions/expense-actions.ts for why, and UpdateQuoteForm for what
+  // happens when a form forgets to do this half.
+  useEffect(() => {
+    if (state?.success && state.expenseId) {
+      router.push(`/dashboard/expenses/${state.expenseId}`);
+    }
+  }, [state, router]);
 
-  const errors = state?.errors;
+  // `fieldErrors` keyed by field, `error` for the form — the shape every
+  // Postgres action returns. Mongo returned `errors` with a `_form` key.
+  const errors = state?.fieldErrors;
 
   return (
     <form action={formAction} className="space-y-6">
-      {/* Form-level errors */}
-      {errors?._form && (
+      {/* Form-level error */}
+      {state?.error && (
         <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4">
-          {errors._form.map((error, i) => (
-            <p key={i} className="text-sm text-red-600 dark:text-red-400">
-              {error}
-            </p>
-          ))}
+          <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
         </div>
       )}
 
@@ -1228,7 +1243,7 @@ export default function ExpenseForm({
           ) : (
             <Send className="w-4 h-4 mr-2" />
           )}
-          {isEditing ? "Update & Post" : "Post Expense"}
+          Post Expense
         </Button>
       </div>
     </form>

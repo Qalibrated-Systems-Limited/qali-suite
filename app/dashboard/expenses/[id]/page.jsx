@@ -28,7 +28,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { getExpenseById } from "@/app/mongodb/queries/expense-queries";
+import {
+  getExpensePg,
+  getExpenseFormData,
+} from "@/app/db/actions/expense-actions";
 import ExpenseActions from "../components/ExpenseActions";
 import Account from "@/app/models/account";
 import dbConnect from "@/app/config/dbConnect";
@@ -36,7 +39,7 @@ import { getTenantContext, tenantFilter } from "@/lib/utils/tenant-utils";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
-  const expense = await getExpenseById(id);
+  const expense = await getExpensePg(id);
   return {
     title: expense
       ? `${expense.expenseNumber} | Expense`
@@ -97,25 +100,9 @@ const statusConfig = {
     icon: XCircle,
     description: "Expense voided and reversed",
   },
-  // Legacy statuses — still displayed for old data
-  pending: {
-    label: "Pending (Legacy)",
-    variant: "warning",
-    icon: Clock,
-    description: "Old workflow — click Post Now to migrate",
-  },
-  approved: {
-    label: "Approved (Legacy)",
-    variant: "success",
-    icon: CheckCircle2,
-    description: "Old workflow — click Post Now to migrate",
-  },
-  rejected: {
-    label: "Rejected (Legacy)",
-    variant: "destructive",
-    icon: XCircle,
-    description: "Old workflow — click Post Now to migrate",
-  },
+  // The legacy statuses (pending / approved / rejected) are gone with 0059.
+  // Nothing created them and there is no data carrying them — see the enum
+  // comment in app/db/schema/enums.ts.
 };
 
 const categoryLabels = {
@@ -136,33 +123,23 @@ const categoryLabels = {
   other: "Other Expenses",
 };
 
+/**
+ * The payment dialog's accounts.
+ *
+ * Was a local `Account.find({ ...tenantFilter(companyId, isSuperAdmin) })` —
+ * and tenantFilter returns `{}` for a SuperAdmin, so the dialog offered every
+ * tenant's cash and bank accounts to pay this company's expense from.
+ */
 async function getPaymentAccounts() {
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
-
-  const accounts = await Account.find({
-    ...tenantFilter(companyId, isSuperAdmin),
-    subType: { $in: ["cash", "bank", "mpesa"] },
-    isActive: { $ne: false },
-    canPost: true,
-  })
-    .select("_id accountCode accountName subType")
-    .sort({ accountCode: 1 })
-    .lean();
-
-  return accounts.map((a) => ({
-    _id: a._id.toString(),
-    accountCode: a.accountCode,
-    accountName: a.accountName,
-    subType: a.subType,
-  }));
+  const { paymentAccounts } = await getExpenseFormData();
+  return paymentAccounts;
 }
 
 export default async function ExpenseDetailPage({ params, searchParams }) {
   const { id } = await params;
   const resolvedSearchParams = await searchParams;
   const [expense, paymentAccounts] = await Promise.all([
-    getExpenseById(id),
+    getExpensePg(id),
     getPaymentAccounts(),
   ]);
 
@@ -208,21 +185,6 @@ export default async function ExpenseDetailPage({ params, searchParams }) {
       </div>
 
       {/* Rejection Reason Alert */}
-      {expense.status === "rejected" && expense.rejectionReason && (
-        <div className="flex items-start gap-3 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
-          <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
-          <div>
-            <p className="font-medium text-destructive">Rejection Reason</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {expense.rejectionReason}
-            </p>
-            <p className="text-xs text-muted-foreground mt-2">
-              Rejected by {expense.rejectedBy?.name} on{" "}
-              {formatDateTime(expense.rejectedAt)}
-            </p>
-          </div>
-        </div>
-      )}
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Main Content */}
@@ -532,23 +494,18 @@ export default async function ExpenseDetailPage({ params, searchParams }) {
                   <p>{formatDateTime(expense.paidAt)}</p>
                 </div>
               )}
-              {/* Legacy audit fields for old data */}
-              {expense.submittedAt && !expense.postedAt && (
+              {expense.voidedAt && (
                 <div className="text-sm">
-                  <p className="text-muted-foreground">Submitted</p>
+                  <p className="text-muted-foreground">Voided</p>
                   <p>
-                    {expense.submittedBy?.name} on{" "}
-                    {formatDateTime(expense.submittedAt)}
+                    {expense.voidedBy?.name} on{" "}
+                    {formatDateTime(expense.voidedAt)}
                   </p>
-                </div>
-              )}
-              {expense.approvedAt && !expense.postedAt && (
-                <div className="text-sm">
-                  <p className="text-muted-foreground">Approved</p>
-                  <p>
-                    {expense.approvedBy?.name} on{" "}
-                    {formatDateTime(expense.approvedAt)}
-                  </p>
+                  {expense.voidReason && (
+                    <p className="text-muted-foreground italic mt-0.5">
+                      {expense.voidReason}
+                    </p>
+                  )}
                 </div>
               )}
             </CardContent>

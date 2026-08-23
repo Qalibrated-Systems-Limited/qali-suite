@@ -2,12 +2,7 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ExpenseForm from "../components/ExpenseForm";
-import Account from "@/app/models/account";
-import Party from "@/app/models/parties";
-import { getAssets } from "@/app/db/actions/asset-actions";
-import dbConnect from "@/app/config/dbConnect";
-import { getExpenseCategories } from "@/app/mongodb/queries/expense-queries";
-import { getTenantContext, tenantFilter } from "@/lib/utils/tenant-utils";
+import { getExpenseFormData } from "@/app/db/actions/expense-actions";
 import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
 
 export const metadata = {
@@ -15,111 +10,24 @@ export const metadata = {
   description: "Record a new business expense",
 };
 
-async function getFormData() {
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  // SuperAdmin: companyId is a UX hint and may be null — { companyId }
-  // would match NOTHING. tenantFilter returns {} for SuperAdmin (sees all),
-  // matching how every other query in the app behaves.
-  const tenant = tenantFilter(companyId, isSuperAdmin);
-
-  // Fetch all data in parallel
-  const [expenseAccounts, paymentAccounts, vendors, employees] = await Promise.all(
-    [
-      // Expense accounts (for expense posting)
-      Account.find({
-        ...tenant,
-        accountType: "expense",
-        isActive: { $ne: false },
-        canPost: true,
-      })
-        .select("_id accountCode accountName subType")
-        .sort({ accountCode: 1 })
-        .lean(),
-
-      // Payment accounts (cash, bank, mpesa)
-      Account.find({
-        ...tenant,
-        subType: { $in: ["cash", "bank", "mpesa"] },
-        isActive: { $ne: false },
-        canPost: true,
-      })
-        .select("_id accountCode accountName subType")
-        .sort({ accountCode: 1 })
-        .lean(),
-
-      // Vendors (suppliers from parties)
-      Party.find({
-        ...tenant,
-        type: { $in: ["supplier", "both"] },
-        isActive: { $ne: false },
-      })
-        .select("_id name taxPin phone email")
-        .sort({ name: 1 })
-        .lean(),
-
-      // Employees — payees for advances/reimbursements booked by accounts
-      Party.find({
-        ...tenant,
-        type: "employee",
-        isActive: { $ne: false },
-      })
-        .select("_id name phone email")
-        .sort({ name: 1 })
-        .lean(),
-
-    ]
-  );
-
-  // Active fixed assets (optional — for tagging fuel/repairs/maintenance).
-  // POSTGRES since 0056: the Mongo collection is no longer written to, so this
-  // picker would have been permanently empty.
-  const { assets: assetRows } = await getAssets({
-    status: ["active", "idle", "in_maintenance"],
-    limit: 200,
-  });
-  const assets = assetRows.map((a) => ({
-    _id: a.id,
-    assetNumber: a.assetNumber,
-    name: a.name,
-    registrationNumber: a.registrationNumber || "",
-  }));
-
-  return {
-    accounts: expenseAccounts.map((a) => ({
-      _id: a._id.toString(),
-      accountCode: a.accountCode,
-      accountName: a.accountName,
-      subType: a.subType || "",
-    })),
-    paymentAccounts: paymentAccounts.map((a) => ({
-      _id: a._id.toString(),
-      accountCode: a.accountCode,
-      accountName: a.accountName,
-      subType: a.subType,
-    })),
-    vendors: vendors.map((v) => ({
-      _id: v._id.toString(),
-      name: v.name,
-      taxPin: v.taxPin || "",
-      phone: v.phone || "",
-      email: v.email || "",
-    })),
-    employees: employees.map((e) => ({
-      _id: e._id.toString(),
-      name: e.name,
-      phone: e.phone || "",
-      email: e.email || "",
-    })),
-    // Already in the shape the picker reads; the ids are UUIDs now.
-    assets,
-  };
-}
-
 export default async function CreateExpensePage() {
-  const [{ accounts, paymentAccounts, vendors, employees, assets }, projects] =
-    await Promise.all([getFormData(), getActiveProjects()]);
-  const categories = getExpenseCategories();
+  /**
+   * The pickers come from Postgres now, through one scoped call.
+   *
+   * What was here before built its own Account and Party queries through
+   * `tenantFilter(companyId, isSuperAdmin)` — and that helper returns `{}` for
+   * a SuperAdmin, so platform staff were shown every tenant's expense
+   * accounts, payment accounts and payees. getExpenseFormData runs inside
+   * withAuthorizedTenant, so it returns the ACTING company's and nothing else.
+   *
+   * Projects stay separate and stay Mongo: they are not ported, and hiding
+   * that behind a helper that reads two stores would make the seam harder to
+   * find, not smaller.
+   */
+  const [
+    { accounts, paymentAccounts, vendors, employees, assets, categories },
+    projects,
+  ] = await Promise.all([getExpenseFormData(), getActiveProjects()]);
 
   return (
     <div className="flex flex-col">

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Trash2,
+  XCircle,
   Wallet,
   Loader2,
   MoreHorizontal,
@@ -27,6 +28,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -48,10 +50,10 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  recordExpensePayment,
-  deleteExpense,
-  postLegacyExpense,
-} from "@/app/mongodb/actions/expense-actions";
+  recordExpensePaymentPg,
+  deleteExpensePg,
+  voidExpensePg,
+} from "@/app/db/actions/expense-actions";
 
 export default function ExpenseActions({ expense, paymentAccounts = [] }) {
   const router = useRouter();
@@ -61,6 +63,8 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
   // Dialog states
   const [showPayDialog, setShowPayDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showVoidDialog, setShowVoidDialog] = useState(false);
+  const [voidReason, setVoidReason] = useState("");
 
   // Payment form states
   const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
@@ -78,7 +82,7 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
       formData.append("paidFrom", paidFrom);
       formData.append("paidAt", new Date().toISOString());
 
-      const result = await recordExpensePayment(expense._id, {}, formData);
+      const result = await recordExpensePaymentPg(expense._id, {}, formData);
       if (!result?.success) {
         setError(result?.error || "Failed to record payment");
       } else {
@@ -96,7 +100,7 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
     setLoading(true);
     setError(null);
     try {
-      const result = await deleteExpense(expense._id);
+      const result = await deleteExpensePg(expense._id);
       if (result?.success) {
         router.push("/dashboard/expenses");
         return;
@@ -110,14 +114,28 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
     }
   };
 
-  const handlePostLegacy = async () => {
+  /**
+   * Void — reverse every entry this expense raised.
+   *
+   * This replaces "Post Now", which existed to rescue two states that no
+   * longer occur: a legacy pending/approved/rejected expense, and a draft
+   * stranded when auto-post threw. Create-and-post is one transaction now, so
+   * neither is expressible.
+   *
+   * And it is the correction path. Mongo carried the `void` status, `voidedAt`,
+   * `voidedBy` and `voidReason` — and nothing wrote any of them, while delete
+   * refused a posted expense with "void it instead". Since every expense is
+   * posted on creation, an expense could not be undone at all.
+   */
+  const handleVoid = async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await postLegacyExpense(expense._id);
+      const result = await voidExpensePg(expense._id, voidReason);
       if (!result?.success) {
-        setError(result?.error || "Failed to post expense");
+        setError(result?.error || "Failed to void expense");
       } else {
+        setShowVoidDialog(false);
         router.refresh();
       }
     } catch (err) {
@@ -127,14 +145,18 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
     }
   };
 
-  // Determine which actions to show
-  const isLegacy = ["pending", "approved", "rejected"].includes(expense.status);
-  // A draft is normally auto-posted on create; if that failed (e.g. a missing
-  // system account) it's left stranded — offer a manual Post to recover it.
-  const canPostDraft = expense.status === "draft" && !expense.journalEntryId;
-  const isUnpaid = expense.paymentStatus === "unpaid" &&
-    ["posted", "approved"].includes(expense.status);
+  // Which actions to show.
+  //
+  // No "Post Now": the legacy statuses are gone, and the draft it also
+  // rescued cannot be stranded any more — create-and-post is one transaction.
+  const isUnpaid =
+    expense.paymentStatus === "unpaid" && expense.status === "posted";
+  // Draft is the only deletable state, and nothing produces one — so this is
+  // effectively never true. It stays because the repository enforces the same
+  // rule, and a button that lies about what it will do is worse than one that
+  // never appears.
   const canDelete = expense.status === "draft";
+  const canVoid = expense.status !== "void" && !!expense.journalEntryId;
 
   return (
     <>
@@ -145,24 +167,8 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
       )}
 
       <div className="flex items-center gap-2">
-        {/* Post — legacy statuses OR a draft whose auto-post failed */}
-        {(isLegacy || canPostDraft) && (
-          <Button
-            size="sm"
-            onClick={handlePostLegacy}
-            disabled={loading}
-          >
-            {loading ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Wallet className="w-4 h-4 mr-2" />
-            )}
-            Post Now
-          </Button>
-        )}
-
         {/* Record Payment — only for unpaid posted expenses */}
-        {isUnpaid && !isLegacy && (
+        {isUnpaid && (
           <Button
             size="sm"
             onClick={() => setShowPayDialog(true)}
@@ -174,7 +180,7 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
         )}
 
         {/* More actions */}
-        {canDelete && (
+        {(canDelete || canVoid) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" className="h-9 w-9">
@@ -182,13 +188,24 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                className="text-destructive focus:text-destructive"
-                onClick={() => setShowDeleteDialog(true)}
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Delete
-              </DropdownMenuItem>
+              {canVoid && (
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => setShowVoidDialog(true)}
+                >
+                  <XCircle className="w-4 h-4 mr-2" />
+                  Void
+                </DropdownMenuItem>
+              )}
+              {canDelete && (
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => setShowDeleteDialog(true)}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}
@@ -290,6 +307,52 @@ export default function ExpenseActions({ expense, paymentAccounts = [] }) {
                 <Wallet className="w-4 h-4 mr-2" />
               )}
               Confirm Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Void Dialog */}
+      <Dialog open={showVoidDialog} onOpenChange={setShowVoidDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Void Expense</DialogTitle>
+            <DialogDescription>
+              Reverses every journal entry {expense.expenseNumber} raised — the
+              expense itself, and its payment clearing entry if it has one. The
+              reversals are dated today and post into the current period; the
+              original entries stay in the ledger, which is what an audit trail
+              is for.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-4">
+            <Label htmlFor="voidReason">Reason</Label>
+            <Input
+              id="voidReason"
+              value={voidReason}
+              onChange={(e) => setVoidReason(e.target.value)}
+              placeholder="Why is this being voided?"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowVoidDialog(false)}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleVoid}
+              disabled={loading || voidReason.trim().length < 3}
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <XCircle className="w-4 h-4 mr-2" />
+              )}
+              Void Expense
             </Button>
           </DialogFooter>
         </DialogContent>

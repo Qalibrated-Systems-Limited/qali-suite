@@ -188,9 +188,10 @@ export default function ExpenseList({
               {formatStatCurrency(postedTotal)}
             </p>
             <p className="text-xs text-muted-foreground">
-              {(summary?.byStatus?.posted?.count || 0) +
-               (summary?.byStatus?.approved?.count || 0) +
-               (summary?.byStatus?.pending?.count || 0)}{" "}
+              {/* `approved` and `pending` were two dead terms in this sum:
+                  nothing has created either status since the one-step flow
+                  replaced the approval workflow. See schema/enums.ts. */}
+              {summary?.byStatus?.posted?.count || 0}{" "}
               expenses
             </p>
           </CardContent>
@@ -209,8 +210,7 @@ export default function ExpenseList({
               {formatStatCurrency(unpaidTotal)}
             </p>
             <p className="text-xs text-muted-foreground">
-              {(summary?.byStatus?.posted?.count || 0) +
-               (summary?.byStatus?.approved?.count || 0)}{" "}
+              {summary?.byStatus?.posted?.count || 0}{" "}
               awaiting payment
             </p>
           </CardContent>

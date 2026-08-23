@@ -3,7 +3,11 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import ExpenseList from "../components/ExpenseList";
-import { getExpenses, getExpenseSummary, getExpenseCategories } from "@/app/mongodb/queries/expense-queries";
+import {
+  listExpensesPg,
+  getExpenseSummaryPg,
+  getExpenseCategoriesPg,
+} from "@/app/db/actions/expense-actions";
 import { FormBanner } from "@/components/ui/form-banner";
 
 export const metadata = {
@@ -15,21 +19,29 @@ export default async function ExpensesPage({ searchParams }) {
   const params = await searchParams;
   const page = parseInt(params?.page) || 1;
 
+  // `undefined`, not `null`: the repository builds its WHERE from whichever
+  // options are present, and `null` is present.
   const filters = {
-    status: params?.status || null,
-    category: params?.category || null,
-    search: params?.search || null,
-    startDate: params?.startDate || null,
-    endDate: params?.endDate || null,
+    status: params?.status || undefined,
+    category: params?.category || undefined,
+    search: params?.search || undefined,
+    startDate: params?.startDate || undefined,
+    endDate: params?.endDate || undefined,
   };
 
-  // Fetch data in parallel
-  const [expenseData, summary] = await Promise.all([
-    getExpenses(page, filters),
-    getExpenseSummary(),
+  /**
+   * Postgres, and tenant-scoped by RLS rather than by remembering to filter.
+   *
+   * `getExpenses` and `getExpenseSummary` both opened with
+   * `isSuperAdmin ? {} : { companyId }` — so signed in as platform staff, the
+   * expense list and every summary card aggregated EVERY tenant's spending
+   * into one figure.
+   */
+  const [expenseData, summary, categories] = await Promise.all([
+    listExpensesPg({ page, ...filters }),
+    getExpenseSummaryPg(),
+    getExpenseCategoriesPg(),
   ]);
-
-  const categories = getExpenseCategories();
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
