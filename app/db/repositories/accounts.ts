@@ -176,11 +176,19 @@ export async function getDescendants(tx: Tx, accountId: string) {
 
 export async function listAccounts(
   tx: Tx,
-  opts: { activeOnly?: boolean; postableOnly?: boolean } = {},
+  opts: {
+    activeOnly?: boolean;
+    postableOnly?: boolean;
+    /** 0059 — the expense form needs the postable expense accounts only. */
+    accountType?: (typeof accounts.accountType.enumValues)[number];
+  } = {},
 ) {
   const conditions = [];
   if (opts.activeOnly !== false) conditions.push(eq(accounts.isActive, true));
   if (opts.postableOnly) conditions.push(eq(accounts.canPost, true));
+  if (opts.accountType) {
+    conditions.push(eq(accounts.accountType, opts.accountType));
+  }
 
   return tx
     .select()

@@ -521,6 +521,22 @@ export async function listReceipts(tx: Tx, expenseId: string) {
     .orderBy(asc(expenseReceipts.uploadedAt));
 }
 
+/**
+ * Deletes a DRAFT expense. A posted one is voided.
+ *
+ * Reachable only if a draft exists, which `createAndPostExpense` never leaves
+ * behind — it is here for a caller that deliberately makes one, and so that
+ * the action layer's guard has something honest to call.
+ */
+export async function deleteDraftExpense(tx: Tx, expenseId: string) {
+  const [deleted] = await tx
+    .delete(expenses)
+    .where(and(eq(expenses.id, expenseId), eq(expenses.status, "draft")))
+    .returning();
+  if (!deleted) throw new Error("Only a draft expense can be deleted");
+  return deleted;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Reads
 // ─────────────────────────────────────────────────────────────────────────────
