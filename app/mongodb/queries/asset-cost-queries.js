@@ -1,25 +1,22 @@
-import mongoose from "mongoose";
-import dbConnect from "@/app/config/dbConnect";
-import Expense from "@/app/models/expenses";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
 import {
   getAssetById,
   listAssetBillCostsPg,
 } from "@/app/db/actions/asset-actions";
+import { getExpensesByAssetPg } from "@/app/db/actions/expense-actions";
 
 /**
  * What an asset has cost to run, from both sides of the split.
  *
- * BILLS ARE ON POSTGRES and so is the asset register (0056); EXPENSES ARE
- * STILL ON MONGO. This is the one query that has to reach into both, so it is
- * the one place the seam is visible — and it lives here, on the Mongo side,
- * because that is the half that will be deleted when expenses move.
+ * THERE IS NO LONGER A SPLIT. This used to be the one query that reached into
+ * both stores — bills and the asset register on Postgres (0056), expenses on
+ * Mongo — and the note here said it lived on the Mongo side "because that is
+ * the half that will be deleted when expenses move". Expenses moved (0059),
+ * so both halves are one store and the Mongo half is gone.
  *
- * `expenses.asset.id` is a String rather than an ObjectId for the same reason:
- * asset ids are UUIDs now, and Mongoose cannot cast one.
+ * The file stays where it is only because `app/dashboard/assets/[id]/page.jsx`
+ * imports it from here. It belongs in app/db/actions/asset-actions.ts beside
+ * listAssetBillCostsPg, and nothing but the import path is stopping it.
  */
-
-const VOIDED = ["void", "rejected"];
 
 export async function getAssetExpenses(assetId) {
   try {
@@ -27,40 +24,34 @@ export async function getAssetExpenses(assetId) {
       return { success: false, error: "Invalid asset id", entries: [], total: 0 };
     }
 
-    const billEntries = await listAssetBillCostsPg(assetId);
-
-    await dbConnect();
-    const { companyId, isSuperAdmin } = await getTenantContext();
-    const match = isSuperAdmin
-      ? { "asset.id": assetId, status: { $nin: VOIDED } }
-      : {
-          companyId: new mongoose.Types.ObjectId(companyId),
-          "asset.id": assetId,
-          status: { $nin: VOIDED },
-        };
-
-    const expenses = await Expense.find(match)
-      .select(
-        "expenseNumber expenseDate status paymentStatus paymentMethod vendor.name description amount total accountCode accountName",
-      )
-      .sort({ expenseDate: -1 })
-      .lean();
+    // Both halves are Postgres, and both are tenant-scoped by RLS rather than
+    // by a `isSuperAdmin ? {} : { companyId }` the query has to remember. The
+    // void filter moves into the repository, where `status <> 'void'` is the
+    // only exclusion there is — `rejected` was one of the legacy statuses and
+    // is gone with 0059.
+    const [billEntries, expenses] = await Promise.all([
+      listAssetBillCostsPg(assetId),
+      getExpensesByAssetPg(assetId),
+    ]);
 
     const expenseEntries = expenses.map((e) => {
-      const amount = e.total || e.amount || 0;
+      // A string from numeric(19,4), and `total` is a generated column, so
+      // the `total || amount` fallback the Mongo version needed is gone: the
+      // figure cannot be missing.
+      const amount = Number(e.total);
       return {
         source: "expense",
-        expenseId: e._id.toString(),
+        expenseId: e.id,
         // Alias, so the existing detail-page links keep working.
-        billId: e._id.toString(),
+        billId: e.id,
         billNumber: e.expenseNumber,
-        billDate: e.expenseDate?.toISOString?.() ?? e.expenseDate ?? null,
+        billDate: e.expenseDate,
         billStatus: e.status,
-        paymentStatus: e.paymentStatus || e.paymentMethod || null,
-        supplierName: e.vendor?.name || "—",
+        paymentStatus: e.paymentStatus,
+        supplierName: e.payeeNameAtExpense || "—",
         lineDescription: e.description || "",
-        accountName: e.accountName || "",
-        accountCode: e.accountCode || "",
+        accountName: e.accountNameAtExpense || "",
+        accountCode: e.accountCodeAtExpense || "",
         amount,
         lineTotal: amount,
       };

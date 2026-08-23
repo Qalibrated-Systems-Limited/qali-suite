@@ -494,6 +494,37 @@ export async function getProjectExpenseTotalsPg(projectId: string) {
   );
 }
 
+export async function getProjectExpensesByAccountPg(projectId: string) {
+  return withAuthorizedTenant([], (tx) =>
+    expensesRepo.getProjectExpensesByAccount(tx, projectId),
+  );
+}
+
+export async function listProjectExpensesPg(projectId: string, limit = 50) {
+  return withAuthorizedTenant([], (tx) =>
+    expensesRepo.listProjectExpenses(tx, projectId, limit),
+  );
+}
+
+export async function sumExpensesByAssetPg(opts: {
+  assetIds: string[];
+  since: string;
+  until: string;
+}) {
+  return withAuthorizedTenant([], (tx) =>
+    expensesRepo.sumExpensesByAsset(tx, opts),
+  );
+}
+
+export async function sumExpensesForPeriodPg(opts: {
+  start: string;
+  end: string;
+}) {
+  return withAuthorizedTenant([], (tx) =>
+    expensesRepo.sumExpensesForPeriod(tx, opts),
+  );
+}
+
 export async function getExpenseCategoriesPg() {
   return expensesRepo.getExpenseCategories();
 }

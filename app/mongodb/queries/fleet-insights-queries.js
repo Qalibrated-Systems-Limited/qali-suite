@@ -13,7 +13,7 @@ import {
 } from "@/lib/utils/tenant-utils";
 import { requirePlanAccess } from "@/lib/plan-gate";
 import { safeErrorMessage } from "@/lib/safe-error";
-import Expense from "@/app/models/expenses";
+import { sumExpensesByAssetPg } from "@/app/db/actions/expense-actions";
 
 // ============================================
 // SHARED INSIGHTS QUERIES
@@ -73,29 +73,15 @@ async function rollupRunningCosts({ assetIds, start, end, companyId, isSuperAdmi
 
   const billTotals = await sumAssetBillCostsPg({ assetIds, since, until });
 
-  const tenantClause = isSuperAdmin ? {} : { companyId };
-  const expenseRows = await Expense.aggregate([
-    {
-      $match: {
-        ...tenantClause,
-        status: { $nin: ["void", "rejected"] },
-        expenseDate: { $gte: start, $lte: end },
-        // A String now: asset ids are UUIDs. See app/models/expenses.js.
-        "asset.id": { $in: assetIds },
-      },
-    },
-    {
-      $group: {
-        _id: "$asset.id",
-        total: { $sum: { $ifNull: ["$total", { $ifNull: ["$amount", 0] }] } },
-      },
-    },
-  ]);
+  // Postgres since 0059, and the asset link is a real uuid FK now rather than
+  // a String the query has to hope matches. `total` is a generated column, so
+  // the $ifNull-inside-$ifNull fallback has nothing left to fall back to.
+  const expenseRows = await sumExpensesByAssetPg({ assetIds, since, until });
 
   const totals = new Map(Object.entries(billTotals));
   for (const row of expenseRows) {
-    const key = String(row._id);
-    totals.set(key, (totals.get(key) || 0) + (row.total || 0));
+    const key = String(row.assetId);
+    totals.set(key, (totals.get(key) || 0) + Number(row.total || 0));
   }
   return totals;
 }

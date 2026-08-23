@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import {
   expenses,
@@ -924,4 +924,109 @@ export function getExpenseCategories() {
       .map((w) => w[0].toUpperCase() + w.slice(1))
       .join(" "),
   }));
+}
+
+/**
+ * Project spend per expense ACCOUNT — the budget-versus-actual breakdown.
+ *
+ * `committed` is the accrual: posted and not yet paid. The Mongo version asks
+ * for `status: "approved"` — one of the legacy statuses nothing produces — so
+ * the committed column on the project budget page has always been zero, and
+ * the variance against budget has always been wrong by exactly the accruals.
+ */
+export async function getProjectExpensesByAccount(tx: Tx, projectId: string) {
+  return tx
+    .select({
+      accountId: expenses.accountId,
+      accountCode: expenses.accountCodeAtExpense,
+      accountName: expenses.accountNameAtExpense,
+      actual: sql<string>`coalesce(sum(${expenses.total}) FILTER (WHERE ${expenses.paymentStatus} = 'paid'), 0)::text`,
+      committed: sql<string>`coalesce(sum(${expenses.total}) FILTER (WHERE ${expenses.paymentStatus} = 'unpaid'), 0)::text`,
+    })
+    .from(expenses)
+    .where(
+      and(eq(expenses.projectId, projectId), sql`${expenses.status} <> 'void'`),
+    )
+    .groupBy(
+      expenses.accountId,
+      expenses.accountCodeAtExpense,
+      expenses.accountNameAtExpense,
+    );
+}
+
+/** The project drill-down list. */
+export async function listProjectExpenses(
+  tx: Tx,
+  projectId: string,
+  limit = 50,
+) {
+  return tx
+    .select({
+      id: expenses.id,
+      expenseNumber: expenses.expenseNumber,
+      status: expenses.status,
+      paymentStatus: expenses.paymentStatus,
+      total: expenses.total,
+      accountName: expenses.accountNameAtExpense,
+      category: expenses.category,
+      expenseDate: expenses.expenseDate,
+      payeeName: expenses.payeeNameAtExpense,
+    })
+    .from(expenses)
+    .where(
+      and(eq(expenses.projectId, projectId), sql`${expenses.status} <> 'void'`),
+    )
+    .orderBy(desc(expenses.expenseDate))
+    .limit(Math.min(limit, 200));
+}
+
+/** Running cost per asset over a window — the fleet insights roll-up. */
+export async function sumExpensesByAsset(
+  tx: Tx,
+  opts: { assetIds: string[]; since: string; until: string },
+) {
+  if (!opts.assetIds.length) return [];
+  return tx
+    .select({
+      assetId: expenses.assetId,
+      total: sql<string>`coalesce(sum(${expenses.total}), 0)::text`,
+    })
+    .from(expenses)
+    .where(
+      and(
+        inArray(expenses.assetId, opts.assetIds),
+        sql`${expenses.status} <> 'void'`,
+        gte(expenses.expenseDate, opts.since),
+        lte(expenses.expenseDate, opts.until),
+      ),
+    )
+    .groupBy(expenses.assetId);
+}
+
+/**
+ * Total operating spend over a window — the executive month-on-month card.
+ *
+ * Sums `total`, where the Mongo aggregate sums `amount` — so the executive
+ * view has been reporting spend NET of VAT and gross of withholding, which is
+ * neither the cash that left nor the cost that hit the P&L. And its status
+ * filter includes "approved", which nothing produces.
+ */
+export async function sumExpensesForPeriod(
+  tx: Tx,
+  opts: { start: string; end: string },
+) {
+  const [row] = await tx
+    .select({
+      count: sql<number>`count(*)::int`,
+      total: sql<string>`coalesce(sum(${expenses.total}), 0)::text`,
+    })
+    .from(expenses)
+    .where(
+      and(
+        sql`${expenses.status} <> 'void'`,
+        gte(expenses.expenseDate, opts.start),
+        lte(expenses.expenseDate, opts.end),
+      ),
+    );
+  return row;
 }

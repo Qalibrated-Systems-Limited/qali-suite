@@ -11,7 +11,11 @@ import {
 import Invoice from "../../models/invoice";
 import CreditNote from "../../models/creditNote";
 import Bill from "../../models/bill";
-import Expense from "../../models/expenses";
+import {
+  getProjectExpenseTotalsPg,
+  getProjectExpensesByAccountPg,
+  listProjectExpensesPg,
+} from "@/app/db/actions/expense-actions";
 import { StockRequest } from "../../models/requests";
 import { StockMovement } from "../../models/stockmovement";
 import dbConnect from "../../config/dbConnect";
@@ -270,7 +274,7 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
     revenuePipeline,
     creditNotes,
     billCosts, billCommitted,
-    expenseCosts, expenseCommitted,
+    expenseTotals,
     requestCommitted,
     invoiceCOGS,
     returnedCOGS,
@@ -301,16 +305,16 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
       { $match: { ...tenantMatch, projectId: pid, status: "approved", paymentStatus: { $ne: "paid" } } },
       { $group: { _id: null, total: { $sum: "$amounts.netPayable" } } },
     ]),
-    // Expense costs (paid) — "void" status is naturally excluded by the paid filter
-    Expense.aggregate([
-      { $match: { ...tenantMatch, projectId: pid, status: "paid" } },
-      { $group: { _id: null, total: { $sum: "$total" } } },
-    ]),
-    // Expense committed (approved but not paid)
-    Expense.aggregate([
-      { $match: { ...tenantMatch, projectId: pid, status: "approved" } },
-      { $group: { _id: null, total: { $sum: "$total" } } },
-    ]),
+    /**
+     * Expense actual and committed, from Postgres (0059), in one query.
+     *
+     * The committed half NEVER WORKED. It asked for `status: "approved"` — a
+     * legacy status the one-step flow stopped producing — so a project's
+     * committed cost from expenses has always been zero, and its variance
+     * against budget wrong by exactly the accruals. Committed is now what it
+     * means: posted and not yet paid.
+     */
+    getProjectExpenseTotalsPg(String(pid)),
     // Stock request committed (approved/partially fulfilled)
     StockRequest.aggregate([
       { $match: { ...tenantMatch, projectId: pid, status: { $in: ["approved", "partially_fulfilled"] } } },
@@ -348,7 +352,7 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
     0,
     claimTotals.actual +
       (billCosts[0]?.total || 0) +
-      (expenseCosts[0]?.total || 0) +
+      Number(expenseTotals?.paid || 0) +
       (invoiceCOGS[0]?.total || 0) -
       (returnedCOGS[0]?.total || 0),
   );
@@ -358,7 +362,7 @@ export const computeProjectActuals = async (pid, tenantMatch) => {
     committed:
       claimTotals.committed +
       (billCommitted[0]?.total || 0) +
-      (expenseCommitted[0]?.total || 0) +
+      Number(expenseTotals?.committed || 0) +
       (requestCommitted[0]?.total || 0),
     revenue,
   };
@@ -391,7 +395,7 @@ export const getProjectBudgetVsActual = async (projectId) => {
   const [
     claimsByAccount,
     billActuals, billCommitted,
-    expenseActuals, expenseCommitted,
+    expenseByAccount,
   ] = await Promise.all([
     // One call for both arms; the $unwind is a GROUP BY now that items are rows.
     getProjectClaimsByAccountPg(String(projectId)),
@@ -407,16 +411,10 @@ export const getProjectBudgetVsActual = async (projectId) => {
       { $unwind: "$lines" },
       { $group: { _id: "$lines.account.id", total: { $sum: "$lines.amount" } } },
     ]),
-    // Expenses — paid (actual) per account
-    Expense.aggregate([
-      { $match: { ...tenantMatch, projectId: pid, status: "paid" } },
-      { $group: { _id: "$accountId", total: { $sum: "$amount" } } },
-    ]),
-    // Expenses — committed (approved, not paid)
-    Expense.aggregate([
-      { $match: { ...tenantMatch, projectId: pid, status: "approved" } },
-      { $group: { _id: "$accountId", total: { $sum: "$amount" } } },
-    ]),
+    // Expenses per account, actual and committed together. Same two fixes as
+    // above: `status: "approved"` never matched anything, and this summed
+    // `amount` where the cost that hits the account is `total`.
+    getProjectExpensesByAccountPg(String(pid)),
   ]);
 
   // Merge all sources into maps
@@ -434,11 +432,17 @@ export const getProjectBudgetVsActual = async (projectId) => {
 
   addToMap(actualMap, claimsByAccount.actuals);
   addToMap(actualMap, billActuals);
-  addToMap(actualMap, expenseActuals);
 
   addToMap(committedMap, claimsByAccount.committed);
   addToMap(committedMap, billCommitted);
-  addToMap(committedMap, expenseCommitted);
+
+  // Postgres rows: `accountId` rather than `_id`, and both halves in one row.
+  for (const e of expenseByAccount) {
+    if (!e.accountId) continue;
+    const key = String(e.accountId);
+    actualMap[key] = (actualMap[key] || 0) + Number(e.actual || 0);
+    committedMap[key] = (committedMap[key] || 0) + Number(e.committed || 0);
+  }
 
   // Build comparison
   const lines = budget.lines.map((line) => {
@@ -514,15 +518,7 @@ export const getProjectTransactions = async (projectId, type = "all", limit = 20
   }
 
   if (type === "all" || type === "expenses") {
-    const expenses = await Expense.find({
-      ...tenantMatch,
-      projectId: pid,
-    })
-      .select("expenseNumber status total accountName category expenseDate employee.name")
-      .sort({ expenseDate: -1 })
-      .limit(limit)
-      .lean();
-    results.expenses = serializeBsonType(expenses);
+    results.expenses = await listProjectExpensesPg(String(pid), limit);
   }
 
   if (type === "all" || type === "requests") {

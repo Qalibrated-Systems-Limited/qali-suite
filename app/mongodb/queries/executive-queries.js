@@ -8,7 +8,7 @@ import {
 } from "@/lib/utils/tenant-utils";
 import Invoice from "@/app/models/invoice";
 import Bill from "@/app/models/bill";
-import Expense from "@/app/models/expenses";
+import { sumExpensesForPeriodPg } from "@/app/db/actions/expense-actions";
 import Account from "@/app/models/account";
 import Opportunity from "@/app/models/opportunity";
 import SalesOrder from "@/app/models/salesOrder";
@@ -76,15 +76,24 @@ export const cExecutiveSnapshot = cache(async () => {
         { $match: { ...tenant, status: "approved", paymentStatus: { $in: ["unpaid", "partial"] } } },
         { $group: { _id: null, total: { $sum: "$amounts.balance" }, count: { $sum: 1 } } },
       ]),
-      // Operating expenses (posted/approved) this vs last month
-      Expense.aggregate([
-        { $match: { ...tenant, status: { $in: ["approved", "posted", "paid"] }, expenseDate: { $gte: thisMonth.start, $lt: thisMonth.end } } },
-        { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } },
-      ]),
-      Expense.aggregate([
-        { $match: { ...tenant, status: { $in: ["approved", "posted", "paid"] }, expenseDate: { $gte: lastMonth.start, $lt: lastMonth.end } } },
-        { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } },
-      ]),
+      /**
+       * Operating expenses, this month against last. Postgres since 0059, and
+       * two things change in the numbers.
+       *
+       * It sums `total`, not `amount` — so the card now reports what actually
+       * hit the P&L (net plus VAT less withholding) rather than the bare line
+       * amount, which was neither the cash that left nor the cost recognised.
+       * And the status filter loses "approved", which nothing has produced
+       * since the one-step flow replaced the approval workflow.
+       */
+      sumExpensesForPeriodPg({
+        start: thisMonth.start.toISOString().slice(0, 10),
+        end: thisMonth.end.toISOString().slice(0, 10),
+      }),
+      sumExpensesForPeriodPg({
+        start: lastMonth.start.toISOString().slice(0, 10),
+        end: lastMonth.end.toISOString().slice(0, 10),
+      }),
       // Cash position — cached balances of money accounts
       Account.aggregate([
         { $match: { ...tenant, subType: { $in: ["cash", "bank", "mpesa"] }, isActive: { $ne: false } } },
@@ -103,10 +112,13 @@ export const cExecutiveSnapshot = cache(async () => {
     ]);
 
     const val = (r) => ({ total: r[0]?.total || 0, count: r[0]?.count || 0 });
+    // The Postgres reads return a row, not a one-element aggregate array, and
+    // money comes back as a string from numeric(19,4).
+    const row = (r) => ({ total: Number(r?.total || 0), count: r?.count || 0 });
 
     return {
       revenue: { ...val(revThis), prev: val(revLast).total },
-      expenses: { ...val(expThis), prev: val(expLast).total },
+      expenses: { ...row(expThis), prev: row(expLast).total },
       ar: val(ar),
       ap: val(ap),
       cash: val(cashAccounts),
