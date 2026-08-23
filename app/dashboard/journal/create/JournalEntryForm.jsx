@@ -43,7 +43,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { createManualJournalEntry as createOnMongo } from "@/app/mongodb/actions/journal-actions";
 
 // Group accounts by type for better UX
 function groupAccountsByType(accounts) {
@@ -75,14 +74,13 @@ const emptyLine = () => ({
 
 export default function JournalEntryForm({ accounts = [], entryTypes = [], action = null }) {
   const router = useRouter();
-  // `action` is supplied by the page. The Mongo fallback is kept only so a
-  // caller that passes nothing still has one; the create page always passes
-  // the Postgres action, because the account list it renders comes from there
-  // and an id from one store selects nothing in the other.
-  const [state, formAction, isPending] = useActionState(
-    action ?? createOnMongo,
-    null,
-  );
+  // `action` is supplied by the page, and there is no fallback. It used to
+  // default to the MONGO createManualJournalEntry — which posts into a ledger
+  // no screen reads, and was harmless only because create/page.tsx has always
+  // passed the Postgres one. The account list rendered here comes from
+  // Postgres, so an id from it selects nothing in Mongo anyway: a default that
+  // is wrong is a trap waiting for a second caller.
+  const [state, formAction, isPending] = useActionState(action, null);
 
   // Form state
   const [entryDate, setEntryDate] = useState(

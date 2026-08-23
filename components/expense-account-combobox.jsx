@@ -37,7 +37,7 @@ import {
   Check,
   AlertCircle,
 } from "lucide-react";
-import { quickCreateExpenseAccount } from "@/app/mongodb/actions/account-actions";
+import { quickCreateExpenseAccountPg } from "@/app/db/actions/account-actions";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -134,7 +134,7 @@ export default function ExpenseAccountCombobox({
     setCreateError("");
 
     const formData = new FormData(e.target);
-    const result = await quickCreateExpenseAccount(formData);
+    const result = await quickCreateExpenseAccountPg(formData);
 
     if (result.success) {
       const acc = result.account;

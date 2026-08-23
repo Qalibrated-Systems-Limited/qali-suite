@@ -106,41 +106,45 @@ form-data adapter, or a lower-level variant a route handler will want, can
 legitimately have no screen calling it. What you are looking for is **a whole
 file's worth at once** — that means the screens were never pointed at it.
 
-### Read this before touching petty cash
+### Read this before adding to any module
 
-**ONE live module still posts journal entries into MongoDB**, and every ledger
-screen — the journal browser, trial balance, P&L, balance sheet, general
-ledger — reads Postgres:
+**Three live modules still post journal entries into MongoDB**, and every
+ledger screen — the journal browser, trial balance, P&L, balance sheet,
+general ledger — reads Postgres:
 
-| Module | Screens | What is being lost |
+| Module | Reached from | Postings |
 |---|---|---|
-| `petty-cash-actions.js` | 3 | every petty cash movement |
+| `checkout-action.js` | three checkout dialogs | 2 |
+| `credit-note-actions.js` | `CreditNoteActions.jsx` (issue, void) | 2 |
+| `opening-balance-actions.js` | `OpeningBalancesClient.jsx` | 1 |
 
-Expenses was the seventh and is done (0059). Its statement half — the float's
-GL position and the expenses paid out of the tin — moved with it, so
-petty cash's postings are all that is left. When they move,
-`app/db/actions/petty-cash-reads.ts` folds into the petty cash actions and
-stops existing.
+Expenses (0059) and petty cash (0060) are done. Credit notes are the awkward
+one: **half the module is on Postgres**. `createCreditNotePg` and
+`getCreditNotesPg` exist and are used; issue, void, delete and the detail page
+are still Mongo. See §9L.
 
-**The lesson expenses cost three sweeps: sweep `app/models/` too.** The count
-went four → five → six as the search widened from `app/mongodb/actions/` to
-`lib/`, and expenses was in neither — its `.post()` calls were in the MODEL,
-reached through an action that looked like a thin wrapper. §9G even named
-expenses, but as a PARTY seam, so nobody read further.
+**Three questions find three different failures. Ask all three.**
 
 ```bash
+# 1. What still posts into the Mongo ledger?
 grep -rn "\.post(" app/models app/mongodb lib | grep -v node_modules
+
+# 2 & 3. What do the screens import from Mongo — and is there already a
+#        Postgres twin that covers it?
+grep -rn "from \"@/app/mongodb" app/dashboard components lib app/api
 ```
 
-**And a second question, which the `.post(` sweep will never answer** (§9K):
+Question 1 misses anything whose posting is in the MODEL rather than the
+action layer — that is how expenses survived three sweeps. Questions 2 and 3
+find what question 1 cannot see at all:
 
-> What reads a collection nothing writes any more?
-
-Sales orders was the first module caught by it — 466 lines reading Mongo
-quotes, products and invoices, all three of which had moved. It posts no
-journal entries, so every ledger sweep passed it by, and only one of its four
-failure points was loud. Its entry points are switched off in
-`lib/unported-modules.js`.
+  - a module that READS a collection nothing writes any more (§9K — sales
+    orders, 466 lines against three stores that had all moved, switched off in
+    `lib/unported-modules.js`);
+  - a module ported only HALFWAY, where a `*-actions.ts` exists but a screen
+    still imports a function it does not cover (§9L — credit notes, and the
+    expense-account combobox, which created accounts in Mongo while every
+    picker read Postgres).
 
 Nothing errors: the entry is created, validated and posted into a ledger no
 screen reads. If you are adding to one of these, post through

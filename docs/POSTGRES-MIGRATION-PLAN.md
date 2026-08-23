@@ -2089,6 +2089,80 @@ job was repairing a stored value on every single read.
 
 ---
 
+### §9L — Petty cash was not the last, and the sweep was asking one question
+
+Petty cash is ported (0060) and it was described as closing the ledger gap. It
+did not. Re-running `grep -rn "\.post(" app/models app/mongodb lib` afterwards
+and checking REACHABILITY — not just presence — turns up three live modules
+still posting into the Mongo ledger.
+
+The reason they were missed is not carelessness about `.post(`. It is that
+"which modules post into Mongo?" is only one of three questions, and each of
+the three finds a different failure:
+
+| Question | Finds | Instances |
+|---|---|---|
+| What still posts? | modules never ported | expenses, petty cash, the two connectors… |
+| What reads a collection nothing writes any more? | stranded modules (§9K) | sales orders |
+| **Which modules are ported only HALFWAY?** | screens calling the Mongo half of a module that has a Postgres half | **credit notes, accounts, journal** |
+
+The third is new, it is mechanical, and it found four things.
+
+**WRONG HALF — a Postgres version exists and the screen calls the Mongo one.**
+
+`JournalEntryForm.jsx` imported the Mongo `createManualJournalEntry` as the
+DEFAULT for its `action` prop. Latent, not live: `create/page.tsx` has always
+passed the Postgres one. But a default that posts into the wrong ledger is a
+trap waiting for a second caller, and the account ids the form renders come
+from Postgres, so it could not have worked anyway. Removed — the prop is now
+required in practice.
+
+**MISSING IN TWIN — the Postgres module does not cover what the screen needs.**
+
+`app/db/actions/credit-note-actions.ts` has exactly two functions:
+`createCreditNotePg` and `getCreditNotesPg`. Meanwhile
+`CreditNoteActions.jsx` imports `issueCreditNote`, `voidCreditNote` and
+`deleteDraftCreditNote` from MONGO — and issue posts. The detail page reads
+`getCreditNoteById` from Mongo queries too. So credit notes are split down the
+middle: **created and listed in Postgres, opened and issued in Mongo.** A
+credit note made through the working path is invisible to its own detail page,
+and one issued through the other path posts where no ledger screen looks.
+
+`app/mongodb/actions/account-actions.js` still owned `quickCreateExpenseAccount`
+— the expense-account combobox's inline "create". It writes to the MONGO
+Account collection while the chart of accounts has been Postgres since 0001,
+and that combobox is on the expense form, project budgets, claim settlements
+and a checkout dialog. Creating an account there put it in a store no picker
+reads: the user made an account, the list did not show it, nothing said why.
+Ported here as `quickCreateExpenseAccountPg`, sharing lib/coa-codes.js so the
+5xxx/6xxx numbering is unchanged.
+
+**NO TWIN — not ported at all, and posting.**
+
+  - `checkout-action.js` — 2 postings, reached from three checkout dialogs
+  - `opening-balance-actions.js` — 1 posting, reached from OpeningBalancesClient
+
+Those two are the real remaining ledger gaps, along with credit-note issue and
+void. **Three modules, five postings.** Not zero.
+
+**The sweep, stated completely.** All three questions, and the third is the one
+that had never been asked:
+
+```bash
+# 1. what posts
+grep -rn "\.post(" app/models app/mongodb lib | grep -v node_modules
+
+# 2 and 3. what the screens actually import from Mongo, and whether a
+#          Postgres twin already covers it
+grep -rn "from \"@/app/mongodb" app/dashboard components lib app/api
+```
+
+For each hit: does `app/db/actions/<same-stem>.ts` exist, and does it export
+that function? Three answers — no twin, twin missing this function, twin has
+it and the screen calls Mongo anyway — and all three are bugs.
+
+---
+
 ### §9K — Sales orders, and a different kind of gap
 
 Not a ledger gap. `sales-order-actions.js` posts nothing, and the sweep for

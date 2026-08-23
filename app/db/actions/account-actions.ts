@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { userMessage } from "../errors";
 import { z } from "zod";
 import { withAuthorizedTenant } from "../tenant";
 import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
@@ -97,6 +98,106 @@ export async function createAccountPg(
     );
   } catch (err) {
     return fail(err);
+  }
+}
+
+/**
+ * The expense-account combobox's inline "create".
+ *
+ * POSTGRES since 0060. It called `quickCreateExpenseAccount` in
+ * app/mongodb/actions/account-actions.js, which writes to the MONGO Account
+ * collection — and the chart of accounts has been Postgres since 0001. So
+ * creating an account from the expense form, a project budget, a claim
+ * settlement or a checkout dialog put it in a store no picker reads: the user
+ * created an account, the combobox did not list it, and nothing said why.
+ *
+ * The code range rules come from lib/coa-codes.js, which is shared, so the
+ * numbering is unchanged: cost-of-sales subtypes book to 5xxx and every other
+ * expense to 6xxx, and a blank code takes the next free one in range.
+ *
+ * The RETURN SHAPE is the combobox's — `{ success, account: { _id,
+ * accountCode, accountName } }` — so the component does not change.
+ */
+export async function quickCreateExpenseAccountPg(formData: FormData) {
+  const accountCode = String(formData.get("accountCode") ?? "").trim();
+  const accountName = String(formData.get("accountName") ?? "").trim();
+  const subType = String(formData.get("subType") ?? "operating_expense");
+  const values = { accountCode, accountName, subType };
+
+  if (accountCode && !/^[0-9]+$/.test(accountCode)) {
+    return { success: false as const, error: "Account code must be numeric", values };
+  }
+  if (!accountName) {
+    return { success: false as const, error: "Account name is required", values };
+  }
+
+  const { DIRECT_COST_SUBTYPES, COA_RANGES, nextCodeInRange } = await import(
+    "@/lib/coa-codes"
+  );
+  // lib/coa-codes.js is plain JS, so the tuple shape has to be asserted.
+  const range = (
+    DIRECT_COST_SUBTYPES.has(subType) ? COA_RANGES.direct_cost : COA_RANGES.expense
+  ) as [number, number];
+
+  try {
+    return await withAuthorizedTenant(
+      [...FINANCE_WRITE_ROLES],
+      async (tx, { companyId }) => {
+        let finalCode = accountCode;
+        if (!finalCode) {
+          const existing = await accountsRepo.listAccounts(tx, {
+            activeOnly: false,
+          });
+          finalCode = nextCodeInRange(
+            existing.map((a) => a.accountCode),
+            range,
+          );
+          if (!finalCode) {
+            return {
+              success: false as const,
+              error: "No free codes left in this range — enter one manually.",
+              values,
+            };
+          }
+        } else {
+          const codeNum = parseInt(finalCode, 10);
+          if (codeNum < range[0] || codeNum > range[1]) {
+            return {
+              success: false as const,
+              error: `${
+                DIRECT_COST_SUBTYPES.has(subType) ? "Direct cost/COGS" : "Expense"
+              } account codes must be between ${range[0]} and ${range[1]}`,
+              values,
+            };
+          }
+        }
+
+        // Uniqueness is a unique index, not a SELECT-then-INSERT: two people
+        // adding "Site Fuel" at once both passed the Mongo check.
+        const created = await accountsRepo.createAccount(tx, {
+          companyId,
+          accountCode: finalCode,
+          accountName,
+          accountType: "expense",
+          subType,
+          // canPost and isActive both default to true on the column, which is
+          // what the Mongo path set them to by hand.
+        });
+
+        revalidatePath("/dashboard/accounts");
+        return {
+          success: true as const,
+          account: {
+            _id: created.id,
+            id: created.id,
+            accountCode: created.accountCode,
+            accountName: created.accountName,
+          },
+        };
+      },
+    );
+  } catch (err) {
+    return { success: false as const, error: userMessage(err), values };
   }
 }
 
