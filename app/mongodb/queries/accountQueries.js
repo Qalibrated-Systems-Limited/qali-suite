@@ -1,9 +1,5 @@
 import Account from "../../models/account";
 import JournalEntry from "../../models/JournalEntry";
-import Invoice from "../../models/invoice";
-import Bill from "../../models/bill";
-import Company from "../../models/Company";
-import Party from "../../models/parties";
 import AccountService from "../services/accountService";
 import dbConnect from "../../config/dbConnect";
 import { getTenantContext, withTenantScope, buildTenantMatch } from "@/lib/utils/tenant-utils";
@@ -601,150 +597,10 @@ export async function getExpenseAccountsForDialog() {
  * - the current Opening Balance Equity balance (so the UI can nudge the user
  *   to reclassify it — "don't leave the drawer full").
  */
-export async function getOpeningBalanceSetup() {
-  await dbConnect();
-
-  const { companyId, isSuperAdmin } = await getTenantContext();
-
-  const [
-    accounts,
-    existing,
-    obe,
-    company,
-    liveTxn,
-    openingReceivables,
-    openingPayables,
-    customers,
-    suppliers,
-  ] = await Promise.all([
-    Account.find(
-      withTenantScope({ canPost: true, isActive: true }, companyId, isSuperAdmin),
-    )
-      .sort({ accountCode: 1 })
-      .select("_id accountCode accountName accountType subType systemAccount")
-      .lean(),
-    // The opening LUMP only — distinguished from opening AR/AP docs (which set
-    // relatedDocuments) by having neither a related invoice nor bill.
-    JournalEntry.findOne(
-      withTenantScope(
-        {
-          entryType: "opening_balance",
-          status: { $ne: "reversed" },
-          "relatedDocuments.invoiceId": { $exists: false },
-          "relatedDocuments.billId": { $exists: false },
-        },
-        companyId,
-        isSuperAdmin,
-      ),
-    )
-      .select("entryNumber entryDate")
-      .lean(),
-    Account.findOne(
-      withTenantScope(
-        { systemAccount: "opening_balance_equity" },
-        companyId,
-        isSuperAdmin,
-      ),
-    ).lean(),
-    Company.findById(companyId).select("conversion").lean(),
-    // Live-lock: any real (non-opening, non-reversal) posted entry.
-    JournalEntry.exists({
-      ...buildTenantMatch(companyId, isSuperAdmin),
-      status: "posted",
-      entryType: { $nin: ["opening_balance"] },
-      originalEntryId: { $exists: false },
-    }),
-    Invoice.find(
-      withTenantScope(
-        { isOpeningBalance: true, status: { $ne: "cancelled" } },
-        companyId,
-        isSuperAdmin,
-      ),
-    )
-      .sort({ invoiceDate: 1 })
-      .select("invoiceNumber invoiceDate dueDate total amountDue paymentStatus customer.name")
-      .lean(),
-    Bill.find(
-      withTenantScope(
-        { isOpeningBalance: true, status: { $ne: "cancelled" } },
-        companyId,
-        isSuperAdmin,
-      ),
-    )
-      .sort({ billDate: 1 })
-      .select("billNumber billDate dueDate amounts.netPayable amounts.balance paymentStatus supplier.name")
-      .lean(),
-    Party.find(
-      withTenantScope(
-        { type: { $in: ["customer", "both"] }, isActive: true },
-        companyId,
-        isSuperAdmin,
-      ),
-    )
-      .sort({ name: 1 })
-      .select("_id name")
-      .lean(),
-    Party.find(
-      withTenantScope(
-        { type: { $in: ["supplier", "both"] }, isActive: true },
-        companyId,
-        isSuperAdmin,
-      ),
-    )
-      .sort({ name: 1 })
-      .select("_id name")
-      .lean(),
-  ]);
-
-  // Live Opening Balance Equity balance (credit-normal): credit − debit
-  // across posted lines that hit it.
-  let openingBalanceEquity = 0;
-  if (obe) {
-    const [agg] = await JournalEntry.aggregate([
-      {
-        $match: {
-          ...buildTenantMatch(companyId, isSuperAdmin),
-          status: "posted",
-          "lines.accountId": obe._id,
-        },
-      },
-      { $unwind: "$lines" },
-      { $match: { "lines.accountId": obe._id } },
-      {
-        $group: {
-          _id: null,
-          debit: { $sum: "$lines.debit" },
-          credit: { $sum: "$lines.credit" },
-        },
-      },
-    ]);
-    if (agg) openingBalanceEquity = Math.round((agg.credit - agg.debit) * 100) / 100;
-  }
-
-  const receivablesTotal = Math.round(
-    openingReceivables.reduce((s, d) => s + (d.total || 0), 0) * 100,
-  ) / 100;
-  const payablesTotal = Math.round(
-    openingPayables.reduce((s, d) => s + (d.amounts?.netPayable || 0), 0) * 100,
-  ) / 100;
-
-  return serializeBsonType({
-    accounts,
-    obeAccountId: obe?._id || null,
-    alreadyPosted: existing
-      ? { entryNumber: existing.entryNumber, entryDate: existing.entryDate }
-      : null,
-    openingBalanceEquity,
-    conversionDate: company?.conversion?.date || null,
-    liveLocked: !!liveTxn,
-    customers,
-    suppliers,
-    openingReceivables,
-    openingPayables,
-    receivablesTotal,
-    payablesTotal,
-  });
-}
+/*
+ * getOpeningBalanceSetup moved to Postgres (0061) —
+ * app/db/actions/opening-balance-actions.getOpeningBalanceSetupPg.
+ */
 
 export default {
   getAccounts,
@@ -760,5 +616,4 @@ export default {
   getAccountStats,
   getAccountsWithBalances,
   getExpenseAccountsForDialog,
-  getOpeningBalanceSetup,
 };

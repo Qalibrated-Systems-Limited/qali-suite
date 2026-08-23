@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, Shield } from "lucide-react";
 import { auth } from "@/auth";
-import { getOpeningBalanceSetup } from "@/app/mongodb/queries/accountQueries";
+import { getOpeningBalanceSetupPg } from "@/app/db/actions/opening-balance-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { OpeningBalancesClient } from "./OpeningBalancesClient";
@@ -42,7 +42,7 @@ export default async function OpeningBalancesPage() {
     );
   }
 
-  const setup = await getOpeningBalanceSetup();
+  const setup = await getOpeningBalanceSetupPg();
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">

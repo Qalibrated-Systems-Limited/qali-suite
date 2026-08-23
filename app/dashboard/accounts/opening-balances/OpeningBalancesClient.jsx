@@ -11,13 +11,13 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { formatCurrency } from "@/lib/utils";
 import {
-  postOpeningBalances,
-  setConversionDate,
-  createOpeningInvoice,
-  createOpeningBill,
-  reverseOpeningInvoice,
-  reverseOpeningBill,
-} from "@/app/mongodb/actions/opening-balance-actions";
+  postOpeningBalancesPg as postOpeningBalances,
+  setConversionDatePg as setConversionDate,
+  createOpeningInvoicePg as createOpeningInvoice,
+  createOpeningBillPg as createOpeningBill,
+  reverseOpeningInvoicePg as reverseOpeningInvoice,
+  reverseOpeningBillPg as reverseOpeningBill,
+} from "@/app/db/actions/opening-balance-actions";
 import { OpeningDocsSection } from "./OpeningDocsSection";
 
 const TYPE_ORDER = ["asset", "liability", "equity", "revenue", "expense"];

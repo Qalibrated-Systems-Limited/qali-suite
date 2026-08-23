@@ -1211,3 +1211,93 @@ export async function findInvoiceByNumber(tx: Tx, invoiceNumber: string) {
     status: String(rows[0].status),
   };
 }
+
+/**
+ * An opening-balance invoice: a pre-cutover receivable carried in at onboarding.
+ *
+ * Posts Dr Accounts Receivable / Cr Opening Balance Equity, and nothing else —
+ * no revenue, no VAT, no COGS, no stock movement. The point is to seed the AR
+ * subledger with what customers already owed on the cutover date without
+ * booking a sale into the new period.
+ *
+ * Mirrors `createOpeningBalanceBill` in bills.ts, with one difference: that
+ * one creates the row and stops. Nothing ever posted its journal entry, so an
+ * opening payable created through it would never have reached the trial
+ * balance. Both post here.
+ */
+export async function createOpeningBalanceInvoice(
+  tx: Tx,
+  input: {
+    companyId: string;
+    customerId: string;
+    invoiceDate: string;
+    dueDate: string;
+    amount: string;
+    arAccountId: string;
+    openingEquityAccountId: string;
+    createdById?: string | null;
+  },
+) {
+  const [customer] = await tx
+    .select({ name: parties.name, email: parties.email, phone: parties.phone })
+    .from(parties)
+    .where(eq(parties.id, input.customerId));
+  if (!customer) throw new Error("Customer not found");
+
+  if (!(Number(input.amount) > 0)) {
+    throw new Error("An opening balance must be greater than zero");
+  }
+
+  const [{ invoice_number }] = (await tx.execute(
+    sql`SELECT next_entry_number(
+      ${input.companyId}::uuid,
+      document_prefix(${input.companyId}::uuid, 'invoice') || '-OB'
+    ) AS invoice_number`,
+  )) as unknown as Array<{ invoice_number: string }>;
+
+  const [invoice] = await tx
+    .insert(invoices)
+    .values({
+      companyId: input.companyId,
+      invoiceNumber: invoice_number,
+      invoiceDate: input.invoiceDate,
+      dueDate: input.dueDate,
+      customerId: input.customerId,
+      // No name snapshot: `invoices` joins parties for the customer, where
+      // `bills` snapshots the supplier. Not changed here — a difference that
+      // predates this and belongs to whoever reconciles the two.
+      isOpeningBalance: true,
+      subtotal: input.amount,
+      status: "completed",
+      createdById: input.createdById ?? null,
+    })
+    .returning();
+
+  const entry = await createJournalEntry(tx, {
+    companyId: input.companyId,
+    entryDate: input.invoiceDate,
+    entryType: "opening_balance",
+    description: `Opening balance — ${customer.name}`,
+    reference: invoice_number,
+    partyType: "customer",
+    partyId: input.customerId,
+    sourceType: "invoice",
+    sourceId: invoice.id,
+    lines: [
+      {
+        accountId: input.arAccountId,
+        debit: input.amount,
+        description: `Opening receivable — ${customer.name}`,
+      },
+      {
+        accountId: input.openingEquityAccountId,
+        credit: input.amount,
+        description: "Opening balance — to be reclassified to equity",
+      },
+    ],
+    createdById: input.createdById ?? null,
+    postImmediately: true,
+  });
+
+  return { invoice, entry };
+}

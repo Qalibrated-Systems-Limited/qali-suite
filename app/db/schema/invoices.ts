@@ -4,6 +4,7 @@ import {
   text,
   integer,
   numeric,
+  boolean,
   timestamp,
   date,
   index,
@@ -92,6 +93,15 @@ export const invoices = pgTable(
       .notNull()
       .default("unpaid"),
     paymentTermsDays: integer("payment_terms_days").notNull().default(30),
+    /**
+     * A pre-cutover receivable carried in during onboarding (0061).
+     * Posts Dr AR / Cr Opening Balance Equity — no revenue, no VAT, no
+     * COGS — so the AR subledger is seeded without booking a sale into
+     * the new period. `bills` has carried the same flag since the bills
+     * port; invoices never got it.
+     */
+    isOpeningBalance: boolean("is_opening_balance").notNull().default(false),
+
 
     status: invoiceStatusEnum("status").notNull().default("draft"),
     /**

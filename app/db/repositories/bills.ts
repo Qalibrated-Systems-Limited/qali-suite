@@ -301,6 +301,8 @@ export async function createOpeningBalanceBill(
     dueDate: string;
     amount: string;
     supplierInvoiceNumber?: string | null;
+    apAccountId: string;
+    openingEquityAccountId: string;
     createdById?: string | null;
   },
 ) {
@@ -330,11 +332,46 @@ export async function createOpeningBalanceBill(
       supplierTaxPinAtBill: supplier.taxPin,
       isOpeningBalance: true,
       subtotal: input.amount,
+      status: "approved",
       createdById: input.createdById ?? null,
     })
     .returning();
 
-  return bill;
+  /**
+   * Dr Opening Balance Equity / Cr Accounts Payable.
+   *
+   * NEW (0061). This function created the row and returned it, and nothing
+   * anywhere posted the entry — so an opening payable made through it seeded
+   * no ledger at all and never appeared on a trial balance. It had no callers,
+   * which is the only reason that never surfaced.
+   */
+  const entry = await createJournalEntry(tx, {
+    companyId: input.companyId,
+    entryDate: input.billDate,
+    entryType: "opening_balance",
+    description: `Opening balance — ${supplier.name}`,
+    reference: bill_number,
+    partyType: "supplier",
+    partyId: input.supplierId,
+    sourceType: "bill",
+    sourceId: bill.id,
+    lines: [
+      {
+        accountId: input.openingEquityAccountId,
+        debit: input.amount,
+        description: "Opening balance — to be reclassified to equity",
+      },
+      {
+        accountId: input.apAccountId,
+        credit: input.amount,
+        description: `Opening payable — ${supplier.name}`,
+      },
+    ],
+    createdById: input.createdById ?? null,
+    postImmediately: true,
+  });
+
+  return { bill, entry };
 }
 
 export async function getBill(tx: Tx, billId: string) {

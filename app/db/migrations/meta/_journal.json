@@ -428,6 +428,13 @@
       "when": 1787049133566,
       "tag": "0060_petty_cash",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1787049134566,
+      "tag": "0061_opening_balances",
+      "breakpoints": true
     }
   ]
 }
