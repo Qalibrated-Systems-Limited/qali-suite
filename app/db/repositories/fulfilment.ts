@@ -1574,3 +1574,162 @@ export async function setCheckoutStatus(
   }
   return updated;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Checkout reads
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The checkout list's row shape — the DOCUMENT shape the screens read.
+ *
+ * `checkedOutTo` and `productSnapshot` are nested because the tables render
+ * `checkout.checkedOutTo?.name` and `checkout.productSnapshot?.SKU`. The
+ * derived day counts are computed in SQL: `daysOverdue` off the expected
+ * return date, and `isOverdue` from it, so a list of two hundred rows does not
+ * recompute dates in JavaScript and cannot disagree with the filter that
+ * selected them.
+ */
+function checkoutRow(r: Record<string, unknown>) {
+  return {
+    _id: String(r.id),
+    id: String(r.id),
+    checkoutNumber: r.checkout_number as string,
+    checkoutDate: r.checked_out_at as Date,
+    expectedReturnDate: r.expected_return_date as string,
+    quantity: Number(r.quantity),
+    purpose: r.purpose as string,
+    purposeDetails: (r.purpose_details as string) ?? null,
+    checkoutNotes: (r.purpose_details as string) ?? null,
+    status: r.status as string,
+    damageDetails: (r.damage_details as string) ?? null,
+
+    productSnapshot: {
+      name: (r.product_name_at_checkout as string) ?? "",
+      SKU: (r.sku_at_checkout as string) ?? "",
+      category: (r.category_at_checkout as string) ?? "",
+    },
+    productId: r.product_id as string,
+
+    checkedOutTo: {
+      id: (r.checked_out_to_id as string) ?? null,
+      name: (r.checked_out_to_name_at_checkout as string) ?? "",
+      department: (r.checked_out_to_department as string) ?? null,
+      email: (r.checked_out_to_email as string) ?? null,
+      phone: (r.checked_out_to_phone as string) ?? null,
+    },
+    checkedOutBy: {
+      id: (r.checked_out_by_id as string) ?? null,
+      name: (r.checked_out_by_name_at_checkout as string) ?? "",
+    },
+
+    isEscalated: Boolean(r.is_escalated),
+    escalatedTo: r.is_escalated
+      ? {
+          id: (r.escalated_to_id as string) ?? null,
+          name: (r.escalated_to_name_at_escalation as string) ?? "",
+          escalatedAt: r.escalated_at as Date,
+          reason: (r.escalation_reason as string) ?? null,
+        }
+      : null,
+
+    quantityReturned: Number(r.quantity_returned),
+    quantityExpensed: Number(r.quantity_expensed),
+    quantitySold: Number(r.quantity_sold),
+
+    daysHeld: Number(r.days_held ?? 0),
+    daysOverdue: Number(r.days_overdue ?? 0),
+    daysUntilDue: Number(r.days_until_due ?? 0),
+    isOverdue: Boolean(r.is_overdue),
+  };
+}
+
+const CHECKOUT_DERIVED = sql`
+  GREATEST(0, (CURRENT_DATE - c.checked_out_at::date))                  AS days_held,
+  GREATEST(0, (CURRENT_DATE - c.expected_return_date))                  AS days_overdue,
+  GREATEST(0, (c.expected_return_date - CURRENT_DATE))                  AS days_until_due,
+  (c.status = 'checked_out' AND c.expected_return_date < CURRENT_DATE)  AS is_overdue
+`;
+
+export async function searchCheckouts(
+  tx: Tx,
+  opts: {
+    search?: string;
+    status?: string;
+    page?: number;
+    limit?: number;
+  } = {},
+) {
+  const limit = Math.min(opts.limit ?? 10, 100);
+  const offset = (Math.max(1, opts.page ?? 1) - 1) * limit;
+  const term = opts.search?.trim() ? `%${opts.search.trim()}%` : null;
+
+  const where = sql`WHERE TRUE
+    ${
+      opts.status && opts.status !== "all"
+        ? sql`AND c.status = ${opts.status}::checkout_status`
+        : sql``
+    }
+    ${
+      term
+        ? sql`AND (c.checkout_number ILIKE ${term}
+                OR c.product_name_at_checkout ILIKE ${term}
+                OR c.sku_at_checkout ILIKE ${term}
+                OR c.checked_out_to_name_at_checkout ILIKE ${term})`
+        : sql``
+    }`;
+
+  const rows = (await tx.execute(sql`
+    SELECT c.*, ${CHECKOUT_DERIVED}
+      FROM item_checkouts c
+      ${where}
+     ORDER BY c.checked_out_at DESC
+     LIMIT ${limit} OFFSET ${offset}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const [{ count }] = (await tx.execute(sql`
+    SELECT count(*)::int AS count FROM item_checkouts c ${where}
+  `)) as unknown as Array<{ count: number }>;
+
+  return {
+    checkouts: rows.map(checkoutRow),
+    total: count,
+    pages: Math.max(1, Math.ceil(count / limit)),
+  };
+}
+
+export async function getCheckoutById(tx: Tx, checkoutId: string) {
+  const rows = (await tx.execute(sql`
+    SELECT c.*, ${CHECKOUT_DERIVED}
+      FROM item_checkouts c
+     WHERE c.id = ${checkoutId}::uuid
+  `)) as unknown as Array<Record<string, unknown>>;
+  return rows[0] ? checkoutRow(rows[0]) : null;
+}
+
+/**
+ * The list page's stat tiles.
+ *
+ * `overdue` is derived from the date rather than read from the status: a
+ * checkout goes overdue by the calendar passing, and nothing runs at midnight
+ * to relabel it. The Mongo version counts `status: "overdue"`, so the tile
+ * showed only those a store manager had manually marked.
+ */
+export async function getCheckoutStats(tx: Tx) {
+  const [row] = (await tx.execute(sql`
+    SELECT
+      count(*) FILTER (WHERE status = 'checked_out')::int AS active,
+      count(*) FILTER (WHERE status = 'checked_out'
+                         AND expected_return_date < CURRENT_DATE)::int AS overdue,
+      -- Due within three days, matching the Mongo window. Not yet overdue:
+      -- the two tiles must not count the same checkout twice.
+      count(*) FILTER (WHERE status = 'checked_out'
+                         AND expected_return_date >= CURRENT_DATE
+                         AND expected_return_date <= CURRENT_DATE + 3)::int AS due_soon,
+      count(*) FILTER (WHERE status = 'returned')::int   AS returned,
+      count(*) FILTER (WHERE status = 'expensed')::int   AS expensed,
+      count(*) FILTER (WHERE is_escalated)::int          AS escalated,
+      count(*)::int                                      AS total
+    FROM item_checkouts
+  `)) as unknown as Array<Record<string, number>>;
+  return row;
+}

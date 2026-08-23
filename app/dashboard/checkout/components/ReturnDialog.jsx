@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { returnCheckout } from "@/app/mongodb/checkout-action";
+import { returnCheckoutPg as returnCheckout } from "@/app/db/actions/checkout-actions";
 import { RotateCcw, Loader2 } from "lucide-react";
 
 export function ReturnDialog({ checkout, open, onOpenChange }) {

@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { expenseInternalCheckout } from "@/app/mongodb/checkout-action";
+import { expenseInternalCheckoutPg as expenseInternalCheckout } from "@/app/db/actions/checkout-actions";
 import { Receipt, Loader2, Package, User, AlertCircle } from "lucide-react";
 import ExpenseAccountCombobox from "@/components/expense-account-combobox";
 

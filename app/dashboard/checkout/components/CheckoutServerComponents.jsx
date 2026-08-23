@@ -2,11 +2,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Package, Clock, AlertTriangle, CheckCircle } from "lucide-react";
 import {
-  searchCheckouts,
-  fetchCheckoutPages,
-  getCheckoutStats,
-} from "@/app/mongodb/queries/checkout-queries";
-import { getExpenseAccountsForDialog } from "@/app/mongodb/queries/accountQueries";
+  searchCheckoutsPg,
+  getCheckoutStatsPg,
+  getCheckoutExpenseAccountsPg,
+} from "@/app/db/actions/checkout-actions";
 import { CheckoutsTable } from "./checkoutsTable";
 import Pagination from "@/components/pagination";
 
@@ -15,7 +14,7 @@ import Pagination from "@/components/pagination";
 // ============================================
 
 export async function CheckoutStatsCards() {
-  const stats = await getCheckoutStats();
+  const stats = await getCheckoutStatsPg();
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -127,9 +126,13 @@ export async function CheckoutsTableServer({
   filters,
   canManageCheckouts,
 }) {
-  const [checkouts, expenseAccounts] = await Promise.all([
-    searchCheckouts(query, page, filters),
-    getExpenseAccountsForDialog(),
+  // One query, not two: searchCheckoutsPg returns the rows AND the page count,
+  // where the Mongo pair ran the same filter twice — once for the rows and
+  // again for fetchCheckoutPages — and could disagree if a checkout was
+  // returned between them.
+  const [{ checkouts }, expenseAccounts] = await Promise.all([
+    searchCheckoutsPg(query, page, filters),
+    getCheckoutExpenseAccountsPg(),
   ]);
 
   return (
@@ -191,7 +194,7 @@ export function CheckoutsTableSkeleton() {
 // ============================================
 
 export async function CheckoutsPaginationServer({ query, filters }) {
-  const totalPages = await fetchCheckoutPages(query, filters);
+  const { pages: totalPages } = await searchCheckoutsPg(query, 1, filters);
 
   if (totalPages <= 1) return null;
 

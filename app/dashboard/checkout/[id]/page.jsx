@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { notFound, redirect } from "next/navigation";
-import { getCheckoutById } from "@/app/mongodb/queries/checkout-queries";
+import { getCheckoutByIdPg as getCheckoutById } from "@/app/db/actions/checkout-actions";
 import { CheckoutDetail } from "./CheckoutDetail";
 
 export const metadata = { title: "Checkout Details" };

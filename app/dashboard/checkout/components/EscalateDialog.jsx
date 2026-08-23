@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { escalateCheckout } from "@/app/mongodb/checkout-action";
+import { escalateCheckoutPg as escalateCheckout } from "@/app/db/actions/checkout-actions";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
 export function EscalateDialog({ checkout, open, onOpenChange }) {
