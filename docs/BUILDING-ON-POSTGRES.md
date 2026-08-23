@@ -123,7 +123,24 @@ one: **half the module is on Postgres**. `createCreditNotePg` and
 `getCreditNotesPg` exist and are used; issue, void, delete and the detail page
 are still Mongo. See §9L.
 
-**Three questions find three different failures. Ask all three.**
+**Before estimating a port, measure the DESTINATION, not the source.**
+
+Counting Mongo lines and `.post(` sites says how much old code there is. It
+says nothing about how much of the new side already exists — and on this
+project the answer is repeatedly "most of it". Checkout looked like a
+1,300-line greenfield port; `item_checkouts` was already there, fully
+designed, with three of its repository functions written. Products looked like
+a 4,700-line rewrite; the table, the stock-movement logic and the entire
+commitment-based flow are done, and what is missing is an action layer.
+
+Check first:
+
+```bash
+ls app/db/schema/<thing>.ts app/db/repositories/<thing>.ts app/db/actions/<thing>-actions.ts
+grep -n "^export async function" app/db/repositories/<thing>.ts
+```
+
+**Four questions find four different failures. Ask all four.**
 
 ```bash
 # 1. What still posts into the Mongo ledger?
@@ -133,6 +150,22 @@ grep -rn "\.post(" app/models app/mongodb lib | grep -v node_modules
 #        Postgres twin that covers it?
 grep -rn "from \"@/app/mongodb" app/dashboard components lib app/api
 ```
+
+And the fourth, which no screen-side grep can find because no screen is
+involved:
+
+```bash
+# 4. Which exported repository functions does nothing import?
+grep -n "^export async function" app/db/repositories/<thing>.ts   # then grep each name
+```
+
+An exported repository function with no callers is either dead code or an
+UNFINISHED PORT — and the unfinished ones look complete in a file listing
+while silently skipping the ledger. Three instances so far, all of them
+functions that moved data and posted nothing: `createOpeningBalanceBill`
+(0061), the credit-note repository half (§9L), and `returnCheckout`, which
+brought stock back into the warehouse and left its value on the
+technician-stock account for ever.
 
 Question 1 misses anything whose posting is in the MODEL rather than the
 action layer — that is how expenses survived three sweeps. Questions 2 and 3
