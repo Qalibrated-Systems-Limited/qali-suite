@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/utils";
-import { getPayment } from "@/app/mongodb/actions/payment-actions";
+import { getPaymentPg } from "@/app/db/actions/payment-actions";
 import { PaymentActions } from "../components/PaymentActions";
 
 export const metadata = {
@@ -50,13 +50,14 @@ export default async function PaymentDetailPage({ params }) {
   if (!session?.user) redirect("/login");
 
   const resolvedParams = await params;
-  const result = await getPayment(resolvedParams.id);
+  const payment = await getPaymentPg(resolvedParams.id);
 
-  if (!result.success) {
+  // RLS decides this: a payment in another tenant is not "forbidden", it is
+  // absent. Nothing in the callback filters by company.
+  if (!payment) {
     notFound();
   }
 
-  const payment = result.data;
   const isReceived = payment.paymentType === "received";
   const backUrl = isReceived
     ? "/dashboard/payments/received"
@@ -106,16 +107,16 @@ export default async function PaymentDetailPage({ params }) {
                     {isReceived ? "Received From" : "Paid To"}
                   </p>
                   <p className="text-lg font-semibold mt-1">
-                    {payment.party?.name}
+                    {payment.partyNameAtPayment}
                   </p>
-                  {payment.party?.email && (
+                  {payment.partyEmailAtPayment && (
                     <p className="text-sm text-muted-foreground">
-                      {payment.party.email}
+                      {payment.partyEmailAtPayment}
                     </p>
                   )}
-                  {payment.party?.phone && (
+                  {payment.partyPhoneAtPayment && (
                     <p className="text-sm text-muted-foreground">
-                      {payment.party.phone}
+                      {payment.partyPhoneAtPayment}
                     </p>
                   )}
                 </div>
@@ -167,9 +168,9 @@ export default async function PaymentDetailPage({ params }) {
                       </thead>
                       <tbody className="divide-y">
                         {payment.allocations.map((alloc) => (
-                          <tr key={alloc._id}>
+                          <tr key={alloc.id}>
                             <td className="px-4 py-2 font-medium">
-                              {alloc.documentNumber}
+                              {alloc.documentNumberAtAllocation}
                             </td>
                             <td className="px-4 py-2 text-right text-muted-foreground">
                               {formatCurrency(alloc.originalAmount)}
@@ -190,14 +191,14 @@ export default async function PaymentDetailPage({ params }) {
                     <div>
                       <span className="text-muted-foreground">Total Allocated: </span>
                       <span className="font-semibold">
-                        {formatCurrency(payment.totalAllocated || 0)}
+                        {formatCurrency(payment.balance?.total_allocated || 0)}
                       </span>
                     </div>
-                    {(payment.unappliedAmount || 0) > 0 && (
+                    {Number(payment.balance?.unapplied_amount || 0) > 0 && (
                       <div>
                         <span className="text-muted-foreground">Unapplied: </span>
                         <span className="font-semibold text-amber-600 dark:text-amber-400">
-                          {formatCurrency(payment.unappliedAmount)}
+                          {formatCurrency(payment.balance.unapplied_amount)}
                         </span>
                       </div>
                     )}
@@ -253,7 +254,7 @@ export default async function PaymentDetailPage({ params }) {
               <div>
                 <p className="text-sm text-muted-foreground">Account</p>
                 <p className="font-medium">
-                  {payment.account?.code} - {payment.account?.name}
+                  {payment.accountCodeAtPayment} - {payment.accountNameAtPayment}
                 </p>
               </div>
 
@@ -265,38 +266,36 @@ export default async function PaymentDetailPage({ params }) {
               )}
 
               {/* M-Pesa details */}
-              {payment.mpesaDetails?.transactionCode && (
+              {payment.mpesaReceipt && (
                 <div>
                   <p className="text-sm text-muted-foreground">M-Pesa Code</p>
-                  <p className="font-mono font-medium">
-                    {payment.mpesaDetails.transactionCode}
-                  </p>
+                  <p className="font-mono font-medium">{payment.mpesaReceipt}</p>
                 </div>
               )}
-              {payment.mpesaDetails?.phoneNumber && (
+              {payment.mpesaPhone && (
                 <div>
                   <p className="text-sm text-muted-foreground">Phone</p>
-                  <p>{payment.mpesaDetails.phoneNumber}</p>
+                  <p>{payment.mpesaPhone}</p>
                 </div>
               )}
 
               {/* Bank details */}
-              {payment.bankDetails?.bankName && (
+              {payment.bankName && (
                 <div>
                   <p className="text-sm text-muted-foreground">Bank</p>
-                  <p>{payment.bankDetails.bankName}</p>
+                  <p>{payment.bankName}</p>
                 </div>
               )}
-              {payment.bankDetails?.chequeNumber && (
+              {payment.chequeNumber && (
                 <div>
                   <p className="text-sm text-muted-foreground">Cheque #</p>
-                  <p>{payment.bankDetails.chequeNumber}</p>
+                  <p>{payment.chequeNumber}</p>
                 </div>
               )}
-              {payment.bankDetails?.transactionReference && (
+              {payment.bankReference && (
                 <div>
                   <p className="text-sm text-muted-foreground">Bank Ref</p>
-                  <p>{payment.bankDetails.transactionReference}</p>
+                  <p>{payment.bankReference}</p>
                 </div>
               )}
             </CardContent>
@@ -310,7 +309,13 @@ export default async function PaymentDetailPage({ params }) {
             <CardContent className="space-y-3">
               <div>
                 <p className="text-sm text-muted-foreground">Fiscal Period</p>
-                <p className="font-medium">{payment.fiscalPeriod || "-"}</p>
+                {/* Derived from the payment date, not stored. Mongo kept a
+                    `fiscalPeriod` string alongside the date, which is one fact
+                    written twice — and the two disagree the moment a payment's
+                    date is corrected without the string being recomputed. */}
+                <p className="font-medium">
+                  {payment.paymentDate ? String(payment.paymentDate).slice(0, 7) : "-"}
+                </p>
               </div>
 
               {payment.journalEntryId && (
@@ -328,17 +333,15 @@ export default async function PaymentDetailPage({ params }) {
               <Separator />
 
               <div>
-                <p className="text-sm text-muted-foreground">Reconciled</p>
+                <p className="text-sm text-muted-foreground">Cleared</p>
                 <p className="font-medium">
-                  {payment.reconciliation?.isReconciled ? "Yes" : "No"}
+                  {payment.status === "pending_clearance"
+                    ? "Awaiting clearance"
+                    : payment.status === "confirmed"
+                      ? "Yes"
+                      : "-"}
                 </p>
               </div>
-              {payment.reconciliation?.statementReference && (
-                <div>
-                  <p className="text-sm text-muted-foreground">Statement Ref</p>
-                  <p>{payment.reconciliation.statementReference}</p>
-                </div>
-              )}
             </CardContent>
           </Card>
 
@@ -350,7 +353,7 @@ export default async function PaymentDetailPage({ params }) {
             <CardContent className="space-y-3 text-sm">
               <div>
                 <p className="text-muted-foreground">Created By</p>
-                <p className="font-medium">{payment.createdBy?.name || "-"}</p>
+                <p className="font-medium">{payment.createdByName || "-"}</p>
                 {payment.createdAt && (
                   <p className="text-xs text-muted-foreground">
                     {new Date(payment.createdAt).toLocaleString("en-KE")}
@@ -358,10 +361,10 @@ export default async function PaymentDetailPage({ params }) {
                 )}
               </div>
 
-              {payment.confirmedBy?.name && (
+              {payment.confirmedAt && (
                 <div>
                   <p className="text-muted-foreground">Confirmed By</p>
-                  <p className="font-medium">{payment.confirmedBy.name}</p>
+                  <p className="font-medium">{payment.confirmedByName || "-"}</p>
                   {payment.confirmedAt && (
                     <p className="text-xs text-muted-foreground">
                       {new Date(payment.confirmedAt).toLocaleString("en-KE")}
@@ -370,10 +373,10 @@ export default async function PaymentDetailPage({ params }) {
                 </div>
               )}
 
-              {payment.cancelledBy?.name && (
+              {payment.cancelledAt && (
                 <div>
                   <p className="text-muted-foreground">Cancelled By</p>
-                  <p className="font-medium">{payment.cancelledBy.name}</p>
+                  <p className="font-medium">{payment.cancelledByName || "-"}</p>
                   {payment.cancellationReason && (
                     <p className="text-xs text-muted-foreground">
                       Reason: {payment.cancellationReason}

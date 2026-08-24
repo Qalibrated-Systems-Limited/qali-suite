@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getCustomers, getSuppliers } from "@/app/mongodb/queries/partyQueries";
+import { getCustomers, getSuppliers } from "@/app/db/actions/party-actions";
 import { PaymentForm } from "../components/PaymentForm";
 
 export const metadata = {

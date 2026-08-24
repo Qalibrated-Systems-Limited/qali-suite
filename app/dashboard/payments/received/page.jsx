@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import Search from "@/components/search";
 import Pagination from "@/components/pagination";
 import { formatCurrency } from "@/lib/utils";
-import { getPayments, getPaymentStats } from "@/app/mongodb/actions/payment-actions";
+import { getPaymentsPg, getPaymentStatsPg } from "@/app/db/actions/payment-actions";
 import { auth } from "@/auth";
 import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { PaymentActions } from "../components/PaymentActions";
@@ -55,13 +55,12 @@ function MethodIcon({ method }) {
 // STATS
 // ============================================
 async function StatsCards() {
-  const result = await getPaymentStats();
-  const stats = result.success ? result.data : {};
+  const stats = await getPaymentStatsPg();
 
   const cards = [
     { label: "This Month Received", value: stats.thisMonth?.received?.count || 0, amount: stats.thisMonth?.received?.total || 0, icon: ArrowDownLeft, iconColor: "text-emerald-500", iconBg: "bg-emerald-500/10" },
     { label: "Draft", value: stats.byStatus?.draft || 0, icon: Clock, iconColor: "text-amber-500", iconBg: "bg-amber-500/10" },
-    { label: "Unreconciled", value: stats.unreconciledCount || 0, icon: CreditCard, iconColor: "text-blue-500", iconBg: "bg-blue-500/10" },
+    { label: "Pending Clearance", value: stats.byStatus?.pendingClearance || 0, icon: CreditCard, iconColor: "text-blue-500", iconBg: "bg-blue-500/10" },
     { label: "Confirmed", value: stats.byStatus?.confirmed || 0, icon: CheckCircle2, iconColor: "text-emerald-500", iconBg: "bg-emerald-500/10" },
   ];
 
@@ -125,14 +124,14 @@ function PaymentsTable({ payments, userRole }) {
         </thead>
         <tbody className="divide-y">
           {payments.map((p) => (
-            <tr key={p._id} className="hover:bg-muted/50 transition-colors">
+            <tr key={p.id} className="hover:bg-muted/50 transition-colors">
               <td className="px-4 py-3">
-                <Link href={`/dashboard/payments/${p._id}`} className="font-medium text-primary hover:underline">
+                <Link href={`/dashboard/payments/${p.id}`} className="font-medium text-primary hover:underline">
                   {p.paymentNumber}
                 </Link>
                 {p.reference && <p className="text-xs text-muted-foreground">Ref: {p.reference}</p>}
               </td>
-              <td className="px-4 py-3 font-medium">{p.party?.name}</td>
+              <td className="px-4 py-3 font-medium">{p.partyName}</td>
               <td className="px-4 py-3 text-sm text-muted-foreground">
                 {p.paymentDate ? new Date(p.paymentDate).toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric" }) : "-"}
               </td>
@@ -144,7 +143,7 @@ function PaymentsTable({ payments, userRole }) {
               </td>
               <td className="px-4 py-3 text-right">
                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">+{formatCurrency(p.amount)}</span>
-                {p.unappliedAmount > 0 && <p className="text-xs text-muted-foreground">Unapplied: {formatCurrency(p.unappliedAmount)}</p>}
+                {Number(p.unappliedAmount) > 0 && <p className="text-xs text-muted-foreground">Unapplied: {formatCurrency(p.unappliedAmount)}</p>}
               </td>
               <td className="px-4 py-3 text-center"><StatusBadge status={p.status} /></td>
               <td className="px-4 py-3 text-right"><PaymentActions payment={p} userRole={userRole} /></td>
@@ -181,14 +180,14 @@ function PaymentsCards({ payments, userRole }) {
   return (
     <div className="md:hidden space-y-3">
       {payments.map((p) => (
-        <div key={p._id} className="rounded-lg border bg-card p-4 hover:bg-muted/50 transition-colors">
+        <div key={p.id} className="rounded-lg border bg-card p-4 hover:bg-muted/50 transition-colors">
           <div className="flex items-start justify-between gap-4">
-            <Link href={`/dashboard/payments/${p._id}`} className="min-w-0 flex-1">
+            <Link href={`/dashboard/payments/${p.id}`} className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium text-primary hover:underline">{p.paymentNumber}</span>
                 <StatusBadge status={p.status} />
               </div>
-              <p className="font-medium mt-1 truncate">{p.party?.name}</p>
+              <p className="font-medium mt-1 truncate">{p.partyName}</p>
             </Link>
             <div className="flex items-start gap-2 shrink-0">
               <p className="font-bold text-emerald-600 dark:text-emerald-400">+{formatCurrency(p.amount)}</p>
@@ -218,15 +217,12 @@ async function PaymentsList({ searchParams, userRole }) {
   const page = Number(params?.page) || 1;
   const query = params?.query || "";
 
-  const result = await getPayments({
+  const { payments, pagination } = await getPaymentsPg({
     paymentType: "received",
     page,
     limit: 10,
     search: query,
   });
-
-  const payments = result.success ? result.data : [];
-  const pagination = result.pagination || { page: 1, pages: 1, total: 0 };
 
   return (
     <>

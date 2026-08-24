@@ -91,7 +91,21 @@ const approvalRequestSchema = new Schema(
         ],
         required: true,
       },
-      id: { type: Schema.Types.ObjectId, required: true },
+      // A STRING, not an ObjectId — because half the things an approval can
+      // point at now live in Postgres and are identified by UUIDs.
+      //
+      // `Schema.Types.ObjectId` accepts only a 24-character hex string, so
+      // `submitApproval` threw a CastError on every attempt to raise one
+      // against a Postgres row. That was not theoretical: expense payments
+      // have been raising approvals with a UUID since the expenses port, and
+      // `expensePaymentValue` defaults to 50,000 and is set for every company
+      // — so an expense payment over fifty thousand shillings threw instead of
+      // going for sign-off. Wiring the bill-payment threshold on the Postgres
+      // payments path would have hit exactly the same wall.
+      //
+      // Mongo-side kinds are unaffected: a 24-hex string casts cleanly on the
+      // way back into `Product.findById` and friends.
+      id: { type: String, required: true },
       // Snapshot fields for display — survives renames / deletions on the
       // referenced doc. Mirror the bill-line snapshot pattern.
       label: String, // e.g. "TYRE-185-65-R15 — Heavy duty tyre"

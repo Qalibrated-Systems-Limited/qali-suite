@@ -23,10 +23,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  createPayment,
-  getUnpaidDocuments,
-  getPaymentAccounts,
-} from "@/app/mongodb/actions/payment-actions";
+  createPaymentPg,
+  getUnpaidDocumentsPg,
+  getPaymentAccountsPg,
+} from "@/app/db/actions/payment-actions";
 
 const PAYMENT_METHODS = [
   { value: "cash", label: "Cash" },
@@ -46,7 +46,7 @@ const initialState = {
 
 export function PaymentForm({ paymentType, parties = [] }) {
   const router = useRouter();
-  const [state, formAction, isPending] = useActionState(createPayment, initialState);
+  const [state, formAction, isPending] = useActionState(createPaymentPg, initialState);
 
   // Form state - initialize from state.formData if present (for error recovery)
   const [partyId, setPartyId] = useState("");
@@ -107,17 +107,22 @@ export function PaymentForm({ paymentType, parties = [] }) {
 
   // Handle success - redirect with success message in URL
   useEffect(() => {
-    if (state.success && state.data) {
+    if (state.success && state.paymentNumber) {
       const backUrl = isReceived
         ? "/dashboard/payments/received"
         : "/dashboard/payments/made";
+      // NOT "created as draft". On this layer the payment is recorded,
+      // allocated, confirmed and posted before the action returns — there is
+      // no draft to go back and confirm.
       const params = new URLSearchParams({
         success: "true",
-        message: `Payment ${state.data.paymentNumber} created as draft`,
+        message: state.entryNumber
+          ? `Payment ${state.paymentNumber} recorded and posted (${state.entryNumber})`
+          : `Payment ${state.paymentNumber} recorded`,
       });
       router.push(`${backUrl}?${params.toString()}`);
     }
-  }, [state.success, state.data, isReceived, router]);
+  }, [state.success, state.paymentNumber, state.entryNumber, isReceived, router]);
 
   // Extract errors from state
   const error = state.error;
@@ -127,10 +132,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
   useEffect(() => {
     async function loadAccounts() {
       setLoadingAccounts(true);
-      const result = await getPaymentAccounts();
-      if (result.success) {
-        setAccounts(result.data);
-      }
+      setAccounts(await getPaymentAccountsPg());
       setLoadingAccounts(false);
     }
     loadAccounts();
@@ -146,10 +148,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
 
     async function loadDocs() {
       setLoadingDocs(true);
-      const result = await getUnpaidDocuments(partyId, docType);
-      if (result.success) {
-        setUnpaidDocs(result.data);
-      }
+      setUnpaidDocs(await getUnpaidDocumentsPg(partyId, docType));
       setLoadingDocs(false);
     }
     loadDocs();
@@ -157,7 +156,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
 
   // Auto-generate description
   useEffect(() => {
-    const party = parties.find((p) => p._id === partyId);
+    const party = parties.find((p) => p.id === partyId);
     if (party) {
       setDescription(
         isReceived
@@ -179,7 +178,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
       if (allocations.find((a) => a.documentId === doc.id)) return;
 
       const remaining = Math.max(0, (parseFloat(amount) || 0) - totalAllocated);
-      const allocAmount = Math.min(doc.balance, remaining);
+      const allocAmount = Math.min(Number(doc.balance), remaining);
 
       setAllocations((prev) => [
         ...prev,
@@ -189,7 +188,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
           documentNumber: doc.documentNumber,
           documentDate: doc.documentDate,
           originalAmount: doc.originalAmount,
-          balanceBefore: doc.balance,
+          balanceBefore: Number(doc.balance),
           amountAllocated: allocAmount > 0 ? allocAmount.toFixed(2) : "",
         },
       ]);
@@ -211,9 +210,9 @@ export function PaymentForm({ paymentType, parties = [] }) {
   const autoAllocate = () => {
     let remaining = parseFloat(amount) || 0;
     const newAllocations = unpaidDocs
-      .filter((doc) => doc.balance > 0)
+      .filter((doc) => Number(doc.balance) > 0)
       .map((doc) => {
-        const allocAmount = Math.min(doc.balance, remaining);
+        const allocAmount = Math.min(Number(doc.balance), remaining);
         remaining -= allocAmount;
         return {
           documentType: docType,
@@ -221,7 +220,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
           documentNumber: doc.documentNumber,
           documentDate: doc.documentDate,
           originalAmount: doc.originalAmount,
-          balanceBefore: doc.balance,
+          balanceBefore: Number(doc.balance),
           amountAllocated: allocAmount > 0 ? allocAmount.toFixed(2) : "0",
         };
       })
@@ -272,7 +271,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
                 </SelectTrigger>
                 <SelectContent>
                   {parties.map((party) => (
-                    <SelectItem key={party._id} value={party._id}>
+                    <SelectItem key={party.id} value={party.id}>
                       {party.name}
                     </SelectItem>
                   ))}
@@ -372,7 +371,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
                 </SelectTrigger>
                 <SelectContent>
                   {accounts.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
+                    <SelectItem key={a._id} value={a._id}>
                       {a.code} - {a.name} ({a.subType})
                     </SelectItem>
                   ))}
@@ -680,7 +679,7 @@ export function PaymentForm({ paymentType, parties = [] }) {
                           <div className="flex items-center gap-3">
                             <span className="text-sm font-medium">
                               Balance: KES{" "}
-                              {doc.balance.toLocaleString("en-KE", {
+                              {Number(doc.balance).toLocaleString("en-KE", {
                                 minimumFractionDigits: 2,
                               })}
                             </span>

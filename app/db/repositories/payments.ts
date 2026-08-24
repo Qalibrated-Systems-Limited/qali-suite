@@ -1,5 +1,5 @@
-import { and, desc, eq, sql } from "drizzle-orm";
-import { createJournalEntry } from "./journal";
+import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
+import { createJournalEntry, reverseJournalEntry } from "./journal";
 import type { Tx } from "../client";
 import {
   payments,
@@ -8,6 +8,7 @@ import {
   accounts,
   invoices,
   bills,
+  users,
 } from "../schema";
 
 /**
@@ -24,6 +25,15 @@ import {
  */
 
 export interface CreatePaymentInput {
+  /**
+   * Pre-allocated, for the one case that needs the id before the row: a
+   * payment held for approval. The approval must point AT something, and
+   * `targetRef` cannot reference a row that will not exist until it is
+   * approved. So the id is minted first, travels on the approval, and the
+   * payment is created with it on release — which makes the approval's link
+   * to /dashboard/payments/:id resolve rather than 404.
+   */
+  id?: string;
   companyId: string;
   paymentType: "received" | "made";
   paymentDate: string;
@@ -33,7 +43,10 @@ export interface CreatePaymentInput {
   accountId: string;
   reference?: string | null;
   description?: string | null;
+  notes?: string | null;
   mpesaReceipt?: string | null;
+  mpesaPhone?: string | null;
+  bankName?: string | null;
   bankReference?: string | null;
   chequeNumber?: string | null;
   createdById?: string | null;
@@ -62,6 +75,7 @@ export async function createPayment(tx: Tx, input: CreatePaymentInput) {
   const [created] = await tx
     .insert(payments)
     .values({
+      ...(input.id ? { id: input.id } : {}),
       companyId: input.companyId,
       paymentNumber: payment_number,
       paymentType: input.paymentType,
@@ -77,7 +91,10 @@ export async function createPayment(tx: Tx, input: CreatePaymentInput) {
       accountNameAtPayment: account.name,
       reference: input.reference ?? null,
       description: input.description ?? null,
+      notes: input.notes ?? null,
       mpesaReceipt: input.mpesaReceipt ?? null,
+      mpesaPhone: input.mpesaPhone ?? null,
+      bankName: input.bankName ?? null,
       bankReference: input.bankReference ?? null,
       chequeNumber: input.chequeNumber ?? null,
       createdById: input.createdById ?? null,
@@ -429,6 +446,17 @@ export async function getPaymentBalance(tx: Tx, paymentId: string) {
   return row ?? null;
 }
 
+/**
+ * One payment, its allocations, its balance and who acted on it.
+ *
+ * The actor NAMES are joined from `users` rather than snapshotted into columns
+ * the way assets and attendance do it. Both are defensible; the join wins here
+ * because a payment's audit trail is read to answer "who do I ask about this",
+ * and the current name answers that better than the name at the time. It
+ * degrades to null rather than erroring when the actor is no longer visible
+ * within the company — RLS decides that, per the `visible_within_company`
+ * policy in 0036.
+ */
 export async function getPayment(tx: Tx, paymentId: string) {
   const [payment] = await tx
     .select()
@@ -439,11 +467,34 @@ export async function getPayment(tx: Tx, paymentId: string) {
   const allocations = await tx
     .select()
     .from(paymentAllocations)
-    .where(eq(paymentAllocations.paymentId, paymentId));
+    .where(eq(paymentAllocations.paymentId, paymentId))
+    .orderBy(asc(paymentAllocations.createdAt));
 
   const balance = await getPaymentBalance(tx, paymentId);
 
-  return { ...payment, allocations, balance };
+  const actorIds = [
+    payment.createdById,
+    payment.confirmedById,
+    payment.cancelledById,
+  ].filter((id): id is string => Boolean(id));
+
+  const names = new Map<string, string>();
+  if (actorIds.length) {
+    const rows = await tx
+      .select({ id: users.id, name: users.name })
+      .from(users)
+      .where(inArray(users.id, [...new Set(actorIds)]));
+    for (const r of rows) names.set(r.id, r.name);
+  }
+
+  return {
+    ...payment,
+    allocations,
+    balance,
+    createdByName: payment.createdById ? (names.get(payment.createdById) ?? null) : null,
+    confirmedByName: payment.confirmedById ? (names.get(payment.confirmedById) ?? null) : null,
+    cancelledByName: payment.cancelledById ? (names.get(payment.cancelledById) ?? null) : null,
+  };
 }
 
 export async function confirmPayment(
@@ -466,16 +517,195 @@ export async function confirmPayment(
   return updated;
 }
 
-export async function listPayments(
+/**
+ * Cancels a payment, undoing everything confirming it did.
+ *
+ * Three things happen, in the caller's transaction:
+ *
+ *   1. The posted journal entry is REVERSED — never deleted. A payment that
+ *      reached the ledger is a fact; withdrawing it is a second fact.
+ *   2. The allocation rows are DELETED, which is what gives the invoice or
+ *      bill its balance back. Nothing here touches `amount_paid`: the trigger
+ *      from 0016/0017 fires on DELETE and recomputes it from what remains.
+ *      This is the §8.2 arrangement — one writer, one number.
+ *   3. The payment is marked cancelled, with who and why. The pair CHECK from
+ *      0063 refuses that write if either is missing.
+ *
+ * Mongo does 1 and 3 and approximates 2: `reverseAllocatedDocuments` calls
+ * `invoice.reversePayment()` per allocation inside a try/catch that logs and
+ * CONTINUES. A failure there leaves the payment cancelled, the entry reversed,
+ * and the invoice still showing the money as received — with the error only in
+ * a server log. Here the deletion is part of the same transaction, so either
+ * the whole cancellation happens or none of it does.
+ *
+ * A cancelled payment cannot be re-cancelled, and — unlike the Mongo path,
+ * which reads a `canCancel` virtual off a reconciliation flag this schema does
+ * not have — the guard is the status alone.
+ */
+export async function cancelPayment(
   tx: Tx,
-  opts: {
-    paymentType?: "received" | "made";
-    limit?: number;
-    offset?: number;
-  } = {},
+  paymentId: string,
+  cancelledById: string,
+  reason: string,
 ) {
-  const limit = Math.min(opts.limit ?? 50, 200);
+  const trimmed = (reason ?? "").trim();
+  if (!trimmed) throw new Error("A cancellation reason is required");
+
+  const [payment] = await tx
+    .select()
+    .from(payments)
+    .where(eq(payments.id, paymentId));
+  if (!payment) throw new Error("Payment not found");
+  if (payment.status === "cancelled") {
+    throw new Error(`Payment ${payment.paymentNumber} is already cancelled`);
+  }
+
+  if (payment.journalEntryId) {
+    await reverseJournalEntry(
+      tx,
+      payment.journalEntryId,
+      cancelledById,
+      `Payment ${payment.paymentNumber} cancelled: ${trimmed}`,
+    );
+  }
+
+  // Gives the documents their balance back, by trigger. Done BEFORE the status
+  // flips, because 0063 refuses an allocation against a cancelled payment.
+  await tx
+    .delete(paymentAllocations)
+    .where(eq(paymentAllocations.paymentId, paymentId));
+
+  const [updated] = await tx
+    .update(payments)
+    .set({
+      status: "cancelled",
+      cancelledAt: new Date(),
+      cancelledById,
+      cancellationReason: trimmed,
+      updatedAt: new Date(),
+    })
+    .where(eq(payments.id, paymentId))
+    .returning();
+
+  return updated;
+}
+
+/**
+ * What a party still owes, or is still owed — the picker behind the payment
+ * form's allocation table.
+ *
+ * `balance`, not a stored "amount due": invoices derive it as
+ * `total - amount_paid` and bills carry `balance` as a generated column, both
+ * maintained by the same triggers the allocations drive. Mongo read
+ * `amounts.balance` and `amountDue`, which its hooks maintained separately.
+ *
+ * Only documents with something OUTSTANDING are returned. The Mongo version
+ * filtered on `paymentStatus IN (unpaid, partial)`, a cached label that can
+ * disagree with the arithmetic; this filters on the arithmetic, so a document
+ * whose label drifted cannot appear here fully paid.
+ */
+export async function listUnpaidDocuments(
+  tx: Tx,
+  input: { partyId: string; documentType: "invoice" | "bill" },
+) {
+  if (input.documentType === "bill") {
+    return tx
+      .select({
+        id: bills.id,
+        documentNumber: bills.billNumber,
+        documentDate: bills.billDate,
+        dueDate: bills.dueDate,
+        originalAmount: bills.netPayable,
+        balance: bills.balance,
+      })
+      .from(bills)
+      .where(
+        and(
+          eq(bills.supplierId, input.partyId),
+          eq(bills.status, "approved"),
+          sql`${bills.balance} > 0`,
+        ),
+      )
+      .orderBy(asc(bills.dueDate), asc(bills.billNumber))
+      .limit(200);
+  }
+
   return tx
+    .select({
+      id: invoices.id,
+      documentNumber: invoices.invoiceNumber,
+      documentDate: invoices.invoiceDate,
+      dueDate: invoices.dueDate,
+      originalAmount: invoices.total,
+      balance: sql<string>`(${invoices.total} - ${invoices.amountPaid})::numeric(19,4)`,
+    })
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.customerId, input.partyId),
+        eq(invoices.status, "completed"),
+        sql`(${invoices.total} - ${invoices.amountPaid}) > 0`,
+      ),
+    )
+    .orderBy(asc(invoices.dueDate), asc(invoices.invoiceNumber))
+    .limit(200);
+}
+
+export interface ListPaymentsOptions {
+  paymentType?: "received" | "made";
+  status?: "draft" | "pending_clearance" | "confirmed" | "cancelled";
+  paymentMethod?: "cash" | "mpesa" | "bank_transfer" | "cheque" | "card";
+  partyId?: string;
+  startDate?: string;
+  endDate?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+/**
+ * The payments list, filtered and paged.
+ *
+ * Every filter the Mongo `getPayments` offered, minus `fiscalPeriod` and
+ * `isReconciled`, which have no column here — see the note on the detail page
+ * and §9M. It used to take only `paymentType` and silently drop `status` and
+ * `partyId`, which the action's own signature advertised; a caller filtering by
+ * status got the unfiltered list back and no error.
+ *
+ * `unappliedAmount` comes from the payment_balances view rather than a stored
+ * column, for the reason at the top of this file. It is joined LATERALLY so the
+ * page does not issue one balance query per row.
+ */
+export async function listPayments(tx: Tx, opts: ListPaymentsOptions = {}) {
+  const page = Math.max(1, opts.page ?? 1);
+  // Capped. The Mongo list takes whatever limit it is handed.
+  const limit = Math.min(opts.limit ?? 20, 200);
+
+  const conditions = [];
+  if (opts.paymentType) conditions.push(eq(payments.paymentType, opts.paymentType));
+  if (opts.status) conditions.push(eq(payments.status, opts.status));
+  if (opts.paymentMethod) {
+    conditions.push(eq(payments.paymentMethod, opts.paymentMethod));
+  }
+  if (opts.partyId) conditions.push(eq(payments.partyId, opts.partyId));
+  if (opts.startDate) conditions.push(gte(payments.paymentDate, opts.startDate));
+  if (opts.endDate) conditions.push(lte(payments.paymentDate, opts.endDate));
+  if (opts.search) {
+    const term = `%${opts.search}%`;
+    conditions.push(
+      or(
+        ilike(payments.paymentNumber, term),
+        ilike(payments.partyNameAtPayment, term),
+        ilike(payments.reference, term),
+        ilike(payments.description, term),
+        ilike(payments.mpesaReceipt, term),
+      )!,
+    );
+  }
+
+  const where = conditions.length ? and(...conditions) : undefined;
+
+  const rows = await tx
     .select({
       id: payments.id,
       paymentNumber: payments.paymentNumber,
@@ -485,15 +715,33 @@ export async function listPayments(
       amount: payments.amount,
       // The snapshot, not a join — this is what the payment document said.
       partyName: payments.partyNameAtPayment,
+      reference: payments.reference,
       status: payments.status,
+      unappliedAmount: sql<string>`COALESCE(
+        (SELECT b.unapplied_amount FROM payment_balances b WHERE b.payment_id = ${payments.id}),
+        ${payments.amount}
+      )`.as("unapplied_amount"),
     })
     .from(payments)
-    .where(
-      opts.paymentType ? eq(payments.paymentType, opts.paymentType) : undefined,
-    )
+    .where(where)
     .orderBy(desc(payments.paymentDate), desc(payments.paymentNumber))
     .limit(limit)
-    .offset(opts.offset ?? 0);
+    .offset((page - 1) * limit);
+
+  const [{ count }] = (await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(payments)
+    .where(where)) as Array<{ count: number }>;
+
+  return {
+    payments: rows,
+    pagination: {
+      page,
+      limit,
+      total: count,
+      pages: Math.max(1, Math.ceil(count / limit)),
+    },
+  };
 }
 
 /** Unapplied payments — money received but not yet matched to a document. */

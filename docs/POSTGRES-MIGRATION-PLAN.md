@@ -2089,6 +2089,147 @@ job was repairing a stored value on every single read.
 
 ---
 
+### §9M — Payments: "three functions" was six seams, four already broken
+
+The handoff sized this as small: `app/db/actions/payment-actions.ts` was built
+and tested, three functions were missing — `getUnpaidDocuments`,
+`cancelPayment`, `deletePayment` — and then five screens could be repointed.
+
+Two of those three were right. The estimate was wrong because, as with claims
+and assets, the work was not in the module being moved. It was in what talked
+to it, and in what the untested-because-uncalled action layer had quietly got
+wrong while nothing exercised it.
+
+#### The seams
+
+**1. The party picker read Mongo.** `payments/create/page.jsx` imported
+`getCustomers` / `getSuppliers` from `@/app/mongodb/queries/partyQueries` while
+`createPaymentPg` wrote Postgres. The invoice-form seam (5cf453641) again, and
+harder to see: `app/db/actions/party-actions.ts` exports functions of exactly
+the same NAMES, so the import path is the only thing distinguishing a working
+picker from one that offers Mongo ObjectIds to a UUID column. This was the
+sixth payments screen, and grepping the action file never finds it — it does
+not import `payment-actions` at all.
+
+**2. `parseAllocations` read a key the form does not send.** It looked for
+`a.amount`; `PaymentForm` builds every row with `amountAllocated`, in both
+`addAllocation` and `autoAllocate`. Every allocation coerced to 0 and was
+filtered out, so a payment would have been recorded and posted in full while
+settling NO invoice — and shown on its own detail page as entirely unapplied.
+Twelve tests passed over this, because they constructed allocations by hand in
+the shape the parser wanted rather than the shape the form emits. **Test the
+payload the form actually serialises**, which is the §9 lesson in the same
+family as "test the filtered path".
+
+**3. The account picker's shape was inverted.** `listPaymentAccounts` returns
+`_id`; `PaymentForm` read `a.id`. Five call sites already depend on `_id` —
+`InvoicePaymentDialog` among them — so the form was adapted and the shared
+repository left alone. Worth stating as a rule: when a shape mismatch appears,
+grep the callers before deciding which side is wrong. The one with five
+consumers is not the wrong one.
+
+**4. Three form fields had nowhere to land.** `notes` had a column and no
+argument; `mpesaPhoneNumber` and `bankName` had neither. A user who typed the
+payer's M-Pesa number watched it vanish on submit. Migration 0063 adds the two
+columns and `createPayment` takes all three. This is rule 4 of the porting
+list — *forms first, and completely* — and the form is the only place it
+surfaces.
+
+**5. `clearPaymentReceipt` had ZERO CALLERS.** Sweep question 4, and the same
+shape as `returnCheckout`. Meanwhile `invoice-actions.ts:408` was already
+passing a clearing account to `postPaymentReceipt`, so a cheque received
+against an invoice could land in `pending_clearance` with nothing in the system
+able to move it on — the receipt parked in a clearing account for ever. It has
+never fired only because nothing seeds `undeposited_funds`, which makes it a
+bug waiting on a chart of accounts rather than a bug in the ledger.
+`clearPaymentPg` and a "Mark Cleared" action close it, and `createPaymentPg`
+now passes the clearing account too, so the two paths agree.
+
+**6. The bill-payment approval threshold would have been silently deleted.**
+This is the one that mattered. `payment-actions.js:606` gates `payment.confirm()`
+on `billPaymentValue` — outbound payments above the company threshold are
+routed for sign-off. The Postgres path had no such gate, so porting payments
+as-written would have removed a financial control on supplier money with
+nothing erroring anywhere.
+
+#### The threshold moved, and had to
+
+Mongo checks the threshold at CONFIRM, on a payment that already exists as a
+draft with its allocations attached. That cannot be reproduced here, and it
+should not be: on this schema `payment_allocations` drives `invoices.amount_paid`
+and `bills.balance` BY TRIGGER, so an over-threshold draft would show a bill as
+paid from a payment the ledger had never seen — for as long as the approval sat
+in the queue.
+
+So the check happens before anything is written. Over the threshold, no row is
+created at all; the approval carries the form's own fields as its payload, and
+the payment id is minted up front so `targetRef.id` names the payment the
+release will create. `releaseApprovedPaymentPg` — called from
+`approval-actions.js` — rebuilds the FormData and deliberately does not
+re-check the threshold, for the reason `applyApprovedExpensePaymentPg` does
+not: the threshold is what raised the approval.
+
+A rejected approval now leaves nothing to clean up, where the Mongo path had a
+draft to cancel.
+
+#### The enabling fix, and the live bug it uncovered
+
+`approvalRequest.targetRef.id` was `Schema.Types.ObjectId`, which accepts only
+a 24-character hex string. Every Postgres row is a UUID, so `submitApproval`
+threw a CastError on any attempt to raise an approval against one.
+
+**This was not theoretical and it was not new.** Expense payments have been
+raising approvals with a UUID since the expenses port (0059), and
+`expensePaymentValue` defaults to 50,000 and is set for every company — so an
+expense payment over fifty thousand shillings has been throwing instead of
+going for sign-off. The field is now `String`; the Mongo-side kinds are
+unaffected, because a 24-hex string casts cleanly on the way back into
+`Product.findById` and friends.
+
+The general lesson: **`ObjectId`-typed columns that point at "some entity" are
+tripwires for a store migration.** They fail loudly, but only on the path that
+is rarely taken — and a threshold is by definition the rarely-taken path.
+
+#### Deliberate omissions
+
+- **No `deletePayment`.** It deletes DRAFT payments only, and on this layer a
+  draft does not survive its own transaction: `createPaymentPg` confirms and
+  posts before returning, and `invoice-actions.ts` does the same. Porting it
+  would have produced a function no status can reach — knowingly walking into
+  `setCheckoutStatusPg`'s trap. Cancellation is the operation that exists, and
+  the better one: a payment that reached the ledger is undone by an auditable
+  reversal, not by a row disappearing.
+- **No `reconcilePayment`.** No reconciliation columns, no screen ever called
+  it. The detail page's "Reconciled" row became "Cleared", read off the status,
+  because a hardcoded "No" is a claim the data cannot support.
+
+#### What cancelling does
+
+Reverses the entry, deletes the allocation rows, marks the payment — all in one
+transaction. The deletion is what returns the balance, by trigger; nothing
+touches `amount_paid` directly, which is the §8.2 arrangement. Mongo approximates
+this with `reverseAllocatedDocuments`, a per-allocation loop inside a try/catch
+that logs and CONTINUES — so a failure leaves the payment cancelled, the entry
+reversed, and the invoice still showing the money as received, with the error
+only in a server log.
+
+Migration 0063 adds `cancellation_reason` and a pair CHECK conditioned on the
+STATUS rather than on one of the columns, because the case that actually
+happens is an UPDATE that flips the status and forgets the rest.
+
+#### And the table was wrong about statements
+
+Listed as "on Postgres" in BUILDING-ON-POSTGRES.md. Four screens read
+`statement-queries.js`, which queries the MONGO `Invoice`, `Bill`, `Party` and
+`Payment` models while pulling credit notes from Postgres. All four moved long
+ago and `app/mongodb/invoice-actions.js` has no screen importer, so those
+collections are unwritten, not merely stale — the statements have been
+rendering an empty ledger, and payments moving empties the last column too.
+Found by grepping the MODEL name rather than trusting the table, which is §9H's
+lesson arriving late.
+
+---
+
 ### §9L — Petty cash was not the last, and the sweep was asking one question
 
 Petty cash is ported (0060) and it was described as closing the ledger gap. It

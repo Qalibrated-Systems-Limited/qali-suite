@@ -70,6 +70,9 @@ export const payments = pgTable(
 
     // Method-specific references, flattened from the embedded blocks.
     mpesaReceipt: text("mpesa_receipt"),
+    /** The payer's number. `PaymentForm` has always sent it (0063). */
+    mpesaPhone: text("mpesa_phone"),
+    bankName: text("bank_name"),
     bankReference: text("bank_reference"),
     chequeNumber: text("cheque_number"),
 
@@ -82,6 +85,7 @@ export const payments = pgTable(
     confirmedById: text("confirmed_by_id"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     cancelledById: text("cancelled_by_id"),
+    cancellationReason: text("cancellation_reason"),
 
     journalEntryId: uuid("journal_entry_id").references(
       () => journalEntries.id,
@@ -102,7 +106,17 @@ export const payments = pgTable(
     index("payments_company_party_idx").on(t.companyId, t.partyId),
     index("payments_company_date_idx").on(t.companyId, t.paymentDate.desc()),
     index("payments_company_status_idx").on(t.companyId, t.status),
+    index("payments_company_method_idx").on(t.companyId, t.paymentMethod),
     check("payments_amount_positive", sql`${t.amount} > 0`),
+    // All three cancellation columns, or none — conditioned on the STATUS, so
+    // an UPDATE that flips the status and forgets the rest is refused. See 0063.
+    check(
+      "payments_cancellation_pair",
+      sql`CASE WHEN ${t.status} = 'cancelled'
+               THEN ${t.cancelledAt} IS NOT NULL AND ${t.cancelledById} IS NOT NULL AND ${t.cancellationReason} IS NOT NULL
+               ELSE ${t.cancelledAt} IS NULL AND ${t.cancelledById} IS NULL AND ${t.cancellationReason} IS NULL
+          END`,
+    ),
   ],
 );
 

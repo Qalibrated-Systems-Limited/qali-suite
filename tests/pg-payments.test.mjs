@@ -340,7 +340,8 @@ suite("postgres payments", () => {
         VALUES (${companyB}, 'Tenant B', ${"b-" + companyB.slice(0, 8)})
       `;
       const seen = await asTenant(companyB, (tx) => paymentRepo.listPayments(tx));
-      expect(seen).toHaveLength(0);
+      expect(seen.payments).toHaveLength(0);
+      expect(seen.pagination.total).toBe(0);
     });
   });
 });

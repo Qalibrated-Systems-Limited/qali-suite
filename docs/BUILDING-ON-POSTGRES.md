@@ -18,7 +18,17 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 
 | on Postgres | still Mongo (screen files) |
 |---|---|
-| **hr**, **claims**, **assets**, **expenses**, **petty-cash**, **credit-notes**, **checkout**, **categories**, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, statements, supplier-statements, quotes, purchase-orders | components 30, projects 11, integrations 10, tax 8, reports 8, banking 8, kpis 7, stocks 6, settings 6, **payments 6**, leads 4, employee 4, **claims 4**, sales-orders 3, journal 3 |
+| **payments**, hr, claims, assets, expenses, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders | projects 11, integrations 10, tax 8, reports 8, banking 8, components 7, kpis 7, settings 6, stocks 4, leads 4, employee 4, **claims 4**, sales-orders 3, profile 3, opportunities 3, admin 3, **statements 2**, **supplier-statements 2**, movements 2 |
+
+**STATEMENTS AND SUPPLIER-STATEMENTS WERE LISTED HERE AS DONE AND ARE NOT.**
+Both read `app/mongodb/queries/statement-queries.js`, which queries the MONGO
+`Invoice`, `Bill`, `Party` and `Payment` models while pulling credit notes from
+Postgres. Every one of those four moved long ago, and
+`app/mongodb/invoice-actions.js` — the only thing that still writes a Mongo
+invoice — has no screen importer, so the collections it reads are not merely
+stale, they are unwritten. The statements have been rendering an empty ledger.
+Caught only by grepping the MODEL names rather than trusting this table, which
+is the lesson two sections down, arriving late.
 
 **Regenerate rather than trust it:**
 
@@ -26,12 +36,8 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 grep -rln "@/app/mongodb" app/dashboard --include="*.jsx" | cut -d/ -f3 | sort | uniq -c | sort -rn
 ```
 
-**payments reads 6, and that is the live gap.** `app/db/actions/payment-actions.ts`
-exists, is tested (12 tests) and is called by NOTHING — the same state quotes
-shipped in. The five screens still call the Mongo actions, so nothing is
-broken; payments is simply half-ported. Three functions are missing before the
-screens can move: `getUnpaidDocuments`, `cancelPayment`, `deletePayment`. See
-the handoff section below.
+**payments reads 0 — the half-port is closed.** See §9M for what the "three
+missing functions" turned out to be.
 
 **sales-orders reads 3 and is switched off** — `lib/unported-modules.js`, §9K.
 Those three reads are behind the flag.
@@ -565,21 +571,37 @@ State: branch `feat/postgres-migration`, everything committed, `tsc` and
 | Checkouts | — (wired an existing table) | 16 |
 | Payments | — (action layer only) | 12 |
 | Categories | 0062 | 17 |
+| **Payments (wired)** | **0063** | **29 + 8 gate** |
 
 Sales orders was **switched off** rather than ported — `lib/unported-modules.js`,
 §9K. One flag, five guards, `grep -rn SALES_ORDERS_AVAILABLE`.
 
 ### Next, in the order I would take them
 
-**1. Wire payments (small, and it is the live half-port).**
-`app/db/actions/payment-actions.ts` is built and tested and nothing calls it.
-Needs three more functions before the five screens can move —
-`getUnpaidDocuments`, `cancelPayment`, `deletePayment` — then repoint
-`payments/received`, `payments/made`, `payments/[id]`, `PaymentForm` and
-`PaymentActions`. After that `payment.confirm()` is unreachable and one of the
-three remaining ledger postings is gone.
+**1. ~~Wire payments~~ — DONE, and it was not three functions.**
+See §9M. `payment.confirm()` is unreachable and `npm run ledger-sweep` no
+longer lists it. Read §9M before the next port: the estimate was wrong in a
+way that is going to repeat, because the work was not in the module being
+moved. It was in the SIX seams around it, four of which were already broken.
 
-**2. Products / stocks.** `stock-actions.js` is 1,163 lines over 7 exports, and
+**2. Statements — the seam payments just made worse, and the table above was
+wrong about it.**
+`docs/BUILDING-ON-POSTGRES.md` listed statements and supplier-statements as
+"on Postgres". They are not. Four screens read
+`app/mongodb/queries/statement-queries.js`, which reads the MONGO `Invoice`,
+`Bill`, `Party` and `Payment` models while pulling credit notes from Postgres.
+All four of those moved long ago — `app/mongodb/invoice-actions.js` has no
+screen importer left — so customer and supplier statements have been rendering
+an empty ledger, and payments moving makes the last column of the statement
+empty too.
+
+Measure the destination first, as always: the AGING HALF IS ALREADY BUILT.
+`reports.ts:getAgingReport(tx, "receivable" | "payable", asOfDate)` derives it
+from the LEDGER rather than from document fields, which is the better source
+anyway. What is missing is the transaction-list half — the running-balance
+statement itself — and the four screens.
+
+**3. Products / stocks.** `stock-actions.js` is 1,163 lines over 7 exports, and
 the destination is largely built: `app/db/repositories/products.ts` has 13
 functions including the whole commitment-based flow (`commitStock`,
 `releaseStock`, `issueStock`, receive-to-hold/accept/reject,
@@ -589,29 +611,47 @@ the Mongoose `Category` model directly — `stocks/[id]/update/page.jsx` and
 `stocks/create/page.jsx` — and categories is on Postgres now, so they are
 reading a collection nothing writes.
 
-**3. Inventory adjustments.** The only genuine from-scratch port left in the
+**4. Inventory adjustments.** The only genuine from-scratch port left in the
 cluster: no Postgres table, no repository. 308 action + 197 query lines, and it
 holds `adjustment.approve()` — a live ledger posting reached from three
 modules (`stock-actions`, `adjustment-actions`, `approval-actions`).
 
-**4. Stock movements.** `app/db/repositories/stockMovements.ts` is complete and
+**5. Stock movements.** `app/db/repositories/stockMovements.ts` is complete and
 has ZERO CALLERS — `recordMovement`, `attachAccounting`, `reverseMovement`,
 `listMovements`. `movement.reverse()` in `integration-actions.js:467` is the
 third remaining posting, reached from 10 screens.
 
 ### Remaining Mongo ledger postings
 
-Three, and `npm run ledger-sweep` is the authority — not a grep:
+TWO now, and `npm run ledger-sweep` is the authority — not a grep:
 
 | Posts | From |
 |---|---|
-| `payment.confirm()` | `payment-actions.js:656`, `approval-actions.js:505` |
 | `adjustment.approve()` | `stock-actions.js:371`, `adjustment-actions.js:210`, `approval-actions.js:457` |
 | `movement.reverse()` | `integration-actions.js:467` |
+
+`payment.confirm()` was the third and is gone (§9M). Both callers moved with
+it: `payment-actions.js:656` is dead, and `approval-actions.js:505` now calls
+`releaseApprovedPaymentPg`.
 
 The sweep also prints three false positives it cannot distinguish — two
 `Array.reverse()` and a project budget's `approve()`. It says so in its own
 output. Read the lines.
+
+### Ported code deliberately NOT written
+
+- `deletePayment` — the Mongo action deletes DRAFT payments only, and on the
+  Postgres layer a draft payment does not survive its own transaction:
+  `createPaymentPg` confirms and posts before it returns, and
+  `invoice-actions.ts` does the same. Porting it would have produced a function
+  no status can reach — `setCheckoutStatusPg`'s trap, walked into knowingly.
+  `cancelPaymentPg` is the operation that exists, and it is the right one: a
+  payment that reached the ledger is undone by an auditable reversal, not by a
+  row disappearing.
+- `reconcilePayment` — there are no reconciliation columns on `payments` and no
+  screen ever called it. The detail page's "Reconciled" row is now "Cleared",
+  read off the status, because a hardcoded "No" is a claim the data cannot
+  support. Bank reconciliation is its own unported module.
 
 ### Known dead code, left deliberately
 

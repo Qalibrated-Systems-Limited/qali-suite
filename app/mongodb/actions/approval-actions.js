@@ -21,7 +21,6 @@ import {
 import ErpCounter from "@/app/models/erp-counter";
 import Product from "@/app/models/product";
 import InventoryAdjustment from "@/app/models/inventoryAdjustment";
-import Payment from "@/app/models/payment";
 import Project from "@/app/models/project";
 
 // ============================================
@@ -60,11 +59,12 @@ async function voidApprovalTarget(approval, user, action) {
   const by = userInfo(user);
   try {
     if (ref.kind === "Payment") {
-      const doc = await Payment.findOne({
-        _id: ref.id,
-        companyId: approval.companyId,
-      });
-      if (doc?.status === "draft") await doc.cancel(by, reason);
+      // NOTHING TO VOID. The Postgres path writes no payment until the
+      // approval is granted, so a rejected bill payment leaves no row behind —
+      // where the Mongo path left a draft that had to be cancelled. This also
+      // stops `Payment.findOne` being handed a UUID it cannot cast, which the
+      // catch below would have swallowed as a logged CastError.
+      return;
     } else if (ref.kind === "CreditNote") {
       // POSTGRES since §9L. This voided the MONGO CreditNote, so rejecting an
       // approval left the real draft — the Postgres one the screens show —
@@ -477,37 +477,42 @@ async function applyStockAdjustment(approval, user) {
 }
 
 // ============================================
-// BILL PAYMENT — applies a pending payment.confirm()
+// BILL PAYMENT — records the payment the approval was holding
 // ============================================
-// The payment was created in draft state; confirmation posts to GL via
-// payment.confirm(). On approval we run that confirm with the approver
-// as the user — preserves the audit trail (the payment shows it was
-// confirmed by the approver, not the requester).
+// ON POSTGRES SINCE THE PAYMENTS PORT. This used to load a DRAFT Mongo payment
+// and call `payment.confirm()`, which posted the journal entry into the Mongo
+// ledger — an approved supplier payment, signed off and recorded, posted where
+// no ledger screen reads.
+//
+// There is no draft payment to load any more. The Postgres path checks the
+// threshold BEFORE it writes anything, so an over-threshold payment is held as
+// a PAYLOAD on the approval rather than as a half-finished row: nothing exists
+// until this runs. The payment id was minted when the approval was raised and
+// travels in that payload, so `targetRef.id` points at the payment this
+// creates, and the approval's link to it resolves.
+//
+// `releaseApprovedPaymentPg` deliberately does not re-check the threshold —
+// the threshold is what raised this approval.
 async function applyBillPayment(approval, user) {
-  const paymentId = approval.targetRef?.id;
+  const payload = approval.payload || {};
+  const paymentId = payload.paymentId || approval.targetRef?.id;
   if (!paymentId) {
     return { success: false, error: "Missing payment reference" };
   }
 
-  const payment = await Payment.findOne({
-    _id: paymentId,
-    companyId: approval.companyId,
-  });
-  if (!payment) return { success: false, error: "Payment not found" };
+  const { releaseApprovedPaymentPg } = await import(
+    "@/app/db/actions/payment-actions"
+  );
+  const result = await releaseApprovedPaymentPg({ ...payload, paymentId });
 
-  if (payment.status !== "draft") {
-    return {
-      success: false,
-      error: `Payment is already ${payment.status}; cannot re-confirm.`,
-    };
+  if (!result?.success) {
+    return { success: false, error: result?.error || "Could not record the payment." };
   }
-
-  await payment.confirm(user);
 
   return {
     success: true,
     appliedAt: new Date(),
-    appliedRef: { kind: "Payment", id: payment._id },
+    appliedRef: { kind: "Payment", id: paymentId },
   };
 }
 

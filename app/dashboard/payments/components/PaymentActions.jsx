@@ -7,7 +7,7 @@ import {
   Eye,
   CheckCircle2,
   XCircle,
-  Trash2,
+  Landmark,
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,11 +30,25 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import {
-  confirmPayment,
-  cancelPayment,
-  deletePayment,
-} from "@/app/mongodb/actions/payment-actions";
+  confirmPaymentPg,
+  cancelPaymentPg,
+  clearPaymentPg,
+} from "@/app/db/actions/payment-actions";
 
+/**
+ * Row and header actions for a payment.
+ *
+ * THERE IS NO "DELETE DRAFT" ANY MORE. It was there for a status this layer
+ * cannot produce: creating a payment records, allocates, confirms and posts in
+ * one transaction, so nothing is left in `draft` when the action returns.
+ * Cancelling is the operation that undoes a payment, and it reverses the
+ * journal entry rather than making the row disappear.
+ *
+ * "Confirm" is kept for a draft that some other path leaves behind. What
+ * replaces it in practice is MARK CLEARED, for a cheque or transfer that was
+ * routed into a clearing account and has since shown up on the statement — the
+ * transition `pending_clearance → confirmed`, which had no button before.
+ */
 export function PaymentActions({ payment, userRole }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -42,57 +56,50 @@ export function PaymentActions({ payment, userRole }) {
   const [cancelReason, setCancelReason] = useState("");
 
   const canManage = ["SuperAdmin", "Admin", "Manager", "Accountant"].includes(userRole);
-  const canDelete = ["SuperAdmin", "Admin", "Manager"].includes(userRole);
-  const isDraft = payment.status === "draft";
-  const canConfirm =
-    ["draft", "pending_clearance"].includes(payment.status) && canManage;
   const canCancel =
     payment.status !== "cancelled" && ["SuperAdmin", "Admin", "Manager"].includes(userRole);
+  const canConfirm = payment.status === "draft" && canManage;
+  const canClear = payment.status === "pending_clearance" && canManage;
 
-  const handleConfirm = () => {
+  const run = (fn, onOk) =>
     startTransition(async () => {
-      const result = await confirmPayment(payment._id);
+      const result = await fn();
       if (result.success) {
-        toast.success(`Payment ${payment.paymentNumber} confirmed`);
+        onOk();
         router.refresh();
       } else {
-        toast.error(result.error || "Failed to confirm payment");
+        toast.error(result.error || "That did not work");
       }
     });
-  };
+
+  const handleConfirm = () =>
+    run(
+      () => confirmPaymentPg(payment.id),
+      () => toast.success(`Payment ${payment.paymentNumber} confirmed`),
+    );
+
+  const handleClear = () =>
+    run(
+      () => clearPaymentPg(payment.id),
+      () => toast.success(`Payment ${payment.paymentNumber} cleared`),
+    );
 
   const handleCancel = () => {
     if (!cancelReason.trim()) {
       toast.error("Please provide a cancellation reason");
       return;
     }
-
     const formData = new FormData();
     formData.append("reason", cancelReason);
 
-    startTransition(async () => {
-      const result = await cancelPayment(payment._id, null, formData);
-      if (result.success) {
+    run(
+      () => cancelPaymentPg(payment.id, null, formData),
+      () => {
         toast.success(`Payment ${payment.paymentNumber} cancelled`);
         setShowCancelDialog(false);
         setCancelReason("");
-        router.refresh();
-      } else {
-        toast.error(result.error || "Failed to cancel payment");
-      }
-    });
-  };
-
-  const handleDelete = () => {
-    startTransition(async () => {
-      const result = await deletePayment(payment._id);
-      if (result.success) {
-        toast.success("Draft payment deleted");
-        router.refresh();
-      } else {
-        toast.error(result.error || "Failed to delete payment");
-      }
-    });
+      },
+    );
   };
 
   return (
@@ -109,7 +116,7 @@ export function PaymentActions({ payment, userRole }) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
-            onClick={() => router.push(`/dashboard/payments/${payment._id}`)}
+            onClick={() => router.push(`/dashboard/payments/${payment.id}`)}
           >
             <Eye className="mr-2 h-4 w-4" />
             View Details
@@ -122,7 +129,14 @@ export function PaymentActions({ payment, userRole }) {
             </DropdownMenuItem>
           )}
 
-          {canCancel && payment.status !== "cancelled" && (
+          {canClear && (
+            <DropdownMenuItem onClick={handleClear}>
+              <Landmark className="mr-2 h-4 w-4" />
+              Mark Cleared
+            </DropdownMenuItem>
+          )}
+
+          {canCancel && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -134,13 +148,6 @@ export function PaymentActions({ payment, userRole }) {
               </DropdownMenuItem>
             </>
           )}
-
-          {isDraft && canDelete && (
-            <DropdownMenuItem className="text-destructive" onClick={handleDelete}>
-              <Trash2 className="mr-2 h-4 w-4" />
-              Delete Draft
-            </DropdownMenuItem>
-          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -150,8 +157,8 @@ export function PaymentActions({ payment, userRole }) {
           <DialogHeader>
             <DialogTitle>Cancel Payment</DialogTitle>
             <DialogDescription>
-              Cancel payment {payment.paymentNumber}. This will reverse the
-              journal entry and update allocated documents.
+              Cancel payment {payment.paymentNumber}. This reverses the journal
+              entry and gives the allocated documents their balance back.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
