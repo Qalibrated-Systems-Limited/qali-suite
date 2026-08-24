@@ -49,16 +49,8 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { auth } from "@/auth";
 import { canSeePricing, canEditPricing } from "@/lib/permissions";
-import { getProductPg } from "@/app/db/actions/product-actions";
+import { getProductPg, getProductActivityPg } from "@/app/db/actions/product-actions";
 import PricingDialog from "../components/PricingDialog";
-import { getRecentMovements } from "@/app/mongodb/queries/erp-dashboard-queries";
-import {
-  getActiveCheckouts,
-  getAProductActiveCheckouts,
-  getAProductPendingRequests,
-  getAProductRecentMovements,
-  getPendingRequests,
-} from "@/app/mongodb/queries/stock-queries";
 import { formatCurrency } from "@/lib/utils/erp-utils";
 import { FormBanner } from "@/components/ui/form-banner";
 
@@ -453,11 +445,8 @@ export default async function ProductDetailPage({ params, searchParams }) {
   const showPricing = canSeePricing(role);
   const canEditPrice = canEditPricing(role);
 
-  const [movements, requests, checkouts] = await Promise.all([
-    getAProductRecentMovements(id),
-    getAProductPendingRequests(id),
-    getAProductActiveCheckouts(id),
-  ]);
+  // One round trip for all three panels; they render together.
+  const { movements, requests, checkouts } = await getProductActivityPg(id);
 
   const qty = product.inventory?.quantityOnHand ?? 0;
   const committed = product.inventory?.quantityCommitted ?? 0;

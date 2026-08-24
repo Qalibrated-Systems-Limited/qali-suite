@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { withAuthorizedTenant } from "../tenant";
 import * as productsRepo from "../repositories/products";
 import * as movementsRepo from "../repositories/stockMovements";
+import * as fulfilmentRepo from "../repositories/fulfilment";
 import { createJournalEntry } from "../repositories/journal";
 import { accounts, categories, products } from "../schema";
 import {
@@ -523,4 +524,59 @@ export async function getStockPdfDataPg() {
       error: e instanceof Error ? e.message : "Failed to load stock data",
     };
   }
+}
+
+/**
+ * The three activity panels on a product's page: what moved, what is waiting
+ * on it, and what is out on loan.
+ *
+ * One call rather than three, because they render together and each was a
+ * separate Mongo round trip. Shaped to what the row components already read —
+ * `_id`, `type`, `requestNumber`, `employee.name` — so the port does not
+ * redesign three panels to change where their data comes from.
+ */
+export async function getProductActivityPg(productId: string) {
+  return withAuthorizedTenant([], async (tx) => {
+    const [movements, requests, checkouts] = await Promise.all([
+      movementsRepo.listMovements(tx, { productId, limit: 10 }),
+      fulfilmentRepo.listPendingRequestsForProduct(tx, productId, 10),
+      fulfilmentRepo.getOutstandingCheckouts(tx, 10, productId),
+    ]);
+
+    return {
+      movements: movements.map((m) => ({
+        _id: String(m.id),
+        movementNumber: m.movementNumber,
+        reference: m.movementNumber,
+        type: m.movementType,
+        direction: m.direction,
+        quantity: num(m.quantity),
+        createdAt: m.movementDate,
+      })),
+      requests: (requests as unknown as Array<Record<string, unknown>>).map(
+        (r) => ({
+          _id: String(r.id),
+          requestNumber: String(r.request_number),
+          status: String(r.status),
+          requestType: String(r.priority ?? ""),
+          requestedBy: { name: (r.requested_by_name as string) ?? "Unknown" },
+          // The row sums `items`; this panel is scoped to ONE product, so the
+          // only line that matters is the one for it.
+          items: [{ quantity: num(r.quantity_requested) }],
+        }),
+      ),
+      checkouts: (checkouts as unknown as Array<Record<string, unknown>>).map(
+        (c) => ({
+          _id: String(c.checkout_id),
+          checkoutNumber: String(c.checkout_number),
+          quantity: num(c.quantity_outstanding),
+          status: String(c.status),
+          expectedReturnDate: c.expected_return_date as Date | null,
+          employee: {
+            name: (c.checked_out_to_name_at_checkout as string) ?? "Unknown",
+          },
+        }),
+      ),
+    };
+  });
 }
