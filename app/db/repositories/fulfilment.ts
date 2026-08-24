@@ -643,14 +643,44 @@ export async function requireReturn(
 }
 
 /** What is still out, and how overdue. */
-export async function getOutstandingCheckouts(tx: Tx, limit = 100) {
+export async function getOutstandingCheckouts(
+  tx: Tx,
+  limit = 100,
+  productId?: string,
+) {
   return tx.execute(sql`
     SELECT checkout_id, checkout_number, product_name_at_checkout,
            checked_out_to_name_at_checkout, quantity, quantity_outstanding,
            expected_return_date, days_overdue, return_required, return_deadline, status
       FROM outstanding_checkouts
+     WHERE ${productId ? sql`product_id = ${productId}::uuid` : sql`TRUE`}
      ORDER BY days_overdue DESC, expected_return_date
      LIMIT ${Math.min(limit, 500)}
+  `);
+}
+
+/**
+ * Requests still waiting on ONE product — what the product page shows under
+ * "pending requests", and the reason a quantity is spoken for.
+ *
+ * Joined through the items, because a request names several products and only
+ * the line for this one is relevant to its page.
+ */
+export async function listPendingRequestsForProduct(
+  tx: Tx,
+  productId: string,
+  limit = 20,
+) {
+  return tx.execute(sql`
+    SELECT r.id, r.request_number, r.status, r.priority,
+           r.required_by_date, r.requested_by_name,
+           i.quantity_requested, i.quantity_fulfilled
+      FROM stock_request_items i
+      JOIN stock_requests r ON r.id = i.request_id
+     WHERE i.product_id = ${productId}::uuid
+       AND r.status IN ('pending', 'approved', 'partially_fulfilled')
+     ORDER BY r.required_by_date NULLS LAST, r.created_at DESC
+     LIMIT ${Math.min(limit, 100)}
   `);
 }
 

@@ -49,7 +49,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { auth } from "@/auth";
 import { canSeePricing, canEditPricing } from "@/lib/permissions";
-import { getProduct } from "@/app/mongodb/actions/stock-actions";
+import { getProductPg } from "@/app/db/actions/product-actions";
 import PricingDialog from "../components/PricingDialog";
 import { getRecentMovements } from "@/app/mongodb/queries/erp-dashboard-queries";
 import {
@@ -445,7 +445,7 @@ function CheckoutRow({ checkout }) {
 export default async function ProductDetailPage({ params, searchParams }) {
   const { id } = await params;
 
-  const product = await getProduct(id);
+  const product = await getProductPg(id);
   if (!product) notFound();
 
   const session = await auth();

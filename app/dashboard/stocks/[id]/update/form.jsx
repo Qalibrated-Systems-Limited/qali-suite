@@ -52,7 +52,7 @@ import {
   ActiveStatusField,
 } from "../../components/ProductFormField";
 
-import { updateProduct } from "../../../../mongodb/actions/stock-actions";
+import { updateProductPg } from "@/app/db/actions/product-actions";
 import {
   canSeePricing as canSeePricingRole,
   canEditPricing as canEditPricingRole,
@@ -241,7 +241,7 @@ export default function UpdateProductForm({
   const canSeePricing = canSeePricingRole(userRole);
 
   // Bind product ID to action
-  const boundUpdateAction = updateProduct.bind(null, product._id.toString());
+  const boundUpdateAction = updateProductPg.bind(null, product._id.toString());
 
   // Form action state - NO useEffect needed!
   const [state, formAction, isPending] = useActionState(

@@ -44,8 +44,12 @@ export function StockCategoryFilter({ currentCategory, categories }) {
   const options = categories || CATEGORIES;
 
   return (
-    <div className="flex flex-col gap-2">
-      <Label className="text-xs text-muted-foreground">Category</Label>
+    /* sr-only label: in a toolbar the select's own placeholder ("All
+       Categories") already says what it filters, and a visible label above it
+       doubles the control's height for no information. Kept in the DOM so a
+       screen reader still announces the field. */
+    <div className="flex flex-col gap-1">
+      <Label className="sr-only">Category</Label>
       <StockFilterSelect
         value={currentCategory}
         param="category"
@@ -61,8 +65,8 @@ export function StockCategoryFilter({ currentCategory, categories }) {
 // ============================================
 export function StockQuantityFilter({ currentQuantity }) {
   return (
-    <div className="flex flex-col gap-2">
-      <Label className="text-xs text-muted-foreground">Stock Level</Label>
+    <div className="flex flex-col gap-1">
+      <Label className="sr-only">Stock Level</Label>
       <StockFilterSelect
         value={currentQuantity}
         param="quantity"

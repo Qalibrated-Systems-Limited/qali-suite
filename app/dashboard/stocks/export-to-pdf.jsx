@@ -11,7 +11,7 @@ import {
 } from "@react-pdf/renderer";
 import { Download, Loader2 } from "lucide-react";
 import { Button } from "../../../components/ui/button";
-import { getStockPdfData } from "@/app/mongodb/actions/stock-actions";
+import { getStockPdfDataPg } from "@/app/db/actions/product-actions";
 
 const styles = StyleSheet.create({
   page: {
@@ -92,7 +92,7 @@ export function GenerateStockPDF() {
     setBusy(true);
     setError("");
     try {
-      const res = await getStockPdfData();
+      const res = await getStockPdfDataPg();
       if (!res?.success) {
         setError(res?.error || "Failed to load stock data");
         setBusy(false);

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { updateProductPricing } from "@/app/mongodb/actions/stock-actions";
+import { updateProductPricingPg } from "@/app/db/actions/product-actions";
 
 const initialState = { success: false, error: null, fieldErrors: null };
 
@@ -47,7 +47,7 @@ function computeMarkupPct(selling, cost) {
 export default function PricingDialog({ product }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const action = updateProductPricing.bind(null, product._id);
+  const action = updateProductPricingPg.bind(null, product._id);
   const [state, formAction, isPending] = useActionState(action, initialState);
 
   const cost = Number(product?.costing?.costPrice) || 0;

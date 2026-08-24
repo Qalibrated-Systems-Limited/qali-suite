@@ -1,6 +1,7 @@
 "use client";
 
 import { Input } from "./ui/input";
+import { cn } from "@/lib/utils";
 import { SearchIcon } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useDebouncedCallback } from "use-debounce";
@@ -35,7 +36,7 @@ const SEARCH_CONFIG = {
 // ============================================
 // LEGACY: Page-level search (used by individual pages)
 // ============================================
-export default function Search({ placeholder }) {
+export default function Search({ placeholder, className }) {
   const searchParams = useSearchParams();
   const { replace } = useRouter();
   const pathname = usePathname();
@@ -52,7 +53,19 @@ export default function Search({ placeholder }) {
   }, 300);
 
   return (
-    <div className="relative flex flex-1 shrink-0 min-w-[200px] w-full md:min-w-[500px]">
+    /*
+      `md:min-w-[500px]` is the page-wide default, and min-width WINS over a
+      parent's max-width — a caller that puts this in a toolbar beside other
+      controls could not make it narrower, so it overflowed into them. cn()
+      runs twMerge, so a className passed in genuinely replaces the conflicting
+      class rather than being appended and losing.
+    */
+    <div
+      className={cn(
+        "relative flex flex-1 shrink-0 min-w-[200px] w-full md:min-w-[500px]",
+        className,
+      )}
+    >
       <label htmlFor="search" className="sr-only">
         Search
       </label>

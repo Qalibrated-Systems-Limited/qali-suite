@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { useState, useActionState } from "react";
+import { useState, useEffect, useActionState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ChevronLeft,
   ChevronRight,
@@ -42,7 +43,7 @@ import {
   ActiveStatusField,
 } from "./ProductFormField";
 
-import { addProduct } from "../../../mongodb/actions/stock-actions";
+import { addProductPg } from "@/app/db/actions/product-actions";
 
 // ============================================
 // STEP DEFINITIONS
@@ -502,9 +503,25 @@ export default function AddProductWizard({
     isActive: true,
   });
 
-  // Form action state - NO useEffect needed!
+  const router = useRouter();
+
+  // Form action state
   // Errors are read directly from state in JSX
-  const [state, formAction, isPending] = useActionState(addProduct, null);
+  const [state, formAction, isPending] = useActionState(addProductPg, null);
+
+  /**
+   * The Mongo action redirected from the server on success. The Postgres one
+   * RETURNS a result instead, because a server action that redirects cannot
+   * also report which product it made — and the wizard needs the id to send
+   * the user to it. Navigation therefore happens here.
+   */
+  useEffect(() => {
+    if (state?.success && state.productId) {
+      router.push(
+        `/dashboard/stocks?success=${encodeURIComponent(state.message ?? "Product created")}`,
+      );
+    }
+  }, [state, router]);
 
   // Combine server errors with client validation errors
   const errors = state?.error || clientErrors;

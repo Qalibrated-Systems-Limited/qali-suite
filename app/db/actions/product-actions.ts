@@ -479,3 +479,48 @@ function shapeProduct(r: Record<string, unknown>) {
     isLowStock: Number(onHand) <= Number(reorder),
   };
 }
+
+/**
+ * The stock list for the PDF export.
+ *
+ * PAGES THROUGH rather than taking the first 200. `searchProducts` caps a page
+ * at 200 by design — a list screen should never ask for more — but an EXPORT
+ * that stops at the cap is worse than one that refuses: it looks complete. The
+ * Mongo version had no cap and no pagination, so this is the first time the
+ * question came up.
+ */
+export async function getStockPdfDataPg() {
+  try {
+    const perPage = 200;
+    const data: Array<{
+      SKU: string;
+      name: string;
+      unit: string;
+      quantity: number;
+    }> = [];
+
+    for (let page = 1; ; page += 1) {
+      const { rows, pages } = await getProductsPg({
+        page,
+        perPage,
+        status: "active",
+      });
+      for (const p of rows) {
+        data.push({
+          SKU: p.SKU,
+          name: p.name,
+          unit: p.unit,
+          quantity: p.inventory.quantityOnHand,
+        });
+      }
+      if (page >= pages || rows.length === 0) break;
+    }
+
+    return { success: true, data };
+  } catch (e) {
+    return {
+      success: false,
+      error: e instanceof Error ? e.message : "Failed to load stock data",
+    };
+  }
+}
