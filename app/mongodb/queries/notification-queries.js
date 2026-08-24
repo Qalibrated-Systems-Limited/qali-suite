@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContextSafe } from "@/lib/utils/tenant-utils";
 import Notification from "@/app/models/notification";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 // ============================================
 // NOTIFICATION QUERIES (the bell)
@@ -26,7 +27,7 @@ export const cMyNotifications = cache(async (limit = 12) => {
       userId: new mongoose.Types.ObjectId(userId),
       ...(ctx.isSuperAdmin || !ctx.companyId
         ? {}
-        : { companyId: new mongoose.Types.ObjectId(ctx.companyId) }),
+        : { companyId: new mongoose.Types.ObjectId(translateCompanyId(ctx.companyId)) }),
     };
 
     const [items, unread] = await Promise.all([

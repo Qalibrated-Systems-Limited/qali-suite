@@ -18,6 +18,7 @@ import JournalEntry from "@/app/models/JournalEntry";
 import PayrollRun from "@/app/models/payrollRun";
 import Invoice from "@/app/models/invoice";
 import { KPI_TEMPLATES } from "@/app/dashboard/kpis/lib/kpi-templates";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ObjectId = mongoose.Types.ObjectId;
 
@@ -489,13 +490,13 @@ async function getAccountBalanceAsOf({ baseMatch, account, asOf }) {
 }
 
 function buildBaseMatch(companyId, isSuperAdmin) {
-  return isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  return isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 }
 
 function buildAccountFilter(companyId, isSuperAdmin, extra = {}) {
   return isSuperAdmin
     ? { isActive: true, ...extra }
-    : { companyId: new ObjectId(companyId), isActive: true, ...extra };
+    : { companyId: new ObjectId(translateCompanyId(companyId)), isActive: true, ...extra };
 }
 
 // ============================================
@@ -519,7 +520,7 @@ async function computeMonthlyRevenue(ctx) {
 async function computeMonthlyPayrollCost(ctx) {
   // Sum totalGrossPay + employer contributions for runs *paid* in the period.
   const { start, end } = getPeriodBounds(ctx.periodicity, ctx.periodYear, ctx.periodMonth);
-  const tenantMatch = ctx.isSuperAdmin ? {} : { companyId: new ObjectId(ctx.companyId) };
+  const tenantMatch = ctx.isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(ctx.companyId)) };
 
   const result = await PayrollRun.aggregate([
     {
@@ -710,7 +711,7 @@ async function computeAvgOrderValue(ctx) {
   // only revenue masks discount-led growth — if AOV drifts down while
   // revenue is up, you're winning more deals at worse prices.
   const { start, end } = getPeriodBounds(ctx.periodicity, ctx.periodYear, ctx.periodMonth);
-  const tenantMatch = ctx.isSuperAdmin ? {} : { companyId: new ObjectId(ctx.companyId) };
+  const tenantMatch = ctx.isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(ctx.companyId)) };
 
   const result = await Invoice.aggregate([
     {

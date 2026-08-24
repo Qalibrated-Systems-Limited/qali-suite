@@ -6,6 +6,7 @@ import {
   getTenantContext,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 // ============================================
 // SEARCH QUOTES
@@ -149,7 +150,7 @@ export async function getQuoteStats(filters = {}) {
 
   // Get tenant context
   const { companyId, isSuperAdmin, user } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new mongoose.Types.ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new mongoose.Types.ObjectId(translateCompanyId(companyId)) };
 
   // Scope visibility: non-admin roles only see their own quotes
   if (

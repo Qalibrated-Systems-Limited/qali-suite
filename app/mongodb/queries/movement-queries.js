@@ -5,6 +5,7 @@ import { sanitizeSearchTerm } from "../../../lib/utils/sanitize";
 import { serializeBsonType } from "@/lib/utils";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -22,7 +23,7 @@ export const fetchMovementPages = async (
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const { movementType, direction, startDate, endDate } = filters;
 
@@ -136,7 +137,7 @@ export const searchMovements = async (
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const { movementType, direction, startDate, endDate, productId } = filters;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
@@ -242,7 +243,7 @@ export const getMovementStats = async (
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const { movementType, direction, startDate, endDate } = filters;
 
@@ -365,7 +366,7 @@ export const getMovementById = async (movementId) => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const movement = await StockMovement.findOne({
     ...tenantMatch,
@@ -396,7 +397,7 @@ export const getProductMovementHistory = async (productId, limit = 50) => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const movements = await StockMovement.find({ ...tenantMatch, productId })
     .sort({ createdAt: -1 })

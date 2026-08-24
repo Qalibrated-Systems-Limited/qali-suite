@@ -29,6 +29,7 @@ const ObjectId = mongoose.Types.ObjectId;
 // Utils
 import { formatCurrency } from "@/lib/utils";
 import { ActivityCardSkeleton } from "../ActivityCard";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 // ============================================
 // OPERATIONS TAB
@@ -68,7 +69,7 @@ export async function OperationsTab() {
 async function OperationsStats() {
   // Tenant scoping - only show company's data
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -209,7 +210,7 @@ function QuickActionsBar() {
 async function PendingRequestsCard() {
   // Tenant scoping - only show company's requests
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const requests = await StockRequest.find({ ...tenantMatch, status: "pending" })
     .sort({ createdAt: -1 })
@@ -329,7 +330,7 @@ async function PendingRequestsCard() {
 async function PendingClaimsCard() {
   // Tenant scoping - only show company's claims
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const { claims } = await listClaimsPg({
     status: "submitted",
@@ -451,7 +452,7 @@ async function PendingClaimsCard() {
 async function RecentActivityCard() {
   // Tenant scoping - only show company's activity
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const [recentRequests, recentClaims] = await Promise.all([
     StockRequest.find({ ...tenantMatch, status: { $in: ["approved", "rejected"] } })

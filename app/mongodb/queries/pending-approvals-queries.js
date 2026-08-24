@@ -20,12 +20,13 @@ import { listNonconformancesAwaitingAuthorisationPg } from "@/app/db/actions/ncr
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import Bill from "@/app/models/bill";
 import { listClaimsPg } from "@/app/db/actions/claim-actions";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const { ObjectId } = mongoose.Types;
 const DEFAULT_LIMIT = 50;
 
 function tenantFilter(companyId, isSuperAdmin) {
-  return isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  return isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 }
 
 // ============================================

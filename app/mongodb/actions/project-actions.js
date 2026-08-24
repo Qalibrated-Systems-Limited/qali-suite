@@ -21,6 +21,7 @@ import {
   FINANCE_WRITE_ROLES,
   hasRole,
 } from "@/lib/utils/role-gates";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 // ============================================
 // HELPERS
@@ -1134,7 +1135,7 @@ export async function reconcileAllProjectFinancials() {
   await dbConnect();
   const match = isSuperAdmin
     ? {}
-    : { companyId: new mongoose.Types.ObjectId(companyId) };
+    : { companyId: new mongoose.Types.ObjectId(translateCompanyId(companyId)) };
   const projects = await Project.find(match).select("_id").lean();
 
   let reconciled = 0;

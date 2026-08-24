@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { ErpCounter } from "./erp-counter";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const Schema = mongoose.Schema;
 
@@ -456,7 +457,7 @@ employeeProfileSchema.statics.getHeadcountByDepartment = async function (company
   return this.aggregate([
     {
       $match: {
-        companyId: new mongoose.Types.ObjectId(companyId),
+        companyId: new mongoose.Types.ObjectId(translateCompanyId(companyId)),
         "employment.status": { $in: ["active", "probation"] },
       },
     },

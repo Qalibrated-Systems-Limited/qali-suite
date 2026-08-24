@@ -3,6 +3,7 @@ import dbConnect from "../../config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { serializeBsonType } from "@/lib/utils";
 import mongoose from "mongoose";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ObjectId = mongoose.Types.ObjectId;
 const ITEMS_PER_PAGE = 10;
@@ -124,7 +125,7 @@ export async function fetchRequestPages(searchTerm, userId, userRole, filters = 
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const roleFilter = buildRoleFilter(userRole, userId);
   const additionalFilters = buildAdditionalFilters(filters);
@@ -146,7 +147,7 @@ export async function searchRequests(searchTerm, page = 1, userId, userRole, fil
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const roleFilter = buildRoleFilter(userRole, userId);
   const additionalFilters = buildAdditionalFilters(filters);
@@ -191,7 +192,7 @@ export async function getPendingApprovalRequests(limit = 10) {
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const result = await StockRequest.aggregate([
     {
@@ -214,7 +215,7 @@ export async function getPendingFulfillmentRequests(limit = 10) {
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const result = await StockRequest.aggregate([
     {
@@ -237,7 +238,7 @@ export async function getRequestsByCustomer(customerId, status = null, limit = 2
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const match = {
     ...tenantMatch,
@@ -263,7 +264,7 @@ export async function getRequestsByRequester(requesterId, status = null, limit =
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const match = {
     ...tenantMatch,
@@ -289,7 +290,7 @@ export async function getRequestStats() {
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -351,7 +352,7 @@ export async function getRequestsByType(requestType, status = null, page = 1) {
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const match = {
     ...tenantMatch,
@@ -380,7 +381,7 @@ export async function getRecentRequests(limit = 5) {
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const result = await StockRequest.find(tenantMatch)
     .sort({ createdAt: -1 })

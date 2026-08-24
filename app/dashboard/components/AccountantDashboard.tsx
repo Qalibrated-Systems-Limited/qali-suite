@@ -40,6 +40,7 @@ import { getExpenseSummaryPg } from "@/app/db/actions/expense-actions";
 import { formatCurrency } from "@/lib/utils";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import mongoose from "mongoose";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ObjectId = mongoose.Types.ObjectId;
 
@@ -285,7 +286,7 @@ async function APAgingCard() {
 // ============================================
 async function OverdueInvoicesCard() {
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const now = new Date();
   const invoices = await Invoice.find({
@@ -342,7 +343,7 @@ async function OverdueInvoicesCard() {
 // ============================================
 async function ClaimsToPayCard() {
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   // `paidAt: null` is gone with the port: 'paid' is its own status now, so an
   // approved claim is by definition one that has not been paid.
@@ -546,7 +547,7 @@ async function BankReconciliationCard() {
 // ============================================
 async function PeriodEndChecklistCard() {
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   // Get fiscal period stats
   const periodResult = await fetchFiscalPeriodStats();

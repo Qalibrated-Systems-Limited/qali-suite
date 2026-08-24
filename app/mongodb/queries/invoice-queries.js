@@ -7,6 +7,7 @@ import Counter from "../../models/counter";
 import { serializeBsonType } from "@/lib/utils";
 import { ObjectId } from "mongodb";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 // ============================================
 // FETCH ACTIVE CUSTOMERS
@@ -216,7 +217,7 @@ export const searchInvoices = async (
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const ITEMS_PER_PAGE = 20;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
@@ -311,7 +312,7 @@ export const fetchInvoicePages = async (searchTerm = "", filters = {}) => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const ITEMS_PER_PAGE = 20;
   const { paymentStatus, status, startDate, endDate } = filters;
@@ -412,7 +413,7 @@ export const getInvoiceStats = async (filters = {}) => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const { startDate, endDate } = filters;
 

@@ -6,6 +6,7 @@ import {
   getTenantContext,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -23,7 +24,7 @@ export async function getTaxTransactions(page = 1, filters = {}) {
   const { companyId, isSuperAdmin } = await getTenantContext();
 
   const skip = (page - 1) * ITEMS_PER_PAGE;
-  let query = isSuperAdmin ? {} : { companyId  : new ObjectId(companyId)};
+  let query = isSuperAdmin ? {} : { companyId  : new ObjectId(translateCompanyId(companyId))};
 
   // Tax type filter (vat_input, vat_output, wht)
   if (filters.taxType) {
@@ -153,7 +154,7 @@ export async function getTaxTransactionById(transactionId) {
 export async function getVATDashboard(filingPeriod = null) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   // Use current month if no period specified
   if (!filingPeriod) {
@@ -278,7 +279,7 @@ export async function getVATDashboard(filingPeriod = null) {
 export async function getWHTDashboard(startDate = null, endDate = null) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   // Default to current month if no dates
   if (!startDate || !endDate) {
@@ -465,7 +466,7 @@ export async function getFilingPeriods(limit = 12) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
 
-  const query = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const query = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
   const periods = await TaxTransaction.distinct(
     "kraTracking.filingPeriod",
     query
@@ -513,7 +514,7 @@ export async function searchTaxTransactions(searchTerm, limit = 50) {
 export async function getTaxTransactionStats(filters = {}) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   let matchQuery = { ...tenantMatch };
 

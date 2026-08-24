@@ -22,6 +22,7 @@ import dbConnect from "../../config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
 import { serializeBsonType } from "@/lib/utils";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -33,7 +34,7 @@ export const fetchProjectPages = async (searchTerm = "", filters = {}) => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const { status, priority } = filters;
 
@@ -79,7 +80,7 @@ export const searchProjects = async (
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const { status, priority } = filters;
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
@@ -126,7 +127,7 @@ export const searchProjects = async (
 export const getProjectStats = async () => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const [total, planning, active, onHold, completed, closed] =
     await Promise.all([
@@ -181,7 +182,7 @@ export const getProjectById = async (projectId) => {
 
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const project = await Project.findOne({
     ...tenantMatch,
@@ -201,7 +202,7 @@ export const getProjectAssignments = async (projectId) => {
 
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const assignments = await ProjectAssignment.find({
     ...tenantMatch,
@@ -220,7 +221,7 @@ export const getProjectAssignments = async (projectId) => {
 export const getActiveProjects = async () => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const projects = await Project.find({
     ...tenantMatch,
@@ -241,7 +242,7 @@ export const getProjectFinancialSummary = async (projectId) => {
 
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   return computeProjectActuals(
     new mongoose.Types.ObjectId(projectId),
@@ -377,7 +378,7 @@ export const getProjectBudgetVsActual = async (projectId) => {
 
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const pid = new mongoose.Types.ObjectId(projectId);
 
@@ -483,7 +484,7 @@ export const getProjectTransactions = async (projectId, type = "all", limit = 20
 
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const pid = new mongoose.Types.ObjectId(projectId);
 
@@ -545,7 +546,7 @@ export const getProjectBudgets = async (projectId) => {
 
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const budgets = await ProjectBudget.find({
     ...tenantMatch,
@@ -563,7 +564,7 @@ export const getProjectBudgets = async (projectId) => {
 export const getCostCodes = async (projectId = null) => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const query = { ...tenantMatch, isActive: true };
 
@@ -590,7 +591,7 @@ export const getCostCodes = async (projectId = null) => {
 export const getAllCostCodes = async () => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const codes = await ProjectCostCode.find(tenantMatch)
     .sort({ code: 1 })
@@ -608,7 +609,7 @@ export const getSubprojects = async (parentProjectId) => {
 
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const children = await Project.find({
     ...tenantMatch,
@@ -627,7 +628,7 @@ export const getSubprojects = async (parentProjectId) => {
 export const getProjectsForParentPicker = async (excludeProjectId = null) => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const query = {
     ...tenantMatch,

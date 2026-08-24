@@ -20,6 +20,7 @@ import { sanitizeSearchTerm } from "../../../lib/utils/sanitize";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
 import { serializeBsonType } from "@/lib/utils";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -30,7 +31,7 @@ export const fetchTodaySummary = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const matchStage1 = {
     $match: {
@@ -155,7 +156,7 @@ export const fetchCardsData = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const customers = await Accounts.countDocuments({
     ...tenantMatch,
@@ -179,7 +180,7 @@ export const monthlyAggregates = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const matchStage = {
     $match: {
@@ -225,7 +226,7 @@ export const weeklyAggregates = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const matchStage = {
     $match: {
@@ -464,7 +465,7 @@ export const fetchRequestPages = async (
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   // Sanitize search term to prevent NoSQL injection
   const safeSearchTerm = sanitizeSearchTerm(searchTerm);
@@ -594,7 +595,7 @@ export const searchRequests = async (
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   // Sanitize search term to prevent NoSQL injection
   const safeSearchTerm = sanitizeSearchTerm(searchTerm);
@@ -793,7 +794,7 @@ export const extractStock = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const matchStage = { $match: tenantMatch };
   const sortStage = { $sort: { category: 1 } };
@@ -1017,7 +1018,7 @@ export const fetchLatestInvoices = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const matchStage = { $match: tenantMatch };
   const projectStage = {
@@ -1185,7 +1186,7 @@ export const getStockAggregate = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const matchStage = { $match: { ...tenantMatch, "inventory.quantityOnHand": { $gt: 0 } } };
   const groupStage = {
@@ -1214,7 +1215,7 @@ export const invoicesCount = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const result = await Invoice.countDocuments(tenantMatch);
 
@@ -1226,7 +1227,7 @@ export const getTotalSaleThisMonth = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   // Define the start and end of the current month
   const startOfMonth = new Date();
@@ -1277,7 +1278,7 @@ export const monthlySalesDistro = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -1353,7 +1354,7 @@ export const quartelySummary = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -1429,7 +1430,7 @@ export async function getTopSellingProducts() {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const matchStage = { $match: tenantMatch };
   const groupStage = {
@@ -1483,7 +1484,7 @@ export const quarterlySalesDistro = async () => {
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = isSuperAdmin
     ? {}
-    : { companyId: new ObjectId(companyId) };
+    : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const now = new Date();
   const currentYear = now.getFullYear();

@@ -11,6 +11,7 @@ import {
 } from "@/lib/utils/tenant-utils";
 import { ObjectId } from "mongodb";
 import { serializeBsonType } from "@/lib/utils";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ITEMS_PER_PAGE = 20;
 
@@ -39,7 +40,7 @@ export async function getPartiesPaginated(
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
 
   // Build filter query with tenant scope
-  let matchQuery = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  let matchQuery = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   // Type filter
   if (type) {
@@ -98,7 +99,7 @@ export async function fetchPartyPages(searchTerm = "", type = null) {
   const { companyId, isSuperAdmin } = await getTenantContext();
 
   // Build filter query with tenant scope
-  let matchQuery = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  let matchQuery = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   // Type filter
   if (type) {

@@ -85,5 +85,27 @@ describe.skipIf(!ADMIN_URL)("company id translation", () => {
       expect(tenantUtils.withTenantScope({ a: 1 }, uuid, true)).toEqual({ a: 1 });
       expect(tenantUtils.buildTenantMatch(uuid, true)).toEqual({});
     });
+
+    it("is the SAME translation the 84 inline call sites use", async () => {
+      // tenant-utils re-exports it rather than keeping a copy. Fixing only
+      // tenant-utils left the dashboard still throwing, because
+      // erp-dashboard-queries.ts and 24 other files build the filter inline
+      // instead of calling the shared helpers.
+      const leaf = await import("../lib/utils/legacy-company-id.js");
+      expect(leaf.translateCompanyId).toBe(tenantUtils.translateCompanyId);
+      expect(leaf.translateCompanyId(uuid)).toBe(legacyId);
+    });
+
+    it("imports without pulling in auth, so models can use it", async () => {
+      // The reason it is a separate module: app/models/* must not import
+      // `@/auth` transitively just to cast an id.
+      const src = await import("node:fs").then((fs) =>
+        fs.readFileSync("lib/utils/legacy-company-id.js", "utf8"),
+      );
+      const staticImports = src
+        .split("\n")
+        .filter((l) => /^import\s/.test(l.trim()));
+      expect(staticImports).toEqual([]);
+    });
   });
 });

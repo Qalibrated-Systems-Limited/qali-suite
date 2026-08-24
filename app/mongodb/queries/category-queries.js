@@ -3,6 +3,7 @@ import dbConnect from "@/app/config/dbConnect";
 import Category from "@/app/models/category";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import { serializeBsonType } from "@/lib/utils";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const { ObjectId } = mongoose.Types;
 
@@ -14,7 +15,7 @@ export async function getCategoryStats() {
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const baseMatch = { ...tenantMatch, isDeleted: false };
 

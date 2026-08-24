@@ -61,6 +61,7 @@ import mongoose from "mongoose";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { StockMovement } from "@/app/models/stockmovement";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 export const cTodayMovementCount = cache(async () => {
   await dbConnect();
@@ -70,7 +71,7 @@ export const cTodayMovementCount = cache(async () => {
   const filter = { createdAt: { $gte: start } };
   if (!isSuperAdmin) {
     if (!companyId) return 0; // fail closed
-    filter.companyId = new mongoose.Types.ObjectId(companyId);
+    filter.companyId = new mongoose.Types.ObjectId(translateCompanyId(companyId));
   }
   return StockMovement.countDocuments(filter);
 });

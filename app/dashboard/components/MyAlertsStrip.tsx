@@ -14,6 +14,7 @@ import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { countMyUpcomingLeave } from "@/app/db/actions/hr-leave-actions";
 import { countMyOpenClaimsPg } from "@/app/db/actions/claim-actions";
 import { ItemCheckout } from "@/app/models/checkouts";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 // ============================================
 // MY ALERTS STRIP — personal counts for the logged-in user
@@ -37,7 +38,7 @@ const cMyAlerts = cache(async (userId) => {
     const { companyId, isSuperAdmin } = await getTenantContext();
     const tenantMatch = isSuperAdmin
       ? {}
-      : { companyId: new mongoose.Types.ObjectId(companyId) };
+      : { companyId: new mongoose.Types.ObjectId(translateCompanyId(companyId)) };
 
     const [
       myPendingClaims,

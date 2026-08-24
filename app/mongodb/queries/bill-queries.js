@@ -18,6 +18,7 @@ import {
   getTenantContext,
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const { ObjectId } = mongoose.Types;
 
@@ -299,7 +300,7 @@ export async function getBillsStats() {
     // silently bypasses the (companyId, billDate, status) compound index.
     const tenantMatch = isSuperAdmin
       ? {}
-      : { companyId: new ObjectId(companyId) };
+      : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
     const stats = await Bill.aggregate([
       { $match: tenantMatch },

@@ -4,6 +4,7 @@ import { listAllCompanies } from "@/app/db/platform";
 import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
 import { serializeBsonType } from "@/lib/utils";
 import mongoose from "mongoose";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ObjectId = mongoose.Types.ObjectId;
 
@@ -24,10 +25,10 @@ export const searchUsers = async (searchTerm, page = 1, filters = {}) => {
   if (isSuperAdmin) {
     matchConditions = {};
     if (filterCompanyId && filterCompanyId !== "all") {
-      matchConditions.companyId = new ObjectId(filterCompanyId);
+      matchConditions.companyId = new ObjectId(translateCompanyId(filterCompanyId));
     }
   } else {
-    matchConditions = { companyId: new ObjectId(companyId) };
+    matchConditions = { companyId: new ObjectId(translateCompanyId(companyId)) };
   }
 
   if (role && role !== "all") {
@@ -129,10 +130,10 @@ export const fetchUserPages = async (searchTerm, filters = {}) => {
   if (isSuperAdmin) {
     matchConditions = {};
     if (filterCompanyId && filterCompanyId !== "all") {
-      matchConditions.companyId = new ObjectId(filterCompanyId);
+      matchConditions.companyId = new ObjectId(translateCompanyId(filterCompanyId));
     }
   } else {
-    matchConditions = { companyId: new ObjectId(companyId) };
+    matchConditions = { companyId: new ObjectId(translateCompanyId(companyId)) };
   }
 
   if (role && role !== "all") {
@@ -201,10 +202,10 @@ export const getUserStats = async (filters = {}) => {
   if (isSuperAdmin) {
     matchConditions = {};
     if (filterCompanyId && filterCompanyId !== "all") {
-      matchConditions.companyId = new ObjectId(filterCompanyId);
+      matchConditions.companyId = new ObjectId(translateCompanyId(filterCompanyId));
     }
   } else {
-    matchConditions = { companyId: new ObjectId(companyId) };
+    matchConditions = { companyId: new ObjectId(translateCompanyId(companyId)) };
   }
 
   if (role && role !== "all") {
@@ -300,7 +301,7 @@ export const getDepartments = async () => {
 
   // distinct() doesn't auto-cast in $match-like filters — cast companyId so
   // it stays scoped and uses the index rather than a COLLSCAN.
-  const query = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const query = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
   const departments = await User.distinct("department", query);
   return departments.filter(Boolean); // Remove null/undefined
 };

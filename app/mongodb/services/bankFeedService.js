@@ -8,6 +8,7 @@ import JournalService from "./journalService";
 import { withTenantScope } from "@/lib/utils/tenant-utils";
 import mongoose from "mongoose";
 import crypto from "crypto";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 // ============================================
 // BANK FEED SERVICE
@@ -454,7 +455,7 @@ export class BankFeedService {
     // Convert companyId to ObjectId if it's a string
     const companyOid =
       typeof companyId === "string"
-        ? new mongoose.Types.ObjectId(companyId)
+        ? new mongoose.Types.ObjectId(translateCompanyId(companyId))
         : companyId;
 
     // Get unpaid invoices and bills (lean — we only need a few fields)

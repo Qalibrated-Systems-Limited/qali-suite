@@ -3,11 +3,12 @@ import mongoose from "mongoose";
 import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import Bill from "@/app/models/bill";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const { ObjectId } = mongoose.Types;
 
 function tenantMatch(companyId, isSuperAdmin) {
-  return isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  return isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 }
 
 // Bills count toward "spend" once they're approved (posted to AP) and

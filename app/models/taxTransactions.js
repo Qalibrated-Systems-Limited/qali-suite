@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const Schema = mongoose.Schema;
 
@@ -569,7 +570,7 @@ taxTransactionSchema.statics.getVATReturn = async function (
     throw new Error("companyId is required for tenant isolation");
   }
 
-  const companyObjectId = new mongoose.Types.ObjectId(companyId);
+  const companyObjectId = new mongoose.Types.ObjectId(translateCompanyId(companyId));
 
   const [input, output] = await Promise.all([
     // VAT Input (purchases)
@@ -638,7 +639,7 @@ taxTransactionSchema.statics.getWHTReportByRate = async function (
     throw new Error("companyId is required for tenant isolation");
   }
 
-  const companyObjectId = new mongoose.Types.ObjectId(companyId);
+  const companyObjectId = new mongoose.Types.ObjectId(translateCompanyId(companyId));
 
   return this.aggregate([
     {
@@ -690,7 +691,7 @@ taxTransactionSchema.statics.getWHTReportByParty = async function (
     throw new Error("companyId is required for tenant isolation");
   }
 
-  const companyObjectId = new mongoose.Types.ObjectId(companyId);
+  const companyObjectId = new mongoose.Types.ObjectId(translateCompanyId(companyId));
 
   return this.aggregate([
     {

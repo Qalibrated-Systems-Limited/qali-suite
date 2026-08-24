@@ -14,6 +14,7 @@ import Account from "../../models/account";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { LOW_STOCK_MATCH } from "@/lib/business-rules";
 import mongoose from "mongoose";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ObjectId = mongoose.Types.ObjectId;
 
@@ -23,7 +24,7 @@ const ObjectId = mongoose.Types.ObjectId;
 function buildTenantFilter(companyId: string | null, isSuperAdmin: boolean) {
   if (isSuperAdmin) return {};
   if (!companyId) throw new Error("companyId required for non-SuperAdmin user");
-  return { companyId: new ObjectId(companyId) };
+  return { companyId: new ObjectId(translateCompanyId(companyId)) };
 }
 
 // ============================================
@@ -57,7 +58,7 @@ export const getFinancialOverview = async () => {
   ]);
 
   // Get revenue and expense aggregates (CORRECTED)
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const [currentMonthData, lastMonthData] = await Promise.all([
     JournalEntry.aggregate([
@@ -264,7 +265,7 @@ export const getKeyMetrics = async () => {
 export const getTopProducts = async (limit = 5) => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const data = await StockMovement.aggregate([
     {
@@ -298,7 +299,7 @@ export const getTopProducts = async (limit = 5) => {
 export const getStockMovementTrend = async (days = 7) => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days + 1);
@@ -343,7 +344,7 @@ export const getStockMovementTrend = async (days = 7) => {
 export const getSalesByCustomer = async (limit = 5) => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const data = await Invoice.aggregate([
     {
@@ -537,7 +538,7 @@ export const getAccountantWorkload = async () => {
 export const getEmployeeFinancialSummary = async (userId: string) => {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -576,7 +577,7 @@ export async function getStockStats() {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const [
     valueResult,
@@ -661,7 +662,7 @@ export async function getStockStats() {
 export async function getLowStockProducts(limit = 10) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   // Use aggregation for complex comparison
   const products = await Product.aggregate([
@@ -724,7 +725,7 @@ export async function getOutOfStockProducts(limit = 10) {
 export async function getMovementTrend(days = 7) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
@@ -783,7 +784,7 @@ export async function getMovementTrend(days = 7) {
 export async function getTopMovedProducts(limit = 5) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -837,7 +838,7 @@ export async function getTopMovedProducts(limit = 5) {
 export async function getCategoryDistribution() {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   return Product.aggregate([
     { $match: { ...baseMatch, status: "active" } },
@@ -938,7 +939,7 @@ export async function getCheckoutStats() {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const now = new Date();
   const sevenDaysFromNow = new Date();
@@ -1030,7 +1031,7 @@ export async function getUserCheckouts(userId: string, activeOnly = true) {
 export async function getRevenueTrend(months = 6) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const startDate = new Date();
   startDate.setMonth(startDate.getMonth() - months + 1);
@@ -1100,7 +1101,7 @@ export async function getRevenueTrend(months = 6) {
 export async function getExpenseBreakdown() {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const thisMonthStart = new Date();
   thisMonthStart.setDate(1);
@@ -1157,7 +1158,7 @@ export async function getDashboardAlerts() {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const now = new Date();
 
@@ -1333,7 +1334,7 @@ export async function getEmployeeSummary(userId: string) {
   await dbConnect();
   const { companyId, isSuperAdmin } = await getTenantContext();
   const tenantMatch = buildTenantFilter(companyId, isSuperAdmin);
-  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const baseMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const [pendingClaims, approvedClaims, paidClaims, totalAdvances] =
     await Promise.all([

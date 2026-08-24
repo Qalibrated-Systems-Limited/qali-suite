@@ -4,6 +4,7 @@ import { ObjectId } from "mongodb";
 
 import connectDB from "../../config/dbConnect";
 import { getTenantContext, withTenantScope, buildTenantMatch } from "@/lib/utils/tenant-utils";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 // ============================================
 // REPORT SERVICE - FINANCIAL REPORTS
@@ -225,7 +226,7 @@ export class ReportService {
     const { companyId, isSuperAdmin } = await getTenantContext();
     const tenantMatch = isSuperAdmin
       ? {}
-      : { companyId: new ObjectId(companyId) };
+      : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
     // Single aggregation: group all journal lines by accountId, then lookup account details
     const result = await JournalEntry.aggregate([
@@ -884,7 +885,7 @@ export class ReportService {
     const tenantMatch = isSuperAdmin
       ? {}
       : companyId
-        ? { companyId: new ObjectId(companyId) }
+        ? { companyId: new ObjectId(translateCompanyId(companyId)) }
         : {};
     const accountIds = accounts.map((a) => a._id);
 

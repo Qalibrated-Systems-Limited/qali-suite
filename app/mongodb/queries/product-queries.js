@@ -12,6 +12,7 @@ import {
   inStockCondExpr,
   outOfStockCondExpr,
 } from "@/lib/business-rules";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const { ObjectId } = mongoose.Types;
 const ITEMS_PER_PAGE = 20;
@@ -59,7 +60,7 @@ export async function getStockStats() {
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   // Single pass over the tenant's products, four conditional counts —
   // replaces four parallel countDocuments calls (= four round trips and
@@ -99,7 +100,7 @@ export async function getProductCategories() {
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   // Import Category model dynamically to avoid circular dependency
   const Category = (await import("@/app/models/category")).default;
@@ -124,7 +125,7 @@ export const searchStock = async (searchTerm, page = 1, filters = {}) => {
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const skipRecords = (page - 1) * ITEMS_PER_PAGE;
   const safeSearchTerm = sanitizeSearchTerm(searchTerm);
@@ -161,7 +162,7 @@ export const fetchStockData = async () => {
   await dbConnect();
   // Get tenant context
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const projectStage = {
     $project: {
@@ -204,7 +205,7 @@ export const fetchStockPages = async (searchTerm, filters = {}) => {
   await dbConnect();
 
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId)) };
 
   const safeSearchTerm = sanitizeSearchTerm(searchTerm);
   const additionalFilters = buildProductFilters(filters);

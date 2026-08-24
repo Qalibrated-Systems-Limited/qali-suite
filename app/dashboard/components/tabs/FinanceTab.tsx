@@ -36,6 +36,7 @@ import { ExpenseBreakdownChart } from "../ExpenseBreakdown";
 
 // Utils
 import { formatCurrency } from "@/lib/utils";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 // ============================================
 // FINANCE TAB
@@ -259,7 +260,7 @@ async function PendingPaymentsCard() {
 
   // Tenant scoping - only show company's invoices
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const invoices = await Invoice.find({
     ...tenantMatch,
@@ -346,7 +347,7 @@ async function PendingClaimsCard() {
 
   // Tenant scoping - only show company's claims
   const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(companyId!) };
+  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   const { claims } = await listClaimsPg({
     status: ["submitted", "approved"],

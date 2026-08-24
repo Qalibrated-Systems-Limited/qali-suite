@@ -23,6 +23,7 @@ import {
 import dbConnect from "@/app/config/dbConnect";
 import Project from "../models/project";
 import { emitWebhookEvent } from "@/lib/integrations/webhooks/emitter";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ObjectId = mongoose.Types.ObjectId;
 
@@ -999,7 +1000,7 @@ export async function createInvoice(prevState, formData) {
             id: user.id,
           },
           status: "draft",
-          companyId: new ObjectId(companyId), // Tenant isolation
+          companyId: new ObjectId(translateCompanyId(companyId)), // Tenant isolation
           // Set expiry only for invoices with committed stock
           ...(draftExpiresAt && { draftExpiresAt }),
           // Project linking (optional)
@@ -1575,7 +1576,7 @@ export async function expireStaleInvoices(companyIdFilter = null) {
 
   // Apply tenant scope unless super admin processing all
   if (targetCompanyId) {
-    query.companyId = new ObjectId(targetCompanyId);
+    query.companyId = new ObjectId(translateCompanyId(targetCompanyId));
   } else if (!isSuperAdmin) {
     return {
       success: false,
@@ -1669,7 +1670,7 @@ export async function getExpiringInvoices(daysWarning = 3) {
   };
 
   if (companyId) {
-    query.companyId = new ObjectId(companyId);
+    query.companyId = new ObjectId(translateCompanyId(companyId));
   }
 
   try {

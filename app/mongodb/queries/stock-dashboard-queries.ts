@@ -8,6 +8,7 @@ import {
   getTenantContext,
   withTenantScope,
 } from "../../../lib/utils/tenant-utils";
+import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 const ObjectId = mongoose.Types.ObjectId;
 
@@ -21,7 +22,7 @@ function aggTenantMatch(
 ): Record<string, unknown> {
   if (isSuperAdmin) return {};
   if (!companyId) throw new Error("companyId required for non-SuperAdmin user");
-  return { companyId: new ObjectId(companyId) };
+  return { companyId: new ObjectId(translateCompanyId(companyId)) };
 }
 
 // ============================================
