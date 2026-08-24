@@ -435,6 +435,13 @@
       "when": 1787049134566,
       "tag": "0061_opening_balances",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1787049135566,
+      "tag": "0062_categories",
+      "breakpoints": true
     }
   ]
 }
