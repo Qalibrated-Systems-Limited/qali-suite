@@ -49,6 +49,8 @@ export default defineConfig({
     // Mirror tsconfig.json paths so test files can use `@/...` imports.
     alias: {
       "@": __dirname,
+      // Next supplies this at build time; see tests/helpers/server-only-stub.mjs.
+      "server-only": path.resolve(__dirname, "tests/helpers/server-only-stub.mjs"),
     },
   },
   test: {
