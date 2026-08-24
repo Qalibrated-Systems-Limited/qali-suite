@@ -112,7 +112,11 @@ suite("logins", () => {
       const id = await makeUser({ role: "Employee" });
       const before = await userAdmin.getUserStatusAndVersion(id);
 
-      const result = await userAdmin.adminUpdateUser({ id, role: "Admin" });
+      const result = await userAdmin.adminUpdateUser({
+        id,
+        role: "Admin",
+        companyId: companyA,
+      });
       const after = await userAdmin.getUserStatusAndVersion(id);
 
       expect(result.roleChanged).toBe(true);
@@ -239,6 +243,321 @@ suite("logins", () => {
         usersRepo.getUserStats(tx));
       expect(stats.total).toBe(2);
       expect(stats.admins).toBe(1);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  describe("platform staff are not members", () => {
+    const grantVia = (userId, companyId, via, role = null) =>
+      admin`INSERT INTO user_company_access (user_id, company_id, role, granted_via)
+            VALUES (${userId}, ${companyId}, ${role}, ${via})
+            ON CONFLICT (user_id, company_id) DO UPDATE
+              SET granted_via = EXCLUDED.granted_via, role = EXCLUDED.role`;
+
+    it("hides a standing SuperAdmin grant from the tenant's user list", async () => {
+      const me = await makeUser({ name: "Werner", grantIn: companyA });
+      const platform = await makeUser({
+        name: "Platform Staff",
+        role: "SuperAdmin",
+        companyId: null,
+        grantIn: null,
+      });
+      await grantVia(platform, companyA, "superadmin");
+
+      const { rows } = await asTenantUser(companyA, me, (tx) =>
+        usersRepo.searchUsers(tx, {}),
+      );
+
+      // A support operator holding standing access is not a colleague, and no
+      // other ERP shows them as one. 0064.
+      expect(rows.map((r) => r.name)).toEqual(["Werner"]);
+    });
+
+    it("still shows platform staff THEMSELVES, via own_row", async () => {
+      const me = await makeUser({ name: "Werner", grantIn: companyA });
+      const platform = await makeUser({
+        name: "Platform Staff",
+        role: "SuperAdmin",
+        companyId: null,
+        grantIn: null,
+      });
+      await grantVia(platform, companyA, "superadmin");
+
+      const { rows } = await asTenantUser(companyA, platform, (tx) =>
+        usersRepo.searchUsers(tx, {}),
+      );
+
+      // Hiding them from everyone else must not hide them from themselves, or
+      // a SuperAdmin cannot operate inside the tenant they just entered.
+      expect(rows.map((r) => r.name).sort()).toEqual(["Platform Staff", "Werner"]);
+    });
+
+    it("still shows a real membership granted BY platform staff", async () => {
+      const me = await makeUser({ name: "Werner", grantIn: companyA });
+      const invited = await makeUser({ name: "Invited", grantIn: null });
+      await grantVia(invited, companyA, "invite");
+
+      const { rows } = await asTenantUser(companyA, me, (tx) =>
+        usersRepo.searchUsers(tx, {}),
+      );
+
+      // The test is granted_via, not who did the granting.
+      expect(rows.map((r) => r.name).sort()).toEqual(["Invited", "Werner"]);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  describe("a role belongs to a membership", () => {
+    it("resolves the session's role per company, so the nav matches the grant", async () => {
+      // The bug this covers: an admin promotes somebody to HR Manager, which
+      // since 0064 writes the GRANT only. The JWT read users.role, so every
+      // canSee*Nav gate saw the old role and the HR module stayed hidden.
+      const id = await makeUser({ role: "Employee", grantIn: companyA });
+      await userAdmin.adminUpdateUser({
+        id,
+        role: "HR Manager",
+        companyId: companyA,
+      });
+
+      expect(await userAdmin.resolveRoleForCompany(id, companyA)).toBe(
+        "HR Manager",
+      );
+      // users.role is untouched by a per-company change — that is the point.
+      const [u] = await admin`SELECT role FROM users WHERE id = ${id}`;
+      expect(u.role).toBe("Employee");
+    });
+
+    it("falls back to the global role where there is no grant", async () => {
+      const id = await makeUser({ role: "Admin", grantIn: companyA });
+      expect(await userAdmin.resolveRoleForCompany(id, companyB)).toBe("Admin");
+      expect(await userAdmin.resolveRoleForCompany(id, null)).toBe("Admin");
+    });
+
+    it("shows the role for THIS company, not the global one", async () => {
+      const me = await makeUser({ name: "Me", role: "Admin", grantIn: companyA });
+      const other = await makeUser({ name: "Dual", role: "Employee", grantIn: null });
+      await admin`INSERT INTO user_company_access (user_id, company_id, role, granted_via)
+                  VALUES (${other}, ${companyA}, 'Accountant', 'invite'),
+                         (${other}, ${companyB}, 'Store Manager', 'invite')`;
+
+      const inA = await asTenantUser(companyA, me, (tx) =>
+        usersRepo.searchUsers(tx, { query: "Dual" }),
+      );
+      // Their global role says Employee and it is true in neither company.
+      expect(inA.rows[0].role).toBe("Accountant");
+      expect(inA.rows[0].globalRole).toBe("Employee");
+    });
+
+    it("does not duplicate a user who holds grants in several companies", async () => {
+      // own_grants (0033) shows you YOUR OWN grants everywhere, so the join
+      // behind the role column matches more than one row for the current user
+      // unless it names the company.
+      const me = await makeUser({ name: "Me", grantIn: companyA });
+      await admin`INSERT INTO user_company_access (user_id, company_id, role, granted_via)
+                  VALUES (${me}, ${companyB}, 'CFO', 'invite')`;
+
+      const { rows, total } = await asTenantUser(companyA, me, (tx) =>
+        usersRepo.searchUsers(tx, {}),
+      );
+      expect(rows.filter((r) => r.name === "Me")).toHaveLength(1);
+      expect(total).toBe(1);
+    });
+
+    it("filters on the role the list displays", async () => {
+      const me = await makeUser({ name: "Me", role: "Admin", grantIn: companyA });
+      const acct = await makeUser({ name: "Acct", role: "Employee", grantIn: null });
+      await admin`INSERT INTO user_company_access (user_id, company_id, role, granted_via)
+                  VALUES (${acct}, ${companyA}, 'Accountant', 'invite')`;
+
+      // Filtering on u.role would have found nobody while the column beside
+      // the filter plainly said Accountant.
+      const hit = await asTenantUser(companyA, me, (tx) =>
+        usersRepo.searchUsers(tx, { role: "Accountant" }),
+      );
+      expect(hit.rows.map((r) => r.name)).toEqual(["Acct"]);
+
+      const miss = await asTenantUser(companyA, me, (tx) =>
+        usersRepo.searchUsers(tx, { role: "Employee" }),
+      );
+      expect(miss.rows.map((r) => r.name)).not.toContain("Acct");
+    });
+
+    it("changes the role for the acting company only", async () => {
+      const id = await makeUser({ name: "Dual", role: "Employee", grantIn: null });
+      await admin`INSERT INTO user_company_access (user_id, company_id, role, granted_via)
+                  VALUES (${id}, ${companyA}, 'Accountant', 'invite'),
+                         (${id}, ${companyB}, 'Accountant', 'invite')`;
+
+      await userAdmin.adminUpdateUser({ id, role: "CFO", companyId: companyA });
+
+      const rows = await admin`
+        SELECT company_id, role FROM user_company_access WHERE user_id = ${id}`;
+      const byCompany = Object.fromEntries(rows.map((r) => [r.company_id, r.role]));
+      expect(byCompany[companyA]).toBe("CFO");
+      // Promoting somebody here is not promoting them everywhere they work.
+      expect(byCompany[companyB]).toBe("Accountant");
+
+      const [u] = await admin`SELECT role FROM users WHERE id = ${id}`;
+      expect(u.role).toBe("Employee");
+    });
+
+    it("treats SuperAdmin as an identity-level change, not a membership one", async () => {
+      const id = await makeUser({ name: "Promoted", role: "Admin", grantIn: companyA });
+
+      await userAdmin.adminUpdateUser({ id, role: "SuperAdmin", companyId: companyA });
+
+      const [u] = await admin`SELECT role FROM users WHERE id = ${id}`;
+      expect(u.role).toBe("SuperAdmin");
+      // Per-company copies would survive the platform role being taken away,
+      // which is exactly what tenant.ts:241 warns about.
+      const [g] = await admin`
+        SELECT role FROM user_company_access
+         WHERE user_id = ${id} AND company_id = ${companyA}`;
+      expect(g.role).not.toBe("SuperAdmin");
+    });
+
+    it("gives the edit form the same role the list showed", async () => {
+      const me = await makeUser({ name: "Me", role: "Admin", grantIn: companyA });
+      const id = await makeUser({ name: "Dual", role: "Employee", grantIn: null });
+      await admin`INSERT INTO user_company_access (user_id, company_id, role, granted_via)
+                  VALUES (${id}, ${companyA}, 'Accountant', 'invite')`;
+
+      const row = await asTenantUser(companyA, me, (tx) =>
+        usersRepo.getUser(tx, id),
+      );
+
+      // The list said Accountant. If this said Employee, opening the form and
+      // saving it unchanged would write Employee onto the grant.
+      expect(row.role).toBe("Accountant");
+      expect(row.globalRole).toBe("Employee");
+    });
+
+    it("returns the dates the edit form renders", async () => {
+      const me = await makeUser({ name: "Me", grantIn: companyA });
+      const row = await asTenantUser(companyA, me, (tx) =>
+        usersRepo.getUser(tx, me),
+      );
+      // shape() dropped both, so "Created" and "Last updated" read N/A for
+      // every user on the edit page.
+      expect(row.createdAt).toBeInstanceOf(Date);
+      expect(row.updatedAt).toBeInstanceOf(Date);
+    });
+
+    it("stores status lowercase, which is what the form must offer", async () => {
+      const me = await makeUser({ name: "Me", grantIn: companyA, status: "Active" });
+      const row = await asTenantUser(companyA, me, (tx) =>
+        usersRepo.getUser(tx, me),
+      );
+      // The form's Select offered "Active"/"Inactive" and matched neither, so
+      // the Status field rendered blank on every user and the schema rejected
+      // the row's own value on submit.
+      expect(row.status).toBe("active");
+    });
+
+    it("refuses a role change with no company rather than dropping it", async () => {
+      const id = await makeUser({ role: "Employee", grantIn: companyA });
+      await expect(
+        userAdmin.adminUpdateUser({ id, role: "Accountant" }),
+      ).rejects.toThrow(/granted within a company/i);
+    });
+
+    it("refuses a role change for a company the user is not a member of", async () => {
+      // Granted in A, edited from B. The UPDATE matches no row, so without the
+      // check this reported success and changed nothing.
+      const id = await makeUser({ role: "Employee", grantIn: companyA });
+      await expect(
+        userAdmin.adminUpdateUser({ id, role: "Accountant", companyId: companyB }),
+      ).rejects.toThrow(/not a member of this company/i);
+
+      const [g] = await admin`
+        SELECT role FROM user_company_access
+         WHERE user_id = ${id} AND company_id = ${companyA}`;
+      expect(g.role).toBeNull();
+    });
+
+    it("refuses to write a role onto a standing platform grant", async () => {
+      // A SuperAdmin is hidden from the user list but still sees THEMSELVES
+      // via own_row, so their own edit page is reachable inside a tenant.
+      const id = await makeUser({ role: "SuperAdmin", grantIn: null });
+      await admin`INSERT INTO user_company_access (user_id, company_id, granted_via)
+                  VALUES (${id}, ${companyA}, 'superadmin')`;
+
+      await expect(
+        userAdmin.adminUpdateUser({ id, role: "Admin", companyId: companyA }),
+      ).rejects.toThrow(/platform access, not a membership/i);
+
+      // A per-company copy would outlive the SuperAdmin role being revoked.
+      const [g] = await admin`
+        SELECT role FROM user_company_access
+         WHERE user_id = ${id} AND company_id = ${companyA}`;
+      expect(g.role).toBeNull();
+      const [u] = await admin`SELECT role FROM users WHERE id = ${id}`;
+      expect(u.role).toBe("SuperAdmin");
+    });
+
+    it("saves nothing at all when the role is refused", async () => {
+      // The name and email of the same edit must not survive a refusal.
+      const id = await makeUser({ name: "Original", role: "Employee", grantIn: companyA });
+      await expect(
+        userAdmin.adminUpdateUser({
+          id,
+          name: "Renamed",
+          role: "Accountant",
+          companyId: companyB,
+        }),
+      ).rejects.toThrow();
+
+      const [u] = await admin`SELECT name FROM users WHERE id = ${id}`;
+      expect(u.name).toBe("Original");
+    });
+
+    it("puts the invited role on the GRANT, not only on the identity", async () => {
+      const inviter = await makeUser({ name: "Inviter", grantIn: companyA });
+      const id = randomUUID();
+
+      await userAdmin.createUserFromInvite({
+        id,
+        name: "Newcomer",
+        email: `${id.slice(0, 8)}@example.com`,
+        role: "Accountant",
+        companyId: companyA,
+        invitedById: inviter,
+        invitedByName: "Inviter",
+      });
+
+      const [g] = await admin`
+        SELECT role, granted_via, granted_by_id FROM user_company_access
+         WHERE user_id = ${id} AND company_id = ${companyA}`;
+
+      // The invite named a role for THIS company. Landing it only on
+      // users.role made it apply everywhere they were ever granted.
+      expect(g.role).toBe("Accountant");
+      expect(g.granted_via).toBe("invite");
+      // A USER id, not the invitation's — that column is where 0036 puts a
+      // foreign key, and an invite id would fail it.
+      expect(g.granted_by_id).toBe(inviter);
+
+      const [u] = await admin`SELECT created_by_id FROM users WHERE id = ${id}`;
+      expect(u.created_by_id).toBe(inviter);
+    });
+
+    it("ends sessions when the role changed only on the GRANT", async () => {
+      const id = await makeUser({ name: "Dual", role: "Employee", grantIn: null });
+      await admin`INSERT INTO user_company_access (user_id, company_id, role, granted_via)
+                  VALUES (${id}, ${companyA}, 'Accountant', 'invite')`;
+      const before = await userAdmin.getUserStatusAndVersion(id);
+
+      // Employee -> Accountant is no change at all if you compare against
+      // users.role, and the demoted session would live out its eight hours.
+      const result = await userAdmin.adminUpdateUser({
+        id,
+        role: "Employee",
+        companyId: companyA,
+      });
+
+      expect(result.roleChanged).toBe(true);
+      const after = await userAdmin.getUserStatusAndVersion(id);
+      expect(after.tokenVersion).toBe(before.tokenVersion + 1);
     });
   });
 });

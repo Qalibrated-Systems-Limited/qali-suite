@@ -59,9 +59,9 @@ const roleColors = {
 };
 
 const statusColors = {
-  Active:
+  active:
     "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
-  Inactive:
+  inactive:
     "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20",
 };
 

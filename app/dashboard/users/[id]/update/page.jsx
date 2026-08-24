@@ -55,21 +55,8 @@ async function EditUserPage(props) {
     );
   }
 
-  // Fetch user data
-  let user = await getUserByIdPg(userId);
-
-  if (!user) {
-    return notFound();
-  } else {
-    user = {
-      ...user,
-      cart: [],
-      _id: user._id.toString(),
-      companyId: user.companyId?.toString() || "",
-      createdAt: user.createdAt?.toString(),
-      updatetAt: user.updatetAt?.toString(),
-    };
-  }
+  const user = await getUserByIdPg(userId);
+  if (!user) return notFound();
 
   // Fetch companies for SuperAdmin
   let companies = [];

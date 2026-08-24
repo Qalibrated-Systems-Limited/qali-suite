@@ -309,6 +309,54 @@ but it is in the file you will be editing.
 
 ---
 
+## Who a user is, and what they may do
+
+Two separate questions, answered by two tables, and conflating them is the
+mistake this model exists to prevent.
+
+**`users` is the identity.** A person, globally: name, email, credentials. Its
+`role` column is now only meaningful for one value — `SuperAdmin`, which is what
+makes somebody platform staff.
+
+**`user_company_access` is the membership.** One row per person per company,
+and it carries the ROLE THEY HOLD THERE. `withAuthorizedTenant` resolves
+`COALESCE(grant.role, users.role)` and re-checks the allow-list against it, so
+the same person can be an Accountant in one company and a Store Manager in
+another. Reading or writing a role means reading or writing the grant — since
+0064, a role written only to `users.role` is overruled by the grant and the edit
+silently does nothing. `adminUpdateUser` therefore REFUSES a role change with no
+company rather than dropping it.
+
+**`granted_via` says why the row exists**, and two values mean different things:
+
+| granted_via | what it is | in the tenant's user list? |
+|---|---|---|
+| `invite`, `primary`, `manual` | a real membership | yes |
+| `superadmin` | standing platform access | **no** |
+
+Platform staff hold every tenant — `grantAllTenants` tops them up — so without
+that distinction a SuperAdmin appears in every customer's user list as an
+ordinary colleague. `visible_within_company` on `users` excludes them (0064);
+the `own_row` policy still shows them to themselves, so they can operate inside
+a tenant they have entered.
+
+**The company ACCESS LIST is deliberately the other way round** and still shows
+platform grants. Two surfaces, two questions:
+
+    /dashboard/users        "who works here"            platform staff hidden
+    company access list     "who can open these books"  platform staff shown
+
+The second is the audit record — `tenant.ts` chose a dated, named, revocable row
+over a role check scattered through the code precisely so it can answer "who
+could read these books in March". Do not "tidy" platform grants out of it.
+
+**Status is lowercase**, with a CHECK (0036). Components comparing against
+`"Active"` match nothing — that has now produced the same bug three times: a
+Select that renders blank, a badge with no colour, and a filter that finds
+nobody.
+
+---
+
 ## The one rule
 
 **Never write a `companyId` filter.** Tenant isolation is row-level security,
@@ -384,7 +432,35 @@ or add it there first.
 
 ---
 
-## Three things that bite
+## Four things that bite
+
+**0. A timestamp off a raw `execute()` is a STRING.** `r.created_at as Date` is
+a cast, not a conversion — it silences the compiler and hands a string to a
+field the interface swears is a `Date`. Use `toDate()` from
+`app/db/repositories/sqlHelpers.ts`.
+
+Importing `drizzle-orm/postgres-js` replaces postgres.js's date parsers
+globally, so drizzle can map columns from the schema itself. It does that for
+`db.select()`. It cannot for `tx.execute(sql`…`)`, which has no schema to map
+against, so those columns arrive exactly as Postgres printed them:
+`2026-08-24 10:20:47.538458+00`.
+
+The failure never lands where the bug is. It surfaces as
+`.toLocaleDateString is not a function` on some page, or a date-fns call quietly
+returning `Invalid Date`. Twenty-two of these were live across six
+repositories — accounts, assets, claims, fulfilment, quotes and users — and the
+only one anything caught was the edit page rendering "N/A" for Created and Last
+updated on every user.
+
+Check it rather than trusting the type:
+
+```js
+const [r] = await db.execute(sql`SELECT now() AS t`);
+r.t instanceof Date   // false
+```
+
+Probe it in a script that never imports drizzle and you will get `Date` and
+prove nothing — the global override is what makes this real.
 
 **1. Do not call a server action from an API route.** They are `"use server"`
 functions taking `(prevState, FormData)`, and they read a NextAuth session

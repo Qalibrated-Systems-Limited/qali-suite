@@ -9,6 +9,7 @@ import {
   updateAvatar,
   createUserFromInvite,
   syncUser,
+  resolveRoleForCompany,
 } from "./app/db/userAdmin";
 import { findOpenInviteForEmail, acceptInvite } from "./app/db/inviteAdmin";
 import { linkUserToPartyDirect } from "./app/db/userAdmin";
@@ -283,7 +284,23 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
             String(token.id),
             String(requested),
           );
-          if (ok) token.activeCompanyId = String(requested);
+          if (ok) {
+            token.activeCompanyId = String(requested);
+            // THE ROLE FOLLOWS THE COMPANY. It is per-membership since 0064, so
+            // somebody who is an Accountant here and a Store Manager there must
+            // not carry the first role into the second company's nav.
+            const { resolveRoleForCompany } = await import(
+              "@/app/db/userAdmin"
+            );
+            const role = await resolveRoleForCompany(
+              String(token.id),
+              String(requested),
+            );
+            if (role) {
+              token.role = role;
+              if (token.user) token.user = { ...token.user, role };
+            }
+          }
         } catch {
           // Leave the token unchanged rather than granting on an error.
         }
@@ -314,7 +331,20 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
 
       // For credentials login — user object has all the data we need
       if (user && account?.provider === "credentials") {
+        // Except the role, which is per-company since 0064. `authorize` read
+        // the identity's global role; the session needs the one held in the
+        // company being entered.
         token.role = user.role;
+        try {
+          const { resolveRoleForCompany } = await import("@/app/db/userAdmin");
+          const scoped = await resolveRoleForCompany(
+            String(user.id),
+            user.companyId ? String(user.companyId) : null,
+          );
+          if (scoped) token.role = scoped;
+        } catch {
+          // The global role is the documented fallback; keep it.
+        }
         token.id = user.id;
         token.avatar = user.image;
         token.companyId = user.companyId;
@@ -326,7 +356,9 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
         token.maxUsers = user.maxUsers;
         token.tokenVersion = user.tokenVersion ?? 0;
         token.planRefreshedAt = Date.now();
-        token.user = user;
+        // The scoped role, not `user.role` — `session.user.role` is read from
+        // here by every nav gate.
+        token.user = { ...user, role: token.role };
       }
 
       // For Google OAuth — read the login back, now from Postgres. The signIn
@@ -354,7 +386,12 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
             currentPeriodEnd = sub?.currentPeriodEnd?.toISOString() || null;
             maxUsers = sub?.maxUsers ?? 5;
           }
-          token.role = dbUser.role;
+          // Per-company since 0064, same as the credentials path above.
+          token.role =
+            (await resolveRoleForCompany(
+              dbUser.id,
+              dbUser.homeCompanyId ?? null,
+            ).catch(() => null)) ?? dbUser.role;
           token.id = dbUser.id;
           token.avatar = dbUser.avatar || user.image;
           token.companyId = dbUser.homeCompanyId ?? undefined;
@@ -369,7 +406,7 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
           token.user = {
             id: dbUser.id,
             name: dbUser.name,
-            role: dbUser.role,
+            role: token.role,
             email: dbUser.email,
             image: dbUser.avatar || user.image,
             companyId: dbUser.homeCompanyId ?? undefined,

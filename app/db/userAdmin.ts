@@ -187,6 +187,39 @@ export async function findUserForSignIn(email: string) {
   };
 }
 
+/**
+ * The role this user holds IN ONE COMPANY — what the session must carry.
+ *
+ * `COALESCE(grant.role, users.role)`, the same resolution `withAuthorizedTenant`
+ * performs, so a nav gate and the server action behind it cannot disagree.
+ *
+ * WITHOUT THIS THE SESSION IS THE GLOBAL ROLE, and since 0064 that is the
+ * column nothing authoritative is written to. `adminUpdateUser` writes a
+ * per-company role to the GRANT, so promoting somebody to HR Manager left
+ * `users.role` at its old value; the JWT read that column, every
+ * `canSee*Nav(user.role)` gate saw the old role, and the HR module stayed
+ * hidden from the person who had just been given it. Revoking their sessions
+ * did not help — they signed in again and got the same stale role.
+ *
+ * Privileged because auth runs before any tenant scope exists.
+ */
+export async function resolveRoleForCompany(
+  userId: string,
+  companyId: string | null | undefined,
+): Promise<string | null> {
+  if (!userId) return null;
+  const rows = (await privilegedDb().execute(sql`
+    SELECT COALESCE(a.role, u.role) AS role
+      FROM users u
+      LEFT JOIN user_company_access a
+        ON a.user_id = u.id
+       AND a.status = 'active'
+       AND a.company_id = ${companyId ?? null}::uuid
+     WHERE u.id = ${String(userId)}
+  `)) as unknown as Array<{ role: string }>;
+  return rows.length ? String(rows[0].role) : null;
+}
+
 /** The session-freshness check reads this on privileged routes. */
 export async function getTokenVersion(userId: string): Promise<number | null> {
   const rows = (await privilegedDb().execute(sql`
@@ -237,12 +270,20 @@ export async function createUserFromInvite(input: {
 
   // The grant is what actually lets them in; a user row without one is a login
   // that can sign in and open nothing.
+  //
+  // AND IT CARRIES THE ROLE. The invite named a role for THIS company, and it
+  // used to land only on `users.role`, which is global — so someone invited as
+  // an Accountant here was an Accountant in every company they were ever
+  // granted, decided by nobody. `withAuthorizedTenant` has always preferred the
+  // grant's role and fallen back to the global one; this is what makes the
+  // preference mean something. See 0064.
   await privilegedDb().execute(sql`
-    INSERT INTO user_company_access (user_id, company_id, granted_via,
+    INSERT INTO user_company_access (user_id, company_id, role, granted_via,
                                      granted_by_id, granted_by_name)
-    VALUES (${input.id}, ${input.companyId}::uuid, 'invite',
+    VALUES (${input.id}, ${input.companyId}::uuid, ${input.role}, 'invite',
             ${input.invitedById ?? null}, ${input.invitedByName ?? null})
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (user_id, company_id) DO UPDATE
+      SET role = EXCLUDED.role, status = 'active', updated_at = now()
   `);
 }
 
@@ -334,6 +375,21 @@ async function revokeSessions(userId: string) {
   `);
 }
 
+/**
+ * Edits a user, and changes their role WHERE THE EDITOR IS STANDING.
+ *
+ * Since 0064 the authoritative role is the one on the membership, so a role
+ * written only to `users.role` would be overruled by the grant and the edit
+ * would appear to do nothing. `companyId` is therefore not optional in
+ * practice: it says which membership the new role applies to.
+ *
+ * SUPERADMIN IS THE EXCEPTION, because it is not a role within a company —
+ * it is what makes someone platform staff, and it is what grantAllTenants and
+ * the standing-access path read. Promoting or demoting it is an identity-level
+ * change and goes to `users.role`; every other role is per-company and goes to
+ * the grant. Granting SuperAdmin per-company would also survive the role being
+ * taken away, which is the thing tenant.ts:241 warns about.
+ */
 export async function adminUpdateUser(input: {
   id: string;
   name?: string | null;
@@ -341,6 +397,8 @@ export async function adminUpdateUser(input: {
   role?: string | null;
   department?: string | null;
   status?: string | null;
+  /** The company whose membership this role applies to. */
+  companyId?: string | null;
 }) {
   const email = input.email ? String(input.email).toLowerCase().trim() : null;
   const status = input.status
@@ -348,20 +406,88 @@ export async function adminUpdateUser(input: {
     : null;
 
   const [before] = (await privilegedDb().execute(sql`
-    SELECT role, status FROM users WHERE id = ${String(input.id)}
-  `)) as unknown as Array<{ role: string; status: string }>;
+    SELECT u.role AS global_role, u.status,
+           a.role AS grant_role, a.granted_via
+      FROM users u
+      LEFT JOIN user_company_access a
+        ON a.user_id = u.id
+       AND a.company_id = ${input.companyId ?? null}::uuid
+     WHERE u.id = ${String(input.id)}
+  `)) as unknown as Array<{
+    global_role: string;
+    status: string;
+    grant_role: string | null;
+    granted_via: string | null;
+  }>;
   if (!before) throw new Error("That user no longer exists.");
+
+  const isPlatformRole = input.role === "SuperAdmin";
+  const perCompanyRole = input.role && !isPlatformRole ? input.role : null;
+
+  // REFUSED RATHER THAN DROPPED. Since 0064 a per-company role has exactly one
+  // place to go, and without a company there is no membership to write it to.
+  // Writing it to `users.role` instead would be worse than failing: the grant
+  // would go on overruling it, so the edit would report success and change
+  // nothing anyone could observe.
+  if (perCompanyRole && !input.companyId) {
+    throw new Error(
+      "A role is granted within a company. No company was given for this change.",
+    );
+  }
+
+  /**
+   * BOTH CHECKS RUN BEFORE THE FIRST WRITE, so a refused role change cannot
+   * leave the name and email of the same edit already saved.
+   *
+   * No membership. The UPDATE below would match no row and report success —
+   * the silent drop the refusal above exists to prevent, arriving by the other
+   * door. Reachable whenever the grant is in a different company from the one
+   * the editor is standing in.
+   */
+  if (perCompanyRole && !before.granted_via) {
+    throw new Error(
+      "That user is not a member of this company, so there is no membership to give the role to.",
+    );
+  }
+
+  /**
+   * A STANDING PLATFORM GRANT IS NOT A MEMBERSHIP TO EDIT.
+   *
+   * 0064 keeps `granted_via = 'superadmin'` rows NULL deliberately: their
+   * authority is the global SuperAdmin role, and a per-company copy would
+   * outlive that role being taken away. Writing a role here would also make
+   * `withAuthorizedTenant` resolve platform staff to it inside that one tenant
+   * while `users.role` still said SuperAdmin.
+   *
+   * Reachable, because 0064 hides platform staff from the user list but the
+   * `own_row` policy still shows them THEMSELVES: a SuperAdmin opening their
+   * own edit page inside a tenant and picking any other role lands here.
+   */
+  if (perCompanyRole && before.granted_via === "superadmin") {
+    throw new Error(
+      "That is platform access, not a membership. Change the SuperAdmin role itself rather than giving it a role inside one company.",
+    );
+  }
 
   await privilegedDb().execute(sql`
     UPDATE users
        SET name       = COALESCE(${input.name ?? null}, name),
            email      = COALESCE(${email}, email),
-           role       = COALESCE(${input.role ?? null}, role),
+           role       = COALESCE(${isPlatformRole ? input.role : null}, role),
            department = COALESCE(${input.department ?? null}, department),
            status     = COALESCE(${status}, status),
            updated_at = now()
      WHERE id = ${String(input.id)}
   `);
+
+  if (perCompanyRole) {
+    await privilegedDb().execute(sql`
+      UPDATE user_company_access
+         SET role = ${perCompanyRole}, updated_at = now()
+       WHERE user_id = ${String(input.id)}
+         AND company_id = ${input.companyId}::uuid
+    `);
+  }
 
   /**
    * A CHANGE OF PRIVILEGE ENDS THE SESSIONS THAT PREDATE IT.
@@ -371,7 +497,12 @@ export async function adminUpdateUser(input: {
    * token_version makes the freshness check reject it on the next privileged
    * request — seconds, not hours.
    */
-  const roleChanged = input.role != null && input.role !== before.role;
+  // Compared against the EFFECTIVE role — the grant's, falling back to the
+  // global one, which is the same resolution withAuthorizedTenant performs.
+  // Comparing against `users.role` alone would miss a demotion that only moved
+  // the grant, and leave the demoted session alive for its full eight hours.
+  const effectiveBefore = before.grant_role ?? before.global_role;
+  const roleChanged = input.role != null && input.role !== effectiveBefore;
   const statusChanged = status != null && status !== before.status;
   if (roleChanged || statusChanged) await revokeSessions(input.id);
 

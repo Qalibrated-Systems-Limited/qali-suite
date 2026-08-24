@@ -202,6 +202,7 @@ export async function getInviteByTokenPg(rawToken: string) {
     email: invite.email,
     role: invite.role,
     companyId: invite.companyId,
+    invitedById: invite.invitedById,
     invitedByName: invite.invitedByName,
     expiresAt: invite.expiresAt,
   };
@@ -259,7 +260,7 @@ export async function acceptInviteWithPasswordPg(
       companyId: invite.companyId,
       passwordHash: await bcrypt.hash(parsed.data.password, 10),
       authProvider: "credentials",
-      invitedById: invite.id,
+      invitedById: invite.invitedById,
       invitedByName: invite.invitedByName,
     });
 

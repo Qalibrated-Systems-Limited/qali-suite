@@ -23,6 +23,14 @@ export interface AcceptableInvite {
   role: string;
   partyId: string | null;
   expiresAt: Date;
+  /**
+   * The USER who sent it. The accept path records the actor on the login and
+   * the grant it creates, and was passing the INVITE's id instead — so
+   * `created_by_id` and `granted_by_id` named a row in the wrong table. That
+   * is also the column 0036 plans to put a foreign key on, which an invite id
+   * would fail.
+   */
+  invitedById: string | null;
   invitedByName: string;
 }
 
@@ -37,7 +45,8 @@ export async function findAcceptableInvite(
   tokenHash: string,
 ): Promise<AcceptableInvite | null> {
   const rows = (await privilegedDb().execute(sql`
-    SELECT id, company_id, email, role, party_id, expires_at, invited_by_name
+    SELECT id, company_id, email, role, party_id, expires_at,
+           invited_by_id, invited_by_name
       FROM invites
      WHERE token = ${tokenHash}
        AND status = 'pending'
@@ -53,6 +62,7 @@ export async function findAcceptableInvite(
     role: String(r.role),
     partyId: (r.party_id as string) ?? null,
     expiresAt: r.expires_at as Date,
+    invitedById: (r.invited_by_id as string) ?? null,
     invitedByName: String(r.invited_by_name),
   };
 }
@@ -94,7 +104,8 @@ export async function findOpenInviteForEmail(
   email: string,
 ): Promise<AcceptableInvite | null> {
   const rows = (await privilegedDb().execute(sql`
-    SELECT id, company_id, email, role, party_id, expires_at, invited_by_name
+    SELECT id, company_id, email, role, party_id, expires_at,
+           invited_by_id, invited_by_name
       FROM invites
      WHERE lower(email) = ${email.toLowerCase().trim()}
        AND status = 'pending'
@@ -112,6 +123,7 @@ export async function findOpenInviteForEmail(
     role: String(r.role),
     partyId: (r.party_id as string) ?? null,
     expiresAt: r.expires_at as Date,
+    invitedById: (r.invited_by_id as string) ?? null,
     invitedByName: String(r.invited_by_name),
   };
 }

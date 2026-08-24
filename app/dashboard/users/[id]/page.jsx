@@ -44,16 +44,18 @@ export default async function UserDetailsPage({ params, searchParams }) {
     notFound();
   }
 
-  // Non-SuperAdmin can only view users in their own company
-  if (currentUser.role !== "SuperAdmin") {
-    if (user.companyId?.toString() !== currentUser.companyId) {
-      redirect("/dashboard/users");
-    }
-  }
-
+  // THE SCOPE IS THE DATABASE'S JOB. getUserByIdPg runs inside
+  // withAuthorizedTenant, so somebody outside this company comes back null and
+  // notFound() has already fired above — there is nothing left for a
+  // hand-written companyId comparison to catch. See "The one rule" in
+  // docs/BUILDING-ON-POSTGRES.md.
+  //
+  // It also never worked: the row carries `homeCompanyId`, not `companyId`, so
+  // this compared undefined against a value and redirected EVERY non-SuperAdmin
+  // away from EVERY user's detail page.
   let company = null;
-  if (user?.companyId) {
-    company = await getCompanyById(user.companyId);
+  if (user.homeCompanyId) {
+    company = await getCompanyById(user.homeCompanyId);
   }
 
   const initials = user?.name

@@ -50,7 +50,7 @@ const userUpdateSchema = z.object({
   email: z.string().email("Invalid email address"),
   role: z.enum(userRoles),
   department: z.string().optional(),
-  status: z.enum(["Active", "Inactive"]),
+  status: z.enum(["active", "inactive"]),
   companyId: z.string().optional(),
 });
 
@@ -69,13 +69,13 @@ const getAvailableRoles = (isSuperAdmin) => {
 export function EditUserForm({ user, companies = [], isSuperAdmin = false }) {
   const router = useRouter();
   const initialState = { message: "", errors: {} };
-  const updateWithId = updateUserPg.bind(null, user._id);
+  const updateWithId = updateUserPg.bind(null, user.id);
   const [state, dispatch, isPending] = useActionState(
     updateWithId,
     initialState
   );
   const [companyOpen, setCompanyOpen] = useState(false);
-  const [selectedCompanyId, setSelectedCompanyId] = useState(user.companyId || "");
+  const [selectedCompanyId, setSelectedCompanyId] = useState(user.homeCompanyId || "");
 
   const availableRoles = getAvailableRoles(isSuperAdmin);
 
@@ -87,7 +87,7 @@ export function EditUserForm({ user, companies = [], isSuperAdmin = false }) {
       role: user.role,
       department: user.department || "",
       status: user.status,
-      companyId: user.companyId || "",
+      companyId: user.homeCompanyId || "",
     },
   });
 
@@ -430,13 +430,13 @@ export function EditUserForm({ user, companies = [], isSuperAdmin = false }) {
                           </FormControl>
                           <SelectContent className="bg-card border-border">
                             <SelectItem
-                              value="Active"
+                              value="active"
                               className="text-foreground"
                             >
                               Active - User can login
                             </SelectItem>
                             <SelectItem
-                              value="Inactive"
+                              value="inactive"
                               className="text-foreground"
                             >
                               Inactive - User cannot login

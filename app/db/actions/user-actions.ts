@@ -138,7 +138,7 @@ export async function updateUserPg(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    return await withAuthorizedTenant([...ADMIN_ROLES], async () => {
+    return await withAuthorizedTenant([...ADMIN_ROLES], async (_tx, { companyId }) => {
       const result = await adminUpdateUser({
         id: userId,
         name: (formData.get("name") as string) || null,
@@ -146,6 +146,10 @@ export async function updateUserPg(
         role: (formData.get("role") as string) || null,
         department: (formData.get("department") as string) || null,
         status: (formData.get("status") as string) || null,
+        // Which membership the new role applies to. Since 0064 the grant's
+        // role is the authoritative one, so without this a role change would
+        // be written globally and then overruled by the grant.
+        companyId,
       });
       revalidatePath("/dashboard/users");
       revalidatePath(`/dashboard/users/${userId}`);
