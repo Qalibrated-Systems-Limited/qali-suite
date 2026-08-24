@@ -2,9 +2,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileText, Users, AlertTriangle, Clock } from "lucide-react";
 import {
-  getCustomersWithBalances,
-  getAgingSummary,
-} from "@/app/mongodb/queries/statement-queries";
+  listPartiesForStatementsPg,
+  getAgingSummaryPg,
+} from "@/app/db/actions/statement-actions";
 import { StatementGenerator } from "./StatementGenerator";
 import { serializeBsonType } from "@/lib/utils";
 
@@ -24,8 +24,8 @@ const formatCurrency = (amount) => {
 
 export async function StatementStatsCards() {
   const [customers, aging] = await Promise.all([
-    getCustomersWithBalances(),
-    getAgingSummary(),
+    listPartiesForStatementsPg("customer"),
+    getAgingSummaryPg("customer"),
   ]);
 
   return (
@@ -111,7 +111,7 @@ export function StatementStatsSkeleton() {
 // ============================================
 
 export async function ARAgingBreakdown() {
-  const aging = await getAgingSummary();
+  const aging = await getAgingSummaryPg("customer");
 
   return (
     <Card>
@@ -185,7 +185,7 @@ export function ARAgingSkeleton() {
 // ============================================
 
 export async function StatementGeneratorServer() {
-  const customersRaw = await getCustomersWithBalances();
+  const customersRaw = await listPartiesForStatementsPg("customer");
   const customers = serializeBsonType(customersRaw);
 
   return (

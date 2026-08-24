@@ -2,7 +2,7 @@
 
 For anyone adding a feature, an endpoint or a page on top of the port. The
 migration reasoning lives in `POSTGRES-MIGRATION-PLAN.md`; this is the practical
-half — what to call, what not to, and the three things that bite.
+half — what to call, what not to, and the four things that bite.
 
 ---
 
@@ -18,17 +18,24 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 
 | on Postgres | still Mongo (screen files) |
 |---|---|
-| **payments**, hr, claims, assets, expenses, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders | projects 11, integrations 10, tax 8, reports 8, banking 8, components 7, kpis 7, settings 6, stocks 4, leads 4, employee 4, **claims 4**, sales-orders 3, profile 3, opportunities 3, admin 3, **statements 2**, **supplier-statements 2**, movements 2 |
+| **statements**, **supplier-statements**, payments, hr, claims, assets, expenses, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders | projects 11, integrations 10, tax 8, reports 8, banking 8, components 7, kpis 7, settings 6, stocks 4, leads 4, employee 4, **claims 4**, sales-orders 3, profile 3, opportunities 3, admin 3, movements 2 |
 
-**STATEMENTS AND SUPPLIER-STATEMENTS WERE LISTED HERE AS DONE AND ARE NOT.**
-Both read `app/mongodb/queries/statement-queries.js`, which queries the MONGO
-`Invoice`, `Bill`, `Party` and `Payment` models while pulling credit notes from
-Postgres. Every one of those four moved long ago, and
-`app/mongodb/invoice-actions.js` — the only thing that still writes a Mongo
-invoice — has no screen importer, so the collections it reads are not merely
-stale, they are unwritten. The statements have been rendering an empty ledger.
-Caught only by grepping the MODEL names rather than trusting this table, which
-is the lesson two sections down, arriving late.
+**STATEMENTS AND SUPPLIER-STATEMENTS ARE NOW GENUINELY DONE.** They were listed
+here as done once before while reading `statement-queries.js`, which summed the
+MONGO `Invoice`, `Bill`, `Party` and `Payment` models — all four of which had
+moved — so both screens rendered an empty ledger. That file is deleted.
+
+They are now derived from the LEDGER rather than from documents:
+`reports.getStatementOfAccount` walks `journal_entries` against the AR or AP
+control account and runs the balance as a window function, with the opening
+balance summed in the same query. Summing documents means every new document
+type that touches a balance has to be remembered in the statement code, which
+is how credit notes got missed twice; the control account already has all of
+them. `app/db/actions/statement-actions.ts` assembles the shape the four
+screens already destructured, so this was a change of source, not a redesign.
+
+The first listing was caught only by grepping the MODEL names rather than
+trusting this table — the lesson two sections down, arriving late.
 
 **Regenerate rather than trust it:**
 

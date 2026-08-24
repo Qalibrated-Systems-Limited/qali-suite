@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getSupplierStatement } from "@/app/mongodb/queries/statement-queries";
+import { getStatementOfAccountPg } from "@/app/db/actions/statement-actions";
 import { getCompanyForDocuments } from "@/app/db/platform";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +11,7 @@ import { SupplierStatementPDFButton } from "../components/SupplierStatementPDFBu
 
 export async function generateMetadata({ params }) {
   const { supplierId } = await params;
-  const statement = await getSupplierStatement(supplierId);
+  const statement = await getStatementOfAccountPg("supplier", supplierId);
 
   if (!statement) {
     return { title: "Statement Not Found" };
@@ -29,7 +29,7 @@ export default async function SupplierStatementDetailPage({ params, searchParams
   const { companyId } = await getTenantContext();
 
   const [statement, company] = await Promise.all([
-    getSupplierStatement(supplierId, startDate, endDate),
+    getStatementOfAccountPg("supplier", supplierId, startDate, endDate),
     getCompanyForDocuments(companyId),
   ]);
 

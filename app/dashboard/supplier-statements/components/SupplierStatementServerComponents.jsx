@@ -2,9 +2,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileText, Users, AlertTriangle, Clock } from "lucide-react";
 import {
-  getSuppliersWithBalances,
-  getAPAgingSummary,
-} from "@/app/mongodb/queries/statement-queries";
+  listPartiesForStatementsPg,
+  getAgingSummaryPg,
+} from "@/app/db/actions/statement-actions";
 import { SupplierStatementGenerator } from "./SupplierStatementGenerator";
 
 // ============================================
@@ -23,8 +23,8 @@ const formatCurrency = (amount) => {
 
 export async function SupplierStatementStatsCards() {
   const [suppliers, aging] = await Promise.all([
-    getSuppliersWithBalances(),
-    getAPAgingSummary(),
+    listPartiesForStatementsPg("supplier"),
+    getAgingSummaryPg("supplier"),
   ]);
 
   return (
@@ -110,7 +110,7 @@ export function SupplierStatementStatsSkeleton() {
 // ============================================
 
 export async function APAgingBreakdown() {
-  const aging = await getAPAgingSummary();
+  const aging = await getAgingSummaryPg("supplier");
 
   return (
     <Card>
@@ -184,7 +184,7 @@ export function APAgingSkeleton() {
 // ============================================
 
 export async function StatementGeneratorServer() {
-  const suppliers = await getSuppliersWithBalances();
+  const suppliers = await listPartiesForStatementsPg("supplier");
 
   return (
     <Card>

@@ -67,16 +67,20 @@ export async function getAgingReport(
         AND e.is_fully_paid = false
     )
     SELECT
-      party_id AS "partyId",
-      NULL::text AS "partyName",
+      a.party_id AS "partyId",
+      -- Named, so callers do not have to fetch the parties separately and
+      -- join them in JavaScript. LEFT so a party deleted since the entry was
+      -- posted still shows its balance rather than dropping out of the total.
+      p.name AS "partyName",
       COALESCE(SUM(amount) FILTER (WHERE days_overdue = 0), 0)::numeric(19,4)          AS "current",
       COALESCE(SUM(amount) FILTER (WHERE days_overdue BETWEEN 1 AND 30), 0)::numeric(19,4)  AS "days0_30",
       COALESCE(SUM(amount) FILTER (WHERE days_overdue BETWEEN 31 AND 60), 0)::numeric(19,4) AS "days31_60",
       COALESCE(SUM(amount) FILTER (WHERE days_overdue BETWEEN 61 AND 90), 0)::numeric(19,4) AS "days61_90",
       COALESCE(SUM(amount) FILTER (WHERE days_overdue > 90), 0)::numeric(19,4)         AS "days90plus",
       COALESCE(SUM(amount), 0)::numeric(19,4)                                          AS "total"
-    FROM aged
-    GROUP BY party_id
+    FROM aged a
+    LEFT JOIN parties p ON p.id = a.party_id
+    GROUP BY a.party_id, p.name
     HAVING SUM(amount) <> 0
     ORDER BY "total" DESC
   `);
@@ -111,6 +115,19 @@ export async function getStatementOfAccount(
     WITH target_account AS (
       SELECT id FROM accounts WHERE system_account = ${systemAccount}
     ),
+    -- EVERYTHING BEFORE THE WINDOW, AS ONE NUMBER. A statement that starts its
+    -- running balance at zero states the wrong debt: what the period opens
+    -- with is the sum of every posted movement before it.
+    opening AS (
+      SELECT COALESCE(SUM(${movement}), 0)::numeric(19,4) AS balance
+        FROM journal_entries e
+        JOIN journal_lines l ON l.entry_id = e.id
+        JOIN target_account ta ON ta.id = l.account_id
+       WHERE e.status = 'posted'
+         AND e.party_type = ${partyType}
+         AND e.party_id = ${partyId}::uuid
+         AND e.entry_date < ${startDate}::date
+    ),
     txns AS (
       SELECT
         e.entry_date,
@@ -119,6 +136,11 @@ export async function getStatementOfAccount(
         e.reference,
         e.due_date,
         e.is_fully_paid,
+        -- What raised the entry, so a row can name itself and link to the
+        -- document. The source_type/source_id pair is kept honest by a CHECK
+        -- (journal.ts): both or neither.
+        e.source_type,
+        e.source_id,
         l.debit,
         l.credit,
         ${movement}::numeric(19,4) AS movement
@@ -137,17 +159,57 @@ export async function getStatementOfAccount(
       reference,
       due_date        AS "dueDate",
       is_fully_paid   AS "isFullyPaid",
+      source_type     AS "sourceType",
+      source_id       AS "sourceId",
       debit,
       credit,
-      SUM(movement) OVER (
+      (o.balance + SUM(movement) OVER (
         ORDER BY entry_date, entry_number
         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-      )::numeric(19,4) AS "balance"
-    FROM txns
+      ))::numeric(19,4) AS "balance"
+    FROM txns, opening o
     ORDER BY entry_date, entry_number
   `);
 
   return rows as unknown as Array<Record<string, unknown>>;
+}
+
+/**
+ * What the party owed before a statement period began.
+ *
+ * The same sum the statement's running balance starts from, available on its
+ * own because the summary block prints it and because a period with no
+ * transactions still has an opening balance to state — and in that case the
+ * statement query returns no rows to carry it.
+ */
+export async function getStatementOpeningBalance(
+  tx: Tx,
+  partyType: "customer" | "supplier",
+  partyId: string,
+  startDate: string,
+): Promise<string> {
+  const systemAccount =
+    partyType === "customer" ? "accounts_receivable" : "accounts_payable";
+  const movement =
+    partyType === "customer"
+      ? sql`(l.debit - l.credit)`
+      : sql`(l.credit - l.debit)`;
+
+  const [row] = (await tx.execute(sql`
+    WITH target_account AS (
+      SELECT id FROM accounts WHERE system_account = ${systemAccount}
+    )
+    SELECT COALESCE(SUM(${movement}), 0)::numeric(19,4) AS balance
+      FROM journal_entries e
+      JOIN journal_lines l ON l.entry_id = e.id
+      JOIN target_account ta ON ta.id = l.account_id
+     WHERE e.status = 'posted'
+       AND e.party_type = ${partyType}
+       AND e.party_id = ${partyId}::uuid
+       AND e.entry_date < ${startDate}::date
+  `)) as unknown as Array<{ balance: string }>;
+
+  return String(row?.balance ?? "0");
 }
 
 /**
