@@ -638,3 +638,14 @@ export const pettyCashReturnStatusEnum = pgEnum("petty_cash_return_status", [
   "approved",
   "rejected",
 ]);
+
+// ── Categories (0062) ────────────────────────────────────────────────────────
+
+/** What kind of value a category's attribute definition expects. */
+export const categoryAttributeTypeEnum = pgEnum("category_attribute_type", [
+  "text",
+  "number",
+  "boolean",
+  "date",
+  "select",
+]);

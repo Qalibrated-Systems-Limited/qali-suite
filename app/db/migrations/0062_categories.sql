@@ -62,8 +62,10 @@ CREATE TABLE "categories" (
   "parent_id" uuid REFERENCES "categories"("id") ON DELETE restrict,
 
   -- Materialised by trigger over the WHOLE subtree, which the Mongo hook does
-  -- only for the row being saved.
-  "path" ltree NOT NULL,
+  -- only for the row being saved. The DEFAULT is a placeholder the BEFORE
+  -- trigger always overwrites — it exists so a caller never has to supply a
+  -- path, which is the point: the tree owns it, not the application.
+  "path" ltree DEFAULT ''::ltree NOT NULL,
   -- Derived, so it cannot disagree with the path it describes. Root is 0,
   -- matching Mongo's `level`.
   "level" integer GENERATED ALWAYS AS (nlevel("path") - 1) STORED,
@@ -86,7 +88,20 @@ CREATE TABLE "categories" (
 CREATE UNIQUE INDEX "categories_sibling_name_uq"
   ON "categories" ("company_id", "parent_id", lower("name")) NULLS NOT DISTINCT;--> statement-breakpoint
 
-CREATE UNIQUE INDEX "categories_slug_uq" ON "categories" ("company_id", "slug");--> statement-breakpoint
+-- Scoped to the PARENT, exactly like the name above — not to the company.
+--
+-- A company-wide slug looks right and is wrong: "Accessories" under Electronics
+-- and "Accessories" under Tools are both legitimate, the sibling-name rule
+-- allows them, and a company-unique slug refuses the second one. Mongo papered
+-- over this by appending "-1" in a query-then-retry loop, which is also how two
+-- concurrent creates both took the same slug.
+--
+-- Nothing reads the slug today — no screen, no query. If a company-wide URL key
+-- is ever wanted it should be derived from the PATH ("electronics-accessories"),
+-- which is unique by construction, rather than from the name with a counter
+-- bolted on.
+CREATE UNIQUE INDEX "categories_slug_uq"
+  ON "categories" ("company_id", "parent_id", "slug") NULLS NOT DISTINCT;--> statement-breakpoint
 
 CREATE INDEX "categories_path_gist" ON "categories" USING gist ("path");--> statement-breakpoint
 CREATE INDEX "categories_parent_idx" ON "categories" ("company_id", "parent_id", "sort_order");--> statement-breakpoint

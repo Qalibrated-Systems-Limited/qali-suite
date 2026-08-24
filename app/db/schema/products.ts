@@ -38,6 +38,15 @@ export const products = pgTable(
     name: text("name").notNull(),
     description: text("description"),
     category: text("category"),
+    /**
+     * The real classification (0062). `category` above stays as the SNAPSHOT
+     * of what the product was filed under — dropping it would rewrite history
+     * on every product the moment a category is renamed.
+     *
+     * RESTRICT: this foreign key is what stops a category with products being
+     * deleted. Mongo guarded that on a cached `productCount`.
+     */
+    categoryId: uuid("category_id"),
     unit: text("unit").notNull().default("pcs"),
     productType: text("product_type").notNull().default("Inventory Item"),
 

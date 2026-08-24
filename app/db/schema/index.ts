@@ -36,3 +36,4 @@ export * from "./assets";
 export * from "./coffee";
 export * from "./expenses";
 export * from "./pettyCash";
+export * from "./categories";
