@@ -1,4 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
+import { toDate } from "./sqlHelpers";
 import type { Tx } from "../client";
 import { quotes, quoteLines } from "../schema/quotes";
 import { documentFlow } from "../schema/documentFlow";
@@ -259,7 +260,7 @@ export async function getQuoteDetail(tx: Tx, quoteId: string) {
       invoiceNumber: String(r.invoice_number),
       amount: Number(r.total),
       status: String(r.status),
-      createdAt: r.created_at as Date,
+      createdAt: toDate(r.created_at)!,
       createdById: (r.created_by_id as string) ?? null,
     })),
     delivery: {

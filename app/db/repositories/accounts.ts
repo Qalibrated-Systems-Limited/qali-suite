@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { toDate } from "./sqlHelpers";
 import type { Tx } from "../client";
 import { accounts } from "../schema";
 
@@ -535,7 +536,7 @@ export async function getAccountLedger(
   return rows.map((r) => ({
     entryId: String(r.entry_id),
     entryNumber: String(r.entry_number),
-    entryDate: r.entry_date as Date,
+    entryDate: toDate(r.entry_date)!,
     description: (r.description as string) ?? null,
     lineDescription: (r.line_description as string) ?? null,
     reference: (r.reference as string) ?? null,
@@ -610,7 +611,7 @@ export async function listAccountDebits(
 
   return rows.map((r) => ({
     entryNumber: String(r.entry_number),
-    entryDate: r.entry_date as Date,
+    entryDate: toDate(r.entry_date)!,
     description: (r.description as string) ?? null,
     amount: String(r.debit ?? "0"),
   }));

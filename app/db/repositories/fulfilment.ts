@@ -1,4 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
+import { toDate } from "./sqlHelpers";
 import { createJournalEntry } from "./journal";
 import type { Tx } from "../client";
 import {
@@ -1598,7 +1599,7 @@ function checkoutRow(r: Record<string, unknown>) {
     _id: String(r.id),
     id: String(r.id),
     checkoutNumber: r.checkout_number as string,
-    checkoutDate: r.checked_out_at as Date,
+    checkoutDate: toDate(r.checked_out_at)!,
     expectedReturnDate: r.expected_return_date as string,
     quantity: Number(r.quantity),
     purpose: r.purpose as string,
@@ -1631,7 +1632,7 @@ function checkoutRow(r: Record<string, unknown>) {
       ? {
           id: (r.escalated_to_id as string) ?? null,
           name: (r.escalated_to_name_at_escalation as string) ?? "",
-          escalatedAt: r.escalated_at as Date,
+          escalatedAt: toDate(r.escalated_at),
           reason: (r.escalation_reason as string) ?? null,
         }
       : null,

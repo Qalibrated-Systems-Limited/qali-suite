@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { anyOf } from "./sqlHelpers";
+import { anyOf, toDate } from "./sqlHelpers";
 import type { Tx } from "../client";
 import {
   employeeClaims,
@@ -111,27 +111,27 @@ function mapClaim(r: Record<string, unknown>) {
     advancePaymentId: s("advance_payment_id"),
     advanceAmount: s("advance_amount"),
     amountReturned: s("amount_returned"),
-    returnRecordedAt: (r.return_recorded_at as Date) ?? null,
+    returnRecordedAt: toDate(r.return_recorded_at),
     returnRecordedByName: s("return_recorded_by_name"),
     amountPaidToEmployee: s("amount_paid_to_employee"),
-    extraPaidAt: (r.extra_paid_at as Date) ?? null,
+    extraPaidAt: toDate(r.extra_paid_at),
     extraPaidByName: s("extra_paid_by_name"),
     currency: String(r.currency),
     description: String(r.description),
     notes: s("notes"),
-    submittedAt: (r.submitted_at as Date) ?? null,
+    submittedAt: toDate(r.submitted_at),
     submittedByName: s("submitted_by_name"),
-    approvedAt: (r.approved_at as Date) ?? null,
+    approvedAt: toDate(r.approved_at),
     approvedByName: s("approved_by_name"),
-    rejectedAt: (r.rejected_at as Date) ?? null,
+    rejectedAt: toDate(r.rejected_at),
     rejectedByName: s("rejected_by_name"),
     rejectionReason: s("rejection_reason"),
     settlementPaymentId: s("settlement_payment_id"),
-    paidAt: (r.paid_at as Date) ?? null,
+    paidAt: toDate(r.paid_at),
     createdById: s("created_by_id"),
     createdByName: s("created_by_name"),
-    createdAt: (r.created_at as Date) ?? null,
-    updatedAt: (r.updated_at as Date) ?? null,
+    createdAt: toDate(r.created_at),
+    updatedAt: toDate(r.updated_at),
     // Derived — see employee_claim_state.
     itemCount: Number(r.item_count ?? 0),
     itemsTotal: s("items_total") ?? "0",

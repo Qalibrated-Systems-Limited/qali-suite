@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { anyOf } from "./sqlHelpers";
+import { anyOf, toDate } from "./sqlHelpers";
 import type { Tx } from "../client";
 import {
   assets,
@@ -313,7 +313,7 @@ function mapAsset(r: Record<string, unknown>) {
       accumulatedDepreciationAccount: s("accumulated_depreciation_account_id"),
       depreciationExpenseAccount: s("depreciation_expense_account_id"),
     },
-    disposedAt: (r.disposed_at as Date) ?? null,
+    disposedAt: toDate(r.disposed_at),
     disposedBy: r.disposed_by_name ? { name: s("disposed_by_name") } : null,
     disposalMethod: s("disposal_method"),
     disposalAmount: n("disposal_amount"),
@@ -333,8 +333,8 @@ function mapAsset(r: Record<string, unknown>) {
     notes: s("notes"),
     createdById: s("created_by_id"),
     createdBy: r.created_by_name ? { name: s("created_by_name") } : null,
-    createdAt: (r.created_at as Date) ?? null,
-    updatedAt: (r.updated_at as Date) ?? null,
+    createdAt: toDate(r.created_at),
+    updatedAt: toDate(r.updated_at),
 
     /**
      * Derived — see `asset_state`. In Mongo these were stored columns set from
@@ -353,7 +353,7 @@ function mapAsset(r: Record<string, unknown>) {
     lastPostedPeriod: s("last_posted_period"),
     nextPendingPeriod: s("next_pending_period"),
     currentUsage: r.current_usage != null ? n("current_usage") : 0,
-    lastReadingAt: (r.last_reading_at as Date) ?? null,
+    lastReadingAt: toDate(r.last_reading_at),
   };
 }
 
@@ -426,7 +426,7 @@ export async function listSchedule(tx: Tx, assetId: string) {
     status: String(r.status),
     journalEntryId: (r.journal_entry_id as string) ?? null,
     entryNumber: (r.entry_number as string) ?? null,
-    postedAt: (r.posted_at as Date) ?? null,
+    postedAt: toDate(r.posted_at),
   }));
 }
 
@@ -1525,7 +1525,7 @@ export async function listFleetUsage(
       bookValue: Number(r.book_value ?? 0),
       acquisitionCost: Number(r.acquisition_cost ?? 0),
       currentUsage: r.current_usage != null ? Number(r.current_usage) : 0,
-      lastReadingAt: (r.last_reading_at as Date) ?? null,
+      lastReadingAt: toDate(r.last_reading_at),
       readingCount: Number(r.reading_count ?? 0),
       /** Distance covered inside the window, not the odometer figure. */
       windowDistance:
