@@ -623,6 +623,30 @@ output. Read the lines.
   had it; the statement derives spend from expenses, so nothing needs a spend
   picker. Same decision to make.
 
+### Two SQL traps that cost a day between them
+
+**`= ANY(${array}::type[])` NEVER WORKS.** drizzle expands a JS array to a
+parameter tuple — `($1, $2)` — and the cast fails with 22P02 "malformed array
+literal". It fails inline, nested, through `sql.join`, and for a single-element
+array. Use `anyOf()` from `app/db/repositories/sqlHelpers.ts`, which builds
+`ARRAY[$1, $2]` from individual params.
+
+It hid behind `if (array.length)` guards at all twelve call sites: the broken
+branch is skipped when the filter is empty, and every suite called those list
+functions with no filter. 77 tests passed identically before and after the fix.
+Meanwhile the dashboard called the broken branch on every load. **Test the
+filtered path** — a list function tested only with no arguments exercises the
+branch that cannot fail.
+
+**`AFTER UPDATE OF column` fires on what the STATEMENT set**, not on what a
+BEFORE trigger changed. The categories path trigger was declared that way and
+never fired, so moving a category stranded its entire subtree — the exact bug
+the trigger existed to prevent. Use `AFTER UPDATE ... WHEN (NEW.x IS DISTINCT
+FROM OLD.x)`.
+
+Both were found by running the code, not by reading it. A migration that
+applies cleanly has proved nothing about its triggers.
+
 ### Environment, before running anything
 
 - **Wrap EVERY Postgres test run in `caffeinate -i`.** Idle sleep does not
