@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useTransition } from "react";
 import { SALES_ORDERS_AVAILABLE } from "@/lib/unported-modules";
+import { planIncludes } from "@/lib/plans";
 import { useRouter } from "next/navigation";
 import {
   CommandDialog,
@@ -93,28 +94,28 @@ const PAGES = [
   { label: "Operating Expenses", href: "/dashboard/expenses", icon: Wallet, category: "Expenses", aliases: ["expenses", "utilities", "rent"] },
 
   // ── Projects ───────────────────────────────────────
-  { label: "Projects", href: "/dashboard/projects", icon: FolderKanban },
+  { label: "Projects", href: "/dashboard/projects", icon: FolderKanban, module: "projects" },
 
   // ── Admin ──────────────────────────────────────────
   { label: "Users", href: "/dashboard/users", icon: Users, category: "Admin" },
   { label: "Companies", href: "/dashboard/admin/companies", icon: Building2, category: "Admin", aliases: ["tenants"] },
   { label: "Company Settings", href: "/dashboard/company", icon: Building2, category: "Admin" },
-  { label: "Integrations", href: "/dashboard/integrations", icon: Settings, category: "Admin" },
+  { label: "Integrations", href: "/dashboard/integrations", icon: Settings, category: "Admin", module: "integration" },
   { label: "Settings", href: "/dashboard/settings", icon: Settings, category: "Admin" },
 
   // ── HR ─────────────────────────────────────────────
-  { label: "HR Overview", href: "/dashboard/hr", icon: Briefcase, category: "HR" },
-  { label: "Employees", href: "/dashboard/hr/employees", icon: Users, category: "HR", aliases: ["staff", "people", "workforce"] },
-  { label: "Departments", href: "/dashboard/hr/departments", icon: Building2, category: "HR" },
-  { label: "Payroll", href: "/dashboard/hr/payroll", icon: Banknote, category: "HR", aliases: ["paye", "salary", "salaries", "payslip", "shif", "nssf"] },
-  { label: "My Payslips", href: "/dashboard/hr/my-payslips", icon: ScrollText, category: "HR", aliases: ["payslip"] },
-  { label: "Leave Requests", href: "/dashboard/hr/leave", icon: CalendarDays, category: "HR" },
-  { label: "My Leave", href: "/dashboard/hr/my-leave", icon: CalendarDays, category: "HR" },
-  { label: "Leave Calendar", href: "/dashboard/hr/leave/calendar", icon: CalendarDays, category: "HR" },
-  { label: "Leave Types", href: "/dashboard/hr/leave-types", icon: CalendarDays, category: "HR", aliases: ["entitlement", "days", "config"] },
-  { label: "Attendance", href: "/dashboard/hr/attendance", icon: Clock, category: "HR", aliases: ["clock-in", "timesheet"] },
-  { label: "My Attendance", href: "/dashboard/hr/my-attendance", icon: Clock, category: "HR" },
-  { label: "Loans", href: "/dashboard/hr/loans", icon: HandCoins, category: "HR", aliases: ["advance", "salary advance"] },
+  { label: "HR Overview", href: "/dashboard/hr", icon: Briefcase, category: "HR", module: "hr" },
+  { label: "Employees", href: "/dashboard/hr/employees", icon: Users, category: "HR", aliases: ["staff", "people", "workforce"], module: "hr" },
+  { label: "Departments", href: "/dashboard/hr/departments", icon: Building2, category: "HR", module: "hr" },
+  { label: "Payroll", href: "/dashboard/hr/payroll", icon: Banknote, category: "HR", aliases: ["paye", "salary", "salaries", "payslip", "shif", "nssf"], module: "hr" },
+  { label: "My Payslips", href: "/dashboard/hr/my-payslips", icon: ScrollText, category: "HR", aliases: ["payslip"], module: "hr" },
+  { label: "Leave Requests", href: "/dashboard/hr/leave", icon: CalendarDays, category: "HR", module: "hr" },
+  { label: "My Leave", href: "/dashboard/hr/my-leave", icon: CalendarDays, category: "HR", module: "hr" },
+  { label: "Leave Calendar", href: "/dashboard/hr/leave/calendar", icon: CalendarDays, category: "HR", module: "hr" },
+  { label: "Leave Types", href: "/dashboard/hr/leave-types", icon: CalendarDays, category: "HR", aliases: ["entitlement", "days", "config"], module: "hr" },
+  { label: "Attendance", href: "/dashboard/hr/attendance", icon: Clock, category: "HR", aliases: ["clock-in", "timesheet"], module: "hr" },
+  { label: "My Attendance", href: "/dashboard/hr/my-attendance", icon: Clock, category: "HR", module: "hr" },
+  { label: "Loans", href: "/dashboard/hr/loans", icon: HandCoins, category: "HR", aliases: ["advance", "salary advance"], module: "hr" },
 
   // ── Finance / Accounting ───────────────────────────
   { label: "Parties", href: "/dashboard/parties", icon: Briefcase, category: "Finance", aliases: ["contacts", "people", "customer supplier"] },
@@ -209,7 +210,7 @@ const CLAIM_TYPE_LABELS = {
 // ============================================
 // COMMAND PALETTE
 // ============================================
-export function CommandPalette({ open, setOpen }) {
+export function CommandPalette({ open, setOpen, companyPlan, role }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState(null);
@@ -290,8 +291,25 @@ export function CommandPalette({ open, setOpen }) {
     if (item.aliases?.some((a) => a.toLowerCase().includes(queryTrimmed))) return true;
     return false;
   };
-  const filteredPages = PAGES.filter(matchesQuery);
-  const filteredActions = ACTIONS.filter(matchesQuery);
+  /**
+   * A module the plan does not include is not offered.
+   *
+   * The palette used to list every page unconditionally, so HR and Projects
+   * were reachable here on a plan that hides them from the sidebar. The gate
+   * that matters is server-side (components/plan-gate-boundary.jsx) — this
+   * only stops the app offering a door it will refuse to open.
+   *
+   * Untagged entries are core or free-tier and always listed. SuperAdmin is
+   * the platform operator and sees everything, matching `hasMod` in the
+   * sidebar.
+   */
+  const allowedByPlan = (item) =>
+    !item.module ||
+    role === "SuperAdmin" ||
+    planIncludes(companyPlan || "free", item.module);
+
+  const filteredPages = PAGES.filter(allowedByPlan).filter(matchesQuery);
+  const filteredActions = ACTIONS.filter(allowedByPlan).filter(matchesQuery);
   const hasNavItems = filteredPages.length > 0 || filteredActions.length > 0;
 
   // Group filtered pages by category (defaults to "General") and preserve

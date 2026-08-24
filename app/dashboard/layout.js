@@ -56,7 +56,10 @@ async function DashboardLayout({ children }) {
   const notifications = await cMyNotifications();
 
   return (
-    <CommandPaletteProvider>
+    <CommandPaletteProvider
+      companyPlan={user?.companyPlan}
+      role={user?.role}
+    >
       <AppSidebar
         user={user}
         notifications={notifications}
