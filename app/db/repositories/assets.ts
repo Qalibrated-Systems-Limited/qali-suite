@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { anyOf } from "./sqlHelpers";
 import type { Tx } from "../client";
 import {
   assets,
@@ -380,7 +381,7 @@ export async function listAssets(tx: Tx, opts: ListAssetsOptions = {}) {
     typeof opts.status === "string" ? [opts.status] : (opts.status ?? []);
 
   const where = sql`WHERE TRUE
-    ${statuses.length ? sql`AND a.status = ANY(${statuses}::asset_status[])` : sql``}
+    ${statuses.length ? sql`AND a.status = ${anyOf(statuses, "asset_status[]")}` : sql``}
     ${opts.category ? sql`AND a.category = ${opts.category}::asset_category` : sql``}
     ${opts.assignedToPartyId ? sql`AND a.assigned_to_party_id = ${opts.assignedToPartyId}::uuid` : sql``}
     ${
@@ -1552,7 +1553,7 @@ export async function sumAssetBillCosts(
     SELECT l.asset_id, SUM(l.line_total)::float8 AS total
       FROM bill_lines l
       JOIN bills b ON b.id = l.bill_id
-     WHERE l.asset_id = ANY(${opts.assetIds}::text[])
+     WHERE l.asset_id = ${anyOf(opts.assetIds, "text[]")}
        AND b.status <> 'cancelled'
        AND b.bill_date BETWEEN ${opts.since}::date AND ${opts.until}::date
      GROUP BY l.asset_id

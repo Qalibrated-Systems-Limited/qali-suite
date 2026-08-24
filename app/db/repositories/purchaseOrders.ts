@@ -1,4 +1,5 @@
 import { asc, eq, sql } from "drizzle-orm";
+import { anyOf } from "./sqlHelpers";
 import type { Tx } from "../client";
 import { purchaseOrders, purchaseOrderLines } from "../schema/purchaseOrders";
 import { documentFlow } from "../schema/documentFlow";
@@ -447,7 +448,7 @@ export async function listPurchaseOrdersForDisplay(
   const counts = (await tx.execute(sql`
     SELECT purchase_order_id, COUNT(*)::int AS n
       FROM bills
-     WHERE purchase_order_id = ANY(${ids}::uuid[])
+     WHERE purchase_order_id = ${anyOf(ids, "uuid[]")}
        AND status <> 'cancelled'
      GROUP BY purchase_order_id
   `)) as unknown as Array<{ purchase_order_id: string; n: number }>;
@@ -498,7 +499,7 @@ function listConditions(filters: ListPurchaseOrdersFilters) {
       ? filters.status
       : [filters.status];
     if (statuses.length) {
-      parts.push(sql`po.status = ANY(${statuses}::text[])`);
+      parts.push(sql`po.status = ${anyOf(statuses, "text[]")}`);
     }
   }
   if (filters.supplierId) {

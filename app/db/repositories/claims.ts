@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { anyOf } from "./sqlHelpers";
 import type { Tx } from "../client";
 import {
   employeeClaims,
@@ -333,7 +334,7 @@ export async function listClaims(tx: Tx, opts: ListClaimsOptions = {}) {
     typeof opts.status === "string" ? [opts.status] : (opts.status ?? []);
 
   const where = sql`WHERE TRUE
-    ${statuses.length ? sql`AND c.status = ANY(${statuses}::employee_claim_status[])` : sql``}
+    ${statuses.length ? sql`AND c.status = ${anyOf(statuses, "employee_claim_status[]")}` : sql``}
     ${opts.claimType ? sql`AND c.claim_type = ${opts.claimType}::employee_claim_type` : sql``}
     ${opts.partyId ? sql`AND c.party_id = ${opts.partyId}::uuid` : sql``}
     ${opts.userId ? sql`AND c.employee_user_id = ${String(opts.userId)}` : sql``}
@@ -432,8 +433,8 @@ export async function countClaims(
 
   const rows = (await tx.execute(sql`
     SELECT COUNT(*)::int AS n FROM employee_claims WHERE TRUE
-      ${statuses.length ? sql`AND status = ANY(${statuses}::employee_claim_status[])` : sql``}
-      ${types.length ? sql`AND claim_type = ANY(${types}::employee_claim_type[])` : sql``}
+      ${statuses.length ? sql`AND status = ${anyOf(statuses, "employee_claim_status[]")}` : sql``}
+      ${types.length ? sql`AND claim_type = ${anyOf(types, "employee_claim_type[]")}` : sql``}
       ${opts.userId ? sql`AND employee_user_id = ${String(opts.userId)}` : sql``}
       ${opts.projectId ? sql`AND project_id = ${String(opts.projectId)}` : sql``}
   `)) as unknown as Array<{ n: number }>;
@@ -475,8 +476,8 @@ export async function sumClaims(
       FROM employee_claims c
       JOIN employee_claim_state s ON s.claim_id = c.id
      WHERE TRUE
-      ${statuses.length ? sql`AND c.status = ANY(${statuses}::employee_claim_status[])` : sql``}
-      ${types.length ? sql`AND c.claim_type = ANY(${types}::employee_claim_type[])` : sql``}
+      ${statuses.length ? sql`AND c.status = ${anyOf(statuses, "employee_claim_status[]")}` : sql``}
+      ${types.length ? sql`AND c.claim_type = ${anyOf(types, "employee_claim_type[]")}` : sql``}
       ${opts.userId ? sql`AND c.employee_user_id = ${String(opts.userId)}` : sql``}
       ${opts.projectId ? sql`AND c.project_id = ${String(opts.projectId)}` : sql``}
       ${opts.approvedSince ? sql`AND c.approved_at >= ${opts.approvedSince}::timestamptz` : sql``}

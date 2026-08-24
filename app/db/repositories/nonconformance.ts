@@ -1,4 +1,5 @@
 import { asc, eq, sql } from "drizzle-orm";
+import { anyOf } from "./sqlHelpers";
 import type { Tx } from "../client";
 import {
   nonconformances,
@@ -434,7 +435,7 @@ function listConditions(filters: ListNonconformancesFilters) {
     const statuses = Array.isArray(filters.status)
       ? filters.status
       : [filters.status];
-    if (statuses.length) parts.push(sql`n.status = ANY(${statuses}::text[])`);
+    if (statuses.length) parts.push(sql`n.status = ${anyOf(statuses, "text[]")}`);
   }
   if (filters.category) parts.push(sql`n.category = ${filters.category}`);
   if (filters.sourceType) parts.push(sql`n.source_type = ${filters.sourceType}`);

@@ -1,4 +1,5 @@
 import { and, asc, eq, sql } from "drizzle-orm";
+import { anyOf } from "./sqlHelpers";
 import type { Tx } from "../client";
 import { goodsReceipts, goodsReceiptLines } from "../schema/goodsReceipts";
 import { bills } from "../schema/bills";
@@ -370,7 +371,7 @@ export async function listGoodsReceiptsForDisplay(
                 OR physical_condition <> 'good'
            )::int AS discrepant
       FROM goods_receipt_lines
-     WHERE goods_receipt_id = ANY(${ids}::uuid[])
+     WHERE goods_receipt_id = ${anyOf(ids, "uuid[]")}
      GROUP BY goods_receipt_id
   `)) as unknown as Array<{ goods_receipt_id: string; lines: number; discrepant: number }>;
   const byId = new Map(counts.map((c) => [c.goods_receipt_id, c]));
@@ -420,7 +421,7 @@ function listConditions(filters: ListGoodsReceiptsFilters) {
     const statuses = Array.isArray(filters.status)
       ? filters.status
       : [filters.status];
-    if (statuses.length) parts.push(sql`grn.status = ANY(${statuses}::text[])`);
+    if (statuses.length) parts.push(sql`grn.status = ${anyOf(statuses, "text[]")}`);
   }
   if (filters.sourceType) parts.push(sql`grn.source_type = ${filters.sourceType}`);
   if (filters.supplierId)
