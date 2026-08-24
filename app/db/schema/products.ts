@@ -105,6 +105,21 @@ export const products = pgTable(
       .notNull()
       .default("0"),
 
+    /**
+     * Pre-fills the tax on an invoice line (0065). invoices.ts otherwise
+     * defaults every line to 16, so a zero-rated or exempt item had to be
+     * corrected by hand on each invoice.
+     */
+    defaultTaxRate: numeric("default_tax_rate", { precision: 9, scale: 4 })
+      .notNull()
+      .default("16"),
+    /** How much to reorder; `reorderLevel` above is when. */
+    reorderQuantity: numeric("reorder_quantity", { precision: 19, scale: 4 })
+      .notNull()
+      .default("0"),
+    location: text("location"),
+    binNumber: text("bin_number"),
+
     isActive: boolean("is_active").notNull().default(true),
 
     createdById: text("created_by_id"),

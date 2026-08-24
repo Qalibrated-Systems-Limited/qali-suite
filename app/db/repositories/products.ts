@@ -16,10 +16,27 @@ export interface CreateProductInput {
   sku: string;
   name: string;
   description?: string | null;
+  /** The snapshot of what it was filed under; `categoryId` is the real link. */
   category?: string | null;
+  categoryId?: string | null;
   unit?: string;
+  productType?: string;
   costPrice?: string;
   sellingPrice?: string;
+  wholesalePrice?: string;
+  minimumPrice?: string;
+  reorderLevel?: string;
+  reorderQuantity?: string;
+  defaultTaxRate?: string;
+  location?: string | null;
+  binNumber?: string | null;
+  /** Derived from the column, so a new method in the enum cannot be missed here. */
+  costingMethod?: (typeof products.costingMethod)["_"]["data"];
+  isActive?: boolean;
+  /**
+   * ONLY for a product that carries no stock. Opening stock must go through
+   * `receiveOpeningStock` so it reaches the ledger — see the note there.
+   */
   quantityOnHand?: string;
   createdById?: string | null;
 }
@@ -33,9 +50,20 @@ export async function createProduct(tx: Tx, input: CreateProductInput) {
       name: input.name,
       description: input.description ?? null,
       category: input.category ?? null,
+      categoryId: input.categoryId ?? null,
       unit: input.unit ?? "pcs",
+      productType: input.productType ?? "Inventory Item",
       costPrice: input.costPrice ?? "0",
       sellingPrice: input.sellingPrice ?? "0",
+      wholesalePrice: input.wholesalePrice ?? "0",
+      minimumPrice: input.minimumPrice ?? "0",
+      reorderLevel: input.reorderLevel ?? "0",
+      reorderQuantity: input.reorderQuantity ?? "0",
+      defaultTaxRate: input.defaultTaxRate ?? "16",
+      location: input.location ?? null,
+      binNumber: input.binNumber ?? null,
+      costingMethod: input.costingMethod ?? "average",
+      isActive: input.isActive ?? true,
       quantityOnHand: input.quantityOnHand ?? "0",
       createdById: input.createdById ?? null,
     })
@@ -380,4 +408,230 @@ export async function findProductByCodeOrName(tx: Tx, code: string) {
     unit: (r.unit as string) ?? null,
     costPrice: String(r.cost_price ?? "0"),
   };
+}
+
+/**
+ * Edits the catalogue record. NEVER the quantities.
+ *
+ * `quantity_on_hand`, `_committed` and `_on_hold` are moved only by the
+ * functions above, each of which records a movement or is guarded by the
+ * `committed + on_hold <= on_hand` CHECK. Letting an edit form write them
+ * would put a number on the shelf that no movement explains, which is the
+ * thing the stock ledger exists to prevent — and it is how the Mongo product
+ * ended up with a stored `quantityAvailable` that disagreed with its inputs.
+ *
+ * Only the keys supplied are written, so a form that knows the name and
+ * nothing else does not blank the description.
+ */
+export async function updateProduct(
+  tx: Tx,
+  productId: string,
+  input: {
+    name?: string | null;
+    sku?: string | null;
+    description?: string | null;
+    category?: string | null;
+    categoryId?: string | null;
+    unit?: string | null;
+    productType?: string | null;
+    reorderLevel?: string | null;
+    reorderQuantity?: string | null;
+    defaultTaxRate?: string | null;
+    location?: string | null;
+    binNumber?: string | null;
+    costingMethod?: (typeof products.costingMethod)["_"]["data"] | null;
+    isActive?: boolean | null;
+    lastModifiedById?: string | null;
+  },
+) {
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.name != null) set.name = input.name;
+  if (input.sku != null) set.sku = input.sku.toUpperCase();
+  if (input.description !== undefined) set.description = input.description;
+  if (input.category !== undefined) set.category = input.category;
+  if (input.categoryId !== undefined) set.categoryId = input.categoryId;
+  if (input.unit != null) set.unit = input.unit;
+  if (input.productType != null) set.productType = input.productType;
+  if (input.reorderLevel != null) set.reorderLevel = input.reorderLevel;
+  if (input.reorderQuantity != null) set.reorderQuantity = input.reorderQuantity;
+  if (input.defaultTaxRate != null) set.defaultTaxRate = input.defaultTaxRate;
+  if (input.location !== undefined) set.location = input.location;
+  if (input.binNumber !== undefined) set.binNumber = input.binNumber;
+  if (input.costingMethod != null) set.costingMethod = input.costingMethod;
+  if (input.isActive != null) set.isActive = input.isActive;
+  if (input.lastModifiedById !== undefined) {
+    set.lastModifiedById = input.lastModifiedById;
+  }
+
+  const [updated] = await tx
+    .update(products)
+    .set(set)
+    .where(eq(products.id, productId))
+    .returning();
+
+  if (!updated) throw new Error("Product not found");
+  return updated;
+}
+
+/**
+ * Prices, separately from the rest of the record.
+ *
+ * Split out because the authority is split: who may set a COST is not who may
+ * set a SELLING price (segregation of duties — lib/permissions.js). Keeping
+ * them in `updateProduct` would mean every caller re-deriving which fields the
+ * user was allowed to touch.
+ *
+ * Cost price is deliberately NOT here. Under weighted average it is an OUTPUT
+ * of receiving stock, not an input — `receiveStock` recomputes it. Typing a
+ * new cost over it would silently revalue every unit on the shelf without a
+ * journal entry to explain the change; that is what an inventory revaluation
+ * is for.
+ */
+export async function updateProductPricing(
+  tx: Tx,
+  productId: string,
+  input: {
+    sellingPrice?: string | null;
+    wholesalePrice?: string | null;
+    minimumPrice?: string | null;
+    lastModifiedById?: string | null;
+  },
+) {
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.sellingPrice != null) set.sellingPrice = input.sellingPrice;
+  if (input.wholesalePrice != null) set.wholesalePrice = input.wholesalePrice;
+  if (input.minimumPrice != null) set.minimumPrice = input.minimumPrice;
+  if (input.lastModifiedById !== undefined) {
+    set.lastModifiedById = input.lastModifiedById;
+  }
+
+  const [updated] = await tx
+    .update(products)
+    .set(set)
+    .where(eq(products.id, productId))
+    .returning();
+
+  if (!updated) throw new Error("Product not found");
+  return updated;
+}
+
+/**
+ * The products list: one page, its filters, and the total in one round trip.
+ *
+ * `COUNT(*) OVER ()` rather than a second query, so the count cannot describe
+ * a different set from the rows beside it.
+ */
+export async function searchProducts(
+  tx: Tx,
+  opts: {
+    query?: string;
+    category?: string;
+    status?: "all" | "active" | "inactive";
+    lowStockOnly?: boolean;
+    page?: number;
+    perPage?: number;
+  } = {},
+) {
+  const page = Math.max(1, opts.page ?? 1);
+  const perPage = Math.min(Math.max(1, opts.perPage ?? 25), 200);
+
+  const where = [sql`TRUE`];
+  if (opts.query) {
+    const like = `%${opts.query}%`;
+    where.push(sql`(p.name ILIKE ${like} OR p.sku ILIKE ${like})`);
+  }
+  if (opts.category && opts.category !== "all") {
+    where.push(sql`p.category = ${opts.category}`);
+  }
+  if (opts.status === "active") where.push(sql`p.is_active = true`);
+  if (opts.status === "inactive") where.push(sql`p.is_active = false`);
+  // At or below the reorder level, which is what the list's "low stock" filter
+  // and the dashboard's reorder alert both mean.
+  if (opts.lowStockOnly) {
+    where.push(sql`p.quantity_on_hand <= p.reorder_level`);
+  }
+
+  const rows = (await tx.execute(sql`
+    SELECT p.*,
+           COUNT(*) OVER ()::int AS total_count
+      FROM products p
+     WHERE ${sql.join(where, sql` AND `)}
+     ORDER BY p.name
+     LIMIT ${perPage} OFFSET ${(page - 1) * perPage}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const total = rows.length ? Number(rows[0].total_count) : 0;
+  return { rows, total, page, perPage, pages: Math.ceil(total / perPage) };
+}
+
+/**
+ * The figures above the products list.
+ *
+ * Inventory VALUE is quantity × cost, never × selling price: stock is carried
+ * at cost until it is sold. Valuing it at retail would book unrealised profit
+ * onto the balance sheet.
+ */
+export async function getProductStats(tx: Tx) {
+  const [row] = (await tx.execute(sql`
+    SELECT count(*)::int                                          AS total,
+           count(*) FILTER (WHERE is_active)::int                 AS active,
+           count(*) FILTER (
+             WHERE is_active AND quantity_on_hand <= reorder_level
+           )::int                                                 AS low_stock,
+           count(*) FILTER (WHERE is_active AND quantity_on_hand = 0)::int
+                                                                  AS out_of_stock,
+           COALESCE(SUM(quantity_on_hand * cost_price), 0)::numeric(19,4)
+                                                                  AS stock_value
+      FROM products
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return {
+    total: Number(row.total),
+    active: Number(row.active),
+    lowStock: Number(row.low_stock),
+    outOfStock: Number(row.out_of_stock),
+    stockValue: String(row.stock_value ?? "0"),
+  };
+}
+
+/**
+ * Retire a product, or delete it only if it never traded.
+ *
+ * A product with movements, invoice lines or commitments is HISTORY, and every
+ * ERP that gets this right deactivates rather than deletes — removing it would
+ * orphan the rows that explain last year's cost of sales. Mongo's delete
+ * checked nothing and left exactly those dangling references.
+ *
+ * Returns which of the two happened so the caller can say so.
+ */
+export async function deleteProductOrDeactivate(tx: Tx, productId: string) {
+  const [product] = await tx
+    .select()
+    .from(products)
+    .where(eq(products.id, productId));
+  if (!product) throw new Error("Product not found");
+
+  const [{ movements, lines }] = (await tx.execute(sql`
+    SELECT (SELECT count(*) FROM stock_movements WHERE product_id = ${productId}::uuid)::int AS movements,
+           (SELECT count(*) FROM invoice_lines  WHERE product_id = ${productId}::uuid)::int AS lines
+  `)) as unknown as Array<{ movements: number; lines: number }>;
+
+  const hasHistory =
+    Number(movements) > 0 ||
+    Number(lines) > 0 ||
+    Number(product.quantityOnHand) !== 0 ||
+    Number(product.quantityCommitted) !== 0 ||
+    Number(product.quantityOnHold) !== 0;
+
+  if (hasHistory) {
+    const [deactivated] = await tx
+      .update(products)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(products.id, productId))
+      .returning();
+    return { deleted: false, deactivated: true, product: deactivated };
+  }
+
+  await tx.delete(products).where(eq(products.id, productId));
+  return { deleted: true, deactivated: false, product };
 }
