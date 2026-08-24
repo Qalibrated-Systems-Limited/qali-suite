@@ -54,12 +54,13 @@ function InviteRow({ invite }) {
   const [isPending, startTransition] = useTransition();
   const [hidden, setHidden] = useState(false);
 
-  const canResend = invite.status === "pending" && !invite.isExpired;
+  const isExpired = invite.status === "expired";
+  const canResend = invite.status === "pending";
   const canCancel = invite.status === "pending";
 
   const handleResend = () => {
     startTransition(async () => {
-      const result = await resendInvitePg(invite._id);
+      const result = await resendInvitePg(invite.id);
       if (result.success) {
         toast.success(result.message);
       } else {
@@ -70,7 +71,7 @@ function InviteRow({ invite }) {
 
   const handleCancel = () => {
     startTransition(async () => {
-      const result = await cancelInvitePg(invite._id);
+      const result = await cancelInvitePg(invite.id);
       if (result.success) {
         toast.success(result.message);
         setHidden(true);
@@ -89,11 +90,11 @@ function InviteRow({ invite }) {
           <span className="text-sm font-medium text-foreground truncate">
             {invite.email}
           </span>
-          <StatusBadge status={invite.status} isExpired={invite.isExpired} />
+          <StatusBadge status={invite.status} isExpired={isExpired} />
           <span className="text-xs text-muted-foreground">{invite.role}</span>
         </div>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Invited by {invite.invitedBy} &middot;{" "}
+          Invited by {invite.invitedByName} &middot;{" "}
           {new Date(invite.createdAt).toLocaleDateString("en-US", {
             month: "short",
             day: "numeric",
@@ -151,12 +152,8 @@ export default function InvitesList({ invites }) {
 
   if (!invites || invites.length === 0) return null;
 
-  const pendingInvites = invites.filter(
-    (inv) => inv.status === "pending" && !inv.isExpired
-  );
-  const otherInvites = invites.filter(
-    (inv) => inv.status !== "pending" || inv.isExpired
-  );
+  const pendingInvites = invites.filter((inv) => inv.status === "pending");
+  const otherInvites = invites.filter((inv) => inv.status !== "pending");
 
   const displayInvites = expanded
     ? [...pendingInvites, ...otherInvites]
@@ -204,7 +201,7 @@ export default function InvitesList({ invites }) {
       <div>
         {displayInvites.length > 0 ? (
           displayInvites.map((invite) => (
-            <InviteRow key={invite._id} invite={invite} />
+            <InviteRow key={invite.id} invite={invite} />
           ))
         ) : (
           <p className="text-sm text-muted-foreground text-center py-6">
