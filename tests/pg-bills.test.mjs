@@ -78,6 +78,7 @@ suite("postgres bills", () => {
       whtPayable: randomUUID(),
       grni: randomUUID(),
       bank: randomUUID(),
+      obe: randomUUID(),
     };
 
     await admin`
@@ -94,6 +95,8 @@ suite("postgres bills", () => {
         [accounts.whtPayable, "2200", "WHT Payable", "liability"],
         [accounts.grni, "2150", "GR/IR Clearing", "liability"],
         [accounts.bank, "1000", "Bank", "asset"],
+        // 0061 — createOpeningBalanceBill posts Dr OBE / Cr AP now.
+        [accounts.obe, "3500", "Opening Balance Equity", "equity"],
       ];
       for (const [id, code, name, type] of rows) {
         await tx.execute(sql`
@@ -205,8 +208,13 @@ suite("postgres bills", () => {
           billDate: "2026-01-01",
           dueDate: "2026-01-31",
           amount: "42000.0000",
+          apAccountId: accounts.ap,
+          openingEquityAccountId: accounts.obe,
         }),
-      );
+      // Returns { bill, entry } since 0061 — createOpeningBalanceBill posts
+      // Dr Opening Balance Equity / Cr AP now, which it never did before. No
+      // accounts are passed here, so only the row is under test.
+      ).then((r) => r.bill);
       const fetched = await asTenant(companyA, (tx) => billRepo.getBill(tx, bill.id));
       expect(fetched.subtotal).toBe("42000.0000");
       expect(fetched.netPayable).toBe("42000.0000");

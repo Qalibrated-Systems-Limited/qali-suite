@@ -506,3 +506,48 @@ export async function getUnappliedPayments(tx: Tx, limit = 50) {
      LIMIT ${Math.min(limit, 200)}
   `);
 }
+
+/**
+ * The payments list's stat tiles, in the shape the pages already read:
+ * `{ thisMonth: { received, made }, byStatus, unreconciledCount }`.
+ *
+ * One grouped query rather than four counts and a fold. `thisMonth` is
+ * computed from the payment DATE, not `created_at` — a payment entered today
+ * for last month belongs to last month, which is the whole reason the date is
+ * a separate column.
+ */
+export async function getPaymentStats(tx: Tx) {
+  const [row] = (await tx.execute(sql`
+    SELECT
+      count(*) FILTER (WHERE payment_type = 'received'
+                         AND date_trunc('month', payment_date) = date_trunc('month', CURRENT_DATE))::int AS received_count,
+      COALESCE(SUM(amount) FILTER (WHERE payment_type = 'received'
+                         AND date_trunc('month', payment_date) = date_trunc('month', CURRENT_DATE)), 0)::text AS received_total,
+      count(*) FILTER (WHERE payment_type = 'made'
+                         AND date_trunc('month', payment_date) = date_trunc('month', CURRENT_DATE))::int AS made_count,
+      COALESCE(SUM(amount) FILTER (WHERE payment_type = 'made'
+                         AND date_trunc('month', payment_date) = date_trunc('month', CURRENT_DATE)), 0)::text AS made_total,
+      count(*) FILTER (WHERE status = 'draft')::int      AS draft,
+      count(*) FILTER (WHERE status = 'confirmed')::int  AS confirmed,
+      count(*) FILTER (WHERE status = 'cancelled')::int  AS cancelled,
+      -- "Unreconciled" in the Mongo sense has no column here.
+      -- pending_clearance is the honest analogue: recorded, and not yet
+      -- through the bank. A cheque written today sits here until it clears.
+      count(*) FILTER (WHERE status = 'pending_clearance')::int AS unreconciled
+    FROM payments
+  `)) as unknown as Array<Record<string, string | number>>;
+
+  return {
+    thisMonth: {
+      received: { count: Number(row.received_count), total: Number(row.received_total) },
+      made: { count: Number(row.made_count), total: Number(row.made_total) },
+    },
+    byStatus: {
+      draft: Number(row.draft),
+      confirmed: Number(row.confirmed),
+      cancelled: Number(row.cancelled),
+      pendingClearance: Number(row.unreconciled),
+    },
+    unreconciledCount: Number(row.unreconciled),
+  };
+}

@@ -339,14 +339,17 @@ suite("postgres fulfilment", () => {
 
     it("closes the checkout once everything is accounted for", async () => {
       const checkout = await makeCheckout("5");
+      // Returns { checkout, entry } since the checkout port — returnCheckout
+      // posts Dr Inventory / Cr Technician Stock now, which it never did
+      // before. No accounts and no cost here, so `entry` is null.
       let after = await asTenant(companyA, (tx) =>
         fulfilRepo.returnCheckout(tx, checkout.id, { quantity: "3" }),
-      );
+      ).then((r) => r.checkout);
       expect(after.status).toBe("checked_out");
 
       after = await asTenant(companyA, (tx) =>
         fulfilRepo.returnCheckout(tx, checkout.id, { quantity: "2" }),
-      );
+      ).then((r) => r.checkout);
       expect(after.quantityReturned).toBe("5.0000");
       expect(after.status).toBe("returned");
     });
