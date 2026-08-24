@@ -1,10 +1,11 @@
 import "server-only";
 import { cache } from "react";
-import mongoose from "mongoose";
 
 import dbConnect from "@/app/config/dbConnect";
 import { countLeaveAwaitingApproval } from "@/app/db/actions/hr-leave-actions";
 import { countLoansAwaitingApproval } from "@/app/db/actions/hr-loan-actions";
+import { getBillsStats } from "@/app/db/actions/bill-actions";
+import { getRequestStats } from "@/app/db/actions/request-actions";
 import {
   getTenantContext,
   withTenantScope,
@@ -12,10 +13,8 @@ import {
 import ApprovalRequest, {
   APPROVER_MATRIX,
 } from "@/app/models/approvalRequest";
-import Bill from "@/app/models/bill";
 import { countClaimsAwaitingApprovalPg } from "@/app/db/actions/claim-actions";
 import { countNonconformancesAwaitingAuthorisationPg } from "@/app/db/actions/ncr-actions";
-import { StockRequest } from "@/app/models/requests";
 // Approver matrices imported from the central rules module. Single
 // source of truth for these gates — every consumer (this query, the
 // /dashboard/approvals page, the dashboard tile) reads the same Sets.
@@ -45,10 +44,6 @@ export const cMyPendingApprovals = cache(async () => {
     const role = user?.role;
     if (!role) return 0;
 
-    const tenantMatch = isSuperAdmin
-      ? {}
-      : { companyId: new mongoose.Types.ObjectId(companyId) };
-
     // Generic approval engine — gated by APPROVER_MATRIX
     const engineTypes = Object.entries(APPROVER_MATRIX)
       .filter(([, roles]) =>
@@ -71,14 +66,14 @@ export const cMyPendingApprovals = cache(async () => {
     }
 
     if (STOCK_REQUEST_APPROVER_ROLES.has(role)) {
-      tasks.push(
-        StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
-      );
+      // Postgres since the requests port. The Mongo collection this counted is
+      // no longer written to, so it reported zero for every tenant.
+      tasks.push(getRequestStats().then((s) => s?.pending ?? 0));
     }
     if (BILL_APPROVER_ROLES.has(role)) {
-      tasks.push(
-        Bill.countDocuments({ ...tenantMatch, status: "submitted" }),
-      );
+      // Postgres since the bills port, same as requests above. `submitted` is
+      // the awaiting-approval status on both sides.
+      tasks.push(getBillsStats().then((s) => s?.pendingCount ?? 0));
     }
     if (LEAVE_APPROVER_ROLES.has(role)) {
       // Leave lives in Postgres. Counting the Mongo collection would report

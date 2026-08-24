@@ -5,7 +5,8 @@ import {
   FileWarning,
   UserMinus,
 } from "lucide-react";
-import { cHRAlerts } from "@/app/mongodb/queries/hr-alerts-queries";
+import { getHrAlertCounts } from "@/app/db/actions/hr-employee-actions";
+import { countClaimsAwaitingApprovalPg } from "@/app/db/actions/claim-actions";
 
 // ============================================
 // HR ALERTS STRIP
@@ -24,8 +25,23 @@ export const HRAlertsStripSkeleton = () => (
   </div>
 );
 
+/**
+ * Both counts are Postgres, and each scopes itself through
+ * withAuthorizedTenant — there is no tenant filter to write here.
+ *
+ * This replaced `cHRAlerts` in app/mongodb/queries/hr-alerts-queries.js, which
+ * opened a Mongo connection and built `{ companyId: new ObjectId(companyId) }`
+ * it then never used. Once companies became UUIDs the ObjectId cast threw on
+ * every render — inside the query's own try/catch, so the strip reported four
+ * zeros instead of failing. Leave and claims awaiting review have been showing
+ * 0 however many were queued.
+ */
 export async function HRAlertsStrip() {
-  const alerts = await cHRAlerts();
+  const [hr, pendingClaims] = await Promise.all([
+    getHrAlertCounts(),
+    countClaimsAwaitingApprovalPg(),
+  ]);
+  const alerts = { ...hr, pendingClaims };
 
   const tiles = [
     {
