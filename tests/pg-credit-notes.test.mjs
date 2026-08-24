@@ -64,8 +64,7 @@ suite("postgres credit notes", () => {
   });
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE entry_counters`;
+    await admin`TRUNCATE companies, entry_counters CASCADE`;
 
     companyA = randomUUID();
     accounts = {

@@ -49,9 +49,7 @@ suite("logins", () => {
   beforeEach(async () => {
     // users is platform-wide, so truncating companies does not clear it —
     // home_company_id is ON DELETE SET NULL, deliberately (0036).
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE users CASCADE`;
-    await admin`TRUNCATE _migration_id_map, entry_counters`;
+    await admin`TRUNCATE companies, users, _migration_id_map, entry_counters CASCADE`;
 
     companyA = randomUUID();
     companyB = randomUUID();

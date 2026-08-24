@@ -40,8 +40,7 @@ suite("postgres backfill and reconciliation", () => {
   });
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE _migration_id_map, _migration_rejects, entry_counters`;
+    await admin`TRUNCATE companies, _migration_id_map, _migration_rejects, entry_counters CASCADE`;
     await seedTestSource(mongoUri);
   });
 

@@ -50,8 +50,7 @@ suite("invitations", () => {
   });
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE users CASCADE`;
+    await admin`TRUNCATE companies, users CASCADE`;
     companyA = randomUUID();
     companyB = randomUUID();
     await admin`INSERT INTO companies (id, name, slug) VALUES

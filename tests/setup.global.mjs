@@ -136,6 +136,30 @@ async function setupPostgresRole() {
       await tx.unsafe(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${PG_TEST_ROLE}`);
     });
 
+    /**
+     * THE SUITE IS BOUND BY TRUNCATE, AND TRUNCATE IS BOUND BY fsync.
+     *
+     * Every Postgres suite clears the tenant tables before each test, and a
+     * cascade from `companies` reaches all 82 of them at roughly 30ms each.
+     * Measured on this schema: 4.6s per test across the three statements the
+     * suites issue, which is the bulk of a half-hour run — the tests
+     * themselves are milliseconds.
+     *
+     * `synchronous_commit = off` takes that to ~2.3s by not waiting for WAL
+     * flush on each commit. The trade is that a server crash can lose the last
+     * few transactions, which for a database whose every test begins by
+     * deleting all of its contents is not a trade at all.
+     *
+     * Set on the DATABASE so every connection inherits it — the suites open
+     * their own clients, and a per-session SET would have to be repeated in
+     * each of the 66 files and forgotten in the 67th. The name guard above has
+     * already established this is a test database.
+     */
+    const dbName = new URL(adminUrl()).pathname.replace(/^\//, "");
+    await admin.unsafe(
+      `ALTER DATABASE "${dbName}" SET synchronous_commit = off`,
+    );
+
     process.env.PG_TEST_URL = pgTestUrl();
   } finally {
     await admin.end();

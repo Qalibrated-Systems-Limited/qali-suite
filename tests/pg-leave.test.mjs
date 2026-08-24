@@ -58,8 +58,7 @@ suite("leave", () => {
   beforeEach(async () => {
     await admin`TRUNCATE companies CASCADE`;
     // users is platform-wide, so truncating companies does not clear it.
-    await admin`TRUNCATE users CASCADE`;
-    await admin`TRUNCATE entry_counters`;
+    await admin`TRUNCATE users, entry_counters CASCADE`;
 
     companyA = randomUUID();
     otherCompany = randomUUID();

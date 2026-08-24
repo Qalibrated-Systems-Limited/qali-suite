@@ -56,8 +56,7 @@ suite("invoice actions (end to end)", () => {
   });
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE _migration_id_map, entry_counters`;
+    await admin`TRUNCATE companies, _migration_id_map, entry_counters CASCADE`;
 
     companyUuid = randomUUID();
     // Sessions still carry the Mongo company id during the transition; the
@@ -822,8 +821,7 @@ suite("invoice list page queries", () => {
   });
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE _migration_id_map, entry_counters`;
+    await admin`TRUNCATE companies, _migration_id_map, entry_counters CASCADE`;
     companyUuid = randomUUID();
     mongoCompanyId = randomUUID().replace(/-/g, "").slice(0, 24);
     customerId = randomUUID();

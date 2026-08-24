@@ -43,8 +43,7 @@ suite("chart of accounts", () => {
   });
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE entry_counters`;
+    await admin`TRUNCATE companies, entry_counters CASCADE`;
     companyA = randomUUID();
     companyB = randomUUID();
     await admin`INSERT INTO companies (id, name, slug) VALUES

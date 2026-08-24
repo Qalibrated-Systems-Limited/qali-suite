@@ -67,8 +67,7 @@ suite("postgres stock movements", () => {
   });
 
   beforeEach(async () => {
-    await sql_admin`TRUNCATE companies CASCADE`;
-    await sql_admin`TRUNCATE entry_counters`;
+    await sql_admin`TRUNCATE companies, entry_counters CASCADE`;
 
     companyA = randomUUID();
     arAccount = randomUUID();

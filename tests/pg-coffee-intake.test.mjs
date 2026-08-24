@@ -57,8 +57,7 @@ suite("coffee cooperative intake", () => {
   });
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE entry_counters`;
+    await admin`TRUNCATE companies, entry_counters CASCADE`;
     companyA = randomUUID();
     inventoryAcct = randomUUID(); farmerPayableAcct = randomUUID();
     cherry = randomUUID(); season = randomUUID();

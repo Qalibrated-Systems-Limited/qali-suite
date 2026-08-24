@@ -62,8 +62,7 @@ suite("weighbridge connector", () => {
   });
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE entry_counters`;
+    await admin`TRUNCATE companies, entry_counters CASCADE`;
     companyA = randomUUID();
     inventoryAcct = randomUUID(); grniAcct = randomUUID(); cogsAcct = randomUUID();
     varianceAcct = randomUUID();

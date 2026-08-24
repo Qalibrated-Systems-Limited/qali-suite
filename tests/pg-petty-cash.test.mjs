@@ -97,8 +97,7 @@ suite("petty cash returns", () => {
   });
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE entry_counters`;
+    await admin`TRUNCATE companies, entry_counters CASCADE`;
     companyId = randomUUID();
     floatId = randomUUID();
     bankId = randomUUID();

@@ -107,8 +107,7 @@ suite("payment actions", () => {
   });
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE entry_counters`;
+    await admin`TRUNCATE companies, entry_counters CASCADE`;
     companyId = randomUUID();
     actingRole = "Accountant";
     bankAcct = randomUUID(); arAcct = randomUUID(); apAcct = randomUUID();

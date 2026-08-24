@@ -79,8 +79,7 @@ suite("bill actions (end to end)", () => {
   }
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE _migration_id_map, entry_counters`;
+    await admin`TRUNCATE companies, _migration_id_map, entry_counters CASCADE`;
 
     companyUuid = randomUUID();
     mongoCompanyId = randomUUID().replace(/-/g, "").slice(0, 24);

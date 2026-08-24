@@ -70,8 +70,7 @@ suite("fixed assets", () => {
   });
 
   beforeEach(async () => {
-    await admin`TRUNCATE companies CASCADE`;
-    await admin`TRUNCATE entry_counters`;
+    await admin`TRUNCATE companies, entry_counters CASCADE`;
     companyA = randomUUID();
     assetAcct = randomUUID(); accumDepAcct = randomUUID(); depExpenseAcct = randomUUID();
     bankAcct = randomUUID(); gainAcct = randomUUID(); lossAcct = randomUUID(); impairAcct = randomUUID();
