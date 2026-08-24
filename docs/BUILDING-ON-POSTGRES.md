@@ -16,15 +16,31 @@ grep -rln "@/app/mongodb" app/dashboard --include="*.jsx" | cut -d/ -f3 | sort |
 
 A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 
-| on Postgres | still Mongo (files) |
+| on Postgres | still Mongo (screen files) |
 |---|---|
-| **hr**, **claims**, **assets**, users, accounts (bar opening balances), invoices, bills, parties, requests, journal, statements, supplier-statements, credit-notes, quotes, purchase-orders | projects 11, integrations 11, tax 8, reports 8, banking 8, kpis 7, components 7, settings 6, payments 6, stocks 5, petty-cash 5, expenses 5, **claims 4**, **assets 2** |
+| **hr**, **claims**, **assets**, **expenses**, **petty-cash**, **credit-notes**, **checkout**, **categories**, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, statements, supplier-statements, quotes, purchase-orders | components 30, projects 11, integrations 10, tax 8, reports 8, banking 8, kpis 7, stocks 6, settings 6, **payments 6**, leads 4, employee 4, **claims 4**, sales-orders 3, journal 3 |
 
-**Assets reads 2, and both are the expenses side.** `fleet-insights-queries`
-and `asset-cost-queries` merge spend from Mongo expenses with bills and the
-register from Postgres — that seam is real until expenses move, and
-`asset-cost-queries.js` deliberately lives on the Mongo side so it goes with
-them.
+**Regenerate rather than trust it:**
+
+```
+grep -rln "@/app/mongodb" app/dashboard --include="*.jsx" | cut -d/ -f3 | sort | uniq -c | sort -rn
+```
+
+**payments reads 6, and that is the live gap.** `app/db/actions/payment-actions.ts`
+exists, is tested (12 tests) and is called by NOTHING — the same state quotes
+shipped in. The five screens still call the Mongo actions, so nothing is
+broken; payments is simply half-ported. Three functions are missing before the
+screens can move: `getUnpaidDocuments`, `cancelPayment`, `deletePayment`. See
+the handoff section below.
+
+**sales-orders reads 3 and is switched off** — `lib/unported-modules.js`, §9K.
+Those three reads are behind the flag.
+
+**Assets no longer reads Mongo.** That seam closed with expenses (0059):
+`asset-cost-queries.js` keeps its filename and lost its reason for existing —
+its own header called it "the one query that has to reach into both stores",
+and both halves are Postgres now. It belongs in `asset-actions.ts`; only the
+import path in `app/dashboard/assets/[id]/page.jsx` is stopping it.
 
 **Claims reads 4, and all four are the project picker.** Every claim, item,
 receipt, journal entry and count is on Postgres (§9H); what is left is
@@ -157,7 +173,19 @@ ls app/db/schema/<thing>.ts app/db/repositories/<thing>.ts app/db/actions/<thing
 grep -n "^export async function" app/db/repositories/<thing>.ts
 ```
 
-**Four questions find four different failures. Ask all four.**
+**Five questions find five different failures. Ask all five, cheapest first.**
+
+**0. `npx eslint . --quiet`.** The cheapest of the lot and the one nobody runs.
+`no-undef` finds a named import a module does not export, and a symbol used
+under a different name than it was imported by — neither of which `tsc` catches
+across the JS/TS boundary. It has found two live bugs: `POTable.jsx` imported
+`sendPurchaseOrderPg` and bound `sendPurchaseOrder` at three call sites, so the
+Send and Confirm buttons on the purchase-order table submitted a form whose
+action was `undefined`; and `Categorymanagement.jsx` imported
+`seedDefaultCategories` from a module that has never exported it, which is why
+nothing renders that file.
+
+
 
 ```bash
 # 1. What still posts into the Mongo ledger?
@@ -518,3 +546,94 @@ ALTER ROLE app_user LOGIN PASSWORD '<pass>';
 `DATABASE_URL` must name that role, never `postgres`: a superuser has BYPASSRLS
 and makes every policy in the schema inert. `SELECT assert_rls_effective()`
 raises if the current connection would bypass RLS — worth a health check.
+
+---
+
+## Handoff — 2026-08-24
+
+State: branch `feat/postgres-migration`, everything committed, `tsc` and
+`eslint --quiet` clean.
+
+### What moved in the last session
+
+| Module | Migration | Tests |
+|---|---|---|
+| Expenses | 0059 | 35 |
+| Petty cash | 0060 | 25 + 4 statement |
+| Credit notes | — (finished a half-port) | 27 existing |
+| Opening balances | 0061 | 24 |
+| Checkouts | — (wired an existing table) | 16 |
+| Payments | — (action layer only) | 12 |
+| Categories | 0062 | 17 |
+
+Sales orders was **switched off** rather than ported — `lib/unported-modules.js`,
+§9K. One flag, five guards, `grep -rn SALES_ORDERS_AVAILABLE`.
+
+### Next, in the order I would take them
+
+**1. Wire payments (small, and it is the live half-port).**
+`app/db/actions/payment-actions.ts` is built and tested and nothing calls it.
+Needs three more functions before the five screens can move —
+`getUnpaidDocuments`, `cancelPayment`, `deletePayment` — then repoint
+`payments/received`, `payments/made`, `payments/[id]`, `PaymentForm` and
+`PaymentActions`. After that `payment.confirm()` is unreachable and one of the
+three remaining ledger postings is gone.
+
+**2. Products / stocks.** `stock-actions.js` is 1,163 lines over 7 exports, and
+the destination is largely built: `app/db/repositories/products.ts` has 13
+functions including the whole commitment-based flow (`commitStock`,
+`releaseStock`, `issueStock`, receive-to-hold/accept/reject,
+`recostFromAcceptedReceipt`), all in use by invoices, quotes and GRNs. What is
+missing is `product-actions.ts` and six screens. Two of those screens import
+the Mongoose `Category` model directly — `stocks/[id]/update/page.jsx` and
+`stocks/create/page.jsx` — and categories is on Postgres now, so they are
+reading a collection nothing writes.
+
+**3. Inventory adjustments.** The only genuine from-scratch port left in the
+cluster: no Postgres table, no repository. 308 action + 197 query lines, and it
+holds `adjustment.approve()` — a live ledger posting reached from three
+modules (`stock-actions`, `adjustment-actions`, `approval-actions`).
+
+**4. Stock movements.** `app/db/repositories/stockMovements.ts` is complete and
+has ZERO CALLERS — `recordMovement`, `attachAccounting`, `reverseMovement`,
+`listMovements`. `movement.reverse()` in `integration-actions.js:467` is the
+third remaining posting, reached from 10 screens.
+
+### Remaining Mongo ledger postings
+
+Three, and `npm run ledger-sweep` is the authority — not a grep:
+
+| Posts | From |
+|---|---|
+| `payment.confirm()` | `payment-actions.js:656`, `approval-actions.js:505` |
+| `adjustment.approve()` | `stock-actions.js:371`, `adjustment-actions.js:210`, `approval-actions.js:457` |
+| `movement.reverse()` | `integration-actions.js:467` |
+
+The sweep also prints three false positives it cannot distinguish — two
+`Array.reverse()` and a project budget's `approve()`. It says so in its own
+output. Read the lines.
+
+### Known dead code, left deliberately
+
+- `setCheckoutStatusPg` — no caller, and the Mongo `updateCheckoutStatus` it
+  was ported from had none either. `lost` and `damaged` are real states the
+  list filters on, so the gap is a missing UI. If no screen wants it, delete
+  the action and the two enum values together.
+- `getPettyCashExpenseAccountsPg` — no caller. Ported because the Mongo module
+  had it; the statement derives spend from expenses, so nothing needs a spend
+  picker. Same decision to make.
+
+### Environment, before running anything
+
+- **Wrap EVERY Postgres test run in `caffeinate -i`.** Idle sleep does not
+  merely slow a run, it corrupts it: tests report 926-second durations (the
+  sleep interval) that the 30-second `testTimeout` never fires on, and a sleep
+  mid-transaction splits `TRUNCATE ... CASCADE` from the fixture insert and
+  produces duplicate-key failures. Two full suites and one targeted run were
+  thrown away to this.
+- **One run at a time.** Overlapping runs on `stockvault_test` block each other
+  on the `TRUNCATE` in `beforeEach` and time out the 120s hook. A four-file run
+  that should take 2 minutes took 55.
+- **Restart `next dev` after touching `app/db/schema/`.** Turbopack caches the
+  module scope, so adding an import produces `ReferenceError: x is not defined`
+  against source that plainly imports it.

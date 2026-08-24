@@ -25,9 +25,14 @@ import {
   Receipt,
   Copy,
 } from "lucide-react";
+// Aliased, because the JSX below binds `sendPurchaseOrder` and
+// `confirmPurchaseOrder`. Imported under their Pg names and used without the
+// suffix, both were `undefined` at every call site — three of them — so the
+// Send and Confirm buttons on this table submitted a form with no action.
+// eslint's no-undef caught it; nothing else did.
 import {
-  sendPurchaseOrderPg,
-  confirmPurchaseOrderPg,
+  sendPurchaseOrderPg as sendPurchaseOrder,
+  confirmPurchaseOrderPg as confirmPurchaseOrder,
 } from "@/app/db/actions/purchase-order-actions";
 
 // ============================================
