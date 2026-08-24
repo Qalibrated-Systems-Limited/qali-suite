@@ -22,9 +22,9 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 
 import {
-  createCategory,
-  updateCategory,
-} from "../../../mongodb/actions/category-actions";
+  createCategoryPg as createCategory,
+  updateCategoryPg as updateCategory,
+} from "@/app/db/actions/category-actions";
 
 export default function CategoryForm({ category, parentOptions = [] }) {
   const isEditing = !!category;

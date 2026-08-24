@@ -182,6 +182,10 @@ export async function searchCategoriesPg(query: string) {
   );
 }
 
+export async function getCategoryStatsPg() {
+  return withAuthorizedTenant([], (tx) => categoriesRepo.getCategoryStats(tx));
+}
+
 export async function getCategoryTreePg(activeOnly = true) {
   return withAuthorizedTenant([], (tx) =>
     categoriesRepo.getCategoryTree(tx, { activeOnly }),

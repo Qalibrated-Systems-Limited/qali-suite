@@ -2,10 +2,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FolderTree, FolderCheck, FolderX, Package, Layers } from "lucide-react";
 import {
-  getCategoryStats,
-  getCategoryTree,
-  searchCategories,
-} from "@/app/mongodb/queries/category-queries";
+  getCategoryStatsPg as getCategoryStats,
+  getCategoryTreePg as getCategoryTree,
+  searchCategoriesPg as searchCategories,
+} from "@/app/db/actions/category-actions";
 import CategoryTree from "./CategoryTree";
 
 // ============================================

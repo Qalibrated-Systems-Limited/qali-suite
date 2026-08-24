@@ -236,6 +236,30 @@ suite("product categories", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
+  describe("the stat tiles", () => {
+    it("counts categories with products by JOIN, not by a cached number", async () => {
+      const electronics = await mk("Electronics");
+      const scales = await mk("Scales", electronics.id);
+      await mk("Empty");
+      await addProduct(scales.id);
+
+      const stats = await asTenant((tx) => repo.getCategoryStats(tx));
+      expect(stats.total).toBe(3);
+      expect(stats.active).toBe(3);
+      expect(stats.rootCategories).toBe(2); // Electronics and Empty
+      expect(stats.withProducts).toBe(1); // only Scales
+    });
+
+    it("counts an inactive category as inactive", async () => {
+      const cat = await mk("Retired");
+      await asTenant((tx) => repo.updateCategory(tx, cat.id, { isActive: false }));
+      const stats = await asTenant((tx) => repo.getCategoryStats(tx));
+      expect(stats.inactive).toBe(1);
+      expect(stats.active).toBe(0);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
   describe("tenant isolation", () => {
     it("another company sees none of it", async () => {
       await mk("Electronics");

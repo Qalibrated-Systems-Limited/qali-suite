@@ -6,7 +6,7 @@ import { AlertCircle, ArrowLeft, FolderTree } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { getCategories } from "../../../mongodb/actions/category-actions";
+import { getCategoriesPg as getCategories } from "@/app/db/actions/category-actions";
 import CategoryForm from "../components/CategoryForm";
 
 export const metadata = {

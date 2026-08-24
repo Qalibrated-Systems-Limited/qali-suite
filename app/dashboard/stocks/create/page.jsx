@@ -5,7 +5,7 @@ import { Shield, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import AddProductWizard from "../components/AddProductWizard";
-import { getCategories } from "@/app/mongodb/actions/category-actions";
+import { getCategoriesPg as getCategories } from "@/app/db/actions/category-actions";
 import Category from "@/app/models/category";
 
 async function CreateStockPage() {

@@ -19,7 +19,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-import { deleteCategory } from "../../../mongodb/actions/category-actions";
+import { deleteCategoryPg as deleteCategory } from "@/app/db/actions/category-actions";
 
 export default function DeleteCategoryForm({
   categoryId,

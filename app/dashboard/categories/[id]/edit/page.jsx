@@ -8,9 +8,9 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  getCategories,
-  getCategory,
-} from "../../../../mongodb/actions/category-actions";
+  getCategoriesPg as getCategories,
+  getCategoryPg as getCategory,
+} from "@/app/db/actions/category-actions";
 import CategoryForm from "../../components/CategoryForm";
 
 export const metadata = {

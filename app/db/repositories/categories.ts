@@ -281,6 +281,35 @@ export async function getCategoryTree(
   return roots;
 }
 
+/**
+ * The categories page's stat tiles.
+ *
+ * `withProducts` counts categories that have products, by JOIN rather than by
+ * reading a cached `productCount` — the same reason deletion no longer trusts
+ * one.
+ */
+export async function getCategoryStats(tx: Tx) {
+  const [r] = (await tx.execute(sql`
+    SELECT
+      count(*)::int                                        AS total,
+      count(*) FILTER (WHERE is_active)::int                AS active,
+      count(*) FILTER (WHERE NOT is_active)::int            AS inactive,
+      count(*) FILTER (WHERE parent_id IS NULL)::int        AS root_categories,
+      count(*) FILTER (
+        WHERE EXISTS (SELECT 1 FROM products p WHERE p.category_id = categories.id)
+      )::int                                               AS with_products
+    FROM categories
+  `)) as unknown as Array<Record<string, number>>;
+
+  return {
+    total: Number(r.total ?? 0),
+    active: Number(r.active ?? 0),
+    inactive: Number(r.inactive ?? 0),
+    withProducts: Number(r.with_products ?? 0),
+    rootCategories: Number(r.root_categories ?? 0),
+  };
+}
+
 /** Every descendant of a category, itself included — one indexed query. */
 export async function listSubtree(tx: Tx, categoryId: string) {
   const rows = (await tx.execute(sql`
