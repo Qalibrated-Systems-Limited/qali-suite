@@ -20,7 +20,7 @@ import {
   getTopMovedProducts,
   getCategoryDistribution,
   getOverdueCheckouts,
-} from "@/app/mongodb/queries/erp-dashboard-queries";
+} from "@/app/db/actions/dashboard-actions";
 
 // Charts (Client Components)
 import { CategoryDistributionChart } from "../CategoryDistroChart";

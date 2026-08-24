@@ -10,7 +10,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
-import { getDashboardAlerts } from "@/app/mongodb/queries/erp-dashboard-queries";
+import { getDashboardAlerts } from "@/app/db/actions/dashboard-actions";
 
 // ============================================
 // ALERTS CARD - Server Component
