@@ -4,7 +4,7 @@ import {
   EmptyState,
   ActivityCardSkeleton,
 } from "./ActivityCard";
-import { getRecentTransactions } from "@/app/mongodb/queries/erp-dashboard-queries";
+import { getRecentTransactions } from "@/app/db/actions/dashboard-actions";
 import {
   Receipt,
   TrendingUp,

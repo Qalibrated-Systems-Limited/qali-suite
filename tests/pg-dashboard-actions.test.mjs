@@ -178,18 +178,144 @@ suite("dashboard actions", () => {
     });
   });
 
+  describe("the financial overview", () => {
+    // Revenue and expense accounts carry OPPOSITE natural balances, so the
+    // sign convention is the thing to get right: revenue is credit-less-debit
+    // and expense is debit-less-credit. Backwards, a profitable month shows a
+    // loss.
+    const post = async ({ date, lines }) => {
+      const entryId = randomUUID();
+      await admin`
+        INSERT INTO journal_entries (id, company_id, entry_number, entry_date,
+                                     entry_type, description, status)
+        VALUES (${entryId}, ${companyUuid}, ${"JE-" + entryId.slice(0, 6)},
+                ${date}, 'adjustment', 'Test', 'draft')`;
+      let n = 0;
+      for (const l of lines) {
+        n += 1;
+        await admin`
+          INSERT INTO journal_lines (company_id, entry_id, account_id, line_number, debit, credit)
+          VALUES (${companyUuid}, ${entryId}, ${l.account}, ${n}, ${l.debit ?? 0}, ${l.credit ?? 0})`;
+      }
+      await admin`UPDATE journal_entries SET status='posted', posted_at=now() WHERE id = ${entryId}`;
+    };
+
+    let revenueAcct, expenseAcct, bankAcct;
+    beforeEach(async () => {
+      revenueAcct = randomUUID();
+      expenseAcct = randomUUID();
+      bankAcct = randomUUID();
+      await admin.begin(async (tx) => {
+        await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+        await tx`
+          INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type) VALUES
+            (${revenueAcct}, ${companyUuid}, '4000', 'Sales',   'revenue', NULL),
+            (${expenseAcct}, ${companyUuid}, '5000', 'Rent',    'expense', NULL),
+            (${bankAcct},    ${companyUuid}, '1000', 'Equity Bank', 'asset', 'bank')`;
+      });
+    });
+
+    it("reads revenue as credit-less-debit and expense the other way", async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      await post({
+        date: today,
+        lines: [
+          { account: bankAcct, debit: 1000 },
+          { account: revenueAcct, credit: 1000 },
+        ],
+      });
+      await post({
+        date: today,
+        lines: [
+          { account: expenseAcct, debit: 300 },
+          { account: bankAcct, credit: 300 },
+        ],
+      });
+
+      const o = await dash.getFinancialOverview();
+      expect(o.revenue.current).toBe(1000);
+      expect(o.expenses.current).toBe(300);
+      expect(o.profit.current).toBe(700);
+      // Cash is the LEDGER balance of the bank account, not a stored figure.
+      expect(o.cash.bankOnly).toBe(700);
+      expect(o.cash.balance).toBe(700);
+    });
+
+    it("reports no change rather than infinity against a zero base", async () => {
+      const o = await dash.getFinancialOverview();
+      expect(o.revenue.trend).toBe(0);
+      expect(o.profit.trend).toBe(0);
+    });
+
+    it("returns a point per month, zero-filled", async () => {
+      const trend = await dash.getRevenueTrend(6);
+      expect(trend).toHaveLength(6);
+      expect(trend.every((m) => /^\d{4}-\d{2}$/.test(m.month))).toBe(true);
+    });
+
+    it("breaks expenses down by account, largest first", async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      await post({
+        date: today,
+        lines: [
+          { account: expenseAcct, debit: 500 },
+          { account: bankAcct, credit: 500 },
+        ],
+      });
+      const breakdown = await dash.getExpenseBreakdown();
+      expect(breakdown[0]).toEqual({ category: "Rent", value: 500 });
+    });
+
+    it("lists recent postings with the entry's size", async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      await post({
+        date: today,
+        lines: [
+          { account: bankAcct, debit: 250 },
+          { account: revenueAcct, credit: 250 },
+        ],
+      });
+      const [txn] = await dash.getRecentTransactions();
+      // Sum of the DEBITS — a balanced entry gives the same either side.
+      expect(txn.amount).toBe(250);
+      expect(txn.entryDate).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    });
+  });
+
+  describe("the accountant's workload", () => {
+    it("separates what is late from what falls due this week", async () => {
+      await admin`
+        INSERT INTO invoices (company_id, invoice_number, invoice_date, due_date,
+                              customer_id, subtotal, total, amount_paid, status, payment_status)
+        VALUES
+          (${companyUuid}, 'L-1', CURRENT_DATE - 60, CURRENT_DATE - 10,
+           ${customerId}, 1000, 1000, 200, 'completed', 'partial'),
+          (${companyUuid}, 'W-1', CURRENT_DATE, CURRENT_DATE + 3,
+           ${customerId}, 500, 500, 0, 'completed', 'unpaid')`;
+
+      const w = await dash.getAccountantWorkload();
+      expect(w.overdueInvoices.count).toBe(1);
+      // What is STILL DUE on it, not the invoice total.
+      expect(w.overdueInvoices.total).toBe(800);
+      expect(w.dueThisWeek.count).toBe(1);
+      expect(w.dueThisWeek.total).toBe(500);
+    });
+  });
+
   describe("aging", () => {
     it("sums the ledger's buckets rather than re-deriving from documents", async () => {
       const ar = await dash.getARAgingSummary();
-      // No posted entries yet — every bucket is zero rather than undefined.
-      expect(ar).toEqual({
-        current: 0,
-        days30: 0,
-        days60: 0,
-        days90: 0,
-        over90: 0,
-        total: 0,
-      });
+      // An ARRAY of {bucket, amount} — the shape the dashboards reduce over.
+      // Labelled the way they index it, not the way the SQL names its columns.
+      expect(ar.map((b) => b.bucket)).toEqual([
+        "current",
+        "1-30",
+        "31-60",
+        "61-90",
+        "90+",
+      ]);
+      // No posted entries yet — every bucket is zero rather than missing.
+      expect(ar.every((b) => b.amount === 0)).toBe(true);
     });
   });
 });

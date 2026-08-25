@@ -8,7 +8,7 @@ import {
 import {
   getRecentTransactions,
   getDashboardAlerts,
-} from "@/app/mongodb/queries/erp-dashboard-queries";
+} from "@/app/db/actions/dashboard-actions";
 import {
   Receipt,
   FileText,

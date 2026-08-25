@@ -28,7 +28,7 @@ import {
   getAccountantWorkload,
   getARAgingSummary,
   getAPAgingSummary,
-} from "@/app/mongodb/queries/erp-dashboard-queries";
+} from "@/app/db/actions/dashboard-actions";
 import { getUnallocatedCount, getBankStatements } from "@/app/mongodb/queries/bank-feed-queries";
 import { fetchFiscalPeriodStats } from "@/app/mongodb/actions/fiscal-period-actions";
 import Invoice from "../../models/invoice";

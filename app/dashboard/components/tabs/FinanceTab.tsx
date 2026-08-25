@@ -22,7 +22,7 @@ import {
   getExpenseBreakdown,
   getRevenueTrend,
   getDashboardAlerts,
-} from "@/app/mongodb/queries/erp-dashboard-queries";
+} from "@/app/db/actions/dashboard-actions";
 import Invoice from "../../../models/invoice";
 import { listClaimsPg } from "@/app/db/actions/claim-actions";
 import { getTenantContext } from "@/lib/utils/tenant-utils";

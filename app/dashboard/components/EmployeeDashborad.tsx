@@ -22,7 +22,7 @@ import { Wallet, FileText, CheckCircle, Plus, Calendar, Receipt } from "lucide-r
 import {
   getEmployeeSummary,
   getEmployeeFinancialSummary,
-} from "@/app/mongodb/queries/erp-dashboard-queries";
+} from "@/app/db/actions/dashboard-actions";
 import MyHRStrip from "./MyHRStrip";
 import { MyAlertsStrip, MyAlertsStripSkeleton } from "./MyAlertsStrip";
 import { listClaimsPg } from "@/app/db/actions/claim-actions";

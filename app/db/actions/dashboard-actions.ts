@@ -7,7 +7,7 @@ import * as invoicesRepo from "../repositories/invoices";
 import * as fulfilmentRepo from "../repositories/fulfilment";
 import * as movementsRepo from "../repositories/stockMovements";
 import * as reportsRepo from "../repositories/reports";
-import { countClaimsAwaitingApprovalPg } from "./claim-actions";
+import { countClaimsAwaitingApprovalPg, sumClaimsPg } from "./claim-actions";
 
 /**
  * The dashboard, on Postgres.
@@ -318,22 +318,297 @@ export async function getAPAgingSummary() {
   return agingSummary("payable");
 }
 
+/**
+ * An ARRAY of `{ bucket, amount }`, which is what the Mongo version returned
+ * and what the dashboards reduce over. tsc caught this when the components
+ * were swapped: a summed object read better and was the wrong shape, which is
+ * the second time on this file that "improving" a ported return would have
+ * broken a caller silently at runtime.
+ *
+ * The bucket LABELS matter too — the components index by "1-30", not days30.
+ */
 async function agingSummary(side: "receivable" | "payable") {
   return withAuthorizedTenant([], async (tx) => {
     const asOf = new Date().toISOString().slice(0, 10);
     const rows = await reportsRepo.getAgingReport(tx, side, asOf);
 
-    const zero = { current: 0, days30: 0, days60: 0, days90: 0, over90: 0, total: 0 };
-    return rows.reduce(
-      (acc, r) => ({
-        current: acc.current + Number(r.current),
-        days30: acc.days30 + Number(r.days0_30),
-        days60: acc.days60 + Number(r.days31_60),
-        days90: acc.days90 + Number(r.days61_90),
-        over90: acc.over90 + Number(r.days90plus),
-        total: acc.total + Number(r.total),
-      }),
-      zero,
-    );
+    const sum = (pick: (r: (typeof rows)[number]) => string) =>
+      rows.reduce((acc, r) => acc + Number(pick(r)), 0);
+
+    return [
+      { bucket: "current", amount: sum((r) => r.current) },
+      { bucket: "1-30", amount: sum((r) => r.days0_30) },
+      { bucket: "31-60", amount: sum((r) => r.days31_60) },
+      { bucket: "61-90", amount: sum((r) => r.days61_90) },
+      { bucket: "90+", amount: sum((r) => r.days90plus) },
+    ];
   });
+}
+
+/**
+ * The most recent posted entries, as the activity feed reads them.
+ *
+ * `amount` is the sum of the DEBITS on the entry. A balanced entry debits and
+ * credits the same total, so either side gives its size; debits are the side
+ * the Mongo version summed and the convention the feed's labels assume.
+ */
+export async function getRecentTransactions(limit = 5) {
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = (await tx.execute(sql`
+      SELECT e.id, e.entry_number, e.entry_date, e.entry_type, e.description,
+             COALESCE(SUM(l.debit), 0)::numeric(19,4) AS amount,
+             p.name AS party_name
+        FROM journal_entries e
+        JOIN journal_lines l ON l.entry_id = e.id
+        LEFT JOIN parties p ON p.id = e.party_id
+       WHERE e.status = 'posted'
+       GROUP BY e.id, e.entry_number, e.entry_date, e.entry_type,
+                e.description, e.created_at, p.name
+       ORDER BY e.entry_date DESC, e.created_at DESC
+       LIMIT ${Math.min(limit, 50)}
+    `)) as unknown as Array<Record<string, unknown>>;
+
+    return rows.map((r) => ({
+      _id: String(r.id),
+      entryNumber: String(r.entry_number),
+      // The Mongo version returned an ISO string and the feed formats it.
+      entryDate: new Date(r.entry_date as string).toISOString(),
+      entryType: String(r.entry_type),
+      description: String(r.description),
+      amount: int(r.amount),
+      party: (r.party_name as string) ?? null,
+    }));
+  });
+}
+
+/**
+ * Revenue, expenses, profit and cash — each against the month before.
+ *
+ * SIGN CONVENTION. Revenue is credit-less-debit and expense is
+ * debit-less-credit, because revenue and expense accounts carry opposite
+ * natural balances. Getting this backwards is the classic way a dashboard
+ * shows a loss in a profitable month.
+ *
+ * Cash is the LEDGER balance of the cash and bank accounts, not a stored
+ * figure — the Mongo version read `actualBalance` off the account document,
+ * which is a cache of exactly this sum.
+ */
+export async function getFinancialOverview() {
+  return withAuthorizedTenant([], async (tx) => {
+    const [row] = (await tx.execute(sql`
+      WITH period AS (
+        SELECT date_trunc('month', CURRENT_DATE)::date                     AS this_start,
+               (date_trunc('month', CURRENT_DATE) - interval '1 month')::date AS last_start
+      ),
+      movement AS (
+        SELECT a.account_type,
+               a.sub_type,
+               e.entry_date,
+               l.debit,
+               l.credit
+          FROM journal_entries e
+          JOIN journal_lines l ON l.entry_id = e.id
+          JOIN accounts a ON a.id = l.account_id
+         WHERE e.status = 'posted'
+      )
+      SELECT
+        COALESCE(SUM(credit - debit) FILTER (
+          WHERE account_type = 'revenue' AND entry_date >= (SELECT this_start FROM period)
+        ), 0)::numeric(19,4) AS revenue_now,
+        COALESCE(SUM(credit - debit) FILTER (
+          WHERE account_type = 'revenue'
+            AND entry_date >= (SELECT last_start FROM period)
+            AND entry_date <  (SELECT this_start FROM period)
+        ), 0)::numeric(19,4) AS revenue_prev,
+        COALESCE(SUM(debit - credit) FILTER (
+          WHERE account_type = 'expense' AND entry_date >= (SELECT this_start FROM period)
+        ), 0)::numeric(19,4) AS expense_now,
+        COALESCE(SUM(debit - credit) FILTER (
+          WHERE account_type = 'expense'
+            AND entry_date >= (SELECT last_start FROM period)
+            AND entry_date <  (SELECT this_start FROM period)
+        ), 0)::numeric(19,4) AS expense_prev,
+        COALESCE(SUM(debit - credit) FILTER (WHERE sub_type = 'cash'), 0)::numeric(19,4) AS cash_only,
+        COALESCE(SUM(debit - credit) FILTER (WHERE sub_type = 'bank'), 0)::numeric(19,4) AS bank_only
+      FROM movement
+    `)) as unknown as Array<Record<string, unknown>>;
+
+    const revenue = int(row.revenue_now);
+    const revenuePrev = int(row.revenue_prev);
+    const expenses = int(row.expense_now);
+    const expensesPrev = int(row.expense_prev);
+    const cashOnly = int(row.cash_only);
+    const bankOnly = int(row.bank_only);
+
+    // Against a zero base a percentage is undefined, not infinite — the Mongo
+    // version returned 0 and the tiles render it as "no change".
+    const pct = (now: number, prev: number) =>
+      prev ? ((now - prev) / prev) * 100 : 0;
+
+    return {
+      revenue: { current: revenue, trend: pct(revenue, revenuePrev) },
+      expenses: { current: expenses, trend: pct(expenses, expensesPrev) },
+      profit: {
+        current: revenue - expenses,
+        trend: pct(revenue - expenses, revenuePrev - expensesPrev),
+      },
+      cash: { balance: cashOnly + bankOnly, cashOnly, bankOnly },
+    };
+  });
+}
+
+/**
+ * Revenue and expenses by month, for the trend chart.
+ *
+ * The months are GENERATED, so a month with no postings is a zero rather than
+ * a missing point — the Mongo version built the same skeleton in JavaScript
+ * and filled it from an aggregation, for the same reason.
+ */
+export async function getRevenueTrend(months = 6) {
+  const span = Math.min(Math.max(months, 1), 36);
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = (await tx.execute(sql`
+      WITH series AS (
+        SELECT generate_series(
+          date_trunc('month', CURRENT_DATE) - make_interval(months => ${span - 1}),
+          date_trunc('month', CURRENT_DATE),
+          '1 month'
+        ) AS m
+      )
+      SELECT to_char(s.m, 'YYYY-MM') AS month,
+             COALESCE(SUM(l.credit - l.debit) FILTER (WHERE a.account_type = 'revenue'), 0)::numeric(19,4) AS revenue,
+             COALESCE(SUM(l.debit - l.credit) FILTER (WHERE a.account_type = 'expense'), 0)::numeric(19,4) AS expenses
+        FROM series s
+        LEFT JOIN journal_entries e
+               ON date_trunc('month', e.entry_date) = s.m AND e.status = 'posted'
+        LEFT JOIN journal_lines l ON l.entry_id = e.id
+        LEFT JOIN accounts a ON a.id = l.account_id
+       GROUP BY s.m
+       ORDER BY s.m
+    `)) as unknown as Array<Record<string, unknown>>;
+
+    return rows.map((r) => ({
+      month: String(r.month),
+      revenue: int(r.revenue),
+      expenses: int(r.expenses),
+    }));
+  });
+}
+
+/** The largest expense accounts, for the breakdown chart. */
+export async function getExpenseBreakdown() {
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = (await tx.execute(sql`
+      SELECT a.account_name AS category,
+             SUM(l.debit - l.credit)::numeric(19,4) AS value
+        FROM journal_entries e
+        JOIN journal_lines l ON l.entry_id = e.id
+        JOIN accounts a ON a.id = l.account_id
+       WHERE e.status = 'posted' AND a.account_type = 'expense'
+       GROUP BY a.account_name
+      HAVING SUM(l.debit - l.credit) > 0
+       ORDER BY value DESC
+       LIMIT 8
+    `)) as unknown as Array<Record<string, unknown>>;
+
+    return rows.map((r) => ({
+      category: String(r.category),
+      value: int(r.value),
+    }));
+  });
+}
+
+/**
+ * What is on an accountant's desk: what is late, what is about to be, and
+ * what has been paid today.
+ */
+export async function getAccountantWorkload() {
+  const [invoiceWork, claimsToPay, paidToday] = await Promise.all([
+    withAuthorizedTenant([], async (tx) => {
+      const [row] = (await tx.execute(sql`
+        SELECT
+          count(*) FILTER (WHERE due_date < CURRENT_DATE)::int                       AS overdue_count,
+          COALESCE(SUM(total - amount_paid) FILTER (WHERE due_date < CURRENT_DATE), 0)::numeric(19,4) AS overdue_total,
+          count(*) FILTER (
+            WHERE due_date >= CURRENT_DATE AND due_date <= CURRENT_DATE + 7
+          )::int                                                                     AS week_count,
+          COALESCE(SUM(total - amount_paid) FILTER (
+            WHERE due_date >= CURRENT_DATE AND due_date <= CURRENT_DATE + 7
+          ), 0)::numeric(19,4)                                                       AS week_total
+        FROM invoices
+        WHERE payment_status IN ('unpaid', 'partial')
+          AND status <> 'cancelled'
+          AND due_date IS NOT NULL
+      `)) as unknown as Array<Record<string, unknown>>;
+
+      return {
+        overdueInvoices: {
+          count: int(row.overdue_count),
+          total: int(row.overdue_total),
+        },
+        dueThisWeek: { count: int(row.week_count), total: int(row.week_total) },
+      };
+    }),
+    // The EXISTING helper, which the Mongo version also called. Writing the
+    // sum again here got it wrong — there is no `total_amount` column; a
+    // claim's value is derived from its receipts, which is exactly what
+    // sumClaims already does.
+    sumClaimsPg({ status: "approved" }),
+    sumClaimsPg({
+      status: "paid",
+      paidSince: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
+    }).then((r) => r.count),
+  ]);
+
+  return { ...invoiceWork, claimsToPay, paidToday };
+}
+
+/**
+ * One employee's claim counts, for their own dashboard.
+ *
+ * ALREADY POSTGRES IN THE MONGO FILE. Every figure here came from
+ * `sumClaimsPg`; the only Mongo left in it was a `tenantMatch` built and never
+ * read — the same dead scaffolding that made the HR alerts strip throw. So
+ * this is the Mongo function with the scaffolding removed, not a rewrite.
+ */
+export async function getEmployeeSummary(userId: string) {
+  const [pendingClaims, approvedClaims, paidClaims, totalAdvances] =
+    await Promise.all([
+      sumClaimsPg({ userId, status: "submitted" }).then((r) => r.count),
+      sumClaimsPg({ userId, status: "approved" }).then((r) => r.count),
+      sumClaimsPg({ userId, status: "paid" }).then((r) => r.count),
+      sumClaimsPg({
+        userId,
+        claimType: "advance_request",
+        status: ["approved", "paid"],
+      }).then((r) => r.total),
+    ]);
+
+  return { pendingClaims, approvedClaims, paidClaims, totalAdvances };
+}
+
+/** What one employee is holding, and what they have been reimbursed this month. */
+export async function getEmployeeFinancialSummary(userId: string) {
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+
+  const [advancesGiven, reimbursedMTD] = await Promise.all([
+    // "Nothing points at this advance yet" — the reverse pointer the Mongo
+    // document carried is gone with the port (§8.2).
+    sumClaimsPg({
+      userId,
+      claimType: "advance_request",
+      status: "paid",
+      unsettledOnly: true,
+    }).then((r) => r.total),
+    sumClaimsPg({
+      userId,
+      claimType: "reimbursement",
+      status: "paid",
+      paidSince: startOfMonth.toISOString(),
+    }).then((r) => r.total),
+  ]);
+
+  return { advancesGiven, reimbursedMTD };
 }
