@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { getInitials } from "@/lib/utils";
-import { logout } from "@/app/mongodb/actions/auth-actions";
+import { logout } from "@/app/db/actions/auth-actions";
 import {
   Menu,
   User,

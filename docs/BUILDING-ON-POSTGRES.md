@@ -18,24 +18,39 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 
 | on Postgres | still Mongo (screen files) |
 |---|---|
-| **statements**, **supplier-statements**, payments, hr, claims, assets, expenses, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders | projects 11, integrations 10, tax 8, reports 8, banking 8, components 7, kpis 7, settings 6, stocks 4, leads 4, employee 4, **claims 4**, sales-orders 3, profile 3, opportunities 3, admin 3, movements 2 |
+| **stocks/products**, **dashboard**, statements, supplier-statements, payments, hr, claims, assets, expenses, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders | projects 11, integrations 10, tax 8, reports 8, banking 8, kpis 7, components 7, settings 6, leads 4, employee 4, **claims 4**, sales-orders 3, profile 3, opportunities 3, journal 3, admin 3, movements 2, **invoices 2**, **expenses 2**, **bills 2**, **assets 2**, approvals 2, adjustments 2, **requests 1**, **quotes 1**, **parties 1**, executive 1, company 1 |
 
-**STATEMENTS AND SUPPLIER-STATEMENTS ARE NOW GENUINELY DONE.** They were listed
-here as done once before while reading `statement-queries.js`, which summed the
-MONGO `Invoice`, `Bill`, `Party` and `Payment` models — all four of which had
-moved — so both screens rendered an empty ledger. That file is deleted.
+**THE COMMAND UNDERCOUNTS — it only reads `*.jsx`.** There are `.tsx` screens
+too, and 16 of them were in `components`. Count both:
 
-They are now derived from the LEDGER rather than from documents:
-`reports.getStatementOfAccount` walks `journal_entries` against the AR or AP
-control account and runs the balance as a window function, with the opening
-balance summed in the same query. Summing documents means every new document
-type that touches a balance has to be remembered in the statement code, which
-is how credit notes got missed twice; the control account already has all of
-them. `app/db/actions/statement-actions.ts` assembles the shape the four
-screens already destructured, so this was a change of source, not a redesign.
+```
+grep -rln "@/app/mongodb" app/dashboard --include="*.jsx" --include="*.tsx" \
+  | cut -d/ -f3 | sort | uniq -c | sort -rn
+```
 
-The first listing was caught only by grepping the MODEL names rather than
-trusting this table — the lesson two sections down, arriving late.
+**A NON-ZERO COUNT IS NOT A VERDICT. Read the import.** Five of the modules
+above — invoices, bills, requests, expenses and claims — read exactly one
+thing, `projectQueries`, and it is the project picker. They are not
+half-ported; they are waiting for PROJECTS, and they all close the moment it
+lands. Same for quotes (the sales-orders flag) and parties (one action).
+Check what the import actually is before treating a count as work.
+
+**STATEMENTS AND SUPPLIER-STATEMENTS ARE DONE**, and are derived from the
+LEDGER rather than from documents — see §"Where the port has reached" below and
+`app/db/actions/statement-actions.ts`.
+
+**STOCKS/PRODUCTS IS DONE, and it was the worst seam in the port.** The
+repository was written early with the whole commitment-based flow and NOTHING
+was ever pointed at it. Products were written to Mongo by the screens while
+INVOICES read Postgres, so with 30 products in Mongo and 0 in Postgres the
+product dropdown on a new invoice was empty and no stock item could be sold at
+all. If you read one thing before porting a module, read §"Finding this one
+yourself".
+
+**THE DASHBOARD IS DONE.** Both Mongo dashboard query modules are ported
+(`app/db/actions/dashboard-actions.ts` and `inventory-dashboard-actions.ts` —
+two files because the Mongo layer had two, exporting the same names with
+different shapes). It had been reporting on a store nothing writes.
 
 **Regenerate rather than trust it:**
 
@@ -635,6 +650,86 @@ ALTER ROLE app_user LOGIN PASSWORD '<pass>';
 `DATABASE_URL` must name that role, never `postgres`: a superuser has BYPASSRLS
 and makes every policy in the schema inert. `SELECT assert_rls_effective()`
 raises if the current connection would bypass RLS — worth a health check.
+
+---
+
+## Handoff — 2026-08-26
+
+State: branch `feat/postgres-migration`, everything committed, `tsc` and
+`eslint --quiet` clean, full suite green (1028 tests at last full run, plus the
+suites added since).
+
+### What moved
+
+| Module | What |
+|---|---|
+| Statements | Off the LEDGER, not documents — 10 tests |
+| Products / stocks | The missing action layer + all 6 screens — 22 tests |
+| Dashboard | Both Mongo query modules, all consumers — 25 tests |
+| Tenant translation | 115 broken casts across 26 files — 9 tests |
+| Plan gate | `<PlanGate>` on module layouts |
+| Test speed | 4.6s -> 2.3s of TRUNCATE per test |
+
+### Things found that were not the module being ported
+
+- **`withTenantScope` threw for every non-SuperAdmin.** The session carries a
+  Postgres uuid; Mongo documents are keyed by ObjectId. 115 call sites across
+  26 files built the cast INLINE rather than calling the shared helper, so
+  fixing the helper fixed one of them. It survived because every helper returns
+  early for SuperAdmin — testing as one, nothing breaks.
+- **The plan gate was nav-deep only.** The port never carried
+  `requirePlanAccess` into `app/db/`, and no HR page checked, so a free-plan
+  company had a working Professional module via the command palette or a typed
+  URL.
+- **The session carried the GLOBAL role**, so promoting somebody per-company
+  changed nothing they could see.
+- **Two dashboard alert strips reported zeros** rather than failing, because
+  the ObjectId cast threw inside their own try/catch.
+
+The pattern in all four: the bug was never in the module being moved. Grep the
+MODEL name, not the action file.
+
+### Next, in order
+
+**1. PROJECTS — read `docs/PROJECTS-QALITRACK-PLAN.md` FIRST.**
+It is the keystone: five modules (claims, invoices, bills, requests, expenses)
+each have exactly one trailing Mongo read and it is the project picker. They
+all close when projects lands.
+
+It is ALSO not a straight port. The MD produced a working prototype,
+`QaliTrack_PMS`, and it is a road construction CONTRACT ADMINISTRATION system —
+Engineer's Instructions, site diaries, Interim Payment Certificates, retention,
+and time-barred notices (EOT and CCN at 28 days, Accident Report at 24 hours,
+where a late notice extinguishes the claim). The recommendation in that
+document is to split: port `projects` as the cost centre it already is, and
+build `contracts` as its own module. Do not merge them without reading it.
+
+**2. The remaining 7 component reads** — company-queries (3), bank-feed,
+approvals, notifications, fiscal-periods, activity. `auth-actions` was the
+eighth and had no Mongo in it at all; it moved to `app/db/actions/`.
+
+**3. Whole modules still untouched** — integrations, tax, reports, banking,
+kpis, settings, leads, opportunities, adjustments, approvals, journal.
+
+### Two decisions still open
+
+- **Manager and selling prices.** `PRICE_ROLES` (server) included Manager,
+  `PRICING_EDIT_ROLES` (UI) did not, so the server's documented intent was
+  unreachable. Consolidated into `lib/permissions.js` on the STRICTER side. One
+  line to widen if that is wrong.
+- **The starter tier is ungated.** `<PlanGate>` covers hr, projects and
+  integrations. Finance, tax, purchases, assets and claims are not gated,
+  because gating them would immediately lock the free-plan dev company out of
+  most of the app. Needs a call on plan assignments.
+
+### Two traps worth knowing before you touch anything
+
+- **A ported return shape is a contract, not a draft.** Three shapes were
+  "improved" during the dashboard port and `tsc` caught all three. Match the
+  Mongo shape exactly, even when it reads worse.
+- **`tsc` cannot check raw SQL.** Two invented column names shipped before
+  being caught by running the query. Check identifiers against
+  `information_schema` after writing raw SQL.
 
 ---
 
