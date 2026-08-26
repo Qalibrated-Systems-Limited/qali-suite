@@ -23,6 +23,7 @@ vi.mock("@/lib/utils/tenant-utils", () => ({ getTenantContext: vi.fn() }));
 
 const { getTenantContext } = await import("@/lib/utils/tenant-utils");
 const dash = await import("@/app/db/actions/dashboard-actions");
+const inv = await import("@/app/db/actions/inventory-dashboard-actions");
 
 suite("dashboard actions", () => {
   let admin;
@@ -330,6 +331,54 @@ suite("dashboard actions", () => {
 
     it("counts today's movements", async () => {
       expect(await dash.getTodayMovementCount()).toBe(0);
+    });
+  });
+
+  describe("the inventory dashboard's own shapes", () => {
+    // A SECOND module with the SAME function names and DIFFERENT shapes.
+    // Merging them would break whichever set of screens lost the coin toss.
+    it("keeps its eight tiles", async () => {
+      await addProduct({ sku: "A", onHand: 10, cost: 40, reorder: 2 });
+      const s = await inv.getDashboardStats();
+      expect(s.totalProducts).toBe(1);
+      expect(s.totalStockValue).toBe(400);
+      expect(s.activeCheckouts).toBe(0);
+      expect(s.monthlyMovements).toBe(0);
+    });
+
+    it("spells the unfiled bucket the way ITS callers do", async () => {
+      await addProduct({ sku: "A", onHand: 2, cost: 5, category: null });
+      const rows = await inv.getStockByCategory();
+      // "Uncategorized" with a z here; the other module says "Uncategorised".
+      expect(rows[0].category).toBe("Uncategorized");
+      expect(rows[0].totalItems).toBe(1);
+      expect(rows[0].totalValue).toBe(10);
+    });
+
+    it("returns top products in this module's shape, not the other's", async () => {
+      const top = await inv.getTopProducts(5);
+      for (const p of top) {
+        expect(Object.keys(p).sort()).toEqual(
+          ["SKU", "name", "productId", "totalMovements", "totalQuantity"].sort(),
+        );
+      }
+    });
+
+    it("names every request status even when none are in it", async () => {
+      const b = await inv.getRequestStatusBreakdown();
+      expect(Object.keys(b).sort()).toEqual(
+        ["approved", "cancelled", "fulfilled", "partially_fulfilled", "pending", "rejected"],
+      );
+      expect(Object.values(b).every((n) => n === 0)).toBe(true);
+    });
+
+    it("ignores the threshold argument and uses each reorder level", async () => {
+      // The old default meant "fewer than ten units", which is not low stock:
+      // reordered at 50 is low at 40, reordered at 2 is not low at 8.
+      await addProduct({ sku: "BIG", onHand: 40, reorder: 50 });
+      await addProduct({ sku: "SMALL", onHand: 8, reorder: 2 });
+      const alerts = await inv.getLowStockAlerts(10);
+      expect(alerts.map((p) => p.SKU)).toEqual(["BIG"]);
     });
   });
 

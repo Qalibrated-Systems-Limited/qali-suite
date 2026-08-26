@@ -1,7 +1,7 @@
 import {
   getRequestStatusBreakdown,
   getTopProducts,
-} from "@/app/mongodb/queries/dashboard-queries";
+} from "@/app/db/actions/inventory-dashboard-actions";
 import { RequestStatusChart, TopProductsChart } from "./dashboardCharts";
 import { da } from "date-fns/locale";
 

@@ -291,7 +291,7 @@ export async function getOverdueCheckouts(limit = 10) {
 export async function getRecentRequests(limit = 5) {
   return withAuthorizedTenant([], async (tx) => {
     const rows = (await tx.execute(sql`
-      SELECT id, request_number, status, priority, requested_by_name, created_at
+      SELECT id, request_number, status, priority, requester_name_at_request, created_at
         FROM stock_requests
        ORDER BY created_at DESC
        LIMIT ${Math.min(limit, 50)}
@@ -302,7 +302,10 @@ export async function getRecentRequests(limit = 5) {
       requestNumber: String(r.request_number),
       status: String(r.status),
       priority: String(r.priority ?? "normal"),
-      requestedBy: { name: (r.requested_by_name as string) ?? "Unknown" },
+      requestedBy: {
+        // `*_at_request` — the name as recorded, not a join.
+        name: (r.requester_name_at_request as string) ?? "Unknown",
+      },
       createdAt: r.created_at,
     }));
   });
