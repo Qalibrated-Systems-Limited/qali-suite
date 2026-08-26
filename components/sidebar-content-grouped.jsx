@@ -51,7 +51,7 @@ import {
   DropdownMenuLabel,
 } from "./ui/dropdown-menu";
 import { getInitials } from "@/lib/utils";
-import { logout } from "@/app/mongodb/actions/auth-actions";
+import { logout } from "@/app/db/actions/auth-actions";
 import { NextThemeToggler } from "./NextThemeToggler";
 import { useState, useEffect } from "react";
 import {
