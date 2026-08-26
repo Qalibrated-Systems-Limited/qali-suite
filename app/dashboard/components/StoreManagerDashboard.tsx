@@ -26,7 +26,7 @@ import {
   cRecentMovements,
   cOverdueCheckouts,
   cTodayMovementCount,
-} from "@/app/mongodb/queries/dashboard-cache";
+} from "@/app/db/dashboard-cache";
 
 // ============================================
 // STORE MANAGER DASHBOARD

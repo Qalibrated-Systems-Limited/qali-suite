@@ -22,7 +22,7 @@ import {
   cOverdueCheckouts,
   cRecentMovements,
   cRecentRequests,
-} from "@/app/mongodb/queries/dashboard-cache";
+} from "@/app/db/dashboard-cache";
 
 // ============================================
 // STOREKEEPER DASHBOARD

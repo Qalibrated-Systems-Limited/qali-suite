@@ -24,7 +24,7 @@ import {
   cFinancialOverview,
   cTopProducts,
   cARAgingSummary,
-} from "@/app/mongodb/queries/dashboard-cache";
+} from "@/app/db/dashboard-cache";
 
 // ============================================
 // SALES MANAGER DASHBOARD

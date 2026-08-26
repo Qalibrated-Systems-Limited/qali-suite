@@ -612,3 +612,74 @@ export async function getEmployeeFinancialSummary(userId: string) {
 
   return { advancesGiven, reimbursedMTD };
 }
+
+/**
+ * The admin dashboard's six headline figures.
+ *
+ * AR and AP come from the LEDGER's aging, not from summing invoice and bill
+ * documents, so they cannot disagree with the aging report or the statements.
+ */
+export async function getKeyMetrics() {
+  const [tenant, claimsPending] = await Promise.all([
+    withAuthorizedTenant([], async (tx) => {
+      const asOf = new Date().toISOString().slice(0, 10);
+      const [products, requests, ar, ap] = await Promise.all([
+        productsRepo.getProductStats(tx),
+        fulfilmentRepo.getStockRequestStats(tx),
+        reportsRepo.getAgingReport(tx, "receivable", asOf),
+        reportsRepo.getAgingReport(tx, "payable", asOf),
+      ]);
+      const total = (rows: Array<{ total: string }>) =>
+        rows.reduce((acc, r) => acc + Number(r.total), 0);
+
+      return {
+        stockValue: Number(products.stockValue),
+        lowStockCount: products.lowStock,
+        pendingOrders: requests.pending,
+        arOutstanding: total(ar),
+        apOutstanding: total(ap),
+      };
+    }),
+    countClaimsAwaitingApprovalPg(),
+  ]);
+
+  return { ...tenant, claimsPending };
+}
+
+/** The products that moved most, for the "top products" tile. */
+export async function getTopProducts(limit = 5) {
+  const rows = await getTopMovedProducts(limit);
+  return rows.map((p) => ({
+    name: p.name,
+    sku: p.SKU,
+    quantity: p.totalMoved,
+  }));
+}
+
+/**
+ * Stock in/out per day for Recharts, keyed `in` and `out`.
+ *
+ * Same data as getMovementTrend, different key names: this one feeds a chart
+ * whose series are named after the directions. Kept as its own function
+ * because that is how the Mongo file had it and both names are in use.
+ */
+export async function getStockMovementTrend(days = 7) {
+  const trend = await getMovementTrend(days);
+  return trend.map((d) => ({
+    date: String(d.date instanceof Date ? d.date.toISOString().slice(0, 10) : d.date),
+    in: d.stockIn,
+    out: d.stockOut,
+  }));
+}
+
+/** Movements recorded today — a small count several tiles share. */
+export async function getTodayMovementCount() {
+  return withAuthorizedTenant([], async (tx) => {
+    const [row] = (await tx.execute(sql`
+      SELECT count(*)::int AS n
+        FROM stock_movements
+       WHERE created_at >= CURRENT_DATE
+    `)) as unknown as Array<{ n: number }>;
+    return int(row?.n);
+  });
+}

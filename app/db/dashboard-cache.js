@@ -16,7 +16,8 @@ import {
   getDashboardAlerts,
   getARAgingSummary,
   getAPAgingSummary,
-} from "./erp-dashboard-queries";
+  getTodayMovementCount,
+} from "@/app/db/actions/dashboard-actions";
 
 // ============================================
 // CACHED DASHBOARD QUERIES
@@ -57,21 +58,8 @@ export const cAPAgingSummary = cache(async () => getAPAgingSummary());
 
 // Today's stock movements — small count query. Cached so multiple
 // boundaries on the same dashboard share it.
-import mongoose from "mongoose";
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
-import { StockMovement } from "@/app/models/stockmovement";
-import { translateCompanyId } from "@/lib/utils/legacy-company-id";
-
-export const cTodayMovementCount = cache(async () => {
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const filter = { createdAt: { $gte: start } };
-  if (!isSuperAdmin) {
-    if (!companyId) return 0; // fail closed
-    filter.companyId = new mongoose.Types.ObjectId(translateCompanyId(companyId));
-  }
-  return StockMovement.countDocuments(filter);
-});
+//
+// This one used to reach Mongo directly and build its own tenant filter.
+// Postgres scopes it through RLS, so there is no filter to write and no
+// fail-closed branch to remember.
+export const cTodayMovementCount = cache(async () => getTodayMovementCount());

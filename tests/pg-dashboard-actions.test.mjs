@@ -302,6 +302,37 @@ suite("dashboard actions", () => {
     });
   });
 
+  describe("the headline metrics", () => {
+    it("takes AR and AP from the ledger, not from summing documents", async () => {
+      await addProduct({ sku: "A", onHand: 10, cost: 40, reorder: 2 });
+      const m = await dash.getKeyMetrics();
+      expect(m.stockValue).toBe(400);
+      expect(m.lowStockCount).toBe(0);
+      // No posted entries, so nothing is outstanding either way.
+      expect(m.arOutstanding).toBe(0);
+      expect(m.apOutstanding).toBe(0);
+    });
+
+    it("renames the moved-products figures for the tile that reads them", async () => {
+      const top = await dash.getTopProducts(5);
+      expect(Array.isArray(top)).toBe(true);
+      // { name, sku, quantity } — not the { SKU, totalMoved } of the source.
+      for (const p of top) expect(Object.keys(p).sort()).toEqual(["name", "quantity", "sku"]);
+    });
+
+    it("keys the movement chart by direction", async () => {
+      const trend = await dash.getStockMovementTrend(7);
+      expect(trend).toHaveLength(7);
+      // Recharts series are named after the directions, not stockIn/stockOut.
+      expect(Object.keys(trend[0]).sort()).toEqual(["date", "in", "out"]);
+      expect(trend[0].date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it("counts today's movements", async () => {
+      expect(await dash.getTodayMovementCount()).toBe(0);
+    });
+  });
+
   describe("aging", () => {
     it("sums the ledger's buckets rather than re-deriving from documents", async () => {
       const ar = await dash.getARAgingSummary();

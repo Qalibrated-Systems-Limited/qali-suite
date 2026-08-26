@@ -17,7 +17,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { AlertsStrip, AlertsStripSkeleton } from "./AlertsStrip";
-import { cLowStockProducts } from "@/app/mongodb/queries/dashboard-cache";
+import { cLowStockProducts } from "@/app/db/dashboard-cache";
 import {
   getProcurementSummaryPg,
   getRecentPurchaseOrdersPg,

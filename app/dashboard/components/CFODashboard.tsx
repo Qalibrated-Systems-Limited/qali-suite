@@ -24,7 +24,7 @@ import {
   cAPAgingSummary,
   cRevenueTrend,
   cRecentTransactions,
-} from "@/app/mongodb/queries/dashboard-cache";
+} from "@/app/db/dashboard-cache";
 
 // ============================================
 // CFO / FINANCE MANAGER DASHBOARD

@@ -7,7 +7,7 @@ import {
   Inbox,
   CheckSquare,
 } from "lucide-react";
-import { cDashboardAlerts } from "@/app/mongodb/queries/dashboard-cache";
+import { cDashboardAlerts } from "@/app/db/dashboard-cache";
 import { cMyPendingApprovals } from "@/app/mongodb/queries/approval-queries";
 
 // ============================================
