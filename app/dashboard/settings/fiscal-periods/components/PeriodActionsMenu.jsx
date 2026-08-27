@@ -34,7 +34,7 @@ import {
   reopenFiscalPeriod,
   lockFiscalPeriod,
   calculatePeriodStatistics,
-} from "@/app/mongodb/actions/fiscal-period-actions";
+} from "@/app/db/actions/fiscal-period-actions";
 
 export default function PeriodActionsMenu({ period }) {
   const [showReopenDialog, setShowReopenDialog] = useState(false);

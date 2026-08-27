@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { createYearPeriods } from "@/app/mongodb/actions/fiscal-period-actions";
+import { createYearPeriods } from "@/app/db/actions/fiscal-period-actions";
 
 export default function CreateYearPeriodsButton() {
   const [open, setOpen] = useState(false);

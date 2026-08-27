@@ -17,7 +17,7 @@ import { format } from "date-fns";
 import {
   fetchFiscalPeriods,
   fetchFiscalPeriodStats,
-} from "@/app/mongodb/actions/fiscal-period-actions";
+} from "@/app/db/actions/fiscal-period-actions";
 import CreateYearPeriodsButton from "./components/CreateYearPeriodsButton";
 import PeriodActionsMenu from "./components/PeriodActionsMenu";
 

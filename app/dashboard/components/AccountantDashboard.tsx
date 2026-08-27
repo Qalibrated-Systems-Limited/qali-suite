@@ -30,7 +30,7 @@ import {
   getAPAgingSummary,
 } from "@/app/db/actions/dashboard-actions";
 import { getUnallocatedCount, getBankStatements } from "@/app/mongodb/queries/bank-feed-queries";
-import { fetchFiscalPeriodStats } from "@/app/mongodb/actions/fiscal-period-actions";
+import { fetchFiscalPeriodStats } from "@/app/db/actions/fiscal-period-actions";
 import Invoice from "../../models/invoice";
 import Bill from "../../models/bill";
 import { listClaimsPg } from "@/app/db/actions/claim-actions";
