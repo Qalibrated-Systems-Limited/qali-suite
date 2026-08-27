@@ -19,7 +19,7 @@ import {
 import { cn, formatCurrency } from "@/lib/utils";
 
 // Queries
-import { getCompanyHealthWithRevenue } from "@/app/mongodb/queries/company-queries";
+import { getCompanyHealthWithRevenue } from "@/app/db/actions/platform-actions";
 
 // ============================================
 // COMPANIES TAB - Company Health Overview

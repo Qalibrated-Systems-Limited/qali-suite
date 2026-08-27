@@ -10,7 +10,7 @@ import {
   getRecentPlatformActivity,
   getSystemAlerts,
   getPlatformActivityChart,
-} from "@/app/mongodb/queries/company-queries";
+} from "@/app/db/actions/platform-actions";
 
 // Components
 import { PlatformActivityChart } from "../PlatformActivityChart";

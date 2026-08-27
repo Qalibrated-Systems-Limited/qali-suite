@@ -16,7 +16,7 @@ import {
   getSubscriptionDistribution,
   getExpiringCompanies,
   getMRRMetrics,
-} from "@/app/mongodb/queries/company-queries";
+} from "@/app/db/actions/platform-actions";
 
 // Utils
 import { formatCurrency } from "@/lib/utils";
