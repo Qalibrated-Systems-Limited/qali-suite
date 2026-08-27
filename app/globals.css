@@ -180,112 +180,120 @@
 }
 
 /* ============================================
-   OKLCH COLOR SPACE (Modern)
+   THEME — replaced by the QSL ERP tokens from the teammate's branch.
+
+   This is the UNLAYERED :root/.dark block, which is the one that takes
+   effect: the HSL block below sits inside @layer base, and layered styles
+   lose to unlayered ones in the cascade. Its own header already called
+   itself Fallback/Legacy — it has been dead for a while and is left alone
+   rather than deleted, so this stays a theme change and nothing else.
+   ============================================ */
+
+   QSL ERP THEME TOKENS
+   Navy brand (#1B3A5C) + gold accent (#C8960C) on an off-white
+   canvas (#F0F4F8), with a dark-navy sidebar carrying gold active
+   states — mirroring the QSL ERP dashboard shell.
    ============================================ */
 :root {
   --radius: 0.625rem;
 
-  /* Light mode - GitHub Light theme */
-  --background: oklch(1 0 0); /* White */
-  --foreground: oklch(0.205 0 0); /* Near Black */
-  --card: oklch(1 0 0); /* White */
-  --card-foreground: oklch(0.205 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.205 0 0);
+  /* Canvas: off-white page, white cards */
+  --background: #f0f4f8;
+  --foreground: #1b3a5c;
+  --card: #ffffff;
+  --card-foreground: #1b3a5c;
+  --popover: #ffffff;
+  --popover-foreground: #1b3a5c;
 
-  /* Primary - Vibrant Yellow (#eab308 - Tailwind yellow-500) */
-  --primary: oklch(0.8 0.17 95); /* #eab308 */
-  --primary-foreground: oklch(0.145 0 0); /* Dark text on yellow */
+  /* Primary — QSL navy */
+  --primary: #1b3a5c;
+  --primary-foreground: #ffffff;
 
-  /* Secondary - Light gray */
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
+  /* Secondary / muted — light greys */
+  --secondary: #e8ecf0;
+  --secondary-foreground: #1b3a5c;
+  --muted: #e8ecf0;
+  --muted-foreground: #64748b;
 
-  /* Muted */
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* Accent — soft navy tint for hover surfaces */
+  --accent: #dce8f5;
+  --accent-foreground: #1b3a5c;
 
-  /* Accent - Brighter yellow */
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  /* Destructive — QSL red */
+  --destructive: #c00000;
+  --destructive-foreground: #ffffff;
 
-  /* Destructive */
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
+  /* Borders / inputs / focus ring */
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #1b3a5c;
 
-  /* Borders */
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.8 0.17 95); /* Yellow ring */
+  /* Charts — QSL categorical palette (navy, gold, green, blue, purple) */
+  --chart-1: #1b3a5c;
+  --chart-2: #c8960c;
+  --chart-3: #1e6b3c;
+  --chart-4: #0070c0;
+  --chart-5: #6a0dad;
 
-  /* Charts - Yellow variations */
-  --chart-1: oklch(0.8 0.17 95); /* #eab308 */
-  --chart-2: oklch(0.83 0.18 97); /* Brighter yellow */
-  --chart-3: oklch(0.77 0.16 93); /* Orange-yellow */
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-
-  /* Sidebar */
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.8 0.17 95); /* Yellow */
-  --sidebar-primary-foreground: oklch(0.145 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.8 0.17 95);
+  /* Sidebar — dark navy shell with gold active items */
+  --sidebar: #0d2238;
+  --sidebar-foreground: #e7edf3;
+  --sidebar-primary: #c8960c;
+  --sidebar-primary-foreground: #0d2238;
+  --sidebar-accent: #1b3a5c;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #c8960c;
 }
 
 .dark {
-  /* Dark mode - GitHub Dark theme */
-  --background: oklch(0.145 0 0); /* #0d1117 */
-  --foreground: oklch(0.91 0 0); /* #e6edf3 */
-  --card: oklch(0.19 0 0); /* #161b22 */
-  --card-foreground: oklch(0.91 0 0);
-  --popover: oklch(0.19 0 0);
-  --popover-foreground: oklch(0.91 0 0);
+  /* Deep-navy canvas */
+  --background: #0d1b2a;
+  --foreground: #e7edf3;
+  --card: #12293f;
+  --card-foreground: #e7edf3;
+  --popover: #12293f;
+  --popover-foreground: #e7edf3;
 
-  /* Primary - Bright Yellow for dark mode */
-  --primary: oklch(0.8 0.17 95); /* #eab308 */
-  --primary-foreground: oklch(0.145 0 0); /* Dark text on yellow */
+  /* Primary — lifted navy so buttons read on the dark canvas */
+  --primary: #2e5f8a;
+  --primary-foreground: #ffffff;
 
-  /* Secondary - GitHub Gray */
-  --secondary: oklch(0.269 0 0); /* #21262d */
-  --secondary-foreground: oklch(0.91 0 0);
-
-  /* Muted */
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.65 0 0); /* #7d8590 */
+  /* Secondary / muted — navy greys */
+  --secondary: #1b3a5c;
+  --secondary-foreground: #e7edf3;
+  --muted: #1b3a5c;
+  --muted-foreground: #9fb2c4;
 
   /* Accent */
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.91 0 0);
+  --accent: #1b3a5c;
+  --accent-foreground: #e7edf3;
 
-  /* Destructive */
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.91 0 0);
+  /* Destructive — brighter red for dark surfaces */
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
 
-  /* Borders - GitHub Border Color #30363d */
-  --border: oklch(0.28 0 0);
-  --input: oklch(0.28 0 0);
-  --ring: oklch(0.8 0.17 95); /* Yellow ring */
+  /* Borders / inputs / focus ring (gold) */
+  --border: #21415f;
+  --input: #21415f;
+  --ring: #c8960c;
 
   /* Charts */
-  --chart-1: oklch(0.8 0.17 95); /* Yellow */
-  --chart-2: oklch(0.83 0.18 97); /* Bright yellow */
-  --chart-3: oklch(0.77 0.16 93); /* Orange-yellow */
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
+  --chart-1: #2e5f8a;
+  --chart-2: #c8960c;
+  --chart-3: #2e8b57;
+  --chart-4: #0070c0;
+  --chart-5: #9b59b6;
 
-  /* Sidebar - Darker than main for distinction */
-  --sidebar: oklch(0.19 0 0); /* #161b22 */
-  --sidebar-foreground: oklch(0.91 0 0);
-  --sidebar-primary: oklch(0.8 0.17 95); /* Yellow */
-  --sidebar-primary-foreground: oklch(0.145 0 0);
-  --sidebar-accent: oklch(0.23 0 0); /* #1f2937 */
-  --sidebar-accent-foreground: oklch(0.91 0 0);
-  --sidebar-border: oklch(0.28 0 0);
-  --sidebar-ring: oklch(0.8 0.17 95);
+  /* Sidebar — stays navy in both modes */
+  --sidebar: #0b1b2b;
+  --sidebar-foreground: #e7edf3;
+  --sidebar-primary: #c8960c;
+  --sidebar-primary-foreground: #0b1b2b;
+  --sidebar-accent: #1b3a5c;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #c8960c;
 }
 
 /* ============================================
