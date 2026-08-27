@@ -376,3 +376,29 @@
     --chart-5: 38 90% 48%;
   }
 }
+
+/* ============================================
+   BRAND PALETTE REMAP — QSL ERP theme
+   The QSL ERP design language uses navy (#1B3A5C) as its brand colour
+   and gold (#C8960C) as its single accent. The dashboard historically
+   hard-codes Tailwind's `yellow-*` utilities as the accent in ~350
+   places. Rather than touch every call site, we retarget the whole
+   `yellow` scale onto a warm-gold ramp centred on the QSL gold, so
+   every existing `bg-yellow-500 / text-yellow-600 / border-yellow-500`
+   now renders as brand gold. `amber-*` is left untouched — it stays the
+   genuine "warning / pending" status colour, which QSL also uses.
+   ============================================ */
+@theme {
+  --color-yellow-50: #fbf7ea;
+  --color-yellow-100: #f6ebc6;
+  --color-yellow-200: #ecd79a;
+  --color-yellow-300: #e0c063;
+  --color-yellow-400: #d3a933;
+  --color-yellow-500: #c8960c;
+  --color-yellow-600: #a87d0a;
+  --color-yellow-700: #856108;
+  --color-yellow-800: #664b09;
+  --color-yellow-900: #4c380b;
+  --color-yellow-950: #2c2005;
+}
+
