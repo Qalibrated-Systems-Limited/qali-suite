@@ -108,6 +108,15 @@ const getNavigationGroups = (user) => {
     href: "/dashboard",
   },
 
+  // My Workspace (ungrouped — personal home, from the QSL ERP modules)
+  {
+    type: "single",
+    icon: User,
+    label: "My Workspace",
+    id: "workspace",
+    href: "/dashboard/workspace",
+  },
+
   // Approvals (ungrouped — visible only to approver roles)
   {
     type: "single",
