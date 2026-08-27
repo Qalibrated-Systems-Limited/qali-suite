@@ -1,5 +1,10 @@
 # Accounting Integration Testing Guide
 
+> ⚠️ **PRE-MIGRATION DOCUMENT.** This describes the Mongoose/MongoDB stack as
+> it was before the PostgreSQL migration. The DOMAIN rules here are still
+> good; the descriptions of storage, models and queries are not. For the
+> current stack see [BUILDING-ON-POSTGRES.md](BUILDING-ON-POSTGRES.md).
+
 ## Overview
 This guide provides step-by-step instructions for testing the automatic journal entry generation when creating invoices.
 

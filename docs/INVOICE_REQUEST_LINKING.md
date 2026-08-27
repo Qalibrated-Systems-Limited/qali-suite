@@ -1,5 +1,10 @@
 # Invoice-Request Linking Implementation
 
+> ⚠️ **PRE-MIGRATION DOCUMENT.** This describes the Mongoose/MongoDB stack as
+> it was before the PostgreSQL migration. The DOMAIN rules here are still
+> good; the descriptions of storage, models and queries are not. For the
+> current stack see [BUILDING-ON-POSTGRES.md](BUILDING-ON-POSTGRES.md).
+
 ## Overview
 Invoices can now handle both **direct sales** (from Inventory) and **technician sales** (from fulfilled requests), with smart COGS accounting.
 

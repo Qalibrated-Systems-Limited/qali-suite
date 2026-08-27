@@ -1,5 +1,10 @@
 # Invoice Accounting Flow - Visual Diagrams
 
+> ⚠️ **PRE-MIGRATION DOCUMENT.** This describes the Mongoose/MongoDB stack as
+> it was before the PostgreSQL migration. The DOMAIN rules here are still
+> good; the descriptions of storage, models and queries are not. For the
+> current stack see [BUILDING-ON-POSTGRES.md](BUILDING-ON-POSTGRES.md).
+
 ## Complete Invoice Creation Flow
 
 ```

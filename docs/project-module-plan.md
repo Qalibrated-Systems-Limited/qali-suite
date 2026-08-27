@@ -1,5 +1,10 @@
 # Project Module — Full ERP Implementation
 
+> ⚠️ **PRE-MIGRATION DOCUMENT.** This describes the Mongoose/MongoDB stack as
+> it was before the PostgreSQL migration. The DOMAIN rules here are still
+> good; the descriptions of storage, models and queries are not. For the
+> current stack see [BUILDING-ON-POSTGRES.md](BUILDING-ON-POSTGRES.md).
+
 ## Context
 During a demo, the MD asked: "Before I approve this advance, which project is it for? What's the budget? Is the project already running at a loss?" Every job the company executes is a project. The MD needs profitability visibility at a glance — both when approving spend and on a dedicated project dashboard.
 

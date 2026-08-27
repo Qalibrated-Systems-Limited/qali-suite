@@ -1,5 +1,10 @@
 # Accounting Implementation Status
 
+> ⚠️ **PRE-MIGRATION DOCUMENT.** This describes the Mongoose/MongoDB stack as
+> it was before the PostgreSQL migration. The DOMAIN rules here are still
+> good; the descriptions of storage, models and queries are not. For the
+> current stack see [BUILDING-ON-POSTGRES.md](BUILDING-ON-POSTGRES.md).
+
 ## Overview
 This document tracks the implementation of automatic journal entry generation for invoices as part of upgrading from a stock management system to a full ERP with accounting capabilities.
 

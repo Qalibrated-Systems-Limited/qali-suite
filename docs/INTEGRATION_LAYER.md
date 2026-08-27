@@ -1,5 +1,10 @@
 # Integration Layer — Technical Specification
 
+> ⚠️ **PRE-MIGRATION DOCUMENT.** This describes the Mongoose/MongoDB stack as
+> it was before the PostgreSQL migration. The DOMAIN rules here are still
+> good; the descriptions of storage, models and queries are not. For the
+> current stack see [BUILDING-ON-POSTGRES.md](BUILDING-ON-POSTGRES.md).
+
 > **Version:** 1.0
 > **Status:** Planning
 > **Scope:** External system integration — weighbridges, collection centers, logistics, millers, and any future connector
