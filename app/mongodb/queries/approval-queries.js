@@ -39,12 +39,26 @@ import {
  */
 export const cMyPendingApprovals = cache(async () => {
   try {
-    await dbConnect();
     const { companyId, isSuperAdmin, user } = await getTenantContext();
     const role = user?.role;
     if (!role) return 0;
 
-    // Generic approval engine — gated by APPROVER_MATRIX
+    /**
+     * THE MONGO COUNT STAYS — IT JUST CANNOT TAKE THE OTHERS DOWN.
+     *
+     * The generic ApprovalRequest engine is not ported yet, so it is still
+     * counted from Mongo. What changed is where the connection is opened.
+     *
+     * `dbConnect()` used to be the first line of this function, so with the
+     * Atlas cluster unreachable it threw before ANY of the six Postgres counts
+     * ran and the tile reported 0 — "nothing to approve" is the worst possible
+     * answer from an approvals tile, and this module has already been burnt by
+     * exactly that once, with leave and loans.
+     *
+     * Now the engine count owns its connection and its own catch. Mongo down
+     * costs you the engine number; stock requests, bills, leave, loans, claims
+     * and NCRs still report, because those live in Postgres.
+     */
     const engineTypes = Object.entries(APPROVER_MATRIX)
       .filter(([, roles]) =>
         role === "SuperAdmin" ? true : roles.includes(role),
@@ -55,13 +69,24 @@ export const cMyPendingApprovals = cache(async () => {
 
     if (engineTypes.length > 0) {
       tasks.push(
-        ApprovalRequest.countDocuments(
-          withTenantScope(
-            { status: "submitted", type: { $in: engineTypes } },
-            companyId,
-            isSuperAdmin,
-          ),
-        ),
+        (async () => {
+          try {
+            await dbConnect();
+            return await ApprovalRequest.countDocuments(
+              withTenantScope(
+                { status: "submitted", type: { $in: engineTypes } },
+                companyId,
+                isSuperAdmin,
+              ),
+            );
+          } catch (error) {
+            console.error(
+              "Approval engine count unavailable (Mongo):",
+              error?.message,
+            );
+            return 0;
+          }
+        })(),
       );
     }
 
