@@ -318,6 +318,30 @@ function readBrackets(formData: FormData) {
       brackets.push({ from, to, rate });
     }
   }
+
+  /**
+   * KRA PUBLISHES INCLUSIVE BANDS; THE SYSTEM STORES HALF-OPEN ONES.
+   *
+   * The gazette reads "0 – 24,000", then "24,001 – 32,333". Typed in
+   * literally that is not a partition of the number line: nothing covers
+   * 24,000.50, and 0048's assert_paye_brackets_cover refuses to save it —
+   * "PAYE bands leave a gap: nothing covers income from 288000 to 288001",
+   * which is why payroll rates could not be saved at all.
+   *
+   * It is also wrong twice over, because the tax arithmetic takes a band's
+   * WIDTH as `to - from` (lib/payroll/kenya-tax.js). Read inclusively,
+   * 32,333 - 24,001 is 8,332 — one shilling short of the 8,333 the gazette
+   * says the band is worth, on every band.
+   *
+   * So each band is made to start exactly where the previous one ended.
+   * KRA's "on the next 8,333" then comes out at 8,333, and income of any
+   * amount, whole shillings or not, falls in exactly one band.
+   */
+  brackets.sort((a, b) => a.from - b.from);
+  for (let i = 1; i < brackets.length; i++) {
+    const previousTop = brackets[i - 1].to;
+    if (previousTop != null) brackets[i].from = previousTop;
+  }
   return brackets;
 }
 
