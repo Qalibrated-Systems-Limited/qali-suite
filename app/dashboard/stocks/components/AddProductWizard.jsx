@@ -444,7 +444,7 @@ function ReviewStep({ formData, canEditPricing }) {
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Costing Method</span>
                 <span className="uppercase">
-                  {formData.costingMethod || "weighted_average"}
+                  {formData.costingMethod || "average"}
                 </span>
               </div>
               {formData.location && (
@@ -495,7 +495,7 @@ export default function AddProductWizard({
     initialStock: "",
     reorderLevel: "10",
     reorderQuantity: "20",
-    costingMethod: "weighted_average",
+    costingMethod: "average",
     location: "",
     binNumber: "",
     trackInventory: true,

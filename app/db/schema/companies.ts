@@ -230,9 +230,10 @@ export const companySettings = pgTable(
       "company_settings_fiscal_month_valid",
       sql`${t.fiscalYearStartMonth} BETWEEN 1 AND 12`,
     ),
+    /** One method (0067) — see the note on `costingMethodEnum`. */
     check(
       "company_settings_costing_valid",
-      sql`${t.defaultCostingMethod} IN ('average', 'fifo', 'lifo')`,
+      sql`${t.defaultCostingMethod} = 'average'`,
     ),
     check(
       "company_settings_draft_expiry_valid",

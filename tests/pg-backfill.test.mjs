@@ -68,7 +68,12 @@ suite("postgres backfill and reconciliation", () => {
       // moved four columns.
       expect(Number(s.default_vat_rate)).toBe(0);
       expect(s.invoice_prefix).toBe("SI");
-      expect(s.default_costing_method).toBe("fifo");
+      // The SOURCE says fifo and it arrives as average — 0067. The system
+      // performs one costing method and always did; the three re-costing
+      // expressions guarded on `<> 'average'` and kept the old cost, so a
+      // product named fifo was never costed as fifo. Carrying the name across
+      // would record a claim the books do not honour.
+      expect(s.default_costing_method).toBe("average");
       expect(Number(s.bill_payment_value)).toBe(250000);
       expect(s.feature_multi_currency).toBe(true);
       // Untouched keys land on the platform default rather than null.
@@ -153,7 +158,8 @@ suite("postgres backfill and reconciliation", () => {
       // 40.5 as a float becomes exactly 40.5000, not 40.4999...
       expect(widget.cost).toBe("40.5000");
       expect(widget.price).toBe("250.0000");
-      expect(widget.method).toBe("fifo");
+      // fifo in the source, average here — see the settings test above.
+      expect(widget.method).toBe("average");
       expect(widget.is_active).toBe(true);
 
       // 99.99 is the classic float that does not survive naive conversion.

@@ -264,7 +264,7 @@ export default function UpdateProductForm({
     taxExempt: product.taxExempt || false,
     reorderLevel: product.inventory?.reorderLevel?.toString() || "10",
     reorderQuantity: product.inventory?.reorderQuantity?.toString() || "20",
-    costingMethod: product.costing?.costingMethod || "weighted_average",
+    costingMethod: product.costing?.costingMethod || "average",
     location: product.storeInfo?.location || "",
     binNumber: product.storeInfo?.binNumber || "",
     trackInventory: product.storeInfo?.trackInventory ?? true,

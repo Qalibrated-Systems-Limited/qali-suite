@@ -98,13 +98,22 @@ export const sourceDocumentTypeEnum = pgEnum("source_document_type", [
 
 // ── Invoices slice ───────────────────────────────────────────────────────────
 
-export const costingMethodEnum = pgEnum("costing_method", [
-  "average",
-  "fifo",
-  "lifo",
-  "specific",
-  "weighted_average",
-]);
+/**
+ * ONE VALUE, and that is the point (0067).
+ *
+ * It offered five. The system implements weighted average and nothing else:
+ * `fifo`, `lifo` and `specific` were never written anywhere, and
+ * `weighted_average` was a DUPLICATE of `average` — and the dangerous one,
+ * because the three re-costing expressions all guarded on
+ * `costing_method <> 'average'`, so a product carrying it would never have
+ * been re-costed at all. It was the wizard's default. Nothing stored it, which
+ * is the only reason that never bit.
+ *
+ * FIFO is a costing-LAYERS table, not an enum value. When there is a reason
+ * for it, `stock_cost_layers` and consumption-on-issue arrive together and
+ * this enum grows a value with them.
+ */
+export const costingMethodEnum = pgEnum("costing_method", ["average"]);
 
 export const invoiceStatusEnum = pgEnum("invoice_status", [
   "draft",

@@ -35,16 +35,14 @@ export const UNIT_OPTIONS = [
 ];
 
 /**
- * Costing method options. Values MUST match the validator enum at
- * stock-actions.js (`["average", "weighted_average", "fifo", "lifo",
- * "specific"]`) — earlier "standard" was sent but rejected by validation.
+ * ONE METHOD (0067). The list offered five and the system performs weighted
+ * average; the value was never stored either, so choosing any of them gave the
+ * same result. Kept as a list of one so `CostingMethodField` stays a field
+ * rather than a hardcoded string, and so adding FIFO later is a line here and
+ * a line in the enum.
  */
 export const COSTING_METHODS = [
-  { value: "weighted_average", label: "Weighted Average" },
-  { value: "average", label: "Moving Average" },
-  { value: "fifo", label: "FIFO (First In, First Out)" },
-  { value: "lifo", label: "LIFO (Last In, First Out)" },
-  { value: "specific", label: "Specific Identification" },
+  { value: "average", label: "Weighted Average" },
 ];
 
 /**
@@ -456,7 +454,7 @@ export function ReorderQuantityField({
 }
 
 export function CostingMethodField({ value, onChange, error, disabled }) {
-  const selected = value || "weighted_average";
+  const selected = value || "average";
   return (
     <FormField label="Costing Method" name="costingMethod" error={error}>
       <Select value={selected} onValueChange={onChange} disabled={disabled}>

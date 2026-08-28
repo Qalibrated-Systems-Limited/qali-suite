@@ -73,6 +73,18 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 // ── exact money helpers ──────────────────────────────────────────────────────
+/**
+ * 0067 narrowed costing to the one method the system performs.
+ *
+ * A Mongo company could name fifo or lifo as its default, and a Mongo product
+ * could carry fifo, lifo, specific or weighted_average — none of which the
+ * re-costing ever honoured, since all three expressions guarded on
+ * `costing_method <> 'average'` and kept the old cost. Carrying those names
+ * across would record a claim the books do not honour, and the enum and the
+ * CHECK both refuse them. They arrive as what they effectively were.
+ */
+const COSTING_METHOD = "average";
+
 const SCALE = 10000; // numeric(19,4)
 
 /** float -> exact integer count of 1/10000 units */
@@ -346,7 +358,7 @@ async function run({ mongo, sql, stats, onlyCompany, log }) {
           ${cs.billPrefix ?? "BILL"},
           ${cs.quotePrefix ?? "QT"},
           ${cs.poPrefix ?? "PO"},
-          ${cs.defaultCostingMethod ?? "average"},
+          ${COSTING_METHOD},
           ${cs.lowStockThreshold ?? 10},
           ${cs.defaultPaymentTerms ?? "Net 30"},
           ${cs.defaultPaymentTermsDays ?? 30},
@@ -637,7 +649,7 @@ async function run({ mongo, sql, stats, onlyCompany, log }) {
             ${toMoney(toScaled(pr.inventory?.reorderLevel))},
             ${toMoney(toScaled(pr.costing?.costPrice))},
             ${toMoney(toScaled(pr.costing?.lastPurchaseCost))},
-            ${pr.costing?.costingMethod ?? "average"},
+            ${COSTING_METHOD},
             ${toMoney(toScaled(pr.pricing?.sellingPrice))},
             ${toMoney(toScaled(pr.pricing?.wholesalePrice))},
             ${isActive}
