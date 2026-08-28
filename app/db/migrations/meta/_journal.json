@@ -477,6 +477,13 @@
       "when": 1787049140566,
       "tag": "0067_one_costing_method",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1787049141566,
+      "tag": "0068_stocktake_sessions",
+      "breakpoints": true
     }
   ]
 }

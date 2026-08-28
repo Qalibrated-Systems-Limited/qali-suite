@@ -23,29 +23,7 @@ import { products } from "../schema";
  * and now calls the Postgres approve.
  */
 
-const FULL_AUTHORITY_ROLES = new Set(["Admin", "Manager", "SuperAdmin"]);
 
-/**
- * Who may auto-approve their OWN adjustment when it is small and low-risk.
- *
- * A DELIBERATE DIVERGENCE, and the one place this port does not do what the
- * Mongo action did. Its policy header says the value branch is for a caller
- * who "is Store Manager / Accountant AND the type is not high-risk AND the
- * value is under the threshold", and the comment beside CREATE_ROLES says
- * "Storekeeper can now propose, but the approval engine ensures they don't
- * auto-apply". Neither is true of the code:
- *
- *     !hasZeroCostIncrease && (hasFullAuthority || (!isHighRisk && !isHighValue))
- *
- * The second branch tests no role at all. So a Storekeeper — the one role the
- * comment names as unable to auto-apply — auto-approved every adjustment under
- * fifty thousand shillings, posting to the ledger and moving stock with no
- * second signature. That is the segregation of duties this module is built
- * around, absent.
- *
- * The roles here are the ones its own policy header names.
- */
-const THRESHOLD_AUTHORITY_ROLES = new Set(["Store Manager", "Accountant"]);
 const CREATE_ROLES = [
   "Admin",
   "Manager",
@@ -170,7 +148,7 @@ export async function createStockAdjustmentPg(
         createdByName: user.name || user.email || "Unknown User",
       });
 
-      const routing = await routingFor(
+      const routing = await adjustmentsRepo.decideRouting(
         tx,
         adjustment.id,
         companyId,
@@ -241,77 +219,6 @@ export async function createStockAdjustmentPg(
           : "Could not create the stock adjustment.",
     };
   }
-}
-
-/**
- * Auto-approve, or route?
- *
- * THE ZERO-COST GUARD IS THE ONE THAT MATTERS, and it is why this cannot be a
- * simple value comparison. An increase admitting stock at a `unit_cost` of zero
- * — because the product's cost price was never set — posts inventory at no
- * value: it understates the balance sheet, wrongs COGS when the item later
- * sells, AND defeats the threshold below, since a total of zero never exceeds
- * anything and would auto-approve every time. SAP and NetSuite refuse a
- * zero-cost receipt outright; here it goes to finance to establish a cost.
- * Mongo's comment (adjustment-actions.js:169) says the same and is worth
- * keeping.
- */
-async function routingFor(
-  tx: Parameters<Parameters<typeof withAuthorizedTenant>[1]>[0],
-  adjustmentId: string,
-  companyId: string,
-  adjustmentType: string,
-  userRole: string | undefined,
-  lines: adjustmentsRepo.AdjustmentLineInput[],
-) {
-  const { net, increase, decrease } = await adjustmentsRepo.summariseAdjustment(
-    tx,
-    adjustmentId,
-  );
-  void net;
-
-  // The threshold is compared against the GROSS movement, as in Mongo: a
-  // count that writes off a million and finds a million back is not a small
-  // adjustment just because it nets to nothing.
-  const totalValue = Number(increase) + Number(decrease);
-
-  const hasZeroCostIncrease = lines.some(
-    (l) =>
-      Number(l.physicalQuantity) > Number(l.systemQuantity) &&
-      Number(l.unitCost) <= 0,
-  );
-
-  const { getCompanyThresholds } = await import("@/app/db/companyConfig");
-  const thresholds = await getCompanyThresholds(companyId);
-
-  const isHighRisk = new Set(thresholds.stockHighRiskTypes).has(adjustmentType);
-  const threshold = Number(thresholds.stockAdjustmentValue);
-  const isHighValue = totalValue > threshold;
-  const hasFullAuthority = FULL_AUTHORITY_ROLES.has(userRole ?? "");
-
-  const reasonParts: string[] = [];
-  if (hasZeroCostIncrease)
-    reasonParts.push("Stock admitted with no cost basis");
-  if (isHighRisk) reasonParts.push(`High-risk type: ${adjustmentType}`);
-  if (isHighValue)
-    reasonParts.push(
-      `Value KES ${totalValue.toLocaleString("en-KE", { maximumFractionDigits: 0 })} exceeds auto-approve threshold`,
-    );
-
-  const mayAutoApproveSmall = THRESHOLD_AUTHORITY_ROLES.has(userRole ?? "");
-  if (!hasFullAuthority && !mayAutoApproveSmall) {
-    reasonParts.push(`${userRole ?? "This role"} proposes; it does not apply`);
-  }
-
-  return {
-    autoApprove:
-      !hasZeroCostIncrease &&
-      (hasFullAuthority || (mayAutoApproveSmall && !isHighRisk && !isHighValue)),
-    isHighRisk,
-    totalValue,
-    threshold,
-    reason: reasonParts.join("; ") || "Requires approval",
-  };
 }
 
 /**

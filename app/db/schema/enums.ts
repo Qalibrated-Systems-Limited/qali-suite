@@ -697,3 +697,20 @@ export const adjustmentStatusEnum = pgEnum("adjustment_status", [
   "approved",
   "cancelled",
 ]);
+
+// ── Stocktake sessions (0068) ────────────────────────────────────────────────
+
+/**
+ * A sheet, counted, reviewed, and posted — or abandoned.
+ *
+ * `draft` is a sheet not yet generated; the freeze happens on the way to
+ * `counting`, which is what `stock_counts_frozen_once_open` states. Both
+ * terminal states are reached from an open one, never from each other.
+ */
+export const stockCountStatusEnum = pgEnum("stock_count_status", [
+  "draft",
+  "counting",
+  "review",
+  "posted",
+  "cancelled",
+]);

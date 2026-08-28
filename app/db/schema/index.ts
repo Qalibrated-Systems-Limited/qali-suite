@@ -38,3 +38,4 @@ export * from "./expenses";
 export * from "./pettyCash";
 export * from "./categories";
 export * from "./stockAdjustments";
+export * from "./stockCounts";
