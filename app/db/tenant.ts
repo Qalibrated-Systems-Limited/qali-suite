@@ -35,9 +35,31 @@ import {
  * person reading it has never heard of.
  */
 
-// Company ids are immutable once mapped, so an in-process cache is safe. It is
-// per-instance and rebuilt on cold start — no invalidation needed.
-const companyUuidCache = new Map<string, string>();
+/**
+ * Company ids are immutable once mapped, so an in-process cache is safe. It is
+ * per-instance and rebuilt on cold start — no invalidation needed.
+ *
+ * INERT UNDER VITEST, and only there. A worker runs many test files in one
+ * process, and every Postgres suite opens by TRUNCATEing `companies` — so a
+ * mapping cached by one file names a company the next file has deleted, and
+ * the cache answers before the query that would have noticed. Nothing in
+ * production truncates companies, which is why it needs no invalidation there.
+ *
+ * A `set` that drops the write, rather than a reset hook in
+ * `tests/setup.mjs`: importing this module from the shared setup pulls
+ * NextAuth into every test file that has no reason to load it, and 494 of them
+ * fail on the spot.
+ *
+ * None of this mattered until the join came out of `lookupCompanyUuid` — it
+ * returned null for every id, so the cache was never written to at all.
+ */
+const companyUuidCache = process.env.VITEST
+  ? {
+      get: (_k: string) => undefined,
+      set: (_k: string, _v: string) => undefined,
+      delete: (_k: string) => undefined,
+    }
+  : new Map<string, string>();
 
 /**
  * The tenant's uuid, or null — WITHOUT provisioning one.
@@ -58,10 +80,26 @@ export async function lookupCompanyUuid(
   const cached = companyUuidCache.get(key);
   if (cached) return cached;
 
+  // NO JOIN TO `companies`, and that is the whole point.
+  //
+  // This ran on the application pool, which is `app_user` — a role with no
+  // BYPASSRLS, by design (0023). `companies` carries two policies, one keyed on
+  // `app.company_id` and one on `app.user_id`, and both settings are
+  // transaction-local (`set_config(..., true)` in `withTenant`). This query is
+  // not inside that transaction — it is what runs BEFORE one, to find out which
+  // tenant to open — so neither setting exists and every row of `companies` is
+  // invisible to it. The map row was always found; the join threw it away.
+  //
+  // So this returned null for EVERY Mongo id, and `getSettingsFor` reported
+  // "This company has no ledger tenant yet" for companies that plainly exist.
+  //
+  // `_migration_id_map` has no RLS and is the authority for the mapping, so it
+  // answers on its own. A row pointing at a deleted company now returns a uuid
+  // whose `withTenant` read fails with a message about the company, which is a
+  // truer error than a mapping that silently is not there.
   const rows = (await db.execute(sql`
-    SELECT c.id
+    SELECT m.new_uuid AS id
       FROM _migration_id_map m
-      JOIN companies c ON c.id = m.new_uuid
      WHERE m.collection = 'companies' AND m.old_object_id = ${key}
   `)) as unknown as Array<{ id: string }>;
 
