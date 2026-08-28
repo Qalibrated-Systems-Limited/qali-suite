@@ -3,21 +3,23 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Info } from "lucide-react";
 import { canSeeInventoryNav } from "@/lib/permissions";
 import { CreateAdjustmentForm } from "../components/CreateAdjustmentForm";
-import Product from "@/app/models/product";
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getProductsPg } from "@/app/db/actions/product-actions";
 
-// Fetch products for adjustment (tenant-scoped)
+/**
+ * The picker read the MONGO Product collection, which nothing has written
+ * since products moved. So the dropdown on this page was EMPTY and no stock
+ * adjustment could be raised at all — the §"the worst seam in the port" defect
+ * exactly, and it survived the sweep because this file imports
+ * `@/app/models/product` directly rather than through `@/app/mongodb`, which
+ * is what the port-reach command greps for.
+ *
+ * `shapeProduct` already returns `_id`, `SKU`, `unit` and
+ * `inventory.quantityOnHand` — the shape this form reads — so nothing in
+ * CreateAdjustmentForm changes.
+ */
 async function getProducts() {
-  await dbConnect();
-  const { companyId } = await getTenantContext();
-
-  const products = await Product.find({ companyId })
-    .select("_id name SKU inventory.quantityOnHand unit costing.costPrice")
-    .sort({ name: 1 })
-    .lean();
-
-  return JSON.parse(JSON.stringify(products));
+  const { rows } = await getProductsPg({ status: "active", perPage: 200 });
+  return rows;
 }
 
 export default async function CreateAdjustmentPage() {

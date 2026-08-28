@@ -3,7 +3,7 @@
 import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useActionState } from "react";
-import { createStockAdjustment } from "@/app/mongodb/actions/adjustment-actions";
+import { createStockAdjustmentPg as createStockAdjustment } from "@/app/db/actions/adjustment-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

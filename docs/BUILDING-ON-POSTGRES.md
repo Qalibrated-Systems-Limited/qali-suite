@@ -18,7 +18,9 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 
 | on Postgres | still Mongo (screen files) |
 |---|---|
-| **stocks/products**, **dashboard**, statements, supplier-statements, payments, hr, claims, assets, expenses, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders | projects 11, integrations 10, tax 8, reports 8, banking 8, kpis 7, components 7, settings 6, leads 4, employee 4, **claims 4**, sales-orders 3, profile 3, opportunities 3, journal 3, admin 3, movements 2, **invoices 2**, **expenses 2**, **bills 2**, **assets 2**, approvals 2, adjustments 2, **requests 1**, **quotes 1**, **parties 1**, executive 1, company 1 |
+| **stocks/products**, **dashboard**, statements, supplier-statements, payments, hr, claims, assets, expenses, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders, **fiscal periods**, **the platform/SuperAdmin dashboard** | projects 11, integrations 10, tax 8, reports 8, banking 8, kpis 7, leads 4, employee 4, components 4, **claims 4**, settings 3, sales-orders 3, profile 3, opportunities 3, journal 3, admin 3, movements 2, **invoices 2**, **expenses 2**, **bills 2**, **assets 2**, approvals 2, adjustments 2, **requests 1**, **quotes 1**, **parties 1**, executive 1, company 1 |
+
+Counted 2026-08-28: **105 screen files, 27 modules.**
 
 **THE COMMAND UNDERCOUNTS — it only reads `*.jsx`.** There are `.tsx` screens
 too, and 16 of them were in `components`. Count both:
@@ -27,6 +29,38 @@ too, and 16 of them were in `components`. Count both:
 grep -rln "@/app/mongodb" app/dashboard --include="*.jsx" --include="*.tsx" \
   | cut -d/ -f3 | sort | uniq -c | sort -rn
 ```
+
+**AND IT MISSES ELEVEN SCREENS ENTIRELY — the ones that skip `app/mongodb`
+and import the MODEL.** `import Product from "@/app/models/product"` does not
+match `@/app/mongodb`, so a page reading a moved collection directly is
+invisible to the count above. Add the second path:
+
+```
+grep -rln "@/app/mongodb\|@/app/models/\|@/app/config/dbConnect" app/dashboard \
+  --include="*.jsx" --include="*.tsx" | cut -d/ -f3 | sort | uniq -c | sort -rn
+```
+
+Counted 2026-08-28, the eleven the first command does not see — and note the
+modules they are in, three of which this document calls DONE:
+
+| Screen | Reads | Store moved in |
+|---|---|---|
+| `stocks/create/page.jsx` | Mongo `Category` — and it already imports `getCategoriesPg` on the line above and never calls it | 0062 |
+| `stocks/[id]/update/page.jsx` | Mongo `Category`, unscoped `find({})` | 0062 |
+| `adjustments/create/page.jsx` | Mongo `Product` — FIXED with 0066 | products |
+| `accounts/create/page.jsx` | Mongo `Account` | 0035 |
+| `claims/[id]/(details)/page.jsx` | Mongo `Account` | 0035 |
+| `expenses/[id]/page.jsx` | Mongo `Account` | 0035 |
+| `components/createReqComponent.jsx` | Mongo `Account`, `User` | 0035 |
+| `components/requestDialog.jsx` | Mongo `Account` | 0035 |
+| `components/tabs/FinanceTab.tsx` | `dbConnect`, dynamically imported | — |
+| `components/MyAlertsStrip.tsx` | Mongo `ItemCheckout` | checkouts |
+| `components/SalesManagerDashboard.tsx` | Mongo `Product` | products |
+
+Every one is a picker or a strip reading a collection nothing writes, so every
+one shows an empty dropdown or a zero rather than failing. `Category.find({})`
+in the two stocks pages carries no tenant filter at all, which would be a
+cross-tenant read if that collection still held anything.
 
 **A NON-ZERO COUNT IS NOT A VERDICT. Read the import.** Five of the modules
 above — invoices, bills, requests, expenses and claims — read exactly one
@@ -78,15 +112,27 @@ count is not a half-ported module — assets is the other. Check what the import
 actually is before reading the number as a verdict.
 
 Also on Postgres, below the screens: auth and sign-in, invitations, companies
-and provisioning, company access and the switcher, fiscal periods, payments,
-stock movements, tax transactions, fulfilment, the reporting queries, and —
-with HR — the payroll exports, the payslip and P9 documents, and the nightly
-attendance cron.
+and provisioning, company access and the switcher, fiscal periods (the screens
+too, since 0699892), payments, stock movements, tax transactions, fulfilment,
+the reporting queries, the platform dashboard the three SuperAdmin tabs render,
+and — with HR — the payroll exports, the payslip and P9 documents, and the
+nightly attendance cron.
 
 The `components` and `settings` counts above are mixed: the HR parts of the
-dashboard strips, the attendance policy, public holidays and payroll rates all
-read Postgres; what is left in those files belongs to checkouts and other
-unported modules. The claims parts of those strips moved with §9H.
+dashboard strips, the attendance policy, public holidays, payroll rates and
+fiscal periods all read Postgres; what is left in those files belongs to
+checkouts and other unported modules. The claims parts of those strips moved
+with §9H.
+
+`components` is down to **four**, and they are four different modules rather
+than one seam — worth knowing before treating them as a batch:
+
+| File | Reads | Goes when |
+|---|---|---|
+| `AccountantDashboard.tsx` | `bank-feed-queries` | banking moves |
+| `AlertsStrip.tsx` | `approval-queries` | the ApprovalRequest engine moves — see the 2026-08-27 handoff for why it has not |
+| `NotificationBell.jsx` | `notification-actions` | notifications move |
+| `crm/ActivityComposer.jsx` | `activity-actions` | leads/opportunities move |
 
 **`docs/CURRENT-STATE.md` predates all of this** — it is a 2026-05-29 snapshot
 of `jeff-business-suite` and describes the stack as Mongoose/MongoDB. Do not
@@ -166,23 +212,36 @@ file's worth at once** — that means the screens were never pointed at it.
 
 ### Read this before adding to any module
 
-**Two modules of substance still post journal entries into MongoDB**, and
-every ledger screen — the journal browser, trial balance, P&L, balance sheet,
-general ledger — reads Postgres. Regenerate this with `npm run ledger-sweep`
-rather than trusting the table:
+**NOTHING OF SUBSTANCE POSTS INTO THE MONGO LEDGER ANY MORE**, with one
+connector left. Every ledger screen — the journal browser, trial balance, P&L,
+balance sheet, general ledger — reads Postgres. Regenerate this with
+`npm run ledger-sweep` rather than trusting the table:
 
 | What posts | Reached from | Screens |
 |---|---|---|
-| `payment.confirm()` | `payment-actions.js:656`, `approval-actions.js:505` | 5 |
-| `adjustment.approve()` | `stock-actions.js:371`, `adjustment-actions.js:210`, `approval-actions.js:457` | 5, 1, 1 |
 | `movement.reverse()` | `integration-actions.js:467` | 10 |
 
-So: **payments** and **inventory adjustments**. `approval-actions` and
-`integration-actions` are callers that follow once those two move.
+**The weighbridge connector is the last one.** Voiding a ticket reverses the
+stock movement, and the movement reverses its linked journal entry with it —
+the comment beside the call says so. It is a whole vertical rather than a
+posting to redirect; see the note on it in the 2026-08-24 handoff.
+
+**Payments closed** — no screen imports the Mongo `payment-actions` or
+`payment-queries` at all. **Inventory adjustments closed with 0066**, and took
+`approval-actions` with it: `applyStockAdjustment` and `voidApprovalTarget`
+both call into `app/db/actions/adjustment-actions.ts` now.
+
+**The sweep prints three false positives; do not port them.**
+`project-actions.js:806` calls `budget.approve()`, which matches on the name
+only — `app/models/projectBudget.js:95` supersedes the previous version and
+sets three fields, and posts nothing. `taxQueries.js:476` and `kpi-queries.js`
+match `Array.prototype.reverse`. Checked, because the sweep's own footer says
+to check, and the footer is right: after 0066 the LIVE list is four modules
+and only one of them is real.
 
 Done: expenses (0059), petty cash (0060), credit notes (§9L), opening balances
-(0061), checkouts. Sales orders is switched off rather than ported —
-`lib/unported-modules.js`, see §9K.
+(0061), checkouts, payments (§9M). Sales orders is switched off rather than
+ported — `lib/unported-modules.js`, see §9K.
 
 **Before estimating a port, measure the DESTINATION, not the source.**
 
@@ -650,6 +709,341 @@ ALTER ROLE app_user LOGIN PASSWORD '<pass>';
 `DATABASE_URL` must name that role, never `postgres`: a superuser has BYPASSRLS
 and makes every policy in the schema inert. `SELECT assert_rls_effective()`
 raises if the current connection would bypass RLS — worth a health check.
+
+---
+
+## Handoff — 2026-08-28
+
+State: branch `feat/postgres-migration`. `tsc --noEmit` and `eslint . --quiet`
+clean. **Full suite green — 75 files, 1130 tests**, run with `caffeinate -i`
+and `--no-file-parallelism`. 0066 is applied to both databases.
+
+### What moved
+
+**Inventory adjustments — the last module of substance posting into the Mongo
+ledger.** Two tables (0066), a repository, an action layer, both screens, and
+both ends of the approval engine's wire. 16 tests. After it the
+`ledger-sweep`'s LIVE list is four modules and three are false positives; the
+only real posting left is `movement.reverse()` in the weighbridge connector.
+
+Most of the 825-line Mongo model did not need porting, for the reason fiscal
+periods did not:
+
+| Was a method | Is now |
+|---|---|
+| `validateLines()`'s two arithmetic checks | generated columns — nothing to disagree with |
+| "reason required for every line" | NOT NULL + a non-empty CHECK |
+| "can only approve draft adjustments" | `WHERE status = 'draft'` on the claiming UPDATE, which two racing approvals cannot both win |
+| "cannot take stock below zero" | `products_quantities_non_negative` |
+| the three stored totals | summed on read |
+
+### The bug that was not in this module at all
+
+**Company settings could not be read AT ALL, by anyone, in either direction.**
+`getSettingsFor` is the one way to reach a tenant's thresholds, prefixes, VAT
+rate and feature flags, and it threw *"This company has no ledger tenant yet.
+Open it once, then try again."* on companies that plainly exist. Fourteen files
+outside `companyConfig.ts` reach it, five of them financial CONTROLS.
+
+**Two independent causes, one per form of company id.**
+
+**1. A UUID has no row in `_migration_id_map`.** `getSettingsFor` resolves a
+MONGO id through that map — the form the session carries and the Mongo actions
+pass. But a Postgres action reads its company from `withAuthorizedTenant`, and
+`ctx.companyId` is `acting.companyUuid`. Four call sites did this: the invoice
+discount cap (`invoice-actions.ts:117`), the bill-payment threshold
+(`payment-actions.ts:375`), the expense-payment threshold
+(`expense-actions.ts:421`), and this port's routing rule.
+
+**2. `lookupCompanyUuid` joined an RLS'd table from outside any tenant scope.**
+Its query was
+
+```sql
+SELECT c.id FROM _migration_id_map m
+JOIN companies c ON c.id = m.new_uuid
+WHERE m.collection = 'companies' AND m.old_object_id = $1
+```
+
+and it runs on the application pool as `app_user`, a role with no BYPASSRLS by
+design (0023). `companies` carries two policies, keyed on `app.company_id` and
+`app.user_id`, and `withTenant` sets both with `set_config(..., true)` —
+TRANSACTION-LOCAL. This query is what runs BEFORE that transaction, to decide
+which tenant to open, so neither setting exists and every row of `companies` is
+invisible to it. **The map row was always found; the join threw it away.** So
+the Mongo-id path returned null for every id ever passed to it, which is every
+caller in `app/mongodb/` plus `saveCompanyThresholds`.
+
+Proven rather than reasoned about — as `app_user` with no context, the same
+predicate returns 1 row without the join and 0 rows with it.
+
+The join was guarding against a map row pointing at a deleted company.
+`_migration_id_map` has no RLS and is the authority for the mapping, so it
+answers alone; a stale row now yields a uuid whose `withTenant` read fails with
+a message about the company, which is a truer error than a mapping that
+silently is not there.
+
+**Why nothing caught either half:** `tests/bill-payment-threshold.test.mjs` and
+`tests/expense-payment-threshold.test.mjs` both `vi.mock` the entire threshold
+module, so the id that reaches the resolver in a test is never the one
+production sends, and the resolver itself never runs. **Testing the layer above
+a seam cannot find a bug in the seam** — the same lesson as
+`find-unwired-actions`, one layer down. `tests/pg-company-thresholds.test.mjs`
+now exercises the resolver itself, in both forms, on both the read and the
+write path, and asserts it still fails CLOSED on an id that names nothing.
+
+**And fixing it woke a cache that had never run.** `companyUuidCache` sits at
+module scope in `tenant.ts` and is written by `lookupCompanyUuid` — which, as
+above, had never returned a value, so it had never cached one. With the lookup
+working, a vitest worker running many files in one process now carried mappings
+across the `TRUNCATE companies` every Postgres suite opens with, and seven
+tests in four unrelated files failed. Each of them passed alone, and passed
+with the others when run as a group: full-suite only.
+
+The cache is inert under `VITEST` now. NOT a reset hook in `tests/setup.mjs` —
+importing `tenant.ts` from the shared setup pulls NextAuth into every test file
+that has no reason to load it, and 494 of them fail on the spot. That was the
+first attempt.
+
+Worth keeping because the shape recurs: **a fix that makes dead code live for
+the first time inherits every assumption that code was written under.** This
+one assumed nothing ever deletes a company.
+
+### The other thing the tests found
+
+**The segregation of duties this module is built around did not exist.** The
+Mongo rule is
+
+```js
+!hasZeroCostIncrease && (hasFullAuthority || (!isHighRisk && !isHighValue))
+```
+
+and the second branch tests no role at all — while the policy header above it
+says the branch is for "Store Manager / Accountant", and the comment beside
+`CREATE_ROLES` says "Storekeeper can now propose, but the approval engine
+ensures they don't auto-apply". A Storekeeper auto-approved every adjustment
+under fifty thousand shillings: posted to the ledger, moved the stock, no
+second signature.
+
+A DELIBERATE DIVERGENCE — the port adds the role test the policy describes.
+Three tests hold the line in both directions: a Storekeeper routes, a Store
+Manager still applies a small low-risk one, and a Store Manager's *theft*
+adjustment routes however small it is.
+
+### Two repository functions that would have been the wrong ones to reuse
+
+`issueStock` also decrements `quantity_committed`, which is right for
+fulfilling a sale and an OVERSELL for a write-off: the customer order those
+units were promised to is still open, and releasing the commitment would let
+the same stock be committed twice. `receiveStock` also writes
+`last_purchase_cost` and `last_purchase_date`, which would let stock found
+behind a shelf overwrite the record of what the product last cost to buy.
+`adjustStockUp` and `adjustStockDown` are the adjustment-shaped pair.
+
+### Three traps that only running the code found
+
+- **`journal_entries_source_pair`.** Setting `sourceId` without `sourceType`
+  is refused — `(source_type IS NULL) = (source_id IS NULL)`. 0066 adds
+  `stock_adjustment` to `source_document_type`, as 0050, 0051, 0052, 0056 and
+  0060 each added theirs. ADD VALUE only, so it stays legal inside the
+  migrator's transaction.
+- **A Drizzle column interpolated into ALIASED raw SQL** renders as
+  `"stock_adjustments"."status"` and Postgres rejects it once the FROM clause
+  has renamed the table to `a`. Spell the alias out in raw queries.
+- **`.select()` with `sql` subqueries did not map the columns back.**
+  `lineCount` arrived `undefined` and the totals arrived zero, with no error
+  anywhere — so the list rendered rows with no items and no value, and `tsc`
+  typed the field as a number throughout, because it types the select from its
+  KEYS and not from what the driver returns. `listAdjustments` is one raw
+  query now, like the stats beside it.
+
+### Rejecting an approval left the draft standing
+
+`voidApprovalTarget` looked the adjustment up in Mongo by `targetRef.id`, which
+is a uuid now, so the lookup threw a CastError the engine's own catch swallowed
+as a log line — the exact defect the CreditNote branch three lines above it was
+written to fix.
+
+Worth knowing how it was nearly missed: `inventoryAdjustment.cancel()` looked
+like dead code, because the grep for it was `cancelAdjustment` and its one
+caller invokes it on a variable named `doc`. **Grep the METHOD name, not the
+name you would have given it.**
+
+### The approver list is the union of two matrix rows
+
+`APPROVER_MATRIX` (approvalRequest.js:196) admits Store Manager for
+`stock_adjustment` and CFO / Finance Manager for `stock_writeoff`. A gate
+narrower than the union refuses an approver the engine has just accepted, and
+it fails silently: the approval sits in the queue and the approver is told they
+lack a permission they have.
+
+### The finding that is bigger than the module
+
+**The port-reach command misses eleven screens.** It greps `@/app/mongodb`;
+these import `@/app/models/…` or `dbConnect` directly, so they have never
+appeared in any count this document has printed. Three are in modules called
+DONE here. The table is in §"Where the port has reached", and the shape is the
+familiar one — a picker or a strip reading a collection nothing writes, showing
+an empty dropdown or a zero rather than failing.
+
+Two are one line each:
+
+- `stocks/create/page.jsx` **already imports `getCategoriesPg` and never calls
+  it**, reading Mongo `Category` on the line below.
+- `stocks/[id]/update/page.jsx` does the same without even the import.
+
+Both call `Category.find({})` with no tenant filter.
+
+### Next, in order
+
+**1. The ten remaining direct-model screens** — small, mechanical, and each one
+is a picker that is empty today. The eleventh was fixed with 0066.
+
+**2. PROJECTS — read `docs/PROJECTS-QALITRACK-PLAN.md` FIRST.** Still the
+keystone, still blocked on the split decision it describes.
+
+**3. The weighbridge connector** — the last Mongo ledger posting, and a whole
+vertical rather than a call to redirect.
+
+**4. Whole modules still untouched** — integrations, tax, reports, banking,
+kpis, settings, leads, opportunities, journal.
+
+### Ported code deliberately NOT written
+
+**No approve action for a UI that does not exist.** The Mongo action file
+exports exactly one function, `createStockAdjustment`; there is no detail page
+(the list links to `/dashboard/adjustments/[id]`, which is a dead route and was
+before this port). `applyApprovedStockAdjustmentPg` and
+`voidDraftStockAdjustmentPg` exist because the approval engine calls both, and
+nothing else was invented to go with them.
+
+### One thing to tidy
+
+0066 was edited AFTER being applied, so the recorded hash in
+`drizzle.__drizzle_migrations` was realigned by hand on both databases and the
+`ALTER TYPE` applied directly. Both are consistent now and a from-scratch run
+of the file is correct, but that path has not been exercised end to end on a
+clean database — `stockvault_test` had live connections and could not be
+dropped. Worth doing once before this branch merges.
+
+---
+
+## Handoff — 2026-08-27
+
+State: branch `feat/postgres-migration`, everything committed, 180 ahead of
+origin. `tsc --noEmit` and `eslint . --quiet` both clean (re-run 2026-08-28).
+**The full suite has NOT been run since the 2026-08-26 handoff** — 33 tests
+were added across three new suites and each passed on its own; 75 test files
+now, 54 of them `pg-*`. Run it with `caffeinate -i` and
+`--no-file-parallelism` before trusting a green.
+
+### What moved
+
+| Module | What |
+|---|---|
+| Platform / SuperAdmin | `company-queries.js`'s nine functions — 13 tests |
+| Fiscal periods | Fifteen Mongo functions, four screens — 15 tests |
+| Payroll rates | Not a port: a real bug, see below — 5 tests |
+| QSL ERP pages | Twelve pages carried across verbatim, plus the brand theme |
+
+**Fiscal periods is the clearest example yet of the rule in §"Migrating a
+vertical": most of the service did not need porting.** Overlapping periods,
+duplicate codes, end-before-start and posting into a closed period are all
+CONSTRAINTS (`fiscal_periods_company_year_month_uq`,
+`fiscal_periods_company_code_uq`, `fiscal_periods_date_order`,
+`trg_resolve_fiscal_period`). The Mongo service performed each as a query
+before writing — a race, and a duplicate of what the schema already says. What
+survived into the repository is the part SQL cannot state: a period with
+unposted work in it is not finished, and closing one moves the result to
+retained earnings. Statistics are no longer STORED either; the Mongo period
+cached `statistics` and `closingBalances` at close time, which could disagree
+with the ledger and needed a button to refresh it.
+
+### Things found that were not the module being ported
+
+- **Payroll rates could not be saved at all**, by anyone, and the database was
+  right. KRA gazettes PAYE bands inclusively — "0 – 24,000", then "24,001 –
+  32,333" — which typed in literally is not a partition of the number line, and
+  `assert_paye_brackets_cover` (0048) refused it: nothing covers 24,000.50.
+  Worse quietly: `lib/payroll/kenya-tax.js` takes a band's width as `to - from`,
+  so read inclusively every band was one shilling short of what the gazette says
+  it is worth. Had the save succeeded, every payslip would have been slightly
+  wrong. Fixed at the point of ENTRY, because the assertion and the arithmetic
+  already agreed with each other — bands are half-open `[from, to)` — and the
+  only thing that disagreed was what the form handed them.
+- **The whole platform dashboard read a store nothing writes.** Companies moved
+  in 0035; `company-queries.js` still read the Mongo `Company` model, so company
+  counts, subscription mix, MRR, expiring trials and system alerts were all
+  derived from an empty collection. Same failure as statements and the tenant
+  dashboard before it. **This is the third time.** When a module reports
+  plausible zeros, check WHICH STORE before checking the query.
+- **The approvals tile called `dbConnect()` as its first line**, so with Atlas
+  unreachable it threw before any of the six Postgres counts ran and the tile
+  reported 0 — "nothing to approve" being the worst possible answer an approvals
+  tile can give, and this module has been burnt by exactly that once before. It
+  now owns its connection and its own catch: Mongo down costs you the engine
+  number, and stock requests, bills, leave, loans, claims and NCRs still report.
+
+**Three shapes that read better and broke a caller**, all caught by `tsc`,
+bringing this month's total to five. `formatDaysRemaining` returned a NUMBER
+despite its name and a friendlier string broke `daysRemaining <= 2` into
+`"3 days leftd"`; `getPeriodStats` omitted `currentPeriod`, which the accountant
+dashboard renders as `currentPeriod.name`; and the period summary counted LINES
+rather than entries, so joining `journal_lines` made a two-line entry report as
+two and the close guard told the user there were twice as many drafts as there
+were. `count(DISTINCT e.id)`. The trap in §"Two traps" is not theoretical — it
+has now fired five times in one month.
+
+**A backtick inside a SQL comment terminates the `sql` template literal.**
+Nothing may contain a backtick inside one.
+
+### The ApprovalRequest engine stays on Mongo, deliberately
+
+There is no Postgres table for it — only `stock_request_approvals`, which
+belongs to fulfilment. It is the one module where "still Mongo" is a decision
+rather than a backlog item, and it is why `AlertsStrip.tsx` is in the remaining
+four component reads. Anything porting approvals should read
+`docs/APPROVALS-PLAN.md` first: the engine's coverage was already partial on
+`jeff-business-suite` (3 of 6 enum types wired), so a faithful port would carry
+that gap across.
+
+### Next, in order
+
+Unchanged from 2026-08-26, minus what closed:
+
+**1. PROJECTS — read `docs/PROJECTS-QALITRACK-PLAN.md` FIRST.** Still the
+keystone: five modules (claims, invoices, bills, requests, expenses) each have
+exactly one trailing Mongo read and it is the project picker. Still not a
+straight port — the MD's `QaliTrack_PMS` is a road-construction CONTRACT
+ADMINISTRATION system, and that document recommends splitting `projects` (the
+cost centre it already is) from `contracts` (its own module). Do not merge them
+without reading it.
+
+**2. Inventory adjustments** — the last module of substance posting into the
+Mongo ledger, and `approval-actions` follows it.
+
+**3. The remaining 4 component reads** — bank-feed, approvals, notifications,
+activity. Each belongs to a different unported module; see the table in
+§"Where the port has reached".
+
+**4. Whole modules still untouched** — integrations, tax, reports, banking,
+kpis, settings, leads, opportunities, adjustments, journal.
+
+### The two decisions from 2026-08-26 are still open
+
+Manager and selling prices (consolidated on the STRICTER side, one line to
+widen), and the ungated starter tier (`<PlanGate>` covers hr, projects and
+integrations only, because gating finance/tax/purchases/assets/claims would
+lock the free-plan dev company out of most of the app).
+
+### A third decision, new: the QSL pages
+
+Twelve pages came across verbatim in `8375317b8`, and `components/erp-ui.jsx`
+bypasses Tailwind and shadcn by design — 43 inline style blocks, 0 `className`,
+0 CSS variables, 0 media queries, 0 dark-mode handling, ten primitives
+re-implemented. That was defensible at fork time and now costs those pages the
+theme, dark mode and breakpoints. `docs/QSL-BLEND-NOTES.md` proposes keeping
+their component API exactly and rebuilding the internals, so their pages do not
+change at all. Not yet done.
 
 ---
 

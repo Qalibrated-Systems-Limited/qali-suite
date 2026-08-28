@@ -463,6 +463,13 @@
       "when": 1787049138566,
       "tag": "0065_the_product_fields_the_form_already_collects",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1787049139566,
+      "tag": "0066_stock_adjustments",
+      "breakpoints": true
     }
   ]
 }

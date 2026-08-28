@@ -92,6 +92,8 @@ export const sourceDocumentTypeEnum = pgEnum("source_document_type", [
   "fixed_asset",
   /** 0060 — the transfer that puts money into a petty cash tin. */
   "petty_cash_return",
+  /** 0066 — an approved stock adjustment's inventory entry. */
+  "stock_adjustment",
 ]);
 
 // ── Invoices slice ───────────────────────────────────────────────────────────
@@ -648,4 +650,41 @@ export const categoryAttributeTypeEnum = pgEnum("category_attribute_type", [
   "boolean",
   "date",
   "select",
+]);
+
+// ── Stock adjustments (0066) ─────────────────────────────────────────────────
+
+/**
+ * `opening_balance` is kept and never written.
+ *
+ * On Mongo, creating a product with initial stock raised an adjustment of this
+ * type and approved it in the same breath — the creator being the approver was
+ * an explicit segregation-of-duties exception, documented at stock-actions.js:
+ * 365. On Postgres, `createProductPg` posts opening stock directly to Opening
+ * Balance Equity (product-actions.ts, `postOpeningStock`), which is where the
+ * Mongo model's own comment says the credit belongs. So the path that wrote
+ * this value is gone; the value survives so a migrated row can still say what
+ * it was.
+ */
+export const adjustmentTypeEnum = pgEnum("adjustment_type", [
+  "physical_count",
+  "damage",
+  "expiry",
+  "theft",
+  "correction",
+  "write_off",
+  "found",
+  "opening_balance",
+  "other",
+]);
+
+/**
+ * Three states, and both terminal ones are reached from `draft` only.
+ * `cancel()` refuses anything that is not a draft, which is what lets the two
+ * pair CHECKs in 0066 be biconditionals rather than implications.
+ */
+export const adjustmentStatusEnum = pgEnum("adjustment_status", [
+  "draft",
+  "approved",
+  "cancelled",
 ]);

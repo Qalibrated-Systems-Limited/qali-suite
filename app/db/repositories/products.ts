@@ -303,6 +303,88 @@ export async function rejectStockFromHold(
 }
 
 /**
+ * Raises stock for an approved adjustment — goods found, a count that came in
+ * over, a correction upward.
+ *
+ * NOT `receiveStock`, and the difference is not cosmetic. That function also
+ * writes `last_purchase_cost` and `last_purchase_date`, because it exists for
+ * goods arriving from a supplier. An adjustment is not a purchase: stock found
+ * behind a shelf did not arrive today at a price anyone paid, and letting it
+ * stamp the purchase provenance corrupts the one record that says what the
+ * product last actually cost to buy.
+ *
+ * The weighted average DOES move, as it does in Mongo — `increaseInventory()`
+ * calls `updateAverageCost()` (product.js:643) — because the units are real and
+ * carry the cost the counter assigned them. Costing methods other than average
+ * leave `cost_price` alone, as everywhere else.
+ */
+export async function adjustStockUp(
+  tx: Tx,
+  productId: string,
+  quantity: string,
+  unitCost: string,
+) {
+  const [updated] = await tx
+    .update(products)
+    .set({
+      quantityOnHand: sql`${products.quantityOnHand} + ${quantity}::numeric(19,4)`,
+      costPrice: sql`CASE
+        WHEN ${products.costingMethod} <> 'average' THEN ${products.costPrice}
+        WHEN ${products.quantityOnHand} + ${quantity}::numeric(19,4) > 0
+          THEN ROUND(
+            (${products.quantityOnHand} * ${products.costPrice}
+             + ${quantity}::numeric(19,4) * ${unitCost}::numeric(19,4))
+            / (${products.quantityOnHand} + ${quantity}::numeric(19,4)), 4)
+        ELSE ${products.costPrice}
+      END`,
+      updatedAt: new Date(),
+    })
+    .where(eq(products.id, productId))
+    .returning();
+
+  if (!updated) throw new Error("Product not found");
+  return updated;
+}
+
+/**
+ * Lowers stock for an approved adjustment — damage, expiry, theft, a shortfall
+ * on a count.
+ *
+ * NOT `issueStock`, for a reason that would be a silent oversell. That function
+ * also decrements `quantity_committed`, because issuing against a sale settles
+ * a commitment that was taken when the order was raised. Writing off damaged
+ * goods settles nothing: the customer order those units were promised to is
+ * still open. Releasing the commitment as a side effect would let the same
+ * stock be committed a second time.
+ *
+ * There is no "is there enough?" read here, deliberately. Two CHECK constraints
+ * already refuse the write — `products_quantities_non_negative` and
+ * `products_commitments_within_on_hand` (0013) — and the second is the one that
+ * matters: stock promised to an order cannot be written off while the promise
+ * stands. Reading first would be a race; this is not.
+ *
+ * The cost basis is left alone. Removing units at the average does not change
+ * the average.
+ */
+export async function adjustStockDown(
+  tx: Tx,
+  productId: string,
+  quantity: string,
+) {
+  const [updated] = await tx
+    .update(products)
+    .set({
+      quantityOnHand: sql`${products.quantityOnHand} - ${quantity}::numeric(19,4)`,
+      updatedAt: new Date(),
+    })
+    .where(eq(products.id, productId))
+    .returning();
+
+  if (!updated) throw new Error("Product not found");
+  return updated;
+}
+
+/**
  * Re-costs a product for goods admitted from HOLD.
  *
  * `receiveStock` cannot be used at acceptance: the quantity went on hand at

@@ -13,7 +13,7 @@ import {
 import {
   getAdjustments,
   getAdjustmentStats,
-} from "@/app/mongodb/queries/adjustment-queries";
+} from "@/app/db/actions/adjustment-actions";
 import { formatCurrency } from "@/lib/utils/erp-utils";
 import { formatDate } from "@/lib/pdf";
 

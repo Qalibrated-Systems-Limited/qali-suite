@@ -20,7 +20,6 @@ import {
 } from "@/lib/notifications/approval-notify";
 import ErpCounter from "@/app/models/erp-counter";
 import Product from "@/app/models/product";
-import InventoryAdjustment from "@/app/models/inventoryAdjustment";
 import Project from "@/app/models/project";
 
 // ============================================
@@ -56,7 +55,6 @@ async function voidApprovalTarget(approval, user, action) {
   const ref = approval.targetRef;
   if (!ref?.kind || !ref?.id) return;
   const reason = `Approval ${approval.requestNumber} ${action}`;
-  const by = userInfo(user);
   try {
     if (ref.kind === "Payment") {
       // NOTHING TO VOID. The Postgres path writes no payment until the
@@ -74,11 +72,14 @@ async function voidApprovalTarget(approval, user, action) {
       );
       await voidDraftCreditNotePg(String(ref.id), reason);
     } else if (ref.kind === "InventoryAdjustment") {
-      const doc = await InventoryAdjustment.findOne({
-        _id: ref.id,
-        companyId: approval.companyId,
-      });
-      if (doc?.status === "draft") await doc.cancel(by, reason);
+      // POSTGRES since 0066. This looked the adjustment up in Mongo by an id
+      // that is a uuid now, so `findOne` threw a CastError, the catch below
+      // logged it, and the rejected adjustment stayed a live draft — exactly
+      // what the CreditNote branch above was written to stop.
+      const { voidDraftStockAdjustmentPg } = await import(
+        "@/app/db/actions/adjustment-actions"
+      );
+      await voidDraftStockAdjustmentPg(String(ref.id), reason);
     }
   } catch (e) {
     console.error("voidApprovalTarget error:", e);
@@ -421,59 +422,46 @@ async function applyApprovalPayload(approval, user) {
   }
 }
 
+// ============================================
+// STOCK ADJUSTMENT — applies the adjustment the approval was holding
+// ============================================
+// ON POSTGRES SINCE 0066. This used to load the Mongo InventoryAdjustment and
+// call `adjustment.approve()`, which created the journal entry, the stock
+// movements and the product mutation in MONGO — so an adjustment raised for
+// sign-off because it was high-risk or high-value was approved by a manager
+// and then booked into a ledger no screen reads, against product counters the
+// inventory screens do not show.
+//
+// It was the last module of substance still posting there.
+//
+// The tenant scope, the draft guard and the atomicity all live below the
+// action now: RLS makes the first structural, `WHERE status = 'draft'` on the
+// claiming UPDATE makes the second unraceable, and the transaction is the
+// action's. What this function keeps is the engine's half — the reference, and
+// the applied record it returns.
 async function applyStockAdjustment(approval, user) {
-  const adjustmentId = approval.targetRef?.id;
+  const adjustmentId = approval.targetRef?.id || approval.payload?.adjustmentId;
   if (!adjustmentId) {
     return { success: false, error: "Missing adjustment reference" };
   }
 
-  // Wrap the whole apply in a transaction so the model's approve() (which
-  // creates a journal entry, posts stock movements, and flips status) runs
-  // atomically. Without this, a partial failure left stock and books out
-  // of sync — this is the high-risk approval queue path.
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    // Tenant scoping is enforced via companyId on the approval — load the
-    // adjustment from the same tenant, in-session for consistency.
-    const adjustment = await InventoryAdjustment.findOne({
-      _id: adjustmentId,
-      companyId: approval.companyId,
-    }).session(session);
-    if (!adjustment) {
-      await session.abortTransaction();
-      return { success: false, error: "Adjustment not found" };
-    }
-    if (adjustment.status !== "draft") {
-      await session.abortTransaction();
-      return {
-        success: false,
-        error: `Adjustment already ${adjustment.status}`,
-      };
-    }
+  const { applyApprovedStockAdjustmentPg } = await import(
+    "@/app/db/actions/adjustment-actions"
+  );
+  const result = await applyApprovedStockAdjustmentPg(adjustmentId);
 
-    // The model's approve() method is the single point of truth — pass the
-    // session so its writes (JE, movements, product mutation) join our txn.
-    await adjustment.approve(
-      {
-        name: user.name || user.email || "Approver",
-        id: user.id,
-      },
-      session,
-    );
-
-    await session.commitTransaction();
+  if (!result?.success) {
     return {
-      success: true,
-      appliedAt: new Date(),
-      appliedRef: { kind: "InventoryAdjustment", id: adjustment._id },
+      success: false,
+      error: result?.message || "Could not apply the adjustment.",
     };
-  } catch (e) {
-    await session.abortTransaction();
-    throw e;
-  } finally {
-    session.endSession();
   }
+
+  return {
+    success: true,
+    appliedAt: new Date(),
+    appliedRef: { kind: "InventoryAdjustment", id: adjustmentId },
+  };
 }
 
 // ============================================
