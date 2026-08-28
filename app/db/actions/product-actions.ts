@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { eq, and } from "drizzle-orm";
 import { withAuthorizedTenant } from "../tenant";
 import * as productsRepo from "../repositories/products";
+import * as pricingRepo from "../repositories/productPricing";
 import * as movementsRepo from "../repositories/stockMovements";
 import * as fulfilmentRepo from "../repositories/fulfilment";
 import { createJournalEntry } from "../repositories/journal";
@@ -12,6 +13,7 @@ import {
   canWriteProducts,
   canSetProductCost,
   canEditPricing,
+  canOverridePricing,
 } from "@/lib/permissions";
 
 /**
@@ -354,43 +356,208 @@ export async function updateProductPg(
   }
 }
 
-/** Selling, wholesale and floor prices only — the pricing dialog. */
+/**
+ * Selling, wholesale and floor prices — the pricing dialog.
+ *
+ * THE GATE WAS LOST IN THE PORT and is restored here. This function used to
+ * set three columns and stop. The Mongo action it replaced
+ * (`stock-actions.js:985`) refused to apply a price below cost, below the
+ * product's own floor, or under the company's minimum margin — it raised a
+ * `price_change` approval instead and left the price alone until somebody
+ * signed it. `price_change` is still in APPROVER_MATRIX; nothing had raised
+ * one since products moved.
+ *
+ * THE CHANGE IS NOT APPLIED WHEN IT IS ROUTED. The proposed prices travel on
+ * the approval's payload and are written by `applyApprovedPriceChangePg` if
+ * and when it is granted, so a pending approval leaves the shelf price exactly
+ * as it was — which is the whole point of gating it.
+ */
 export async function updateProductPricingPg(
   productId: string,
   _prevState: unknown,
   formData: FormData,
 ): Promise<ProductActionResult> {
   try {
-    return await withAuthorizedTenant([], async (tx, { user }) => {
+    return await withAuthorizedTenant([], async (tx, { user, companyId }) => {
       if (!canEditPricing(user?.role)) {
         return fail("_form", "You do not have permission to set prices.");
       }
 
       const selling = money(formData.get("sellingPrice"));
       const minimum = money(formData.get("minimumPrice"));
+      const wholesale = money(formData.get("wholesalePrice"));
 
-      // A floor above the price it protects is not a floor. Caught here
-      // because the two arrive together and neither is wrong alone.
-      if (num(minimum) > 0 && num(selling) > 0 && num(minimum) > num(selling)) {
+      // NO HARD "floor above price" CHECK, and its removal is the point.
+      //
+      // A floor above the selling price IS "selling below the floor" — the
+      // same condition, stated from the other end — and that is precisely what
+      // the gate below exists to route for approval. Refusing it outright here
+      // made `minimumPrice` an invariant nobody could override, which
+      // contradicts both `PRICING_OVERRIDE_ROLES` and the whole `price_change`
+      // approval type: the floor is the limit somebody set, not a law of the
+      // schema. With the check here the gate's floor branch could never fire.
+      //
+      // Selling below the floor now routes, and a CFO can still override it.
+
+      const proposed = {
+        sellingPrice: selling,
+        wholesalePrice: wholesale,
+        minimumPrice: minimum,
+      };
+
+      const { getCompanyThresholds } = await import("@/app/db/companyConfig");
+      const { minimumMarginPercent } = await getCompanyThresholds(companyId);
+
+      const verdict = await pricingRepo.decidePriceChange(
+        tx,
+        productId,
+        proposed,
+        {
+          mayOverride: canOverridePricing(user?.role),
+          minimumMarginPercent,
+        },
+      );
+
+      // A floor stated above the price it is meant to protect is a
+      // contradiction, not a policy breach — no approver can make both true,
+      // so it is refused rather than routed. Distinguished from "sell below
+      // the standing floor" by whether the FLOOR is what moved; see
+      // `decidePriceChange`.
+      if (verdict.floorRaisedAbovePrice) {
         return fail(
           "minimumPrice",
           "The minimum price cannot be above the selling price.",
         );
       }
 
-      await productsRepo.updateProductPricing(tx, productId, {
-        sellingPrice: selling,
-        wholesalePrice: money(formData.get("wholesalePrice")),
-        minimumPrice: minimum,
-        lastModifiedById: user?.id ?? null,
+      if (verdict.needsApproval) {
+        const { submitApproval } = await import(
+          "@/app/mongodb/actions/approval-actions"
+        );
+        const product = await productsRepo.getProduct(tx, productId);
+
+        const result = await submitApproval({
+          type: "price_change",
+          targetRef: {
+            kind: "Product",
+            id: productId,
+            label: `${product?.sku ?? ""} — ${product?.name ?? "product"}`,
+          },
+          payload: proposed,
+          reason: verdict.reason,
+          // The cost the decision was made against. The applier refuses if it
+          // has moved since, rather than writing a price nobody approved.
+          context: { cost: verdict.cost, margin: verdict.proposedMargin },
+        });
+
+        if (!result?.success) {
+          return fail("_form", result?.error ?? "Could not raise the approval.");
+        }
+
+        return fail(
+          "_form",
+          `${verdict.reason}. Approval ${result.approval.requestNumber} has been submitted; the price is unchanged until it is granted.`,
+        );
+      }
+
+      const { changed } = await pricingRepo.applyPriceChange(tx, productId, {
+        proposed,
+        actor: {
+          id: user?.id ?? null,
+          name: user?.name || user?.email || "Unknown User",
+        },
+        // An override is still RECORDED. The bypass is of the gate, not of the
+        // history — the record is the only thing that makes it reviewable.
+        reason: verdict.reason
+          ? `${verdict.reason} (overridden by ${user?.role})`
+          : null,
       });
 
       revalidatePath(`/dashboard/stocks/${productId}`);
-      return { success: true, productId, message: "Pricing updated." };
+      return {
+        success: true,
+        productId,
+        message: changed.length ? "Pricing updated." : "Nothing changed.",
+      };
     });
   } catch (e) {
     return fail("_form", e instanceof Error ? e.message : "Could not update pricing.");
   }
+}
+
+/**
+ * Applies a price change the approval engine has signed off.
+ *
+ * Called from `app/mongodb/actions/approval-actions.js` — the engine is not
+ * ported, so this is the seam. It replaces `applyPriceChange` there, which
+ * loaded the MONGO Product and edited it: an approval raised, granted, and
+ * then written to a store no screen reads.
+ *
+ * IT REFUSES IF COST HAS MOVED. The request tripped the floor and margin
+ * checks against the cost at submission; if a receipt has re-costed the
+ * product since, the approver is greenlighting a number that no longer means
+ * what it meant. Carried over from the Mongo applier, which got this right.
+ */
+export async function applyApprovedPriceChangePg(
+  productId: string,
+  proposed: {
+    sellingPrice?: string | null;
+    wholesalePrice?: string | null;
+    minimumPrice?: string | null;
+  },
+  meta: { submittedCost?: number | null; approvalRef?: string | null } = {},
+): Promise<ProductActionResult> {
+  try {
+    return await withAuthorizedTenant(
+      ["SuperAdmin", "Admin", "CFO", "Finance Manager"],
+      async (tx, { user }) => {
+        const product = await productsRepo.getProduct(tx, productId);
+        if (!product) return fail("_form", "Product not found");
+
+        const cost = Number(product.costPrice);
+        const submitted = Number(meta.submittedCost);
+        if (
+          Number.isFinite(submitted) &&
+          submitted > 0 &&
+          Math.abs(cost - submitted) > 0.005
+        ) {
+          return fail(
+            "_form",
+            `Cost changed since submission (was ${submitted}, now ${cost}). Please resubmit the price change.`,
+          );
+        }
+
+        await pricingRepo.applyPriceChange(tx, productId, {
+          proposed,
+          actor: {
+            id: user?.id ?? null,
+            name: user?.name || user?.email || "Approver",
+          },
+          reason: "Released by approval",
+          approvalRef: meta.approvalRef ?? null,
+        });
+
+        revalidatePath(`/dashboard/stocks/${productId}`);
+        return { success: true, productId, message: "Pricing updated." };
+      },
+    );
+  } catch (e) {
+    return fail("_form", e instanceof Error ? e.message : "Could not apply the price change.");
+  }
+}
+
+/** The most recent price changes across the company — the sales dashboard. */
+export async function getRecentPriceChangesPg(limit = 8) {
+  return withAuthorizedTenant([], (tx) =>
+    pricingRepo.listRecentPriceChanges(tx, limit),
+  );
+}
+
+/** One product's price history, newest first. */
+export async function getPriceHistoryPg(productId: string, limit = 50) {
+  return withAuthorizedTenant([], (tx) =>
+    pricingRepo.listPriceHistoryFor(tx, productId, limit),
+  );
 }
 
 /**

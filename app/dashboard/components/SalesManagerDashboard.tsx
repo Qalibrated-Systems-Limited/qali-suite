@@ -16,7 +16,10 @@ import {
   ShoppingBag,
   History,
 } from "lucide-react";
-import { getPricingHealthPg } from "@/app/db/actions/product-actions";
+import {
+  getPricingHealthPg,
+  getRecentPriceChangesPg,
+} from "@/app/db/actions/product-actions";
 import { AlertsStrip, AlertsStripSkeleton } from "./AlertsStrip";
 import {
   cFinancialOverview,
@@ -196,24 +199,11 @@ async function CommercialMetrics() {
 // RECENT PRICE CHANGES (audit log)
 // ============================================
 async function RecentPriceChanges() {
-  /**
-   * NOTHING RECORDS A PRICE CHANGE ON POSTGRES YET.
-   *
-   * This flattened `pricing.priceHistory` out of the MONGO products, which
-   * nothing has written since products moved — so the card has been rendering
-   * its empty state regardless of what anyone did to a price.
-   *
-   * The empty state was worse than empty: it said "No price changes logged
-   * yet. Use Manage pricing on a product to start tracking", and using Manage
-   * pricing starts nothing. `updateProductPricing` (products.ts:572) sets the
-   * three columns and keeps no history at all, while `price_change` is a live
-   * type in APPROVER_MATRIX — so a price change can be routed, approved, and
-   * then leave no trace of what it was before.
-   *
-   * A price-history table is the fix and it is not one line; until it exists
-   * the card says what is true rather than promising a log that is not kept.
-   */
-  const recent: Array<never> = [];
+  // Real since 0069. This flattened `pricing.priceHistory` out of the MONGO
+  // products, which nothing has written since products moved — so the card
+  // rendered its empty state whatever anyone did to a price, and the empty
+  // state promised a log that was not kept.
+  const recent = await getRecentPriceChangesPg(8);
 
   if (recent.length === 0) {
     return (
@@ -225,14 +215,14 @@ async function RecentPriceChanges() {
           </h2>
         </header>
         <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-          Price history is not recorded yet. Changes made through{" "}
+          No price changes logged yet. Use{" "}
           <Link
             href="/dashboard/stocks"
             className="text-primary hover:underline"
           >
             Manage pricing
           </Link>{" "}
-          take effect immediately but are not kept as a log.
+          on a product — every change is recorded from now on.
         </p>
       </section>
     );
@@ -255,33 +245,35 @@ async function RecentPriceChanges() {
       </header>
       <ul className="divide-y divide-border">
         {recent.map((r: any) => {
-          const h = r.history;
-          const delta = (h.newPrice || 0) - (h.previousPrice || 0);
-          const pct =
-            h.previousPrice > 0 ? (delta / h.previousPrice) * 100 : 0;
+          const delta = (r.newValue || 0) - (r.oldValue || 0);
+          const pct = r.oldValue > 0 ? (delta / r.oldValue) * 100 : 0;
           const up = delta > 0;
           return (
             <li
-              key={`${r._id}-${h.changedAt}`}
+              key={r.id}
               className="flex items-start justify-between gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/40"
             >
               <div className="min-w-0 flex-1">
                 <Link
-                  href={`/dashboard/stocks/${r._id}`}
+                  href={`/dashboard/stocks/${r.productId}`}
                   className="block hover:underline"
                 >
-                  <p className="truncate font-medium">{r.name}</p>
+                  <p className="truncate font-medium">{r.productName}</p>
                   <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
                     {r.SKU}
-                    {h.changedBy?.name && ` · ${h.changedBy.name}`}
-                    {h.changedAt &&
-                      ` · ${formatRelativeDate(new Date(h.changedAt))}`}
+                    {/* Which price moved — a floor change and a selling-price
+                        change are different events and the card said neither. */}
+                    {` · ${r.field}`}
+                    {r.changedByName && ` · ${r.changedByName}`}
+                    {r.changedAt &&
+                      ` · ${formatRelativeDate(new Date(r.changedAt))}`}
+                    {r.approvalRef && ` · ${r.approvalRef}`}
                   </p>
                 </Link>
               </div>
               <div className="text-right">
                 <p className="text-sm font-semibold tabular-nums">
-                  {formatCompact(h.newPrice || 0)}
+                  {formatCompact(r.newValue || 0)}
                 </p>
                 <p
                   className={`mt-0.5 inline-flex items-center gap-0.5 text-[11px] tabular-nums ${

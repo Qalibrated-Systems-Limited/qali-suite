@@ -19,7 +19,6 @@ import {
   notifyApprovalDecided,
 } from "@/lib/notifications/approval-notify";
 import ErpCounter from "@/app/models/erp-counter";
-import Product from "@/app/models/product";
 import Project from "@/app/models/project";
 
 // ============================================
@@ -48,8 +47,9 @@ function userInfo(user) {
 // already created and would otherwise linger in "draft" forever — cluttering
 // lists and re-submittable. Void it via the model's own method so audit
 // fields are populated and any reversal is handled (here none — drafts were
-// never posted). price_change targets a Product that was never edited, so
-// it's a no-op there. Best-effort: cleanup failure must never block the
+// never posted). price_change is a no-op here too, but for a different
+// reason: it never applied anything to undo — the price is only written when
+// the approval is GRANTED (0069), so a rejected one leaves nothing behind. Best-effort: cleanup failure must never block the
 // decision the approver/submitter just made.
 async function voidApprovalTarget(approval, user, action) {
   const ref = approval.targetRef;
@@ -600,81 +600,61 @@ async function applyCreditNote(approval, user) {
   };
 }
 
+// ============================================
+// PRICE CHANGE — writes the price the approval was holding
+// ============================================
+// ON POSTGRES SINCE 0069. This loaded the MONGO Product and edited it — an
+// approval raised because a price was below cost, granted by a CFO, and then
+// written to a store no screen reads. The shelf price never moved.
+//
+// It also kept its own `pricing.priceHistory` array, which was the only record
+// of a price change anywhere and has been unwritten since products moved.
+// `product_price_history` is that record now, written by the same repository
+// function the direct path uses — so an approved change and an overridden one
+// leave the same kind of trace.
+//
+// MARKUP MODE IS GONE. The Mongo product carried `priceMode` and
+// `markupPercentage` and could derive a selling price from cost; the Postgres
+// product carries three plain prices and no mode, and nothing on this branch
+// submits a markup payload. The payload holds the prices themselves.
 async function applyPriceChange(approval, user) {
-  const { companyId } = await getTenantContext();
+  void user;
   const productId = approval.targetRef?.id;
-  if (!productId)
+  if (!productId) {
     return { success: false, error: "Missing product reference" };
-
-  const product = await Product.findOne({ _id: productId, companyId });
-  if (!product) return { success: false, error: "Product not found" };
-
-  const cost = Number(product.costing?.costPrice) || 0;
-  const previousPrice = Number(product.pricing?.sellingPrice) || 0;
-  const previousMarkup = Number(product.pricing?.markupPercentage) || 0;
-
-  // The request tripped the floor/margin checks against the cost at
-  // submission time, and (in markup mode) the new selling price is derived
-  // from cost. If cost moved since — a GRN, a landed-cost correction — the
-  // approver is greenlighting a number that no longer holds. Refuse rather
-  // than silently write a now-wrong price; the requester can resubmit.
-  const submittedCost = Number(approval.context?.cost);
-  if (
-    Number.isFinite(submittedCost) &&
-    submittedCost > 0 &&
-    Math.abs(cost - submittedCost) > 0.005
-  ) {
-    return {
-      success: false,
-      error: `Cost changed since submission (was ${submittedCost}, now ${cost}). Please resubmit the price change.`,
-    };
   }
+
+  const { applyApprovedPriceChangePg } = await import(
+    "@/app/db/actions/product-actions"
+  );
 
   const p = approval.payload || {};
-  const mode = p.priceMode || product.pricing?.priceMode || "manual";
-
-  let nextSelling;
-  let nextMarkup;
-  if (mode === "markup") {
-    nextMarkup = Number(p.markupPercent) || 0;
-    nextSelling = cost > 0 ? Math.round(cost * (1 + nextMarkup / 100) * 100) / 100 : 0;
-  } else {
-    nextSelling = Number(p.sellingPrice) || 0;
-    nextMarkup = cost > 0 ? ((nextSelling - cost) / cost) * 100 : 0;
-  }
-
-  product.pricing.priceMode = mode;
-  if (p.minimumPrice !== undefined && p.minimumPrice !== null) {
-    product.pricing.minimumPrice = Number(p.minimumPrice) || 0;
-  }
-  if (mode === "markup") {
-    product.pricing.markupPercentage = nextMarkup;
-  } else {
-    product.pricing.sellingPrice = nextSelling;
-  }
-  product.pricing.lastPriceUpdate = new Date();
-  product.pricing.priceHistory = product.pricing.priceHistory || [];
-  product.pricing.priceHistory.push({
-    previousPrice,
-    newPrice: nextSelling,
-    previousMarkup,
-    newMarkup: nextMarkup,
-    costAtChange: cost,
-    mode,
-    reason: `Approved (${approval.requestNumber}): ${approval.reason || p.reason || ""}`.trim(),
-    changedBy: {
-      name: user.name || user.email || "System",
-      id: user.id,
-      role: user.role,
+  const result = await applyApprovedPriceChangePg(
+    String(productId),
+    {
+      sellingPrice: p.sellingPrice ?? null,
+      wholesalePrice: p.wholesalePrice ?? null,
+      minimumPrice: p.minimumPrice ?? null,
     },
-    changedAt: new Date(),
-  });
+    {
+      // The cost the request was judged against. The action refuses if a
+      // receipt has re-costed the product since, rather than writing a price
+      // nobody approved at that cost.
+      submittedCost: Number(approval.context?.cost),
+      approvalRef: approval.requestNumber,
+    },
+  );
 
-  await product.save();
+  if (!result?.success) {
+    return {
+      success: false,
+      error: result?.error || "Could not apply the price change.",
+    };
+  }
 
   return {
     success: true,
     appliedAt: new Date(),
-    appliedRef: { kind: "Product", id: product._id },
+    appliedRef: { kind: "Product", id: productId },
   };
 }

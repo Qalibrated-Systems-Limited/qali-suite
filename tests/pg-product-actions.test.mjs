@@ -70,6 +70,12 @@ suite("product actions (end to end)", () => {
     await admin`
       INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
       VALUES ('companies', ${mongoCompanyId}, ${companyUuid})`;
+    // Provisioning creates this row WITH the company (0035), so a company
+    // without one cannot occur in production — the fixture was simply
+    // unfaithful, and it started mattering when the pricing gate began
+    // reading `minimumMarginPercent` from it (0069).
+    await admin`
+      INSERT INTO company_settings (company_id) VALUES (${companyUuid})`;
     await admin.begin(async (tx) => {
       await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
       await tx`

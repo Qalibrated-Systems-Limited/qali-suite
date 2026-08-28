@@ -484,6 +484,13 @@
       "when": 1787049141566,
       "tag": "0068_stocktake_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1787049142566,
+      "tag": "0069_price_history_and_the_gate",
+      "breakpoints": true
     }
   ]
 }
