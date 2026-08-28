@@ -32,6 +32,7 @@ import {
   Package,
   Plug,
   Receipt,
+  ScanLine,
   Search,
   Settings,
   ShieldAlert,
@@ -200,6 +201,13 @@ const getNavigationGroups = (user) => {
         label: "Stock Adjustments",
         id: "adjustments",
         href: "/dashboard/adjustments",
+        hidden: !canSeeInventoryNav(user?.role),
+      },
+      {
+        icon: ScanLine,
+        label: "Stock Counts",
+        id: "stock-counts",
+        href: "/dashboard/stock-counts",
         hidden: !canSeeInventoryNav(user?.role),
       },
       {
