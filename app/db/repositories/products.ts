@@ -194,8 +194,9 @@ export async function receiveStock(
     .update(products)
     .set({
       quantityOnHand: sql`${products.quantityOnHand} + ${quantity}::numeric(19,4)`,
+      // No costing-method branch: 0067 narrowed the enum to the one method
+      // this system performs, so a guard on `<> 'average'` is unreachable.
       costPrice: sql`CASE
-        WHEN ${products.costingMethod} <> 'average' THEN ${products.costPrice}
         WHEN ${products.quantityOnHand} + ${quantity}::numeric(19,4) > 0
           THEN ROUND(
             (${products.quantityOnHand} * ${products.costPrice}
@@ -328,8 +329,9 @@ export async function adjustStockUp(
     .update(products)
     .set({
       quantityOnHand: sql`${products.quantityOnHand} + ${quantity}::numeric(19,4)`,
+      // No costing-method branch: 0067 narrowed the enum to the one method
+      // this system performs, so a guard on `<> 'average'` is unreachable.
       costPrice: sql`CASE
-        WHEN ${products.costingMethod} <> 'average' THEN ${products.costPrice}
         WHEN ${products.quantityOnHand} + ${quantity}::numeric(19,4) > 0
           THEN ROUND(
             (${products.quantityOnHand} * ${products.costPrice}
@@ -409,10 +411,10 @@ export async function adjustStockDown(
  * in float64 across a read and a write, against `onHandAfter - acceptedQty`,
  * with no notion of the hold bucket at all.
  *
- * FIFO and specific costing keep their layer cost, but a cost of ZERO is
- * seeded from this receipt rather than left — a product created by a warehouse
- * role starts at 0, and a zero cost basis silently turns every later sale into
- * 100% margin and every valuation into an understatement.
+ * A cost of ZERO is seeded from this receipt rather than left — a product
+ * created by a warehouse role starts at 0, and a zero cost basis silently
+ * turns every later sale into 100% margin and every valuation into an
+ * understatement.
  */
 export async function recostFromAcceptedReceipt(
   tx: Tx,
@@ -428,11 +430,12 @@ export async function recostFromAcceptedReceipt(
   const [updated] = await tx
     .update(products)
     .set({
+      // 0067: one costing method, so the non-average branch is gone. What it
+      // did — seed a ZERO cost from this receipt rather than leave it — is
+      // kept below in the ELSE, because a zero cost basis silently turns every
+      // later sale into 100% margin and every valuation into an
+      // understatement, whatever the method.
       costPrice: sql`CASE
-        WHEN ${products.costingMethod} <> 'average'
-          THEN CASE WHEN ${products.costPrice} <= 0
-                    THEN ${unitCost}::numeric(19,4)
-                    ELSE ${products.costPrice} END
         WHEN ${products.quantityOnHand} - ${products.quantityOnHold} > 0
           THEN ROUND(
             ((${products.quantityOnHand} - ${products.quantityOnHold}
@@ -453,6 +456,127 @@ export async function recostFromAcceptedReceipt(
 }
 
 /** Products at or below their reorder level. */
+/**
+ * Stock valuation — what the inventory is worth, by product and by category.
+ *
+ * The one inventory report, and it read a MONGO collection nothing has written
+ * since products moved, so it valued an empty catalogue at nothing.
+ *
+ * Grouped in SQL rather than in a JS loop over every product: the report is
+ * over the whole catalogue, and summing thousands of rows in the request
+ * handler to produce nine numbers is work the database is better at. The
+ * per-product rows come back in the same query for the expandable detail.
+ *
+ * TWO CORRECTIONS, both arithmetic rather than translation:
+ *
+ * `averageMargin` was `potentialProfit / inventoryValue * 100`, which is
+ * MARKUP on cost, and the card renders it as "% margin" beside "Potential
+ * profit". Margin is profit over RETAIL. On stock costing 100 and selling for
+ * 150 the old figure said 50% and the true margin is 33.3%. A deliberate
+ * divergence; the tests assert the corrected number.
+ *
+ * `category` came from a `.populate("category", "name")` on a field that
+ * holds an ObjectId, while 0062 made `category` a text SNAPSHOT and
+ * `category_id` the real reference. The name is read through the FK where
+ * there is one and falls back to the snapshot, so a product filed before the
+ * tree existed still reports what it was filed under instead of
+ * "Uncategorized".
+ */
+export async function getStockValuation(tx: Tx) {
+  const rows = (await tx.execute(sql`
+    SELECT p.id,
+           p.name,
+           p.sku                                   AS "SKU",
+           p.unit,
+           COALESCE(c.name, NULLIF(p.category, ''), 'Uncategorized') AS category,
+           p.category_id                           AS "categoryId",
+           p.quantity_on_hand::float8              AS quantity,
+           p.cost_price::float8                    AS "costPrice",
+           p.selling_price::float8                 AS "sellingPrice",
+           (p.quantity_on_hand * p.cost_price)::float8    AS "inventoryValue",
+           (p.quantity_on_hand * p.selling_price)::float8 AS "retailValue",
+           (p.quantity_on_hand * (p.selling_price - p.cost_price))::float8
+                                                   AS "potentialProfit"
+      FROM products p
+      LEFT JOIN categories c ON c.id = p.category_id
+     WHERE p.is_active = true
+     ORDER BY p.name
+  `)) as unknown as Array<{
+    id: string;
+    name: string;
+    SKU: string;
+    unit: string;
+    category: string;
+    categoryId: string | null;
+    quantity: number;
+    costPrice: number;
+    sellingPrice: number;
+    inventoryValue: number;
+    retailValue: number;
+    potentialProfit: number;
+  }>;
+
+  const products = Array.from(rows).map((r) => ({ ...r, _id: r.id }));
+
+  const byCategory = new Map<
+    string,
+    {
+      category: string;
+      items: typeof products;
+      totalQuantity: number;
+      totalInventoryValue: number;
+      totalRetailValue: number;
+    }
+  >();
+
+  for (const product of products) {
+    let group = byCategory.get(product.category);
+    if (!group) {
+      group = {
+        category: product.category,
+        items: [],
+        totalQuantity: 0,
+        totalInventoryValue: 0,
+        totalRetailValue: 0,
+      };
+      byCategory.set(product.category, group);
+    }
+    group.items.push(product);
+    group.totalQuantity += product.quantity;
+    group.totalInventoryValue += product.inventoryValue;
+    group.totalRetailValue += product.retailValue;
+  }
+
+  const categories = [...byCategory.values()].sort(
+    (a, b) => b.totalInventoryValue - a.totalInventoryValue,
+  );
+
+  const withStock = products.filter((p) => p.quantity > 0);
+  const totalInventoryValue = products.reduce((s, p) => s + p.inventoryValue, 0);
+  const totalRetailValue = products.reduce((s, p) => s + p.retailValue, 0);
+  const totalPotentialProfit = products.reduce((s, p) => s + p.potentialProfit, 0);
+
+  return {
+    reportName: "Stock Valuation Report",
+    generatedAt: new Date(),
+    products,
+    categories,
+    summary: {
+      totalProducts: products.length,
+      productsWithStock: withStock.length,
+      productsOutOfStock: products.length - withStock.length,
+      totalQuantity: products.reduce((s, p) => s + p.quantity, 0),
+      totalInventoryValue,
+      totalRetailValue,
+      totalPotentialProfit,
+      categoryCount: categories.length,
+      // Profit over RETAIL, not over cost. See the header.
+      averageMargin:
+        totalRetailValue > 0 ? (totalPotentialProfit / totalRetailValue) * 100 : 0,
+    },
+  };
+}
+
 export async function getLowStock(tx: Tx, limit = 50) {
   return tx.execute(sql`
     SELECT id, sku, name, quantity_on_hand, quantity_available, reorder_level

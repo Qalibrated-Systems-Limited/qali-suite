@@ -7,10 +7,10 @@ import {
   DollarSign,
 } from "lucide-react";
 import {
-  searchMovements,
-  fetchMovementPages,
-  getMovementStats,
-} from "@/app/mongodb/queries/movement-queries";
+  searchMovementsPg as searchMovements,
+  fetchMovementPagesPg as fetchMovementPages,
+  getMovementStatsPg as getMovementStats,
+} from "@/app/db/actions/stock-movement-actions";
 import { MovementsTable } from "./movementTable";
 import Pagination from "@/components/pagination";
 import { formatCurrency } from "@/lib/utils";
@@ -20,7 +20,10 @@ import { formatCurrency } from "@/lib/utils";
 // ============================================
 
 export async function MovementStatsCards({ filters, userId, userRole, isManager }) {
-  const stats = await getMovementStats(filters, userId, userRole);
+  // `userId` / `userRole` are no longer passed: the action decides the role
+  // scope and the query enforces it, so a caller cannot omit it and see
+  // everything — which is what the old signature allowed.
+  const stats = await getMovementStats(filters);
   const { startDate, endDate } = filters;
 
   return (
@@ -170,7 +173,7 @@ export async function MovementsTableServer({
   userRole,
   isManager,
 }) {
-  const movements = await searchMovements(query, page, filters, userId, userRole);
+  const movements = await searchMovements({ ...filters, search: query, page });
 
   return <MovementsTable movements={movements} isManager={isManager} />;
 }
@@ -223,7 +226,7 @@ export function MovementsTableSkeleton() {
 // ============================================
 
 export async function MovementsPaginationServer({ query, filters, userId, userRole }) {
-  const totalPages = await fetchMovementPages(query, filters, userId, userRole);
+  const totalPages = await fetchMovementPages({ ...filters, search: query });
 
   if (totalPages <= 1) return null;
 

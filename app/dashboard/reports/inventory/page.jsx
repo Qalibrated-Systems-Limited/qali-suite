@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { canSeeInventoryNav } from "@/lib/permissions";
-import { getStockValuationReport } from "@/app/mongodb/queries/inventory-queries";
+import { getStockValuationReportPg as getStockValuationReport } from "@/app/db/actions/product-actions";
 import { StockValuationClient } from "./StockValuationClient";
 
 export const metadata = {
@@ -31,14 +31,14 @@ export default async function InventoryReportsPage({ searchParams }) {
     );
   }
 
-  const params = await searchParams;
-  const groupBy = params?.groupBy || "category";
 
   let reportData = null;
   let error = null;
 
   try {
-    reportData = await getStockValuationReport({ groupBy });
+    // The report has always grouped by category; `groupBy` was accepted and
+    // never read, on the Mongo side too.
+    reportData = await getStockValuationReport();
   } catch (err) {
     console.error("Error fetching stock valuation report:", err);
     error = err.message;

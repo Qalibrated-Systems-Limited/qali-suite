@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { notFound, redirect } from "next/navigation";
-import { getMovementById } from "@/app/mongodb/queries/movement-queries";
+import { getMovementByIdPg as getMovementById } from "@/app/db/actions/stock-movement-actions";
 import { MovementDetail } from "./MovementDetail";
 
 export const metadata = { title: "Movement Details" };

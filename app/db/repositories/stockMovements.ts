@@ -231,3 +231,243 @@ export async function getProvenanceVariances(tx: Tx, limit = 50) {
      LIMIT ${Math.min(limit, 200)}
   `);
 }
+
+/**
+ * The movements LEDGER SCREEN — search, filters, role scope, pagination and
+ * the summary tiles above it.
+ *
+ * `listMovements` above is the plain read the other modules use. This is the
+ * browsing surface, and it needs the shape the table renders: the product and
+ * person snapshots nested as `productSnapshot` and `performedBy`, because that
+ * is what `movementTable.jsx` reads.
+ *
+ * ROLE SCOPE IS PART OF THE QUERY, not the page. A technician sees the
+ * movements they were involved in; Admin and Store Manager see everything.
+ * The Mongo version checked three fields — performedBy, issuedTo, receivedBy —
+ * of which `receivedBy` does not exist on the Postgres table and never did on
+ * the Mongo one either: nothing wrote it. Two are checked here.
+ *
+ * THE SEARCH IS ILIKE ON FOUR COLUMNS, not a six-field regex OR. The Mongo
+ * version needed a two-character minimum "before triggering a 6-field regex
+ * OR scan (each field would otherwise do a full COLLSCAN)". The minimum is
+ * kept because it is a sensible interaction, not because the query cannot
+ * cope.
+ */
+const MOVEMENTS_PER_PAGE = 20;
+
+export interface MovementBrowseOptions {
+  search?: string | null;
+  movementType?: string | null;
+  direction?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  productId?: string | null;
+  /** Non-null narrows to movements this person was involved in. */
+  restrictToUserId?: string | null;
+  page?: number;
+}
+
+function movementFilters(opts: MovementBrowseOptions) {
+  const where = [sql`TRUE`];
+
+  if (opts.restrictToUserId) {
+    where.push(
+      sql`(m.performed_by_id = ${opts.restrictToUserId}
+           OR m.issued_to_id::text = ${opts.restrictToUserId})`,
+    );
+  }
+  if (opts.movementType && opts.movementType !== "all") {
+    where.push(sql`m.movement_type::text = ${opts.movementType}`);
+  }
+  if (opts.direction && opts.direction !== "all") {
+    where.push(sql`m.direction::text = ${opts.direction}`);
+  }
+  if (opts.productId) {
+    where.push(sql`m.product_id = ${opts.productId}::uuid`);
+  }
+  if (opts.startDate) {
+    where.push(sql`m.movement_date >= ${opts.startDate}::date`);
+  }
+  if (opts.endDate) {
+    // Inclusive of the end DAY, as the Mongo version was: it added a day and
+    // used a strict less-than.
+    where.push(sql`m.movement_date < (${opts.endDate}::date + 1)`);
+  }
+
+  const term = (opts.search ?? "").trim();
+  if (term.length >= 2) {
+    const like = `%${term}%`;
+    where.push(sql`(
+      m.movement_number ILIKE ${like}
+      OR m.product_name_at_movement ILIKE ${like}
+      OR m.product_sku_at_movement ILIKE ${like}
+      OR m.performed_by_name_at_movement ILIKE ${like}
+      OR m.issued_to_name_at_movement ILIKE ${like}
+    )`);
+  }
+
+  return sql.join(where, sql` AND `);
+}
+
+/** One page of the ledger, in the shape the table renders. */
+export async function browseMovements(tx: Tx, opts: MovementBrowseOptions = {}) {
+  const page = Math.max(1, opts.page ?? 1);
+  const rows = (await tx.execute(sql`
+    SELECT m.id,
+           m.movement_number, m.movement_type::text AS movement_type,
+           m.direction::text AS direction, m.status::text AS status,
+           m.quantity::float8 AS quantity,
+           m.previous_stock::float8 AS previous_stock,
+           m.new_stock::float8 AS new_stock,
+           m.unit_cost::float8 AS unit_cost,
+           m.total_cost::float8 AS total_cost,
+           m.total_value::float8 AS total_value,
+           m.product_id, m.product_sku_at_movement, m.product_name_at_movement,
+           m.performed_by_id, m.performed_by_name_at_movement,
+           m.issued_to_name_at_movement,
+           m.source_reference, m.movement_date, m.created_at
+      FROM stock_movements m
+     WHERE ${movementFilters(opts)}
+     ORDER BY m.movement_date DESC, m.created_at DESC
+     LIMIT ${MOVEMENTS_PER_PAGE} OFFSET ${(page - 1) * MOVEMENTS_PER_PAGE}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return Array.from(rows).map(shapeMovementForScreen);
+}
+
+/** How many pages the current filters cover. */
+export async function countMovementPages(
+  tx: Tx,
+  opts: MovementBrowseOptions = {},
+) {
+  const [row] = (await tx.execute(sql`
+    SELECT count(*)::int AS count FROM stock_movements m
+     WHERE ${movementFilters(opts)}
+  `)) as unknown as Array<{ count: number }>;
+
+  return Math.max(1, Math.ceil((row?.count ?? 0) / MOVEMENTS_PER_PAGE));
+}
+
+/**
+ * The tiles above the ledger.
+ *
+ * `total_value` falls back to `total_cost`, as the Mongo aggregation did —
+ * an inbound movement carries a cost and no sale value, and the tile is about
+ * value moved either way.
+ */
+export async function getMovementBrowseStats(
+  tx: Tx,
+  opts: MovementBrowseOptions = {},
+) {
+  const [row] = (await tx.execute(sql`
+    SELECT
+      count(*)::int AS "totalMovements",
+      count(*) FILTER (WHERE m.direction = 'in')::int  AS "totalIn",
+      count(*) FILTER (WHERE m.direction = 'out')::int AS "totalOut",
+      COALESCE(SUM(m.quantity) FILTER (WHERE m.direction = 'in'), 0)::float8
+        AS "totalQuantityIn",
+      COALESCE(SUM(m.quantity) FILTER (WHERE m.direction = 'out'), 0)::float8
+        AS "totalQuantityOut",
+      COALESCE(SUM(COALESCE(m.total_value, m.total_cost, 0))
+               FILTER (WHERE m.direction = 'in'), 0)::float8  AS "totalValueIn",
+      COALESCE(SUM(COALESCE(m.total_value, m.total_cost, 0))
+               FILTER (WHERE m.direction = 'out'), 0)::float8 AS "totalValueOut"
+    FROM stock_movements m
+    WHERE ${movementFilters(opts)}
+  `)) as unknown as Array<Record<string, number>>;
+
+  const stats = row ?? {
+    totalMovements: 0,
+    totalIn: 0,
+    totalOut: 0,
+    totalQuantityIn: 0,
+    totalQuantityOut: 0,
+    totalValueIn: 0,
+    totalValueOut: 0,
+  };
+
+  return {
+    ...stats,
+    netQuantity: stats.totalQuantityIn - stats.totalQuantityOut,
+    netValue: stats.totalValueIn - stats.totalValueOut,
+  };
+}
+
+/** One movement, for the detail page. */
+export async function getMovementForScreen(tx: Tx, movementId: string) {
+  const rows = (await tx.execute(sql`
+    SELECT m.id,
+           m.movement_number, m.movement_type::text AS movement_type,
+           m.direction::text AS direction, m.status::text AS status,
+           m.quantity::float8 AS quantity,
+           m.previous_stock::float8 AS previous_stock,
+           m.new_stock::float8 AS new_stock,
+           m.unit_cost::float8 AS unit_cost,
+           m.total_cost::float8 AS total_cost,
+           m.total_value::float8 AS total_value,
+           m.average_cost_at_movement::float8 AS average_cost_at_movement,
+           m.product_id, m.product_sku_at_movement, m.product_name_at_movement,
+           m.performed_by_id, m.performed_by_name_at_movement,
+           m.issued_to_id, m.issued_to_name_at_movement,
+           m.source_reference,
+           m.journal_entry_id, m.cogs_journal_entry_id,
+           m.is_reversed, m.reversed_at, m.original_movement_id,
+           m.movement_date, m.created_at
+      FROM stock_movements m
+     WHERE m.id = ${movementId}::uuid
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.length ? shapeMovementForScreen(rows[0]) : null;
+}
+
+/**
+ * The Mongo document shape the screens read: snapshots nested rather than
+ * flat. Kept exactly, so `movementTable.jsx` and the detail page do not change.
+ */
+function shapeMovementForScreen(r: Record<string, unknown>) {
+  return {
+    _id: String(r.id),
+    id: String(r.id),
+    movementNumber: r.movement_number as string,
+    movementType: r.movement_type as string,
+    direction: r.direction as string,
+    status: r.status as string,
+    quantity: Number(r.quantity ?? 0),
+    previousStock: Number(r.previous_stock ?? 0),
+    newStock: Number(r.new_stock ?? 0),
+    productId: r.product_id as string,
+    productSnapshot: {
+      SKU: r.product_sku_at_movement as string,
+      name: r.product_name_at_movement as string,
+    },
+    performedBy: {
+      id: r.performed_by_id as string | null,
+      name: (r.performed_by_name_at_movement as string) ?? "System",
+      // The Mongo snapshot carried a role and the Postgres table does not:
+      // a role is not a property of a movement, it is a property of a person
+      // at a point in time, and storing it made the two disagree the moment
+      // somebody was promoted. The table shows the name.
+      role: null,
+    },
+    issuedTo: r.issued_to_name_at_movement
+      ? { name: r.issued_to_name_at_movement as string }
+      : null,
+    costing: {
+      unitCost: Number(r.unit_cost ?? 0),
+      totalCost: Number(r.total_cost ?? 0),
+      totalValue: r.total_value == null ? null : Number(r.total_value),
+      averageCostAtMovement:
+        r.average_cost_at_movement == null
+          ? null
+          : Number(r.average_cost_at_movement),
+    },
+    sourceReference: (r.source_reference as string) ?? null,
+    journalEntryId: (r.journal_entry_id as string) ?? null,
+    cogsJournalEntryId: (r.cogs_journal_entry_id as string) ?? null,
+    isReversed: Boolean(r.is_reversed),
+    reversedAt: r.reversed_at ?? null,
+    originalMovementId: (r.original_movement_id as string) ?? null,
+    movementDate: r.movement_date,
+    createdAt: r.created_at,
+  };
+}

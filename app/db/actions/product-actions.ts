@@ -593,3 +593,13 @@ export async function getProductActivityPg(productId: string) {
 export async function getPricingHealthPg() {
   return withAuthorizedTenant([], (tx) => productsRepo.getPricingHealth(tx));
 }
+
+/**
+ * The stock valuation report.
+ *
+ * `canSeeInventoryNav` gates the page; the roles here are the write-and-read
+ * set for inventory, since a valuation is a financial figure about stock.
+ */
+export async function getStockValuationReportPg() {
+  return withAuthorizedTenant([], (tx) => productsRepo.getStockValuation(tx));
+}
