@@ -968,6 +968,11 @@ export async function searchStockRequests(
            r.total_value::text AS total_value,
            r.required_by_date::text AS required_by_date,
            r.requested_at, r.created_at, r.notes,
+           -- When the request was DECIDED, for activity feeds. Additive: no
+           -- existing caller reads it, and the Mongo shape's updatedAt was the
+           -- wrong answer anyway — any later edit re-dated the decision.
+           -- (No backticks in here: one ends the sql template literal.)
+           COALESCE(r.approved_at, r.rejected_at) AS decided_at,
            COALESCE(t.item_count, 0) AS item_count,
            COALESCE(t.target, 0)::text     AS total_requested,
            COALESCE(t.fulfilled, 0)::text  AS total_fulfilled,
@@ -997,6 +1002,7 @@ export async function searchStockRequests(
       totalValue: r.total_value,
       requiredByDate: r.required_by_date,
       requestedAt: r.requested_at,
+      decidedAt: r.decided_at,
       createdAt: r.created_at,
       notes: r.notes,
       customer: { name: r.customer_name_at_request },
@@ -1019,6 +1025,30 @@ export async function searchStockRequests(
 }
 
 /** The figures the requests list cards read. */
+/**
+ * What was decided TODAY — the two movement tiles on the operations tab.
+ *
+ * Not in `getStockRequestStats`, which counts standing state. These count
+ * transitions, and they key on `approved_at` / `rejected_at` rather than
+ * `updated_at`: the Mongo query used `updatedAt >= todayStart`, so ANY edit to
+ * an old request — a note, a fulfilment, a priority change — re-dated it into
+ * today's "approved" tile. The column that records the decision is the one
+ * that answers when the decision was made.
+ *
+ * `CURRENT_DATE` in the database's timezone, not a JS `todayStart` computed on
+ * the server, so the boundary is one thing rather than two that can disagree.
+ */
+export async function getStockRequestDecisionsToday(tx: Tx) {
+  const [row] = (await tx.execute(sql`
+    SELECT
+      count(*) FILTER (WHERE approved_at >= CURRENT_DATE)::int AS "approvedToday",
+      count(*) FILTER (WHERE rejected_at >= CURRENT_DATE)::int AS "rejectedToday"
+    FROM stock_requests
+  `)) as unknown as Array<{ approvedToday: number; rejectedToday: number }>;
+
+  return row ?? { approvedToday: 0, rejectedToday: 0 };
+}
+
 export async function getStockRequestStats(tx: Tx) {
   const [row] = (await tx.execute(sql`
     SELECT count(*)::int                                          AS total,
@@ -1749,6 +1779,32 @@ export async function getCheckoutById(tx: Tx, checkoutId: string) {
  * to relabel it. The Mongo version counts `status: "overdue"`, so the tile
  * showed only those a store manager had manually marked.
  */
+/**
+ * What ONE person still holds — the two numbers on their own alerts strip.
+ *
+ * `overdue` IS NOT A STATUS HERE, and that is the only real difference from
+ * the Mongo query this replaces. That collection carried an `overdue` value
+ * that nothing ever set (see `setCheckoutStatusPg`), so its
+ * `status: { $in: ["checked_out", "overdue"] }` was the first term and a value
+ * that could not occur. Overdue is derived from the date, which is the only
+ * way the number can be right the morning after it becomes true.
+ *
+ * The two counts deliberately OVERLAP: an overdue item is still checked out,
+ * and the strip renders "3 out, 1 overdue" rather than two disjoint buckets.
+ */
+export async function countMyCheckouts(tx: Tx, userId: string) {
+  const [row] = (await tx.execute(sql`
+    SELECT
+      count(*) FILTER (WHERE status = 'checked_out')::int AS "checkedOut",
+      count(*) FILTER (WHERE status = 'checked_out'
+                         AND expected_return_date < CURRENT_DATE)::int AS overdue
+    FROM item_checkouts
+    WHERE checked_out_to_id = ${userId}
+  `)) as unknown as Array<{ checkedOut: number; overdue: number }>;
+
+  return row ?? { checkedOut: 0, overdue: 0 };
+}
+
 export async function getCheckoutStats(tx: Tx) {
   const [row] = (await tx.execute(sql`
     SELECT

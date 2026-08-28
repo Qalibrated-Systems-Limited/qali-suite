@@ -3,43 +3,18 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import AccountForm from "../components/accountForm";
 
-import connectDB from "@/app/config/dbConnect";
-import Account from "@/app/models/account";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
-import { suggestCodes } from "@/lib/coa-codes";
+import { getAccountFormOptionsPg } from "@/app/db/actions/account-actions";
 
 export const metadata = {
   title: "Create Account | ERP System",
 };
 
 export default async function CreateAccountPage() {
-  await connectDB();
-  const { companyId } = await getTenantContext();
-
-  // Fetch ONLY header accounts (can't post, used as parents) - tenant-scoped
-  const headerAccounts = await Account.find({
-    companyId,
-    subType: "header",
-    isActive: true,
-  })
-    .sort({ accountCode: 1 })
-    .select("_id accountCode accountName accountType")
-    .lean();
-
-  // All codes (cheap projection) → per-range next-code suggestions so the
-  // form can auto-fill instead of making users guess.
-  const allCodes = await Account.find({ companyId })
-    .select("accountCode")
-    .lean();
-  const nextCodes = suggestCodes(allCodes.map((a) => a.accountCode));
-
-  // Serialize for client
-  const serializedHeaders = headerAccounts.map((acc) => ({
-    _id: acc._id.toString(),
-    accountCode: acc.accountCode,
-    accountName: acc.accountName,
-    accountType: acc.accountType,
-  }));
+  // Both reads were Mongo, and both failed silently — see the action's header
+  // for what each one cost. Tenant scoping is RLS's now, not a filter this
+  // page has to remember.
+  const { headerAccounts: serializedHeaders, nextCodes } =
+    await getAccountFormOptionsPg();
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">

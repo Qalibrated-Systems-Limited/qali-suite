@@ -460,3 +460,10 @@ export async function getRequestFormData() {
 export const approveRequest = approveStockRequest;
 export const rejectRequest = rejectStockRequest;
 export const cancelRequest = cancelStockRequest;
+
+/** The two "decided today" tiles on the operations tab. */
+export async function getRequestDecisionsToday() {
+  return withAuthorizedTenant([], (tx) =>
+    fulfilment.getStockRequestDecisionsToday(tx),
+  );
+}

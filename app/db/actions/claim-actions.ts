@@ -11,6 +11,7 @@ import {
   FINANCE_WRITE_ROLES,
 } from "@/lib/utils/role-gates";
 import * as claims from "../repositories/claims";
+import * as accountsRepo from "../repositories/accounts";
 import {
   advanceRequestSchema,
   reimbursementSchema,
@@ -977,4 +978,29 @@ export async function getExpenseAccountsForCategories() {
   } catch {
     return [];
   }
+}
+
+/**
+ * Cash, bank and M-Pesa accounts the claim payment dialogs offer.
+ *
+ * The claim detail page read these from the MONGO Account collection, which
+ * nothing has written since 0035 — so all three dialogs on that page offered
+ * an empty account list and no claim could be paid from it.
+ *
+ * Gated on CLAIM_PAY_ROLES: this list exists to be spent from, and the page
+ * hands it to the settle, reimburse and pay dialogs.
+ *
+ * The shape is the page's, not the repository's — it renders `accountCode` and
+ * `accountName`, where `listPaymentAccounts` says `code` and `name`.
+ */
+export async function getClaimPaymentAccountsPg() {
+  return withAuthorizedTenant([...CLAIM_PAY_ROLES], async (tx) => {
+    const rows = await accountsRepo.listPaymentAccounts(tx);
+    return rows.map((a) => ({
+      _id: a._id,
+      accountCode: a.code,
+      accountName: a.name,
+      subType: a.subType,
+    }));
+  });
 }

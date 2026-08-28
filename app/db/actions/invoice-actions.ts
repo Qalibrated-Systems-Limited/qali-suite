@@ -545,3 +545,16 @@ export async function getInvoiceDetailPg(invoiceId: string) {
     invoices.getInvoiceDetail(tx, invoiceId),
   );
 }
+
+/**
+ * The overdue invoices the finance tab lists.
+ *
+ * That card read the MONGO Invoice collection, which nothing has written since
+ * invoices moved, so it showed "nothing overdue" to a company with a full
+ * ledger of it — the worst possible answer from a collections list.
+ */
+export async function getOverdueInvoicesPg(limit = 4) {
+  return withAuthorizedTenant([...INVOICE_WRITE_ROLES], (tx) =>
+    invoices.listOverdueInvoices(tx, limit),
+  );
+}

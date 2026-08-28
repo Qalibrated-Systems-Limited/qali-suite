@@ -2,7 +2,6 @@
 // REQUEST DIALOG
 // ============================================
 
-import Account from "@/app/models/account";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

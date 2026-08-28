@@ -580,3 +580,16 @@ export async function getProductActivityPg(productId: string) {
     };
   });
 }
+
+/**
+ * Average margin, priced count and below-floor count for the sales dashboard.
+ *
+ * These were two Mongo aggregations over a collection nothing has written
+ * since products moved, so both tiles read 0% and 0 whatever the catalogue
+ * held. They also matched on `status: "active"` — a field the Postgres
+ * products table does not carry, because `is_active` is the one the rest of
+ * the app filters on.
+ */
+export async function getPricingHealthPg() {
+  return withAuthorizedTenant([], (tx) => productsRepo.getPricingHealth(tx));
+}

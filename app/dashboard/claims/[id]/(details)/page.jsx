@@ -38,32 +38,11 @@ import { ResubmitClaimButton } from "../../components/ResubmitClaimButton";
 import ProjectContextCard from "../../components/ProjectContextCard";
 import { Suspense } from "react";
 import { Banknote } from "lucide-react";
-import dbConnect from "@/app/config/dbConnect";
-import Account from "@/app/models/account";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { getClaimPaymentAccountsPg as getPaymentAccounts } from "@/app/db/actions/claim-actions";
 // ============================================
-
-async function getPaymentAccounts() {
-  await dbConnect();
-  const { companyId } = await getTenantContext();
-
-  const accounts = await Account.find({
-    companyId,
-    subType: { $in: ["cash", "bank", "mpesa"] },
-    isActive: { $ne: false },
-    canPost: true,
-  })
-    .select("_id accountCode accountName subType")
-    .sort({ accountCode: 1 })
-    .lean();
-
-  return accounts.map((a) => ({
-    _id: a._id.toString(),
-    accountCode: a.accountCode,
-    accountName: a.accountName,
-    subType: a.subType,
-  }));
-}
+// This read the MONGO Account collection, which nothing has written since
+// 0035, so all three payment dialogs on this page offered an empty account
+// list and no claim could be paid from it. Tenant scoping is RLS's now.
 
 export const metadata = {
   title: "Claim Details | ERP System",

@@ -1166,6 +1166,47 @@ export async function getInvoiceStats(
   };
 }
 
+/**
+ * The oldest overdue invoices — the finance tab's actionable list.
+ *
+ * OVERDUE IS DERIVED, not a status. The Mongo query asked for
+ * `paymentStatus: { $in: ["unpaid", "partial"] }` and a due date in the past;
+ * the same predicate is here, plus `status = 'completed'`, because a DRAFT
+ * invoice past its due date is not overdue — nobody has been asked to pay it.
+ * The stats card beside this one has always excluded drafts (invoices.ts:1146)
+ * and the list did not, so the two disagreed about the same invoices.
+ *
+ * `amountDue` is computed rather than stored, as everywhere else on this
+ * branch: total less what has been paid.
+ */
+export async function listOverdueInvoices(tx: Tx, limit = 4) {
+  const rows = (await tx.execute(sql`
+    SELECT i.id,
+           i.invoice_number                       AS "invoiceNumber",
+           i.due_date                             AS "dueDate",
+           p.name                                 AS "customerName",
+           (i.total - i.amount_paid)::text        AS "amountDue",
+           (CURRENT_DATE - i.due_date)::int       AS "daysOverdue"
+      FROM invoices i
+      JOIN parties p ON p.id = i.customer_id
+     WHERE i.status = 'completed'
+       AND i.payment_status <> 'paid'
+       AND i.due_date IS NOT NULL
+       AND i.due_date < CURRENT_DATE
+     ORDER BY i.due_date ASC
+     LIMIT ${limit}
+  `)) as unknown as Array<{
+    id: string;
+    invoiceNumber: string;
+    dueDate: string;
+    customerName: string;
+    amountDue: string;
+    daysOverdue: number;
+  }>;
+
+  return Array.from(rows);
+}
+
 export async function listInvoices(
   tx: Tx,
   opts: { limit?: number; offset?: number; status?: "draft" | "completed" | "cancelled" } = {},

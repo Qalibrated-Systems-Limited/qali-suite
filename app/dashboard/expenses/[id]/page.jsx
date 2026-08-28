@@ -33,8 +33,6 @@ import {
   getExpenseFormData,
 } from "@/app/db/actions/expense-actions";
 import ExpenseActions from "../components/ExpenseActions";
-import Account from "@/app/models/account";
-import dbConnect from "@/app/config/dbConnect";
 import { getTenantContext, tenantFilter } from "@/lib/utils/tenant-utils";
 
 export async function generateMetadata({ params }) {

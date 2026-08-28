@@ -1,14 +1,13 @@
 import UpdateStockForm from "./form";
 import { notFound } from "next/navigation";
-import Product from "../../../../models/product";
 import { auth } from "../../../../../auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Shield, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import Category from "@/app/models/category";
-import { serializeBsonType } from "@/lib/utils";
+import { getCategoriesPg as getCategories } from "@/app/db/actions/category-actions";
+import { getProductPg } from "@/app/db/actions/product-actions";
 
 async function UpdateStockPage(props) {
   const params = await props.params;
@@ -18,12 +17,12 @@ async function UpdateStockPage(props) {
   const user = session && session.user;
   const canUpdateStock =
     user?.role === "Store Manager" || user?.role === "Admin";
-  const result = (await Category.find({}).lean()) ?? [];
-
-  const categories = result.map((cat) => {
-    const id = cat._id.toString();
-    return { _id: id, name: cat.name };
-  });
+  // Both reads were Mongo, and both were broken. `Category.find({})` had no
+  // tenant filter and read a collection nothing has written since 0062, so the
+  // dropdown was empty. `Product.findOne({ _id: id })` was worse than empty:
+  // `id` is a uuid now, so Mongoose threw a CastError and this page 500'd
+  // rather than rendering at all.
+  const categories = await getCategories();
 
   if (!canUpdateStock) {
     return (
@@ -61,19 +60,20 @@ async function UpdateStockPage(props) {
     );
   }
 
-  let stock = await Product.findOne({ _id: id });
+  const stock = await getProductPg(id);
 
   if (!stock) {
     return notFound();
   }
 
-  // Find the category ID from the category name stored in product
-  const productCategoryName = stock.category;
-  const matchingCategory = categories.find(cat => cat.name === productCategoryName);
-
-  // Serialize and add the category ID for the form
-  stock = serializeBsonType(stock);
-  stock.categoryId = matchingCategory?._id || "";
+  // `shapeProduct` already returns `categoryId` from the real foreign key, so
+  // the name match is only a fallback — 0062 kept `category` as a text
+  // SNAPSHOT of what the product was filed under, and a product created before
+  // the tree existed has the text and no id.
+  if (!stock.categoryId) {
+    stock.categoryId =
+      categories.find((cat) => cat.name === stock.category)?._id || "";
+  }
 
   return (
     <main className="flex flex-col gap-6">

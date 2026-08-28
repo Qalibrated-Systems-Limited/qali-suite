@@ -23,12 +23,9 @@ import {
   getRevenueTrend,
   getDashboardAlerts,
 } from "@/app/db/actions/dashboard-actions";
-import Invoice from "../../../models/invoice";
+import { getOverdueInvoicesPg } from "@/app/db/actions/invoice-actions";
 import { listClaimsPg } from "@/app/db/actions/claim-actions";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
-import mongoose from "mongoose";
 
-const ObjectId = mongoose.Types.ObjectId;
 
 // Charts
 import { RevenueTrendChart } from "../RevenueTrendChart";
@@ -36,7 +33,6 @@ import { ExpenseBreakdownChart } from "../ExpenseBreakdown";
 
 // Utils
 import { formatCurrency } from "@/lib/utils";
-import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 // ============================================
 // FINANCE TAB
@@ -254,27 +250,12 @@ async function FinanceAlertsBar() {
 // PENDING PAYMENTS CARD - Actionable List
 // ============================================
 async function PendingPaymentsCard() {
-  // Ensure DB connection (critical for serverless cold starts)
-  const dbConnect = (await import("@/app/config/dbConnect")).default;
-  await dbConnect();
-
-  // Tenant scoping - only show company's invoices
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
-
-  const invoices = await Invoice.find({
-    ...tenantMatch,
-    paymentStatus: { $in: ["unpaid", "partial"] },
-    dueDate: { $lte: new Date() },
-  })
-    .sort({ dueDate: 1 })
-    .limit(4)
-    .lean();
-
-  const getDaysOverdue = (dueDate: Date) => {
-    const diff = Date.now() - new Date(dueDate).getTime();
-    return Math.floor(diff / (1000 * 60 * 60 * 24));
-  };
+  // Postgres since 0066's sweep. This read the MONGO Invoice collection,
+  // which nothing has written since invoices moved, so the card showed
+  // "nothing overdue" to a company with a full ledger of it. Tenant scoping
+  // is RLS's now, and the day count is computed in the database against
+  // CURRENT_DATE rather than from the browser-side clock.
+  const invoices = await getOverdueInvoicesPg(4);
 
   return (
     <Card className="border-border/40">
@@ -304,8 +285,8 @@ async function PendingPaymentsCard() {
         ) : (
           invoices.map((invoice: any) => (
             <Link
-              key={invoice._id.toString()}
-              href={`/dashboard/invoices/${invoice._id}`}
+              key={invoice.id}
+              href={`/dashboard/invoices/${invoice.id}`}
               className="flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
             >
               <div className="min-w-0 flex-1">
@@ -313,8 +294,8 @@ async function PendingPaymentsCard() {
                   {invoice.invoiceNumber}
                 </p>
                 <p className="text-xs text-muted-foreground truncate">
-                  {invoice.customer?.name || "Unknown"} •{" "}
-                  {getDaysOverdue(invoice.dueDate)}d overdue
+                  {invoice.customerName || "Unknown"} •{" "}
+                  {invoice.daysOverdue}d overdue
                 </p>
               </div>
               <div className="text-right shrink-0 ml-3">
@@ -341,14 +322,8 @@ async function PendingPaymentsCard() {
 // PENDING CLAIMS CARD - Actionable List
 // ============================================
 async function PendingClaimsCard() {
-  // Ensure DB connection (critical for serverless cold starts)
-  const dbConnect = (await import("@/app/config/dbConnect")).default;
-  await dbConnect();
-
-  // Tenant scoping - only show company's claims
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
-
+  // The claims half moved with the claims port; this connection, tenant match
+  // and Mongo import were left behind it and did nothing but load Mongoose.
   const { claims } = await listClaimsPg({
     status: ["submitted", "approved"],
     orderBy: "submittedAt",

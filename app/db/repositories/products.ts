@@ -653,6 +653,42 @@ export async function searchProducts(
  * at cost until it is sold. Valuing it at retail would book unrealised profit
  * onto the balance sheet.
  */
+/**
+ * Pricing health across the catalogue — the sales manager's two tiles.
+ *
+ * `avgMargin` averages the PER-PRODUCT margin, not the margin of the totals,
+ * because that is what the Mongo aggregation did and the two are different
+ * numbers: a catalogue of one high-volume thin-margin line and fifty fat ones
+ * reads very differently each way. Kept as it was; changing it would move a
+ * figure people have been reading.
+ *
+ * Both counts consider ACTIVE products with a cost and a price actually set.
+ * A product priced at zero is not a zero-margin product, it is an unpriced
+ * one, and averaging it in drags the number toward a fiction.
+ */
+export async function getPricingHealth(tx: Tx) {
+  const [row] = (await tx.execute(sql`
+    SELECT
+      COALESCE(AVG(
+        CASE WHEN cost_price > 0 AND selling_price > 0
+             THEN (selling_price - cost_price) / selling_price * 100
+        END
+      ), 0)::float8 AS "avgMargin",
+      count(*) FILTER (WHERE cost_price > 0 AND selling_price > 0)::int AS priced,
+      -- Selling below the floor the company set for the product.
+      count(*) FILTER (WHERE minimum_price > 0
+                         AND selling_price < minimum_price)::int AS "belowFloor"
+    FROM products
+    WHERE is_active = true
+  `)) as unknown as Array<{
+    avgMargin: number;
+    priced: number;
+    belowFloor: number;
+  }>;
+
+  return row ?? { avgMargin: 0, priced: 0, belowFloor: 0 };
+}
+
 export async function getProductStats(tx: Tx) {
   const [row] = (await tx.execute(sql`
     SELECT count(*)::int                                          AS total,

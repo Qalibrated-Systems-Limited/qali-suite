@@ -7,14 +7,10 @@ import {
   Clock,
 } from "lucide-react";
 import { cache } from "react";
-import mongoose from "mongoose";
 
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { countMyUpcomingLeave } from "@/app/db/actions/hr-leave-actions";
 import { countMyOpenClaimsPg } from "@/app/db/actions/claim-actions";
-import { ItemCheckout } from "@/app/models/checkouts";
-import { translateCompanyId } from "@/lib/utils/legacy-company-id";
+import { countMyCheckoutsPg } from "@/app/db/actions/checkout-actions";
 
 // ============================================
 // MY ALERTS STRIP — personal counts for the logged-in user
@@ -34,31 +30,15 @@ const cMyAlerts = cache(async (userId) => {
     };
   }
   try {
-    await dbConnect();
-    const { companyId, isSuperAdmin } = await getTenantContext();
-    const tenantMatch = isSuperAdmin
-      ? {}
-      : { companyId: new mongoose.Types.ObjectId(translateCompanyId(companyId)) };
-
-    const [
-      myPendingClaims,
-      myCheckedOut,
-      myOverdueCheckouts,
-      myUpcomingLeave,
-    ] = await Promise.all([
+    const [myPendingClaims, checkouts, myUpcomingLeave] = await Promise.all([
       // Postgres since the claims port. The Mongo collection is no longer
       // written to, so counting it would show every employee a clean slate.
       countMyOpenClaimsPg(userId),
-      ItemCheckout.countDocuments({
-        ...tenantMatch,
-        "checkedOutTo.id": userId,
-        status: { $in: ["checked_out", "overdue"] },
-      }),
-      ItemCheckout.countDocuments({
-        ...tenantMatch,
-        "checkedOutTo.id": userId,
-        status: "overdue",
-      }),
+      // Postgres since 0066's sweep. The Mongo collection is no longer
+      // written to, so every employee saw zero items out however many they
+      // were holding — the same failure the claims and leave counts on this
+      // strip were already moved for. Both numbers come back in one query.
+      countMyCheckoutsPg(userId),
       // Leave moved to Postgres; the rest of this strip has not. Counted
       // there rather than from a Mongo collection nothing writes any more.
       countMyUpcomingLeave(),
@@ -66,8 +46,8 @@ const cMyAlerts = cache(async (userId) => {
 
     return {
       myPendingClaims,
-      myCheckedOut,
-      myOverdueCheckouts,
+      myCheckedOut: checkouts.checkedOut,
+      myOverdueCheckouts: checkouts.overdue,
       myUpcomingLeave,
     };
   } catch (error) {

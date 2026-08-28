@@ -309,3 +309,42 @@ export async function getAccountLedgerPg(
 export async function getAccountHierarchyPg() {
   return withAuthorizedTenant([], (tx) => accountsRepo.getAccountHierarchy(tx));
 }
+
+/**
+ * What the create form needs before it can be filled in: the accounts that may
+ * be a parent, and the next free code in each range.
+ *
+ * BOTH WERE READ FROM MONGO, on a collection nothing has written since 0035,
+ * and the failure was silent in two different ways. `headerAccounts` came back
+ * empty, and `accountForm.jsx:307` renders the parent picker only
+ * `{headerAccounts.length > 0 && ...}` — so the field was not disabled or
+ * blank, it did not EXIST, and no account created through this page could be
+ * given a parent. `nextCodes` came back `{}`, so the code auto-fill silently
+ * did nothing and every code was typed by hand.
+ *
+ * `subType: "header"` was the Mongo filter. The Postgres schema says the same
+ * thing structurally — `can_post = false` is what makes an account a header
+ * (accounts.ts:55) — so this asks the column that the ledger itself obeys
+ * rather than a string beside it.
+ */
+export async function getAccountFormOptionsPg() {
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = await accountsRepo.listAccounts(tx, { activeOnly: true });
+
+    const { suggestCodes } = await import("@/lib/coa-codes");
+
+    return {
+      headerAccounts: rows
+        .filter((a) => !a.canPost)
+        .map((a) => ({
+          _id: a.id,
+          accountCode: a.accountCode,
+          accountName: a.accountName,
+          accountType: a.accountType,
+        })),
+      // Every code, not just the headers' — a range's next free code has to
+      // step over the postable accounts in it too.
+      nextCodes: suggestCodes(rows.map((a) => a.accountCode)),
+    };
+  });
+}

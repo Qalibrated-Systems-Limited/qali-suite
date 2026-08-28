@@ -6,21 +6,19 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import AddProductWizard from "../components/AddProductWizard";
 import { getCategoriesPg as getCategories } from "@/app/db/actions/category-actions";
-import Category from "@/app/models/category";
 
 async function CreateStockPage() {
   const session = await auth();
   const user = session && session.user;
   const canCreateStock =
     user?.role === "Store Manager" || user?.role === "Admin";
-  const result = (await Category.find({}).lean()) ?? [];
-
-  const categories = result.map((cat) => {
-    const id = cat._id.toString();
-    return { _id: id, name: cat.name };
-  });
-
-  // Fetch categories if needed
+  // `getCategories` was imported on the line above and never called: this read
+  // the MONGO collection, which nothing has written since categories moved in
+  // 0062, so the dropdown was empty. It also had no tenant filter — a plain
+  // `find({})` — which would have been a cross-tenant read had that collection
+  // still held anything. `getCategoriesPg` returns `{ _id, name, ... }`, the
+  // shape this mapped to.
+  const categories = await getCategories();
 
   if (!canCreateStock) {
     return (

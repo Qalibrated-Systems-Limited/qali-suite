@@ -26,8 +26,7 @@ import {
 import MyHRStrip from "./MyHRStrip";
 import { MyAlertsStrip, MyAlertsStripSkeleton } from "./MyAlertsStrip";
 import { listClaimsPg } from "@/app/db/actions/claim-actions";
-import { StockRequest } from "../../models/requests";
-import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { getRequestsPaginated } from "@/app/db/actions/request-actions";
 
 // Utils
 import { formatCurrency } from "@/lib/utils";
@@ -217,7 +216,6 @@ async function EmployeeStatsCards({ userId }: { userId: string }) {
 // MY RECENT CLAIMS
 // ============================================
 async function MyRecentClaimsCard({ userId }: { userId: string }) {
-  const { companyId, isSuperAdmin } = await getTenantContext();
   const { claims } = await listClaimsPg({
     userId,
     orderBy: "createdAt",
@@ -300,14 +298,13 @@ async function MyRecentClaimsCard({ userId }: { userId: string }) {
 // MY RECENT REQUESTS
 // ============================================
 async function MyRecentRequestsCard({ userId }: { userId: string }) {
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const requests = await StockRequest.find(
-    withTenantScope({ "requester.userId": userId }, companyId, isSuperAdmin),
-  )
-    .sort({ createdAt: -1 })
-    .limit(5)
-    .select("requestNumber status priority requestType items totalValue createdAt customer.name")
-    .lean();
+  // Postgres since 0066's sweep. This read the MONGO StockRequest collection,
+  // which nothing has written since requests moved, so every employee's "my
+  // recent requests" card was permanently empty. Tenant scoping is RLS's now.
+  const { requests } = await getRequestsPaginated({
+    requesterId: userId,
+    perPage: 5,
+  });
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -355,7 +352,7 @@ async function MyRecentRequestsCard({ userId }: { userId: string }) {
           <ActivityItem
             key={request._id.toString()}
             title={request.requestNumber}
-            subtitle={`${request.items?.length || 0} items • ${formatDate(
+            subtitle={`${request.itemCount || 0} items • ${formatDate(
               request.createdAt
             )}`}
             badge={{

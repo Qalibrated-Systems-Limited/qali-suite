@@ -14,22 +14,22 @@ import {
 import { cn } from "@/lib/utils";
 
 // Queries
-import { StockRequest } from "../../../models/requests";
+import {
+  getRequestStats,
+  getRequestDecisionsToday,
+  getRequestsPaginated,
+} from "@/app/db/actions/request-actions";
 import {
   countClaimsAwaitingApprovalPg,
   listClaimsPg,
 } from "@/app/db/actions/claim-actions";
 
 // Tenant Scoping
-import { getTenantContext } from "@/lib/utils/tenant-utils";
-import mongoose from "mongoose";
 
-const ObjectId = mongoose.Types.ObjectId;
 
 // Utils
 import { formatCurrency } from "@/lib/utils";
 import { ActivityCardSkeleton } from "../ActivityCard";
-import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
 // ============================================
 // OPERATIONS TAB
@@ -67,44 +67,29 @@ export async function OperationsTab() {
 // OPERATIONS STATS
 // ============================================
 async function OperationsStats() {
-  // Tenant scoping - only show company's data
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
-
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-
-  const [pendingRequests, pendingClaims, todayApproved, todayRejected] =
-    await Promise.all([
-      StockRequest.countDocuments({ ...tenantMatch, status: "pending" }),
-      // Postgres since the claims port; the Mongo collection is not written
-      // to any more, so this tile would sit permanently at zero.
+  const [requestStats, pendingClaims, decidedToday] = await Promise.all([
+      // Postgres since 0066's sweep — all three of these read a collection
+      // nothing has written since requests moved, so every tile on this strip
+      // sat at zero. The claims count beside them had already been moved for
+      // exactly that reason.
+      getRequestStats(),
       countClaimsAwaitingApprovalPg(),
-      StockRequest.countDocuments({
-        ...tenantMatch,
-        status: "approved",
-        updatedAt: { $gte: todayStart },
-      }),
-      StockRequest.countDocuments({
-        ...tenantMatch,
-        status: "rejected",
-        updatedAt: { $gte: todayStart },
-      }),
+      getRequestDecisionsToday(),
     ]);
 
   const stats = [
     {
       label: "Pending",
-      value: pendingRequests + pendingClaims,
+      value: requestStats.pending + pendingClaims,
       subtext: "awaiting review",
       icon: Clock,
       color: "text-amber-500",
       bgColor: "bg-amber-500/10",
-      alert: pendingRequests + pendingClaims > 0,
+      alert: requestStats.pending + pendingClaims > 0,
     },
     {
       label: "Approved Today",
-      value: todayApproved,
+      value: decidedToday.approvedToday,
       subtext: "items",
       icon: CheckCircle,
       color: "text-emerald-500",
@@ -112,7 +97,7 @@ async function OperationsStats() {
     },
     {
       label: "Rejected Today",
-      value: todayRejected,
+      value: decidedToday.rejectedToday,
       subtext: "items",
       icon: XCircle,
       color: "text-rose-500",
@@ -208,14 +193,10 @@ function QuickActionsBar() {
 // PENDING REQUESTS CARD
 // ============================================
 async function PendingRequestsCard() {
-  // Tenant scoping - only show company's requests
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
-
-  const requests = await StockRequest.find({ ...tenantMatch, status: "pending" })
-    .sort({ createdAt: -1 })
-    .limit(5)
-    .lean();
+  const { requests } = await getRequestsPaginated({
+    status: "pending",
+    perPage: 5,
+  });
 
   const getPriorityColor = (priority: string) => {
     const colors: Record<string, string> = {
@@ -328,10 +309,6 @@ async function PendingRequestsCard() {
 // PENDING CLAIMS CARD
 // ============================================
 async function PendingClaimsCard() {
-  // Tenant scoping - only show company's claims
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
-
   const { claims } = await listClaimsPg({
     status: "submitted",
     orderBy: "submittedAt",
@@ -450,21 +427,23 @@ async function PendingClaimsCard() {
 // RECENT ACTIVITY CARD
 // ============================================
 async function RecentActivityCard() {
-  // Tenant scoping - only show company's activity
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
-
-  const [recentRequests, recentClaims] = await Promise.all([
-    StockRequest.find({ ...tenantMatch, status: { $in: ["approved", "rejected"] } })
-      .sort({ updatedAt: -1 })
-      .limit(3)
-      .lean(),
+  // Postgres. Tenant scoping is RLS's now.
+  //
+  // Two calls rather than one: `getRequestsPaginated` filters on a single
+  // status, and widening a query the whole requests module shares for the sake
+  // of a three-row card is the wrong trade. They are merged and re-sorted
+  // below, which the card did anyway.
+  const [approvedRecent, rejectedRecent, recentClaims] = await Promise.all([
+    getRequestsPaginated({ status: "approved", perPage: 3 }).then((r) => r.requests),
+    getRequestsPaginated({ status: "rejected", perPage: 3 }).then((r) => r.requests),
     listClaimsPg({
       status: ["approved", "rejected", "paid"],
       orderBy: "updatedAt",
       limit: 3,
     }).then((r) => r.claims),
   ]);
+
+  const recentRequests = [...approvedRecent, ...rejectedRecent];
 
   // Combine and sort
   const activities = [
@@ -474,7 +453,9 @@ async function RecentActivityCard() {
       title: r.requestNumber,
       subtitle: r.requester?.name || "Unknown",
       status: r.status,
-      date: r.updatedAt,
+      // The DECISION time, not the last edit. `updatedAt` was what Mongo had,
+      // and a note added to an old request re-dated it to the top of this feed.
+      date: r.decidedAt ?? r.requestedAt,
     })),
     ...recentClaims.map((c: any) => ({
       type: "claim",

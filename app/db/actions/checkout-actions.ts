@@ -317,3 +317,18 @@ export async function getCheckoutExpenseAccountsPg() {
     }));
   });
 }
+
+/**
+ * The two checkout numbers on a person's own alerts strip.
+ *
+ * `MyAlertsStrip` counted these from the MONGO ItemCheckout collection, which
+ * nothing has written since checkouts moved — so every employee saw zero items
+ * out and zero overdue, however many they were actually holding. The claims and
+ * leave halves of that same strip had already been moved for exactly this
+ * reason; these two were left.
+ */
+export async function countMyCheckoutsPg(userId: string) {
+  return withAuthorizedTenant([], (tx) =>
+    fulfilment.countMyCheckouts(tx, userId),
+  );
+}

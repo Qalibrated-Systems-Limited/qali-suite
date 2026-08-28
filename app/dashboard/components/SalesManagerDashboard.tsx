@@ -16,9 +16,7 @@ import {
   ShoppingBag,
   History,
 } from "lucide-react";
-import dbConnect from "@/app/config/dbConnect";
-import { getTenantContext, buildTenantMatch } from "@/lib/utils/tenant-utils";
-import Product from "@/app/models/product";
+import { getPricingHealthPg } from "@/app/db/actions/product-actions";
 import { AlertsStrip, AlertsStripSkeleton } from "./AlertsStrip";
 import {
   cFinancialOverview,
@@ -84,59 +82,20 @@ function CardSkeleton({ height = "h-28" }: { height?: string }) {
 async function CommercialMetrics() {
   // Three independent reads — run in parallel rather than three sequential
   // awaits (cuts response time to the slowest single call).
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
-  await dbConnect();
-
-  const [overview, marginAgg, belowFloorAgg] = await Promise.all([
+  const [overview, pricing] = await Promise.all([
     cFinancialOverview(),
-    // Average margin across active products with both cost & selling set.
-    Product.aggregate([
-      { $match: { ...tenantMatch, status: "active" } },
-      {
-        $project: {
-          cost: { $ifNull: ["$costing.costPrice", 0] },
-          selling: { $ifNull: ["$pricing.sellingPrice", 0] },
-        },
-      },
-      { $match: { cost: { $gt: 0 }, selling: { $gt: 0 } } },
-      {
-        $group: {
-          _id: null,
-          avgMargin: {
-            $avg: {
-              $multiply: [
-                { $divide: [{ $subtract: ["$selling", "$cost"] }, "$selling"] },
-                100,
-              ],
-            },
-          },
-          priced: { $sum: 1 },
-        },
-      },
-    ]),
-    // Below-floor count — products where selling < minimumPrice.
-    Product.aggregate([
-      { $match: { ...tenantMatch, status: "active" } },
-      {
-        $project: {
-          selling: { $ifNull: ["$pricing.sellingPrice", 0] },
-          floor: { $ifNull: ["$pricing.minimumPrice", 0] },
-        },
-      },
-      {
-        $match: {
-          floor: { $gt: 0 },
-          $expr: { $lt: ["$selling", "$floor"] },
-        },
-      },
-      { $count: "count" },
-    ]),
+    // Postgres since 0066's sweep. Both of these were Mongo aggregations over
+    // a collection nothing has written since products moved, so the margin
+    // tile read 0% and the below-floor tile read 0 whatever the catalogue
+    // held. They also matched on `status: "active"`, which the Postgres
+    // products table does not carry — `is_active` is what the rest of the app
+    // filters on.
+    getPricingHealthPg(),
   ]);
 
-  const avgMargin = marginAgg[0]?.avgMargin || 0;
-  const pricedCount = marginAgg[0]?.priced || 0;
-  const belowFloor = belowFloorAgg[0]?.count || 0;
+  const avgMargin = pricing.avgMargin;
+  const pricedCount = pricing.priced;
+  const belowFloor = pricing.belowFloor;
 
   const cards = [
     {
@@ -237,25 +196,24 @@ async function CommercialMetrics() {
 // RECENT PRICE CHANGES (audit log)
 // ============================================
 async function RecentPriceChanges() {
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = buildTenantMatch(companyId, isSuperAdmin);
-  await dbConnect();
-
-  // Single aggregation — flatten priceHistory across products and pull the
-  // 8 most recent. Index-friendly thanks to companyId match.
-  const recent = await Product.aggregate([
-    { $match: { ...tenantMatch, "pricing.priceHistory.0": { $exists: true } } },
-    {
-      $project: {
-        SKU: 1,
-        name: 1,
-        history: { $slice: ["$pricing.priceHistory", -1] },
-      },
-    },
-    { $unwind: "$history" },
-    { $sort: { "history.changedAt": -1 } },
-    { $limit: 8 },
-  ]);
+  /**
+   * NOTHING RECORDS A PRICE CHANGE ON POSTGRES YET.
+   *
+   * This flattened `pricing.priceHistory` out of the MONGO products, which
+   * nothing has written since products moved — so the card has been rendering
+   * its empty state regardless of what anyone did to a price.
+   *
+   * The empty state was worse than empty: it said "No price changes logged
+   * yet. Use Manage pricing on a product to start tracking", and using Manage
+   * pricing starts nothing. `updateProductPricing` (products.ts:572) sets the
+   * three columns and keeps no history at all, while `price_change` is a live
+   * type in APPROVER_MATRIX — so a price change can be routed, approved, and
+   * then leave no trace of what it was before.
+   *
+   * A price-history table is the fix and it is not one line; until it exists
+   * the card says what is true rather than promising a log that is not kept.
+   */
+  const recent: Array<never> = [];
 
   if (recent.length === 0) {
     return (
@@ -267,14 +225,14 @@ async function RecentPriceChanges() {
           </h2>
         </header>
         <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-          No price changes logged yet. Use{" "}
+          Price history is not recorded yet. Changes made through{" "}
           <Link
             href="/dashboard/stocks"
             className="text-primary hover:underline"
           >
             Manage pricing
           </Link>{" "}
-          on a product to start tracking.
+          take effect immediately but are not kept as a log.
         </p>
       </section>
     );

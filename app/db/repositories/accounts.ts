@@ -250,6 +250,10 @@ export async function listPaymentAccounts(tx: Tx) {
       and(
         eq(accounts.accountType, "asset"),
         eq(accounts.isActive, true),
+        // A header account cannot be posted to, so offering one as a payment
+        // target is offering a payment that the ledger will refuse. The Mongo
+        // claims query asked for `canPost: true` and this did not.
+        eq(accounts.canPost, true),
         inArray(accounts.subType, ["cash", "bank", "mpesa"]),
       ),
     )
