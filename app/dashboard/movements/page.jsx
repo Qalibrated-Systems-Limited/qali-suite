@@ -61,7 +61,7 @@ async function MovementsPage(props) {
     <div className="flex flex-col gap-6">
       {/* Header */}
       <div className="space-y-1">
-        <h1 className="text-3xl font-bold text-foreground">Stock Movements</h1>
+        <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Stock Movements</h1>
         <p className="text-muted-foreground">
           {isManager
             ? "Track all inventory movements across the system"

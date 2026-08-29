@@ -53,7 +53,7 @@ export default async function BudgetPage({ params }) {
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+          <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold text-foreground">
             Project Budget
           </h1>
           <p className="text-sm text-muted-foreground">

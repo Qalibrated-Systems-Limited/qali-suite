@@ -73,7 +73,7 @@ export default async function ProjectsPage({ searchParams }) {
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="space-y-1 sm:space-y-2 min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+          <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold text-foreground">
             Projects
           </h1>
           <p className="text-sm sm:text-base text-muted-foreground hidden sm:block">

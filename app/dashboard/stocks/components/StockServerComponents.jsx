@@ -6,6 +6,7 @@ import { getCategoriesPg } from "@/app/db/actions/category-actions";
 import { ResponsiveInventoryTable } from "../table";
 import Pagination from "@/components/pagination";
 import { StockCategoryFilter } from "@/components/custom-filters";
+import { MetricBar, MetricBarSkeleton } from "@/components/metric-bar";
 import { auth } from "@/auth";
 import { canSeePricing } from "@/lib/permissions";
 
@@ -55,76 +56,34 @@ export async function StockMetricsBar({ searchParams = {} }) {
   }).format(Number(stats.stockValue || 0));
 
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-border bg-card px-3 py-2 sm:gap-x-6 sm:px-4 sm:py-2.5">
-      <Metric label="Products" value={stats.total} />
-      <Metric
-        label="Low stock"
-        value={stats.lowStock}
-        href={withQuantity("low-stock")}
-        tone={stats.lowStock > 0 ? "warn" : "muted"}
-      />
-      <Metric
-        label="Out of stock"
-        value={stats.outOfStock}
-        href={withQuantity("out-of-stock")}
-        tone={stats.outOfStock > 0 ? "danger" : "muted"}
-      />
-      {/* Valued at cost, never at selling price — stock is carried at cost
-          until it is sold, and valuing it at retail books unrealised profit. */}
-      <Metric label="Stock value" value={money} title="Quantity × cost" />
-    </div>
-  );
-}
-
-const TONE = {
-  muted: "text-foreground",
-  warn: "text-orange-600 dark:text-orange-400",
-  danger: "text-red-600 dark:text-red-400",
-};
-
-function Metric({ label, value, href, tone = "muted", title }) {
-  const body = (
-    <>
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span
-        className={`text-sm font-semibold tabular-nums ${TONE[tone] ?? TONE.muted}`}
-      >
-        {value}
-      </span>
-    </>
-  );
-
-  // Only a figure that names a subset is clickable; the total and the
-  // valuation are not filters, so they are not offered as ones.
-  if (!href) {
-    return (
-      <span className="flex items-baseline gap-2" title={title}>
-        {body}
-      </span>
-    );
-  }
-  return (
-    <Link
-      href={href}
-      className="flex items-baseline gap-2 rounded-sm px-1 -mx-1 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      title={`Show only ${label.toLowerCase()}`}
-    >
-      {body}
-    </Link>
+    <MetricBar
+      items={[
+        { label: "Products", value: stats.total },
+        {
+          label: "Low stock",
+          value: stats.lowStock,
+          href: withQuantity("low-stock"),
+          // `default` is what "muted" rendered as here before this moved to the
+          // shared component — plain foreground. The shared `muted` is a real
+          // grey, and using it for a zero would be a change to this page.
+          tone: stats.lowStock > 0 ? "warn" : "default",
+        },
+        {
+          label: "Out of stock",
+          value: stats.outOfStock,
+          href: withQuantity("out-of-stock"),
+          tone: stats.outOfStock > 0 ? "danger" : "default",
+        },
+        // Valued at cost, never at selling price — stock is carried at cost
+        // until it is sold, and valuing it at retail books unrealised profit.
+        { label: "Stock value", value: money, title: "Quantity × cost" },
+      ]}
+    />
   );
 }
 
 export function StockMetricsSkeleton() {
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-border bg-card px-3 py-2 sm:gap-x-6 sm:px-4 sm:py-2.5">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="flex items-baseline gap-2">
-          <Skeleton className="h-3 w-16" />
-          <Skeleton className="h-4 w-10" />
-        </div>
-      ))}
-    </div>
-  );
+  return <MetricBarSkeleton count={4} />;
 }
 
 /**

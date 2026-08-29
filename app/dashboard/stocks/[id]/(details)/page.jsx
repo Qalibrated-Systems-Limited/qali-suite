@@ -193,7 +193,7 @@ function KPICard({
         )}
       </div>
       <p className="text-sm text-muted-foreground mt-3">{label}</p>
-      <p className="text-2xl sm:text-3xl font-semibold text-foreground tracking-tight mt-0.5">
+      <p className="text-xl sm:text-2xl font-semibold text-foreground tracking-tight mt-0.5">
         {value}
       </p>
       {trendLabel && (

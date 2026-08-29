@@ -1,4 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card";
+import { MetricBarSkeleton } from "@/components/metric-bar";
 
 // Shimmer Skeleton Component
 function SkeletonWithShimmer({ className }) {
@@ -100,32 +101,17 @@ function UsersCardsSkeleton() {
 // Full Page Skeleton
 export function UsersPageSkeleton() {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="space-y-2">
-          <SkeletonWithShimmer className="h-8 w-48" />
-          <SkeletonWithShimmer className="h-4 w-64" />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-1.5">
+          <SkeletonWithShimmer className="h-6 w-32" />
+          <SkeletonWithShimmer className="h-4 w-56" />
         </div>
-        <SkeletonWithShimmer className="h-10 w-32 rounded" />
+        <SkeletonWithShimmer className="h-9 w-32 rounded" />
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <Card key={i} className="bg-card border-border">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div className="space-y-2 flex-1">
-                  <SkeletonWithShimmer className="h-3 w-20" />
-                  <SkeletonWithShimmer className="h-8 w-12" />
-                </div>
-                <SkeletonWithShimmer className="h-8 w-8 rounded" />
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <MetricBarSkeleton count={4} />
 
       {/* Search and Filters */}
       <Card className="bg-card border-border">

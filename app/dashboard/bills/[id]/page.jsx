@@ -198,7 +198,7 @@ export default async function BillDetailsPage({ params }) {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3 mb-2 flex-wrap">
-              <h1 className="text-3xl font-bold text-foreground">
+              <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
                 {bill.billNumber}
               </h1>
               <Badge variant="outline" className={statusConfig.className}>

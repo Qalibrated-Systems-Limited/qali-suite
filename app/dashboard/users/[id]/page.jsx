@@ -15,6 +15,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MetricBar } from "@/components/metric-bar";
 
 export const metadata = {
   title: "User Details",
@@ -69,7 +70,7 @@ export default async function UserDetailsPage({ params, searchParams }) {
     (currentUser.role === "Admin" && !["SuperAdmin", "Admin"].includes(user.role));
 
   return (
-    <div className="container max-w-4xl py-6 space-y-6">
+    <div className="container max-w-4xl py-4 space-y-4 sm:py-6">
       {/* Success Message */}
       {created === "true" && (
         <div className="space-y-3">
@@ -131,7 +132,7 @@ export default async function UserDetailsPage({ params, searchParams }) {
 
           {/* Info */}
           <div className="text-center sm:text-left flex-1">
-            <h1 className="text-3xl font-bold text-white">{user.name}</h1>
+            <h1 className="text-xl sm:text-2xl font-semibold text-white">{user.name}</h1>
             <p className="text-white/80 flex items-center justify-center sm:justify-start gap-2 mt-1">
               <Mail className="h-4 w-4" />
               {user.email}
@@ -172,66 +173,43 @@ export default async function UserDetailsPage({ params, searchParams }) {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="rounded-xl border bg-card p-5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-lg bg-green-500/10">
-              <User className="h-5 w-5 text-green-600" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Status</p>
-              <p className="font-semibold flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${user.status === "active" ? "bg-green-500" : "bg-gray-400"}`} />
-                {user.status || "Active"}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-card p-5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-lg bg-blue-500/10">
-              <Calendar className="h-5 w-5 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Created</p>
-              <p className="font-semibold">
-                {user.createdAt
-                  ? new Date(user.createdAt).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })
-                  : "N/A"}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-card p-5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-lg bg-purple-500/10">
-              <Shield className="h-5 w-5 text-purple-600" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Access Level</p>
-              <p className="font-semibold">{user.role}</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Three tinted-icon cards at p-5 became one strip. On a phone the old
+          grid was `grid-cols-1`, so these three attributes filled the screen
+          before any of the user's actual details appeared. `size="sm"`: a date
+          set at text-2xl reads as an error, not as emphasis. */}
+      <MetricBar
+        items={[
+          {
+            label: "Status",
+            tone: user.status === "active" ? "success" : "muted",
+            value: user.status
+              ? user.status.charAt(0).toUpperCase() + user.status.slice(1)
+              : "Active",
+          },
+          {
+            label: "Created",
+            value: user.createdAt
+              ? new Date(user.createdAt).toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })
+              : "—",
+          },
+          { label: "Access level", value: user.role },
+        ]}
+      />
 
       {/* User Details */}
       <div className="rounded-xl border bg-card shadow-sm">
-        <div className="p-6 border-b">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
+        <div className="px-4 py-3 border-b sm:px-5">
+          <h2 className="text-base font-semibold flex items-center gap-2">
             <User className="h-5 w-5 text-muted-foreground" />
             User Information
           </h2>
         </div>
-        <div className="p-6">
-          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div className="p-4 sm:p-5">
+          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <dt className="text-sm font-medium text-muted-foreground">Full Name</dt>
               <dd className="mt-1 text-foreground">{user.name}</dd>

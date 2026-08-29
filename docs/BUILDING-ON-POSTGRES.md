@@ -732,6 +732,116 @@ raises if the current connection would bypass RLS — worth a health check.
 
 ---
 
+## Handoff — 2026-08-29 — global search (§9P), and the count that could not see it
+
+No migration. `components/command-palette.jsx` — Ctrl-K, reachable from every
+page — called `globalSearch`, which read the Mongo `Product`, `Invoice`,
+`Quote`, `Bill`, `Party`, `StockRequest` and `Project` models. **All seven of
+those collections had moved.** Claims was the only section repointed, by
+whoever ported claims and hit it; the comment they left at `:129` says exactly
+why.
+
+So the palette had been returning navigation entries and one working section
+since products ported. It never errored, and that is why it lasted seven
+module ports: **an empty result set is indistinguishable from a search with no
+matches.**
+
+### The count could not see it, and neither could the sweep
+
+This is the finding worth carrying forward. `global-search-action.js`:
+
+- imports the MODELS (`@/app/models/product`), not `@/app/mongodb`, so the
+  module-count grep at the top of this document never listed it;
+- posts nothing, so `ledger-sweep` passes over it;
+- lives in `app/mongodb/actions/`, but is called from `components/`, so it is
+  not a "screen" in any module.
+
+The count is **still 63 files across 19 modules** after this port — unchanged,
+because the thing that was broken was never in it. A module count measures
+screens that import a path. It does not measure whether the app works.
+
+### One query, not twenty-odd
+
+Each of the eight modules already has a `search*` in its own repository, and
+calling all eight would have been the faithful port. They are LIST queries
+built for a page: `searchProducts` carries a `COUNT(*) OVER ()`, `listProjects`
+runs four more queries for budget, actuals and progress, `searchStockRequests`
+joins a totals subquery for a progress bar. The palette draws five fields per
+row and throws the rest away — on a 300ms debounce, which makes this the most
+frequently-executed query in the app.
+
+`app/db/repositories/globalSearch.ts` is one UNION whose branches select only
+what is drawn. The cost, stated because it is real: the match predicates are
+restated rather than shared, so they can drift from the list pages. They are
+deliberately the same columns, and a test pins each branch.
+
+**Two bugs in the first draft of that UNION, both caught before running it:**
+
+- **Only the first branch aliased its columns.** A UNION takes its output names
+  from whichever branch comes FIRST — and which branch that is depends on the
+  reader's ROLE, because a Storekeeper gets no invoice branch. Alias one branch
+  and the result columns are named correctly for some users and not others.
+  There is a test for exactly this: search with the product branch gated off.
+- **A branch's own ORDER BY does not order the UNION.** It decides which four
+  rows survive that branch's LIMIT; the UNION may still interleave. The outer
+  ORDER BY is what makes the ranking hold.
+
+### Two things deliberately not what Mongo did
+
+**Results are gated by role.** The Mongo version returned invoices, bills,
+claims, projects and every customer's contact details to anyone who could open
+the palette, a Storekeeper included. The palette already refuses to OFFER a
+page the role cannot see — "the app should not offer a door it will refuse to
+open" — and a search result is the same claim about the same door. The gates
+are read off `sidebar-content-grouped.jsx` rather than guessed, which mattered:
+**parties sit behind FINANCE there, not sales**, and Bills carry an explicit
+Procurement Officer exception. Neither is what I would have assumed.
+
+**Claims are scoped to the reader unless they review claims.** The Mongo
+search, and `searchClaimsPg` after it, matched every claim in the company — so
+any employee could type a colleague's name and read their reimbursements and
+the amounts. Gating claims off for non-reviewers would fix the leak and take
+away an employee's ability to find their own; scoping on `employee_user_id`
+does both.
+
+### The escaping sweep — 47 sites, 26 files
+
+Every search function in `app/db/repositories/` built its ILIKE pattern by
+hand: `` `%${query}%` ``. That treats `%` and `_` IN THE SEARCH TERM as
+wildcards, so typing `%` matches every row and `a_c` matches "abc" — and the
+second is the worse one, because a wrong result looks like a right one.
+
+Found in the tax port the same day and swept from there, per the rule that
+fixing one instance is half the job. `likeContains` / `likePrefix` in
+`sqlHelpers.ts`, beside `anyOf`, which exists for the same reason.
+
+Nothing else in the suite searches with a wildcard character, so the sweep
+changes no existing expectation — checked rather than assumed.
+
+### Two hours lost to a test that was not failing
+
+Worth recording because the diagnosis was wrong twice. The new test file ran
+**926 seconds on one test** and failed two, then passed 11/11 in 54s with no
+change. Both wrong readings had a plausible story attached — a lock held by an
+abandoned transaction, then a slept machine.
+
+It was neither. `pg_stat_activity` during the hang showed queries this file
+does not run (`SELECT e.*, d.name AS department`, a platform-dashboard company
+query): something else was on the machine. The project's own diagnostic settles
+the sleep question and I should have used it first — **read the phase
+breakdown**: a slept run reports hours in `import`, and this reported 611ms.
+
+The one real fixture bug underneath: `TRUNCATE companies CASCADE` **does not
+reach `users`**, because `home_company_id` is ON DELETE SET NULL. `pg-projects`
+and `pg-user-admin` list `users` explicitly and this now does too.
+
+### After this
+
+`app/mongodb/actions/global-search-action.js` is deleted. The question §9K
+named — **"what reads a collection nothing writes any more?"** — has now caught
+sales orders, tax and this. Two of the three were invisible to every count in
+this document, so it is not exhausted.
+
 ## Handoff — 2026-08-29 — tax (§9O), and two tiles that were never wired
 
 No migration. The table, its constraints, its RLS and fifteen repository

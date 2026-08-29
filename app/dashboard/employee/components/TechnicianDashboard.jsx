@@ -35,7 +35,7 @@ export async function TechnicianDashboard() {
     <div className="flex flex-col gap-6">
       {/* Welcome Header */}
       <div className="space-y-1">
-        <h1 className="text-3xl font-bold text-foreground">
+        <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
           Welcome back, {user?.name?.split(" ")[0] || "there"}
         </h1>
         <p className="text-muted-foreground">

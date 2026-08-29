@@ -26,7 +26,7 @@ export default async function CreateAccountPage() {
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">Create Account</h1>
+          <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold">Create Account</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Add a new account to your chart of accounts
           </p>

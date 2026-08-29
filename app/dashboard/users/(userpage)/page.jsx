@@ -8,6 +8,7 @@ import { auth } from "@/auth";
 import Pagination from "@/components/pagination";
 import Search from "@/components/search";
 import { Card, CardContent } from "@/components/ui/card";
+import { MetricBar } from "@/components/metric-bar";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Plus, Users, UserCheck, UserX, Shield } from "lucide-react";
@@ -82,7 +83,11 @@ async function UsersPage(props) {
   // getCompanyInvitesPg returns the rows directly — the Mongo action wrapped
   // them in { invites }.
   const [stats, departments, invites, companies] = await Promise.all([
-    getUserStatsPg(filters),
+    // Company-wide, deliberately unfiltered: the strip summarises the
+    // company while the table below answers the filters. `getUserStatsPg`
+    // never took an argument — the `filters` passed here was dropped on the
+    // floor, which is what made it look filtered.
+    getUserStatsPg(),
     getDepartmentsPg(),
     getCompanyInvitesPg(),
     isSuperAdmin ? getCompaniesForDropdown() : Promise.resolve([]),
@@ -102,78 +107,49 @@ async function UsersPage(props) {
     (isSuperAdmin && companyIdFilter !== "all");
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Users</h1>
-          <p className="text-muted-foreground mt-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold text-foreground sm:text-2xl">
+            Users
+          </h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">
             Manage user accounts and permissions
           </p>
         </div>
         <InviteUserDialog isSuperAdmin={isSuperAdmin} companies={companies} />
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="bg-card border-border">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground mb-2">
-                  Total Users
-                </p>
-                <p className="text-2xl font-bold text-foreground">
-                  {stats.totalUsers}
-                </p>
-              </div>
-              <Users className="w-8 h-8 text-blue-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground mb-2">Active</p>
-                <p className="text-2xl font-bold text-green-500">
-                  {stats.activeUsers}
-                </p>
-              </div>
-              <UserCheck className="w-8 h-8 text-green-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground mb-2">Inactive</p>
-                <p className="text-2xl font-bold text-gray-500">
-                  {stats.inactiveUsers}
-                </p>
-              </div>
-              <UserX className="w-8 h-8 text-gray-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground mb-2">Admins</p>
-                <p className="text-2xl font-bold text-red-500">
-                  {stats.adminCount}
-                </p>
-              </div>
-              <Shield className="w-8 h-8 text-red-500" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Four figures the page never showed: `getUserStats` returns
+          { total, active, inactive, admins } and this read `stats.totalUsers`,
+          `activeUsers`, `inactiveUsers` and `adminCount` — names that have
+          never existed on it, so all four rendered blank. */}
+      <MetricBar
+        items={[
+          { label: "Users", value: stats.total },
+          // Every figure that names a subset filters to it — the same rule the
+          // stock bar follows. `status` is the page's own filter param, so
+          // these land on a list that matches the number clicked.
+          {
+            label: "Active",
+            value: stats.active,
+            href: "?status=active",
+            tone: "success",
+          },
+          {
+            label: "Inactive",
+            value: stats.inactive,
+            href: "?status=inactive",
+            tone: stats.inactive > 0 ? "warn" : "muted",
+          },
+          {
+            label: "Admins",
+            value: stats.admins,
+            href: "?role=Admin",
+          },
+        ]}
+      />
 
       {/* Search and Filters */}
       <Card className="bg-card border-border">

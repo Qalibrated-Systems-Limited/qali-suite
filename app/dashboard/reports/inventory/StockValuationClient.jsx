@@ -124,7 +124,7 @@ export function StockValuationClient({ initialData, error }) {
       <div className="flex flex-col gap-4 mb-4 sm:mb-6 print:hidden">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-foreground">
+            <h1 className="text-xl sm:text-2xl lg:text-xl sm:text-2xl font-semibold text-foreground">
               Stock Valuation
             </h1>
             <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 sm:mt-1">

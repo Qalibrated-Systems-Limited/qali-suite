@@ -29,7 +29,7 @@ export default async function EditAccountPage({ params }) {
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">Edit Account</h1>
+          <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold">Edit Account</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Update {account.accountName}
           </p>

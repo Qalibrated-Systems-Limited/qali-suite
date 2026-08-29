@@ -118,7 +118,7 @@ export default async function QuoteDetailPage({ params, searchParams }) {
             Back to Quotes
           </Link>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+            <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold text-foreground">
               {quote.quoteNumber}
             </h1>
             <Badge variant="outline" className={getStatusColor(quote.status)}>

@@ -138,7 +138,7 @@ export default async function CreditNoteDetailPage({ params }) {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-3xl font-bold">
+              <h1 className="text-xl sm:text-2xl font-semibold">
                 {creditNote.creditNoteNumber}
               </h1>
               <Badge variant="outline" className={getStatusColor(creditNote.status)}>

@@ -2415,6 +2415,51 @@ collection nothing writes any more?"** — and the answer is still not exhausted
 
 ---
 
+### §9P — Global search, and the limit of counting screens
+
+The command palette read seven Mongo collections that had all moved. Ported in
+one UNION; the reasoning is in the 2026-08-29 handoff. What belongs in the PLAN
+rather than the handoff is what it says about the method.
+
+**Every instrument this migration uses would have missed it, and two of them
+still do.**
+
+| Instrument | Why it missed `global-search-action.js` |
+|---|---|
+| the module count in BUILDING-ON-POSTGRES.md | greps `@/app/mongodb` in `app/dashboard`; this imports `@/app/models/*` and is called from `components/` |
+| `ledger-sweep` | it posts nothing |
+| `find-unwired-actions.mjs` | the action WAS wired — to a live screen. It was its data that had gone |
+
+The count did not move when this was fixed: **63 files across 19 modules before
+and after.** A module count measures screens importing a path. It is not a
+measure of whether the application works, and §9N already showed it is not a
+measure of work either — projects closed 28 files of which 11 were its own.
+
+**The three failures this port has actually had are one failure.** §9K (sales
+orders), §9O (tax) and §9P (global search) are all the same shape: a reader
+left pointing at a collection whose writer moved. Not one was a mistranslated
+query. The question that finds them — "what reads a collection nothing writes
+any more?" — has no instrument behind it yet, which is why all three were found
+by hand and two by accident.
+
+**The generalisation, for whoever writes that instrument:** the reads that hide
+best are the ones that DEGRADE rather than throw. A dropdown renders empty, a
+tile shows 0, a search finds nothing, a compliance card says "compliant". Each
+is a legitimate state of the same UI, so the screen looks correct in exactly
+the case where it is most wrong. Every finding in §9K, §9O and §9P is that
+sentence.
+
+#### The escaping sweep that came with it
+
+47 hand-built ILIKE patterns across 26 repositories interpolated the raw search
+term, so `%` matched every row and `a_c` matched "abc". `likeContains` and
+`likePrefix` in `sqlHelpers.ts` — beside `anyOf`, which exists because twelve
+call sites made the same class of mistake with `= ANY`. Two sweeps now have
+ended in the same file; a third should be read as a signal that these helpers
+are where SQL-building conventions belong.
+
+---
+
 ## 10. Explicitly out of scope
 
 - Redesigning the posting engine, fiscal periods, or COGS logic beyond the

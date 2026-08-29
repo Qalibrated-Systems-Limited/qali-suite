@@ -40,7 +40,7 @@ export default async function HRDashboardPage() {
       {/* Header */}
       <div>
         <p className="text-xs font-medium text-muted-foreground">{formatDate(new Date())}</p>
-        <h1 className="mt-0.5 text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+        <h1 className="mt-0.5 text-2xl sm:text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
           {greeting}, {firstName}
         </h1>
       </div>

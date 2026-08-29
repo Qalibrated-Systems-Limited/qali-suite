@@ -50,7 +50,7 @@ export default async function CreateRequestPage() {
             <IconClipboardList className="h-6 w-6 text-yellow-500" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-foreground">
+            <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
               Create Stock Request
             </h1>
             <p className="text-muted-foreground">

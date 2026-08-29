@@ -189,7 +189,7 @@ export function ReimbursementForm({ claim = null, expenseAccounts = [], projects
           </Link>
         </Button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-foreground truncate">
+          <h1 className="text-xl sm:text-2xl lg:text-xl sm:text-2xl font-semibold text-foreground truncate">
             {isEdit ? `Edit ${claim.claimNumber}` : "New Reimbursement Claim"}
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">

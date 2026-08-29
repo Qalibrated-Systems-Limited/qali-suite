@@ -33,10 +33,10 @@ import * as taxRepo from "../repositories/taxTransactions";
  * TWO FUNCTIONS WERE NOT PORTED, deliberately. `getTaxTransactionById` has no
  * detail route to serve — /dashboard/tax/transactions renders a list whose rows
  * link nowhere — and `searchTaxTransactions` has no caller either; the command
- * palette searches through `global-search-action`, which does not include tax.
- * Both were already dead in Mongo, and porting dead code faithfully produces
- * dead code. `getTaxTransaction` and the search filter both remain in the
- * repository, so either is a four-line action when a screen wants one.
+ * palette searches through `search-actions.ts`, whose sections do not include
+ * tax. Both were already dead in Mongo, and porting dead code faithfully
+ * produces dead code. `getTaxTransaction` and the search filter both remain in
+ * the repository, so either is a four-line action when a screen wants one.
  *
  * Amounts come back as numbers. The columns are `numeric` and drizzle hands
  * those over as strings, while every screen does arithmetic on them

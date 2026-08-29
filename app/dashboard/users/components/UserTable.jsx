@@ -318,7 +318,7 @@ export function UsersTable({ users, currentUser, isSuperAdmin = false }) {
       </Card>
 
       {/* Mobile Card View */}
-      <div className="space-y-4 md:hidden">
+      <div className="space-y-2.5 md:hidden">
         {users.length === 0 ? (
           <Card className="p-8 text-center bg-card border-border">
             <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
@@ -329,12 +329,12 @@ export function UsersTable({ users, currentUser, isSuperAdmin = false }) {
             const isCurrentUser = user._id === currentUser?.id;
 
             return (
-              <Card key={user._id} className="p-4 bg-card border-border">
-                <div className="space-y-3">
+              <Card key={user._id} className="p-3 bg-card border-border">
+                <div className="space-y-2.5">
                   {/* Header */}
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-yellow-500/10 rounded-full flex items-center justify-center flex-shrink-0">
+                      <div className="w-9 h-9 bg-yellow-500/10 rounded-full flex items-center justify-center flex-shrink-0">
                         <span className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
                           {user.name.charAt(0).toUpperCase()}
                         </span>
@@ -356,39 +356,31 @@ export function UsersTable({ users, currentUser, isSuperAdmin = false }) {
                     </Badge>
                   </div>
 
-                  {/* Details */}
-                  <div className="space-y-2 text-sm">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Building className="w-4 h-4" />
-                      <span>{user.department}</span>
-                    </div>
-                    {isSuperAdmin && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Building className="w-4 h-4" />
-                        <span>
-                          {user.companyName || (
-                            <span className="italic">System</span>
-                          )}
-                        </span>
-                      </div>
+                  {/* One wrapped line rather than four stacked rows: each of
+                      these is two or three words, and stacking them made the
+                      card several times taller than the name it describes. */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+                    <Badge variant="outline" className={roleColors[user.role]}>
+                      {user.role}
+                    </Badge>
+                    {user.department && (
+                      <span className="inline-flex items-center gap-1">
+                        <Building className="w-3.5 h-3.5" />
+                        {user.department}
+                      </span>
                     )}
-                    <div className="flex items-center gap-2">
-                      <Shield className="w-4 h-4 text-muted-foreground" />
-                      <Badge
-                        variant="outline"
-                        className={roleColors[user.role]}
-                      >
-                        {user.role}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground text-xs">
-                      Joined {formatDate(user.createdAt)}
-                    </div>
+                    {isSuperAdmin && (
+                      <span className="inline-flex items-center gap-1">
+                        <Shield className="w-3.5 h-3.5" />
+                        {user.companyName || <span className="italic">System</span>}
+                      </span>
+                    )}
+                    <span>Joined {formatDate(user.createdAt)}</span>
                   </div>
 
                   {/* Actions */}
                   {canEdit && (
-                    <div className="flex items-center gap-2 pt-2 border-t border-border">
+                    <div className="flex items-center gap-2 pt-2.5 border-t border-border">
                       <Button
                         variant="outline"
                         size="sm"

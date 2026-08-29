@@ -52,7 +52,7 @@ export default async function CreateQuotePage({ searchParams }) {
     <div className="space-y-6">
       {/* Header */}
       <div className="space-y-1">
-        <h1 className="text-3xl font-bold text-foreground">
+        <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
           {duplicateFrom ? "Duplicate Quote" : "Create Quote"}
         </h1>
         <p className="text-muted-foreground">

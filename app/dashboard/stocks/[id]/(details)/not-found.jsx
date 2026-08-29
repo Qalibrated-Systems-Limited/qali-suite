@@ -15,7 +15,7 @@ export default function ProductNotFound() {
         </div>
 
         {/* Message */}
-        <h1 className="text-2xl sm:text-3xl font-semibold text-foreground mb-2">
+        <h1 className="text-xl sm:text-2xl font-semibold text-foreground mb-2">
           Product not found
         </h1>
         <p className="text-sm text-muted-foreground mb-8 max-w-sm mx-auto">

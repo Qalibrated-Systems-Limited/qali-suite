@@ -85,7 +85,7 @@ export default async function UpdateQuotePage({ params }) {
           <ArrowLeft className="mr-1 h-4 w-4" />
           Back to Quote
         </Link>
-        <h1 className="text-3xl font-bold text-foreground">
+        <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
           Edit Quote {quote.quoteNumber}
         </h1>
         <p className="text-muted-foreground">

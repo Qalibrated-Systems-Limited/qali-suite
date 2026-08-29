@@ -565,7 +565,7 @@ export default function EditInvoiceFormClient({
               Editing
             </Badge>
           </div>
-          <h1 className="text-3xl font-bold text-foreground">
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
             Edit Invoice: {invoice.invoiceNumber}
           </h1>
           <p className="text-muted-foreground">
