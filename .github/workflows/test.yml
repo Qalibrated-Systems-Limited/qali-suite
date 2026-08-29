@@ -108,6 +108,43 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # ── 4b. Repair the platform-native bindings npm left out ───────
+      # THIS IS WHY CI HAS FAILED ON EVERY RUN SINCE THE BRANCH STARTED.
+      #
+      # `package-lock.json` is generated on a macOS arm64 machine, and npm
+      # records only the optional platform packages it resolved there
+      # (npm/cli#4828). For most native deps that is harmless here — esbuild
+      # declares all 14 platforms explicitly so they are all in the lock — but
+      # six are darwin-only, and one of them is load-bearing for the tests:
+      #
+      #   @rolldown/binding-darwin-arm64     <- vitest 4 runs on rolldown
+      #   @next/swc-darwin-arm64
+      #   @tailwindcss/oxide-darwin-arm64
+      #   lightningcss-darwin-arm64
+      #   @img/sharp-darwin-arm64
+      #   @unrs/resolver-binding-darwin-arm64
+      #
+      # `npm ci` installs exactly the lock, so on ubuntu-latest it installs NO
+      # rolldown binding at all and vitest dies before running a single test:
+      # "Cannot find native binding … Cannot find module
+      # '@rolldown/binding-linux-x64-gnu'". Install, lint and migrate all pass,
+      # which is why the failure looked like a test failure and was not one.
+      #
+      # The version is read from what `npm ci` actually installed rather than
+      # pinned here, so a vitest bump does not silently reintroduce this.
+      #
+      # The root fix is a platform-complete lockfile. Regenerating it is not a
+      # drive-by change — a clean re-resolve moves other things — so it is left
+      # for a deliberate dependency pass. Only rolldown is repaired because
+      # only rolldown is needed to run tests; add to this list if a future step
+      # builds the app, which needs swc, oxide and lightningcss.
+      - name: Repair platform-native optional deps (npm/cli#4828)
+        run: |
+          ROLLDOWN_VERSION="$(node -p "require('rolldown/package.json').version")"
+          echo "rolldown $ROLLDOWN_VERSION — installing its linux binding"
+          npm install --no-save --no-audit --no-fund \
+            "@rolldown/binding-linux-x64-gnu@$ROLLDOWN_VERSION"
+
       # ── 5. Lint (bug gate) ─────────────────────────────────────────
       # --quiet => only ERROR-level rules can fail the job. Catches
       # undefined references (no-undef) like the formatAddress regression.
