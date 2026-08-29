@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Loader2, Save, Check } from "lucide-react";
-import { updateProfile } from "@/app/mongodb/actions/profile-actions";
+import { updateProfile } from "@/app/db/actions/profile-actions";
 
 export default function ProfileForm({ user, hasEmployeeProfile = false }) {
   const router = useRouter();

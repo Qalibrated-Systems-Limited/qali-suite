@@ -3,11 +3,14 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, Lock, Check, Eye, EyeOff, KeyRound } from "lucide-react";
-import { changePassword } from "@/app/mongodb/actions/profile-actions";
+import { changePassword } from "@/app/db/actions/profile-actions";
 
 export default function PasswordForm({ hasPassword = true }) {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  // The action's own words when it has some — it is the thing that knows the
+  // change ends every session, including this one.
+  const [successMessage, setSuccessMessage] = useState("");
   const [error, setError] = useState("");
   const [showPasswords, setShowPasswords] = useState({
     current: false,
@@ -46,12 +49,16 @@ export default function PasswordForm({ hasPassword = true }) {
 
       if (result.success) {
         setSuccess(true);
+        setSuccessMessage(result.message || "");
         setFormData({
           currentPassword: "",
           newPassword: "",
           confirmPassword: "",
         });
-        setTimeout(() => setSuccess(false), 3000);
+        // Not auto-dismissed when the action has something to say: changing a
+        // password now revokes every session, and "sign in again" is not a
+        // message to hide after three seconds.
+        if (!result.message) setTimeout(() => setSuccess(false), 3000);
       } else {
         setError(result.error || "Failed to change password");
       }
@@ -181,9 +188,10 @@ export default function PasswordForm({ hasPassword = true }) {
       {success && (
         <p className="text-sm text-green-600 bg-green-50 dark:bg-green-900/20 p-3 rounded-lg flex items-center gap-2">
           <Check className="h-4 w-4" />
-          {hasPassword
-            ? "Password changed successfully"
-            : "Password set successfully"}
+          {successMessage ||
+            (hasPassword
+              ? "Password changed successfully"
+              : "Password set successfully")}
         </p>
       )}
 

@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import { getUserById } from "@/app/mongodb/queries/user-queries";
+import { getMyProfile } from "@/app/db/actions/profile-actions";
 import { getCompanyRecord as getCompanyById } from "@/app/db/platform";
 import { getMyEmployeeRecord } from "@/app/db/actions/hr-employee-actions";
 import {
@@ -35,7 +35,7 @@ export default async function ProfilePage() {
   }
 
   const [user, empProfile] = await Promise.all([
-    getUserById(session.user.id),
+    getMyProfile(),
     getMyEmployeeRecord(),
   ]);
 

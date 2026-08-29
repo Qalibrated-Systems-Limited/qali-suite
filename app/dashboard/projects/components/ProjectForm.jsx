@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useActionState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
@@ -28,12 +28,28 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { ArrowLeft, Loader2, Save, ChevronsUpDown, Check } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  ChevronsUpDown,
+  Loader2,
+  Plus,
+  Save,
+} from "lucide-react";
 import {
   createProject,
   updateProject,
 } from "@/app/db/actions/project-actions";
 import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { createParty } from "@/app/db/actions/party-actions";
 
 function PartyCombobox({ value, onValueChange, parties, placeholder, label }) {
   const [open, setOpen] = useState(false);
@@ -110,6 +126,8 @@ export default function ProjectForm({
   users = [],
   parentProjects = [],
   project = null,
+  /** PARTY_MANAGE_ROLES. A Manager may raise a project but not a customer. */
+  canCreateClient = false,
 }) {
   const isEdit = !!project;
 
@@ -120,6 +138,14 @@ export default function ProjectForm({
   const [clientPartyId, setClientPartyId] = useState(
     project?.client?.partyId || "",
   );
+  /**
+   * Customers added from inside this form, so the picker offers one the moment
+   * it exists. revalidatePath refreshes the prop on the next load; this keeps a
+   * half-filled project usable now.
+   */
+  const [clientList, setClientList] = useState(clients);
+  useEffect(() => setClientList(clients), [clients]);
+  const [addingClient, setAddingClient] = useState(false);
   const [pmUserId, setPmUserId] = useState(
     project?.projectManager?.userId || "",
   );
@@ -216,16 +242,35 @@ export default function ProjectForm({
           <div className="grid gap-6 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Client</Label>
-              <PartyCombobox
-                value={clientPartyId}
-                onValueChange={(id) => setClientPartyId(id)}
-                parties={clients}
-                placeholder="Select customer..."
-                label="customers"
-              />
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <PartyCombobox
+                    value={clientPartyId}
+                    onValueChange={(id) => setClientPartyId(id)}
+                    parties={clientList}
+                    placeholder="Select customer..."
+                    label="customers"
+                  />
+                </div>
+                {canCreateClient && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => setAddingClient(true)}
+                    title="New customer"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span className="sr-only">New customer</span>
+                  </Button>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">
-                A project&apos;s client is a customer. Add them under Parties
-                first if they are not on the list.
+                A project&apos;s client is a customer.{" "}
+                {canCreateClient
+                  ? "Add one here, or under Parties."
+                  : "Add them under Parties first if they are not on the list."}
               </p>
             </div>
 
@@ -458,6 +503,118 @@ export default function ProjectForm({
           </Button>
         </div>
       </form>
+
+      {canCreateClient && (
+        <NewClientDialog
+          open={addingClient}
+          onOpenChange={setAddingClient}
+          onCreated={(party) => {
+            setClientList((prev) =>
+              prev.some((c) => c._id === party._id) ? prev : [...prev, party],
+            );
+            setClientPartyId(party._id);
+            setAddingClient(false);
+          }}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * A customer, from inside the project form.
+ *
+ * Calls the SAME `createParty` action the Parties page uses, so the role gate,
+ * the validation and the duplicate rules are that page's rather than a second
+ * copy. Only the three fields a project needs are asked for; credit limit,
+ * terms and tax PIN are left to the full form, because somebody naming a client
+ * mid-project does not have them to hand.
+ */
+function NewClientDialog({ open, onOpenChange, onCreated }) {
+  const [state, formAction, isPending] = useActionState(createParty, null);
+
+  useEffect(() => {
+    if (state?.success && state.partyId) {
+      onCreated({
+        _id: state.partyId,
+        id: state.partyId,
+        name: state.values?.name ?? "New customer",
+        email: state.values?.email ?? null,
+      });
+    }
+  }, [state, onCreated]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <form action={formAction}>
+          <DialogHeader>
+            <DialogTitle>New customer</DialogTitle>
+            <DialogDescription>
+              Added to Parties as a customer, and selected as this
+              project&apos;s client.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-4">
+            {/* The action requires a type; a project's client is a customer. */}
+            <input type="hidden" name="type" value="customer" />
+            <div className="space-y-1.5">
+              <Label htmlFor="client-name">Name</Label>
+              <Input
+                id="client-name"
+                name="name"
+                placeholder="Acme Ltd"
+                defaultValue={state?.values?.name ?? ""}
+                required
+              />
+              {state?.errors?.name && (
+                <p className="text-xs text-red-600">{state.errors.name[0]}</p>
+              )}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="client-email">Email</Label>
+                <Input
+                  id="client-email"
+                  name="email"
+                  type="email"
+                  defaultValue={state?.values?.email ?? ""}
+                />
+                {state?.errors?.email && (
+                  <p className="text-xs text-red-600">{state.errors.email[0]}</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="client-phone">Phone</Label>
+                <Input
+                  id="client-phone"
+                  name="phone"
+                  defaultValue={state?.values?.phone ?? ""}
+                />
+              </div>
+            </div>
+            {state?.error && (
+              <p className="text-sm text-red-600">{state.error}</p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isPending}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isPending}>
+              {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Add customer
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

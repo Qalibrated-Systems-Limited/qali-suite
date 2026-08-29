@@ -603,3 +603,48 @@ export async function countCompanyUsers(companyId: string) {
   `)) as unknown as Array<{ n: number }>;
   return Number(n);
 }
+
+/**
+ * The credentials of ONE login, by id — for a self-service password change.
+ *
+ * `findUserForSignIn` is by EMAIL, because that is what sign-in has. Somebody
+ * changing their own password has a session, so they have an id and not
+ * necessarily a current email — and looking them up by the email in the JWT
+ * would trust a claim rather than the row.
+ *
+ * Privileged, like the rest of this file: this runs before any company is
+ * scoped, and the users policy would return nothing.
+ */
+export async function getCredentialsForUser(userId: string) {
+  const rows = (await privilegedDb().execute(sql`
+    SELECT auth_provider, password_hash, status
+      FROM users WHERE id = ${String(userId)}
+  `)) as unknown as Array<Record<string, unknown>>;
+  if (!rows.length) return null;
+  return {
+    authProvider: String(rows[0].auth_provider),
+    passwordHash: (rows[0].password_hash as string) ?? null,
+    status: String(rows[0].status),
+  };
+}
+
+/**
+ * A person editing their OWN name and department.
+ *
+ * Deliberately not `adminUpdateUser`: that one writes role and status, gates on
+ * ADMIN_ROLES and revokes sessions on a privilege change. None of that belongs
+ * on a self-service form, and routing this through it would mean a form that
+ * can only be used by admins.
+ */
+export async function updateOwnProfile(
+  userId: string,
+  input: { name: string; department?: string | null },
+) {
+  await privilegedDb().execute(sql`
+    UPDATE users
+       SET name = ${input.name},
+           department = COALESCE(${input.department ?? null}, department),
+           updated_at = now()
+     WHERE id = ${String(userId)}
+  `);
+}

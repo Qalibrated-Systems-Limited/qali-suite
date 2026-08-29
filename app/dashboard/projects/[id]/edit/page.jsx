@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import { getProjectById, getProjectsForParentPicker } from "@/app/db/actions/project-actions";
 import { searchParties } from "@/app/db/actions/party-actions";
 import { getUsers } from "@/app/db/actions/user-actions";
-import { PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
+import { PARTY_MANAGE_ROLES, PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
 import ProjectForm from "../../components/ProjectForm";
 
 export const metadata = {
@@ -35,7 +35,7 @@ export default async function EditProjectPage({ params }) {
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
-      <ProjectForm clients={clients} users={users} parentProjects={parentProjects} project={project} />
+      <ProjectForm canCreateClient={PARTY_MANAGE_ROLES.includes(session?.user?.role)} clients={clients} users={users} parentProjects={parentProjects} project={project} />
     </div>
   );
 }
