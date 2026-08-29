@@ -15,6 +15,7 @@ import {
   calculateSHIF,
   calculateAHL,
 } from "@/lib/payroll/kenya-tax";
+import { likeContains } from "./sqlHelpers";
 
 /**
  * Payroll.
@@ -1260,7 +1261,7 @@ export async function listEntries(
 ) {
   const filters = [sql`e.payroll_run_id = ${runId}::uuid`];
   if (opts.search?.trim()) {
-    const like = `%${opts.search.trim()}%`;
+    const like = likeContains(opts.search.trim());
     filters.push(sql`(e.employee_name ILIKE ${like} OR e.employee_number ILIKE ${like})`);
   }
 

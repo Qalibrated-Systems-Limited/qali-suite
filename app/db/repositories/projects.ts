@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
-import { anyOf, arrayOf } from "./sqlHelpers";
+import { anyOf, arrayOf, likeContains } from "./sqlHelpers";
 import type { Tx } from "../client";
 import {
   projects,
@@ -72,7 +72,7 @@ function filterConditions(opts: ProjectFilters) {
   }
   const search = opts.search?.trim();
   if (search) {
-    const term = `%${search}%`;
+    const term = likeContains(search);
     conditions.push(
       or(
         ilike(projects.projectNumber, term),

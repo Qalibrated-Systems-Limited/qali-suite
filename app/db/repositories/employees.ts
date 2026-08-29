@@ -7,6 +7,7 @@ import {
   salaryChanges,
   parties,
 } from "../schema";
+import { likeContains } from "./sqlHelpers";
 
 /**
  * Employees — the HR master record.
@@ -757,7 +758,7 @@ export async function listEmployees(
     filters.push(sql`e.department_id = ${opts.departmentId}::uuid`);
   }
   if (opts.search?.trim()) {
-    const like = `%${opts.search.trim()}%`;
+    const like = likeContains(opts.search.trim());
     filters.push(sql`(
       e.full_name ILIKE ${like}
       OR e.employee_number ILIKE ${like}
@@ -933,7 +934,7 @@ export async function listEmployeesForPicker(
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 50);
   const filters = [sql`e.status <> 'terminated'`];
   if (opts.search?.trim()) {
-    const like = `%${opts.search.trim()}%`;
+    const like = likeContains(opts.search.trim());
     filters.push(
       sql`(e.full_name ILIKE ${like} OR e.employee_number ILIKE ${like})`,
     );

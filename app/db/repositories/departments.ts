@@ -1,6 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import { departments } from "../schema";
+import { likeContains } from "./sqlHelpers";
 
 /**
  * Departments.
@@ -150,7 +151,7 @@ export async function listDepartments(
 
   const filters = [sql`TRUE`];
   if (opts.search?.trim()) {
-    const like = `%${opts.search.trim()}%`;
+    const like = likeContains(opts.search.trim());
     filters.push(sql`(d.name ILIKE ${like} OR d.code ILIKE ${like})`);
   }
   if (opts.isActive === true) filters.push(sql`d.is_active`);

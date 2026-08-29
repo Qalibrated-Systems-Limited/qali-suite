@@ -1,6 +1,7 @@
 import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import { categories, categoryAttributes, products } from "../schema";
+import { isUuid, likeContains } from "./sqlHelpers";
 
 /**
  * Product categories — a real tree (0062).
@@ -228,6 +229,9 @@ export async function listCategories(
 }
 
 export async function getCategory(tx: Tx, categoryId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(categoryId)) return null;
   const rows = (await tx.execute(sql`
     SELECT c.*, ${PATH_NAMES}, ${WITH_COUNTS}
       FROM categories c
@@ -245,7 +249,7 @@ export async function getCategory(tx: Tx, categoryId: string) {
 }
 
 export async function searchCategories(tx: Tx, query: string, limit = 20) {
-  const term = `%${query.trim()}%`;
+  const term = likeContains(query.trim());
   const rows = (await tx.execute(sql`
     SELECT c.*, ${PATH_NAMES}, ${WITH_COUNTS}
       FROM categories c

@@ -7,6 +7,7 @@ import {
   invoices,
   bills,
 } from "../schema";
+import { isUuid, likeContains } from "./sqlHelpers";
 
 /**
  * Statutory tax records — VAT, withholding, payroll — and their filing state.
@@ -280,6 +281,9 @@ export async function recordBillTaxes(
 }
 
 export async function getTaxTransaction(tx: Tx, id: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(id)) return null;
   const [row] = await tx
     .select()
     .from(taxTransactions)
@@ -584,7 +588,7 @@ function listFilterSql(f: TaxListFilters) {
   // is the same four columns without the injection surface: a supplier named
   // "A.*B" matches itself here and matched everything there.
   if (f.search) {
-    const term = `%${f.search.replace(/([%_\\])/g, "\\$1")}%`;
+    const term = likeContains(f.search);
     parts.push(sql`(
       transaction_number ILIKE ${term}
       OR party_name_at_transaction ILIKE ${term}

@@ -1,5 +1,5 @@
 import { and, asc, eq, sql } from "drizzle-orm";
-import { anyOf } from "./sqlHelpers";
+import { anyOf, likeContains } from "./sqlHelpers";
 import type { Tx } from "../client";
 import { goodsReceipts, goodsReceiptLines } from "../schema/goodsReceipts";
 import { bills } from "../schema/bills";
@@ -431,7 +431,7 @@ function listConditions(filters: ListGoodsReceiptsFilters) {
   if (filters.billId) parts.push(sql`grn.bill_id = ${filters.billId}::uuid`);
   if (filters.discrepanciesOnly) parts.push(sql`st.has_discrepancy`);
   if (filters.search) {
-    const term = `%${filters.search}%`;
+    const term = likeContains(filters.search);
     parts.push(
       sql`(grn.grn_number ILIKE ${term} OR grn.supplier_name ILIKE ${term}
            OR grn.packing_list_number ILIKE ${term} OR grn.notes ILIKE ${term})`,

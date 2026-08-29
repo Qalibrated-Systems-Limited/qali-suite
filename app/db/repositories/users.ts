@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { toDate } from "./sqlHelpers";
+import { anyOf, likeContains, toDate } from "./sqlHelpers";
 import type { Tx } from "../client";
 
 /**
@@ -204,7 +204,7 @@ export async function searchUsers(
 
   const where = [sql`TRUE`];
   if (opts.query) {
-    const like = `%${opts.query}%`;
+    const like = likeContains(opts.query);
     where.push(sql`(u.name ILIKE ${like} OR u.email ILIKE ${like})`);
   }
   // The role FOR THIS COMPANY, matching what the list displays. Filtering on
@@ -306,4 +306,43 @@ export async function listDepartments(tx: Tx) {
      ORDER BY department
   `)) as unknown as Array<{ department: string }>;
   return rows.map((r) => r.department);
+}
+
+/**
+ * Active users in this company holding any of `roles` — the approver fan-out.
+ *
+ * THE ROLE IS THE GRANT'S, not `users.role`. `listCompanyUsers` returns `u.*`,
+ * which carries the GLOBAL role, and picking approvers by that would notify an
+ * Accountant in company A about company B's requests because their global row
+ * still says Accountant. `withAuthorizedTenant` and `getUser` both resolve
+ * `COALESCE(grant.role, users.role)`; so does this.
+ *
+ * `status` is checked on both: a login disabled globally is not an approver,
+ * and neither is one whose grant to THIS company has been revoked.
+ *
+ * The value is LOWERCASE — `users_status_valid` allows only 'active' and
+ * 'inactive'. Capitalised 'Active' matches no row and raises no error, which is
+ * how `getUsers()` below still filters on "Inactive" and excludes nobody.
+ */
+export async function listUsersByRole(
+  tx: Tx,
+  roles: readonly string[],
+  limit = 25,
+): Promise<UserRow[]> {
+  if (roles.length === 0) return [];
+
+  const rows = (await tx.execute(sql`
+    SELECT u.*, COALESCE(a.role, u.role) AS role
+      FROM users u
+      LEFT JOIN user_company_access a
+             ON a.user_id = u.id
+            AND a.status = 'active'
+            AND a.company_id = NULLIF(current_setting('app.company_id', true), '')::uuid
+     WHERE u.status = 'active'
+       AND COALESCE(a.role, u.role) = ${anyOf(roles, "text[]")}
+     ORDER BY u.name
+     LIMIT ${Math.min(Math.max(limit, 1), 200)}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map(shape);
 }

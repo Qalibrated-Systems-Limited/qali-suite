@@ -1,5 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
-import { toDate } from "./sqlHelpers";
+import { isUuid, likeContains, toDate } from "./sqlHelpers";
 import type { Tx } from "../client";
 import { quotes, quoteLines } from "../schema/quotes";
 import { documentFlow } from "../schema/documentFlow";
@@ -175,6 +175,9 @@ async function insertLines(
 }
 
 export async function getQuote(tx: Tx, quoteId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(quoteId)) return null;
   const [row] = await tx.select().from(quotes).where(eq(quotes.id, quoteId));
   return row ?? null;
 }
@@ -193,6 +196,9 @@ export function isExpired(quote: { status: string; validUntil: string | null }) 
 }
 
 export async function getQuoteDetail(tx: Tx, quoteId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(quoteId)) return null;
   const quote = await getQuote(tx, quoteId);
   if (!quote) return null;
 
@@ -458,7 +464,7 @@ export async function searchQuotes(
 
   const where = [sql`TRUE`];
   if (opts.query) {
-    const like = `%${opts.query}%`;
+    const like = likeContains(opts.query);
     where.push(sql`(q.quote_number ILIKE ${like} OR q.customer_name ILIKE ${like})`);
   }
   if (opts.status && opts.status !== "all") {
@@ -535,7 +541,7 @@ export async function countQuotes(
 ) {
   const where = [sql`TRUE`];
   if (opts.query) {
-    const like = `%${opts.query}%`;
+    const like = likeContains(opts.query);
     where.push(sql`(quote_number ILIKE ${like} OR customer_name ILIKE ${like})`);
   }
   if (opts.status && opts.status !== "all") where.push(sql`status = ${opts.status}`);

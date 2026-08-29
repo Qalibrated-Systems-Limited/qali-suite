@@ -10,6 +10,7 @@ import {
   bills,
   users,
 } from "../schema";
+import { likeContains } from "./sqlHelpers";
 
 /**
  * Payments received and made, and what they settle.
@@ -691,7 +692,7 @@ export async function listPayments(tx: Tx, opts: ListPaymentsOptions = {}) {
   if (opts.startDate) conditions.push(gte(payments.paymentDate, opts.startDate));
   if (opts.endDate) conditions.push(lte(payments.paymentDate, opts.endDate));
   if (opts.search) {
-    const term = `%${opts.search}%`;
+    const term = likeContains(opts.search);
     conditions.push(
       or(
         ilike(payments.paymentNumber, term),

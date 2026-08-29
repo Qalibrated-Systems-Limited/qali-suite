@@ -29,20 +29,19 @@ import {
   getARAgingSummary,
   getAPAgingSummary,
 } from "@/app/db/actions/dashboard-actions";
+// Banking is genuinely still on Mongo — the only unported read left on this
+// dashboard. It uses withTenantScope rather than translateCompanyId, so for a
+// Postgres-native company it matches nothing instead of throwing.
 import { getUnallocatedCount, getBankStatements } from "@/app/mongodb/queries/bank-feed-queries";
 import { fetchFiscalPeriodStats } from "@/app/db/actions/fiscal-period-actions";
-import Invoice from "../../models/invoice";
-import Bill from "../../models/bill";
+import { getOverdueInvoicesPg } from "@/app/db/actions/invoice-actions";
+import { getBillsStats } from "@/app/db/actions/bill-actions";
 import { listClaimsPg } from "@/app/db/actions/claim-actions";
 import { getExpenseSummaryPg } from "@/app/db/actions/expense-actions";
 
 // Utils
 import { formatCurrency } from "@/lib/utils";
-import { getTenantContext } from "@/lib/utils/tenant-utils";
-import mongoose from "mongoose";
-import { translateCompanyId } from "@/lib/utils/legacy-company-id";
 
-const ObjectId = mongoose.Types.ObjectId;
 
 // ============================================
 // ACCOUNTANT DASHBOARD PAGE
@@ -66,7 +65,7 @@ export default async function AccountantDashboardPage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
+        <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold text-foreground tracking-tight">
           Finance Dashboard
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
@@ -285,24 +284,26 @@ async function APAgingCard() {
 // OVERDUE INVOICES CARD
 // ============================================
 async function OverdueInvoicesCard() {
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
-
-  const now = new Date();
-  const invoices = await Invoice.find({
-    ...tenantMatch,
-    paymentStatus: { $in: ["unpaid", "partial"] },
-    dueDate: { $lt: now },
-  })
-    .sort({ dueDate: 1 })
-    .limit(5)
-    .select("_id invoiceNumber dueDate amountDue customer.name paymentStatus")
-    .lean();
-
-  const getDaysOverdue = (dueDate: Date) => {
-    const diff = now.getTime() - new Date(dueDate).getTime();
-    return Math.floor(diff / (1000 * 60 * 60 * 24));
-  };
+  /**
+   * THIS CARD CAUSED A 500 ON THE INVOICE PAGE.
+   *
+   * It read the Mongo `Invoice` collection — which nothing has written since
+   * invoices ported — and rendered `/dashboard/invoices/${invoice._id}` from
+   * whatever it found. Those ids are ObjectIds, and the invoice detail page is
+   * a Postgres uuid lookup, so following one raised 22P02 with the whole
+   * statement in the message. Reported from the running app as
+   * `params: 6a3ba4ae0f569c9f3d9a907f`.
+   *
+   * `getOverdueInvoicesPg` already existed and nothing called it; its own
+   * comment says the Mongo version "showed nothing overdue to a company with a
+   * full ledger of it — the worst possible answer from a collections list".
+   *
+   * The definition of overdue is the repository's, not this card's: completed,
+   * not fully paid, past its due date. The old query asked for
+   * `paymentStatus in (unpaid, partial)` and never checked the invoice was
+   * completed, so a DRAFT past its due date counted as money owed.
+   */
+  const invoices = await getOverdueInvoicesPg(5);
 
   return (
     <ActivityCard
@@ -315,24 +316,24 @@ async function OverdueInvoicesCard() {
       }
     >
       <div className="space-y-1">
-        {invoices.map((invoice: any) => {
-          const daysOverdue = getDaysOverdue(invoice.dueDate);
-          return (
-            <ActivityItem
-              key={invoice._id.toString()}
-              title={invoice.invoiceNumber}
-              subtitle={`${
-                invoice.customer?.name || "Unknown"
-              } • ${daysOverdue} days overdue`}
-              value={formatCurrency(invoice.amountDue)}
-              badge={{
-                label: "Overdue",
-                className: "text-red-500 bg-red-500/10",
-              }}
-              href={`/dashboard/invoices/${invoice._id}`}
-            />
-          );
-        })}
+        {invoices.map((invoice) => (
+          <ActivityItem
+            key={invoice.id}
+            title={invoice.invoiceNumber}
+            subtitle={`${invoice.customerName || "Unknown"} • ${
+              invoice.daysOverdue
+            } days overdue`}
+            // Days overdue is computed in SQL against CURRENT_DATE rather than
+            // in JavaScript against the server's clock, so the number and the
+            // filter that produced the row agree.
+            value={formatCurrency(Number(invoice.amountDue))}
+            badge={{
+              label: "Overdue",
+              className: "text-red-500 bg-red-500/10",
+            }}
+            href={`/dashboard/invoices/${invoice.id}`}
+          />
+        ))}
       </div>
     </ActivityCard>
   );
@@ -342,8 +343,6 @@ async function OverdueInvoicesCard() {
 // CLAIMS TO PAY CARD
 // ============================================
 async function ClaimsToPayCard() {
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   // `paidAt: null` is gone with the port: 'paid' is its own status now, so an
   // approved claim is by definition one that has not been paid.
@@ -546,8 +545,6 @@ async function BankReconciliationCard() {
 // PERIOD-END CHECKLIST CARD
 // ============================================
 async function PeriodEndChecklistCard() {
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const tenantMatch = isSuperAdmin ? {} : { companyId: new ObjectId(translateCompanyId(companyId!)) };
 
   // Get fiscal period stats
   const periodResult = await fetchFiscalPeriodStats();
@@ -564,11 +561,25 @@ async function PeriodEndChecklistCard() {
    * what an accountant actually has outstanding is the accruals still to be
    * settled. That is what is counted now.
    */
-  const [expenseSummary, pendingBills, unreconciledCount] = await Promise.all([
+  /**
+   * "Pending" IS NOT A BILL STATUS, and never was.
+   *
+   * This counted `Bill.countDocuments({ status: "pending" })`. The enum is
+   * draft | submitted | approved | rejected | cancelled, in Mongo and in
+   * Postgres alike, so the count was structurally zero and the checklist line
+   * read "Approve pending bills: 0" for every company for ever — while its
+   * link went to `?status=pending`, a filter that could never match.
+   *
+   * Exactly the fault the expense line above it was already fixed for, sitting
+   * unnoticed in the same Promise.all. Awaiting approval is `submitted`, which
+   * is what `getBillStats` has always called `pendingApproval`.
+   */
+  const [expenseSummary, billStats, unreconciledCount] = await Promise.all([
     getExpenseSummaryPg(),
-    Bill.countDocuments({ ...tenantMatch, status: "pending" }),
+    getBillsStats(),
     getUnallocatedCount(),
   ]);
+  const pendingBills = billStats.pendingApproval.count;
   const unpaidExpenses = expenseSummary.byStatus?.posted?.count ?? 0;
 
   const checklistItems = [
@@ -582,7 +593,7 @@ async function PeriodEndChecklistCard() {
       label: "Approve pending bills",
       count: pendingBills,
       completed: pendingBills === 0,
-      href: "/dashboard/bills?status=pending",
+      href: "/dashboard/bills?status=submitted",
     },
     {
       label: "Reconcile bank transactions",

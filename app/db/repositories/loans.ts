@@ -3,6 +3,7 @@ import type { Tx } from "../client";
 import { loans, loanInstallments } from "../schema";
 import { createJournalEntry, reverseJournalEntry } from "./journal";
 import { getRatesForPeriod } from "./payroll";
+import { likeContains } from "./sqlHelpers";
 
 /**
  * Staff loans and salary advances.
@@ -459,7 +460,7 @@ export async function listLoans(
   if (opts.status) filters.push(sql`l.status = ${opts.status}`);
   if (opts.employeeId) filters.push(sql`l.employee_id = ${opts.employeeId}::uuid`);
   if (opts.search?.trim()) {
-    const like = `%${opts.search.trim()}%`;
+    const like = likeContains(opts.search.trim());
     filters.push(sql`(e.full_name ILIKE ${like} OR l.loan_number ILIKE ${like})`);
   }
 

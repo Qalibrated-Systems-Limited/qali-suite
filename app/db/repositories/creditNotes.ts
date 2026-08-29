@@ -11,6 +11,7 @@ import {
 import { createJournalEntry } from "./journal";
 import { receiveStock } from "./products";
 import { recordMovement } from "./stockMovements";
+import { isUuid, likeContains } from "./sqlHelpers";
 
 /**
  * Credit notes raised against sales invoices.
@@ -165,6 +166,9 @@ export async function createCreditNote(
 }
 
 export async function getCreditNote(tx: Tx, noteId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(noteId)) return null;
   const [note] = await tx
     .select()
     .from(creditNotes)
@@ -486,7 +490,7 @@ export async function listCreditNotes(
 ) {
   const limit = Math.min(opts.limit ?? 50, 200);
 
-  const term = opts.search?.trim() ? `%${opts.search.trim()}%` : null;
+  const term = opts.search?.trim() ? likeContains(opts.search.trim()) : null;
   const filters = [
     opts.status ? eq(creditNotes.status, opts.status) : undefined,
     opts.invoiceId ? eq(creditNotes.invoiceId, opts.invoiceId) : undefined,
@@ -593,6 +597,9 @@ export async function getCreditNoteStats(tx: Tx) {
  * invoice, `lines[]` and a generated remaining balance.
  */
 export async function getCreditNoteForDisplay(tx: Tx, noteId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(noteId)) return null;
   const note = await getCreditNote(tx, noteId);
   if (!note) return null;
 

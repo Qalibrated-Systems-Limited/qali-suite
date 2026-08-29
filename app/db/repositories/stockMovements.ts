@@ -1,6 +1,7 @@
 import { desc, eq, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import { stockMovements, products } from "../schema";
+import { likeContains } from "./sqlHelpers";
 
 /**
  * Stock movements — the provenance layer under COGS.
@@ -296,7 +297,7 @@ function movementFilters(opts: MovementBrowseOptions) {
 
   const term = (opts.search ?? "").trim();
   if (term.length >= 2) {
-    const like = `%${term}%`;
+    const like = likeContains(term);
     where.push(sql`(
       m.movement_number ILIKE ${like}
       OR m.product_name_at_movement ILIKE ${like}

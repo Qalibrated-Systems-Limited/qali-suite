@@ -1,5 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
-import { toDate } from "./sqlHelpers";
+import { isUuid, likeContains, likePrefix, toDate } from "./sqlHelpers";
 import { createJournalEntry } from "./journal";
 import type { Tx } from "../client";
 import {
@@ -194,6 +194,9 @@ export async function createStockRequest(
 }
 
 export async function getStockRequest(tx: Tx, requestId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(requestId)) return null;
   const [request] = await tx
     .select()
     .from(stockRequests)
@@ -946,9 +949,9 @@ export async function searchStockRequests(
   const where = [];
   if (q) {
     where.push(sql`(
-      r.request_number ILIKE ${q + "%"}
-      OR r.requester_name_at_request ILIKE ${"%" + q + "%"}
-      OR r.customer_name_at_request ILIKE ${"%" + q + "%"}
+      r.request_number ILIKE ${likePrefix(q)}
+      OR r.requester_name_at_request ILIKE ${likeContains(q)}
+      OR r.customer_name_at_request ILIKE ${likeContains(q)}
     )`);
   }
   if (opts.status) where.push(sql`r.status = ${opts.status}::stock_request_status`);
@@ -1083,6 +1086,9 @@ export async function getStockRequestStats(tx: Tx) {
 
 /** One request, shaped for the detail page. */
 export async function getStockRequestDetail(tx: Tx, requestId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(requestId)) return null;
   const [r] = (await tx.execute(sql`
     SELECT r.*,
            r.request_type::text  AS request_type_text,
@@ -1726,7 +1732,7 @@ export async function searchCheckouts(
 ) {
   const limit = Math.min(opts.limit ?? 10, 100);
   const offset = (Math.max(1, opts.page ?? 1) - 1) * limit;
-  const term = opts.search?.trim() ? `%${opts.search.trim()}%` : null;
+  const term = opts.search?.trim() ? likeContains(opts.search.trim()) : null;
 
   const where = sql`WHERE TRUE
     ${
@@ -1763,6 +1769,9 @@ export async function searchCheckouts(
 }
 
 export async function getCheckoutById(tx: Tx, checkoutId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(checkoutId)) return null;
   const rows = (await tx.execute(sql`
     SELECT c.*, ${CHECKOUT_DERIVED}
       FROM item_checkouts c

@@ -1,7 +1,7 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import { journalEntries, journalLines, accounts } from "../schema";
-import { anyOf } from "./sqlHelpers";
+import { anyOf, likeContains } from "./sqlHelpers";
 
 /**
  * Journal repository — all SQL for the double-entry ledger lives here.
@@ -408,10 +408,10 @@ export async function listJournalTimeline(
            : sql`AND e.entry_date <= ${to}::date`
          : sql``}
        ${search
-         ? sql`AND (e.entry_number ILIKE ${"%" + search + "%"}
-                 OR e.description ILIKE ${"%" + search + "%"}
-                 OR e.reference ILIKE ${"%" + search + "%"}
-                 OR p.name ILIKE ${"%" + search + "%"})`
+         ? sql`AND (e.entry_number ILIKE ${likeContains(search)}
+                 OR e.description ILIKE ${likeContains(search)}
+                 OR e.reference ILIKE ${likeContains(search)}
+                 OR p.name ILIKE ${likeContains(search)})`
          : sql``}
        ${after
          ? sql`AND (e.entry_date, e.id) < (${after.entryDate}::date, ${after.id}::uuid)`

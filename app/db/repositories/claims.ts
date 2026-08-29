@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { anyOf, toDate } from "./sqlHelpers";
+import { anyOf, isUuid, likeContains, toDate } from "./sqlHelpers";
 import type { Tx } from "../client";
 import {
   employeeClaims,
@@ -210,6 +210,9 @@ export async function ensureEmployeeParty(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getClaim(tx: Tx, claimId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(claimId)) return null;
   const rows = (await tx.execute(sql`
     SELECT ${CLAIM_SELECT} ${CLAIM_FROM} WHERE c.id = ${claimId}::uuid
   `)) as unknown as Array<Record<string, unknown>>;
@@ -217,6 +220,9 @@ export async function getClaim(tx: Tx, claimId: string) {
 }
 
 export async function getClaimDetail(tx: Tx, claimId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(claimId)) return null;
   const claim = await getClaim(tx, claimId);
   if (!claim) return null;
 
@@ -343,9 +349,9 @@ export async function listClaims(tx: Tx, opts: ListClaimsOptions = {}) {
     ${opts.to ? sql`AND c.claim_date <= ${opts.to}::date` : sql``}
     ${
       opts.search
-        ? sql`AND (c.claim_number ILIKE ${"%" + opts.search + "%"}
-                OR c.description ILIKE ${"%" + opts.search + "%"}
-                OR p.name ILIKE ${"%" + opts.search + "%"})`
+        ? sql`AND (c.claim_number ILIKE ${likeContains(opts.search)}
+                OR c.description ILIKE ${likeContains(opts.search)}
+                OR p.name ILIKE ${likeContains(opts.search)})`
         : sql``
     }`;
 
@@ -1844,6 +1850,9 @@ export async function listClaimsForScreen(
 
 /** The detail page: the claim, its items, its receipts, and its counterpart. */
 export async function getClaimForScreen(tx: Tx, claimId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(claimId)) return null;
   const detail = await getClaimDetail(tx, claimId);
   if (!detail) return null;
 

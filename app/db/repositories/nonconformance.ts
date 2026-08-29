@@ -1,5 +1,5 @@
 import { asc, eq, sql } from "drizzle-orm";
-import { anyOf } from "./sqlHelpers";
+import { anyOf, likeContains } from "./sqlHelpers";
 import type { Tx } from "../client";
 import {
   nonconformances,
@@ -444,7 +444,7 @@ function listConditions(filters: ListNonconformancesFilters) {
   if (filters.goodsReceiptId)
     parts.push(sql`n.goods_receipt_id = ${filters.goodsReceiptId}::uuid`);
   if (filters.search) {
-    const term = `%${filters.search}%`;
+    const term = likeContains(filters.search);
     parts.push(
       sql`(n.ncr_number ILIKE ${term} OR n.title ILIKE ${term}
            OR n.description ILIKE ${term} OR n.supplier_name ILIKE ${term})`,

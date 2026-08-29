@@ -1,5 +1,5 @@
 import { asc, eq, sql } from "drizzle-orm";
-import { anyOf } from "./sqlHelpers";
+import { anyOf, likeContains } from "./sqlHelpers";
 import type { Tx } from "../client";
 import { purchaseOrders, purchaseOrderLines } from "../schema/purchaseOrders";
 import { documentFlow } from "../schema/documentFlow";
@@ -514,7 +514,7 @@ function listConditions(filters: ListPurchaseOrdersFilters) {
     );
   }
   if (filters.search) {
-    const term = `%${filters.search}%`;
+    const term = likeContains(filters.search);
     parts.push(
       sql`(po.po_number ILIKE ${term} OR po.supplier_name ILIKE ${term}
            OR po.notes ILIKE ${term} OR po.internal_notes ILIKE ${term})`,

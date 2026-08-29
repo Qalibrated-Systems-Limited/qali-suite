@@ -1,6 +1,7 @@
 import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import { parties } from "../schema";
+import { likeContains, likePrefix } from "./sqlHelpers";
 
 /**
  * Customers, suppliers and employees.
@@ -87,7 +88,7 @@ export async function listParties(
   if (opts.role === "employee") conditions.push(eq(parties.isEmployee, true));
 
   if (opts.search) {
-    const term = `%${opts.search}%`;
+    const term = likeContains(opts.search);
     conditions.push(
       or(
         ilike(parties.name, term),
@@ -187,10 +188,10 @@ export async function searchParties(
   if (opts.activeOnly) where.push(sql`p.is_active`);
   if (q) {
     where.push(sql`(
-      p.name ILIKE ${"%" + q + "%"}
-      OR p.display_name ILIKE ${"%" + q + "%"}
-      OR p.email ILIKE ${q + "%"}
-      OR p.tax_pin ILIKE ${q + "%"}
+      p.name ILIKE ${likeContains(q)}
+      OR p.display_name ILIKE ${likeContains(q)}
+      OR p.email ILIKE ${likePrefix(q)}
+      OR p.tax_pin ILIKE ${likePrefix(q)}
     )`);
   }
   const clause = where.length ? sql`WHERE ${sql.join(where, sql` AND `)}` : sql``;

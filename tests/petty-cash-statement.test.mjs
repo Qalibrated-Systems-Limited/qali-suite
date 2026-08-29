@@ -132,9 +132,21 @@ suite("petty cash statement", () => {
 
     // Two spends actually PAID from the float — one project-tagged, one
     // category overhead.
+    /**
+     * A REAL project row. This passed a Mongo ObjectId until the projects port
+     * (0070) made `expenses.project_id` a uuid foreign key, after which the
+     * insert raised 22P02 and this test failed on every run. The label itself
+     * is a snapshot column (`project_name_at_expense`), so only the FK needs to
+     * resolve — but it does need to resolve.
+     */
+    const projectId = randomUUID();
+    await admin`
+      INSERT INTO projects (id, company_id, project_number, name, created_by_name)
+      VALUES (${projectId}, ${companyId}, 'PRJ-PETTY-1', 'Tom Project', 'Fixture')`;
+
     await spend({
       total: undefined,
-      projectId: "65f0000000000000000000aa",
+      projectId,
       projectName: "Tom Project",
     });
     await spend({

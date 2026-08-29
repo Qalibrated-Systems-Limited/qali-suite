@@ -8,6 +8,7 @@ import {
   localDateTimeFromYmd,
   minutesOfDay,
 } from "@/lib/hr/time";
+import { likeContains } from "./sqlHelpers";
 
 /**
  * Attendance.
@@ -593,7 +594,7 @@ export async function getDailyRoster(
     filters.push(sql`e.department_id = ${input.departmentId}::uuid`);
   }
   if (input.search?.trim()) {
-    const like = `%${input.search.trim()}%`;
+    const like = likeContains(input.search.trim());
     filters.push(sql`(e.full_name ILIKE ${like} OR e.employee_number ILIKE ${like})`);
   }
 

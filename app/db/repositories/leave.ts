@@ -1,6 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import { leaveTypes, leaveEntitlements, leaveRequests } from "../schema";
+import { likeContains } from "./sqlHelpers";
 
 /**
  * Leave.
@@ -651,7 +652,7 @@ export async function listLeaveRequests(
   if (opts.leaveTypeId) filters.push(sql`r.leave_type_id = ${opts.leaveTypeId}::uuid`);
   if (opts.year) filters.push(sql`EXTRACT(YEAR FROM r.from_date) = ${opts.year}`);
   if (opts.search?.trim()) {
-    const like = `%${opts.search.trim()}%`;
+    const like = likeContains(opts.search.trim());
     filters.push(sql`(e.full_name ILIKE ${like} OR r.leave_number ILIKE ${like})`);
   }
 

@@ -44,7 +44,7 @@ import {
   CheckSquare,
 } from "lucide-react";
 import { useDebouncedCallback } from "use-debounce";
-import { globalSearch } from "@/app/mongodb/actions/global-search-action";
+import { globalSearch } from "@/app/db/actions/search-actions";
 
 // ============================================
 // QUICK NAVIGATION ITEMS

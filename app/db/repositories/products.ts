@@ -1,6 +1,7 @@
 import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import { products } from "../schema";
+import { isUuid, likeContains } from "./sqlHelpers";
 
 /**
  * Product catalogue and stock commitment.
@@ -73,6 +74,9 @@ export async function createProduct(tx: Tx, input: CreateProductInput) {
 }
 
 export async function getProduct(tx: Tx, productId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(productId)) return null;
   const [product] = await tx
     .select()
     .from(products)
@@ -90,7 +94,7 @@ export async function listProducts(
   if (opts.activeOnly !== false) conditions.push(eq(products.isActive, true));
   if (opts.category) conditions.push(eq(products.category, opts.category));
   if (opts.search) {
-    const term = `%${opts.search}%`;
+    const term = likeContains(opts.search);
     conditions.push(or(ilike(products.name, term), ilike(products.sku, term))!);
   }
 
@@ -743,7 +747,7 @@ export async function searchProducts(
 
   const where = [sql`TRUE`];
   if (opts.query) {
-    const like = `%${opts.query}%`;
+    const like = likeContains(opts.query);
     where.push(sql`(p.name ILIKE ${like} OR p.sku ILIKE ${like})`);
   }
   if (opts.category && opts.category !== "all") {

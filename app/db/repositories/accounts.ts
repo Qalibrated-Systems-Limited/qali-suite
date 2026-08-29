@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { toDate } from "./sqlHelpers";
+import { isUuid, toDate } from "./sqlHelpers";
 import type { Tx } from "../client";
 import { accounts } from "../schema";
 
@@ -397,6 +397,9 @@ export async function getAccountsGrouped(tx: Tx) {
 
 /** One account, with its derived balance. */
 export async function getAccount(tx: Tx, accountId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(accountId)) return null;
   const rows = (await tx.execute(sql`
     SELECT a.*, COALESCE(b.balance, 0)::numeric(19,4) AS balance,
            COALESCE(b.total_debit, 0)::numeric(19,4)  AS total_debit,

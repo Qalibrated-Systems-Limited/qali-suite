@@ -5,6 +5,7 @@ import { createJournalEntry, reverseJournalEntry } from "./journal";
 import { receiveStock } from "./products";
 import { recordMovement } from "./stockMovements";
 import { recordBillTaxes } from "./taxTransactions";
+import { isUuid, likeContains, likePrefix } from "./sqlHelpers";
 
 /**
  * Bills — accounts payable, and the posting they drive.
@@ -375,6 +376,9 @@ export async function createOpeningBalanceBill(
 }
 
 export async function getBill(tx: Tx, billId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(billId)) return null;
   const [bill] = await tx.select().from(bills).where(eq(bills.id, billId));
   if (!bill) return null;
 
@@ -880,9 +884,9 @@ export async function searchBills(
   const where = [];
   if (q) {
     where.push(
-      sql`(b.bill_number ILIKE ${q + "%"}
-           OR b.supplier_invoice_number ILIKE ${q + "%"}
-           OR p.name ILIKE ${"%" + q + "%"})`,
+      sql`(b.bill_number ILIKE ${likePrefix(q)}
+           OR b.supplier_invoice_number ILIKE ${likePrefix(q)}
+           OR p.name ILIKE ${likeContains(q)})`,
     );
   }
   if (opts.status) where.push(sql`b.status = ${opts.status}::bill_status`);
@@ -1096,6 +1100,9 @@ export async function deleteDraftBill(tx: Tx, billId: string) {
  * payment history and a balance cannot disagree.
  */
 export async function getBillDetail(tx: Tx, billId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(billId)) return null;
   const [b] = (await tx.execute(sql`
     SELECT b.id,
            b.bill_number,

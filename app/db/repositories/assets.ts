@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { anyOf, toDate } from "./sqlHelpers";
+import { anyOf, isUuid, likeContains, toDate } from "./sqlHelpers";
 import type { Tx } from "../client";
 import {
   assets,
@@ -358,6 +358,9 @@ function mapAsset(r: Record<string, unknown>) {
 }
 
 export async function getAsset(tx: Tx, assetId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(assetId)) return null;
   const rows = (await tx.execute(sql`
     SELECT ${ASSET_SELECT} ${ASSET_FROM} WHERE a.id = ${assetId}::uuid
   `)) as unknown as Array<Record<string, unknown>>;
@@ -386,10 +389,10 @@ export async function listAssets(tx: Tx, opts: ListAssetsOptions = {}) {
     ${opts.assignedToPartyId ? sql`AND a.assigned_to_party_id = ${opts.assignedToPartyId}::uuid` : sql``}
     ${
       opts.search
-        ? sql`AND (a.asset_number ILIKE ${"%" + opts.search + "%"}
-                OR a.name ILIKE ${"%" + opts.search + "%"}
-                OR a.serial_number ILIKE ${"%" + opts.search + "%"}
-                OR a.registration_number ILIKE ${"%" + opts.search + "%"})`
+        ? sql`AND (a.asset_number ILIKE ${likeContains(opts.search)}
+                OR a.name ILIKE ${likeContains(opts.search)}
+                OR a.serial_number ILIKE ${likeContains(opts.search)}
+                OR a.registration_number ILIKE ${likeContains(opts.search)})`
         : sql``
     }`;
 
@@ -432,6 +435,9 @@ export async function listSchedule(tx: Tx, assetId: string) {
 
 /** The detail page: the asset and everything hanging off it. */
 export async function getAssetDetail(tx: Tx, assetId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(assetId)) return null;
   const asset = await getAsset(tx, assetId);
   if (!asset) return null;
 

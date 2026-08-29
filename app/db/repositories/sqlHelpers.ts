@@ -69,3 +69,63 @@ export function toDate(value: unknown): Date | null {
   const d = new Date(String(value));
   return Number.isNaN(d.getTime()) ? null : d;
 }
+
+/**
+ * A user's search box turned into an ILIKE pattern, with the wildcards escaped.
+ *
+ * `ILIKE '%' || term || '%'` treats `%` and `_` in the TERM as wildcards, so a
+ * person typing `%` matches every row and `a_c` matches "abc". Neither is what
+ * a search box means, and the second is the worse one because it looks like it
+ * worked.
+ *
+ * Every search function in this directory built its pattern by hand —
+ * `` `%${query}%` `` — so all of them had it. Found while porting the tax
+ * screens, where the same construction had the same fault, and swept from
+ * there per the rule that fixing one instance is half the job.
+ *
+ * `\` is the LIKE escape character by default, and these reach Postgres as
+ * bound parameters, so the backslash arrives intact without needing
+ * `ESCAPE '\'` on every clause.
+ *
+ *   contains  — matches anywhere. Names, descriptions.
+ *   prefix    — matches from the start. Document numbers, emails; index-usable.
+ */
+function escapeLike(term: string) {
+  return term.replace(/([%_\\])/g, "\\$1");
+}
+
+/** `%term%` — matches anywhere in the column. */
+export function likeContains(term: string) {
+  return `%${escapeLike(term)}%`;
+}
+
+/** `term%` — matches from the start, and can use a b-tree index. */
+export function likePrefix(term: string) {
+  return `${escapeLike(term)}%`;
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Is this string something a `uuid` column could hold?
+ *
+ * WHY A DETAIL LOOKUP NEEDS THIS. `WHERE i.id = ${invoiceId}` against a uuid
+ * column does not return no rows when the id is malformed — Postgres fails to
+ * parse the literal and raises 22P02, which surfaces to the reader as a
+ * DrizzleQueryError containing the whole statement. Reported from the running
+ * app: opening a stale invoice link whose id was a 24-character Mongo ObjectId
+ * (`6a3ba4ae0f569c9f3d9a907f`) produced a 500 and a screenful of SQL, on a page
+ * that already handles the not-found case two lines later.
+ *
+ * An id that cannot exist is NOT FOUND, not an error. Old links, bookmarks and
+ * anything still holding a pre-migration id all land in the same place, and the
+ * page's `notFound()` does the rest.
+ *
+ * The same reasoning as the `isUuid` branches in app/db/platform.ts, which
+ * choose between `c.id = $1::uuid` and the legacy id map — this is the half
+ * that has no legacy fallback to fall back to.
+ */
+export function isUuid(value: unknown): boolean {
+  return typeof value === "string" && UUID_RE.test(value);
+}

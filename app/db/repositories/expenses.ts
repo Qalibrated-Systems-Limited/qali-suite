@@ -15,6 +15,7 @@ import {
   type JournalLineInput,
 } from "./journal";
 import { getSystemAccount } from "./accounts";
+import { isUuid, likeContains } from "./sqlHelpers";
 
 /**
  * Expense repository — the seventh module out of the Mongo ledger.
@@ -555,6 +556,9 @@ export async function deleteDraftExpense(tx: Tx, expenseId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getExpense(tx: Tx, expenseId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(expenseId)) return null;
   const [row] = await tx
     .select()
     .from(expenses)
@@ -570,6 +574,9 @@ export async function getExpense(tx: Tx, expenseId: string) {
  * function that returns `lines[]`, silently rendering nothing.
  */
 export async function getExpenseForDisplay(tx: Tx, expenseId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(expenseId)) return null;
   // Three aliases of `users`, because one row can name three different people
   // and a single join would pick whichever the planner reached first.
   const createdBy = alias(users, "created_by");
@@ -758,7 +765,7 @@ export async function listExpenses(tx: Tx, opts: ListExpensesOptions = {}) {
     conditions.push(eq(expenses.isReimbursable, opts.isReimbursable));
   }
   if (opts.search) {
-    const term = `%${opts.search}%`;
+    const term = likeContains(opts.search);
     conditions.push(
       or(
         ilike(expenses.expenseNumber, term),

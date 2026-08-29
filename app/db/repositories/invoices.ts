@@ -11,6 +11,7 @@ import { createJournalEntry } from "./journal";
 import { issueStock, commitStock, releaseStock } from "./products";
 import { recordMovement } from "./stockMovements";
 import { recordInvoiceVatOutput } from "./taxTransactions";
+import { isUuid, likeContains, likePrefix } from "./sqlHelpers";
 
 /**
  * Sales invoices and the posting they drive.
@@ -330,6 +331,9 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
 }
 
 export async function getInvoice(tx: Tx, invoiceId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(invoiceId)) return null;
   const [invoice] = await tx
     .select()
     .from(invoices)
@@ -889,6 +893,9 @@ export async function updateInvoice(
 }
 
 export async function getInvoiceDetail(tx: Tx, invoiceId: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with
+  // the statement in the message. See isUuid in sqlHelpers.
+  if (!isUuid(invoiceId)) return null;
   const [inv] = (await tx.execute(sql`
     SELECT i.id,
            i.invoice_number,
@@ -1060,7 +1067,7 @@ export async function searchInvoices(
   const where = [];
   if (q) {
     where.push(
-      sql`(i.invoice_number ILIKE ${q + "%"} OR p.name ILIKE ${"%" + q + "%"})`,
+      sql`(i.invoice_number ILIKE ${likePrefix(q)} OR p.name ILIKE ${likeContains(q)})`,
     );
   }
   if (opts.status) where.push(sql`i.status = ${opts.status}::invoice_status`);
