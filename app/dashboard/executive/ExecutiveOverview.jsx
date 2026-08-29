@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { SALES_ORDERS_AVAILABLE } from "@/lib/unported-modules";
 import {
   TrendingUp,
   TrendingDown,
@@ -8,12 +7,12 @@ import {
   Receipt,
   Landmark,
   Briefcase,
-  ClipboardCheck,
   CreditCard,
   ArrowRight,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { cExecutiveSnapshot } from "@/app/mongodb/queries/executive-queries";
+import { getExecutiveSnapshotPg } from "@/app/db/actions/report-actions";
+import { cPipelineTotal } from "@/app/mongodb/queries/opportunity-queries";
 
 // Compact for phones, full for desktop — same convention as the reports.
 const compact = (n) =>
@@ -71,14 +70,26 @@ function Kpi({ label, value, sub, icon: Icon, href, children }) {
 // so the CEO gets a normal dashboard home like every other role; the old
 // redirect tripped a Next Router dev bug mid-navigation).
 export default async function ExecutiveOverview() {
-  const s = await cExecutiveSnapshot();
-  if (!s) {
+  // TWO STORES, DELIBERATELY. Seven of the eight numbers come from the
+  // Postgres LEDGER, so each tile is the same figure as the report it links
+  // to — the Mongo snapshot this replaces summed documents, which meant the
+  // revenue card and the P&L disagreed by the value of every invoice that had
+  // been sent and not completed. The pipeline is the exception: the CRM has
+  // not been ported, so it is still a Mongo read, and it degrades to zero on
+  // its own rather than taking the page down.
+  let s;
+  try {
+    s = await getExecutiveSnapshotPg();
+  } catch (error) {
+    console.error("ExecutiveOverview snapshot failed:", error);
     return (
       <p className="p-8 text-center text-sm text-muted-foreground">
         Could not load the snapshot. Try refreshing.
       </p>
     );
   }
+
+  const pipeline = await cPipelineTotal();
 
   const net = s.revenue.total - s.expenses.total;
   const netPrev = s.revenue.prev - s.expenses.prev;
@@ -124,24 +135,31 @@ export default async function ExecutiveOverview() {
 
       {/* Position — what we hold and owe */}
       <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+        {/* M-Pesa is in here now. The chart seeds account 1113 for it and both
+            the Mongo snapshot's replacement and `getFinancialOverview` counted
+            only cash and bank, so the money position was short by the whole
+            float. */}
         <Kpi
-          label="Cash & bank"
+          label="Cash, bank & M-Pesa"
           value={s.cash.total}
           sub={`${s.cash.count} account${s.cash.count === 1 ? "" : "s"}`}
           icon={Landmark}
           href="/dashboard/banking"
         />
+        {/* Open items against the control accounts — the same predicate the
+            aging report uses, so the tile and the page it links to cannot
+            disagree. */}
         <Kpi
           label="Owed to us (AR)"
           value={s.ar.total}
-          sub={`${s.ar.count} open invoice${s.ar.count === 1 ? "" : "s"}`}
+          sub={`${s.ar.count} open item${s.ar.count === 1 ? "" : "s"}`}
           icon={Wallet}
           href="/dashboard/reports/ar-aging"
         />
         <Kpi
           label="We owe (AP)"
           value={s.ap.total}
-          sub={`${s.ap.count} unpaid bill${s.ap.count === 1 ? "" : "s"}`}
+          sub={`${s.ap.count} open item${s.ap.count === 1 ? "" : "s"}`}
           icon={Receipt}
           href="/dashboard/reports/ap-aging"
         />
@@ -153,28 +171,22 @@ export default async function ExecutiveOverview() {
         />
       </div>
 
-      {/* What's coming — the future */}
+      {/* What's coming — the future.
+          ORDER BACKLOG IS GONE, not hidden. It aggregated the Mongo SalesOrder
+          collection, which nothing writes to while the module is switched off
+          (lib/unported-modules.js, §9K), and the tile was already behind the
+          flag — so what the flag guarded was a figure that could only be stale
+          and a zero labelled "confirmed orders awaiting invoice". Restore it
+          from Postgres when sales orders are ported; a tile that reads zero
+          because its store is empty is worse than no tile. */}
       <div className="grid grid-cols-2 gap-2 sm:gap-3">
         <Kpi
           label="Sales pipeline"
-          value={s.pipeline.total}
-          sub={`${s.pipeline.count} open deal${s.pipeline.count === 1 ? "" : "s"}`}
+          value={pipeline.total}
+          sub={`${pipeline.count} open deal${pipeline.count === 1 ? "" : "s"}`}
           icon={Briefcase}
           href="/dashboard/opportunities"
         />
-        {/* Order backlog — aggregates the MONGO SalesOrder collection, which
-            nothing can add to while the module is switched off, so the figure
-            can only go stale. Hidden with the rest of the entry points; see
-            lib/unported-modules.js. */}
-        {SALES_ORDERS_AVAILABLE && (
-          <Kpi
-            label="Order backlog"
-            value={s.backlog.total}
-            sub={`${s.backlog.count} confirmed order${s.backlog.count === 1 ? "" : "s"} awaiting invoice`}
-            icon={ClipboardCheck}
-            href="/dashboard/sales-orders"
-          />
-        )}
       </div>
 
       {/* Drill-down */}

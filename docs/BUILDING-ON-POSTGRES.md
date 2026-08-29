@@ -18,9 +18,22 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 
 | on Postgres | still Mongo (screen files) |
 |---|---|
-| **stocks/products**, **dashboard**, statements, supplier-statements, payments, hr, claims, assets, expenses, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders, **fiscal periods**, **the platform/SuperAdmin dashboard** | projects 11, integrations 10, tax 8, reports 8, banking 8, kpis 7, leads 4, employee 4, components 4, **claims 4**, settings 3, sales-orders 3, profile 3, opportunities 3, journal 3, admin 3, movements 2, **invoices 2**, **expenses 2**, **bills 2**, **assets 2**, approvals 2, adjustments 2, **requests 1**, **quotes 1**, **parties 1**, executive 1, company 1 |
+| **stocks/products**, **dashboard**, statements, supplier-statements, payments, hr, **claims**, assets, **expenses**, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders, **fiscal periods**, **projects**, **the platform/SuperAdmin dashboard** | integrations 10, tax 8, banking 8, reports 7, kpis 7, components 5, leads 4, employee 4, settings 3, sales-orders 3, profile 3, opportunities 3, journal 3, admin 3, assets 2, approvals 2, quotes 1, parties 1, executive 1, company 1, adjustments 1 |
 
-Counted 2026-08-28: **105 screen files, 27 modules.**
+Counted 2026-08-29, after projects (0070) and the executive overview:
+**80 screen files, 21 modules** — down from 105 across 27.
+
+**`executive 1` IS NOT WORK.** It is `cPipelineTotal`, and the CRM genuinely is
+still on Mongo, so that read is correct until opportunities port. Everything
+else on that screen moved to the ledger — see the 2026-08-29 executive handoff.
+The same caveat the projects row carried, one module further on.
+
+**PROJECTS CLOSED FIVE OTHER MODULES WITH IT.** The count above fell by 28
+files, and only 11 of them were projects' own. Invoices, bills, requests,
+movements and quotes went to zero, and claims and expenses to one, because what
+they were reading was the project picker. The 2026-08-28 note below predicted
+exactly this — "they all close the moment it lands" — and it is the clearest
+case in the port of a count that was not a measure of work. See §9N.
 
 **THE COMMAND UNDERCOUNTS — it only reads `*.jsx`.** There are `.tsx` screens
 too, and 16 of them were in `components`. Count both:
@@ -104,12 +117,12 @@ its own header called it "the one query that has to reach into both stores",
 and both halves are Postgres now. It belongs in `asset-actions.ts`; only the
 import path in `app/dashboard/assets/[id]/page.jsx` is stopping it.
 
-**Claims reads 4, and all four are the project picker.** Every claim, item,
-receipt, journal entry and count is on Postgres (§9H); what is left is
-`getActiveProjects` and `ProjectContextCard`, which read Mongo because PROJECTS
-are on Mongo. They go when projects do. This is the one case where a non-zero
-count is not a half-ported module — assets is the other. Check what the import
-actually is before reading the number as a verdict.
+**Claims read 4, and all four were the project picker.** They went with 0070,
+along with a fifth thing nobody had counted: `claims/create/advance/page.jsx`
+reads the Mongo `User` collection directly, so the on-behalf-of picker that
+exists to stop "manual advances that bypass the system" has been EMPTY since
+auth ported. It does not match `@/app/mongodb` and no screen-side grep found
+it — the same class as the eleven above.
 
 Also on Postgres, below the screens: auth and sign-in, invitations, companies
 and provisioning, company access and the switcher, fiscal periods (the screens
@@ -711,6 +724,243 @@ and makes every policy in the schema inert. `SELECT assert_rls_effective()`
 raises if the current connection would bypass RLS — worth a health check.
 
 ---
+
+## Handoff — 2026-08-29 — a project's client is a customer (0072)
+
+The create and edit forms already offered nothing but customers and had no
+quick-create beside the picker. The rule was enforced nowhere below the form,
+and three routes around it existed.
+
+1. **A name with no party was legal.** `projects_client_pair` (0070) was an
+   implication — an id requires a name — so `client_name` on its own passed,
+   and the 0070 header explicitly blessed it as "what a one-off client is".
+   That was the wrong call: a project's client is the party its invoices are
+   raised against, and a name that is not a customer record cannot be invoiced,
+   aged, or put on a statement. The constraint is a BICONDITIONAL now.
+2. **Any party was acceptable.** The FK targets `parties`, which holds
+   suppliers and employees. The picker filtered; the column did not. A trigger
+   does it, because an FK cannot target a partial unique index.
+3. **The name came from the request body.** `createProject` stored whatever
+   `clientName` and `clientEmail` were posted, with nothing checking they had
+   anything to do with the id beside them. The action resolves both from
+   `parties` now — the same fix `assignPartyToProject` needed.
+
+The client stays OPTIONAL: an internal project has no external client, and
+requiring one pushes people to invent a party to satisfy a form.
+
+### Two things found doing it
+
+**`getProjectTransactions` had no test, and its claims arm did not run.** It
+selected `c.employee_name`, which is not a column — the employee is a party and
+the name comes from a join. Every project detail page with a claim against it
+threw. The Mongo function it replaced called `listClaimsPg({ projectId })`; the
+port should have kept doing that, and now does. Found by the dev server, not by
+the suite, which is the tell: the drill-down had zero coverage. It has three
+tests now, and the first one exercises all five arms because the failure mode
+was "the query does not run", not "the number is wrong".
+
+**Every optional field on the project actions rejected an ABSENT key.**
+`formData.get()` returns `null` for a key that is not present and
+`z.string().optional()` rejects null, so an action called with anything less
+than the full set of form keys failed with "expected string, received null"
+against fields the caller had no opinion about. The screens post all of them,
+so it never surfaced there. `optionalText` / `optionalEnum` /
+`optionalTextMax` coerce null first.
+
+## Handoff — 2026-08-29 — the executive overview
+
+No migration. The CEO's home screen, moved off four dead Mongo collections and
+onto the ledger.
+
+`cExecutiveSnapshot` summed documents: `Invoice`, `Bill` and
+`Account.cachedBalance`. All three are on Postgres, so **five of its eight
+headline numbers — revenue, AR, AP, cash, and the net derived from two of them
+— have read ZERO** since those modules ported. Nothing errored. The page
+rendered, with the business apparently at a standstill on it. `executive` was
+one line in the count table, which is why it sat there for four handoffs.
+
+### It is not a transcription, for one reason
+
+**The tile now IS the number on the report it links to.** The Mongo version's
+revenue was `status IN ('sent', 'completed')`, and a SENT invoice posts
+nothing — only completing one credits the revenue account. So the executive
+card reported a bigger month than the P&L it drills into, by exactly the value
+of everything sent and not completed, and no one number was wrong enough to
+notice. Reading the ledger removes the question. `tests/pg-executive-
+snapshot.test.mjs` asserts the two agree rather than asserting a figure.
+
+Three things follow from the same change:
+
+- **Credit notes net off for free.** A credit note debits revenue and the
+  figure is `SUM(credit - debit)`. The document sum had no arm for them at all.
+- **AR and AP use `getAgingReport`'s exact predicate** — open entries against
+  the control account, by party type — so the tile and the aging page cannot
+  disagree. They previously came from different stores.
+- **Cash is a ledger balance**, not `Account.cachedBalance`, whose own Mongo
+  comment reads "Cached - NOT source of truth!". Same family as
+  `parties.cachedBalance` and `products.quantityAvailable`.
+
+### Three things found that were not the screen being ported
+
+1. **M-PESA WAS NOT COUNTED AS CASH.** `lib/chart-of-accounts.js` seeds account
+   1113 with sub-type `mpesa`, and `getFinancialOverview` — the PG dashboard
+   query, nothing to do with the executive page — filters on `cash` and `bank`
+   only. Every dashboard reading it has understated the money position by the
+   whole M-Pesa float. In this market that is not a rounding difference. Fixed
+   there too, with `mpesaOnly` added to the shape and `CFODashboard`'s hint
+   moved with it so the breakdown still adds up to the balance above it.
+
+2. **`cPipeline().totals` caps at 250 rows.** Right for the board it was
+   written for, wrong for a headline: a company with 300 open deals would see
+   the value of 250 of them and nothing would say so. `cPipelineTotal`
+   aggregates in the database instead.
+
+3. **The role gate was about to be wrong.** The obvious gate for a finance
+   action is `FINANCE_ROLES`, and `Viewer` is not in it — but Viewer is what
+   CEO became (0039) and this screen is that role's HOME. Gating the snapshot
+   on a finance list would have shown the "could not load" card to the one
+   person the page exists for. `EXECUTIVE_VIEW_ROLES` now lives in
+   `role-gates.js` and the page and the action share it.
+
+### One tile deleted rather than ported
+
+**Order backlog.** It aggregated the Mongo `SalesOrder` collection, the module
+is switched off (`lib/unported-modules.js`, §9K), and the tile was already
+behind the flag — so what the flag guarded was a zero labelled "confirmed
+orders awaiting invoice". Restore it from Postgres when sales orders are
+ported. A tile reading zero because its store is empty is worse than no tile,
+and this session has now found six numbers that were exactly that.
+
+## Handoff — 2026-08-29 — the work breakdown (0071)
+
+Step 1 of `docs/PROJECTS-EXECUTION-LAYER.md` §4, and the first line of what the
+MD's template actually asks for: "tasks drive execution".
+
+`project_tasks` — an ltree WBS, the same pattern `categories` uses (0062) —
+plus the repository, the actions, and a `ProjectTasks` card on the project
+detail page. **`projects.progress_percent` is not dropped and not recomputed by
+a trigger. It is now the FALLBACK**: a project with no tasks reports what
+somebody typed; a project with tasks reports the weighted roll-up of its
+leaves, computed on read.
+
+### The six decisions
+
+1. **Progress is derived where there are tasks, typed where there are none**,
+   and `progress.source` says which — because a number somebody dragged a
+   slider to and a number rolled up from measured work look identical on a bar,
+   and only one is evidence. `updateProjectProgress` now REFUSES once a WBS
+   exists rather than writing a value the read ignores.
+2. **A summary task has no progress of its own.** The trigger refuses to store
+   one on a task with subtasks, and breaking a task down demotes whatever it
+   was carrying. The commonest way a WBS lies is 90% typed on a summary line
+   whose children are at 20%.
+3. **Weight, not count** — `COALESCE(weight, estimated_hours, 1)`. An
+   unweighted average makes "order the cable" worth as much as "lay 8km of
+   subbase". Zero weight is refused: invisible to the average, still on the page.
+4. **`done` is 100 and 100 is `done`** — a biconditional. `cancelled` is
+   excluded from both the CHECK and the roll-up. Reopening a completed task is
+   the one transition the repository will not guess: it asks for the number.
+5. **The hierarchy is an ltree maintained over the subtree** — cycle check free
+   with the path, descendants move with their parent, `depth` generated so it
+   cannot disagree, and the roll-up becomes `leaf.path <@ task.path` rather
+   than a recursive CTE per row. A composite FK keeps a subtask in its parent's
+   project.
+6. **No `actual_hours` column**, though the MD's template lists one. It is the
+   sum of a task's timesheets and timesheets are step 4 — storing the total now
+   is storing a number with no writer, which is the `financials` mistake 0070
+   spent a migration undoing.
+
+Deliberately absent: **dependencies and a critical path**.
+`PROJECTS-QALITRACK-PLAN.md` §4 is blunt that a Gantt without predecessor links
+"is a picture of a programme, not a programme", and half of one is worse than
+none.
+
+### One thing found that was not the table being built
+
+`assignPartyToProject` — the roster action ported in 0070 — **took a different
+shape from the one its only caller sends.** `ProjectTeam.jsx` posts
+`{ partyId, role, rate: { amount, unit } }`; the port asked for `name`, `type`,
+`rateAmount` and `rateUnit`. It typechecked, and a direct-call test would have
+passed, because a direct-call test uses the shape the function wants — which is
+exactly the layer nothing else uses. Every member added through the only screen
+that adds one would have been written as "Unnamed" with no rate.
+
+The action now resolves the party from `parties` and snapshots the name and
+type server-side, as the Mongo action did — which is also the safer half: the
+name was being taken from the request body. `tests/pg-projects.test.mjs` has
+four tests on the contract itself for that reason.
+
+**The lesson generalises: grep the CALLER before settling a ported function's
+signature.** `tsc` cannot see across the `.jsx` boundary and neither can a test
+that calls the function directly.
+
+## Handoff — 2026-08-29 — projects (§9N)
+
+Migration **0070**. `projects`, `project_budgets` + `project_budget_lines`,
+`project_cost_codes`, `project_assignments`; the repository, the actions, all
+13 screens, and the five `project_id` columns that have been `text` with no
+foreign key since 0053/0054.
+
+**This is the one module that was NOT a faithful port, and that was decided in
+writing before it started** — `docs/PROJECTS-QALITRACK-PLAN.md`. The MD has a
+prototype, `QaliTrack_PMS`, which is a road contract administration system: a
+different product built on top of a project. That product is `contracts` and it
+is not built. What is built is the cost centre the ledger already refers to.
+
+### What the module was doing before
+
+Not one of these is a translation error. They were all live.
+
+| | |
+|---|---|
+| `financials.{totalRevenue,totalCosts,totalCommitted}` | Three cached columns maintained by an `$inc` helper **nothing has ever called**. Grep `updateProjectFinancials` outside its own file: one comment. Every project has displayed zeros since the module shipped. |
+| `computeProjectActuals` | The live figures beside them aggregate the MONGO `Invoice`, `Bill`, `StockRequest` and `StockMovement` collections. All four ported; none is written to. Revenue, bill cost and stock commitment read a dead store. |
+| `status: { $in: ["completed", "posted"] }` | `posted` is not an invoice status in EITHER store. Dead filter. Postgres raises 22P02 on it, which is how it was found — the same shape as claims' `settled`. |
+| `StockMovement status: "posted"` | Same again: `movement_status` is pending\|completed\|reversed. The returned-COGS arm never matched anything. |
+| a fulfilled stock request | Counted as committed while `approved`, and **counted as nothing once fulfilled**. The stock is on site and the project's cost FALLS by what was just delivered. Nothing restores it: fulfilment posts DR Technician Stock, an asset, and the checkout that later expenses it carries no project. |
+| `deleteProject` | Counts CLAIMS. The module's own gap list admits it. A project with three invoices and no claims deleted cleanly and took the link off all three. |
+| `getProjectsForParentPicker` | Docstring says "excludes self and own children". The query excludes self. Picking your own child builds a cycle `getSubprojects` walks for ever. |
+| `budget.approve()` | Supersede-then-approve, read-write-write, no lock. Two approvals racing leave two approved budgets and budget-vs-actual takes whichever sorts first. |
+| `{ companyId, code, projectId }` unique | Works in Mongo, which treats a missing `projectId` as a value. Postgres NULLs are distinct, so the same index lets a company hold ten cost codes called `LAB`. Two partial indexes. |
+| the client / PM / on-behalf pickers | `partyQueries.searchParties`, `getUsers`, `getEmployees` and `claims/create/advance` read Mongo collections that auth and parties stopped writing to. Every one of those dropdowns was empty. |
+| `ExpenseForm`'s vendor dialog | Created the vendor in MONGO while every supplier picker on the page read Postgres, so a vendor added there vanished from the dropdown that had just been used to add it. |
+
+### The seven decisions
+
+In the 0070 header, at length. In one line each:
+
+1. **No cached financials.** Computed from the documents, live, for one project
+   or twenty in one query.
+2. **No project dimension on `journal_lines`** — deliberately. `committed` is
+   the number a budget is checked against and an approved stock request has no
+   ledger entry at all, correctly. A ledger-only summary reports a project as
+   having spent nothing until the goods arrive. The dimension is the right move
+   when IPCs and retention arrive; it touches every posting path and is its own
+   migration.
+3. **The status machine is a trigger.** Two of Mongo's three writers reach the
+   document through `findOneAndUpdate`, where `canTransitionTo` never runs.
+4. **One approved budget per project, as a partial unique index.**
+5. **The budget total is not stored and is not copied onto the project.** The
+   lines are the total; `projects.budget_amount` stays the advisory figure the
+   create form collects; the repository reads `COALESCE` of the two.
+6. **One budget line per account.** Two lines on one account each display the
+   FULL actual for it, so the project reads twice as far over budget as it is.
+7. **Two cost code indexes**, split on whether the code is project-scoped.
+
+### Still open, and why
+
+- **A project dimension on `journal_lines`.** Decision 2. Until it exists,
+  project cost is a document query and labour reaching a project through
+  payroll is invisible to it.
+- **Cost codes have no screen.** The CRUD actions and the "for the management
+  page" query both exist, in Mongo and now here, and there has never been a
+  management page — so no cost code can be created through the app, and the
+  picker that would spend one is not on any form either.
+- **`contracts`** — notices with their 24-hour and 28-day clocks, IPCs,
+  retention, the site diary. The sequence is in `PROJECTS-QALITRACK-PLAN.md` §5.
+- **The MD's execution layer** — tasks/WBS, milestones, timesheets, change
+  orders. Not built; the data model is designed and the picks are argued in
+  the handoff below rather than in code.
 
 ## Handoff — 2026-08-28
 

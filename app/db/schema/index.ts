@@ -40,3 +40,4 @@ export * from "./categories";
 export * from "./stockAdjustments";
 export * from "./stockCounts";
 export * from "./productPriceHistory";
+export * from "./projects";

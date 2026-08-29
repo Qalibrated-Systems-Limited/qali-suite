@@ -4,7 +4,7 @@ import {
   getClaimById,
   getExpenseAccountsForCategories,
 } from "@/app/db/actions/claim-actions";
-import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
+import { getActiveProjects } from "@/app/db/actions/project-actions";
 import { AdvanceRequestForm } from "../../components/AdvanceRequestForm";
 import { ReimbursementForm } from "../../components/ReimbursementForm";
 

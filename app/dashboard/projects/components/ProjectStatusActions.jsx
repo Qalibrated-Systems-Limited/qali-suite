@@ -10,7 +10,7 @@ import {
   Lock,
   Loader2,
 } from "lucide-react";
-import { updateProjectStatus } from "@/app/mongodb/actions/project-actions";
+import { updateProjectStatus } from "@/app/db/actions/project-actions";
 import { toast } from "sonner";
 
 const TRANSITIONS = {

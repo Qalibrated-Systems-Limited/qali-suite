@@ -714,3 +714,85 @@ export const stockCountStatusEnum = pgEnum("stock_count_status", [
   "posted",
   "cancelled",
 ]);
+
+// ── Projects (0070) ──────────────────────────────────────────────────────────
+
+/**
+ * planning → active → on_hold → active
+ *                    → completed → closed
+ *
+ * Enforced by `project_status_transition`, not by the application. Mongo's
+ * `canTransitionTo` guards ONE of the three writers — `updateProject` and
+ * `updateProjectProgress` both reach the document through `findOneAndUpdate`,
+ * where nothing checks anything.
+ */
+export const projectStatusEnum = pgEnum("project_status", [
+  "planning",
+  "active",
+  "on_hold",
+  "completed",
+  "closed",
+]);
+
+export const projectPriorityEnum = pgEnum("project_priority", [
+  "low",
+  "normal",
+  "high",
+  "critical",
+]);
+
+/**
+ * `milestone` and `time_material` are declared and nothing acts on them: there
+ * is no milestone table and no hour logging, so both bill exactly as `fixed`
+ * does. They are here because the Mongo enum had them and the create form
+ * offers them; what makes them mean something is `contracts`.
+ */
+export const projectBillingModelEnum = pgEnum("project_billing_model", [
+  "fixed",
+  "milestone",
+  "time_material",
+]);
+
+/** A superseded budget WAS approved and keeps its approval stamp. */
+export const projectBudgetStatusEnum = pgEnum("project_budget_status", [
+  "draft",
+  "approved",
+  "superseded",
+]);
+
+export const projectAssignmentStatusEnum = pgEnum("project_assignment_status", [
+  "active",
+  "inactive",
+  "removed",
+]);
+
+export const projectRateUnitEnum = pgEnum("project_rate_unit", [
+  "hour",
+  "day",
+  "month",
+  "fixed",
+]);
+
+export const projectPartyTypeEnum = pgEnum("project_party_type", [
+  "employee",
+  "supplier",
+  "both",
+]);
+
+// ── Project tasks (0071) ─────────────────────────────────────────────────────
+
+/**
+ * `done` is 100% and 100% is `done` — a biconditional, enforced by
+ * `project_tasks_done_is_complete`. A leaf sitting at 100 that nobody marked
+ * done is the same lie as a summary typed to 90, pointing the other way.
+ *
+ * `cancelled` is not a kind of finished. It is excluded from the progress
+ * roll-up entirely: work called off is neither completed nor outstanding.
+ */
+export const projectTaskStatusEnum = pgEnum("project_task_status", [
+  "todo",
+  "in_progress",
+  "blocked",
+  "done",
+  "cancelled",
+]);

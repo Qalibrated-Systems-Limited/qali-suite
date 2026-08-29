@@ -6,7 +6,7 @@ import {
   CheckCircle2,
   TrendingUp,
 } from "lucide-react";
-import { getProjectStats } from "@/app/mongodb/queries/projectQueries";
+import { getProjectStats } from "@/app/db/actions/project-actions";
 
 function formatCurrency(amount) {
   return new Intl.NumberFormat("en-KE", {

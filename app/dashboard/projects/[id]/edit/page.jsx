@@ -1,7 +1,8 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
-import { getProjectById, getProjectsForParentPicker } from "@/app/mongodb/queries/projectQueries";
-import { searchParties, getUsers } from "@/app/mongodb/queries/partyQueries";
+import { getProjectById, getProjectsForParentPicker } from "@/app/db/actions/project-actions";
+import { searchParties } from "@/app/db/actions/party-actions";
+import { getUsers } from "@/app/db/actions/user-actions";
 import { PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
 import ProjectForm from "../../components/ProjectForm";
 

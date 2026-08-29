@@ -1,13 +1,18 @@
 /**
- * The pickers that still serve Mongo ObjectIds into Postgres uuid columns.
+ * The pickers that used to serve Mongo ObjectIds into Postgres columns.
  *
- * Bills, invoices and stock requests are on Postgres. PROJECTS and ASSETS are
- * not — so the pickers on those forms are fed by `getActiveProjects()` and an
- * `Asset.find()`, both of which return 24-character Mongo ObjectIds. Any
- * column typed `uuid` on the receiving end rejects them outright.
+ * This file began as the record of a trap: bills, invoices and stock requests
+ * were on Postgres while PROJECTS and ASSETS were not, so the pickers on those
+ * forms handed back 24-character Mongo ObjectIds and any `uuid` column on the
+ * receiving end rejected them outright. `employee_claims.project_id` avoided it
+ * by being `text` (0052); the rest were typed `text` in 0053/0054 for the same
+ * reason.
  *
- * This is the same trap `employee_claims.project_id` avoided by being `text`
- * (0052). These are the ones that did not.
+ * BOTH SIDES HAVE MOVED. Assets ported in 0056 and `bill_lines.asset_id`
+ * became a real foreign key in 0057; projects ported in 0070 and all five
+ * `project_id` columns went with them. So what this file asserts now is the
+ * opposite of what it was written to assert: the id must be a row in the
+ * register, and a made-up one is refused.
  *
  * Skipped unless DATABASE_URL is set.
  */
@@ -32,7 +37,7 @@ const { invoiceDataSchema, toRepositoryInput } = await import(
   "@/app/db/validation/invoices"
 );
 
-/** What `getActiveProjects()` and the asset picker actually hand back. */
+/** What those pickers used to hand back, and what no column accepts now. */
 const MONGO_OBJECT_ID = "507f1f77bcf86cd799439011";
 
 suite("Mongo picker ids reaching Postgres columns", () => {
@@ -117,14 +122,26 @@ suite("Mongo picker ids reaching Postgres columns", () => {
     ...(extra.header ?? {}),
   });
 
+  /** A real project, since the columns are foreign keys now. */
+  const seedProject = async () => {
+    const id = randomUUID();
+    await asTenant(companyA, (tx) =>
+      tx.execute(sql`
+        INSERT INTO projects (id, company_id, project_number, name)
+        VALUES (${id}::uuid, ${companyA}::uuid, 'PRJ-00001', 'Otho Road')`),
+    );
+    return id;
+  };
+
   it("an invoice tagged to a project keeps the link", async () => {
     // CreateInvoiceForm puts projectId in the JSON payload it posts. Until
     // 0054 there was no column and no schema field, so the link was dropped
     // in silence — the save succeeded and the project was simply gone.
+    const project = await seedProject();
     const parsed = invoiceDataSchema.safeParse({
       customerId: customer,
       invoiceDate: "2026-08-10",
-      projectId: MONGO_OBJECT_ID,
+      projectId: project,
       stockItems: [
         {
           productId: widget,
@@ -137,7 +154,7 @@ suite("Mongo picker ids reaching Postgres columns", () => {
       serviceItems: [],
     });
     expect(parsed.success).toBe(true);
-    expect(parsed.data.projectId).toBe(MONGO_OBJECT_ID);
+    expect(parsed.data.projectId).toBe(project);
 
     const invoice = await asTenant(companyA, (tx) =>
       invoicesRepo.createInvoice(tx, {
@@ -148,35 +165,54 @@ suite("Mongo picker ids reaching Postgres columns", () => {
 
     const [row] = await admin`
       SELECT project_id FROM invoices WHERE id = ${invoice.id}::uuid`;
-    expect(row.project_id).toBe(MONGO_OBJECT_ID);
+    expect(row.project_id).toBe(project);
   });
 
   it("a stock request tagged to a project keeps the link", async () => {
     // The column has existed since 0020 and mapRequest already reads it back
     // out; nothing ever wrote it, so it rendered NULL from the day it shipped.
+    const project = await seedProject();
     const request = await asTenant(companyA, (tx) =>
       fulfilmentRepo.createStockRequest(tx, {
         companyId: companyA,
         requestType: "internal",
         requesterName: "Sam Stores",
         requesterDepartment: "Technical",
-        projectId: MONGO_OBJECT_ID,
+        projectId: project,
         items: [{ productId: widget, requestedQuantity: "3.0000", unitPrice: "0.0000" }],
       }),
     );
 
     const [row] = await admin`
       SELECT project_id FROM stock_requests WHERE id = ${request.id}::uuid`;
-    expect(row.project_id).toBe(MONGO_OBJECT_ID);
+    expect(row.project_id).toBe(project);
   });
 
   it("a bill tagged to a project saves", async () => {
-    // The bill form ships a ProjectPicker fed by getActiveProjects(), which
-    // returns Mongo ObjectIds. bills.project_id must accept one.
+    const project = await seedProject();
     const bill = await asTenant(companyA, (tx) =>
-      billsRepo.createBill(tx, billInput({ header: { projectId: MONGO_OBJECT_ID } })),
+      billsRepo.createBill(tx, billInput({ header: { projectId: project } })),
     );
-    expect(bill.projectId).toBe(MONGO_OBJECT_ID);
+    expect(bill.projectId).toBe(project);
+  });
+
+  it("refuses a Mongo ObjectId where a project used to be accepted", async () => {
+    // 0053's own words: "a uuid column rejected every bill the project picker
+    // touched", which is why these were text. The picker serves uuids now, so
+    // the column says what the value is and the old id cannot get in.
+    await expect(
+      asTenant(companyA, (tx) =>
+        billsRepo.createBill(tx, billInput({ header: { projectId: MONGO_OBJECT_ID } })),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a project that is not in the register", async () => {
+    await expect(
+      asTenant(companyA, (tx) =>
+        billsRepo.createBill(tx, billInput({ header: { projectId: randomUUID() } })),
+      ),
+    ).rejects.toThrow();
   });
 
   it("a bill line tagged to a fixed asset points at the register", async () => {

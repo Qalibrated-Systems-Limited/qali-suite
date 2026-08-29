@@ -432,7 +432,12 @@ export async function getFinancialOverview() {
             AND entry_date <  (SELECT this_start FROM period)
         ), 0)::numeric(19,4) AS expense_prev,
         COALESCE(SUM(debit - credit) FILTER (WHERE sub_type = 'cash'), 0)::numeric(19,4) AS cash_only,
-        COALESCE(SUM(debit - credit) FILTER (WHERE sub_type = 'bank'), 0)::numeric(19,4) AS bank_only
+        COALESCE(SUM(debit - credit) FILTER (WHERE sub_type = 'bank'), 0)::numeric(19,4) AS bank_only,
+        -- M-PESA IS CASH. lib/chart-of-accounts.js seeds account 1113 with
+        -- sub-type mpesa and this query counted cash and bank only, so
+        -- the money position on every dashboard reading it was short by the
+        -- whole float. In this market that is not a rounding difference.
+        COALESCE(SUM(debit - credit) FILTER (WHERE sub_type = 'mpesa'), 0)::numeric(19,4) AS mpesa_only
       FROM movement
     `)) as unknown as Array<Record<string, unknown>>;
 
@@ -442,6 +447,7 @@ export async function getFinancialOverview() {
     const expensesPrev = int(row.expense_prev);
     const cashOnly = int(row.cash_only);
     const bankOnly = int(row.bank_only);
+    const mpesaOnly = int(row.mpesa_only);
 
     // Against a zero base a percentage is undefined, not infinite — the Mongo
     // version returned 0 and the tiles render it as "no change".
@@ -455,7 +461,11 @@ export async function getFinancialOverview() {
         current: revenue - expenses,
         trend: pct(revenue - expenses, revenuePrev - expensesPrev),
       },
-      cash: { balance: cashOnly + bankOnly, cashOnly, bankOnly },
+      // `mpesaOnly` is ADDED to the shape rather than folded into `cashOnly`,
+      // so the hint under the tile can still account for the balance it sits
+      // beneath. A caller that ignores it now reports a balance bigger than
+      // its own breakdown, which is why CFODashboard's hint moved with it.
+      cash: { balance: cashOnly + bankOnly + mpesaOnly, cashOnly, bankOnly, mpesaOnly },
     };
   });
 }

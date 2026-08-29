@@ -180,6 +180,69 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
     "A return that has been submitted must carry the figures it was submitted with.",
   petty_cash_returns_totals_non_negative:
     "A return's totals cannot be negative.",
+
+  // ── Projects (0070) ───────────────────────────────────────────────────────
+  projects_company_number_idx: "A project with that number already exists.",
+  projects_name_not_blank: "A project needs a name.",
+  projects_progress_in_range: "Progress is a percentage between 0 and 100.",
+  projects_amounts_non_negative: "A budget or contract value cannot be negative.",
+  projects_client_pair:
+    "A project's client is a customer, chosen from the list — not a name typed in.",
+  projects_client_email_needs_a_client:
+    "A client email belongs to a client. Choose the customer first.",
+  projects_manager_pair:
+    "A project with a project manager needs that person's name on it.",
+  projects_dates_ordered: "The end date cannot fall before the start date.",
+  projects_actual_end_needs_an_end:
+    "Only a completed or closed project has an actual end date.",
+  projects_not_own_parent: "A project cannot be its own parent.",
+  project_budgets_version_idx:
+    "That budget version already exists for this project.",
+  project_budgets_one_approved:
+    "This project already has an approved budget. Supersede it first.",
+  project_budgets_approval_pair:
+    "A draft budget carries no approval, and an approved one must.",
+  project_budgets_approver_pair: "An approved budget must name its approver.",
+  project_budget_lines_one_per_account:
+    "That account is already on this budget. Use one line per account and split the detail with cost codes.",
+  project_budget_lines_amount_non_negative:
+    "A budget line cannot be negative.",
+  project_cost_codes_company_code_idx:
+    "A company-wide cost code with that code already exists.",
+  project_cost_codes_project_code_idx:
+    "That project already has a cost code with that code.",
+  project_cost_codes_code_not_blank: "A cost code needs a code.",
+  project_cost_codes_name_not_blank: "A cost code needs a name.",
+  project_assignments_party_once:
+    "That person is already on this project's roster.",
+  project_assignments_rate_pair:
+    "A rate needs both an amount and a unit, or neither.",
+  project_assignments_rate_non_negative: "A rate cannot be negative.",
+  project_assignments_removal_pair:
+    "A removed assignment carries the date it was removed.",
+
+  // ── The work breakdown (0071) ─────────────────────────────────────────────
+  project_tasks_title_not_blank: "A task needs a title.",
+  project_tasks_progress_in_range: "Progress is a percentage between 0 and 100.",
+  project_tasks_hours_non_negative: "Estimated hours cannot be negative.",
+  project_tasks_weight_positive:
+    "A task's weight must be more than zero — a zero-weight task counts for nothing.",
+  project_tasks_planned_dates_ordered:
+    "The planned finish cannot fall before the planned start.",
+  project_tasks_actual_dates_ordered:
+    "The actual finish cannot fall before the actual start.",
+  project_tasks_assignee_pair:
+    "A task assigned to somebody needs that person's name on it.",
+  project_tasks_done_is_complete:
+    "A task is done at 100% and only at 100%. Set the percentage and the status together.",
+  project_tasks_todo_has_not_started:
+    "A task nobody has started has no progress and no start date.",
+  project_tasks_finished_has_ended:
+    "Only a task that is done or cancelled carries a finish date.",
+  project_tasks_not_own_parent: "A task cannot be its own parent.",
+  project_tasks_parent_same_project_fk:
+    "A subtask belongs to the same project as the task above it.",
+  project_tasks_id_project_uq: "That task already exists.",
 };
 
 interface PgLike {

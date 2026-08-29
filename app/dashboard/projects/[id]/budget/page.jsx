@@ -7,7 +7,7 @@ import { ArrowLeft } from "lucide-react";
 import {
   getProjectById,
   getProjectBudgets,
-} from "@/app/mongodb/queries/projectQueries";
+} from "@/app/db/actions/project-actions";
 import { getExpenseAccountsForCategories } from "@/app/db/actions/claim-actions";
 import {
   PROJECT_MANAGE_ROLES,

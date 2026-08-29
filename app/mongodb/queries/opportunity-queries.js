@@ -98,6 +98,36 @@ export const cPipeline = cache(async () => {
 });
 
 /**
+ * Open pipeline value and deal count — the executive headline.
+ *
+ * NOT `cPipeline().totals`. That query caps its working set at 250 rows for
+ * the board, which is right for a board and wrong for a total: a company with
+ * 300 open deals would show the value of 250 of them, and nothing on the page
+ * would say so. This aggregates in the database, so there is no cap to exceed.
+ *
+ * Still Mongo, and legitimately so — the CRM has not been ported. It is the
+ * one figure on the executive overview that does not come from the ledger.
+ */
+export const cPipelineTotal = cache(async () => {
+  try {
+    await dbConnect();
+    const { companyId, isSuperAdmin } = await getTenantContext();
+
+    const [row] = await Opportunity.aggregate([
+      { $match: withTenantScope({ stage: { $in: OPEN_STAGES } }, companyId, isSuperAdmin) },
+      { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } },
+    ]);
+
+    return { total: row?.total || 0, count: row?.count || 0 };
+  } catch (error) {
+    // Degrades rather than taking the whole overview down with it — the other
+    // seven numbers come from a different database entirely.
+    console.error("cPipelineTotal error:", error);
+    return { total: 0, count: 0 };
+  }
+});
+
+/**
  * A single opportunity by id, fully serialized for the detail page —
  * including stage history (for the velocity trail), close details, and
  * lead provenance. Returns null if not found in the caller's tenant.

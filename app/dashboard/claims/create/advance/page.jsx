@@ -1,29 +1,22 @@
 import { auth } from "@/auth";
 import { AdvanceRequestForm } from "../../components/AdvanceRequestForm";
-import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
+import { getActiveProjects } from "@/app/db/actions/project-actions";
 import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
-import dbConnect from "@/app/config/dbConnect";
-import User from "@/app/models/user";
-import { getTenantContext, tenantFilter } from "@/lib/utils/tenant-utils";
+import { getUsers } from "@/app/db/actions/user-actions";
 
 export const dynamic = "force-dynamic";
 
 // Finance roles can record an advance ON BEHALF of an employee — the
 // fix for "manual" advances that used to bypass the system entirely.
+// Postgres since 0070. This read the Mongo `users` collection, which auth
+// stopped writing to when it ported — so the on-behalf picker has been empty
+// for every finance user, and the "manual advances that bypass the system"
+// this feature exists to stop went on bypassing it.
 async function getOnBehalfOptions(role) {
   if (!FINANCE_WRITE_ROLES.includes(role)) return [];
-  await dbConnect();
-  const { companyId, isSuperAdmin } = await getTenantContext();
-  const users = await User.find({
-    ...tenantFilter(companyId, isSuperAdmin),
-    status: "Active",
-  })
-    .select("name email role")
-    .sort({ name: 1 })
-    .limit(200)
-    .lean();
+  const users = await getUsers();
   return users.map((u) => ({
-    _id: u._id.toString(),
+    _id: u._id,
     name: u.name,
     email: u.email || "",
     role: u.role,

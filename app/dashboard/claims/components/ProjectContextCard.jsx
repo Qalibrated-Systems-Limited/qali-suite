@@ -11,7 +11,7 @@ import {
   getProjectById,
   getProjectFinancialSummary,
   getProjectBudgetVsActual,
-} from "@/app/mongodb/queries/projectQueries";
+} from "@/app/db/actions/project-actions";
 
 function fmt(amount) {
   return new Intl.NumberFormat("en-KE", {

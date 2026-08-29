@@ -16,6 +16,7 @@ import { companies } from "./companies";
 import { assets } from "./assets";
 import { products } from "./products";
 import { journalEntries } from "./journal";
+import { projects, projectCostCodes } from "./projects";
 import {
   billStatusEnum,
   billLineAccountTypeEnum,
@@ -168,15 +169,21 @@ export const bills = pgTable(
      */
     purchaseOrderId: uuid("purchase_order_id"),
     purchaseOrderNumberAtBill: text("purchase_order_number_at_bill"),
-    /**
-     * text, not uuid — 0053. Projects are not ported, so this holds a Mongo
-     * ObjectId, and a uuid column rejected every bill the project picker
-     * touched. Becomes a uuid with a foreign key when projects move.
-     */
-    projectId: text("project_id"),
+    /** A real reference since 0070 — see `projects.project_id` there. */
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
     projectNumberAtBill: text("project_number_at_bill"),
     projectNameAtBill: text("project_name_at_bill"),
-    costCodeId: uuid("cost_code_id"),
+    /**
+     * This was ALREADY uuid while claims, expenses and stock requests had it
+     * as text — so the bill form's cost code picker, which posted a Mongo
+     * ObjectId, threw `invalid input syntax for type uuid` on every bill
+     * anybody tagged. The column was right; the picker feeding it was not.
+     */
+    costCodeId: uuid("cost_code_id").references(() => projectCostCodes.id, {
+      onDelete: "set null",
+    }),
     costCodeAtBill: text("cost_code_at_bill"),
     costCodeNameAtBill: text("cost_code_name_at_bill"),
 

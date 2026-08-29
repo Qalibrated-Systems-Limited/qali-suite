@@ -24,10 +24,13 @@ import {
   getProjectTransactions,
   getSubprojects,
   getProjectAssignments,
-} from "@/app/mongodb/queries/projectQueries";
-import { getEmployees, getSuppliers } from "@/app/mongodb/queries/partyQueries";
+  getProjectTasks,
+  getProjectProgress,
+} from "@/app/db/actions/project-actions";
+import { getEmployees, getSuppliers } from "@/app/db/actions/party-actions";
 import ProjectStatusActions from "../components/ProjectStatusActions";
 import ProjectTeam from "../components/ProjectTeam";
+import ProjectTasks from "../components/ProjectTasks";
 import { FormBanner } from "@/components/ui/form-banner";
 
 // Roles allowed to manage the project team — mirrors the server action gate.
@@ -97,6 +100,38 @@ async function TeamCard({ projectId, canManage }) {
       members={members}
       parties={parties}
       canManage={canManage}
+    />
+  );
+}
+
+// ============================================
+// WORK BREAKDOWN (0071)
+// ============================================
+// The percentage on the info card above comes from here whenever there is a
+// task to take it from — see 0071 decision 1. A closed project's WBS is
+// read-only for the same reason its fields are.
+async function TasksCard({ projectId, canManage, readOnly }) {
+  // The assignee list is THE ROSTER, not every party in the company: a task
+  // should be given to somebody who is on the project. `project_assignments`
+  // already says who that is.
+  const [tasks, progress, members] = await Promise.all([
+    getProjectTasks(projectId),
+    getProjectProgress(projectId),
+    getProjectAssignments(projectId),
+  ]);
+  const assignees = (members || [])
+    .filter((m) => m.status === "active")
+    .map((m) => ({ _id: m.party?.partyId, name: m.party?.name }))
+    .filter((a) => a._id && a.name);
+
+  return (
+    <ProjectTasks
+      projectId={projectId}
+      tasks={tasks}
+      progress={progress}
+      assignees={assignees}
+      canManage={canManage}
+      readOnly={readOnly}
     />
   );
 }
@@ -748,8 +783,11 @@ export default async function ProjectDetailPage({ params, searchParams }) {
           </div>
         )}
 
-        {/* Progress */}
-        {project.progressPercent > 0 && (
+        {/* Progress — earned from the WBS where there is one, typed where
+            there is not (0071 decision 1). Saying WHICH matters: a number
+            somebody dragged a slider to and a number rolled up from measured
+            work look identical on a bar, and only one of them is evidence. */}
+        {(project.progressPercent > 0 || project.progress?.source === "tasks") && (
           <div className="pt-3 border-t space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Progress</span>
@@ -761,6 +799,13 @@ export default async function ProjectDetailPage({ params, searchParams }) {
                 style={{ width: `${project.progressPercent}%` }}
               />
             </div>
+            <p className="text-xs text-muted-foreground">
+              {project.progress?.source === "tasks"
+                ? `Earned across ${project.progress.taskCount} task${
+                    project.progress.taskCount === 1 ? "" : "s"
+                  } — ${project.progress.doneCount} done`
+                : "Entered by hand. Add tasks and this becomes the weighted progress of the work."}
+            </p>
           </div>
         )}
 
@@ -846,6 +891,22 @@ export default async function ProjectDetailPage({ params, searchParams }) {
         <FinancialSummaryCard
           projectId={id}
           budget={project.budget}
+        />
+      </Suspense>
+
+      {/* Work breakdown */}
+      <Suspense
+        fallback={
+          <Card className="p-6 animate-pulse">
+            <div className="h-6 w-40 bg-muted rounded mb-4" />
+            <div className="h-24 w-full bg-muted rounded" />
+          </Card>
+        }
+      >
+        <TasksCard
+          projectId={id}
+          canManage={canManageTeam}
+          readOnly={project.status === "closed"}
         />
       </Suspense>
 

@@ -9,7 +9,7 @@ import { Users, Plus, X, Loader2 } from "lucide-react";
 import {
   assignPartyToProject,
   removePartyFromProject,
-} from "@/app/mongodb/actions/project-assignment-actions";
+} from "@/app/db/actions/project-actions";
 import { toast } from "sonner";
 
 const RATE_UNITS = ["day", "hour", "month", "fixed"];

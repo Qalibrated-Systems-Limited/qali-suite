@@ -18,6 +18,7 @@ import { parties } from "./parties";
 import { products } from "./products";
 import { accounts } from "./accounts";
 import { journalEntries } from "./journal";
+import { projects, projectCostCodes } from "./projects";
 import {
   stockRequestTypeEnum,
   stockRequestStatusEnum,
@@ -134,14 +135,15 @@ export const stockRequests = pgTable(
       withTimezone: true,
     }),
 
-    /**
-     * Deferred references — `projects` is not ported. See bills.project_id.
-     * text, not uuid (0054): the value is a Mongo ObjectId until projects move.
-     */
-    projectId: text("project_id"),
+    /** Real references since 0070. See bills.project_id. */
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
     projectNumberAtRequest: text("project_number_at_request"),
     projectNameAtRequest: text("project_name_at_request"),
-    costCodeId: text("cost_code_id"),
+    costCodeId: uuid("cost_code_id").references(() => projectCostCodes.id, {
+      onDelete: "set null",
+    }),
     costCodeAtRequest: text("cost_code_at_request"),
 
     createdById: text("created_by_id"),

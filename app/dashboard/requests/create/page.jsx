@@ -9,7 +9,7 @@ import { IconArrowLeft, IconClipboardList } from "@tabler/icons-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CreateStockRequestForm } from "../components/CreateRequestForm";
-import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
+import { getActiveProjects } from "@/app/db/actions/project-actions";
 
 export const metadata = {
   title: "Create Stock Request",

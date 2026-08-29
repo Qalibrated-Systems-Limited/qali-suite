@@ -112,7 +112,10 @@ function VendorCombobox({ vendors = [], employees = [], defaultValue, error, onV
 
     const formData = new FormData(e.target);
     formData.set("type", "supplier");
-    const { quickCreateParty } = await import("@/app/mongodb/actions/party-actions");
+    // Postgres since 0070: this created the vendor in Mongo while every
+    // supplier picker on the page reads Postgres, so a vendor added here
+    // vanished from the dropdown that had just been used to add it.
+    const { quickCreateParty } = await import("@/app/db/actions/party-actions");
     const result = await quickCreateParty(formData);
 
     if (result.success) {

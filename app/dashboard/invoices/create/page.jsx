@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { INVOICE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { redirect } from "next/navigation";
 import { getInvoiceFormData } from "@/app/db/actions/invoice-actions";
-import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
+import { getActiveProjects } from "@/app/db/actions/project-actions";
 import CreateInvoiceFormClient from "../components/CreateInvoiceForm";
 
 export default async function CreateInvoicePage() {

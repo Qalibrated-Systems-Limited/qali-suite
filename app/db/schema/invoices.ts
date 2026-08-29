@@ -17,6 +17,7 @@ import { parties } from "./parties";
 import { products } from "./products";
 import { journalEntries } from "./journal";
 import { stockRequests, itemCheckouts, weighbridgeTickets } from "./fulfilment";
+import { projects } from "./projects";
 import {
   invoiceStatusEnum,
   paymentStatusEnum,
@@ -67,9 +68,15 @@ export const invoices = pgTable(
      * posted a `projectId` since it was written and there was no column to put
      * it in, so every link a user picked was dropped on the way in.
      *
-     * text, not uuid — projects are not ported, so this is a Mongo ObjectId.
+     * A real reference since 0070. It was `text` because a project id was a
+     * Mongo ObjectId and no uuid column would accept one; projects are a table
+     * here now, so the column says what it is. `set null` on delete —
+     * `deleteProjectPg` refuses while anything is linked, and deleting a
+     * project must never delete an invoice.
      */
-    projectId: text("project_id"),
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
     projectNumberAtInvoice: text("project_number_at_invoice"),
     projectNameAtInvoice: text("project_name_at_invoice"),
     title: text("title"),

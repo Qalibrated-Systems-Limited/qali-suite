@@ -379,3 +379,37 @@ export async function getSuppliers(activeOnly = true) {
     partiesRepo.listParties(tx, { role: "supplier", activeOnly, limit: 200 }),
   );
 }
+
+export async function getEmployees(activeOnly = true) {
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = await partiesRepo.listParties(tx, {
+      role: "employee",
+      activeOnly,
+      limit: 200,
+    });
+    return rows.map((r) => ({ ...r, _id: r.id }));
+  });
+}
+
+/**
+ * The name-and-id picker feed — 0070.
+ *
+ * The Mongo twin reads the `parties` collection, which nothing has written to
+ * since parties ported, so every client and PM dropdown built on it has been
+ * empty. `_id` rides alongside `id` because the pickers key on it.
+ */
+export async function searchParties(
+  searchTerm = "",
+  type: "customer" | "supplier" | "employee" | null = null,
+  limit = 50,
+) {
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = await partiesRepo.listParties(tx, {
+      role: type ?? undefined,
+      search: searchTerm || undefined,
+      activeOnly: true,
+      limit,
+    });
+    return rows.map((r) => ({ ...r, _id: r.id }));
+  });
+}

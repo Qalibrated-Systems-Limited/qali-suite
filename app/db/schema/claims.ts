@@ -18,6 +18,7 @@ import { users } from "./users";
 import { payments } from "./payments";
 import { journalEntries } from "./journal";
 import { employeeClaimTypeEnum, employeeClaimStatusEnum } from "./enums";
+import { projects, projectCostCodes } from "./projects";
 
 const money = (name: string) =>
   numeric(name, { precision: 19, scale: 4, mode: "string" });
@@ -83,20 +84,20 @@ export const employeeClaims = pgTable(
     }),
 
     /**
-     * Deferred references — projects are not ported (§10), so these carry the
-     * value without a foreign key rather than dropping it. Same treatment
-     * bills gave purchase_order_id in 0015.
-     *
-     * `text`, not `uuid`. A project id today is a Mongo ObjectId — 24 hex
-     * characters — which no uuid column accepts, so typing it as uuid would
-     * have rejected every claim linked through the project picker the create
-     * form already ships. When projects move, this becomes a uuid with a
-     * foreign key; until then the column says what the value is.
+     * Deferred until 0070, and no longer deferred. These were `text` because a
+     * project id was a Mongo ObjectId — 24 hex characters — which no uuid
+     * column accepts, so typing them as uuid would have rejected every claim
+     * linked through the project picker the create form already shipped.
+     * Projects moved, so the columns say what they are.
      */
-    projectId: text("project_id"),
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
     projectNumber: text("project_number"),
     projectName: text("project_name"),
-    costCodeId: text("cost_code_id"),
+    costCodeId: uuid("cost_code_id").references(() => projectCostCodes.id, {
+      onDelete: "set null",
+    }),
     costCodeCode: text("cost_code_code"),
     costCodeName: text("cost_code_name"),
 

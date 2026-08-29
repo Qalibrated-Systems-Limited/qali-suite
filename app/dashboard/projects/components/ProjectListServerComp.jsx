@@ -1,4 +1,4 @@
-import { searchProjects } from "@/app/mongodb/queries/projectQueries";
+import { searchProjects } from "@/app/db/actions/project-actions";
 import ProjectListWithFilters from "./ProjectListWithFilters";
 
 export default async function ProjectListServerComp({ params }) {

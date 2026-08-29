@@ -5,7 +5,7 @@ import {
   getInvoiceDetailPg,
   getInvoiceFormData,
 } from "@/app/db/actions/invoice-actions";
-import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
+import { getActiveProjects } from "@/app/db/actions/project-actions";
 import EditInvoiceFormClient from "../../components/EditInvoiceForm";
 
 export default async function EditInvoicePage({ params }) {

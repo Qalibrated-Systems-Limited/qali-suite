@@ -3,7 +3,7 @@ import { ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ExpenseForm from "../components/ExpenseForm";
 import { getExpenseFormData } from "@/app/db/actions/expense-actions";
-import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
+import { getActiveProjects } from "@/app/db/actions/project-actions";
 
 export const metadata = {
   title: "Create Expense | ERP",

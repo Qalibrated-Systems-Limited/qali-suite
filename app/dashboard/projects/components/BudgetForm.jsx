@@ -12,7 +12,7 @@ import {
   createProjectBudget,
   updateProjectBudget,
   approveProjectBudget,
-} from "@/app/mongodb/actions/project-actions";
+} from "@/app/db/actions/project-actions";
 import { toast } from "sonner";
 import ExpenseAccountCombobox from "@/components/expense-account-combobox";
 

@@ -18,6 +18,7 @@ import { parties } from "./parties";
 import { assets } from "./assets";
 import { journalEntries } from "./journal";
 import { users } from "./users";
+import { projects, projectCostCodes } from "./projects";
 import {
   expenseStatusEnum,
   expenseCategoryEnum,
@@ -125,11 +126,15 @@ export const expenses = pgTable(
     notes: text("notes"),
 
     // ── Optional links ──────────────────────────────────────────────────────
-    /** `text`, not uuid: a Mongo ObjectId until projects are ported (0053/0054). */
-    projectId: text("project_id"),
+    /** Real references since 0070; `text` until then, holding a Mongo ObjectId. */
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
     projectNumberAtExpense: text("project_number_at_expense"),
     projectNameAtExpense: text("project_name_at_expense"),
-    costCodeId: text("cost_code_id"),
+    costCodeId: uuid("cost_code_id").references(() => projectCostCodes.id, {
+      onDelete: "set null",
+    }),
     costCodeAtExpense: text("cost_code_at_expense"),
     /**
      * A real uuid FK. Fixed assets moved in 0056 and bills' link became real

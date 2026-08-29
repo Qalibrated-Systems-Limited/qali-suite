@@ -3,6 +3,7 @@
 import { withAuthorizedTenant, FINANCE_ROLES } from "../tenant";
 import * as reportQueries from "../repositories/reportQueries";
 import { coerceDayString } from "@/lib/utils/report-dates";
+import { EXECUTIVE_VIEW_ROLES } from "@/lib/utils/role-gates";
 import type {
   TrialBalanceReport,
   GeneralLedgerReport,
@@ -143,6 +144,23 @@ export async function getBalanceSheetDataPg(asOfDate: string) {
   return report("Balance Sheet", () =>
     withAuthorizedTenant(FINANCE_ROLES, (tx) =>
       reportQueries.getBalanceSheet(tx, asOf),
+    ),
+  );
+}
+
+/**
+ * The executive overview's seven numbers.
+ *
+ * Gated on EXECUTIVE_VIEW_ROLES rather than FINANCE_ROLES. `Viewer` is what
+ * CEO became (0039) and this screen is that role's home — a finance gate would
+ * lock out the one person it was built for, and `withAuthorizedTenant` throws
+ * rather than degrading, so the page would have shown its "could not load"
+ * message to the CEO and to nobody else.
+ */
+export async function getExecutiveSnapshotPg() {
+  return report("Executive snapshot", () =>
+    withAuthorizedTenant([...EXECUTIVE_VIEW_ROLES], (tx) =>
+      reportQueries.getExecutiveSnapshot(tx),
     ),
   );
 }

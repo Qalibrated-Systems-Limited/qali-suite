@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { canSeeProjectsNav } from "@/lib/permissions";
-import { fetchProjectPages } from "@/app/mongodb/queries/projectQueries";
+import { fetchProjectPages } from "@/app/db/actions/project-actions";
 import Pagination from "@/components/pagination";
 import { Suspense } from "react";
 import Link from "next/link";

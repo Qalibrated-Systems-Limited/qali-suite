@@ -32,7 +32,7 @@ import { ArrowLeft, Loader2, Save, ChevronsUpDown, Check } from "lucide-react";
 import {
   createProject,
   updateProject,
-} from "@/app/mongodb/actions/project-actions";
+} from "@/app/db/actions/project-actions";
 import { cn } from "@/lib/utils";
 
 function PartyCombobox({ value, onValueChange, parties, placeholder, label }) {
@@ -120,7 +120,6 @@ export default function ProjectForm({
   const [clientPartyId, setClientPartyId] = useState(
     project?.client?.partyId || "",
   );
-  const [clientName, setClientName] = useState(project?.client?.name || "");
   const [pmUserId, setPmUserId] = useState(
     project?.projectManager?.userId || "",
   );
@@ -161,9 +160,12 @@ export default function ProjectForm({
 
       {/* Form */}
       <form action={formAction}>
-        {/* Hidden fields for combobox values */}
+        {/* Hidden fields for combobox values.
+            NO `clientName` — 0072. The action reads the client's name and
+            email from `parties`, so the form posts the id and nothing else;
+            a name in the body was a name nothing checked against the id
+            beside it. */}
         <input type="hidden" name="clientPartyId" value={clientPartyId} />
-        <input type="hidden" name="clientName" value={clientName} />
         <input type="hidden" name="projectManagerUserId" value={pmUserId} />
         <input type="hidden" name="projectManagerName" value={pmName} />
         <input type="hidden" name="parentProjectId" value={parentProjectId} />
@@ -216,14 +218,15 @@ export default function ProjectForm({
               <Label>Client</Label>
               <PartyCombobox
                 value={clientPartyId}
-                onValueChange={(id, name) => {
-                  setClientPartyId(id);
-                  setClientName(name);
-                }}
+                onValueChange={(id) => setClientPartyId(id)}
                 parties={clients}
-                placeholder="Select client..."
-                label="clients"
+                placeholder="Select customer..."
+                label="customers"
               />
+              <p className="text-xs text-muted-foreground">
+                A project&apos;s client is a customer. Add them under Parties
+                first if they are not on the list.
+              </p>
             </div>
 
             <div className="space-y-2">

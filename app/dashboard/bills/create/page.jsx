@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import BillForm from "../components/BillForm";
 import { getBillFormData } from "@/app/db/actions/bill-actions";
 import { getAssets } from "@/app/db/actions/asset-actions";
-import { getActiveProjects } from "@/app/mongodb/queries/projectQueries";
+import { getActiveProjects } from "@/app/db/actions/project-actions";
 
 // ============================================
 // METADATA

@@ -97,10 +97,12 @@ async function FinancialOverview() {
   const overview = await cFinancialOverview();
   const cards = [
     {
-      label: "Cash & bank",
+      // M-Pesa joined the balance, so it joins the breakdown under it —
+      // otherwise the hint stops adding up to the number it explains.
+      label: "Cash, bank & M-Pesa",
       value: `KES ${formatCompact(overview.cash.balance)}`,
       icon: Wallet,
-      hint: `Cash ${formatCompact(overview.cash.cashOnly)} · Bank ${formatCompact(overview.cash.bankOnly)}`,
+      hint: `Cash ${formatCompact(overview.cash.cashOnly)} · Bank ${formatCompact(overview.cash.bankOnly)} · M-Pesa ${formatCompact(overview.cash.mpesaOnly)}`,
       tone: "primary" as const,
     },
     {

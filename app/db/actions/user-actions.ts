@@ -302,3 +302,19 @@ export async function getDepartmentsPg() {
 export async function getCompanyUsersPg() {
   return withAuthorizedTenant([], (tx) => usersRepo.listCompanyUsers(tx));
 }
+
+/**
+ * The user picker's feed — 0070.
+ *
+ * `partyQueries.getUsers()` reads the Mongo `users` collection, which stopped
+ * being written to when auth ported, so the project manager dropdown has been
+ * empty since. `_id` alongside `id` because the picker keys on it.
+ */
+export async function getUsers() {
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = await usersRepo.listCompanyUsers(tx);
+    return rows
+      .filter((u) => (u as { status?: string }).status !== "Inactive")
+      .map((u) => ({ ...u, _id: u.id }));
+  });
+}

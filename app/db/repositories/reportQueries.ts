@@ -491,3 +491,167 @@ export async function getBalanceSheet(tx: Tx, asOfDate: string) {
     source: "postgres" as const,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The executive snapshot
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ExecutiveFigure {
+  total: number;
+  count: number;
+}
+
+export interface ExecutiveSnapshot {
+  revenue: ExecutiveFigure & { prev: number };
+  expenses: ExecutiveFigure & { prev: number };
+  ar: ExecutiveFigure;
+  ap: ExecutiveFigure;
+  cash: ExecutiveFigure & { cashOnly: number; bankOnly: number; mpesaOnly: number };
+}
+
+/**
+ * Seven headline numbers for the executive overview, in one query.
+ *
+ * EVERY ONE OF THEM COMES FROM THE LEDGER, and that is the change. The Mongo
+ * snapshot summed DOCUMENTS — invoice totals, bill balances,
+ * `Account.cachedBalance` — which had three consequences:
+ *
+ * 1. It read four collections nothing writes to any more. Invoices, bills and
+ *    accounts are all on Postgres, so revenue, AR, AP and cash have reported
+ *    zero on the CEO's home screen since those modules ported.
+ *
+ * 2. THE HEADLINE DISAGREED WITH THE REPORT IT LINKS TO. Revenue was
+ *    `status IN ('sent', 'completed')`, and a SENT invoice posts nothing: only
+ *    completing one credits the revenue account. So the executive card
+ *    reported a bigger month than the P&L it drills into, by exactly the value
+ *    of what had been sent and not completed. Reading the ledger removes the
+ *    question — the tile IS the P&L's number.
+ *
+ * 3. Credit notes were never netted off. A ledger read gets that for free: a
+ *    credit note debits revenue, and `SUM(credit - debit)` is already net.
+ *
+ * `cachedBalance` deserves its own line. It is the same pattern as
+ * `parties.cachedBalance` and `products.quantityAvailable` — a stored number
+ * that can disagree with the ledger it summarises, and its own Mongo comment
+ * reads "Cached - NOT source of truth!".
+ *
+ * AR AND AP ARE DEFINED EXACTLY AS `getAgingReport` DEFINES THEM: open entries
+ * against the control account, by party type. The tile and the aging page it
+ * links to cannot disagree, because they are the same predicate.
+ *
+ * M-PESA IS CASH. The chart seeds account 1113 with sub-type `mpesa` and
+ * `getFinancialOverview` counts only `cash` and `bank`, so the main dashboard
+ * has been understating the money position by the whole M-Pesa float. In this
+ * market that is not a rounding difference.
+ */
+export async function getExecutiveSnapshot(tx: Tx): Promise<ExecutiveSnapshot> {
+  const [row] = (await tx.execute(sql`
+    WITH period AS (
+      SELECT date_trunc('month', CURRENT_DATE)::date                        AS this_start,
+             (date_trunc('month', CURRENT_DATE) - interval '1 month')::date AS last_start
+    ),
+    posted AS (
+      SELECT a.account_type,
+             a.sub_type,
+             a.system_account,
+             e.entry_date,
+             e.party_type,
+             e.is_fully_paid,
+             e.id AS entry_id,
+             l.debit,
+             l.credit
+        FROM journal_entries e
+        JOIN journal_lines l ON l.entry_id = e.id
+        JOIN accounts a ON a.id = l.account_id
+       WHERE e.status = 'posted'
+    )
+    SELECT
+      -- ── The flows, this month against last ─────────────────────────────
+      COALESCE(SUM(credit - debit) FILTER (
+        WHERE account_type = 'revenue'
+          AND entry_date >= (SELECT this_start FROM period)
+      ), 0)::float8                                              AS revenue_now,
+      COALESCE(SUM(credit - debit) FILTER (
+        WHERE account_type = 'revenue'
+          AND entry_date >= (SELECT last_start FROM period)
+          AND entry_date <  (SELECT this_start FROM period)
+      ), 0)::float8                                              AS revenue_prev,
+      COALESCE(SUM(debit - credit) FILTER (
+        WHERE account_type = 'expense'
+          AND entry_date >= (SELECT this_start FROM period)
+      ), 0)::float8                                              AS expense_now,
+      COALESCE(SUM(debit - credit) FILTER (
+        WHERE account_type = 'expense'
+          AND entry_date >= (SELECT last_start FROM period)
+          AND entry_date <  (SELECT this_start FROM period)
+      ), 0)::float8                                              AS expense_prev,
+
+      -- How many entries made up each, for the "N documents" subtitles.
+      COUNT(DISTINCT entry_id) FILTER (
+        WHERE account_type = 'revenue'
+          AND entry_date >= (SELECT this_start FROM period)
+      )::int                                                     AS revenue_count,
+      COUNT(DISTINCT entry_id) FILTER (
+        WHERE account_type = 'expense'
+          AND entry_date >= (SELECT this_start FROM period)
+      )::int                                                     AS expense_count,
+
+      -- ── The position ───────────────────────────────────────────────────
+      COALESCE(SUM(debit - credit) FILTER (WHERE sub_type = 'cash'), 0)::float8   AS cash_only,
+      COALESCE(SUM(debit - credit) FILTER (WHERE sub_type = 'bank'), 0)::float8   AS bank_only,
+      COALESCE(SUM(debit - credit) FILTER (WHERE sub_type = 'mpesa'), 0)::float8  AS mpesa_only,
+
+      -- Open items against the control accounts — the same predicate
+      -- getAgingReport uses, so the tile and the aging page agree.
+      COALESCE(SUM(debit - credit) FILTER (
+        WHERE system_account = 'accounts_receivable'
+          AND is_fully_paid = false AND party_type = 'customer'
+      ), 0)::float8                                              AS ar_total,
+      COUNT(DISTINCT entry_id) FILTER (
+        WHERE system_account = 'accounts_receivable'
+          AND is_fully_paid = false AND party_type = 'customer'
+      )::int                                                     AS ar_count,
+      COALESCE(SUM(credit - debit) FILTER (
+        WHERE system_account = 'accounts_payable'
+          AND is_fully_paid = false AND party_type = 'supplier'
+      ), 0)::float8                                              AS ap_total,
+      COUNT(DISTINCT entry_id) FILTER (
+        WHERE system_account = 'accounts_payable'
+          AND is_fully_paid = false AND party_type = 'supplier'
+      )::int                                                     AS ap_count,
+
+      -- The count of money accounts is a fact about the CHART, not about the
+      -- postings — a bank account opened and not yet used still exists.
+      (SELECT COUNT(*) FROM accounts
+        WHERE sub_type IN ('cash', 'bank', 'mpesa')
+          AND is_active IS NOT false)::int                        AS cash_count
+    FROM posted
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const n = (v: unknown) => Number(v ?? 0);
+  const cashOnly = n(row?.cash_only);
+  const bankOnly = n(row?.bank_only);
+  const mpesaOnly = n(row?.mpesa_only);
+
+  return {
+    revenue: {
+      total: n(row?.revenue_now),
+      count: n(row?.revenue_count),
+      prev: n(row?.revenue_prev),
+    },
+    expenses: {
+      total: n(row?.expense_now),
+      count: n(row?.expense_count),
+      prev: n(row?.expense_prev),
+    },
+    ar: { total: n(row?.ar_total), count: n(row?.ar_count) },
+    ap: { total: n(row?.ap_total), count: n(row?.ap_count) },
+    cash: {
+      total: cashOnly + bankOnly + mpesaOnly,
+      count: n(row?.cash_count),
+      cashOnly,
+      bankOnly,
+      mpesaOnly,
+    },
+  };
+}

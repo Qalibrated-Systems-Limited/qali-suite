@@ -17,10 +17,23 @@ import { sql } from "drizzle-orm";
  * shown a count. Twelve call sites had the same bug.
  */
 export function anyOf(values: readonly (string | number)[], cast: string) {
-  return sql`ANY(ARRAY[${sql.join(
+  return sql`ANY(${arrayOf(values, cast)})`;
+}
+
+/**
+ * The array literal itself — `ARRAY[$1, $2]::uuid[]` — for the places that
+ * need one somewhere other than after `= ANY`.
+ *
+ * `unnest()` is the case that made this necessary: a batched query that turns
+ * a list of ids into rows to LEFT JOIN against cannot use `anyOf`, and
+ * inlining the array runs into the same tuple expansion documented above.
+ * `cast` includes the brackets, as it does for anyOf: `"uuid[]"`.
+ */
+export function arrayOf(values: readonly (string | number)[], cast: string) {
+  return sql`ARRAY[${sql.join(
     values.map((v) => sql`${v}`),
     sql`, `,
-  )}]::${sql.raw(cast)})`;
+  )}]::${sql.raw(cast)}`;
 }
 
 /**
