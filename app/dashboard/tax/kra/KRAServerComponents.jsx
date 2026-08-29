@@ -1,7 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileText, AlertTriangle, Clock, CheckCircle2 } from "lucide-react";
-import { getTaxSummary } from "@/app/mongodb/queries/taxQueries";
+import { getTaxSummaryPg } from "@/app/db/actions/tax-actions";
 
 const formatCurrency = (amount) => {
   return new Intl.NumberFormat("en-KE", {
@@ -13,7 +13,7 @@ const formatCurrency = (amount) => {
 };
 
 export async function KRAStatsCards() {
-  const summary = await getTaxSummary();
+  const summary = await getTaxSummaryPg();
 
   const totalUnfiled = (summary?.unfiled?.vat || 0) + (summary?.unfiled?.wht || 0);
   const totalFiled = (summary?.filed?.vat || 0) + (summary?.filed?.wht || 0);

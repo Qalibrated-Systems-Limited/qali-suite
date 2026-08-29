@@ -6,21 +6,15 @@ import {
   KRAContentSkeleton,
 } from "./KRAServerComponents";
 import {
-  getUnfiledTransactions,
-  getUnremittedWHT,
-  getFilingPeriods,
-  getTaxSummary,
-} from "@/app/mongodb/queries/taxQueries";
+  getUnfiledTransactionsPg,
+  getUnremittedWHTPg,
+  getFilingPeriodsPg,
+} from "@/app/db/actions/tax-actions";
 
 export const metadata = {
   title: "KRA Filings | Taxes",
   description: "KRA compliance dashboard - filing status, deadlines, and remittance tracking",
 };
-
-function getCurrentPeriod() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
 
 export default async function KRAFilingsPage({ searchParams }) {
   const params = await searchParams;
@@ -51,25 +45,25 @@ export default async function KRAFilingsPage({ searchParams }) {
 }
 
 async function KRAContentServer({ period }) {
-  const activePeriod = period || getCurrentPeriod();
-
-  const [unfiledRaw, unremittedRaw, periods, summary] = await Promise.all([
-    getUnfiledTransactions(),
-    getUnremittedWHT(),
-    getFilingPeriods(24),
-    getTaxSummary(),
+  // The period is passed to the client as `initialPeriod` and filtered there —
+  // `activePeriod` was computed here and never read, along with the helper that
+  // produced it. None of these three reads takes a period.
+  // getTaxSummary() was fetched here too and passed as `summary`, which
+  // KRAFilingsClient destructures and never reads — a second round trip for a
+  // prop with no consumer. KRAStatsCards is the real one and fetches its own.
+  const [unfiled, unremittedWHT, periods] = await Promise.all([
+    getUnfiledTransactionsPg(),
+    getUnremittedWHTPg(),
+    getFilingPeriodsPg(24),
   ]);
 
-  // Serialize BSON types for client component
-  const unfiled = JSON.parse(JSON.stringify(unfiledRaw || []));
-  const unremittedWHT = JSON.parse(JSON.stringify(unremittedRaw || []));
-
+  // No JSON round trip: the action layer serializes, so nothing BSON reaches
+  // here any more.
   return (
     <KRAFilingsClient
       unfiled={unfiled}
       unremittedWHT={unremittedWHT}
       periods={periods}
-      summary={JSON.parse(JSON.stringify(summary || {}))}
       initialPeriod={period}
     />
   );

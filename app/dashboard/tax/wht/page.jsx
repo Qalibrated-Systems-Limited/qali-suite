@@ -5,7 +5,10 @@ import {
   WHTStatsSkeleton,
   WHTContentSkeleton,
 } from "./WHTServerComponents";
-import { getWHTDashboard, getTaxTransactions } from "@/app/mongodb/queries/taxQueries";
+import {
+  getWHTDashboardPg,
+  getTaxTransactionsPg,
+} from "@/app/db/actions/tax-actions";
 
 export const metadata = {
   title: "WHT Reports | Taxes",
@@ -66,8 +69,8 @@ export default async function WHTReportPage({ searchParams }) {
 async function WHTContentServer({ startDate, endDate, startDateStr, endDateStr }) {
   // Fetch WHT dashboard and transactions in parallel
   const [whtData, txnData] = await Promise.all([
-    getWHTDashboard(startDate, endDate),
-    getTaxTransactions(1, {
+    getWHTDashboardPg(startDate, endDate),
+    getTaxTransactionsPg(1, {
       taxType: "wht",
       startDate: startDateStr,
       endDate: endDateStr,

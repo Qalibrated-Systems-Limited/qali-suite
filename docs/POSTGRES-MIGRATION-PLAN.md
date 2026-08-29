@@ -2340,6 +2340,81 @@ and the convert-to-invoice path joining the Postgres invoice flow.
 
 ---
 
+### §9O — Tax: the destination shipped with 0018, and nobody pointed at it
+
+The cheapest module in the port so far, and the one with the widest consequence
+if it had been left. `tax_transactions`, its constraints, its RLS, the
+`vat_return` view and fifteen repository functions all landed with **0018 and
+0019**, as §9.6 step 4. Postgres invoices and bills call into them —
+`recordInvoiceVatOutput` and `recordBillTaxes` — so the table has been correct
+and current since those modules moved.
+
+The eight screens under `/dashboard/tax` never moved with it.
+
+| | reads | writes |
+|---|---|---|
+| VAT return, WHT report, KRA filings, tax transactions | Mongo `TaxTransaction` | — |
+| `invoices.ts:679`, `bills.ts:686` | — | `tax_transactions` |
+
+So the returns a VAT-registered Kenyan business files with KRA were computed
+from a collection nothing had written for weeks, and reported zero rather than
+failing.
+
+**What finds this class, and what does not.** Question 1 (`ledger-sweep`) passes
+over tax entirely — it posts nothing. Questions 2 and 3 find the eight screens,
+which is the visible half. It is **question 4** that states the problem
+properly: ten of fifteen exported repository functions had no PRODUCTION caller.
+`getVatReturn`, `getUnremittedWht`, `getWhtReportByParty`, `getWhtReportByRate`,
+`listTaxTransactions`, `getTaxTransaction`, `markAsFiled`, `markAsRemitted`,
+`issueCertificate`, `reconcile` — every read and every filing verb, written and
+unreachable. The tests called all of them, which is precisely the layer nothing
+else uses, so the suite was green throughout.
+That is the same signature as `createOpeningBalanceBill` (0061), the credit-note
+repository half (§9L) and `returnCheckout`, and it is now four for four.
+
+#### Two defects that predate the migration
+
+Both were found by reading what the screen asks for against what the function
+returns, which is §9I's method rather than a comparison against Mongo.
+
+1. **`unfiledCount` has always been 0.** `getVATDashboard` calls the
+   `getVATReturn` model static and hardcodes the count with the comment "static
+   method doesn't track this"; the branch that computes it properly is
+   unreachable because the static exists. The VAT compliance card and both
+   "not yet filed" warnings are driven by that constant.
+
+2. **All four KRA tiles have always been 0.** `KRAStatsCards` reads `unfiled`,
+   `filed`, `unremittedWHT` and `totalTax`; `TaxService.getTaxSummary` returns
+   `period`, `vat` and `wht`. The two have never shared a field name.
+
+The port fixes both, because reproducing them faithfully would have put four
+zeroes on a live table — the §9I correction restated: **audit the arithmetic,
+do not transcribe it.**
+
+#### Scope, for the record
+
+No migration. 12 actions, 7 repository queries, 8 screens repointed, 7 tests.
+`getTaxTransactionById` and `searchTaxTransactions` were dead in Mongo and are
+not ported; `taxQueries.js` and `taxService.js` are deleted.
+
+#### After tax — and the module the count cannot see
+
+**`app/mongodb/actions/global-search-action.js` is the next §9K**, and it is a better
+example of the class than sales orders was. The command palette's server search
+imports the Mongo `Product`, `Invoice`, `Quote`, `Bill`, `Party`, `StockRequest`
+and `Project` models — **seven collections, all seven moved.** Only claims was
+repointed, and only because someone hit it while porting claims.
+
+It imports the MODELS, not `@/app/mongodb`, so it has never appeared in the
+module count in BUILDING-ON-POSTGRES.md — the same blind spot as the eleven
+direct-model screens. And it fails silently in the way that matters most: a
+search returning nothing is indistinguishable from a search with no matches.
+
+The question that finds it remains the one §9K named — **"what reads a
+collection nothing writes any more?"** — and the answer is still not exhausted.
+
+---
+
 ## 10. Explicitly out of scope
 
 - Redesigning the posting engine, fiscal periods, or COGS logic beyond the

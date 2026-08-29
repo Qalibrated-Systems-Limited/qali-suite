@@ -8,7 +8,7 @@ import {
   CheckCircle2,
   Clock,
 } from "lucide-react";
-import { getVATStats } from "@/app/mongodb/queries/taxQueries";
+import { getVATStatsPg } from "@/app/db/actions/tax-actions";
 
 // ============================================
 // FORMAT CURRENCY HELPER
@@ -27,7 +27,7 @@ const formatCurrency = (amount) => {
 // ============================================
 
 export async function VATStatsCards({ period }) {
-  const stats = await getVATStats(period);
+  const stats = await getVATStatsPg(period);
   const isPayable = stats.netPosition > 0;
 
   return (

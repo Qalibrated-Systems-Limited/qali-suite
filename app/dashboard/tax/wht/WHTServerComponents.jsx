@@ -1,7 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Receipt, CheckCircle2, Clock, FileText } from "lucide-react";
-import { getWHTStats } from "@/app/mongodb/queries/taxQueries";
+import { getWHTStatsPg } from "@/app/db/actions/tax-actions";
 
 // ============================================
 // FORMAT CURRENCY HELPER
@@ -20,7 +20,7 @@ const formatCurrency = (amount) => {
 // ============================================
 
 export async function WHTStatsCards({ startDate, endDate }) {
-  const stats = await getWHTStats(startDate, endDate);
+  const stats = await getWHTStatsPg(startDate, endDate);
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

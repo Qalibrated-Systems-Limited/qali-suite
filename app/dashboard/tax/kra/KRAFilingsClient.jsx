@@ -84,7 +84,6 @@ export default function KRAFilingsClient({
   unfiled = [],
   unremittedWHT = [],
   periods = [],
-  summary = {},
   initialPeriod,
 }) {
   const router = useRouter();

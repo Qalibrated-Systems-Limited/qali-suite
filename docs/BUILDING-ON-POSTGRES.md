@@ -18,10 +18,17 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 
 | on Postgres | still Mongo (screen files) |
 |---|---|
-| **stocks/products**, **dashboard**, statements, supplier-statements, payments, hr, **claims**, assets, **expenses**, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders, **fiscal periods**, **projects**, **the platform/SuperAdmin dashboard** | integrations 10, tax 8, banking 8, reports 7, kpis 7, components 5, leads 4, employee 4, settings 3, sales-orders 3, profile 3, opportunities 3, journal 3, admin 3, assets 2, approvals 2, quotes 1, parties 1, executive 1, company 1, adjustments 1 |
+| **stocks/products**, **dashboard**, statements, supplier-statements, payments, hr, **claims**, assets, **expenses**, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders, **fiscal periods**, **projects**, **tax**, **the platform/SuperAdmin dashboard** | integrations 10, banking 8, kpis 7, components 5, leads 4, employee 4, settings 3, sales-orders 3, profile 3, opportunities 3, admin 3, assets 2, approvals 2, reports 1, quotes 1, parties 1, executive 1, company 1, adjustments 1 |
 
-Counted 2026-08-29, after projects (0070) and the executive overview:
-**80 screen files, 21 modules** — down from 105 across 27.
+Counted 2026-08-29, after tax (§9O):
+**63 screen files, 19 modules** — down from 105 across 27.
+
+**`tax` was a HALF-PORT, not a greenfield one**, and that is the shape to expect
+from here on. `tax_transactions` shipped in 0018/0019 and invoices and bills
+have been writing to it ever since; only the eight screens were left reading
+Mongo. Ten of the fifteen repository functions had no caller — which is
+question 4, and no screen-side grep would ever have found it. See the
+2026-08-29 tax handoff.
 
 **`executive 1` IS NOT WORK.** It is `cPipelineTotal`, and the CRM genuinely is
 still on Mongo, so that read is correct until opportunities port. Everything
@@ -724,6 +731,126 @@ and makes every policy in the schema inert. `SELECT assert_rls_effective()`
 raises if the current connection would bypass RLS — worth a health check.
 
 ---
+
+## Handoff — 2026-08-29 — tax (§9O), and two tiles that were never wired
+
+No migration. The table, its constraints, its RLS and fifteen repository
+functions all shipped with **0018/0019**, and Postgres invoices and bills have
+been writing into it ever since they moved — `invoices.ts:679` calls
+`recordInvoiceVatOutput`, `bills.ts:686` calls `recordBillTaxes`. All eight
+screens under `/dashboard/tax` went on reading the Mongo `TaxTransaction`
+collection, which nothing has written since.
+
+So Kenya's statutory returns — the VAT return, the WHT report, the KRA filing
+status — were being computed from a dead collection. **And they showed zeroes
+rather than failing, which reads as "nothing to file".**
+
+This is §9E's seam, inside the tax module. It was found by question 4, not by
+any screen-side grep: ten of the fifteen repository functions had no caller.
+
+### The port is a change of source, not a redesign
+
+The nested `party` and `kraTracking` blocks and the `_id` key are kept, so the
+four client components are untouched — the same call `statement-actions.ts`
+made. Twelve reads went into `app/db/actions/tax-actions.ts`; seven new queries
+went into the repository below it, each transcribed from a named function in
+`taxQueries.js`.
+
+Two things are deliberately NOT the Mongo behaviour, and both are defects a
+faithful port would have carried across.
+
+### The VAT page reported "compliant" whatever was outstanding
+
+`getVATDashboard` has two branches. One aggregates and counts unfiled properly;
+the other calls the `getVATReturn` model static and hardcodes
+`unfiledCount: 0`, with the comment *"static method doesn't track this"*. The
+static exists (`taxTransactions.js:565`), **so the first branch is unreachable
+and both counts have always been zero.**
+
+That value feeds three things: the compliance card on the VAT stats row, and the
+two "N transactions not yet filed" warnings on the return itself. All three have
+been silent since they were written.
+
+`getVatUnfiledCounts` counts it. It is a second query rather than a column on
+the `vat_return` view on purpose — the view is the RETURN, what is owed for a
+period, and filing state is not part of that number.
+
+### All four KRA tiles have always rendered zero
+
+`KRAStatsCards` reads `summary.unfiled.vat`, `summary.filed.vat`,
+`summary.unremittedWHT` and `summary.totalTax`. `TaxService.getTaxSummary`
+returns `{ period, vat: {input, output, netPayable}, wht: {...} }`. **Not one of
+those four fields has ever existed on the object.** Four tiles, four zeroes,
+against a table that was live.
+
+So `getTaxSummaryPg` returns what the card reads, with `vat` and `wht` kept
+alongside so the shape is a superset rather than a swap. The unfiled, filed and
+unremitted figures carry no date filter — a return that missed its deadline last
+quarter is still unfiled today, and narrowing the dates must not make money owed
+to KRA disappear. Mongo's unremitted aggregation made the same choice; its
+filed/unfiled counts never existed to make it.
+
+`kra/page.jsx` also fetched `getTaxSummary()` a second time and passed it as
+`summary` to `KRAFilingsClient`, which destructures the prop and never reads it.
+The fetch and the prop are gone.
+
+### Three smaller decisions
+
+- **Search is a literal, not a pattern.** Mongo ran four `$regex` with the raw
+  search string interpolated, so a supplier named `A.*B` matched everything.
+  `ILIKE` over an escaped term matches itself. The test pins it on `%`, which
+  now matches exactly the one row whose description contains a percent sign
+  (`WHT 5% withheld on payment to Vivo Energy`) rather than both.
+- **`filed` and `remitted` are tri-state.** `?filed=false` arrives as the string
+  `"false"`, which is truthy. Undefined means "do not filter", which is not the
+  same as false.
+- **`TAX_VIEW_ROLES` is FINANCE_WRITE plus `Viewer`.** The Mongo queries carried
+  no role gate at all, and `canSeeTaxNav` puts the menu item in front of Viewer.
+  A nav link that leads to "You don't have permission" is a worse answer than
+  either. Same reasoning as `EXECUTIVE_VIEW_ROLES`.
+
+### Ported code deliberately NOT written
+
+`getTaxTransactionById` and `searchTaxTransactions` were **dead in Mongo too**
+and are not in the action layer. There is no tax detail route — the list's rows
+link nowhere — and the command palette searches through `global-search-action`,
+which does not include tax. `getTaxTransaction` and the search filter both stay
+in the repository, so either is a four-line action the day a screen wants one.
+
+`taxQueries.js` and `taxService.js` are **deleted**, not left. Both had zero
+importers the moment the screens moved, and a zero-importer Mongo file sitting
+beside its Postgres twin is exactly how §9L happened — a screen imports the one
+that no longer has any data behind it.
+
+### The thing found that was not the tax module
+
+**`global-search-action.js` is the next §9K.** The command palette's server
+search reads the Mongo `Product`, `Invoice`, `Quote`, `Bill`, `Party`,
+`StockRequest` and `Project` models directly — **all seven of those collections
+have moved.** Claims is the only one repointed (`searchClaimsPg`), and the
+comment at `:129` explains why it had to be.
+
+It does not error. A search that finds nothing looks like a search with no
+matches, so the palette has been returning navigation entries and nothing else
+since products ported. It reads no `@/app/mongodb` path — it imports the models
+— so the module count above has never seen it.
+
+Not fixed here: it is one file against seven ported modules, which is a port of
+its own rather than a line to redirect.
+
+### Where that leaves the count
+
+**63 screen files across 19 modules**, down from 71 across 21. `tax` is at zero.
+Eslint clean, `tsc` clean, `ledger-sweep` unchanged — tax posts nothing, and
+never did.
+
+**The full suite: 1294 passed, 1 failed — and the failure is not this port.**
+`tests/petty-cash-statement.test.mjs` passes `projectId:
+"65f0000000000000000000aa"` into `createAndPostExpense`, and `expenses.project_id`
+became a real uuid FK with the projects port, so the insert raises 22P02.
+Confirmed pre-existing by stashing this branch's changes and running the file
+against HEAD, where it fails identically. The fixture needs a project row, not a
+one-line edit, so it is left for whoever picks up projects next.
 
 ## Handoff — 2026-08-29 — the journal browser, aging, and the reports (no migration)
 

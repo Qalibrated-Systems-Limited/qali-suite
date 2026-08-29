@@ -485,4 +485,305 @@ suite("postgres tax transactions", () => {
       expect(seen).toHaveLength(0);
     });
   });
+
+  /**
+   * The queries the eight /dashboard/tax screens actually run.
+   *
+   * Everything above this point tests the write side and the repository as it
+   * shipped with 0018/0019 — which had no callers at all, because the screens
+   * were still reading the Mongo collection. These cover the reads added to
+   * point them here, and two of them pin behaviour that is deliberately NOT
+   * what Mongo did.
+   */
+  describe("the screen queries", () => {
+    /** The approved bill raises VAT input 2408.00 and WHT 752.50, both 2026-08. */
+    it("pages and counts a filtered list", async () => {
+      await approvedBill();
+
+      const all = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, {}, 1, 20),
+      );
+      expect(all.total).toBe(2);
+      expect(all.rows).toHaveLength(2);
+
+      const wht = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, { taxType: "wht" }, 1, 20),
+      );
+      expect(wht.total).toBe(1);
+      expect(wht.rows[0].tax_type).toBe("wht");
+
+      // The count is the count of MATCHES, not of the page — the pager reads it.
+      const firstOfOne = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, {}, 1, 1),
+      );
+      expect(firstOfOne.rows).toHaveLength(1);
+      expect(firstOfOne.total).toBe(2);
+
+      const secondPage = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, {}, 2, 1),
+      );
+      expect(secondPage.rows).toHaveLength(1);
+      expect(secondPage.rows[0].id).not.toBe(firstOfOne.rows[0].id);
+    });
+
+    it("filters on filed and remitted as three states, not two", async () => {
+      const { taxes } = await approvedBill();
+      const whtId = taxes.find((t) => t.taxType === "wht").id;
+      await asTenant(companyA, (tx) =>
+        taxRepo.markAsFiled(tx, whtId, randomUUID(), "KRA/2026/08"),
+      );
+
+      const filed = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, { filed: true }, 1, 20),
+      );
+      expect(filed.total).toBe(1);
+
+      const unfiled = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, { filed: false }, 1, 20),
+      );
+      expect(unfiled.total).toBe(1);
+
+      // Undefined is "either", which is not the same as false.
+      const either = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, { filed: undefined }, 1, 20),
+      );
+      expect(either.total).toBe(2);
+    });
+
+    it("searches the party snapshot, and treats the term as a literal", async () => {
+      await approvedBill();
+
+      const byName = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, { search: "vivo" }, 1, 20),
+      );
+      expect(byName.total).toBe(2);
+
+      const byPin = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, { search: "P05123" }, 1, 20),
+      );
+      expect(byPin.total).toBe(2);
+
+      // Mongo ran $regex with the raw search string, so "%" and ".*" matched
+      // everything. Escaped, "%" is a literal percent sign — and exactly one of
+      // these two rows contains one, the WHT record whose description reads
+      // "WHT 5% withheld on payment to Vivo Energy". Unescaped it would match
+      // both, which is the failure this pins.
+      const wildcard = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, { search: "%" }, 1, 20),
+      );
+      expect(wildcard.total).toBe(1);
+      expect(wildcard.rows[0].tax_type).toBe("wht");
+
+      const underscore = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, { search: "Vivo_Energy" }, 1, 20),
+      );
+      expect(underscore.total).toBe(0);
+    });
+
+    it("splits filed and unfiled over the same filters as the list", async () => {
+      const { taxes } = await approvedBill();
+      await asTenant(companyA, (tx) =>
+        taxRepo.markAsFiled(tx, taxes[0].id, randomUUID(), "KRA/2026/08"),
+      );
+
+      const stats = await asTenant(companyA, (tx) =>
+        taxRepo.getTaxTransactionStats(tx, {}),
+      );
+      expect(stats.total_transactions).toBe(2);
+      expect(stats.filed_count).toBe(1);
+      expect(stats.unfiled_count).toBe(1);
+      // 2408.00 VAT input + 752.50 WHT.
+      expect(Number(stats.total_tax_amount)).toBeCloseTo(3160.5, 4);
+
+      const scoped = await asTenant(companyA, (tx) =>
+        taxRepo.getTaxTransactionStats(tx, { taxType: "wht" }),
+      );
+      expect(scoped.total_transactions).toBe(1);
+    });
+
+    it("counts unfiled VAT for real, which the Mongo dashboard hardcoded to zero", async () => {
+      await approvedBill(); // VAT input, unfiled
+      await asTenant(companyA, async (tx) => {
+        const invoice = await invoiceRepo.createInvoice(tx, {
+          companyId: companyA,
+          customerId: customer,
+          invoiceDate: "2026-08-05",
+          lines: [
+            { productId: widget, quantity: "10", unitPrice: "100.0000", taxAmount: "1600.0000" },
+          ],
+        });
+        await invoiceRepo.completeInvoice(tx, invoice.id, {
+          arAccountId: accounts.ar,
+          revenueAccountId: accounts.revenue,
+          vatOutputAccountId: accounts.vatOutput,
+          completedById: randomUUID(),
+        });
+      });
+
+      const before = await asTenant(companyA, (tx) =>
+        taxRepo.getVatUnfiledCounts(tx, "2026-08"),
+      );
+      expect(before.input_unfiled).toBe(1);
+      expect(before.output_unfiled).toBe(1);
+
+      // Filing one moves it out of the count — the whole point of the card.
+      const vatOut = await asTenant(companyA, (tx) =>
+        taxRepo.listTaxTransactionsPaged(tx, { taxType: "vat_output" }, 1, 1),
+      );
+      await asTenant(companyA, (tx) =>
+        taxRepo.markAsFiled(tx, vatOut.rows[0].id, randomUUID(), "KRA/2026/08"),
+      );
+
+      const after = await asTenant(companyA, (tx) =>
+        taxRepo.getVatUnfiledCounts(tx, "2026-08"),
+      );
+      expect(after.input_unfiled).toBe(1);
+      expect(after.output_unfiled).toBe(0);
+
+      // WHT is not VAT and must not leak into either side of the return.
+      const other = await asTenant(companyA, (tx) =>
+        taxRepo.getVatUnfiledCounts(tx, "2026-09"),
+      );
+      expect(other.input_unfiled).toBe(0);
+      expect(other.output_unfiled).toBe(0);
+    });
+
+    it("reports the whole unremitted WHT balance, not the date range's share", async () => {
+      await approvedBill();
+
+      // A range that contains the transaction: totals and outstanding agree.
+      const inRange = await asTenant(companyA, (tx) =>
+        taxRepo.getWhtSummary(tx, "2026-08-01", "2026-08-31"),
+      );
+      expect(Number(inRange.total_wht)).toBeCloseTo(752.5, 4);
+      expect(Number(inRange.remitted)).toBe(0);
+      expect(inRange.transaction_count).toBe(1);
+      expect(Number(inRange.unremitted)).toBeCloseTo(752.5, 4);
+
+      // A range that excludes it: the period total is zero, but money still
+      // owed to KRA does not stop being owed because the reader narrowed the
+      // dates. Mongo's unremitted aggregation carried no date filter either.
+      const outOfRange = await asTenant(companyA, (tx) =>
+        taxRepo.getWhtSummary(tx, "2026-09-01", "2026-09-30"),
+      );
+      expect(Number(outOfRange.total_wht)).toBe(0);
+      expect(outOfRange.transaction_count).toBe(0);
+      expect(Number(outOfRange.unremitted)).toBeCloseTo(752.5, 4);
+      expect(outOfRange.unremitted_count).toBe(1);
+    });
+
+    it("summarises the fields the KRA tiles read", async () => {
+      await approvedBill();
+
+      const s = await asTenant(companyA, (tx) =>
+        taxRepo.getTaxSummary(tx, "2026-08-01", "2026-08-31"),
+      );
+
+      // The four the card reads, none of which TaxService.getTaxSummary ever
+      // returned — which is why all four tiles rendered zero.
+      expect(s.unfiled_vat).toBe(1);
+      expect(s.unfiled_wht).toBe(1);
+      expect(s.filed_vat).toBe(0);
+      expect(s.filed_wht).toBe(0);
+      expect(Number(s.unremitted_wht)).toBeCloseTo(752.5, 4);
+      expect(Number(s.total_tax)).toBeCloseTo(3160.5, 4);
+
+      // And the three it did, kept alongside them.
+      expect(Number(s.vat_input)).toBeCloseTo(2408, 4);
+      expect(Number(s.vat_output)).toBe(0);
+      expect(Number(s.wht_total)).toBeCloseTo(752.5, 4);
+    });
+
+    it("totals WHT by rate, carrying the code that was stored", async () => {
+      await approvedBill(); // 5% on a 15,050 base → 752.50
+
+      const rows = await asTenant(companyA, (tx) =>
+        taxRepo.getWhtReportByRate(tx, "2026-01-01", "2026-12-31"),
+      );
+      expect(rows).toHaveLength(1);
+      expect(Number(rows[0].tax_rate)).toBe(5);
+      // The stored code, not one rebuilt from the rate. The bill was created
+      // with whtRate "5" and the numeric(5,2) column hands it back as "5.00",
+      // so recordBillTaxes wrote "WHT-5.00" — while reconstructing the label
+      // from the rate here would print "WHT-5". That gap is the whole reason
+      // this column is selected rather than derived.
+      expect(rows[0].tax_code).toBe("WHT-5.00");
+      expect(Number(rows[0].total_withheld)).toBeCloseTo(752.5, 4);
+      expect(Number(rows[0].total_base)).toBeCloseTo(15050, 4);
+      expect(rows[0].transaction_count).toBe("1");
+    });
+
+    it("lists filing periods most recent first, without duplicates", async () => {
+      await approvedBill(); // two rows, both 2026-08
+
+      const { id: billId } = await asTenant(companyA, (tx) =>
+        billRepo.createBill(tx, {
+          companyId: companyA,
+          supplierId: supplier,
+          billDate: "2026-06-01",
+          dueDate: "2026-06-30",
+          lines: [
+            {
+              description: "Diesel",
+              accountId: accounts.fuel,
+              quantity: "1",
+              unitPrice: "100",
+              vatRate: "16",
+            },
+          ],
+        }),
+      );
+      await asTenant(companyA, (tx) =>
+        taxRepo.recordTaxTransaction(tx, {
+          companyId: companyA,
+          transactionNumber: "VAT-IN-JUNE",
+          transactionDate: "2026-06-15",
+          taxType: "vat_input",
+          taxCode: "VAT-16",
+          taxRate: "16",
+          baseAmount: "100",
+          taxAmount: "16",
+          totalAmount: "116",
+          partyId: supplier,
+          partyType: "supplier",
+          sourceDocumentType: "bill",
+          sourceDocumentId: billId,
+          accountId: accounts.vatInput,
+        }),
+      );
+
+      const periods = await asTenant(companyA, (tx) =>
+        taxRepo.getFilingPeriods(tx, 24),
+      );
+      // Two rows share 2026-08 and collapse to one entry.
+      expect(periods).toEqual(["2026-08", "2026-06"]);
+
+      const capped = await asTenant(companyA, (tx) =>
+        taxRepo.getFilingPeriods(tx, 1),
+      );
+      expect(capped).toEqual(["2026-08"]);
+    });
+
+    it("hides another tenant's rows from every one of them", async () => {
+      await approvedBill();
+      const companyB = randomUUID();
+      await admin`
+        INSERT INTO companies (id, name, slug)
+        VALUES (${companyB}, 'Tenant B', ${"b-" + companyB.slice(0, 8)})
+      `;
+
+      await asTenant(companyB, async (tx) => {
+        expect((await taxRepo.listTaxTransactionsPaged(tx, {}, 1, 20)).total).toBe(0);
+        expect((await taxRepo.getTaxTransactionStats(tx, {})).total_transactions).toBe(0);
+        expect(await taxRepo.getFilingPeriods(tx, 24)).toEqual([]);
+
+        const unfiled = await taxRepo.getVatUnfiledCounts(tx, "2026-08");
+        expect(unfiled.input_unfiled).toBe(0);
+
+        const summary = await taxRepo.getTaxSummary(tx, "2026-01-01", "2026-12-31");
+        expect(Number(summary.total_tax)).toBe(0);
+        expect(Number(summary.unremitted_wht)).toBe(0);
+      });
+    });
+  });
 });

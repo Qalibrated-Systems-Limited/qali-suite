@@ -476,6 +476,13 @@ export async function getWhtReportByRate(
 ) {
   return tx.execute(sql`
     SELECT tax_rate,
+           -- The code as STORED, not rebuilt from the rate. recordBillTaxes
+           -- derives it from the rate on the way in, so one rate cannot carry
+           -- two codes and MIN is the only one there is. Reconstructing it
+           -- here would round the label: a bill saved with whtRate "5" stores
+           -- "WHT-5.00", because the rate round-trips through numeric(5,2) --
+           -- and rebuilding it from that rate prints "WHT-5".
+           MIN(tax_code)                   AS tax_code,
            COUNT(*)                        AS transaction_count,
            SUM(base_amount)::numeric(19,4) AS total_base,
            SUM(tax_amount)::numeric(19,4)  AS total_withheld
@@ -526,4 +533,234 @@ export async function listTaxTransactions(
     )
     .limit(limit)
     .offset(opts.offset ?? 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The screen queries.
+//
+// Everything above this line was written with the table in 0018/0019 and had
+// no callers: the tax pages went on reading the Mongo collection while
+// Postgres invoices and bills wrote here. These are the reads those eight
+// screens actually need — the filtered list, the four dashboards and the
+// period dropdown — added rather than invented, each one transcribed from a
+// named function in app/mongodb/queries/taxQueries.js.
+//
+// No company filter appears in any of them. RLS supplies it (0019), as it does
+// for the rest of this file.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TaxListFilters {
+  taxType?: string;
+  filingPeriod?: string;
+  /** Tri-state: undefined means "either". */
+  filed?: boolean;
+  remitted?: boolean;
+  startDate?: string;
+  endDate?: string;
+  sourceType?: string;
+  search?: string;
+}
+
+/**
+ * The WHERE the list, the count and the stats cards all share.
+ *
+ * One builder, so a filter cannot mean one thing to the table and another to
+ * the tiles above it — which is how the aging pages came to disagree with the
+ * executive tiles that link to them.
+ */
+function listFilterSql(f: TaxListFilters) {
+  const parts = [sql`TRUE`];
+
+  if (f.taxType) parts.push(sql`tax_type = ${f.taxType}`);
+  if (f.filingPeriod) parts.push(sql`filing_period = ${f.filingPeriod}`);
+  if (f.filed !== undefined) parts.push(sql`filed = ${f.filed}`);
+  if (f.remitted !== undefined) parts.push(sql`remitted = ${f.remitted}`);
+  if (f.startDate) parts.push(sql`transaction_date >= ${f.startDate}::date`);
+  if (f.endDate) parts.push(sql`transaction_date <= ${f.endDate}::date`);
+  if (f.sourceType) parts.push(sql`source_document_type = ${f.sourceType}`);
+
+  // Mongo ran four case-insensitive $regex, which is a full scan with the
+  // search string interpolated into a pattern. ILIKE over an escaped literal
+  // is the same four columns without the injection surface: a supplier named
+  // "A.*B" matches itself here and matched everything there.
+  if (f.search) {
+    const term = `%${f.search.replace(/([%_\\])/g, "\\$1")}%`;
+    parts.push(sql`(
+      transaction_number ILIKE ${term}
+      OR party_name_at_transaction ILIKE ${term}
+      OR party_tax_pin_at_transaction ILIKE ${term}
+      OR description ILIKE ${term}
+    )`);
+  }
+
+  return sql.join(parts, sql` AND `);
+}
+
+/** One page of tax transactions, with the total the pager needs. */
+export async function listTaxTransactionsPaged(
+  tx: Tx,
+  filters: TaxListFilters,
+  page: number,
+  perPage: number,
+) {
+  const where = listFilterSql(filters);
+  const offset = (Math.max(page, 1) - 1) * perPage;
+
+  const rows = (await tx.execute(sql`
+    SELECT id, transaction_number, transaction_date, tax_type, tax_code,
+           tax_rate, base_amount, tax_amount, total_amount, currency,
+           party_id, party_type, party_name_at_transaction,
+           party_tax_pin_at_transaction,
+           source_document_type, source_document_id, source_document_number,
+           filing_period, filed, remitted,
+           account_code_at_transaction, account_name_at_transaction,
+           description
+      FROM tax_transactions
+     WHERE ${where}
+     ORDER BY transaction_date DESC, transaction_number DESC
+     LIMIT ${perPage} OFFSET ${offset}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const [countRow] = (await tx.execute(sql`
+    SELECT COUNT(*)::int AS total FROM tax_transactions WHERE ${where}
+  `)) as unknown as Array<{ total: number }>;
+
+  return { rows, total: Number(countRow?.total ?? 0) };
+}
+
+/** Totals and filed/unfiled split over the same filters as the list. */
+export async function getTaxTransactionStats(
+  tx: Tx,
+  filters: TaxListFilters,
+) {
+  const [row] = (await tx.execute(sql`
+    SELECT COUNT(*)::int                                  AS total_transactions,
+           COALESCE(SUM(tax_amount), 0)::numeric(19,4)     AS total_tax_amount,
+           COALESCE(SUM(base_amount), 0)::numeric(19,4)    AS total_base_amount,
+           COUNT(*) FILTER (WHERE filed)::int              AS filed_count,
+           COUNT(*) FILTER (WHERE NOT filed)::int          AS unfiled_count
+      FROM tax_transactions
+     WHERE ${listFilterSql(filters)}
+  `)) as unknown as Array<Record<string, unknown>>;
+  return row ?? null;
+}
+
+/**
+ * Unfiled VAT counts for one filing period, split by direction.
+ *
+ * SEPARATE FROM `getVatReturn` DELIBERATELY, and this is the bug it fixes.
+ * Mongo's getVATDashboard has two branches: an aggregation that counts unfiled
+ * properly, and a call to the `getVATReturn` model static that hardcodes
+ * `unfiledCount: 0` with the comment "static method doesn't track this". The
+ * static exists (taxTransactions.js:565), so the first branch is unreachable
+ * and BOTH counts have always been zero — which renders the VAT page's
+ * compliance card as "Compliant" and suppresses the two "N transactions not
+ * yet filed" warnings, whatever is actually outstanding.
+ *
+ * The `vat_return` view has the same shape as the static and would have
+ * reproduced it. Counting is a second query rather than a change to the view,
+ * because the view is the RETURN — what is owed for a period — and filing
+ * state is not part of that number.
+ */
+export async function getVatUnfiledCounts(tx: Tx, filingPeriod: string) {
+  const [row] = (await tx.execute(sql`
+    SELECT COUNT(*) FILTER (WHERE tax_type = 'vat_input')::int  AS input_unfiled,
+           COUNT(*) FILTER (WHERE tax_type = 'vat_output')::int AS output_unfiled
+      FROM tax_transactions
+     WHERE filing_period = ${filingPeriod}
+       AND tax_type IN ('vat_input', 'vat_output')
+       AND NOT filed
+  `)) as unknown as Array<{ input_unfiled: number; output_unfiled: number }>;
+  return row ?? { input_unfiled: 0, output_unfiled: 0 };
+}
+
+/**
+ * WHT totals for a date range.
+ *
+ * `unremitted` here is the WHOLE outstanding balance, not the range's share of
+ * it — as in Mongo, where the unremitted aggregation carries no date filter at
+ * all while the total does. That asymmetry is deliberate and is what the card
+ * means: money still owed to KRA does not stop being owed because the reader
+ * narrowed the dates.
+ */
+export async function getWhtSummary(
+  tx: Tx,
+  startDate: string,
+  endDate: string,
+) {
+  const [row] = (await tx.execute(sql`
+    SELECT COALESCE(SUM(tax_amount), 0)::numeric(19,4)                     AS total_wht,
+           COALESCE(SUM(tax_amount) FILTER (WHERE remitted), 0)::numeric(19,4) AS remitted,
+           COUNT(*)::int                                                   AS transaction_count
+      FROM tax_transactions
+     WHERE tax_type = 'wht'
+       AND transaction_date BETWEEN ${startDate}::date AND ${endDate}::date
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const [outstanding] = (await tx.execute(sql`
+    SELECT COALESCE(SUM(tax_amount), 0)::numeric(19,4) AS unremitted,
+           COUNT(*)::int                               AS unremitted_count
+      FROM tax_transactions
+     WHERE tax_type = 'wht' AND NOT remitted
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return { ...(row ?? {}), ...(outstanding ?? {}) } as Record<string, unknown>;
+}
+
+/**
+ * VAT and WHT for a date range, plus how much of it is still to be filed.
+ *
+ * THE SHAPE IS NOT MONGO'S, and that is the point. `TaxService.getTaxSummary`
+ * returns `{ period, vat: {input, output, netPayable}, wht: {...} }`, while its
+ * only real consumer — KRAStatsCards — reads `summary.unfiled.vat`,
+ * `summary.filed.vat`, `summary.unremittedWHT` and `summary.totalTax`. Not one
+ * of those four fields has ever existed on the object, so all four KRA tiles
+ * have always rendered 0 and KES 0. Porting the Mongo shape faithfully would
+ * have reproduced four zeroes against a live table.
+ *
+ * So this returns what the card reads. The unfiled and filed counts carry no
+ * date filter, for the same reason `unremitted` does not: a return that missed
+ * its deadline last quarter is still unfiled today.
+ */
+export async function getTaxSummary(
+  tx: Tx,
+  startDate: string,
+  endDate: string,
+) {
+  const [totals] = (await tx.execute(sql`
+    SELECT COALESCE(SUM(tax_amount) FILTER (WHERE tax_type = 'vat_input'), 0)::numeric(19,4)  AS vat_input,
+           COALESCE(SUM(tax_amount) FILTER (WHERE tax_type = 'vat_output'), 0)::numeric(19,4) AS vat_output,
+           COALESCE(SUM(tax_amount) FILTER (WHERE tax_type = 'wht'), 0)::numeric(19,4)        AS wht_total,
+           COALESCE(SUM(tax_amount), 0)::numeric(19,4)                                        AS total_tax
+      FROM tax_transactions
+     WHERE transaction_date BETWEEN ${startDate}::date AND ${endDate}::date
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const [state] = (await tx.execute(sql`
+    SELECT COUNT(*) FILTER (WHERE NOT filed AND tax_type IN ('vat_input','vat_output'))::int AS unfiled_vat,
+           COUNT(*) FILTER (WHERE NOT filed AND tax_type = 'wht')::int                       AS unfiled_wht,
+           COUNT(*) FILTER (WHERE filed AND tax_type IN ('vat_input','vat_output'))::int     AS filed_vat,
+           COUNT(*) FILTER (WHERE filed AND tax_type = 'wht')::int                           AS filed_wht,
+           COALESCE(SUM(tax_amount) FILTER (WHERE tax_type = 'wht' AND NOT remitted), 0)::numeric(19,4) AS unremitted_wht
+      FROM tax_transactions
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return { ...(totals ?? {}), ...(state ?? {}) } as Record<string, unknown>;
+}
+
+/**
+ * The filing periods that exist, most recent first — the page dropdowns.
+ *
+ * `DISTINCT ... ORDER BY DESC LIMIT` in SQL rather than Mongo's `distinct()`
+ * followed by sorting and slicing the whole list in JavaScript. The periods are
+ * `YYYY-MM` text, so lexical order is chronological order.
+ */
+export async function getFilingPeriods(tx: Tx, limit = 12) {
+  const rows = (await tx.execute(sql`
+    SELECT DISTINCT filing_period
+      FROM tax_transactions
+     ORDER BY filing_period DESC
+     LIMIT ${Math.min(Math.max(limit, 1), 120)}
+  `)) as unknown as Array<{ filing_period: string }>;
+  return rows.map((r) => r.filing_period);
 }

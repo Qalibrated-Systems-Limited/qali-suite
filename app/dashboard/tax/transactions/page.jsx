@@ -5,7 +5,10 @@ import {
   TaxTransactionsStatsSkeleton,
   TaxTransactionsTableSkeleton,
 } from "./TaxTransactionsServerComponents";
-import { getTaxTransactions, getFilingPeriods } from "@/app/mongodb/queries/taxQueries";
+import {
+  getTaxTransactionsPg,
+  getFilingPeriodsPg,
+} from "@/app/db/actions/tax-actions";
 
 export const metadata = {
   title: "Tax Transactions | Taxes",
@@ -85,8 +88,8 @@ export default async function TaxTransactionsPage({ searchParams }) {
 
 async function TaxTransactionsTableServer({ page, filters, initialFilters }) {
   const [data, periods] = await Promise.all([
-    getTaxTransactions(page, filters),
-    getFilingPeriods(24),
+    getTaxTransactionsPg(page, filters),
+    getFilingPeriodsPg(24),
   ]);
 
   return (

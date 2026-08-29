@@ -1,7 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Receipt, FileCheck, Clock, Calculator } from "lucide-react";
-import { getTaxTransactionStats } from "@/app/mongodb/queries/taxQueries";
+import { getTaxTransactionStatsPg } from "@/app/db/actions/tax-actions";
 
 // ============================================
 // FORMAT CURRENCY HELPER
@@ -20,7 +20,7 @@ const formatCurrency = (amount) => {
 // ============================================
 
 export async function TaxTransactionsStatsCards({ filters = {} }) {
-  const stats = await getTaxTransactionStats(filters);
+  const stats = await getTaxTransactionStatsPg(filters);
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

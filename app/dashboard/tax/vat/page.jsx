@@ -5,7 +5,11 @@ import {
   VATStatsSkeleton,
   VATContentSkeleton,
 } from "./VATServerComponents";
-import { getVATDashboard, getFilingPeriods, getTaxTransactions } from "@/app/mongodb/queries/taxQueries";
+import {
+  getVATDashboardPg,
+  getFilingPeriodsPg,
+  getTaxTransactionsPg,
+} from "@/app/db/actions/tax-actions";
 
 export const metadata = {
   title: "VAT Returns | Taxes",
@@ -58,15 +62,15 @@ async function VATContentServer({ period }) {
 
   // Fetch VAT dashboard data, periods, and transaction details in parallel
   const [vatData, periods, outputTxns, inputTxns] = await Promise.all([
-    getVATDashboard(period),
-    getFilingPeriods(24),
+    getVATDashboardPg(period),
+    getFilingPeriodsPg(24),
     // Get VAT Output transactions for drill-down
-    getTaxTransactions(1, {
+    getTaxTransactionsPg(1, {
       taxType: "vat_output",
       filingPeriod: activePeriod,
     }),
     // Get VAT Input transactions for drill-down
-    getTaxTransactions(1, {
+    getTaxTransactionsPg(1, {
       taxType: "vat_input",
       filingPeriod: activePeriod,
     }),
