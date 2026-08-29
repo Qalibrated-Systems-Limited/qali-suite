@@ -955,7 +955,16 @@ export async function reopenPurchaseOrder(
   const patch: Record<string, unknown> = {
     lastModifiedById: modifiedById ?? null,
     lastModifiedByName: modifiedByName ?? null,
+    // THE SENT STAMP IS CLEARED. Returning to draft is how an order the
+    // supplier already has gets amended, and the amended version has not been
+    // sent to anybody — leaving `sent_at` behind would answer "when did the
+    // supplier get this?" with a date that belongs to the previous version.
+    // It is stamped again when the order is re-sent.
+    sentAt: null,
+    sentById: null,
+    sentByName: null,
   };
+  // `undefined` leaves the validity date alone; `null` clears it deliberately.
   if (validUntil !== undefined) patch.validUntil = validUntil;
   return setStatus(tx, purchaseOrderId, "draft", patch);
 }

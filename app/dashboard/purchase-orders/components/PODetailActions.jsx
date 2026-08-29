@@ -65,6 +65,19 @@ export function PODetailActions({ purchaseOrder, userRole }) {
   const canManage = roleAllowed(userRole, [...PROCUREMENT_ROLES]);
   const po = purchaseOrder;
 
+  // `status` here is the DISPLAY status — "expired", "partial" and "received"
+  // are derived and are not values the column can hold. `workflowStatus` is
+  // what was actually chosen, and it is the one a transition is judged on.
+  const isExpired = po.status === "expired";
+  /**
+   * A sent order the supplier has not confirmed can still be amended, which is
+   * what the transition table has always allowed (sent -> draft) and what the
+   * UI never offered: Edit is draft-only and Reopen was expired-only, so a
+   * sent order was a dead end and the only way to change it was to cancel it
+   * and retype it under a new number.
+   */
+  const canReturnToDraft = po.workflowStatus === "sent" || isExpired;
+
   // ----------------------------------------
   // ACTION HANDLERS
   // ----------------------------------------
@@ -80,21 +93,36 @@ export function PODetailActions({ purchaseOrder, userRole }) {
     });
   };
 
+  /**
+   * Back to draft — the amendment step 0049 designed the freeze around.
+   *
+   * The lines are frozen outside draft on purpose, so revising an order the
+   * supplier already has is a deliberate act with a name on it rather than an
+   * edit nobody sees. Coming back to draft also clears `sent`, which is what
+   * keeps "status = sent" meaning "the supplier has THIS version" — it has to
+   * be sent again afterwards.
+   *
+   * THE VALIDITY DATE MOVES ONLY FOR AN EXPIRED ORDER. Reopening an expired
+   * one is meaningless without it. Amending a live one must not silently
+   * extend what the supplier was told, so its `validUntil` is left alone.
+   */
   const handleReopen = () => {
     startTransition(async () => {
-      // Reopening moves the validity date forward. The Mongo model did this
-      // inside reopen() to escape its own pre-save hook, which re-expired any
-      // order whose validUntil had passed; expiry is derived now, so the date
-      // is simply what the caller means by "open again".
-      const reopenedUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .slice(0, 10);
+      const reopenedUntil = isExpired
+        ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+            .toISOString()
+            .slice(0, 10)
+        : undefined;
       const result = await reopenPurchaseOrderPg(po._id, reopenedUntil);
       if (result.success) {
-        toast.success("Purchase order reopened as draft");
+        toast.success(
+          isExpired
+            ? "Purchase order reopened as draft"
+            : "Returned to draft — edit it, then send it again",
+        );
         router.refresh();
       } else {
-        toast.error(result.error || "Failed to reopen purchase order");
+        toast.error(result.error || "Failed to return the purchase order to draft");
       }
     });
   };
@@ -182,8 +210,8 @@ export function PODetailActions({ purchaseOrder, userRole }) {
   // ----------------------------------------
   return (
     <div className="space-y-3">
-      {/* Reopen - Expired only (otherwise an expired PO is a dead end) */}
-      {po.status === "expired" && canManage && (
+      {/* Back to draft: an expired order, or a sent one not yet confirmed. */}
+      {canReturnToDraft && canManage && (
         <Button
           onClick={handleReopen}
           disabled={isPending}
@@ -195,7 +223,7 @@ export function PODetailActions({ purchaseOrder, userRole }) {
           ) : (
             <RotateCcw className="mr-2 h-4 w-4" />
           )}
-          Reopen as Draft
+          {isExpired ? "Reopen as Draft" : "Amend — Return to Draft"}
         </Button>
       )}
 

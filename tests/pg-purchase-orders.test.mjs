@@ -165,6 +165,70 @@ suite("procurement: purchase orders and goods receipts", () => {
       expect(detail.status).toBe("sent");
     });
 
+    /**
+     * AMENDING A SENT ORDER — the path 0049 designed the line freeze around
+     * ("a status change back to draft, followed by an edit") and the UI never
+     * offered: Edit was draft-only and the return-to-draft button was
+     * expired-only, so a sent order the supplier wanted changed was a dead
+     * end and the only way out was to cancel it and retype it under a new
+     * number.
+     */
+    it("amends a sent order by returning it to draft, and the lines unfreeze", async () => {
+      const po = await asTenant(companyA, (tx) =>
+        openOrder(tx, { validUntil: "2027-06-30" }));
+
+      // Frozen while sent — this is the rule that stays.
+      await expect(
+        asTenant(companyA, (tx) =>
+          poRepo.updatePurchaseOrder(tx, po.id, { notes: "changed" })),
+      ).rejects.toThrow(/draft/i);
+
+      await asTenant(companyA, (tx) =>
+        poRepo.reopenPurchaseOrder(tx, po.id, undefined, "buyer", "Bea Buyer"));
+
+      const after = await asTenant(companyA, (tx) =>
+        poRepo.getPurchaseOrderDetail(tx, po.id));
+      expect(after.status).toBe("draft");
+
+      // ...and now it can be edited.
+      await asTenant(companyA, (tx) =>
+        poRepo.updatePurchaseOrder(tx, po.id, { notes: "changed" }));
+    });
+
+    it("leaves the validity date alone when amending, and clears the sent stamp", async () => {
+      const po = await asTenant(companyA, (tx) =>
+        openOrder(tx, { validUntil: "2027-06-30" }));
+
+      await asTenant(companyA, (tx) =>
+        poRepo.reopenPurchaseOrder(tx, po.id, undefined, "buyer", "Bea Buyer"));
+
+      const [row] = await admin`
+        SELECT valid_until::text AS valid_until, sent_at, sent_by_id
+          FROM purchase_orders WHERE id = ${po.id}`;
+
+      // `undefined` means "do not touch". The ACTION used to coalesce this to
+      // null, and the repository reads null as "clear it" — so amending an
+      // order without naming a new date wiped the date the supplier was given.
+      expect(row.valid_until).toBe("2027-06-30");
+
+      // The amended version has not been sent to anybody. Leaving the stamp
+      // would answer "when did the supplier get this?" with the previous
+      // version's date.
+      expect(row.sent_at).toBeNull();
+      expect(row.sent_by_id).toBeNull();
+    });
+
+    it("still refuses to amend a confirmed order", async () => {
+      const po = await asTenant(companyA, (tx) => openOrder(tx));
+      await asTenant(companyA, (tx) =>
+        poRepo.confirmPurchaseOrder(tx, po.id, "buyer", "Bea Buyer"));
+
+      await expect(
+        asTenant(companyA, (tx) =>
+          poRepo.updatePurchaseOrder(tx, po.id, { notes: "changed" })),
+      ).rejects.toThrow(/draft/i);
+    });
+
     it("reopening is just moving the date", async () => {
       const po = await asTenant(companyA, (tx) =>
         openOrder(tx, { validUntil: "2026-08-02" }));

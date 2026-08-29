@@ -326,8 +326,11 @@ export async function reopenPurchaseOrderPg(
     const po = await withAuthorizedTenant([...PROCUREMENT_ROLES], (tx, { user }) =>
       purchaseOrders.reopenPurchaseOrder(
         tx,
-        purchaseOrderId,
-        validUntil ?? null,
+        // NOT `?? null`. The repository distinguishes the two: `undefined`
+        // leaves the validity date alone, `null` CLEARS it. Coalescing here
+        // meant amending an order without naming a new date silently wiped
+        // the date the supplier was given.
+        validUntil,
         user.id,
         user.name,
       ),
