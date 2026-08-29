@@ -519,6 +519,13 @@
       "when": 1787049146566,
       "tag": "0073_cost_codes_are_the_budget_vocabulary",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1787049147566,
+      "tag": "0074_the_bell_reads_postgres",
+      "breakpoints": true
     }
   ]
 }

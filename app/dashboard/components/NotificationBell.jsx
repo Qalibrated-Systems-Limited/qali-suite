@@ -13,7 +13,7 @@ import {
 import {
   markAllNotificationsRead,
   markNotificationRead,
-} from "@/app/mongodb/actions/notification-actions";
+} from "@/app/db/actions/notification-actions";
 
 // In-app notification bell. Server-rendered data arrives via props (the
 // dashboard layout fetches cMyNotifications once per request); marking

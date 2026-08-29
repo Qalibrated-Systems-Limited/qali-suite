@@ -796,3 +796,18 @@ export const projectTaskStatusEnum = pgEnum("project_task_status", [
   "done",
   "cancelled",
 ]);
+
+// ── Notifications (0074) ─────────────────────────────────────────────────────
+
+/**
+ * Transcribed from `NOTIFICATION_TYPES` in app/models/notification.js.
+ *
+ * An enum rather than free text because the bell renders an icon per type and
+ * a value it does not recognise draws nothing — the failure is silent, which
+ * is the mode this module was already failing in.
+ */
+export const notificationTypeEnum = pgEnum("notification_type", [
+  "approval_request",
+  "approval_decision",
+  "system",
+]);

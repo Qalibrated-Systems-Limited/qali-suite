@@ -41,3 +41,4 @@ export * from "./stockAdjustments";
 export * from "./stockCounts";
 export * from "./productPriceHistory";
 export * from "./projects";
+export * from "./notifications";

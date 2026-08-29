@@ -14,6 +14,44 @@ import {
 import { findOpenInviteForEmail, acceptInvite } from "./app/db/inviteAdmin";
 import { linkUserToPartyDirect } from "./app/db/userAdmin";
 
+/**
+ * How long a role change may take to reach an existing session.
+ *
+ * A minute: short enough that a demotion is effectively immediate, long enough
+ * that this is one indexed read per user per minute rather than per request.
+ */
+const ROLE_REFRESH_MS = 60_000;
+
+/**
+ * The refresh has to be throttled HERE, not on the token.
+ *
+ * `roleRefreshedAt` on the JWT would be the obvious place, and it is what the
+ * first version of this used. It does not work: a Server Component cannot set
+ * cookies, so a token mutated during an RSC render is never written back — the
+ * stamp resets to 0 on the next request and the "once a minute" read becomes
+ * once per `auth()` call, several times per page.
+ *
+ * So the throttle is an in-process map, which is the same trade
+ * `companyUuidCache` in app/db/tenant.ts makes and for the same reason: it is
+ * per-instance, rebuilt on cold start, and needs no invalidation because the
+ * TTL is the invalidation. A second server instance simply does its own read.
+ *
+ * The stamp still goes on the token as well, for the paths that CAN persist it
+ * (a sign-in, a session update) — it just cannot be relied on alone.
+ */
+const roleRefreshCache = new Map<string, number>();
+
+function dueForRefresh(userId: string, tokenStamp: unknown) {
+  const now = Date.now();
+  const last = Math.max(Number(tokenStamp ?? 0), roleRefreshCache.get(userId) ?? 0);
+  if (now - last <= ROLE_REFRESH_MS) return false;
+  roleRefreshCache.set(userId, now);
+  // Unbounded growth is the one failure mode worth guarding: a long-lived
+  // instance serving many tenants would otherwise hold a row per user for ever.
+  if (roleRefreshCache.size > 10_000) roleRefreshCache.clear();
+  return true;
+}
+
 type UserType = {
   id: string;
   name: string;
@@ -416,11 +454,75 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
         }
       }
 
-      // Note: Periodic DB refresh removed — edge runtime can't reliably
-      // connect to MongoDB. Plan data is set at login. When SuperAdmin
-      // changes a company's plan, the user must re-login to pick it up.
-      // For instant effect, use the server-side checkPlanAccess() in
-      // plan-gate.js which reads the session (set at login time).
+      /**
+       * PERIODIC RE-READ — role, status and token version.
+       *
+       * REPORTED: "changed user roles but they are still able to fetch pages."
+       * `token.role` was written at sign-in and never again, and the session
+       * lives eight hours, so a demotion did not reach `session.user.role` —
+       * which is what every nav gate and page guard reads. `adminUpdateUser`
+       * bumps `token_version` precisely to kill those sessions, but the only
+       * thing that compares it (`requireFreshSession`) is called from two
+       * legacy Mongo action files and from nothing on the Postgres path. So
+       * the revocation was written and never read.
+       *
+       * The note that used to sit here said periodic refresh was removed
+       * because "edge runtime can't reliably connect to MongoDB". That reason
+       * expired with 0036: logins are Postgres, this callback already runs
+       * `resolveRoleForCompany` and `findUserForSignIn` against it above, and
+       * the middleware keeps its own edge-safe config in auth.config.js.
+       *
+       * Server ACTIONS were never exposed by this — `withAuthorizedTenant`
+       * re-checks the allow-list against the grant's role, so a demoted user
+       * could not mutate anything. It is page and nav access that trusted the
+       * stale claim, which is exactly what was reported.
+       *
+       * FAILS OPEN ON A DB ERROR, deliberately. A transient outage must not
+       * sign the whole company out; the eight-hour maxAge is still the
+       * backstop. Anything the database actually answers is enforced.
+       */
+      if (token?.id && !user) {
+        if (dueForRefresh(String(token.id), token.roleRefreshedAt)) {
+          try {
+            const { getUserStatusAndVersion, resolveRoleForCompany } =
+              await import("@/app/db/userAdmin");
+
+            const dbUser = await getUserStatusAndVersion(String(token.id));
+
+            // Deleted, deactivated, or revoked since this token was issued.
+            // Returning null ends the session on this request.
+            if (!dbUser) return null;
+            if (dbUser.status !== "active") return null;
+            if (
+              typeof token.tokenVersion === "number" &&
+              token.tokenVersion !== (dbUser.tokenVersion ?? 0)
+            ) {
+              return null;
+            }
+
+            // The role FOR THE COMPANY BEING OPERATED ON — the active company
+            // when one has been switched to, otherwise the home company. The
+            // same resolution `withAuthorizedTenant` performs, so the page
+            // gates and the data gates cannot disagree.
+            const scoped = await resolveRoleForCompany(
+              String(token.id),
+              (token.activeCompanyId ?? token.companyId) ?? null,
+            );
+            if (scoped && scoped !== token.role) {
+              token.role = scoped;
+              if (token.user) token.user = { ...token.user, role: scoped };
+            }
+            token.roleRefreshedAt = Date.now();
+          } catch {
+            // Leave the token as it is and try again on the next request.
+          }
+        }
+      }
+
+      // Note: PLAN data is still set at login only. When SuperAdmin changes a
+      // company's plan, the user picks it up on their next sign-in or via
+      // useSession().update(). For instant effect use checkPlanAccess() in
+      // plan-gate.js.
 
       return token;
     },

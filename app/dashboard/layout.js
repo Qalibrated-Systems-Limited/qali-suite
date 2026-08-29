@@ -5,7 +5,7 @@ import { logout } from "../db/actions/auth-actions";
 import { AppSidebar } from "./components/app-sidebar";
 import { CommandPaletteProvider } from "@/components/command-palette-provider";
 import MobileBottomNav from "./components/MobileBottomNav";
-import { cMyNotifications } from "@/app/mongodb/queries/notification-queries";
+import { getMyNotifications } from "@/app/db/actions/notification-actions";
 import { CompanySwitcher } from "@/components/company-switcher-server";
 
 export const metadata = {
@@ -51,9 +51,12 @@ async function DashboardLayout({ children }) {
     );
   }
 
-  // Bell data — request-scoped (cache()), index-backed, capped. Safe-noop
-  // when there's no session.
-  const notifications = await cMyNotifications();
+  // Bell data — one query, index-backed, capped. Called once per render here,
+  // which is where the deduplication belongs: the Mongo version wrapped itself
+  // in React cache(), and caching a transaction-scoped read across a request is
+  // how one company's rows get served inside another's after a switch.
+  // Degrades to an empty bell rather than throwing; the layout wraps every page.
+  const notifications = await getMyNotifications();
 
   return (
     <CommandPaletteProvider
