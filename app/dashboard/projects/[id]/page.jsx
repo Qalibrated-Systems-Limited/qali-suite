@@ -694,7 +694,7 @@ export default async function ProjectDetailPage({ params, searchParams }) {
                 </Badge>
               )}
             </div>
-            <h1 className="text-xl sm:text-xl sm:text-2xl font-semibold text-foreground truncate">
+            <h1 className="text-xl sm:text-2xl font-semibold text-foreground truncate">
               {project.name}
             </h1>
             {project.description && (

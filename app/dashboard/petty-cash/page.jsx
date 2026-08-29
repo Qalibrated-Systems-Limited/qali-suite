@@ -38,7 +38,7 @@ export default async function PettyCashPage() {
     <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
       <div className="flex items-center justify-between gap-3">
         <div className="space-y-1 sm:space-y-2 min-w-0">
-          <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold text-foreground">
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
             Petty Cash
           </h1>
           <p className="text-sm sm:text-base text-muted-foreground hidden sm:block">

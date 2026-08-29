@@ -53,7 +53,7 @@ export default async function OpeningBalancesPage() {
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold">Opening Balances</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Opening Balances</h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
             Enter what your business owned, owed, and was worth on your start
             date, so the books carry on from your real figures. Anything left

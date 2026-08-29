@@ -99,7 +99,7 @@ export default async function AccountDetailPage({ params }) {
           </Button>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold font-mono break-all">
+              <h1 className="text-xl sm:text-2xl font-semibold font-mono break-all">
                 {account.accountCode}
               </h1>
               <Badge

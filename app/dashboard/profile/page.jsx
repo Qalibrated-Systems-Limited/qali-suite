@@ -80,7 +80,7 @@ export default async function ProfilePage() {
 
         {/* Info */}
         <div className="text-center sm:text-left min-w-0">
-          <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold text-foreground tracking-tight">{displayName}</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground tracking-tight">{displayName}</h1>
           {empProfile?.designation && (
             <p className="text-muted-foreground text-sm mt-0.5">{empProfile.designation}</p>
           )}

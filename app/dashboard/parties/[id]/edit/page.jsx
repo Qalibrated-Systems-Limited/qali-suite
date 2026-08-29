@@ -29,7 +29,7 @@ export default async function EditPartyPage({ params }) {
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold">Edit Party</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold">Edit Party</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Update {party.name}'s information
           </p>

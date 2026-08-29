@@ -48,7 +48,7 @@ export default async function CostCodesPage() {
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold text-foreground">
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
             Cost Codes
           </h1>
           <p className="text-sm text-muted-foreground">

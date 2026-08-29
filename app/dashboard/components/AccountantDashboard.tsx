@@ -65,7 +65,7 @@ export default async function AccountantDashboardPage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold text-foreground tracking-tight">
+        <h1 className="text-xl sm:text-2xl font-semibold text-foreground tracking-tight">
           Finance Dashboard
         </h1>
         <p className="text-sm text-muted-foreground mt-1">

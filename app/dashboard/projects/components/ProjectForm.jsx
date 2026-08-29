@@ -147,7 +147,7 @@ export default function ProjectForm({
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold text-foreground">
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
             {isEdit ? "Edit Project" : "Create Project"}
           </h1>
           <p className="text-sm sm:text-base text-muted-foreground">
