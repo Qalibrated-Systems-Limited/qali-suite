@@ -725,6 +725,84 @@ raises if the current connection would bypass RLS — worth a health check.
 
 ---
 
+## Handoff — 2026-08-29 — the journal browser, aging, and the reports (no migration)
+
+Two live seams and three dead reports. No schema change: every reader this
+needed already existed or was a query away.
+
+### The journal browser was the worst of them
+
+`/dashboard/journal/create` wrote to Postgres. The list, the stats and the
+detail page read the Mongo `JournalEntry` collection. So a manual entry raised
+through the UI **never appeared on the page it was raised from**, and every
+automatic posting — invoices, bills, expenses, claims, payments — was invisible
+in the browser entirely. `getJournalEntries` and `getJournalEntry` were already
+sitting unwired in `journal-actions.ts`.
+
+The Post and Reverse buttons went with it: those routes loaded the entry from
+Mongo by `_id`, and once the browser served Postgres uuids they could only fail.
+
+Three things the port had to decide rather than copy:
+
+- **The cursor is an opaque string.** `JournalPageClient` puts it in a URL
+  query parameter, so a structured cursor would reach the route as
+  `[object Object]` and serve page one for ever. It encodes `(entry_date, id)`
+  — an id alone is not monotonic in date order, so paging on it skips and
+  repeats rows the moment two entries share a date, which in a ledger is every
+  day. An unparseable cursor starts from the top rather than throwing.
+- **One stats query, not five.** The Mongo version fires five, one of them an
+  `$unwind` over every line posted this month purely to count distinct entries.
+- **`isBalanced` compares exact sums**, as the balance sheet does. An entry out
+  by half a cent is out.
+
+### AR and AP aging disagreed with the tiles that link to them
+
+`aging-queries.js` aggregates the Mongo `Invoice` and `Bill` collections, both
+of which moved. Meanwhile the executive overview's "Owed to us" and "We owe"
+tiles were moved onto the ledger earlier the same day — and they link straight
+to these pages. Fixing the tile without the destination left the two visibly
+disagreeing, which is worth stating plainly because it was introduced and then
+removed within one session.
+
+Both pages now call `getAgingReport`, the same function behind the tiles, so
+they cannot disagree. It gained an `itemCount` — the open items behind each
+balance — because the pages show a count beside the money; the dashboard
+summaries that already read it ignore the new field.
+
+### Three reports that had been empty
+
+`sales`, `purchases` and `cash-flow` all read collections nothing writes.
+
+**The cash flow categoriser was testing for account sub-types this chart has
+never had.** `ReportService.generateCashFlow` looks for `owner_drawings`,
+`retained_earnings`, `share_capital`, `investment` and `other_asset`;
+`lib/chart-of-accounts.js` seeds `drawings`, `retained`, `capital` and
+`fixed_asset`. Five dead strings out of eight — the only tests that ever matched
+were `fixed_asset`, `loan` and `accountType === 'equity'`. The Postgres version
+uses the names the chart actually uses, and a test asserts share capital lands
+in financing.
+
+`ReportServerComponents.jsx` was **deleted, not ported**: six stats-card
+components reading Mongo that nothing imports — not the pages, not the barrel.
+Porting dead code faithfully produces dead code.
+
+### One report is blocked on a product decision, not on work
+
+**`sales-by-rep` cannot be ported as it stands.** Mongo's invoice carries
+`salesPerson.employeeId`; the Postgres `invoices` table has `created_by_id`
+and nothing else. Porting it against `created_by` would be worse than leaving
+it: a finance clerk raising invoices for the whole team would come out as the
+top rep, and the page would look right. It needs a `sales_person` on the
+invoice and a picker on the form to fill it — a feature, and one somebody
+should choose deliberately. The page is empty either way today.
+
+### Where that leaves the count
+
+**71 screen files, down from 105 at the start of the day.** `journal` is at
+zero, `reports` at one. The remaining seven untouched modules — tax, banking,
+kpis, leads, employee, opportunities, approvals — are whole verticals and
+honest about it.
+
 ## Handoff — 2026-08-29 — cost codes are the budget vocabulary (0073)
 
 The budget form handed a project manager **39 postable expense accounts,

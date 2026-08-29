@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { canSeePurchasesNav } from "@/lib/permissions";
-import { getSupplierPurchaseReport } from "@/app/mongodb/queries/supplier-report-queries";
+import { getSupplierPurchaseReportPg as getSupplierPurchaseReport } from "@/app/db/actions/report-actions";
 import { PurchaseReportClient } from "./PurchaseReportClient";
 import { ReportSkeleton } from "../components/ReportSkeleton";
 

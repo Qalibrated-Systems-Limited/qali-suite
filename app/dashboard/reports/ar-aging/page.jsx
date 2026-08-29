@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { canSeeReportsNav } from "@/lib/permissions";
-import { getARAgingReport } from "@/app/mongodb/queries/aging-queries";
+import { getARAgingReportPg as getARAgingReport } from "@/app/db/actions/report-actions";
 import { ARAgingClient } from "./ARAgingClient";
 
 export const metadata = {

@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
-import { getJournalEntryById } from "@/app/mongodb/queries/journalQueries";
+import { getJournalEntryById } from "@/app/db/actions/journal-actions";
 import { serializeBsonType } from "@/lib/utils";
 import { JournalEntryDetail } from "./JournalEntryDetail";
 import JournalDetailLoading from "./loading";

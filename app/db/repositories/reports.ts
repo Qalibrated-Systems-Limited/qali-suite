@@ -23,6 +23,8 @@ export interface AgingRow {
   days61_90: string;
   days90plus: string;
   total: string;
+  /** Open items behind the balance — invoices for AR, bills for AP. */
+  itemCount: number;
 }
 
 /**
@@ -53,6 +55,7 @@ export async function getAgingReport(
     aged AS (
       SELECT
         e.party_id,
+        e.id AS entry_id,
         ${amount}::numeric(19,4) AS amount,
         CASE
           WHEN e.due_date IS NULL THEN 0
@@ -77,7 +80,11 @@ export async function getAgingReport(
       COALESCE(SUM(amount) FILTER (WHERE days_overdue BETWEEN 31 AND 60), 0)::numeric(19,4) AS "days31_60",
       COALESCE(SUM(amount) FILTER (WHERE days_overdue BETWEEN 61 AND 90), 0)::numeric(19,4) AS "days61_90",
       COALESCE(SUM(amount) FILTER (WHERE days_overdue > 90), 0)::numeric(19,4)         AS "days90plus",
-      COALESCE(SUM(amount), 0)::numeric(19,4)                                          AS "total"
+      COALESCE(SUM(amount), 0)::numeric(19,4)                                          AS "total",
+      -- How many open items make up that balance. ADDED for the aging report
+      -- pages, which show a count per party beside the money; the dashboard
+      -- summaries that already read this function ignore it.
+      COUNT(DISTINCT a.entry_id)::int                                                  AS "itemCount"
     FROM aged a
     LEFT JOIN parties p ON p.id = a.party_id
     GROUP BY a.party_id, p.name

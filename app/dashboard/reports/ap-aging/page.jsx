@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { canSeeReportsNav } from "@/lib/permissions";
-import { getAPAgingReport } from "@/app/mongodb/queries/aging-queries";
+import { getAPAgingReportPg as getAPAgingReport } from "@/app/db/actions/report-actions";
 import { APAgingClient } from "./APAgingClient";
 
 export const metadata = {

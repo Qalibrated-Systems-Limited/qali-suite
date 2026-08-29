@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getJournalEntriesForTimeline } from "@/app/mongodb/queries/journalQueries";
+import { getJournalEntriesForTimeline } from "@/app/db/actions/journal-actions";
 import { serializeBsonType } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {

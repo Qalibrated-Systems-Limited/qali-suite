@@ -271,3 +271,45 @@ export async function getPostableAccountsPg() {
 export async function getAccountsGroupedPg() {
   return withAuthorizedTenant([], (tx) => accountsRepo.getAccountsGrouped(tx));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The journal browser — the screens that were reading the other ledger.
+//
+// `/dashboard/journal/create` has written here since the ledger ported, while
+// the list, the stats and the detail page all read the Mongo `JournalEntry`
+// collection. A manual entry raised through the UI therefore never appeared on
+// the page it was raised from, and every automatic posting was invisible in
+// the browser entirely.
+//
+// SHAPES ARE THE SCREENS'. `_id` beside `id`, `party.name`, `totals.debit`,
+// `createdBy.name` — the components read those, so they move over by changing
+// an import and nothing else.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** `_id` as well as `id`: the timeline keys on `_id` and links on it. */
+function withMongoId(row: Record<string, unknown>) {
+  return { ...row, _id: String(row.id) };
+}
+
+export async function getJournalEntriesForTimeline(
+  filters: journal.JournalTimelineFilters = {},
+  limit = 20,
+  cursor: string | null = null,
+) {
+  return withAuthorizedTenant(FINANCE_ROLES, async (tx) => {
+    const page = await journal.listJournalTimeline(tx, filters, limit, cursor);
+    return { ...page, entries: page.entries.map(withMongoId) };
+  });
+}
+
+export async function getJournalStatsForDashboard() {
+  return withAuthorizedTenant(FINANCE_ROLES, (tx) => journal.getJournalStats(tx));
+}
+
+export async function getJournalEntryById(entryId: string) {
+  if (!entryId) return null;
+  return withAuthorizedTenant(FINANCE_ROLES, async (tx) => {
+    const entry = await journal.getJournalEntryDetail(tx, entryId);
+    return entry ? withMongoId(entry) : null;
+  });
+}

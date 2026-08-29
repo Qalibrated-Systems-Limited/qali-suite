@@ -1,4 +1,4 @@
-import { getCashFlowData } from "@/app/mongodb/queries/reportQueries";
+import { getCashFlowDataPg as getCashFlowData } from "@/app/db/actions/report-actions";
 import { CashFlowClient } from "./CashFlowClient";
 
 export const metadata = {

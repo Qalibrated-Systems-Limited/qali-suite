@@ -3,7 +3,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   getJournalStatsForDashboard,
   getJournalEntriesForTimeline,
-} from "@/app/mongodb/queries/journalQueries";
+} from "@/app/db/actions/journal-actions";
 import { serializeBsonType } from "@/lib/utils";
 import { JournalStatsCards } from "./JournalStatsCards";
 

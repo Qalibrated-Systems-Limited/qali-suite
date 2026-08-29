@@ -2,6 +2,7 @@
 
 import { withAuthorizedTenant, FINANCE_ROLES } from "../tenant";
 import * as reportQueries from "../repositories/reportQueries";
+import * as reportsRepo from "../repositories/reports";
 import { coerceDayString } from "@/lib/utils/report-dates";
 import { EXECUTIVE_VIEW_ROLES } from "@/lib/utils/role-gates";
 import type {
@@ -161,6 +162,159 @@ export async function getExecutiveSnapshotPg() {
   return report("Executive snapshot", () =>
     withAuthorizedTenant([...EXECUTIVE_VIEW_ROLES], (tx) =>
       reportQueries.getExecutiveSnapshot(tx),
+    ),
+  );
+}
+
+/**
+ * AR and AP aging, in the shape the two report pages render.
+ *
+ * `aging-queries.js` aggregates the Mongo `Invoice` and `Bill` collections —
+ * both of which moved — so those pages have shown a store nothing writes.
+ * Worse than stale: the executive overview's "Owed to us" and "We owe" tiles
+ * read the LEDGER, and they link straight here, so the tile and the page it
+ * opened disagreed.
+ *
+ * They cannot now: this is `getAgingReport`, the same function behind the
+ * tiles, reshaped. The buckets are renamed on the way out (`days0_30` →
+ * `days1_30`) because that is what the clients read, and the summary is
+ * totalled here rather than in each of the two pages.
+ */
+function toAgingReport(
+  rows: Awaited<ReturnType<typeof reportsRepo.getAgingReport>>,
+  asOfDate: string,
+  side: "receivable" | "payable",
+) {
+  const n = (v: unknown) => Number(v ?? 0);
+  const isAR = side === "receivable";
+
+  const parties = rows.map((r) => {
+    const count = n(r.itemCount);
+    return {
+      // Both id/name pairs and both counts, because the two clients read
+      // different names for the same column and neither should have to care.
+      customerId: r.partyId,
+      supplierId: r.partyId,
+      customerName: r.partyName ?? "Unnamed",
+      supplierName: r.partyName ?? "Unnamed",
+      current: n(r.current),
+      days1_30: n(r.days0_30),
+      days31_60: n(r.days31_60),
+      days61_90: n(r.days61_90),
+      days90plus: n(r.days90plus),
+      total: n(r.total),
+      invoiceCount: count,
+      billCount: count,
+    };
+  });
+
+  const summary = parties.reduce(
+    (acc, p) => ({
+      current: acc.current + p.current,
+      days1_30: acc.days1_30 + p.days1_30,
+      days31_60: acc.days31_60 + p.days31_60,
+      days61_90: acc.days61_90 + p.days61_90,
+      days90plus: acc.days90plus + p.days90plus,
+      total: acc.total + p.total,
+      customerCount: acc.customerCount + 1,
+      supplierCount: acc.supplierCount + 1,
+      invoiceCount: acc.invoiceCount + p.invoiceCount,
+      billCount: acc.billCount + p.billCount,
+    }),
+    {
+      current: 0,
+      days1_30: 0,
+      days31_60: 0,
+      days61_90: 0,
+      days90plus: 0,
+      total: 0,
+      customerCount: 0,
+      supplierCount: 0,
+      invoiceCount: 0,
+      billCount: 0,
+    },
+  );
+
+  const overdueTotal =
+    summary.days1_30 + summary.days31_60 + summary.days61_90 + summary.days90plus;
+
+  return {
+    reportName: isAR ? "Accounts Receivable Aging" : "Accounts Payable Aging",
+    asOfDate: new Date(asOfDate),
+    customers: parties,
+    suppliers: parties,
+    summary: {
+      ...summary,
+      overdueTotal,
+      // Against a zero total the share overdue is undefined, not 100%.
+      overduePercent: summary.total > 0 ? (overdueTotal / summary.total) * 100 : 0,
+    },
+    source: "postgres" as const,
+  };
+}
+
+export async function getARAgingReportPg(asOfDate?: string) {
+  const asOf = requireDay(asOfDate ?? new Date(), "As-of date");
+  return report("AR Aging", () =>
+    withAuthorizedTenant(FINANCE_ROLES, async (tx) =>
+      toAgingReport(
+        await reportsRepo.getAgingReport(tx, "receivable", asOf),
+        asOf,
+        "receivable",
+      ),
+    ),
+  );
+}
+
+export async function getAPAgingReportPg(asOfDate?: string) {
+  const asOf = requireDay(asOfDate ?? new Date(), "As-of date");
+  return report("AP Aging", () =>
+    withAuthorizedTenant(FINANCE_ROLES, async (tx) =>
+      toAgingReport(
+        await reportsRepo.getAgingReport(tx, "payable", asOf),
+        asOf,
+        "payable",
+      ),
+    ),
+  );
+}
+
+export async function getCashFlowDataPg(startDate: unknown, endDate: unknown) {
+  const from = requireDay(startDate, "Start date");
+  const to = requireDay(endDate, "End date");
+  return report("Cash Flow", () =>
+    withAuthorizedTenant(FINANCE_ROLES, (tx) =>
+      reportQueries.getCashFlow(tx, from, to),
+    ),
+  );
+}
+
+export async function getSalesByCustomerReportPg(startDate: unknown, endDate: unknown) {
+  const from = requireDay(startDate, "Start date");
+  const to = requireDay(endDate, "End date");
+  return report("Sales by Customer", () =>
+    withAuthorizedTenant(FINANCE_ROLES, (tx) =>
+      reportQueries.getSalesByCustomer(tx, from, to),
+    ),
+  );
+}
+
+export async function getSalesByProductReportPg(startDate: unknown, endDate: unknown) {
+  const from = requireDay(startDate, "Start date");
+  const to = requireDay(endDate, "End date");
+  return report("Sales by Product", () =>
+    withAuthorizedTenant(FINANCE_ROLES, (tx) =>
+      reportQueries.getSalesByProduct(tx, from, to),
+    ),
+  );
+}
+
+export async function getSupplierPurchaseReportPg(startDate: unknown, endDate: unknown) {
+  const from = requireDay(startDate, "Start date");
+  const to = requireDay(endDate, "End date");
+  return report("Purchase Report", () =>
+    withAuthorizedTenant(FINANCE_ROLES, (tx) =>
+      reportQueries.getSupplierPurchases(tx, from, to),
     ),
   );
 }

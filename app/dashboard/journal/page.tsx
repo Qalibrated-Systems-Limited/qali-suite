@@ -5,7 +5,7 @@ import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getJournalEntriesForTimeline } from "@/app/mongodb/queries/journalQueries";
+import { getJournalEntriesForTimeline } from "@/app/db/actions/journal-actions";
 import { serializeBsonType } from "@/lib/utils";
 import { JournalPageClient } from "./JournalPageClient";
 import {

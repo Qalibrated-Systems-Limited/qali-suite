@@ -2,9 +2,9 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { canSeeSalesNav } from "@/lib/permissions";
 import {
-  getSalesByCustomerReport,
-  getSalesByProductReport,
-} from "@/app/mongodb/queries/sales-queries";
+  getSalesByCustomerReportPg as getSalesByCustomerReport,
+  getSalesByProductReportPg as getSalesByProductReport,
+} from "@/app/db/actions/report-actions";
 import { SalesReportClient } from "./SalesReportClient";
 
 export const metadata = {

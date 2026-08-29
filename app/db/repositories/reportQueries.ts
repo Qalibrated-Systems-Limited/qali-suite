@@ -655,3 +655,353 @@ export async function getExecutiveSnapshot(tx: Tx): Promise<ExecutiveSnapshot> {
     },
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cash flow
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The cash flow statement, by the indirect route the Mongo service took:
+ * every posted entry that touches a cash account, categorised by what it was
+ * paid to or received from.
+ *
+ * THREE OF THE MONGO CATEGORISER'S SIX FINANCING SUB-TYPES DO NOT EXIST.
+ * `ReportService.generateCashFlow` tests for `owner_drawings`,
+ * `retained_earnings` and `share_capital`; this chart seeds `drawings`,
+ * `retained` and `capital` (`lib/chart-of-accounts.js`). Its investing arm
+ * tests for `investment` and `other_asset`, and neither is seeded either. So
+ * the only tests that ever matched were `fixed_asset`, `loan` and
+ * `accountType === 'equity'` — which caught the equity accounts anyway, and
+ * left owner drawings out of financing whenever they were not typed as equity.
+ * The names below are the ones the chart actually uses.
+ *
+ * A transfer BETWEEN cash accounts is not a cash flow, and an entry whose only
+ * lines are cash lines is exactly that — it is skipped, as it was.
+ */
+export async function getCashFlow(
+  tx: Tx,
+  startDate: string,
+  endDate: string,
+) {
+  const rows = (await tx.execute(sql`
+    WITH cash_accounts AS (
+      SELECT id FROM accounts
+       WHERE sub_type IN ('cash', 'bank', 'mpesa')
+         AND is_active IS NOT false
+    ),
+    -- What each entry did to the cash position over the window.
+    cash_impact AS (
+      SELECT e.id                                   AS entry_id,
+             e.entry_date,
+             e.entry_number,
+             e.description,
+             SUM(l.debit - l.credit)::numeric(19,4) AS amount
+        FROM journal_entries e
+        JOIN journal_lines l ON l.entry_id = e.id
+        JOIN cash_accounts c ON c.id = l.account_id
+       WHERE e.status = 'posted'
+         AND e.entry_date >= ${startDate}::date
+         AND e.entry_date <= ${endDate}::date
+       GROUP BY e.id
+      HAVING ABS(SUM(l.debit - l.credit)) >= 0.01
+    ),
+    -- The FIRST contra line that names a category, by line number — the Mongo
+    -- loop breaks on its first match, so an entry with a financing line above
+    -- an investing one is financing, and reordering the test would silently
+    -- reclassify it.
+    categorised AS (
+      SELECT ci.*,
+             COALESCE((
+               SELECT CASE
+                        WHEN a.sub_type IN ('fixed_asset', 'investment') THEN 'investing'
+                        ELSE 'financing'
+                      END
+                 FROM journal_lines l2
+                 JOIN accounts a ON a.id = l2.account_id
+                WHERE l2.entry_id = ci.entry_id
+                  AND a.id NOT IN (SELECT id FROM cash_accounts)
+                  AND (a.sub_type IN ('fixed_asset', 'investment', 'loan',
+                                      'drawings', 'retained', 'capital')
+                       OR a.account_type = 'equity')
+                ORDER BY l2.line_number
+                LIMIT 1
+             ), 'operating') AS category
+        FROM cash_impact ci
+       -- An entry with no non-cash line is a transfer between cash accounts.
+       WHERE EXISTS (
+         SELECT 1 FROM journal_lines l3
+          WHERE l3.entry_id = ci.entry_id
+            AND l3.account_id NOT IN (SELECT id FROM cash_accounts)
+       )
+    )
+    SELECT entry_id::text     AS id,
+           entry_date         AS date,
+           entry_number       AS "entryNumber",
+           description,
+           amount::float8     AS amount,
+           category
+      FROM categorised
+     ORDER BY entry_date, entry_number
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const bucket = (name: string) => {
+    const transactions = rows
+      .filter((r) => r.category === name)
+      .map((r) => ({
+        date: r.date,
+        description: r.description,
+        entryNumber: r.entryNumber,
+        amount: Number(r.amount ?? 0),
+      }));
+    return {
+      transactions,
+      total: transactions.reduce((sum, t) => sum + t.amount, 0),
+    };
+  };
+
+  const operating = bucket("operating");
+  const investing = bucket("investing");
+  const financing = bucket("financing");
+
+  return {
+    reportName: "Cash Flow Statement",
+    period: { startDate: new Date(startDate), endDate: new Date(endDate) },
+    operating,
+    investing,
+    financing,
+    summary: {
+      operatingCashFlow: operating.total,
+      investingCashFlow: investing.total,
+      financingCashFlow: financing.total,
+      netCashFlow: operating.total + investing.total + financing.total,
+    },
+    source: "postgres" as const,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sales and purchase reports
+//
+// All three read the Mongo `Invoice` and `Bill` collections, both of which
+// moved — so these pages have shown an empty report for as long as those
+// modules have been ported. Nothing errored; there was simply nothing there.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Sales by customer, with gross margin.
+ *
+ * COGS comes from `cogs_postings` — what actually reached the ledger — rather
+ * than a stored `totalCOGS` on the document, which is where the Mongo version
+ * read it. That column is a cache of the same thing and one of the family this
+ * port has been removing.
+ *
+ * The status filter is Mongo's, and its comment is worth keeping: everything
+ * except draft and cancelled, because restricting to `completed` undercounts
+ * in tenants whose workflow ends at `sent`.
+ */
+export async function getSalesByCustomer(
+  tx: Tx,
+  startDate: string,
+  endDate: string,
+) {
+  const rows = (await tx.execute(sql`
+    SELECT i.customer_id::text                            AS "customerId",
+           COALESCE(p.name, 'Unnamed')                    AS "customerName",
+           p.email                                        AS "customerEmail",
+           COUNT(*)::int                                  AS "invoiceCount",
+           SUM(i.total)::float8                           AS "totalSales",
+           COALESCE(SUM(c.cogs), 0)::float8               AS "totalCOGS",
+           SUM(i.amount_paid)::float8                     AS "totalPaid",
+           AVG(i.total)::float8                           AS "avgInvoiceValue",
+           MIN(i.invoice_date)                            AS "firstInvoice",
+           MAX(i.invoice_date)                            AS "lastInvoice"
+      FROM invoices i
+      LEFT JOIN parties p ON p.id = i.customer_id
+      LEFT JOIN LATERAL (
+        SELECT SUM(cp.total_cost) AS cogs
+          FROM cogs_postings cp
+          JOIN invoice_lines il ON il.id = cp.invoice_line_id
+         WHERE il.invoice_id = i.id
+      ) c ON true
+     WHERE i.status NOT IN ('draft', 'cancelled')
+       AND i.invoice_date >= ${startDate}::date
+       AND i.invoice_date <= ${endDate}::date
+     GROUP BY i.customer_id, p.name, p.email
+     ORDER BY SUM(i.total) DESC
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const n = (v: unknown) => Number(v ?? 0);
+  const base = rows.map((r) => {
+    const totalSales = n(r.totalSales);
+    const totalCOGS = n(r.totalCOGS);
+    const totalPaid = n(r.totalPaid);
+    return {
+      customerId: r.customerId,
+      customerName: r.customerName,
+      customerEmail: r.customerEmail ?? "",
+      invoiceCount: n(r.invoiceCount),
+      totalSales,
+      totalCOGS,
+      grossProfit: totalSales - totalCOGS,
+      grossMarginPct: totalSales > 0 ? ((totalSales - totalCOGS) / totalSales) * 100 : 0,
+      totalPaid,
+      totalOutstanding: totalSales - totalPaid,
+      avgInvoiceValue: n(r.avgInvoiceValue),
+      firstInvoice: r.firstInvoice,
+      lastInvoice: r.lastInvoice,
+    };
+  });
+
+  const totalSales = base.reduce((s, c) => s + c.totalSales, 0);
+  const totalCOGS = base.reduce((s, c) => s + c.totalCOGS, 0);
+  const share = (amount: number) => (totalSales > 0 ? (amount / totalSales) * 100 : 0);
+
+  return {
+    reportName: "Sales by Customer",
+    period: { startDate: new Date(startDate), endDate: new Date(endDate) },
+    customers: base.map((c) => ({ ...c, revenueShare: share(c.totalSales) })),
+    summary: {
+      totalCustomers: base.length,
+      totalSales,
+      totalCOGS,
+      grossProfit: totalSales - totalCOGS,
+      grossMarginPct: totalSales > 0 ? ((totalSales - totalCOGS) / totalSales) * 100 : 0,
+      totalPaid: base.reduce((s, c) => s + c.totalPaid, 0),
+      totalOutstanding: base.reduce((s, c) => s + c.totalOutstanding, 0),
+      totalInvoices: base.reduce((s, c) => s + c.invoiceCount, 0),
+      topCustomerShare: base.length ? share(base[0].totalSales) : 0,
+      topFiveShare: share(base.slice(0, 5).reduce((s, c) => s + c.totalSales, 0)),
+    },
+    source: "postgres" as const,
+  };
+}
+
+/** Sales by product — completed invoices only, as the Mongo version had it. */
+export async function getSalesByProduct(
+  tx: Tx,
+  startDate: string,
+  endDate: string,
+) {
+  const rows = (await tx.execute(sql`
+    SELECT il.product_id::text                          AS "productId",
+           COALESCE(pr.name, il.description, 'Unnamed') AS "productName",
+           pr.sku                                       AS "productSKU",
+           SUM(il.quantity)::float8                     AS "quantitySold",
+           SUM(il.line_total)::float8                   AS "totalRevenue",
+           COUNT(DISTINCT il.invoice_id)::int           AS "invoiceCount",
+           (SUM(il.line_total) / NULLIF(SUM(il.quantity), 0))::float8 AS "avgPrice"
+      FROM invoice_lines il
+      JOIN invoices i ON i.id = il.invoice_id
+      LEFT JOIN products pr ON pr.id = il.product_id
+     WHERE i.status = 'completed'
+       AND i.invoice_date >= ${startDate}::date
+       AND i.invoice_date <= ${endDate}::date
+     GROUP BY il.product_id, pr.name, il.description, pr.sku
+     ORDER BY SUM(il.line_total) DESC
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const n = (v: unknown) => Number(v ?? 0);
+  const products = rows.map((r) => ({
+    productId: r.productId,
+    productName: r.productName,
+    productSKU: r.productSKU ?? "",
+    quantitySold: n(r.quantitySold),
+    totalRevenue: n(r.totalRevenue),
+    invoiceCount: n(r.invoiceCount),
+    avgPrice: n(r.avgPrice),
+  }));
+
+  return {
+    reportName: "Sales by Product",
+    period: { startDate: new Date(startDate), endDate: new Date(endDate) },
+    products,
+    summary: {
+      totalProducts: products.length,
+      totalRevenue: products.reduce((s, p) => s + p.totalRevenue, 0),
+      totalQuantity: products.reduce((s, p) => s + p.quantitySold, 0),
+    },
+    source: "postgres" as const,
+  };
+}
+
+/** Supplier spend, and the accounts it was charged to. */
+export async function getSupplierPurchases(
+  tx: Tx,
+  startDate: string,
+  endDate: string,
+) {
+  const where = sql`
+    b.status NOT IN ('draft', 'cancelled', 'rejected')
+    AND b.bill_date >= ${startDate}::date
+    AND b.bill_date <= ${endDate}::date`;
+
+  const [supplierRows, categoryRows] = await Promise.all([
+    tx.execute(sql`
+      SELECT b.supplier_id::text                        AS "supplierId",
+             COALESCE(p.name, b.supplier_name_at_bill, 'Unnamed') AS "supplierName",
+             COUNT(*)::int                              AS "billCount",
+             SUM(b.total)::float8                       AS "totalSpend",
+             SUM(b.net_payable)::float8                 AS "totalNetPayable",
+             SUM(b.amount_paid)::float8                 AS "totalPaid",
+             SUM(b.balance)::float8                     AS outstanding,
+             MIN(b.bill_date)                           AS "firstBillDate",
+             MAX(b.bill_date)                           AS "lastBillDate"
+        FROM bills b
+        LEFT JOIN parties p ON p.id = b.supplier_id
+       WHERE ${where}
+       GROUP BY b.supplier_id, p.name, b.supplier_name_at_bill
+       ORDER BY SUM(b.total) DESC
+    `),
+    tx.execute(sql`
+      SELECT bl.account_code_at_bill                    AS "accountCode",
+             MIN(bl.account_name_at_bill)               AS "accountName",
+             MIN(a.account_type::text)                  AS "accountType",
+             SUM(bl.amount)::float8                     AS "totalSpend"
+        FROM bill_lines bl
+        JOIN bills b ON b.id = bl.bill_id
+        LEFT JOIN accounts a ON a.id = bl.account_id
+       WHERE ${where}
+       GROUP BY bl.account_code_at_bill
+       ORDER BY SUM(bl.amount) DESC
+    `),
+  ]);
+
+  const n = (v: unknown) => Number(v ?? 0);
+  const suppliersRaw = (supplierRows as unknown as Array<Record<string, unknown>>).map(
+    (r) => ({
+      supplierId: r.supplierId,
+      supplierName: r.supplierName,
+      billCount: n(r.billCount),
+      totalSpend: n(r.totalSpend),
+      totalNetPayable: n(r.totalNetPayable),
+      totalPaid: n(r.totalPaid),
+      outstanding: n(r.outstanding),
+      firstBillDate: r.firstBillDate,
+      lastBillDate: r.lastBillDate,
+    }),
+  );
+
+  const totalSpend = suppliersRaw.reduce((s, r) => s + r.totalSpend, 0);
+  const share = (amount: number) => (totalSpend > 0 ? (amount / totalSpend) * 100 : 0);
+
+  return {
+    period: { startDate: new Date(startDate).toISOString(), endDate: new Date(endDate).toISOString() },
+    summary: {
+      totalSuppliers: suppliersRaw.length,
+      totalSpend,
+      totalOutstanding: suppliersRaw.reduce((s, r) => s + r.outstanding, 0),
+      totalBills: suppliersRaw.reduce((s, r) => s + r.billCount, 0),
+      topSupplierShare: suppliersRaw.length ? share(suppliersRaw[0].totalSpend) : 0,
+      topFiveShare: share(suppliersRaw.slice(0, 5).reduce((s, r) => s + r.totalSpend, 0)),
+    },
+    suppliers: suppliersRaw.map((r) => ({ ...r, spendShare: share(r.totalSpend) })),
+    categories: (categoryRows as unknown as Array<Record<string, unknown>>).map((c) => ({
+      accountCode: c.accountCode,
+      accountName: c.accountName,
+      accountType: c.accountType,
+      totalSpend: n(c.totalSpend),
+      spendShare: share(n(c.totalSpend)),
+    })),
+    source: "postgres" as const,
+  };
+}
