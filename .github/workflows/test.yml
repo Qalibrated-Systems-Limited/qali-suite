@@ -165,16 +165,37 @@ jobs:
       # If any test fails, the step exits non-zero and the job fails.
       # GitHub then surfaces a ✗ on the commit / PR.
       #
-      # Both URLs point at the superuser deliberately. globalSetup derives a
-      # RESTRICTED role (app_test_role) from DIRECT_DATABASE_URL and hands the
-      # workers that instead — a superuser bypasses RLS even under FORCE ROW
-      # LEVEL SECURITY, and the isolation tests would pass vacuously (§9A).
+      # THE TWO URLS ARE DIFFERENT ROLES, and that is the whole point.
+      #
+      # A superuser bypasses RLS even under FORCE ROW LEVEL SECURITY, so an
+      # isolation test run as one passes vacuously — it asks "can I see the
+      # other tenant?", the answer is yes, and the assertion that it should be
+      # no fails. Eight tests did exactly that here while passing locally.
+      #
+      # They passed locally for a reason that hid the problem: a developer's
+      # DATABASE_URL connects as `app_user`, which is already restricted, so
+      # RLS applied whether or not anything else was set up. CI pointed both
+      # URLs at `postgres` and there was nothing restricted in the picture.
+      #
+      # globalSetup creates `app_test_role` (non-superuser, constant password)
+      # and sets PG_TEST_URL — but PG_TEST_URL does not reach the test workers,
+      # and the APPLICATION's own client reads DATABASE_URL regardless, so
+      # every action-level test connected as the superuser. Naming the
+      # restricted role here fixes both at once and mirrors local.
+      #
+      # DIRECT_DATABASE_URL stays the superuser: CREATE ROLE, the GRANTs,
+      # TRUNCATE and ALTER DATABASE all need privileges app_test_role does not
+      # have and should not have.
+      #
+      # The role does not exist when this step starts — globalSetup creates it
+      # before any worker connects, and the migrate step above runs on
+      # DIRECT_DATABASE_URL.
       - name: Run tests
         run: npm test
         env:
           # Some Mongoose features check NODE_ENV. Keep it explicit.
           NODE_ENV: test
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/erp_test
+          DATABASE_URL: postgresql://app_test_role:app_test_pw@localhost:5432/erp_test
           DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/erp_test
 
       # ── (Optional) Upload coverage ─────────────────────────────────
