@@ -8,7 +8,7 @@ import {
   getProjectById,
   getProjectBudgets,
 } from "@/app/db/actions/project-actions";
-import { getExpenseAccountsForCategories } from "@/app/db/actions/claim-actions";
+import { getCostCodes } from "@/app/db/actions/project-actions";
 import {
   PROJECT_MANAGE_ROLES,
   FINANCE_WRITE_ROLES,
@@ -30,10 +30,12 @@ export default async function BudgetPage({ params }) {
 
   if (!session?.user) redirect("/login");
 
-  const [project, budgets, expenseAccounts] = await Promise.all([
+  // Cost codes, not the chart of accounts — 0073. Company-wide codes plus any
+  // scoped to this project.
+  const [project, budgets, costCodes] = await Promise.all([
     getProjectById(id),
     getProjectBudgets(id),
-    getExpenseAccountsForCategories(),
+    getCostCodes(id),
   ]);
 
   if (!project) notFound();
@@ -62,7 +64,7 @@ export default async function BudgetPage({ params }) {
 
       {/* Create New Budget */}
       {canCreate && project.status !== "closed" && (
-        <BudgetForm projectId={id} expenseAccounts={expenseAccounts} />
+        <BudgetForm projectId={id} costCodes={costCodes} />
       )}
 
       {/* Budget History */}
@@ -74,7 +76,7 @@ export default async function BudgetPage({ params }) {
               key={budget._id}
               budget={budget}
               projectId={id}
-              expenseAccounts={expenseAccounts}
+              costCodes={costCodes}
               canCreate={canCreate}
               canApprove={canApprove}
             />

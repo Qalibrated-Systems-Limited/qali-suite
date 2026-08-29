@@ -253,6 +253,11 @@ export async function getProjectTransactions(
 function toScreenBudgetLine(line: Record<string, unknown>) {
   return {
     _id: String(line.id),
+    /** What the budget-holder picked, and what the form edits. */
+    costCodeId: line.costCodeId,
+    costCode: line.costCode ?? "",
+    costCodeName: line.costCodeName ?? "",
+    /** What it charges — the trigger's, shown to whoever approves. */
     accountId: line.accountId,
     accountCode: line.accountCodeAtBudget ?? "",
     accountName: line.accountNameAtBudget ?? "",
@@ -411,7 +416,11 @@ const projectSchema = z.object({
 });
 
 const budgetLineSchema = z.object({
-  accountId: z.string().min(1, "Account is required"),
+  /**
+   * A cost code, not an account — 0073. The budget-holder works in their own
+   * vocabulary and the account is finance's mapping, resolved by the database.
+   */
+  costCodeId: z.string().min(1, "Cost code is required"),
   description: optionalTextMax(500, "Description too long"),
   amount: z.coerce.number().min(0, "Amount must be positive"),
 });
@@ -425,6 +434,7 @@ const budgetSchema = z.object({
 const costCodeSchema = z.object({
   code: z.string().min(1, "Code is required").max(20),
   name: z.string().min(1, "Name is required").max(100),
+  accountId: z.string().min(1, "Say which account this code charges"),
   description: optionalTextMax(500, "Description too long"),
   projectId: optionalText,
 });
@@ -746,7 +756,7 @@ export async function createProjectBudget(prevState: unknown, formData: FormData
           projectId: parsed.data.projectId,
           revisionNotes: parsed.data.revisionNotes,
           lines: parsed.data.lines.map((l) => ({
-            accountId: l.accountId,
+            costCodeId: l.costCodeId,
             description: l.description || "",
             amount: l.amount.toFixed(4),
           })),
@@ -788,7 +798,7 @@ export async function updateProjectBudget(prevState: unknown, formData: FormData
           budgetId,
           companyId,
           parsed.data.lines.map((l) => ({
-            accountId: l.accountId,
+            costCodeId: l.costCodeId,
             description: l.description || "",
             amount: l.amount.toFixed(4),
           })),
@@ -819,11 +829,21 @@ export async function approveProjectBudget(budgetId: string) {
 
 // ── Cost codes ───────────────────────────────────────────────────────────────
 
+/**
+ * Cost codes are FINANCE'S, not the project manager's — 0073.
+ *
+ * `PROJECT_MANAGE_ROLES` includes `Manager`, and while a cost code was just a
+ * label that was the right gate. It now carries the GL account the code
+ * charges, so defining one is a chart-of-accounts decision — and the whole
+ * point of putting cost codes in front of the budget form was to keep the
+ * chart away from the person filling it in.
+ */
 export async function createCostCode(prevState: unknown, formData: FormData) {
   const values = valuesOf(formData);
   const parsed = costCodeSchema.safeParse({
     code: formData.get("code"),
     name: formData.get("name"),
+    accountId: formData.get("accountId"),
     description: formData.get("description"),
     projectId: formData.get("projectId"),
   });
@@ -833,13 +853,14 @@ export async function createCostCode(prevState: unknown, formData: FormData) {
 
   try {
     await withAuthorizedTenant(
-      PROJECT_MANAGE_ROLES as unknown as string[],
+      FINANCE_WRITE_ROLES as unknown as string[],
       (tx, { user, companyId }) => {
         const actor = actorFrom(user);
         return repo.createCostCode(tx, {
           companyId,
           code: parsed.data.code,
           name: parsed.data.name,
+          accountId: parsed.data.accountId,
           description: parsed.data.description,
           projectId: parsed.data.projectId || null,
           createdById: actor.id,
@@ -863,6 +884,7 @@ export async function updateCostCode(
   const parsed = costCodeSchema.safeParse({
     code: formData.get("code"),
     name: formData.get("name"),
+    accountId: formData.get("accountId"),
     description: formData.get("description"),
     projectId: formData.get("projectId"),
   });
@@ -872,11 +894,12 @@ export async function updateCostCode(
 
   try {
     const row = await withAuthorizedTenant(
-      PROJECT_MANAGE_ROLES as unknown as string[],
+      FINANCE_WRITE_ROLES as unknown as string[],
       (tx) =>
         repo.updateCostCode(tx, costCodeId, {
           code: parsed.data.code,
           name: parsed.data.name,
+          accountId: parsed.data.accountId,
           description: parsed.data.description,
           projectId: parsed.data.projectId || null,
         }),

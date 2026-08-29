@@ -320,6 +320,19 @@ suite("projects", () => {
 
   // ───────────────────────────────────────────────────────────────────────────
   describe("budgets", () => {
+    /** A cost code charging `accountId`. Codes are the budget vocabulary. */
+    const code = (accountId, over = {}) =>
+      inA((tx) =>
+        repo.createCostCode(tx, {
+          companyId: companyA,
+          code: over.code ?? "LAB",
+          name: over.name ?? "Labour",
+          accountId,
+          projectId: over.projectId ?? null,
+          createdByName: "Test User",
+        }),
+      );
+
     const draft = (projectId, lines) =>
       inA((tx) =>
         repo.createBudget(tx, {
@@ -330,35 +343,92 @@ suite("projects", () => {
         }),
       );
 
-    it("versions per project and resolves the account snapshot itself", async () => {
+    it("versions per project and derives the account from the cost code", async () => {
       const p = await seedProject();
-      const v1 = await draft(p.id, [{ accountId: travelAcct, amount: "1000.0000" }]);
-      const v2 = await draft(p.id, [{ accountId: travelAcct, amount: "1500.0000" }]);
+      const lab = await code(travelAcct);
+      const v1 = await draft(p.id, [{ costCodeId: lab.id, amount: "1000.0000" }]);
+      const v2 = await draft(p.id, [{ costCodeId: lab.id, amount: "1500.0000" }]);
       expect(v1.version).toBe(1);
       expect(v2.version).toBe(2);
 
       const full = await inA((tx) => repo.getBudgetWithLines(tx, v1.id));
-      // Not taken off the posted body, as Mongo does — read from the chart.
+      // Written by the trigger, not supplied — 0073 decision 2.
+      expect(full.lines[0].accountId).toBe(travelAcct);
       expect(full.lines[0].accountCodeAtBudget).toBe("6100");
       expect(full.lines[0].accountNameAtBudget).toBe("Travel");
+      expect(full.lines[0].costCode).toBe("LAB");
     });
 
-    it("refuses two lines against one account", async () => {
+    it("refuses two lines against one cost code", async () => {
       const p = await seedProject();
+      const lab = await code(travelAcct);
       await failsWith(
         () =>
           draft(p.id, [
-            { accountId: travelAcct, amount: "1000.0000" },
-            { accountId: travelAcct, amount: "500.0000" },
+            { costCodeId: lab.id, amount: "1000.0000" },
+            { costCodeId: lab.id, amount: "500.0000" },
           ]),
-        /already on this budget/i,
+        /appears twice on this budget/i,
       );
+    });
+
+    it("refuses two codes that charge the same account, and says why", async () => {
+      // Budget-versus-actual matches by ACCOUNT, so two lines on one account
+      // each show its full spend. Two codes sharing an account is legitimate;
+      // both on one budget is not.
+      const p = await seedProject();
+      const site = await code(travelAcct, { code: "LAB-S", name: "Labour, site" });
+      const office = await code(travelAcct, { code: "LAB-O", name: "Labour, office" });
+
+      await failsWith(
+        () =>
+          draft(p.id, [
+            { costCodeId: site.id, amount: "1000.0000" },
+            { costCodeId: office.id, amount: "500.0000" },
+          ]),
+        /charge the same account/i,
+      );
+    });
+
+    it("refuses a cost code that charges something other than an expense", async () => {
+      await failsWith(
+        () => code(arAcct, { code: "BAD", name: "Bad" }),
+        /charges an expense account/i,
+      );
+    });
+
+    it("refuses a cost code scoped to another project", async () => {
+      const mine = await seedProject({ name: "Mine" });
+      const theirs = await seedProject({ name: "Theirs" });
+      const scoped = await code(travelAcct, { code: "OTH", projectId: theirs.id });
+
+      await failsWith(
+        () => draft(mine.id, [{ costCodeId: scoped.id, amount: "100.0000" }]),
+        /belongs to a different project/i,
+      );
+    });
+
+    it("does not rewrite an approved line when finance re-maps the code", async () => {
+      // A budget was signed against an account and the signature refers to
+      // that account.
+      const p = await seedProject();
+      const lab = await code(travelAcct);
+      const v1 = await draft(p.id, [{ costCodeId: lab.id, amount: "1000.0000" }]);
+      await inA((tx) => repo.approveBudget(tx, v1.id, actor));
+
+      await inA((tx) => repo.updateCostCode(tx, lab.id, { accountId: materialsAcct }));
+
+      const full = await inA((tx) => repo.getBudgetWithLines(tx, v1.id));
+      expect(full.lines[0].accountCodeAtBudget).toBe("6100");
+      expect(full.lines[0].accountId).toBe(travelAcct);
     });
 
     it("supersedes the incumbent on approval, and never leaves two approved", async () => {
       const p = await seedProject();
-      const v1 = await draft(p.id, [{ accountId: travelAcct, amount: "1000.0000" }]);
-      const v2 = await draft(p.id, [{ accountId: travelAcct, amount: "2000.0000" }]);
+      const lab = await code(travelAcct);
+      const mat = await code(materialsAcct, { code: "MAT", name: "Materials" });
+      const v1 = await draft(p.id, [{ costCodeId: lab.id, amount: "1000.0000" }]);
+      const v2 = await draft(p.id, [{ costCodeId: mat.id, amount: "2000.0000" }]);
 
       await inA((tx) => repo.approveBudget(tx, v1.id, actor));
       await inA((tx) => repo.approveBudget(tx, v2.id, actor));
@@ -373,7 +443,8 @@ suite("projects", () => {
       // Mongo's approve() is read-then-write-then-write with no lock, so two
       // concurrent approvals both pass its check. The index does not care.
       const p = await seedProject();
-      const v1 = await draft(p.id, [{ accountId: travelAcct, amount: "1000.0000" }]);
+      const lab = await code(travelAcct);
+      const v1 = await draft(p.id, [{ costCodeId: lab.id, amount: "1000.0000" }]);
       await inA((tx) => repo.approveBudget(tx, v1.id, actor));
 
       await failsWith(
@@ -390,14 +461,15 @@ suite("projects", () => {
 
     it("freezes an approved budget's lines", async () => {
       const p = await seedProject();
-      const v1 = await draft(p.id, [{ accountId: travelAcct, amount: "1000.0000" }]);
+      const lab = await code(travelAcct);
+      const v1 = await draft(p.id, [{ costCodeId: lab.id, amount: "1000.0000" }]);
       await inA((tx) => repo.approveBudget(tx, v1.id, actor));
 
       await failsWith(
         () =>
           inA((tx) =>
             repo.replaceBudgetLines(tx, v1.id, companyA, [
-              { accountId: travelAcct, amount: "9999.0000" },
+              { costCodeId: lab.id, amount: "9999.0000" },
             ]),
           ),
         /cannot be changed/i,
@@ -424,9 +496,11 @@ suite("projects", () => {
       expect(budget.amount).toBe(500);
       expect(budget.fromApprovedBudget).toBe(false);
 
+      const lab = await code(travelAcct);
+      const mat = await code(materialsAcct, { code: "MAT", name: "Materials" });
       const v1 = await draft(p.id, [
-        { accountId: travelAcct, amount: "1000.0000" },
-        { accountId: materialsAcct, amount: "250.0000" },
+        { costCodeId: lab.id, amount: "1000.0000" },
+        { costCodeId: mat.id, amount: "250.0000" },
       ]);
       await inA((tx) => repo.approveBudget(tx, v1.id, actor));
 
@@ -449,6 +523,7 @@ suite("projects", () => {
           companyId: companyA,
           code: over.code ?? "LAB",
           name: over.name ?? "Labour",
+          accountId: over.accountId ?? travelAcct,
           projectId: over.projectId ?? null,
           createdByName: "Test User",
         }),
@@ -676,13 +751,25 @@ suite("projects", () => {
 
     it("puts bills, claims and expenses against the budget line's account", async () => {
       const p = await seedProject();
+      const lab = await inA((tx) =>
+        repo.createCostCode(tx, {
+          companyId: companyA, code: "LAB", name: "Labour",
+          accountId: travelAcct, createdByName: "Test User",
+        }),
+      );
+      const mat = await inA((tx) =>
+        repo.createCostCode(tx, {
+          companyId: companyA, code: "MAT", name: "Materials",
+          accountId: materialsAcct, createdByName: "Test User",
+        }),
+      );
       const v1 = await inA((tx) =>
         repo.createBudget(tx, {
           companyId: companyA,
           projectId: p.id,
           lines: [
-            { accountId: travelAcct, amount: "10000.0000" },
-            { accountId: materialsAcct, amount: "5000.0000" },
+            { costCodeId: lab.id, amount: "10000.0000" },
+            { costCodeId: mat.id, amount: "5000.0000" },
           ],
           createdByName: "Test User",
         }),

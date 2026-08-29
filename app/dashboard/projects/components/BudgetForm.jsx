@@ -14,7 +14,7 @@ import {
   approveProjectBudget,
 } from "@/app/db/actions/project-actions";
 import { toast } from "sonner";
-import ExpenseAccountCombobox from "@/components/expense-account-combobox";
+import CostCodeCombobox from "./CostCodeCombobox";
 
 function formatCurrency(amount) {
   return new Intl.NumberFormat("en-KE", {
@@ -24,22 +24,39 @@ function formatCurrency(amount) {
   }).format(amount || 0);
 }
 
-export default function BudgetForm({ projectId, expenseAccounts, budget, onCancel }) {
+/**
+ * A budget line names a COST CODE — 0073.
+ *
+ * It used to name a GL account, chosen from all 39 postable expense accounts,
+ * by whoever was drafting the budget — and `PROJECT_MANAGE_ROLES` includes
+ * `Manager`, so that was an operations role reading a chart of accounts. The
+ * combobox even offered to CREATE an account from inside a budget line.
+ *
+ * No comparable system works that way: Procore and Candy budget by cost code,
+ * Odoo by budgetary position, Intacct and Xero by cost category, and in every
+ * one of them finance owns the mapping to the ledger. Here the mapping lives
+ * on the cost code, and the database derives the account from it.
+ */
+const blankLine = () => ({
+  _id: Date.now() + Math.floor(Math.random() * 1000),
+  costCodeId: "",
+  description: "",
+  amount: "",
+});
+
+export default function BudgetForm({ projectId, costCodes = [], budget, onCancel }) {
   const isEdit = !!budget;
-  const [allAccounts, setAllAccounts] = useState(expenseAccounts);
 
   const [lines, setLines] = useState(() => {
     if (budget?.lines?.length) {
       return budget.lines.map((l, i) => ({
         _id: Date.now() + i,
-        accountId: l.accountId || "",
-        accountCode: l.accountCode || "",
-        accountName: l.accountName || "",
+        costCodeId: l.costCodeId || "",
         description: l.description || "",
         amount: l.amount ?? "",
       }));
     }
-    return [{ _id: Date.now(), accountId: "", accountCode: "", accountName: "", description: "", amount: "" }];
+    return [blankLine()];
   });
   const [revisionNotes, setRevisionNotes] = useState(budget?.revisionNotes || "");
 
@@ -53,9 +70,7 @@ export default function BudgetForm({ projectId, expenseAccounts, budget, onCance
         onCancel?.();
       } else {
         // Reset form
-        setLines([
-          { _id: Date.now(), accountId: "", accountCode: "", accountName: "", description: "", amount: "" },
-        ]);
+        setLines([blankLine()]);
         setRevisionNotes("");
       }
     }
@@ -64,12 +79,7 @@ export default function BudgetForm({ projectId, expenseAccounts, budget, onCance
     }
   }, [state]);
 
-  const addLine = () => {
-    setLines([
-      ...lines,
-      { _id: Date.now(), accountId: "", accountCode: "", accountName: "", description: "", amount: "" },
-    ]);
-  };
+  const addLine = () => setLines([...lines, blankLine()]);
 
   const removeLine = (id) => {
     if (lines.length <= 1) return;
@@ -93,15 +103,15 @@ export default function BudgetForm({ projectId, expenseAccounts, budget, onCance
     if (isEdit) {
       formData.set("budgetId", budget._id);
     }
+    // The cost code and the amount, and nothing else. The account, its code
+    // and its name are the database's to write — see 0073 decision 2.
     formData.set(
       "lines",
       JSON.stringify(
         lines
-          .filter((l) => l.accountId && l.amount)
+          .filter((l) => l.costCodeId && l.amount)
           .map((l) => ({
-            accountId: l.accountId,
-            accountCode: l.accountCode,
-            accountName: l.accountName,
+            costCodeId: l.costCodeId,
             description: l.description,
             amount: parseFloat(l.amount) || 0,
           })),
@@ -133,27 +143,14 @@ export default function BudgetForm({ projectId, expenseAccounts, budget, onCance
               className="rounded-lg border p-3 sm:p-0 sm:border-0 sm:rounded-none space-y-2 sm:space-y-0 sm:grid sm:grid-cols-12 sm:gap-2 sm:items-start"
             >
               <div className="sm:col-span-4">
-                <Label className="text-xs text-muted-foreground sm:hidden mb-1 block">Account</Label>
-                <ExpenseAccountCombobox
-                  value={line.accountId}
-                  onValueChange={(id, code, name) => {
-                    const updated = [...lines];
-                    updated[index] = {
-                      ...updated[index],
-                      accountId: id,
-                      accountCode: code,
-                      accountName: name,
-                    };
-                    setLines(updated);
-                  }}
-                  accounts={allAccounts}
-                  onAccountCreated={(acc) => {
-                    setAllAccounts((prev) =>
-                      [...prev, acc].sort((a, b) =>
-                        a.accountCode.localeCompare(b.accountCode),
-                      ),
-                    );
-                  }}
+                <Label className="text-xs text-muted-foreground sm:hidden mb-1 block">Cost code</Label>
+                <CostCodeCombobox
+                  value={line.costCodeId}
+                  onValueChange={(id) => updateLine(index, "costCodeId", id)}
+                  costCodes={costCodes}
+                  taken={lines
+                    .filter((l) => l._id !== line._id)
+                    .map((l) => l.costCodeId)}
                 />
               </div>
               <div className="sm:col-span-4">
@@ -231,7 +228,7 @@ export default function BudgetForm({ projectId, expenseAccounts, budget, onCance
         <div className="flex justify-end">
           <Button
             type="submit"
-            disabled={isPending || lines.every((l) => !l.accountId)}
+            disabled={isPending || lines.every((l) => !l.costCodeId)}
             className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold"
           >
             {isPending ? (
@@ -272,14 +269,14 @@ const STATUS_COLORS = {
   superseded: "bg-gray-100 text-gray-500",
 };
 
-export function BudgetCard({ budget, projectId, expenseAccounts, canCreate, canApprove }) {
+export function BudgetCard({ budget, projectId, costCodes, canCreate, canApprove }) {
   const [editing, setEditing] = useState(false);
 
   if (editing) {
     return (
       <BudgetForm
         projectId={projectId}
-        expenseAccounts={expenseAccounts}
+        costCodes={costCodes}
         budget={budget}
         onCancel={() => setEditing(false)}
       />
@@ -326,8 +323,12 @@ export function BudgetCard({ budget, projectId, expenseAccounts, canCreate, canA
         {budget.lines?.map((line, i) => (
           <div key={i} className="flex items-center justify-between gap-2 py-2 border-b last:border-0">
             <div className="min-w-0">
-              <p className="text-sm truncate">{line.accountName}</p>
-              <p className="text-xs text-muted-foreground font-mono">{line.accountCode}</p>
+              <p className="text-sm truncate">
+                {line.costCode ? `${line.costCode} — ${line.costCodeName}` : line.accountName}
+              </p>
+              <p className="text-xs text-muted-foreground font-mono">
+                {line.accountCode} {line.accountName}
+              </p>
               {line.description && (
                 <p className="text-xs text-muted-foreground truncate">{line.description}</p>
               )}
@@ -344,7 +345,7 @@ export function BudgetCard({ budget, projectId, expenseAccounts, canCreate, canA
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left">
-              <th className="pb-2 font-medium text-muted-foreground">Account</th>
+              <th className="pb-2 font-medium text-muted-foreground">Cost code</th>
               <th className="pb-2 font-medium text-muted-foreground">Description</th>
               <th className="pb-2 font-medium text-muted-foreground text-right">Amount</th>
             </tr>
@@ -353,10 +354,13 @@ export function BudgetCard({ budget, projectId, expenseAccounts, canCreate, canA
             {budget.lines?.map((line, i) => (
               <tr key={i} className="border-b last:border-0">
                 <td className="py-2">
-                  <span className="font-mono text-xs text-muted-foreground mr-1">
-                    {line.accountCode}
+                  <span className="font-mono text-xs mr-1">{line.costCode}</span>
+                  {line.costCodeName}
+                  {/* What it charges, because the person reading an approved
+                      budget is often the accountant, not the PM. */}
+                  <span className="block text-xs text-muted-foreground">
+                    {line.accountCode} {line.accountName}
                   </span>
-                  {line.accountName}
                 </td>
                 <td className="py-2 text-muted-foreground">
                   {line.description || "—"}

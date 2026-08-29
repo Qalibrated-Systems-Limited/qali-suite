@@ -6,7 +6,7 @@ import Pagination from "@/components/pagination";
 import { Suspense } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, Tags } from "lucide-react";
 import ProjectStats, {
   ProjectStatsSkeleton,
 } from "../components/ProjectStats";
@@ -80,12 +80,22 @@ export default async function ProjectsPage({ searchParams }) {
             Track project budgets, costs, and profitability
           </p>
         </div>
-        <Button asChild size="sm" className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold shrink-0 sm:size-default">
-          <Link href="/dashboard/projects/create">
-            <Plus className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">New Project</span>
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* The cost codes page — 0073. Without a link it is unreachable, and
+              a budget cannot be drafted until at least one code exists. */}
+          <Button asChild size="sm" variant="outline">
+            <Link href="/dashboard/projects/cost-codes">
+              <Tags className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Cost Codes</span>
+            </Link>
+          </Button>
+          <Button asChild size="sm" className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold sm:size-default">
+            <Link href="/dashboard/projects/create">
+              <Plus className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">New Project</span>
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}

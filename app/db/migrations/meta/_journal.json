@@ -512,6 +512,13 @@
       "when": 1787049145566,
       "tag": "0072_project_client_is_a_customer",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1787049146566,
+      "tag": "0073_cost_codes_are_the_budget_vocabulary",
+      "breakpoints": true
     }
   ]
 }

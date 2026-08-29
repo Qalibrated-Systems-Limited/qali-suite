@@ -647,11 +647,7 @@ export async function getProjectBudgetVsActual(tx: Tx, projectId: string) {
     );
   if (!budget) return null;
 
-  const lines = await tx
-    .select()
-    .from(projectBudgetLines)
-    .where(eq(projectBudgetLines.budgetId, budget.id))
-    .orderBy(asc(projectBudgetLines.lineNumber));
+  const lines = await budgetLinesFor(tx, [budget.id]);
   if (!lines.length) return null;
 
   const [claimsByAccount, expensesByAccount, billRows] = await Promise.all([
@@ -703,6 +699,8 @@ export async function getProjectBudgetVsActual(tx: Tx, projectId: string) {
       accountId: line.accountId,
       accountCode: line.accountCodeAtBudget,
       accountName: line.accountNameAtBudget,
+      costCode: line.costCode,
+      costCodeName: line.costCodeName,
       description: line.description,
       budgeted,
       actual: spent,
@@ -829,6 +827,39 @@ export async function countProjectLinks(tx: Tx, projectId: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Budget lines with the COST CODE they were set in beside the account they
+ * charge — 0073.
+ *
+ * Both, because they answer different readers: the project manager set the
+ * budget in codes, and the accountant approving it needs to see where the
+ * money lands. The account is the trigger's, the code is the person's.
+ */
+async function budgetLinesFor(tx: Tx, budgetIds: readonly string[]) {
+  if (!budgetIds.length) return [];
+  return tx
+    .select({
+      id: projectBudgetLines.id,
+      budgetId: projectBudgetLines.budgetId,
+      lineNumber: projectBudgetLines.lineNumber,
+      costCodeId: projectBudgetLines.costCodeId,
+      costCode: projectCostCodes.code,
+      costCodeName: projectCostCodes.name,
+      accountId: projectBudgetLines.accountId,
+      accountCodeAtBudget: projectBudgetLines.accountCodeAtBudget,
+      accountNameAtBudget: projectBudgetLines.accountNameAtBudget,
+      description: projectBudgetLines.description,
+      amount: projectBudgetLines.amount,
+    })
+    .from(projectBudgetLines)
+    .innerJoin(
+      projectCostCodes,
+      eq(projectCostCodes.id, projectBudgetLines.costCodeId),
+    )
+    .where(inArray(projectBudgetLines.budgetId, [...budgetIds]))
+    .orderBy(asc(projectBudgetLines.lineNumber));
+}
+
+/**
  * Every version, newest first, WITH its lines.
  *
  * The budget page renders each version's lines inline, and in Mongo they were
@@ -844,16 +875,10 @@ export async function getProjectBudgets(tx: Tx, projectId: string) {
     .orderBy(desc(projectBudgets.version));
   if (!budgets.length) return [];
 
-  const lines = await tx
-    .select()
-    .from(projectBudgetLines)
-    .where(
-      inArray(
-        projectBudgetLines.budgetId,
-        budgets.map((b) => b.id),
-      ),
-    )
-    .orderBy(asc(projectBudgetLines.lineNumber));
+  const lines = await budgetLinesFor(
+    tx,
+    budgets.map((b) => b.id),
+  );
 
   const byBudget = new Map<string, typeof lines>();
   for (const line of lines) {
@@ -879,11 +904,7 @@ export async function getBudgetWithLines(tx: Tx, budgetId: string) {
     .where(eq(projectBudgets.id, budgetId));
   if (!budget) return null;
 
-  const lines = await tx
-    .select()
-    .from(projectBudgetLines)
-    .where(eq(projectBudgetLines.budgetId, budgetId))
-    .orderBy(asc(projectBudgetLines.lineNumber));
+  const lines = await budgetLinesFor(tx, [budgetId]);
 
   return {
     ...budget,
@@ -893,7 +914,8 @@ export async function getBudgetWithLines(tx: Tx, budgetId: string) {
 }
 
 export interface BudgetLineInput {
-  accountId: string;
+  /** A cost code, not an account — 0073. The account is derived from it. */
+  costCodeId: string;
   description?: string | null;
   amount: string;
 }
@@ -901,10 +923,6 @@ export interface BudgetLineInput {
 /**
  * A new version. `version` is MAX + 1 taken inside the caller's transaction,
  * and `project_budgets_version_idx` catches the race the read cannot.
- *
- * Account code and name are read from the chart HERE rather than trusted from
- * the form — Mongo takes `accountCode` and `accountName` off the posted body,
- * so a crafted request could label a budget line with any account it liked.
  */
 export async function createBudget(
   tx: Tx,
@@ -942,6 +960,13 @@ export async function createBudget(
 /**
  * Draft lines, replaced wholesale.
  *
+ * NO `account_id` IS SUPPLIED, and that is the point of 0073 decision 2:
+ * `project_budget_lines_derive_account` reads the cost code and writes the
+ * account and its snapshot itself, so nothing in the application can produce a
+ * line whose account disagrees with the code beside it. That is also why these
+ * go in through raw SQL rather than `tx.insert` — Drizzle would require the
+ * column the trigger owns.
+ *
  * `project_budget_lines_frozen` refuses this on anything that is not a draft,
  * so a caller that forgets to check gets an error rather than a rewritten
  * approval.
@@ -958,37 +983,34 @@ export async function replaceBudgetLines(
 
   if (!lines.length) return [];
 
-  const ids = [...new Set(lines.map((l) => l.accountId))];
-  const chart = await tx
-    .select({
-      id: accounts.id,
-      code: accounts.accountCode,
-      name: accounts.accountName,
-    })
-    .from(accounts)
-    .where(inArray(accounts.id, ids));
-  const byId = new Map(chart.map((a) => [a.id, a]));
-
-  const missing = ids.filter((id) => !byId.has(id));
-  if (missing.length) {
-    throw new Error("A budget line names an account that is not in this company's chart.");
+  // The same code twice, caught before the insert so the message can name the
+  // actual mistake. The database refuses it too, but reports whichever unique
+  // index it checks first — which may be the account one, whose sentence has
+  // to cover both cases and so covers neither precisely.
+  const seen = new Set<string>();
+  for (const line of lines) {
+    if (seen.has(line.costCodeId)) {
+      throw new Error(
+        "A cost code appears twice on this budget. Two lines against one code are two halves of one number.",
+      );
+    }
+    seen.add(line.costCodeId);
   }
 
-  return tx
-    .insert(projectBudgetLines)
-    .values(
-      lines.map((line, i) => ({
-        companyId,
-        budgetId,
-        lineNumber: i + 1,
-        accountId: line.accountId,
-        accountCodeAtBudget: byId.get(line.accountId)!.code ?? "",
-        accountNameAtBudget: byId.get(line.accountId)!.name ?? "",
-        description: line.description ?? "",
-        amount: line.amount,
-      })),
-    )
-    .returning();
+  const inserted = [];
+  for (const [i, line] of lines.entries()) {
+    const [row] = (await tx.execute(sql`
+      INSERT INTO project_budget_lines
+        (company_id, budget_id, line_number, cost_code_id, description, amount)
+      VALUES (${companyId}, ${budgetId}, ${i + 1}, ${line.costCodeId},
+              ${line.description ?? ""}, ${line.amount})
+      RETURNING id::text AS id, account_id::text AS "accountId",
+                account_code_at_budget AS "accountCodeAtBudget",
+                account_name_at_budget AS "accountNameAtBudget"
+    `)) as unknown as Array<Record<string, unknown>>;
+    inserted.push(row);
+  }
+  return inserted;
 }
 
 /**
@@ -1038,15 +1060,32 @@ export async function approveBudget(
   return approved;
 }
 
-/** Company-wide codes, plus this project's own when one is named. */
+/**
+ * Company-wide codes, plus this project's own when one is named.
+ *
+ * The account rides along so the budget form can show what a code charges
+ * without a second query — the picker is the PM's vocabulary, and the account
+ * beside it is the answer to "and where does that land".
+ */
 export async function getCostCodes(tx: Tx, projectId?: string | null) {
   const scope = projectId
     ? or(isNull(projectCostCodes.projectId), eq(projectCostCodes.projectId, projectId))!
     : isNull(projectCostCodes.projectId);
 
   return tx
-    .select()
+    .select({
+      id: projectCostCodes.id,
+      code: projectCostCodes.code,
+      name: projectCostCodes.name,
+      description: projectCostCodes.description,
+      projectId: projectCostCodes.projectId,
+      isActive: projectCostCodes.isActive,
+      accountId: projectCostCodes.accountId,
+      accountCode: accounts.accountCode,
+      accountName: accounts.accountName,
+    })
     .from(projectCostCodes)
+    .innerJoin(accounts, eq(accounts.id, projectCostCodes.accountId))
     .where(and(eq(projectCostCodes.isActive, true), scope))
     .orderBy(asc(projectCostCodes.code));
 }
@@ -1054,8 +1093,20 @@ export async function getCostCodes(tx: Tx, projectId?: string | null) {
 /** The management page, inactive codes included. */
 export async function getAllCostCodes(tx: Tx) {
   return tx
-    .select()
+    .select({
+      id: projectCostCodes.id,
+      code: projectCostCodes.code,
+      name: projectCostCodes.name,
+      description: projectCostCodes.description,
+      projectId: projectCostCodes.projectId,
+      isActive: projectCostCodes.isActive,
+      accountId: projectCostCodes.accountId,
+      accountCode: accounts.accountCode,
+      accountName: accounts.accountName,
+      createdByName: projectCostCodes.createdByName,
+    })
     .from(projectCostCodes)
+    .innerJoin(accounts, eq(accounts.id, projectCostCodes.accountId))
     .orderBy(asc(projectCostCodes.code));
 }
 
@@ -1251,12 +1302,22 @@ export async function deleteProject(tx: Tx, projectId: string) {
   return row ?? null;
 }
 
+/**
+ * A cost code, and the account it charges.
+ *
+ * `accountId` is required — 0073 decision 1. A code that does not say where
+ * it lands cannot be budgeted against and cannot be reported on, and the
+ * schema has carried exactly that since 0070.
+ * `project_cost_code_charges_an_expense` refuses anything that is not a
+ * postable expense account.
+ */
 export async function createCostCode(
   tx: Tx,
   input: {
     companyId: string;
     code: string;
     name: string;
+    accountId: string;
     description?: string | null;
     projectId?: string | null;
     createdById?: string | null;
@@ -1269,6 +1330,7 @@ export async function createCostCode(
       companyId: input.companyId,
       code: input.code.trim().toUpperCase(),
       name: input.name.trim(),
+      accountId: input.accountId,
       description: input.description?.trim() ?? "",
       projectId: input.projectId || null,
       createdById: input.createdById ?? null,
@@ -1284,6 +1346,7 @@ export async function updateCostCode(
   input: {
     code?: string;
     name?: string;
+    accountId?: string;
     description?: string | null;
     projectId?: string | null;
   },
@@ -1291,6 +1354,7 @@ export async function updateCostCode(
   const patch: Record<string, unknown> = { updatedAt: new Date() };
   if (input.code !== undefined) patch.code = input.code.trim().toUpperCase();
   if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.accountId !== undefined) patch.accountId = input.accountId;
   if (input.description !== undefined) patch.description = input.description?.trim() ?? "";
   if (input.projectId !== undefined) patch.projectId = input.projectId || null;
 

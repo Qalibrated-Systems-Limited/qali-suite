@@ -203,8 +203,20 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   project_budgets_approval_pair:
     "A draft budget carries no approval, and an approved one must.",
   project_budgets_approver_pair: "An approved budget must name its approver.",
+  /**
+   * Worded to be true either way. Postgres reports whichever unique index it
+   * happens to check first, and the same code twice and two codes sharing an
+   * account both land here — the sentence has to fit both. The repository
+   * catches the same-code case before the insert and says so exactly.
+   */
   project_budget_lines_one_per_account:
-    "That account is already on this budget. Use one line per account and split the detail with cost codes.",
+    "Two lines on this budget charge the same account, so each would show that account's full spend. Budget them as one line.",
+  project_budget_lines_one_per_cost_code:
+    "That cost code is already on this budget. Two lines against one code are two halves of one number.",
+  project_cost_codes_account_id_accounts_id_fk:
+    "That account is not in this company's chart.",
+  project_budget_lines_cost_code_id_project_cost_codes_id_fk:
+    "That cost code does not exist.",
   project_budget_lines_amount_non_negative:
     "A budget line cannot be negative.",
   project_cost_codes_company_code_idx:

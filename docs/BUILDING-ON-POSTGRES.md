@@ -725,6 +725,74 @@ raises if the current connection would bypass RLS — worth a health check.
 
 ---
 
+## Handoff — 2026-08-29 — cost codes are the budget vocabulary (0073)
+
+The budget form handed a project manager **39 postable expense accounts,
+ordered by account code**, and asked them to build a budget out of it.
+`PROJECT_MANAGE_ROLES` includes `Manager` — an operations role — so the person
+being asked to read a chart of accounts is precisely the one who does not have
+one in their head. The combobox also offered to **create an account** from
+inside a budget line.
+
+### What every comparable system does instead
+
+| | what the budget-holder picks | who owns the GL mapping |
+|---|---|---|
+| Procore, Candy, RIB | **cost code** (+ cost type) | finance, once |
+| Odoo | **budgetary position** — a named group of accounts | accountant |
+| Sage Intacct, Xero Projects | **cost category** | mapped behind the scenes |
+| NetSuite | accounts, but filtered and budgeted at parent level | finance |
+| SAP, Oracle | cost element group / commitment item | finance |
+
+Unanimous: nobody puts a raw chart of accounts in front of a project manager.
+
+**And this schema already had the table.** `project_cost_codes` has existed
+since 0070, is referenced by claims, bills, expenses and stock requests, has
+full CRUD in both stores — and **has never had a screen in either of them**, so
+no cost code could be created through the app at all. It had one thing missing:
+it did not say which account it charges.
+
+### The four decisions
+
+1. **A cost code charges exactly one postable EXPENSE account**, and finance
+   sets it. Not a group, as Odoo's budgetary position is — a group has to be
+   split back across the codes that share it, and there is no non-arbitrary way
+   to do that. Several codes MAY share one account; "Labour, site" and "Labour,
+   office" both on 6200 Wages is normal.
+2. **The budget line's account is derived, not chosen.**
+   `project_budget_lines_derive_account` reads the cost code and writes
+   `account_id` and the snapshot itself, so no path can produce a line whose
+   account disagrees with its code — including paths nobody has written yet.
+   It fires on write only: re-mapping a code later does not rewrite budgets
+   already approved against the old account.
+3. **One line per account survives** (0070 decision 6), and now has something
+   to say: two codes charging one account cannot both be lines, because
+   budget-versus-actual matches by account and each would show the full spend.
+   Matching by cost code instead is where this goes when the claims, bills and
+   expense forms actually SET one — nothing does today, so matching on it now
+   would show every line an actual of zero.
+4. **Defining a cost code became FINANCE's**, not `PROJECT_MANAGE_ROLES`. While
+   a cost code was just a label that gate was right; it now carries a GL
+   mapping, and keeping the chart away from the person filling in the budget is
+   the entire point.
+
+### And the hole underneath the picker
+
+`project_budget_lines.account_id` was an unrestricted reference to `accounts`.
+The picker had always filtered on `account_type = 'expense' AND can_post`; the
+COLUMN never did, so a bank or receivable account posted to the form saved and
+then matched no actual, for ever, in silence. Exactly the shape of the project
+client in 0072 — the picker filtered and nothing underneath it agreed. That is
+now three in a row, and it is worth stating as a rule: **if a picker filters,
+find out what happens when the filter is bypassed.**
+
+### New screens
+
+`/dashboard/projects/cost-codes` — read by anyone who manages projects, written
+by finance, linked from the projects list. It shows what each code charges and
+warns when two codes share an account, rather than letting the budget page be
+the first place anyone finds out.
+
 ## Handoff — 2026-08-29 — a project's client is a customer (0072)
 
 The create and edit forms already offered nothing but customers and had no

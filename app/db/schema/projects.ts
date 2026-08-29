@@ -226,43 +226,6 @@ export const projectBudgets = pgTable(
   ],
 );
 
-export const projectBudgetLines = pgTable(
-  "project_budget_lines",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    companyId: uuid("company_id")
-      .notNull()
-      .references(() => companies.id, { onDelete: "restrict" }),
-    budgetId: uuid("budget_id")
-      .notNull()
-      .references(() => projectBudgets.id, { onDelete: "cascade" }),
-    lineNumber: integer("line_number").notNull(),
-
-    accountId: uuid("account_id")
-      .notNull()
-      .references(() => accounts.id, { onDelete: "restrict" }),
-    /** What the account was called when the budget was signed. */
-    accountCodeAtBudget: text("account_code_at_budget").notNull().default(""),
-    accountNameAtBudget: text("account_name_at_budget").notNull().default(""),
-
-    description: text("description").notNull().default(""),
-    amount: money("amount").notNull(),
-  },
-  (t) => [
-    uniqueIndex("project_budget_lines_number_idx").on(t.budgetId, t.lineNumber),
-    /**
-     * Budget-vs-actual reads the actual per ACCOUNT, so a second line on the
-     * same account would display the same spend twice and the project would
-     * look twice as far over budget as it is.
-     */
-    uniqueIndex("project_budget_lines_one_per_account").on(
-      t.budgetId,
-      t.accountId,
-    ),
-    check("project_budget_lines_amount_non_negative", sql`${t.amount} >= 0`),
-  ],
-);
-
 export const projectCostCodes = pgTable(
   "project_cost_codes",
   {
@@ -273,6 +236,25 @@ export const projectCostCodes = pgTable(
     code: text("code").notNull(),
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
+    /**
+     * What this code charges — 0073.
+     *
+     * A cost code is the vocabulary the budget-holder works in; the account is
+     * the mapping finance owns. Procore, Candy, Odoo, Intacct and SAP all draw
+     * the line in the same place, and this schema had the codes since 0070
+     * without ever saying where they land.
+     *
+     * SEVERAL CODES MAY SHARE ONE ACCOUNT — "Labour, site" and "Labour,
+     * office" both charging 6200 Wages is normal. What they may not do is both
+     * appear on one budget: budget-versus-actual matches by account, so two
+     * lines on one account each show the full spend.
+     *
+     * `project_cost_code_charges_an_expense` refuses anything that is not a
+     * postable expense account.
+     */
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "restrict" }),
     /** NULL = available to every project in the company. */
     projectId: uuid("project_id").references(() => projects.id, {
       onDelete: "cascade",
@@ -303,9 +285,67 @@ export const projectCostCodes = pgTable(
       .on(t.companyId, t.projectId, t.code)
       .where(sql`${t.projectId} IS NOT NULL`),
     index("project_cost_codes_active_idx").on(t.companyId, t.isActive),
+    index("project_cost_codes_account_idx").on(t.companyId, t.accountId),
 
     check("project_cost_codes_code_not_blank", sql`length(btrim(${t.code})) > 0`),
     check("project_cost_codes_name_not_blank", sql`length(btrim(${t.name})) > 0`),
+  ],
+);
+
+export const projectBudgetLines = pgTable(
+  "project_budget_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    budgetId: uuid("budget_id")
+      .notNull()
+      .references(() => projectBudgets.id, { onDelete: "cascade" }),
+    lineNumber: integer("line_number").notNull(),
+
+    /**
+     * What the budget-holder picked — 0073. The account below is DERIVED from
+     * it by `project_budget_lines_derive_account`, so a caller supplies a cost
+     * code and cannot supply an account that disagrees with it.
+     */
+    costCodeId: uuid("cost_code_id")
+      .notNull()
+      .references(() => projectCostCodes.id, { onDelete: "restrict" }),
+
+    /**
+     * WRITTEN BY THE TRIGGER, not by the application. It stays on the line
+     * because budget-versus-actual matches actuals by account — claims, bills
+     * and expenses all post to one — and because a budget signed against an
+     * account should still name that account after finance re-maps the code.
+     */
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "restrict" }),
+    /** Also trigger-written: what the account was called when it was signed. */
+    accountCodeAtBudget: text("account_code_at_budget").notNull().default(""),
+    accountNameAtBudget: text("account_name_at_budget").notNull().default(""),
+
+    description: text("description").notNull().default(""),
+    amount: money("amount").notNull(),
+  },
+  (t) => [
+    uniqueIndex("project_budget_lines_number_idx").on(t.budgetId, t.lineNumber),
+    /**
+     * Budget-vs-actual reads the actual per ACCOUNT, so a second line on the
+     * same account would display the same spend twice and the project would
+     * look twice as far over budget as it is.
+     */
+    uniqueIndex("project_budget_lines_one_per_account").on(
+      t.budgetId,
+      t.accountId,
+    ),
+    /** And once per code, which is the rule in the budget-holder's own terms. */
+    uniqueIndex("project_budget_lines_one_per_cost_code").on(
+      t.budgetId,
+      t.costCodeId,
+    ),
+    check("project_budget_lines_amount_non_negative", sql`${t.amount} >= 0`),
   ],
 );
 
