@@ -7,6 +7,7 @@ import {
 import { getActiveProjects } from "@/app/db/actions/project-actions";
 import { AdvanceRequestForm } from "../../components/AdvanceRequestForm";
 import { ReimbursementForm } from "../../components/ReimbursementForm";
+import { getAllCostCodes } from "@/app/db/actions/project-actions";
 
 export const metadata = {
   title: "Edit Claim | ERP System",
@@ -45,16 +46,17 @@ export default async function EditClaimPage({ params }) {
     redirect(`/dashboard/claims/${id}`);
   }
 
-  const [expenseAccounts, projects] = await Promise.all([
+  const [expenseAccounts, projects, costCodes] = await Promise.all([
     getExpenseAccountsForCategories(),
     getActiveProjects(),
+    getAllCostCodes(),
   ]);
 
   // Render appropriate form based on claim type
   if (claim.claimType === "advance_request") {
-    return <AdvanceRequestForm claim={claim} projects={projects} />;
+    return <AdvanceRequestForm claim={claim} projects={projects} costCodes={costCodes} />;
   } else if (claim.claimType === "reimbursement") {
-    return <ReimbursementForm claim={claim} expenseAccounts={expenseAccounts} projects={projects} />;
+    return <ReimbursementForm claim={claim} expenseAccounts={expenseAccounts} projects={projects} costCodes={costCodes} />;
   } else {
     // Settlement claims cannot be edited
     redirect(`/dashboard/claims/${id}`);

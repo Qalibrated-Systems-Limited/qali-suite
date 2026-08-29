@@ -89,6 +89,7 @@ const createSchema = z
     // CreateRequestForm has posted this since it was written; nothing read it,
     // so every project a requester picked was dropped here (0054).
     projectId: z.string().optional().nullable(),
+    costCodeId: z.string().optional().nullable(),
     items: z.array(itemSchema).min(1, "Add at least one item"),
   })
   .refine(
@@ -162,6 +163,7 @@ export async function createStockRequest(
           requiredByDate: d.requiredByDate ? d.requiredByDate.slice(0, 10) : null,
           notes: blank(d.notes),
           projectId: blank(d.projectId),
+          costCodeId: blank(d.costCodeId),
           createdById: user.id,
           items: d.items.map((i) => ({
             productId: i.productId,

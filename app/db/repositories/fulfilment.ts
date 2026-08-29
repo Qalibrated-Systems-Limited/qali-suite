@@ -83,6 +83,7 @@ export interface CreateStockRequestInput {
    * 0020 and `mapRequest` already reads it back out; nothing ever wrote it.
    */
   projectId?: string | null;
+  costCodeId?: string | null;
   createdById?: string | null;
 }
 
@@ -149,6 +150,7 @@ export async function createStockRequest(
       requiredByDate: input.requiredByDate ?? null,
       notes: input.notes ?? null,
       projectId: input.projectId ?? null,
+      costCodeId: input.costCodeId ?? null,
       createdById: input.createdById ?? null,
     })
     .returning();

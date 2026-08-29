@@ -9,7 +9,7 @@ import BillForm from "../../components/BillForm";
 import { getBillById, getBillFormData } from "@/app/db/actions/bill-actions";
 import { getAssets } from "@/app/db/actions/asset-actions";
 import { auth } from "@/auth";
-import { getActiveProjects } from "@/app/db/actions/project-actions";
+import { getActiveProjects, getAllCostCodes } from "@/app/db/actions/project-actions";
 
 // ============================================
 // METADATA
@@ -50,11 +50,12 @@ async function getAssetPickerOptions() {
 // FORM WRAPPER (Server Component)
 // ============================================
 async function BillEditFormWrapper({ billId }) {
-  const [{ bill, error }, formData, assets, projects] = await Promise.all([
+  const [{ bill, error }, formData, assets, projects, costCodes] = await Promise.all([
     getBillById(billId),
     getBillFormData(),
     getAssetPickerOptions(),
     getActiveProjects(),
+    getAllCostCodes(),
   ]);
 
   if (error || !bill) {
@@ -86,6 +87,7 @@ async function BillEditFormWrapper({ billId }) {
 
   return (
     <BillForm
+      costCodes={costCodes}
       // Already plain JSON: the repository returns strings and dates as text,
       // so there is no BSON left to serialize.
       bill={bill}

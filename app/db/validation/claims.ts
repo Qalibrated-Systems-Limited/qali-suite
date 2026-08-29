@@ -108,6 +108,7 @@ export const advanceRequestSchema = z
     travelFromDate: optionalText,
     travelToDate: optionalText,
     projectId: blankToNull,
+    costCodeId: blankToNull,
     estimatedExpenses: optionalText.pipe(
       z.string().max(200, "Estimated expenses too long").optional(),
     ),
@@ -165,6 +166,7 @@ export const reimbursementSchema = z.object({
     z.string().max(500, "Notes must be at most 500 characters long").optional(),
   ),
   projectId: blankToNull,
+  costCodeId: blankToNull,
   items: itemsField,
   receipts: attachmentsField,
 });

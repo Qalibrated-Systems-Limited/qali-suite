@@ -270,6 +270,7 @@ const billSchema = z.object({
   description: z.string().optional(),
   internalNotes: z.string().optional(),
   projectId: z.string().optional().nullable(),
+  costCodeId: z.string().optional().nullable(),
   lines: z.array(billLineSchema).min(1, "Add at least one line item"),
 });
 
@@ -312,6 +313,7 @@ function toBillInput(data: z.infer<typeof billSchema>) {
     description: data.description || null,
     internalNotes: data.internalNotes || null,
     projectId: optionalId(data.projectId),
+    costCodeId: optionalId(data.costCodeId),
     lines: data.lines.map((l) => ({
       description: l.description,
       accountId: l.accountId,

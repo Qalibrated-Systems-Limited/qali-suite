@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import ExpenseForm from "../components/ExpenseForm";
 import { getExpenseFormData } from "@/app/db/actions/expense-actions";
 import { getActiveProjects } from "@/app/db/actions/project-actions";
+import { getAllCostCodes } from "@/app/db/actions/project-actions";
 
 export const metadata = {
   title: "Create Expense | ERP",
@@ -20,14 +21,22 @@ export default async function CreateExpensePage() {
    * accounts, payment accounts and payees. getExpenseFormData runs inside
    * withAuthorizedTenant, so it returns the ACTING company's and nothing else.
    *
-   * Projects stay separate and stay Mongo: they are not ported, and hiding
-   * that behind a helper that reads two stores would make the seam harder to
-   * find, not smaller.
+   * Projects stay a separate call, but no longer for the reason written here
+   * before: they were Mongo and are Postgres since 0070. Kept separate because
+   * getExpenseFormData is the EXPENSE form's data and projects are not.
    */
   const [
     { accounts, paymentAccounts, vendors, employees, assets, categories },
     projects,
-  ] = await Promise.all([getExpenseFormData(), getActiveProjects()]);
+    costCodes,
+  ] = await Promise.all([
+    getExpenseFormData(),
+    getActiveProjects(),
+    // The vocabulary a project's spend is recorded in. Loaded whole and
+    // filtered against the chosen project in the form, because the project is
+    // picked client-side.
+    getAllCostCodes(),
+  ]);
 
   return (
     <div className="flex flex-col">
@@ -67,6 +76,7 @@ export default async function CreateExpensePage() {
           employees={employees}
           categories={categories}
           projects={projects}
+          costCodes={costCodes}
           assets={assets}
         />
       </div>

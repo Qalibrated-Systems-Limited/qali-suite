@@ -3,6 +3,7 @@ import { AdvanceRequestForm } from "../../components/AdvanceRequestForm";
 import { getActiveProjects } from "@/app/db/actions/project-actions";
 import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { getUsers } from "@/app/db/actions/user-actions";
+import { getAllCostCodes } from "@/app/db/actions/project-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -26,15 +27,16 @@ async function getOnBehalfOptions(role) {
 export default async function AdvanceCreatePage() {
   const session = await auth();
   const role = session?.user?.role;
-  const [projects, onBehalfOptions] = await Promise.all([
+  const [projects, costCodes, onBehalfOptions] = await Promise.all([
     getActiveProjects(),
+    getAllCostCodes(),
     getOnBehalfOptions(role),
   ]);
   return (
     <AdvanceRequestForm
       projects={projects}
       onBehalfOptions={onBehalfOptions}
-      currentUserId={session?.user?.id || ""}
+      currentUserId={session?.user?.id || ""} costCodes={costCodes}
     />
   );
 }

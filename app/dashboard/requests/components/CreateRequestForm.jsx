@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, startTransition } from "react";
+import { useState, startTransition, useEffect } from "react";
 import { useActionState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,8 @@ import {
 } from "@tabler/icons-react";
 import { cn, stockRequestTypes, stockRequestTypeConfig } from "@/lib/utils";
 import ProjectPicker from "@/components/project-picker";
+import Link from "next/link";
+import CostCodeCombobox from "@/app/dashboard/projects/components/CostCodeCombobox";
 
 // ============================================
 // HELPER: Get available stock from product
@@ -206,6 +208,7 @@ function CustomerSearchCombobox({ customers, selectedCustomer, onSelect, disable
 // MAIN FORM COMPONENT
 // ============================================
 export function CreateStockRequestForm({
+  costCodes = [],
   products = [],
   customers = [],
   projects = [],
@@ -239,6 +242,19 @@ export function CreateStockRequestForm({
   );
   const [notes, setNotes] = useState(state?.values?.notes || "");
   const [projectId, setProjectId] = useState(state?.values?.projectId || "");
+  const [costCodeId, setCostCodeId] = useState(state?.values?.costCodeId || "");
+
+  /**
+   * Company-wide codes plus any scoped to the chosen project, active only.
+   * A cost code with no project has nothing to roll up to, so the field only
+   * appears once one is picked — and clearing the project clears it.
+   */
+  const availableCostCodes = costCodes.filter(
+    (c) => c.isActive !== false && (!c.projectId || c.projectId === projectId),
+  );
+  useEffect(() => {
+    if (!projectId && costCodeId) setCostCodeId("");
+  }, [projectId, costCodeId]);
 
   // Determine if customer is required based on request type
   const typeConfig = stockRequestTypeConfig[requestType];
@@ -381,6 +397,7 @@ export function CreateStockRequestForm({
     // Project (optional)
     if (projectId) {
       formData.append("projectId", projectId);
+      if (costCodeId) formData.append("costCodeId", costCodeId);
     }
 
     startTransition(() => {
@@ -574,6 +591,30 @@ export function CreateStockRequestForm({
               <p className="text-xs text-muted-foreground">
                 Tag this request to a project for cost tracking
               </p>
+
+              {projectId && (
+                <div className="space-y-1 pt-2">
+                  <Label>
+                    Cost code{" "}
+                    <span className="text-muted-foreground font-normal">
+                      (optional)
+                    </span>
+                  </Label>
+                  <CostCodeCombobox
+                    value={costCodeId}
+                    onValueChange={setCostCodeId}
+                    costCodes={availableCostCodes}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Which budget line this lands against. Finance defines the
+                    codes under{" "}
+                    <Link href="/dashboard/projects/cost-codes" className="underline">
+                      Projects → Cost codes
+                    </Link>
+                    .
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

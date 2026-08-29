@@ -9,7 +9,7 @@ import { IconArrowLeft, IconClipboardList } from "@tabler/icons-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CreateStockRequestForm } from "../components/CreateRequestForm";
-import { getActiveProjects } from "@/app/db/actions/project-actions";
+import { getActiveProjects, getAllCostCodes } from "@/app/db/actions/project-actions";
 
 export const metadata = {
   title: "Create Stock Request",
@@ -27,9 +27,10 @@ export default async function CreateRequestPage() {
 
   // Customers and products come from the store the form writes to, and no
   // companyId is passed: RLS supplies it. Projects are still a Mongo module.
-  const [{ products, customers }, projects] = await Promise.all([
+  const [{ products, customers }, projects, costCodes] = await Promise.all([
     getRequestFormData(),
     getActiveProjects(),
+    getAllCostCodes(),
   ]);
 
   return (
@@ -62,6 +63,7 @@ export default async function CreateRequestPage() {
 
       {/* Form */}
       <CreateStockRequestForm
+        costCodes={costCodes}
         products={products}
         customers={customers}
         projects={projects}

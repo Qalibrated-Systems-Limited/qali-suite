@@ -35,6 +35,7 @@ import {
 import { toast } from "sonner";
 import { ADVANCE_TYPES } from "@/lib/utils";
 import ProjectPicker from "@/components/project-picker";
+import CostCodeCombobox from "@/app/dashboard/projects/components/CostCodeCombobox";
 
 function SubmitButton({ isEdit, pending }) {
   return (
@@ -87,6 +88,7 @@ function getAdvanceTip(type) {
 }
 
 export function AdvanceRequestForm({
+  costCodes = [],
   claim = null,
   projects = [],
   onBehalfOptions = [],
@@ -102,6 +104,19 @@ export function AdvanceRequestForm({
 
   // Project selection (optional for all advance types)
   const [projectId, setProjectId] = useState(claim?.projectId || "");
+  const [costCodeId, setCostCodeId] = useState(claim?.costCodeId || "");
+
+  /**
+   * Company-wide codes plus any scoped to the chosen project, active only.
+   * A cost code with no project has nothing to roll up to, so the field only
+   * appears once one is picked — and clearing the project clears it.
+   */
+  const availableCostCodes = costCodes.filter(
+    (c) => c.isActive !== false && (!c.projectId || c.projectId === projectId),
+  );
+  useEffect(() => {
+    if (!projectId && costCodeId) setCostCodeId("");
+  }, [projectId, costCodeId]);
 
   // Use different action based on mode
   const action = isEdit
@@ -456,6 +471,31 @@ export function AdvanceRequestForm({
                 <p className="text-xs sm:text-sm text-muted-foreground">
                   Link this advance to a project for budget tracking
                 </p>
+
+                {projectId && (
+                  <div className="space-y-2.5 pt-3">
+                    <Label className="text-sm sm:text-base font-medium">
+                      Cost code{" "}
+                      <span className="text-xs text-muted-foreground font-normal">
+                        (optional)
+                      </span>
+                    </Label>
+                    <input type="hidden" name="costCodeId" value={costCodeId} />
+                    <CostCodeCombobox
+                      value={costCodeId}
+                      onValueChange={setCostCodeId}
+                      costCodes={availableCostCodes}
+                    />
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                      Which budget line this lands against. Finance defines the
+                      codes under{" "}
+                      <Link href="/dashboard/projects/cost-codes" className="underline">
+                        Projects → Cost codes
+                      </Link>
+                      .
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}

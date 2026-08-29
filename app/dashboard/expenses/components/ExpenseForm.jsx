@@ -58,6 +58,7 @@ import { createExpensePg } from "@/app/db/actions/expense-actions";
 import { FileUpload } from "@/components/file-upload";
 import ProjectPicker from "@/components/project-picker";
 import ExpenseAccountCombobox from "@/components/expense-account-combobox";
+import CostCodeCombobox from "@/app/dashboard/projects/components/CostCodeCombobox";
 
 const formatCurrency = (amount) => {
   return new Intl.NumberFormat("en-KE", {
@@ -759,6 +760,7 @@ export default function ExpenseForm({
   categories = [],
   projects = [],
   assets = [],
+  costCodes = [],
 }) {
   const router = useRouter();
 
@@ -773,6 +775,23 @@ export default function ExpenseForm({
   // submitAndApprove removed — all expenses auto-post on save
   const [receipts, setReceipts] = useState(expense?.receipts || []);
   const [projectId, setProjectId] = useState(expense?.projectId || "");
+  const [costCodeId, setCostCodeId] = useState(expense?.costCodeId || "");
+
+  /**
+   * Codes usable against the chosen project: the company-wide ones plus any
+   * scoped to it. Inactive codes are excluded — an old code stays on the
+   * expenses already recorded against it, but nothing new is filed under it.
+   */
+  const availableCostCodes = costCodes.filter(
+    (c) => c.isActive !== false && (!c.projectId || c.projectId === projectId),
+  );
+
+  // A cost code with no project has nothing to roll up to, so the field only
+  // appears once one is chosen — and clearing the project clears the code
+  // rather than leaving a stale one to be saved.
+  useEffect(() => {
+    if (!projectId && costCodeId) setCostCodeId("");
+  }, [projectId, costCodeId]);
   const [assetId, setAssetId] = useState(
     expense?.asset?.id?.toString?.() || expense?.asset?.id || ""
   );
@@ -1135,6 +1154,38 @@ export default function ExpenseForm({
               operating overhead.
             </p>
           </div>
+
+          {/* Cost code — only once a project is chosen, because that is the
+              only thing it rolls up to. Until forms set one, a project's
+              budget-versus-actual can only match by ACCOUNT, which is why
+              0073 could not match by code. */}
+          {projectId && (
+            <div className="space-y-2">
+              <Label>
+                Cost code{" "}
+                <span className="text-muted-foreground font-normal">
+                  (optional)
+                </span>
+              </Label>
+              <input type="hidden" name="costCodeId" value={costCodeId} />
+              <CostCodeCombobox
+                value={costCodeId}
+                onValueChange={setCostCodeId}
+                costCodes={availableCostCodes}
+              />
+              <p className="text-xs text-muted-foreground">
+                Which budget line this spend lands against. Finance defines the
+                codes under{" "}
+                <Link
+                  href="/dashboard/projects/cost-codes"
+                  className="underline"
+                >
+                  Projects → Cost codes
+                </Link>
+                .
+              </p>
+            </div>
+          )}
 
           {/* Linked Asset (Optional) */}
           {assets.length > 0 && (

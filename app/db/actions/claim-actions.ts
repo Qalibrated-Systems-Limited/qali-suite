@@ -171,6 +171,7 @@ export async function createAdvanceRequestPg(
           destination: data.destination ?? null,
           estimatedExpenses: data.estimatedExpenses ?? null,
           projectId: data.projectId,
+          costCodeId: data.costCodeId,
           notes: data.notes ?? null,
           attachments: toClaimAttachments(data.receipts, {
             id: user.id,
@@ -228,6 +229,7 @@ export async function createReimbursementPg(
           description: data.description,
           items: toClaimItems(data.items),
           projectId: data.projectId,
+          costCodeId: data.costCodeId,
           notes: data.notes ?? null,
           attachments: toClaimAttachments(data.receipts, {
             id: user.id,

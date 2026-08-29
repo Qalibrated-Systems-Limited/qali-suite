@@ -13,7 +13,7 @@
 // ✅ Consistent theming with design system
 // ============================================
 
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Plus,
@@ -62,6 +62,7 @@ import { cn } from "@/lib/utils";
 import { createBill, updateBill } from "@/app/db/actions/bill-actions";
 import QuickCreatePartyDialog from "@/app/dashboard/invoices/components/QuickCreateCustomerDialog";
 import ProjectPicker from "@/components/project-picker";
+import CostCodeCombobox from "@/app/dashboard/projects/components/CostCodeCombobox";
 
 // ============================================
 // INITIAL STATE
@@ -997,6 +998,7 @@ function LineItem({
 // MAIN FORM COMPONENT
 // ============================================
 export default function BillForm({
+  costCodes = [],
   bill = null,
   suppliers = [],
   accounts = [],
@@ -1039,6 +1041,19 @@ export default function BillForm({
   // Project State (optional)
   // ----------------------------------------
   const [projectId, setProjectId] = useState(bill?.projectId || "");
+  const [costCodeId, setCostCodeId] = useState(bill?.costCodeId || "");
+
+  /**
+   * Company-wide codes plus any scoped to the chosen project, active only.
+   * A cost code with no project has nothing to roll up to, so the field only
+   * appears once one is picked — and clearing the project clears it.
+   */
+  const availableCostCodes = costCodes.filter(
+    (c) => c.isActive !== false && (!c.projectId || c.projectId === projectId),
+  );
+  useEffect(() => {
+    if (!projectId && costCodeId) setCostCodeId("");
+  }, [projectId, costCodeId]);
 
   // ----------------------------------------
   // Line Management
@@ -1378,6 +1393,31 @@ export default function BillForm({
               <p className="text-xs text-muted-foreground">
                 Tag this bill to a project for cost tracking
               </p>
+
+              {projectId && (
+                <div className="space-y-2 pt-2">
+                  <Label className="text-sm font-medium">
+                    Cost code{" "}
+                    <span className="text-muted-foreground font-normal">
+                      (optional)
+                    </span>
+                  </Label>
+                  <input type="hidden" name="costCodeId" value={costCodeId} />
+                  <CostCodeCombobox
+                    value={costCodeId}
+                    onValueChange={setCostCodeId}
+                    costCodes={availableCostCodes}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Which budget line this lands against. Finance defines the
+                    codes under{" "}
+                    <Link href="/dashboard/projects/cost-codes" className="underline">
+                      Projects → Cost codes
+                    </Link>
+                    .
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

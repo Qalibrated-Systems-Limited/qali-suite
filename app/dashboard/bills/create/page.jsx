@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import BillForm from "../components/BillForm";
 import { getBillFormData } from "@/app/db/actions/bill-actions";
 import { getAssets } from "@/app/db/actions/asset-actions";
-import { getActiveProjects } from "@/app/db/actions/project-actions";
+import { getActiveProjects, getAllCostCodes } from "@/app/db/actions/project-actions";
 
 // ============================================
 // METADATA
@@ -73,11 +73,12 @@ function FormSkeleton() {
 async function BillFormWrapper() {
   // Suppliers, accounts and products come from Postgres and carry no
   // companyId: RLS supplies it. Assets and projects are still Mongo modules.
-  const [{ suppliers, accounts, products }, assets, projects] =
+  const [{ suppliers, accounts, products }, assets, projects, costCodes] =
     await Promise.all([
       getBillFormData(),
       getAssetPickerOptions(),
       getActiveProjects(),
+      getAllCostCodes(),
     ]);
 
   // Check if we have required data
@@ -127,6 +128,7 @@ async function BillFormWrapper() {
 
   return (
     <BillForm
+      costCodes={costCodes}
       suppliers={suppliers}
       accounts={accounts}
       products={products}

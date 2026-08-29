@@ -27,6 +27,7 @@ import { useActionState } from "react";
 import { FileUpload } from "@/components/file-upload";
 import ProjectPicker from "@/components/project-picker";
 import ExpenseAccountCombobox from "@/components/expense-account-combobox";
+import CostCodeCombobox from "@/app/dashboard/projects/components/CostCodeCombobox";
 
 function SubmitButton({ isEdit, pending }) {
   return (
@@ -50,13 +51,31 @@ function SubmitButton({ isEdit, pending }) {
   );
 }
 
-export function ReimbursementForm({ claim = null, expenseAccounts = [], projects = [] }) {
+export function ReimbursementForm({
+  claim = null,
+  expenseAccounts = [],
+  projects = [],
+  costCodes = [],
+}) {
   const router = useRouter();
   const isEdit = !!claim;
   const [allAccounts, setAllAccounts] = useState(expenseAccounts);
 
   // Project selection (optional)
   const [projectId, setProjectId] = useState(claim?.projectId || "");
+  const [costCodeId, setCostCodeId] = useState(claim?.costCodeId || "");
+
+  /**
+   * Company-wide codes plus any scoped to the chosen project, active only.
+   * A cost code with no project has nothing to roll up to, so the field only
+   * appears once a project is picked — and clearing the project clears it.
+   */
+  const availableCostCodes = costCodes.filter(
+    (c) => c.isActive !== false && (!c.projectId || c.projectId === projectId),
+  );
+  useEffect(() => {
+    if (!projectId && costCodeId) setCostCodeId("");
+  }, [projectId, costCodeId]);
 
   // Use different action based on mode
   const action = isEdit
@@ -288,6 +307,31 @@ export function ReimbursementForm({ claim = null, expenseAccounts = [], projects
                 </p>
               </div>
             )}
+                {projectId && (
+                  <div className="space-y-2.5 pt-1">
+                    <Label className="text-sm sm:text-base font-medium">
+                      Cost code{" "}
+                      <span className="text-xs text-muted-foreground font-normal">
+                        (optional)
+                      </span>
+                    </Label>
+                    <input type="hidden" name="costCodeId" value={costCodeId} />
+                    <CostCodeCombobox
+                      value={costCodeId}
+                      onValueChange={setCostCodeId}
+                      costCodes={availableCostCodes}
+                    />
+                    <p className="text-xs sm:text-sm text-muted-foreground">
+                      Which budget line this lands against. Finance defines the
+                      codes under{" "}
+                      <Link href="/dashboard/projects/cost-codes" className="underline">
+                        Projects → Cost codes
+                      </Link>
+                      .
+                    </p>
+                  </div>
+                )}
+
           </Card>
 
           {/* Expense Items Card */}
