@@ -852,11 +852,19 @@ export async function createCostCode(prevState: unknown, formData: FormData) {
   }
 
   try {
-    await withAuthorizedTenant(
+    /**
+     * Returns the CODE, not just a flag.
+     *
+     * The budget form can now raise one without leaving the page (0073's
+     * combobox refused to, for a reason that was about WHO may add a code, not
+     * about where). Selecting it on the line that needed it means knowing its
+     * id, and the joined account, which only the write knows.
+     */
+    const created = await withAuthorizedTenant(
       FINANCE_WRITE_ROLES as unknown as string[],
-      (tx, { user, companyId }) => {
+      async (tx, { user, companyId }) => {
         const actor = actorFrom(user);
-        return repo.createCostCode(tx, {
+        const row = await repo.createCostCode(tx, {
           companyId,
           code: parsed.data.code,
           name: parsed.data.name,
@@ -866,10 +874,19 @@ export async function createCostCode(prevState: unknown, formData: FormData) {
           createdById: actor.id,
           createdByName: actor.name,
         });
+        // The picker shows the account beneath each code, so the new one has
+        // to arrive with it rather than blank until the next page load.
+        const account = await repo.getAccountLabel(tx, row.accountId);
+        return {
+          ...row,
+          _id: row.id,
+          accountCode: account?.accountCode ?? null,
+          accountName: account?.accountName ?? null,
+        };
       },
     );
     revalidatePath("/dashboard/projects/cost-codes");
-    return { success: true, message: "Cost code created" };
+    return { success: true, message: "Cost code created", costCode: created };
   } catch (error) {
     return { errors: { _form: [userMessage(error)] }, values };
   }

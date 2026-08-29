@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -15,17 +14,37 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { ChevronsUpDown, Check } from "lucide-react";
+import { ChevronsUpDown, Check, Plus, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useState, useActionState, useEffect } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { createCostCode } from "@/app/db/actions/project-actions";
 
 /**
  * The budget line's picker — 0073.
  *
- * DELIBERATELY HAS NO "create" AFFORDANCE. The combobox it replaces did: a
- * project manager could add a chart-of-accounts entry from inside a budget
- * line, which is the opposite of the reason cost codes sit in front of the
- * ledger at all. A code that does not exist yet is finance's to add, on the
- * cost codes page.
+ * THE CREATE AFFORDANCE IS GATED, NOT ABSENT — and the difference matters.
+ *
+ * 0073 removed it outright: a project manager could add a chart-of-accounts
+ * entry from inside a budget line, which is the opposite of the reason cost
+ * codes sit in front of the ledger at all. That reasoning is about WHO may
+ * define a code, and it still holds — `canCreate` is the same
+ * FINANCE_WRITE_ROLES check the cost codes page uses, so a Manager sees no
+ * button and is still told where codes come from.
+ *
+ * But it is not about WHERE. An accountant part-way through a budget who needs
+ * one more code had to abandon the form — losing every line typed so far —
+ * walk to Projects → Cost codes, add it, and start the budget again. That cost
+ * bought no governance, because they were already allowed to add it.
  *
  * The account each code charges is shown beneath it — not to be chosen, but
  * because the person approving the budget is usually the accountant, and they
@@ -36,8 +55,17 @@ export default function CostCodeCombobox({
   onValueChange,
   costCodes = [],
   taken = [],
+  /** FINANCE_WRITE_ROLES. False for a project manager, who sees no button. */
+  canCreate = false,
+  /** Postable expense accounts — only needed when canCreate. */
+  accounts = [],
+  /** Scopes a new code to this project; blank makes it company-wide. */
+  projectId = null,
+  /** Lifts the new code into the parent's list so every line can pick it. */
+  onCreated,
 }) {
   const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const selected = value ? costCodes.find((c) => c._id === value) : null;
   const takenSet = new Set(taken.filter(Boolean));
 
@@ -67,7 +95,9 @@ export default function CostCodeCombobox({
           <CommandInput placeholder="Search cost codes..." />
           <CommandList>
             <CommandEmpty>
-              No cost codes. Finance adds them under Projects → Cost codes.
+              {canCreate
+                ? "No match. Add it below."
+                : "No cost codes. Finance adds them under Projects → Cost codes."}
             </CommandEmpty>
             <CommandGroup>
               {costCodes.map((code) => {
@@ -106,9 +136,148 @@ export default function CostCodeCombobox({
                 );
               })}
             </CommandGroup>
+            {canCreate && (
+              <CommandGroup className="border-t">
+                <CommandItem
+                  value="__create__"
+                  onSelect={() => {
+                    setOpen(false);
+                    setCreating(true);
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4 shrink-0" />
+                  New cost code
+                </CommandItem>
+              </CommandGroup>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>
+
+      {canCreate && (
+        <NewCostCodeDialog
+          open={creating}
+          onOpenChange={setCreating}
+          accounts={accounts}
+          projectId={projectId}
+          onCreated={(code) => {
+            onCreated?.(code);
+            // Select it on the line that needed it — the whole point of not
+            // making them leave the form.
+            onValueChange(code._id);
+            setCreating(false);
+          }}
+        />
+      )}
     </Popover>
+  );
+}
+
+/**
+ * The same four fields the cost codes page asks for, in a dialog.
+ *
+ * It calls the SAME `createCostCode` action, so the role gate, the validation
+ * and the unique-code constraint are the page's, not a second copy that can
+ * drift. A code added here shows up there, and vice versa.
+ */
+function NewCostCodeDialog({ open, onOpenChange, accounts, projectId, onCreated }) {
+  const [state, formAction, isPending] = useActionState(createCostCode, null);
+
+  useEffect(() => {
+    if (state?.success && state.costCode) onCreated(state.costCode);
+  }, [state, onCreated]);
+
+  const err = (field) =>
+    state?.errors?.[field]?.[0] ? (
+      <p className="text-xs text-red-600">{state.errors[field][0]}</p>
+    ) : null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <form action={formAction}>
+          <DialogHeader>
+            <DialogTitle>New cost code</DialogTitle>
+            <DialogDescription>
+              Added to this company&apos;s codes. The account decides where
+              spend against it lands in the ledger.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="cc-code">Code</Label>
+                <Input
+                  id="cc-code"
+                  name="code"
+                  placeholder="LAB"
+                  maxLength={20}
+                  className="font-mono"
+                  defaultValue={state?.values?.code ?? ""}
+                  required
+                />
+              </div>
+              <div className="col-span-2 space-y-1.5">
+                <Label htmlFor="cc-name">Name</Label>
+                <Input
+                  id="cc-name"
+                  name="name"
+                  placeholder="Labour"
+                  maxLength={100}
+                  defaultValue={state?.values?.name ?? ""}
+                  required
+                />
+              </div>
+            </div>
+            {err("code")}
+            {err("name")}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="cc-account">Charges which account</Label>
+              <select
+                id="cc-account"
+                name="accountId"
+                required
+                defaultValue={state?.values?.accountId ?? ""}
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              >
+                <option value="">Select an expense account...</option>
+                {accounts.map((a) => (
+                  <option key={a._id} value={a._id}>
+                    {a.accountCode} — {a.accountName}
+                  </option>
+                ))}
+              </select>
+              {err("accountId")}
+            </div>
+
+            {/* Company-wide by default. A code scoped to one project cannot be
+                spent by another, which is rarely what somebody adding one
+                mid-budget means. */}
+            <input type="hidden" name="projectId" value="" />
+
+            {state?.errors?._form && (
+              <p className="text-sm text-red-600">{state.errors._form[0]}</p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isPending}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isPending}>
+              {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Add code
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

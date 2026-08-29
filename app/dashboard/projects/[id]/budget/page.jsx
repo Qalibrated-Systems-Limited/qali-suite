@@ -14,6 +14,7 @@ import {
   FINANCE_WRITE_ROLES,
 } from "@/lib/utils/role-gates";
 import BudgetForm, { BudgetCard } from "../../components/BudgetForm";
+import { getExpenseAccountsForCategories } from "@/app/db/actions/claim-actions";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
@@ -32,16 +33,25 @@ export default async function BudgetPage({ params }) {
 
   // Cost codes, not the chart of accounts — 0073. Company-wide codes plus any
   // scoped to this project.
-  const [project, budgets, costCodes] = await Promise.all([
+  const [project, budgets, costCodes, expenseAccounts] = await Promise.all([
     getProjectById(id),
     getProjectBudgets(id),
     getCostCodes(id),
+    // Only ever used by the finance-gated "New cost code" dialog. Loaded here
+    // rather than fetched on open so the dialog has no loading state.
+    getExpenseAccountsForCategories(),
   ]);
 
   if (!project) notFound();
 
   const canCreate = PROJECT_MANAGE_ROLES.includes(session.user.role);
   const canApprove = FINANCE_WRITE_ROLES.includes(session.user.role);
+  /**
+   * Who may DEFINE a cost code, which is not who may spend one (0073 decision
+   * 4). A Manager builds the budget and picks from the codes finance has
+   * defined; the same list, one narrower gate.
+   */
+  const canManageCostCodes = FINANCE_WRITE_ROLES.includes(session.user.role);
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
@@ -53,7 +63,7 @@ export default async function BudgetPage({ params }) {
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl sm:text-xl sm:text-2xl font-semibold text-foreground">
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
             Project Budget
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -64,7 +74,12 @@ export default async function BudgetPage({ params }) {
 
       {/* Create New Budget */}
       {canCreate && project.status !== "closed" && (
-        <BudgetForm projectId={id} costCodes={costCodes} />
+        <BudgetForm
+          projectId={id}
+          costCodes={costCodes}
+          canManageCostCodes={canManageCostCodes}
+          expenseAccounts={expenseAccounts}
+        />
       )}
 
       {/* Budget History */}
@@ -77,6 +92,8 @@ export default async function BudgetPage({ params }) {
               budget={budget}
               projectId={id}
               costCodes={costCodes}
+              canManageCostCodes={canManageCostCodes}
+              expenseAccounts={expenseAccounts}
               canCreate={canCreate}
               canApprove={canApprove}
             />

@@ -44,7 +44,22 @@ const blankLine = () => ({
   amount: "",
 });
 
-export default function BudgetForm({ projectId, costCodes = [], budget, onCancel }) {
+export default function BudgetForm({
+  projectId,
+  costCodes = [],
+  budget,
+  onCancel,
+  canManageCostCodes = false,
+  expenseAccounts = [],
+}) {
+  /**
+   * A code added from inside the picker has to reach every OTHER line's picker
+   * too, so the list is state here rather than the prop. revalidatePath
+   * refreshes the prop on the next load; this keeps the form usable now,
+   * without discarding what has been typed.
+   */
+  const [codes, setCodes] = useState(costCodes);
+  useEffect(() => setCodes(costCodes), [costCodes]);
   const isEdit = !!budget;
 
   const [lines, setLines] = useState(() => {
@@ -147,7 +162,15 @@ export default function BudgetForm({ projectId, costCodes = [], budget, onCancel
                 <CostCodeCombobox
                   value={line.costCodeId}
                   onValueChange={(id) => updateLine(index, "costCodeId", id)}
-                  costCodes={costCodes}
+                  costCodes={codes}
+                  canCreate={canManageCostCodes}
+                  accounts={expenseAccounts}
+                  projectId={projectId}
+                  onCreated={(code) =>
+                    setCodes((prev) =>
+                      prev.some((c) => c._id === code._id) ? prev : [...prev, code],
+                    )
+                  }
                   taken={lines
                     .filter((l) => l._id !== line._id)
                     .map((l) => l.costCodeId)}
@@ -269,7 +292,15 @@ const STATUS_COLORS = {
   superseded: "bg-gray-100 text-gray-500",
 };
 
-export function BudgetCard({ budget, projectId, costCodes, canCreate, canApprove }) {
+export function BudgetCard({
+  budget,
+  projectId,
+  costCodes,
+  canCreate,
+  canApprove,
+  canManageCostCodes = false,
+  expenseAccounts = [],
+}) {
   const [editing, setEditing] = useState(false);
 
   if (editing) {
@@ -277,6 +308,8 @@ export function BudgetCard({ budget, projectId, costCodes, canCreate, canApprove
       <BudgetForm
         projectId={projectId}
         costCodes={costCodes}
+        canManageCostCodes={canManageCostCodes}
+        expenseAccounts={expenseAccounts}
         budget={budget}
         onCancel={() => setEditing(false)}
       />

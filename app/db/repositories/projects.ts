@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
-import { anyOf, arrayOf, likeContains } from "./sqlHelpers";
+import { anyOf, arrayOf, isUuid, likeContains } from "./sqlHelpers";
 import type { Tx } from "../client";
 import {
   projects,
@@ -1088,6 +1088,25 @@ export async function getCostCodes(tx: Tx, projectId?: string | null) {
     .innerJoin(accounts, eq(accounts.id, projectCostCodes.accountId))
     .where(and(eq(projectCostCodes.isActive, true), scope))
     .orderBy(asc(projectCostCodes.code));
+}
+
+/**
+ * The code and name of one account, for labelling a cost code just created.
+ *
+ * `getCostCodes` joins this in; a fresh insert has only the id, and the picker
+ * shows the account beneath each code — so without this the code the user just
+ * added would be the one row missing its account until the next page load.
+ */
+export async function getAccountLabel(tx: Tx, accountId: string) {
+  if (!isUuid(accountId)) return null;
+  const [row] = await tx
+    .select({
+      accountCode: accounts.accountCode,
+      accountName: accounts.accountName,
+    })
+    .from(accounts)
+    .where(eq(accounts.id, accountId));
+  return row ?? null;
 }
 
 /** The management page, inactive codes included. */
