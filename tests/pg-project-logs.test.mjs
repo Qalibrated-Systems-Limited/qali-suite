@@ -206,6 +206,63 @@ suite("postgres project logs", () => {
     });
   });
 
+  describe("the workspace switcher", () => {
+    it("offers finished jobs, not just live ones", async () => {
+      // The records of a completed job are the ones read during a final
+      // account or a dispute. `getActiveProjects` is planning|active, so using
+      // it here made every finished job's diary unreachable.
+      const done = await inA((tx) =>
+        projectRepo.createProject(tx, {
+          companyId: companyA,
+          name: "Finished job",
+          createdByName: "Seed",
+        }),
+      );
+      // planning → active → completed. 0070 enforces the transitions, so a
+      // fixture cannot shortcut them — and should not, since the guard is one
+      // of the things that makes the status meaningful.
+      await admin`UPDATE projects SET status = 'active'    WHERE id = ${done.id}`;
+      await admin`UPDATE projects SET status = 'completed' WHERE id = ${done.id}`;
+
+      const live = await inA((tx) => projectRepo.getActiveProjects(tx));
+      expect(live.map((p) => p.id)).not.toContain(done.id);
+
+      const workspace = await inA((tx) => projectRepo.listProjectsForWorkspace(tx));
+      expect(workspace.map((p) => p.id)).toContain(done.id);
+      expect(workspace.map((p) => p.id)).toContain(projectA);
+    });
+
+    it("puts live projects first so the common case stays on top", async () => {
+      const done = await inA((tx) =>
+        projectRepo.createProject(tx, {
+          companyId: companyA,
+          // Sorts before "Nakuru Depot" by name, so only the status ordering
+          // can put it second.
+          name: "AAA finished",
+          createdByName: "Seed",
+        }),
+      );
+      await admin`UPDATE projects SET status = 'active'    WHERE id = ${done.id}`;
+      await admin`UPDATE projects SET status = 'completed' WHERE id = ${done.id}`;
+      await admin`UPDATE projects SET status = 'closed'    WHERE id = ${done.id}`;
+
+      const rows = await inA((tx) => projectRepo.listProjectsForWorkspace(tx));
+      expect(rows[0].id).toBe(projectA);
+      expect(rows[rows.length - 1].id).toBe(done.id);
+    });
+
+    it("still hides another tenant's projects", async () => {
+      const companyB = randomUUID();
+      await admin`
+        INSERT INTO companies (id, name, slug)
+        VALUES (${companyB}, 'Tenant B', ${"b-" + companyB.slice(0, 8)})`;
+      const seen = await asTenant(companyB, (tx) =>
+        projectRepo.listProjectsForWorkspace(tx),
+      );
+      expect(seen).toEqual([]);
+    });
+  });
+
   describe("scoping", () => {
     it("lists only the project asked for", async () => {
       const other = (

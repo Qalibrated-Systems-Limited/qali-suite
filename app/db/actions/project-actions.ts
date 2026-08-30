@@ -196,6 +196,26 @@ export async function getProjectById(projectId: string) {
 }
 
 /** The picker five other modules render. */
+/**
+ * The workspace switcher's list — every project, whatever its status.
+ *
+ * See `listProjectsForWorkspace`: the site diary and instruction register are
+ * read most after a job finishes, so a switcher limited to live projects hides
+ * exactly the records people come back for.
+ */
+export async function getProjectsForWorkspace() {
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = await repo.listProjectsForWorkspace(tx);
+    return rows.map((r) => ({
+      _id: r.id,
+      id: r.id,
+      projectNumber: r.projectNumber,
+      name: r.name,
+      status: r.status,
+    }));
+  });
+}
+
 export async function getActiveProjects() {
   return withAuthorizedTenant([], async (tx) => {
     const rows = await repo.getActiveProjects(tx);

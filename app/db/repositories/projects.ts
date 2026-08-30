@@ -208,6 +208,38 @@ export async function getProjectById(tx: Tx, projectId: string) {
 }
 
 /** The picker every other module renders: planning and active only. */
+/**
+ * Every project, for the workspace switcher — not just the live ones.
+ *
+ * `getActiveProjects` is `status IN ('planning','active')`, which is right for
+ * a PICKER on a new invoice: you do not book fresh work to a finished job. It
+ * is wrong for the workspace, and wrong in the direction that matters.
+ *
+ * A site diary and an instruction register are read most AFTER completion —
+ * the final account, a defects dispute, an arbitration. FIDIC claims are
+ * argued from the diary years later. Filtering the switcher to live jobs makes
+ * the records of every finished one unreachable, which is the opposite of what
+ * they exist for.
+ *
+ * Ordered live-first so the common case is still the top of the list, then by
+ * name. Deliberately light — no budget, no actuals, no progress: this fills a
+ * dropdown, and `listProjects` runs four more queries per page to build a card.
+ */
+export async function listProjectsForWorkspace(tx: Tx) {
+  return tx
+    .select({
+      id: projects.id,
+      projectNumber: projects.projectNumber,
+      name: projects.name,
+      status: projects.status,
+    })
+    .from(projects)
+    .orderBy(
+      sql`CASE WHEN ${projects.status} IN ('planning','active') THEN 0 ELSE 1 END`,
+      asc(projects.name),
+    );
+}
+
 export async function getActiveProjects(tx: Tx) {
   return tx
     .select({
