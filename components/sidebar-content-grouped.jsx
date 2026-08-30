@@ -400,14 +400,72 @@ const getNavigationGroups = (user) => {
   // ============================================
   // PROJECTS
   // ============================================
+  // A dropdown group, like Inventory/Finance/HR below — matches the
+  // module's own sub-nav (app/dashboard/projects/components/ProjectsNav.jsx)
+  // so the same nine sections are one click away from either place.
   {
-    type: "single",
-    icon: FolderKanban,
+    type: "group",
     label: "Projects",
+    icon: FolderKanban,
     id: "projects",
-    href: "/dashboard/projects",
+    defaultOpen: false,
     hidden: !canSeeProjectsNav(user?.role) || !hasMod("projects"),
-    // HR intentionally excluded via the permission group
+    items: [
+      {
+        icon: LayoutDashboard,
+        label: "Dashboard",
+        id: "projects-dashboard",
+        href: "/dashboard/projects",
+      },
+      {
+        icon: Target,
+        label: "Milestone Tracker",
+        id: "projects-milestones",
+        href: "/dashboard/projects/milestones",
+      },
+      {
+        icon: Calendar,
+        label: "Programme",
+        id: "projects-programme",
+        href: "/dashboard/projects/programme",
+      },
+      {
+        icon: FileText,
+        label: "Engineer's Instructions",
+        id: "projects-instructions",
+        href: "/dashboard/projects/instructions",
+      },
+      {
+        icon: BookOpen,
+        label: "Site Diary",
+        id: "projects-diary",
+        href: "/dashboard/projects/diary",
+      },
+      {
+        icon: ClipboardCheck,
+        label: "Forms Register",
+        id: "projects-forms",
+        href: "/dashboard/projects/forms",
+      },
+      {
+        icon: Receipt,
+        label: "IPC & Payments",
+        id: "projects-ipc",
+        href: "/dashboard/projects/ipc",
+      },
+      {
+        icon: Wallet,
+        label: "Cash Requisitions",
+        id: "projects-cash-requisitions",
+        href: "/dashboard/projects/cash-requisitions",
+      },
+      {
+        icon: FileSpreadsheet,
+        label: "Monthly Report",
+        id: "projects-monthly-report",
+        href: "/dashboard/projects/monthly-report",
+      },
+    ],
   },
 
   // ============================================
