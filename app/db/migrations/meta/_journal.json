@@ -526,6 +526,13 @@
       "when": 1787049147566,
       "tag": "0074_the_bell_reads_postgres",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1787049148566,
+      "tag": "0075_project_instructions_and_diary",
+      "breakpoints": true
     }
   ]
 }

@@ -811,3 +811,42 @@ export const notificationTypeEnum = pgEnum("notification_type", [
   "approval_decision",
   "system",
 ]);
+
+// ── Project instructions & site diary (0075) ─────────────────────────────────
+
+/**
+ * What kind of record this is. `vo` and `rfi_response` are declared because
+ * the site log the template mirrors distinguishes them from a plain
+ * instruction and a non-conformance; nothing else in this pass acts on the
+ * difference, the same posture `projectBillingModelEnum` takes with
+ * `milestone`/`time_material`.
+ */
+export const projectInstructionTypeEnum = pgEnum("project_instruction_type", [
+  "instruction",
+  "ncr",
+  "vo",
+  "rfi_response",
+]);
+
+/**
+ * pending → complied | disputed, and back to pending on reopen.
+ * `project_instructions_response_signed` requires a name and a timestamp on
+ * the way out of pending — a status flip with nobody attached to it is a
+ * checkbox, not a decision.
+ */
+export const projectInstructionStatusEnum = pgEnum("project_instruction_status", [
+  "pending",
+  "complied",
+  "disputed",
+]);
+
+/**
+ * submitted → countersigned. There is no Resident Engineer role in this
+ * system's role list, so `PROJECT_LOG_SIGNOFF_ROLES` (lib/utils/role-gates.js)
+ * stands in for "whoever plays the RE on this tenant" — narrower than the
+ * roles that may log a diary entry in the first place.
+ */
+export const projectDiaryStatusEnum = pgEnum("project_diary_status", [
+  "submitted",
+  "countersigned",
+]);

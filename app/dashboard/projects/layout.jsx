@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { PlanGate } from "@/components/plan-gate-boundary";
+import ProjectsNav from "./components/ProjectsNav";
 
 /**
  * Projects is a Professional module, and only its LIST page checked that.
@@ -10,6 +11,14 @@ import { PlanGate } from "@/components/plan-gate-boundary";
  *
  * The list page keeps its own `checkPlanAccess` call; it is harmless now and
  * costs one cached session read.
+ *
+ * ProjectsNav renders the module's sticky sub-navigation (Dashboard,
+ * Milestone Tracker, Programme, Engineer's Instructions, Site Diary, Forms
+ * Register, IPC & Payments, Cash Requisitions, Monthly Report) above every
+ * page in the module — the same pattern HR uses for its own sub-nav. It
+ * mirrors the "Projects" dropdown added to the sidebar in
+ * components/sidebar-content-grouped.jsx, so the same nine destinations are
+ * reachable both from the sidebar and from within any project page.
  */
 export default async function ProjectsLayout({ children }) {
   const session = await auth();
@@ -17,7 +26,10 @@ export default async function ProjectsLayout({ children }) {
 
   return (
     <PlanGate module="projects" feature="Project Management">
-      {children}
+      <div className="flex flex-col">
+        <ProjectsNav />
+        <main className="flex-1">{children}</main>
+      </div>
     </PlanGate>
   );
 }
