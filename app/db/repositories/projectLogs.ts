@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import type { Tx } from "../client";
 import { projectInstructions, projectDiaryEntries } from "../schema";
+import { isUuid } from "./sqlHelpers";
 
 /**
  * Engineer's Instructions & Site Diary repository — 0075.
@@ -31,6 +32,10 @@ export async function listInstructions(tx: Tx, projectId: string) {
 }
 
 export async function getInstructionById(tx: Tx, id: string) {
+  // An id a uuid column cannot hold is NOT FOUND, not a 22P02 with the
+  // statement in the message. See isUuid in sqlHelpers — the same guard the
+  // other 22 detail getters carry.
+  if (!isUuid(id)) return null;
   const [row] = await tx
     .select()
     .from(projectInstructions)
@@ -181,6 +186,7 @@ export async function listDiaryEntries(tx: Tx, projectId: string) {
 }
 
 export async function getDiaryEntryById(tx: Tx, id: string) {
+  if (!isUuid(id)) return null;
   const [row] = await tx
     .select()
     .from(projectDiaryEntries)
