@@ -20,8 +20,13 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 |---|---|
 | **stocks/products**, **dashboard**, statements, supplier-statements, payments, hr, **claims**, assets, **expenses**, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders, **fiscal periods**, **projects**, **tax**, **the platform/SuperAdmin dashboard** | integrations 10, banking 8, kpis 7, components 5, leads 4, employee 4, settings 3, sales-orders 3, profile 3, opportunities 3, admin 3, assets 2, approvals 2, reports 1, quotes 1, parties 1, executive 1, company 1, adjustments 1 |
 
-Counted 2026-08-29, after tax (§9O):
-**63 screen files, 19 modules** — down from 105 across 27.
+Counted 2026-08-31, after profile:
+**59 screen files, 18 modules** — down from 105 across 27.
+
+**BANKING STAYS ON MONGO BY DECISION**, not by oversight. It is a ~3,900-line
+vertical whose service posts payment-received and payment-made entries to the
+ledger, and it is not currently broken — it reads the store it still writes. A
+half-port of it would be §9L again. See the 2026-08-31 handoff.
 
 **`tax` was a HALF-PORT, not a greenfield one**, and that is the shape to expect
 from here on. `tax_transactions` shipped in 0018/0019 and invoices and bills
@@ -731,6 +736,179 @@ and makes every policy in the schema inert. `SELECT assert_rls_effective()`
 raises if the current connection would bypass RLS — worth a health check.
 
 ---
+
+## Handoff — 2026-08-31 — sessions, the bell, profile, cost codes, and a colleague's module
+
+Twelve commits and one merge. No single module port — this was the day the
+things that had been written down but never wired got connected, plus the first
+merge of somebody else's work into this branch.
+
+### The three that were silently broken, in order of how much they mattered
+
+**A ROLE CHANGE REACHED NOTHING.** `token.role` was written at sign-in and never
+again, and the session lives eight hours — so a demotion never reached
+`session.user.role`, which is what every nav gate and page guard reads.
+`adminUpdateUser` bumps `token_version` precisely to kill those sessions, but
+the only thing that compares it, `requireFreshSession`, is called from two
+legacy Mongo action files and from nothing on the Postgres path, no page and no
+layout. **The revocation was being written and never read.**
+
+The note in auth.ts said periodic refresh was removed because "edge runtime
+can't reliably connect to MongoDB". That reason expired with 0036.
+
+Scope of the exposure, stated precisely because it is narrower than it sounds:
+server ACTIONS were never affected — `withAuthorizedTenant` re-checks the
+allow-list against the GRANT's role, so a demoted user could not mutate
+anything. Page and nav access trusted the stale claim.
+
+The jwt callback now re-reads status, token_version and the per-company role;
+returning null clears the cookie (`@auth/core` session.js:
+`if (token !== null) … else sessionStore.clean()`). It FAILS OPEN on a database
+error — a transient outage must not sign out the whole company.
+
+The throttle is an in-process map, not a token field. **A Server Component
+cannot set cookies**, so a stamp written during an RSC render is never persisted
+and "once a minute" becomes once per `auth()` call, several times a page.
+
+**NOBODY COULD CHANGE THEIR OWN PASSWORD.** `profile-actions.js` read
+`user.password` from Mongo and saved the new one there; sign-in compares against
+the Postgres `password_hash` (auth.ts:133). So a password change either failed
+with "User not found" or appeared to work and left the person signing in with
+the old one for ever — on a form that said it had worked. `updateProfile` was
+the same shape: `findByIdAndUpdate` against a collection nothing reads.
+
+**EVERY APPROVAL NOTIFIED NOBODY.** `lib/notifications/approval-notify.js` read
+the Mongo `User` collection to decide who to tell. Users moved in 0036, so
+`User.find({ companyId, role: { $in: roles } })` had matched nothing since —
+silently, because that file swallows its own errors by design so a mail failure
+cannot fail an approval.
+
+### 0074 — the bell, and a TTL that Postgres does not have
+
+Reported from the running app, logging on every dashboard render: "No legacy
+Mongo id for company 4d6ab761-…". The bell scoped itself by translating the
+active company's uuid BACK to an ObjectId, and a company created after the
+migration has none. `cMyNotifications` swallows its own errors, so it was a log
+line and an always-empty bell rather than a crash.
+
+Three things the schema does that Mongo did not:
+
+- **the recipient is in the WHERE of markRead**, not just the company. RLS
+  scopes to the tenant, which is not the same as scoping to the reader — without
+  it any colleague could clear another's bell by id.
+- **href must be app-relative, by CHECK.** It becomes a link the recipient
+  clicks; this stops a future writer turning the bell into an open redirect.
+- **the 90-day TTL index has no Postgres equivalent**, so the sweep is
+  `/api/cron/prune-notifications` on the existing per-tenant cron pattern.
+  Porting the table alone would have dropped self-cleaning silently.
+
+And one that is not the schema: **no session is not an error.** The layout's
+`user && …` guard short-circuits, so a signed-out render reaches the bell.
+
+### The UI pass, and a bug I shipped in it
+
+The users stats cards showed nothing: `getUserStats` returns
+`{ total, active, inactive, admins }` and the page read `stats.totalUsers`,
+`activeUsers`, `inactiveUsers`, `adminCount` — names that have never existed on
+it. The same class as the KRA tiles: four figures rendering `undefined`, which
+React prints as nothing.
+
+The layout answer was already in the codebase. The stock page's
+`StockMetricsBar` is one inline line where every figure that names a subset is a
+clickable filter, with a note arguing that four 140px cards put 300px between
+the heading and the first row. That became `components/metric-bar.jsx` and the
+competing component this session had introduced was deleted. **One pattern, and
+it is the one the codebase had already reasoned its way to.**
+
+**THEN THE HEADER SWEEP SHIPPED A BUG.** 41 page titles were resized by
+replacing a list of class variants — and the list put `text-3xl font-bold`
+FIRST, which is a substring of `text-2xl sm:text-3xl font-bold`. It matched
+inside the longer variants and left `text-2xl sm:text-xl sm:text-2xl` in 18
+files, which Tailwind resolves to text-2xl at every width: the titles came out
+BIGGER on mobile than before the sweep. Ordering longest-first would have
+avoided it; asserting the result would have caught it. Neither lint nor tsc can
+see a class name. Found by chance while reading a projects file, after it was
+already pushed.
+
+### Cost codes got their other half
+
+0073 put cost codes in front of the budget and named the hole in its own
+handoff: "matching by cost code is where this goes when the claims, bills and
+expense forms actually SET one — nothing does today". Nothing did.
+
+Most of it already existed, which is this port's recurring lesson: all four
+tables had `cost_code_id`, three repositories already accepted it, and the
+EXPENSE validation already parsed and mapped it. **The gap was the action layer
+and the field.** The picker only appears once a project is chosen, because a
+cost code with no project has nothing to roll up to.
+
+The create affordance 0073 removed came back GATED rather than absent. That
+decision was about WHO may define a code, not about where: an accountant
+part-way through a budget had to abandon the form — losing every line typed — to
+add one. `canCreate` is the same FINANCE_WRITE_ROLES check the cost codes page
+uses, so a Manager still sees no button.
+
+### The merge — and reviewing before, not after
+
+`feat/projects-module-dropdown` (Zawadi): two new tables, a project-scoped
+workspace, eight sections, 3,787 lines. It branched directly off this branch's
+tip, so no divergence.
+
+Reviewed in an isolated worktree BEFORE merging: tsc and eslint clean, and
+migration 0075 verified to apply — both tables landing with RLS enabled AND
+forced, tenant_isolation, and correct app_user grants. It follows the house
+conventions: RLS-only scoping, drizzle query builder, none of the traps this
+port has been bitten by.
+
+Four findings, three fixed here and one left deliberately:
+
+1. **No tests** for a migration, two tables and 14 repository functions. Written
+   — 17 of them — and they pin the CONSTRAINTS directly, with an UPDATE fired
+   at the table rather than through the repository, so what is proven is the
+   database's refusal and not the repository's care. **All 17 passed first
+   time: the module was sound, it was untested, and those are different
+   things.**
+2. **`getInstructionById` / `getDiaryEntryById` took a bare id to a uuid
+   column** — the pattern guarded in 22 other detail getters the same day.
+   `isUuid` was on their own base commit.
+3. **Two byte-identical admin scripts** differing by one comment.
+4. **IPC and Cash Requisitions are two nav entries running the identical pair
+   of queries**, each with a banner admitting it is not the document its name
+   implies. NOT fixed: that is a product decision, not a review finding.
+
+### Two defects found in the merged workspace afterwards
+
+`getWorkspaceContext` resolves the project for all eight pages, and had both.
+
+**Finished jobs were unreachable.** The switcher listed `getActiveProjects()` —
+`status IN ('planning','active')`. Right for a picker on a new invoice; wrong
+here, and wrong in the direction that matters. A site diary and an instruction
+register are read MOST after completion — the final account, a dispute. FIDIC
+claims are argued from the diary years later.
+
+**And a bookmark showed a different project.** `?project=` was honoured only
+when the id appeared in that filtered list; otherwise it fell through to
+`projects[0]` SILENTLY. A saved link to a completed job's diary opened another
+project's diary, with the right page title and the wrong records. **A wrong
+answer that looks right is worse than an empty one.**
+
+Writing the tests for that found a third thing: 0070 enforces the project status
+machine in the database, so a fixture cannot jump planning → completed. The
+trigger refused the shortcut, which is the guard working.
+
+### What this day says about the sweeps
+
+Three separate scripted sweeps landed this session — 47 ILIKE patterns, 22 uuid
+guards, 41 page headers — and **the one that had no assertion is the one that
+shipped a bug**. The other two asserted their target existed before replacing
+it and were clean. `feedback_assert_before_replace` exists for this and was
+followed twice out of three times.
+
+### Where the count is
+
+**59 screen files, 18 modules.** `profile` went to zero. Banking stays on Mongo
+by an explicit decision — it is a ~3,900-line vertical that posts to the ledger,
+and a half-port would be the credit-note failure again.
 
 ## Handoff — 2026-08-29 — global search (§9P), and the count that could not see it
 
