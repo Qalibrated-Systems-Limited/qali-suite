@@ -554,6 +554,13 @@
       "when": 1787049151566,
       "tag": "0078_workflow_report_data",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1787049152566,
+      "tag": "0079_technical_calibration_inspection",
+      "breakpoints": true
     }
   ]
 }
