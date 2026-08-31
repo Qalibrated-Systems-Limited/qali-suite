@@ -46,6 +46,7 @@ import {
   projectRateUnitEnum,
   projectPartyTypeEnum,
   projectTaskStatusEnum,
+  projectBoqStatusEnum,
 } from "./enums";
 
 /** `ltree` has no Drizzle builder. Declared as `categories` declares it. */
@@ -572,5 +573,263 @@ export const projectTasks = pgTable(
       "project_tasks_not_own_parent",
       sql`${t.parentTaskId} IS NULL OR ${t.parentTaskId} <> ${t.id}`,
     ),
+  ],
+);
+
+/**
+ * The bill header — 0076. Versioned, one awarded at a time.
+ *
+ * §8 of `docs/PROJECTS-QALITRACK-PLAN.md` described two tables; building it
+ * showed the bill-level facts have nowhere to live in the items. The precedent
+ * is in this same file: `projectBudgets` / `projectBudgetLines`, versioned, one
+ * live at a time, lines frozen once signed. A bill of quantities is that shape
+ * with quantities.
+ */
+export const projectBoqs = pgTable(
+  "project_boqs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+
+    version: integer("version").notNull().default(1),
+    status: projectBoqStatusEnum("status").notNull().default("draft"),
+
+    /**
+     * CESMM4, SMM7, POMI, a national standard, or nothing. TEXT, never an
+     * enum: this is multi-tenant, the standards are not interchangeable, and
+     * whichever one our own bills use would look like the obvious default.
+     * The form offers a list; the column takes what the contract says.
+     */
+    methodOfMeasurement: text("method_of_measurement"),
+    currency: text("currency").notNull().default("KES"),
+    notes: text("notes").notNull().default(""),
+
+    awardedById: text("awarded_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    awardedByName: text("awarded_by_name"),
+    awardedAt: timestamp("awarded_at", { withTimezone: true }),
+
+    createdById: text("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdByName: text("created_by_name").notNull().default("System"),
+    lastModifiedById: text("last_modified_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    lastModifiedByName: text("last_modified_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_boqs_version_uq").on(t.projectId, t.version),
+    /** The partial unique index, not a check-then-write. See 0070 decision 3. */
+    uniqueIndex("project_boqs_one_awarded")
+      .on(t.projectId)
+      .where(sql`${t.status} = 'awarded'`),
+    uniqueIndex("project_boqs_id_project_uq").on(t.id, t.projectId),
+    index("project_boqs_project_idx").on(t.companyId, t.projectId, t.status),
+
+    check("project_boqs_version_positive", sql`${t.version} > 0`),
+    /**
+     * Against `draft`, not against `awarded`: a SUPERSEDED bill was awarded
+     * once and keeps its stamp. Same reasoning as `project_budgets`.
+     */
+    check(
+      "project_boqs_draft_is_unawarded",
+      sql`(${t.status} = 'draft') = (${t.awardedAt} IS NULL)`,
+    ),
+    check(
+      "project_boqs_award_pair",
+      sql`(${t.awardedAt} IS NULL) = (length(btrim(COALESCE(${t.awardedByName}, ''))) = 0)`,
+    ),
+  ],
+);
+
+/**
+ * The bill itself — an ltree tree, like `categories` (0062) and `projectTasks`
+ * (0071). A bill of quantities is numbered hierarchically and the figures a QS
+ * reads are the section totals, which are roll-ups of the leaves.
+ *
+ * ONLY A LEAF IS PRICED (0076 decision 4). A section takes its amount from what
+ * is under it; `project_boq_items_leaf_owns_quantity` refuses a rate on a row
+ * with sub-items, and `project_boq_items_refuse_child_of_priced` refuses the
+ * other direction rather than silently discarding a contractual figure.
+ *
+ * QUANTITY TO DATE IS NOT HERE. It is the sum of
+ * `projectBoqMeasurements.quantity`, computed on read — decision 2, and the
+ * same rule as every other roll-up in this module.
+ */
+export const projectBoqItems = pgTable(
+  "project_boq_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    boqId: uuid("boq_id")
+      .notNull()
+      .references(() => projectBoqs.id, { onDelete: "cascade" }),
+    /** Denormalised from the header, so the composite key to a task can say
+     *  "the same project" without a join. */
+    projectId: uuid("project_id").notNull(),
+
+    /** `restrict`. Deleting a section must not take the items priced under it. */
+    parentItemId: uuid("parent_item_id"),
+
+    /** Trigger-maintained. NEVER ASSIGN THIS. */
+    path: ltree("path").notNull().default(sql`''::ltree`),
+    depth: integer("depth").generatedAlwaysAs(sql`nlevel(path) - 1`),
+
+    /** The reference as printed — "B.2.14". Nullable: a narrative line has none. */
+    itemCode: text("item_code"),
+    description: text("description").notNull(),
+    isHeading: boolean("is_heading").notNull().default(false),
+
+    /** Free text — see `methodOfMeasurement`. m, m2, m3, kg, t, no, sum, item. */
+    unit: text("unit"),
+    quantity: numeric("quantity", { precision: 19, scale: 4, mode: "string" }),
+    rate: money("rate"),
+    /** GENERATED from quantity × rate. Arithmetic is the database's job. */
+    amount: money("amount").generatedAlwaysAs(
+      sql`(quantity * rate)::numeric(19,4)`,
+    ),
+
+    costCodeId: uuid("cost_code_id").references(() => projectCostCodes.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * The programme activity this item measures. Optional, and the composite
+     * `project_boq_items_task_same_project_fk` keeps it in the same project —
+     * NULL skips the check under MATCH SIMPLE, which is what makes it optional.
+     */
+    taskId: uuid("task_id"),
+
+    sortOrder: integer("sort_order").notNull().default(0),
+
+    createdById: text("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdByName: text("created_by_name").notNull().default("System"),
+    lastModifiedById: text("last_modified_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    lastModifiedByName: text("last_modified_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_boq_items_id_boq_uq").on(t.id, t.boqId),
+    /** Partial: two items numbered B.2.14 make every reference ambiguous, and
+     *  an unnumbered narrative line is legitimate. */
+    uniqueIndex("project_boq_items_code_uq")
+      .on(t.boqId, t.itemCode)
+      .where(sql`${t.itemCode} IS NOT NULL`),
+    index("project_boq_items_boq_idx").on(t.companyId, t.boqId, t.sortOrder),
+    index("project_boq_items_parent_idx")
+      .on(t.parentItemId)
+      .where(sql`${t.parentItemId} IS NOT NULL`),
+    index("project_boq_items_task_idx")
+      .on(t.taskId)
+      .where(sql`${t.taskId} IS NOT NULL`),
+    index("project_boq_items_cost_code_idx")
+      .on(t.costCodeId)
+      .where(sql`${t.costCodeId} IS NOT NULL`),
+
+    check(
+      "project_boq_items_description_not_blank",
+      sql`length(btrim(${t.description})) > 0`,
+    ),
+    check(
+      "project_boq_items_code_not_blank",
+      sql`${t.itemCode} IS NULL OR length(btrim(${t.itemCode})) > 0`,
+    ),
+    check(
+      "project_boq_items_heading_is_unpriced",
+      sql`NOT ${t.isHeading} OR (${t.unit} IS NULL AND ${t.quantity} IS NULL AND ${t.rate} IS NULL)`,
+    ),
+    /** Both-or-neither, written as a conditional on the quantity. */
+    check(
+      "project_boq_items_quantity_needs_unit",
+      sql`${t.quantity} IS NULL OR length(btrim(COALESCE(${t.unit}, ''))) > 0`,
+    ),
+    check(
+      "project_boq_items_quantity_non_negative",
+      sql`${t.quantity} IS NULL OR ${t.quantity} >= 0`,
+    ),
+    check(
+      "project_boq_items_rate_non_negative",
+      sql`${t.rate} IS NULL OR ${t.rate} >= 0`,
+    ),
+    check(
+      "project_boq_items_rate_needs_quantity",
+      sql`${t.rate} IS NULL OR ${t.quantity} IS NOT NULL`,
+    ),
+    check(
+      "project_boq_items_not_own_parent",
+      sql`${t.parentItemId} IS NULL OR ${t.parentItemId} <> ${t.id}`,
+    ),
+  ],
+);
+
+/**
+ * One row per measurement event — 0076 decision 2. NEVER a running total.
+ *
+ * The quantity measured to date is `SUM(quantity)` over these rows. Last
+ * month's over-measure is corrected by a NEGATIVE row rather than by editing
+ * what was certified, which is how the trade fixes a certificate it has
+ * already issued.
+ *
+ * There is no `certificateId` yet, deliberately: certificates are step 5, and a
+ * column with no writer is the cached `financials` that 0070 spent a migration
+ * undoing.
+ */
+export const projectBoqMeasurements = pgTable(
+  "project_boq_measurements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    boqItemId: uuid("boq_item_id")
+      .notNull()
+      .references(() => projectBoqItems.id, { onDelete: "cascade" }),
+
+    measuredOn: date("measured_on").notNull().default(sql`CURRENT_DATE`),
+    /** Signed, and never zero. Over-measure is information, not an error. */
+    quantity: numeric("quantity", { precision: 19, scale: 4, mode: "string" }).notNull(),
+
+    /**
+     * Chainage, grid reference, sheet number, level — what makes a remeasure
+     * checkable two years later, which is when a final account is argued.
+     */
+    reference: text("reference").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+
+    measuredById: text("measured_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    measuredByName: text("measured_by_name").notNull().default("System"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("project_boq_measurements_item_idx").on(t.boqItemId, t.measuredOn),
+    index("project_boq_measurements_company_idx").on(t.companyId, t.measuredOn),
+    check("project_boq_measurements_quantity_not_zero", sql`${t.quantity} <> 0`),
   ],
 );

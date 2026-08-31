@@ -133,13 +133,18 @@ export default async function MonthlyReportPage({ searchParams }) {
                 {progress?.percent ?? 0}%
               </span>
             </div>
-            {progress?.source === "tasks" ? (
+            {progress?.source === "measured" ? (
+              <p className="text-xs text-muted-foreground">
+                Measured against the bill of quantities — KES {fmt(progress.measuredValue)}{" "}
+                of KES {fmt(progress.billedValue)} certified as done.
+              </p>
+            ) : progress?.source === "tasks" ? (
               <p className="text-xs text-muted-foreground">
                 {progress.doneCount} of {progress.taskCount} programme tasks complete.
               </p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                No work breakdown tasks yet — this is the project's typed-in overall progress.
+                No work breakdown tasks yet — this is the project&apos;s typed-in overall progress.
               </p>
             )}
           </Card>

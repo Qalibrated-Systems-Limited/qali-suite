@@ -783,11 +783,13 @@ export default async function ProjectDetailPage({ params, searchParams }) {
           </div>
         )}
 
-        {/* Progress — earned from the WBS where there is one, typed where
-            there is not (0071 decision 1). Saying WHICH matters: a number
-            somebody dragged a slider to and a number rolled up from measured
-            work look identical on a bar, and only one of them is evidence. */}
-        {(project.progressPercent > 0 || project.progress?.source === "tasks") && (
+        {/* Progress — MEASURED against a bill where there is one (0076),
+            earned from the WBS where there is one (0071 decision 1), typed
+            where there is neither. Saying WHICH matters: all three look
+            identical on a bar and only one of them is evidence. */}
+        {(project.progressPercent > 0 ||
+          project.progress?.source === "tasks" ||
+          project.progress?.source === "measured") && (
           <div className="pt-3 border-t space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Progress</span>
@@ -800,11 +802,15 @@ export default async function ProjectDetailPage({ params, searchParams }) {
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              {project.progress?.source === "tasks"
-                ? `Earned across ${project.progress.taskCount} task${
-                    project.progress.taskCount === 1 ? "" : "s"
-                  } — ${project.progress.doneCount} done`
-                : "Entered by hand. Add tasks and this becomes the weighted progress of the work."}
+              {project.progress?.source === "measured"
+                ? `Measured against the bill of quantities — KES ${formatCurrency(
+                    project.progress.measuredValue,
+                  )} of KES ${formatCurrency(project.progress.billedValue)}`
+                : project.progress?.source === "tasks"
+                  ? `Earned across ${project.progress.taskCount} task${
+                      project.progress.taskCount === 1 ? "" : "s"
+                    } — ${project.progress.doneCount} done`
+                  : "Entered by hand. Add tasks, or price a bill of quantities, and this becomes the progress of the work itself."}
             </p>
           </div>
         )}

@@ -1305,3 +1305,401 @@ function revalidateTask(projectId?: string | null) {
     revalidatePath(`/dashboard/projects/${projectId}/tasks`);
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The bill of quantities — 0076
+//
+// The measured half. `getProjectBoq` is the whole page in one call; everything
+// below it writes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** `numeric(19,4)` as a string, or null. Never a float — see `hours`. */
+const decimal = (v: string | undefined | null) => hours(v, 4);
+
+function revalidateBoq(projectId?: string | null) {
+  revalidatePath("/dashboard/projects/boq");
+  if (projectId) {
+    revalidatePath(`/dashboard/projects/${projectId}`);
+    revalidatePath("/dashboard/projects");
+  }
+}
+
+/**
+ * The effective bill for a project, its lines and its totals — one call,
+ * because a screen that renders a bill needs all three or none of them.
+ *
+ * Returns null where the project has no bill at all, which is the common case:
+ * a supply job or a lump-sum installation never has one, and §8 decision 5 is
+ * that the BILL'S PRESENCE — not the project's type — is what makes a job
+ * measured.
+ */
+export async function getProjectBoq(projectId: string) {
+  if (!projectId) return null;
+  return withAuthorizedTenant([], async (tx) => {
+    const boq = await repo.getEffectiveBoq(tx, projectId);
+    if (!boq) return null;
+
+    const [items, summary, versions] = await Promise.all([
+      repo.listBoqItems(tx, boq.id),
+      repo.getBoqSummary(tx, boq.id),
+      repo.listBoqsForProject(tx, projectId),
+    ]);
+
+    return {
+      boq: { ...boq, _id: boq.id, id: boq.id },
+      items: items.map((i) => ({ ...i, _id: i.id })),
+      summary,
+      /** Every version, so a superseded bill is reachable rather than lost. */
+      versions: versions.map((v) => ({ ...v, _id: v.id })),
+    };
+  });
+}
+
+/** The measurement log for one item — the audit behind a remeasured quantity. */
+export async function getBoqMeasurements(itemId: string) {
+  if (!itemId) return [];
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = await repo.listBoqMeasurements(tx, itemId);
+    return rows.map((r) => ({ ...r, _id: r.id }));
+  });
+}
+
+const boqSchema = z.object({
+  projectId: z.string().min(1, "Project is required"),
+  methodOfMeasurement: optionalTextMax(120, "Method of measurement too long"),
+  currency: optionalText,
+  notes: optionalTextMax(2000, "Notes too long"),
+});
+
+export async function createProjectBoq(prevState: unknown, formData: FormData) {
+  const values = valuesOf(formData);
+  try {
+    await requirePlanAccess("projects");
+  } catch (e) {
+    return { errors: { _form: [(e as Error).message] }, values };
+  }
+
+  const parsed = boqSchema.safeParse({
+    projectId: formData.get("projectId"),
+    methodOfMeasurement: formData.get("methodOfMeasurement"),
+    currency: formData.get("currency"),
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) return { errors: fieldErrorsFrom(parsed.error), values };
+
+  const d = parsed.data;
+  try {
+    const boq = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user, companyId }) => {
+        const project = await repo.getProjectById(tx, d.projectId);
+        if (!project) throw new Error("Project not found");
+        const actor = actorFrom(user);
+        return repo.createBoq(tx, {
+          companyId,
+          projectId: d.projectId,
+          methodOfMeasurement: d.methodOfMeasurement || null,
+          currency: d.currency || null,
+          notes: d.notes || null,
+          createdById: actor.id,
+          createdByName: actor.name,
+        });
+      },
+    );
+    revalidateBoq(d.projectId);
+    return { success: true, message: `Bill v${boq.version} started`, boqId: boq.id };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+export async function updateProjectBoq(
+  boqId: string,
+  prevState: unknown,
+  formData: FormData,
+) {
+  const values = valuesOf(formData);
+  const parsed = boqSchema.safeParse({
+    projectId: formData.get("projectId"),
+    methodOfMeasurement: formData.get("methodOfMeasurement"),
+    currency: formData.get("currency"),
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) return { errors: fieldErrorsFrom(parsed.error), values };
+
+  const d = parsed.data;
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user }) => {
+        const actor = actorFrom(user);
+        const row = await repo.updateBoq(tx, boqId, {
+          methodOfMeasurement: d.methodOfMeasurement || null,
+          currency: d.currency || null,
+          notes: d.notes || null,
+          lastModifiedById: actor.id,
+          lastModifiedByName: actor.name,
+        });
+        if (!row) throw new Error("Bill not found");
+        return row;
+      },
+    );
+    revalidateBoq(d.projectId);
+    return { success: true, message: "Bill updated" };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+/**
+ * Award the bill — FINANCE, not project management.
+ *
+ * Same gate and same reasoning as `approveProjectBudget`: `PROJECT_MANAGE_ROLES`
+ * includes `Manager`, and awarding is the commercial act that fixes the
+ * contract sum and FREEZES every rate in the bill. A project manager builds and
+ * prices the bill; signing it off is the same decision as approving a budget,
+ * and it is made by the same people.
+ */
+export async function awardProjectBoq(boqId: string) {
+  try {
+    const boq = await withAuthorizedTenant(
+      FINANCE_WRITE_ROLES as unknown as string[],
+      (tx, { user }) => repo.awardBoq(tx, boqId, actorFrom(user)),
+    );
+    if (!boq) return { success: false, error: "Bill not found" };
+    revalidateBoq(boq.projectId);
+    return { success: true, message: `Bill v${boq.version} awarded` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+const boqItemSchema = z.object({
+  boqId: z.string().min(1, "Bill is required"),
+  projectId: z.string().min(1, "Project is required"),
+  parentItemId: optionalText,
+  itemCode: optionalTextMax(40, "Item code too long"),
+  description: z
+    .string()
+    .min(1, "A bill item needs a description")
+    .max(1000, "Description too long"),
+  isHeading: optionalText,
+  unit: optionalTextMax(20, "Unit too long"),
+  quantity: optionalText,
+  rate: optionalText,
+  costCodeId: optionalText,
+  taskId: optionalText,
+  sortOrder: optionalText,
+});
+
+function boqItemFields(formData: FormData) {
+  return {
+    boqId: formData.get("boqId"),
+    projectId: formData.get("projectId"),
+    parentItemId: formData.get("parentItemId"),
+    itemCode: formData.get("itemCode"),
+    description: formData.get("description"),
+    isHeading: formData.get("isHeading"),
+    unit: formData.get("unit"),
+    quantity: formData.get("quantity"),
+    rate: formData.get("rate"),
+    costCodeId: formData.get("costCodeId"),
+    taskId: formData.get("taskId"),
+    sortOrder: formData.get("sortOrder"),
+  };
+}
+
+export async function createProjectBoqItem(
+  prevState: unknown,
+  formData: FormData,
+) {
+  const values = valuesOf(formData);
+  const parsed = boqItemSchema.safeParse(boqItemFields(formData));
+  if (!parsed.success) return { errors: fieldErrorsFrom(parsed.error), values };
+
+  const d = parsed.data;
+  const heading = d.isHeading === "on" || d.isHeading === "true";
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user, companyId }) => {
+        const actor = actorFrom(user);
+        return repo.createBoqItem(tx, {
+          companyId,
+          boqId: d.boqId,
+          projectId: d.projectId,
+          parentItemId: d.parentItemId || null,
+          itemCode: d.itemCode || null,
+          description: d.description,
+          isHeading: heading,
+          // A heading carries no unit, quantity or rate — the CHECK says so,
+          // and a form that leaves a stale rate in a hidden field would hit it
+          // with a message about a constraint.
+          unit: heading ? null : d.unit || null,
+          quantity: heading ? null : decimal(d.quantity),
+          rate: heading ? null : decimal(d.rate),
+          costCodeId: d.costCodeId || null,
+          taskId: d.taskId || null,
+          sortOrder: parseInt(d.sortOrder || "0", 10) || 0,
+          createdById: actor.id,
+          createdByName: actor.name,
+        });
+      },
+    );
+    revalidateBoq(d.projectId);
+    return { success: true, message: "Bill item added" };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+export async function updateProjectBoqItem(
+  itemId: string,
+  prevState: unknown,
+  formData: FormData,
+) {
+  const values = valuesOf(formData);
+  const parsed = boqItemSchema.safeParse(boqItemFields(formData));
+  if (!parsed.success) return { errors: fieldErrorsFrom(parsed.error), values };
+
+  const d = parsed.data;
+  const heading = d.isHeading === "on" || d.isHeading === "true";
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user }) => {
+        const actor = actorFrom(user);
+        const row = await repo.updateBoqItem(tx, itemId, {
+          parentItemId: d.parentItemId || null,
+          itemCode: d.itemCode || null,
+          description: d.description,
+          isHeading: heading,
+          unit: heading ? null : d.unit || null,
+          quantity: heading ? null : decimal(d.quantity),
+          rate: heading ? null : decimal(d.rate),
+          costCodeId: d.costCodeId || null,
+          taskId: d.taskId || null,
+          sortOrder: parseInt(d.sortOrder || "0", 10) || 0,
+          lastModifiedById: actor.id,
+          lastModifiedByName: actor.name,
+        });
+        if (!row) throw new Error("Bill item not found");
+        return row;
+      },
+    );
+    revalidateBoq(d.projectId);
+    return { success: true, message: "Bill item updated" };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+export async function deleteProjectBoqItem(itemId: string, projectId: string) {
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx) => {
+        const row = await repo.deleteBoqItem(tx, itemId);
+        if (!row) throw new Error("Bill item not found");
+        return row;
+      },
+    );
+    revalidateBoq(projectId);
+    return { success: true, message: "Bill item removed" };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+const measurementSchema = z.object({
+  boqItemId: z.string().min(1, "Bill item is required"),
+  projectId: z.string().min(1, "Project is required"),
+  measuredOn: optionalText,
+  quantity: z.string().min(1, "A measurement needs a quantity"),
+  reference: optionalTextMax(200, "Reference too long"),
+  notes: optionalTextMax(2000, "Notes too long"),
+});
+
+/**
+ * Record a remeasure.
+ *
+ * SIGNED, and the form says so: a negative quantity is how last month's
+ * over-measure is corrected without editing what was already certified. The
+ * database refuses zero, refuses a heading, refuses an unpriced item and
+ * refuses anything against a bill that has not been awarded — so this parses
+ * the number and gets out of the way.
+ */
+export async function recordProjectBoqMeasurement(
+  prevState: unknown,
+  formData: FormData,
+) {
+  const values = valuesOf(formData);
+  const parsed = measurementSchema.safeParse({
+    boqItemId: formData.get("boqItemId"),
+    projectId: formData.get("projectId"),
+    measuredOn: formData.get("measuredOn"),
+    quantity: formData.get("quantity"),
+    reference: formData.get("reference"),
+    notes: formData.get("notes"),
+  });
+  if (!parsed.success) return { errors: fieldErrorsFrom(parsed.error), values };
+
+  const d = parsed.data;
+  const quantity = decimal(d.quantity);
+  if (quantity === null) {
+    return {
+      errors: { quantity: ["A measurement needs a number"] },
+      values,
+    };
+  }
+
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user, companyId }) => {
+        const actor = actorFrom(user);
+        return repo.recordBoqMeasurement(tx, {
+          companyId,
+          boqItemId: d.boqItemId,
+          measuredOn: d.measuredOn || null,
+          quantity,
+          reference: d.reference || null,
+          notes: d.notes || null,
+          measuredById: actor.id,
+          measuredByName: actor.name,
+        });
+      },
+    );
+    revalidateBoq(d.projectId);
+    return { success: true, message: "Measurement recorded" };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+/**
+ * Remove a measurement — for a mis-keyed entry, and only that.
+ *
+ * A quantity that has been certified is corrected by a NEGATIVE measurement,
+ * so both the original and the adjustment survive in the log. The screen says
+ * which is which; the database cannot tell them apart.
+ */
+export async function deleteProjectBoqMeasurement(
+  measurementId: string,
+  projectId: string,
+) {
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx) => {
+        const row = await repo.deleteBoqMeasurement(tx, measurementId);
+        if (!row) throw new Error("Measurement not found");
+        return row;
+      },
+    );
+    revalidateBoq(projectId);
+    return { success: true, message: "Measurement removed" };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}

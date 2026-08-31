@@ -983,6 +983,73 @@ Requisitions still run the identical query under two names** and that is still
 §7's blocking decision 1, for the author to settle. What changed is that both
 now show the right numbers while it is settled.
 
+### 0076 — the bill of quantities, and progress that is a measurement
+
+The same day again, and the first migration since the merge. §8 of
+`PROJECTS-QALITRACK-PLAN.md` answered §6.4 — there IS a bill of quantities — and
+this builds it: `project_boqs`, `project_boq_items`, `project_boq_measurements`,
+the repository, the actions, a page, and 35 tests.
+
+**What it finishes.** 0071 replaced a typed percentage with a weighted roll-up
+of tasks and was honest about it: `progress.source` returned `tasks` or `typed`.
+But every leaf percentage in that tree was still typed by a person, so a roll-up
+of tasks is a careful OPINION. `source` now has a third value, `measured`, and
+it outranks the other two: 8 of 20 km of subbase laid is 40% because 8 km was
+measured against a rate.
+
+It also supplies the one figure §7's certificate arithmetic did not have — work
+done to date, for a measured valuation.
+
+**Three tables, where the plan said two.** The bill-level facts — the method of
+measurement, which version is awarded, what freezing means — have nowhere to
+live in the items. The precedent was already in the module:
+`project_budgets` / `project_budget_lines`, versioned, one live at a time, lines
+frozen once signed. A bill of quantities is that shape with quantities, so it
+follows it, including the partial unique index that stops two racing awards
+rather than a check-then-write.
+
+**The decisions that are not obvious, and why:**
+
+- **Only a LEAF is priced.** A section takes its amount from what is under it. A
+  priced parent with priced children is double-counted in the bill total and the
+  row cannot say which was meant. That is 0071 decision 2 applied to money.
+- **…and where 0071 DEMOTED a parent to 0% silently, this REFUSES.** A
+  percentage is a working number; a rate is a contractual figure, and discarding
+  one without saying so is worse than declining. The message names the fix.
+- **A measurement may be NEGATIVE and may exceed the bill.** A correction to a
+  certified over-measure is a negative remeasure — that is how the trade fixes
+  last month's certificate without editing it, and both rows stay in the log.
+  Measuring more than was billed is usually the first evidence of a variation,
+  so nothing caps it; the page warns, the same rule as the budget at 90%.
+- **The unit and the method of measurement are TEXT.** CESMM4, SMM7, POMI and
+  the national standards are not interchangeable, and whichever one our own
+  bills happen to use would look like the obvious enum. The screen offers a
+  list; the column takes what the contract says.
+- **No `certificate_id` on a measurement yet.** It belongs there and
+  certificates are two steps away — but a column with no writer is the cached
+  `financials` that 0070 spent a migration undoing.
+
+**And the enum lesson landed on the screens, not the schema.** Adding a third
+value to `progress.source` meant four render sites that compared
+`=== "tasks"` and fell through to "entered by hand" for everything else — which
+would have described a remeasured bill as a typed percentage. All four were
+found by grep before shipping, which is the same sweep the `_id` findings this
+morning needed and did not get.
+
+**A test that ran for 22 minutes, and did not need to.** The first run of the
+BOQ suite took 1,325s with two hook timeouts in `TRUNCATE`; the second took 61s
+with no changes but one test fixture. `pg_stat_activity` was empty by the time
+it was sampled, so it was contention that had already cleared — worth recording
+because the instinct on a 22-minute run is to look for a slow query, and the
+duration alone does not distinguish the two. `feedback_caffeinate_pg_suite`
+already says a huge duration is not proof of sleep; it is not proof of a slow
+query either.
+
+The one real failure that run found was a test asserting the wrong guard:
+awarding a second bill with no priced item hit `project_boq_has_priced_items`
+before it could ever reach `project_boqs_one_awarded`, so the test proved a
+constraint it was not written for.
+
 ## Handoff — 2026-08-29 — global search (§9P), and the count that could not see it
 
 No migration. `components/command-palette.jsx` — Ctrl-K, reachable from every

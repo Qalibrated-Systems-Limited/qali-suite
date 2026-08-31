@@ -181,3 +181,22 @@ table — and it is what Candy gives a QS. Worth adding when the tables exist.
 
 `contracts` — notices, IPCs, retention, the site diary — remains a separate
 product and a separate decision. See `PROJECTS-QALITRACK-PLAN.md` §5.
+
+---
+
+**Amended 2026-08-31 — the BOQ arrived, and it lands above step 2 of this
+list.** `PROJECTS-QALITRACK-PLAN.md` §8 answers that document's §6.4: quantities
+ARE measured against a bill, so migration 0076 built one — and it finishes what
+step 1 above could only half-do. Decision 1 here demoted `progress_percent` to
+the fallback for a project with no WBS, and 0071 delivered that; but a weighted
+roll-up of tasks is a careful OPINION, because every leaf percentage in it was
+still typed by a person. `progress.source` now returns `measured` where a bill
+has been awarded and measured against, and it outranks `tasks` and `typed`.
+
+Two consequences for the list above:
+
+- **Milestones (step 2) keep their value and their draft invoice**, unchanged.
+  What changes is that on a project with a bill, milestone completion is
+  evidence rather than the valuation — the bill is.
+- **Earned value (step 6) is now the real thing** rather than a proxy. EV is
+  measured work at billed rates, which is exactly what the bill sums.

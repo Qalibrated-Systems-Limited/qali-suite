@@ -229,6 +229,14 @@ export default function ProjectTasks({
               {progress.doneCount}/{progress.taskCount} done · {progress.percent}%
             </Badge>
           )}
+          {/* The project's headline percentage now comes from the bill, so this
+              card must not imply the WBS is where it came from — 0076. */}
+          {progress?.source === "measured" && (
+            <Badge variant="outline" className="text-xs shrink-0 font-normal">
+              {progress.doneCount}/{progress.taskCount} done · project progress
+              is measured from the bill
+            </Badge>
+          )}
         </div>
         {editable && addingUnder === null && (
           <Button size="sm" variant="outline" onClick={() => setAddingUnder("")}>

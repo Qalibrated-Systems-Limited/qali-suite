@@ -12,6 +12,7 @@ import {
   Receipt,
   Wallet,
   FileSpreadsheet,
+  Ruler,
 } from "lucide-react";
 
 /**
@@ -24,6 +25,7 @@ import {
  */
 const NAV_ITEMS = [
   { label: "Dashboard", href: "/dashboard/projects", icon: LayoutDashboard, exact: true },
+  { label: "Bill of Quantities", href: "/dashboard/projects/boq", icon: Ruler },
   { label: "Milestone Tracker", href: "/dashboard/projects/milestones", icon: Milestone },
   { label: "Programme", href: "/dashboard/projects/programme", icon: CalendarDays },
   { label: "Engineer's Instructions", href: "/dashboard/projects/instructions", icon: FileEdit },

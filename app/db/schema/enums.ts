@@ -850,3 +850,21 @@ export const projectDiaryStatusEnum = pgEnum("project_diary_status", [
   "submitted",
   "countersigned",
 ]);
+
+// ── Bill of quantities (0076) ────────────────────────────────────────────────
+
+/**
+ * `draft → awarded → superseded`, versioned per project with one awarded at a
+ * time (`project_boqs_one_awarded`).
+ *
+ * `awarded` is what FREEZES the priced facts — quantity, rate, unit, code — so
+ * a variation issues a new item rather than editing a signed one, and a final
+ * account can be argued from what was actually let. It is a status on the bill,
+ * NOT a dependency on `contracts`: when that table lands it supplies the award
+ * date, not the concept.
+ */
+export const projectBoqStatusEnum = pgEnum("project_boq_status", [
+  "draft",
+  "awarded",
+  "superseded",
+]);

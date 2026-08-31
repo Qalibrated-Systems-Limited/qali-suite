@@ -103,6 +103,9 @@ export default async function MilestonesPage({ searchParams }) {
                 — earned from {progress.taskCount} task{progress.taskCount === 1 ? "" : "s"}
               </span>
             )}
+            {progress?.source === "measured" && (
+              <span className="ml-1.5">— measured against the bill of quantities</span>
+            )}
           </span>
           <span className="font-semibold text-foreground">{progress?.percent ?? 0}%</span>
         </div>

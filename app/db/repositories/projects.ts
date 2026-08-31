@@ -8,6 +8,9 @@ import {
   projectCostCodes,
   projectAssignments,
   projectTasks,
+  projectBoqs,
+  projectBoqItems,
+  projectBoqMeasurements,
   accounts,
 } from "../schema";
 import { getProjectClaimsByAccount, listClaims } from "./claims";
@@ -125,6 +128,8 @@ export async function listProjects(tx: Tx, opts: ProjectFilters = {}) {
         source: "typed" as const,
         taskCount: 0,
         doneCount: 0,
+        billedValue: 0,
+        measuredValue: 0,
       },
     })),
     total: Number(total ?? 0),
@@ -1567,13 +1572,56 @@ const LEAVES = sql`
             WHERE c.parent_task_id = t.id AND c.status <> 'cancelled')
 `;
 
+/**
+ * The measured value of an awarded bill — 0076.
+ *
+ * `billed` is the bill total, `earned` is what has been measured against it at
+ * the same rates. Both are money, which is what a quantity surveyor means by
+ * "percent complete": a 40% figure is 40% OF THE VALUE, not 40% of the rows.
+ *
+ * Only priced items count, and by construction those are the leaves —
+ * `project_boq_items_leaf_owns_quantity` refuses a rate on a row with
+ * sub-items, so no NOT EXISTS is needed here the way `LEAVES` needs one.
+ *
+ * `earned` may exceed `billed`. Over-measurement is usually the first evidence
+ * of a variation, and this module warns rather than blocking — so the figure
+ * is reported as it is and the screen says so.
+ */
+const MEASURED = sql`
+  SELECT b.project_id,
+         SUM(i.quantity * i.rate)                    AS billed,
+         SUM(COALESCE(m.measured, 0) * i.rate)       AS earned,
+         COUNT(*)::int                               AS item_count
+    FROM project_boqs b
+    JOIN project_boq_items i ON i.boq_id = b.id
+    LEFT JOIN LATERAL (
+      SELECT SUM(x.quantity) AS measured
+        FROM project_boq_measurements x
+       WHERE x.boq_item_id = i.id
+    ) m ON TRUE
+   WHERE b.status = 'awarded'
+     AND i.quantity IS NOT NULL
+     AND i.rate IS NOT NULL
+   GROUP BY b.project_id
+`;
+
 export interface ProjectProgress {
-  /** 0–100. */
+  /** 0–100 — EXCEPT where more has been measured than was billed. */
   percent: number;
-  /** Where the number came from — `tasks` is earned, `typed` is asserted. */
-  source: "tasks" | "typed";
+  /**
+   * Where the number came from, best first.
+   *
+   * `measured` is remeasured work against an awarded bill — the only one of
+   * the three that is a measurement rather than an opinion. `tasks` is the
+   * weighted roll-up of a WBS whose leaf percentages were still typed by
+   * somebody. `typed` is the project-level slider.
+   */
+  source: "measured" | "tasks" | "typed";
   taskCount: number;
   doneCount: number;
+  /** Money, and 0 where there is no awarded bill. */
+  billedValue: number;
+  measuredValue: number;
 }
 
 /**
@@ -1594,30 +1642,52 @@ export async function computeProgressFor(
   const ids = anyOf([...new Set(projectIds)], "uuid[]");
 
   const rows = (await tx.execute(sql`
-    WITH leaves AS (${LEAVES})
+    WITH leaves AS (${LEAVES}), measured AS (${MEASURED})
     SELECT p.id::text                                          AS project_id,
            p.progress_percent                                  AS typed,
            (SUM(l.w * l.p) / NULLIF(SUM(l.w), 0))::float8      AS rolled_up,
            COUNT(l.id)::int                                     AS leaf_count,
+           mm.billed::float8                                    AS billed,
+           mm.earned::float8                                    AS earned,
            (SELECT COUNT(*) FROM project_tasks t
              WHERE t.project_id = p.id AND t.status <> 'cancelled')::int AS task_count,
            (SELECT COUNT(*) FROM project_tasks t
              WHERE t.project_id = p.id AND t.status = 'done')::int       AS done_count
       FROM projects p
-      LEFT JOIN leaves l ON l.project_id = p.id
+      LEFT JOIN leaves l   ON l.project_id = p.id
+      LEFT JOIN measured mm ON mm.project_id = p.id
      WHERE p.id = ${ids}
-     GROUP BY p.id
+     GROUP BY p.id, mm.billed, mm.earned
   `)) as unknown as Array<Record<string, unknown>>;
 
   for (const r of rows) {
     const rolled = r.rolled_up === null || r.rolled_up === undefined
       ? null
       : num(r.rolled_up);
+
+    /**
+     * MEASURED BEATS TASKS BEATS TYPED — 0076.
+     *
+     * A remeasure against a signed bill is evidence; a weighted roll-up of
+     * tasks is a careful opinion; the slider is an assertion. Where more than
+     * one is available the strongest wins, and `source` says which so no
+     * screen can imply somebody measured something they did not.
+     *
+     * A bill whose items are all priced at zero has `billed = 0` and no
+     * percentage — dividing by it would be a fabricated 0% or a crash — so it
+     * falls through to the next source, which is the honest answer.
+     */
+    const billed = num(r.billed);
+    const earnedPct = billed > 0 ? (num(r.earned) / billed) * 100 : null;
+
     result.set(String(r.project_id), {
-      percent: Math.round(rolled ?? num(r.typed)),
-      source: rolled === null ? "typed" : "tasks",
+      percent: Math.round(earnedPct ?? rolled ?? num(r.typed)),
+      source:
+        earnedPct !== null ? "measured" : rolled === null ? "typed" : "tasks",
       taskCount: Number(r.task_count ?? 0),
       doneCount: Number(r.done_count ?? 0),
+      billedValue: billed,
+      measuredValue: num(r.earned),
     });
   }
   return result;
@@ -1631,6 +1701,8 @@ export async function getProjectProgress(tx: Tx, projectId: string) {
       source: "typed" as const,
       taskCount: 0,
       doneCount: 0,
+      billedValue: 0,
+      measuredValue: 0,
     }
   );
 }
@@ -1907,4 +1979,488 @@ export async function countTasks(tx: Tx, projectId: string) {
     .from(projectTasks)
     .where(eq(projectTasks.projectId, projectId));
   return Number(row?.total ?? 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The bill of quantities — 0076
+//
+// The measured half of the module. Everything above this line values a project
+// by what was spent or asserted; this values it by what was measured against a
+// bill somebody signed, which is the only one of the three a final account can
+// be argued from.
+//
+// MONEY IS A NUMBER in this section, not a string — the same exception the
+// financial summary takes, and for the same reason: every screen that renders a
+// bill does arithmetic on it (a section total, a percentage of the bill, an
+// over-measure) and a string that silently concatenates is how Cash
+// Requisitions came to render NaN.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Every version of the bill for a project, newest first. */
+export async function listBoqsForProject(tx: Tx, projectId: string) {
+  return tx
+    .select()
+    .from(projectBoqs)
+    .where(eq(projectBoqs.projectId, projectId))
+    .orderBy(desc(projectBoqs.version));
+}
+
+/**
+ * THE bill for a project: the awarded one, and the latest draft where nothing
+ * has been awarded yet.
+ *
+ * One rule, stated once, so no screen has to decide which version it is looking
+ * at — the same shape as `getEffectiveBudget` (0070 decision 5).
+ */
+export async function getEffectiveBoq(tx: Tx, projectId: string) {
+  const [row] = await tx
+    .select()
+    .from(projectBoqs)
+    .where(eq(projectBoqs.projectId, projectId))
+    .orderBy(
+      // `awarded` first, then the highest version among the rest.
+      sql`CASE WHEN ${projectBoqs.status} = 'awarded' THEN 0 ELSE 1 END`,
+      desc(projectBoqs.version),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export async function getBoqById(tx: Tx, boqId: string) {
+  if (!isUuid(boqId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectBoqs)
+    .where(eq(projectBoqs.id, boqId));
+  return row ?? null;
+}
+
+/**
+ * A new version of the bill.
+ *
+ * The version is `max + 1` INSIDE the caller's transaction, and
+ * `project_boqs_version_uq` is what actually guarantees it: two people starting
+ * v2 at once both read v1 and one of them loses the insert, which is the
+ * correct outcome and a clearer error than a silently duplicated version.
+ */
+export async function createBoq(
+  tx: Tx,
+  input: {
+    companyId: string;
+    projectId: string;
+    methodOfMeasurement?: string | null;
+    currency?: string | null;
+    notes?: string | null;
+    createdById?: string | null;
+    createdByName: string;
+  },
+) {
+  const [prev] = await tx
+    .select({ version: projectBoqs.version })
+    .from(projectBoqs)
+    .where(eq(projectBoqs.projectId, input.projectId))
+    .orderBy(desc(projectBoqs.version))
+    .limit(1);
+
+  const [row] = await tx
+    .insert(projectBoqs)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      version: (prev?.version ?? 0) + 1,
+      methodOfMeasurement: input.methodOfMeasurement?.trim() || null,
+      currency: input.currency?.trim() || "KES",
+      notes: input.notes?.trim() ?? "",
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+/** The bill's own facts. Refused on anything that is not a draft. */
+export async function updateBoq(
+  tx: Tx,
+  boqId: string,
+  input: {
+    methodOfMeasurement?: string | null;
+    currency?: string | null;
+    notes?: string | null;
+    lastModifiedById?: string | null;
+    lastModifiedByName?: string | null;
+  },
+) {
+  const current = await getBoqById(tx, boqId);
+  if (!current) return null;
+  if (current.status !== "draft") {
+    throw new Error(
+      `Bill v${current.version} is ${current.status} and cannot be edited. Create a new version.`,
+    );
+  }
+
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.methodOfMeasurement !== undefined) {
+    patch.methodOfMeasurement = input.methodOfMeasurement?.trim() || null;
+  }
+  if (input.currency !== undefined) patch.currency = input.currency?.trim() || "KES";
+  if (input.notes !== undefined) patch.notes = input.notes?.trim() ?? "";
+  if (input.lastModifiedById !== undefined) patch.lastModifiedById = input.lastModifiedById;
+  if (input.lastModifiedByName !== undefined) {
+    patch.lastModifiedByName = input.lastModifiedByName;
+  }
+
+  const [row] = await tx
+    .update(projectBoqs)
+    .set(patch)
+    .where(eq(projectBoqs.id, boqId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Award the bill, and supersede whichever one was awarded before it.
+ *
+ * Supersede-then-award, in this order, inside one transaction — the same
+ * sequence `approveProjectBudget` uses, and for the same reason: the reverse
+ * order leaves two rows matching `project_boqs_one_awarded` for the length of a
+ * statement, and that index is the only thing standing between two racing
+ * awards and a project with two contract sums.
+ *
+ * Awarding is what FREEZES the priced items. After this, a variation issues a
+ * new item; nothing edits a signed one.
+ */
+export async function awardBoq(
+  tx: Tx,
+  boqId: string,
+  actor: { id?: string | null; name: string },
+) {
+  const boq = await getBoqById(tx, boqId);
+  if (!boq) return null;
+  if (boq.status === "awarded") return boq;
+  if (boq.status === "superseded") {
+    throw new Error(
+      `Bill v${boq.version} has been superseded and cannot be awarded again.`,
+    );
+  }
+
+  await tx
+    .update(projectBoqs)
+    .set({ status: "superseded", updatedAt: new Date() })
+    .where(
+      and(
+        eq(projectBoqs.projectId, boq.projectId),
+        eq(projectBoqs.status, "awarded"),
+      ),
+    );
+
+  const [row] = await tx
+    .update(projectBoqs)
+    .set({
+      status: "awarded",
+      awardedById: actor.id ?? null,
+      awardedByName: actor.name,
+      awardedAt: new Date(),
+      lastModifiedById: actor.id ?? null,
+      lastModifiedByName: actor.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectBoqs.id, boqId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * The bill, depth-first, siblings in `sort_order`, every row carrying what has
+ * been measured against it.
+ *
+ * `path` alone orders the tree depth-first but by id, which is arbitrary, so
+ * the recursive CTE builds a sort key from each row's ancestors — exactly as
+ * `listProjectTasks` does.
+ *
+ * `billedAmount` and `measuredAmount` are SUBTREE totals: a leaf's own figures,
+ * and the roll-up of everything beneath a section. That is the whole point of
+ * the tree — a section's amount is what is under it, and
+ * `project_boq_items_leaf_owns_quantity` guarantees the two can never be
+ * double-counted.
+ */
+export async function listBoqItems(tx: Tx, boqId: string) {
+  const rows = (await tx.execute(sql`
+    WITH RECURSIVE priced AS (
+      SELECT i.path,
+             i.quantity,
+             i.rate,
+             COALESCE((
+               SELECT SUM(m.quantity) FROM project_boq_measurements m
+                WHERE m.boq_item_id = i.id
+             ), 0) AS measured
+        FROM project_boq_items i
+       WHERE i.boq_id = ${boqId}
+         AND i.quantity IS NOT NULL
+         AND i.rate IS NOT NULL
+    ),
+    tree AS (
+      SELECT i.id,
+             ARRAY[lpad((i.sort_order + 1000000)::text, 12, '0') || '|' || i.description] AS ord
+        FROM project_boq_items i
+       WHERE i.boq_id = ${boqId} AND i.parent_item_id IS NULL
+      UNION ALL
+      SELECT c.id,
+             p.ord || (lpad((c.sort_order + 1000000)::text, 12, '0') || '|' || c.description)
+        FROM project_boq_items c
+        JOIN tree p ON c.parent_item_id = p.id
+       WHERE c.boq_id = ${boqId}
+    )
+    SELECT i.id::text                                   AS id,
+           i.parent_item_id::text                       AS "parentItemId",
+           i.depth,
+           i.item_code                                  AS "itemCode",
+           i.description,
+           i.is_heading                                 AS "isHeading",
+           i.unit,
+           i.quantity::float8                           AS quantity,
+           i.rate::float8                               AS rate,
+           i.amount::float8                             AS amount,
+           i.cost_code_id::text                         AS "costCodeId",
+           cc.code                                      AS "costCode",
+           i.task_id::text                              AS "taskId",
+           t.title                                      AS "taskTitle",
+           i.sort_order                                 AS "sortOrder",
+           (SELECT COUNT(*) FROM project_boq_items c
+             WHERE c.parent_item_id = i.id)::int        AS "childCount",
+           COALESCE((
+             SELECT SUM(m.quantity) FROM project_boq_measurements m
+              WHERE m.boq_item_id = i.id
+           ), 0)::float8                                AS "measuredQuantity",
+           COALESCE((
+             SELECT SUM(p.quantity * p.rate) FROM priced p WHERE p.path <@ i.path
+           ), 0)::float8                                AS "billedAmount",
+           COALESCE((
+             SELECT SUM(p.measured * p.rate) FROM priced p WHERE p.path <@ i.path
+           ), 0)::float8                                AS "measuredAmount"
+      FROM project_boq_items i
+      JOIN tree ON tree.id = i.id
+      LEFT JOIN project_cost_codes cc ON cc.id = i.cost_code_id
+      LEFT JOIN project_tasks t       ON t.id  = i.task_id
+     WHERE i.boq_id = ${boqId}
+     ORDER BY tree.ord
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({ ...r, id: String(r.id) })) as Array<
+    Record<string, unknown> & { id: string }
+  >;
+}
+
+export async function getBoqItemById(tx: Tx, itemId: string) {
+  if (!isUuid(itemId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectBoqItems)
+    .where(eq(projectBoqItems.id, itemId));
+  return row ?? null;
+}
+
+/**
+ * The bill's totals in one pass.
+ *
+ * `overMeasured` is the count of items measured beyond what was billed. It is
+ * not an error — it is usually the first evidence of a variation — and the
+ * module warns rather than blocking, so it is a figure the page shows and not a
+ * constraint the database enforces.
+ */
+export async function getBoqSummary(tx: Tx, boqId: string) {
+  const [row] = (await tx.execute(sql`
+    WITH priced AS (
+      SELECT i.id, i.quantity, i.rate,
+             COALESCE((
+               SELECT SUM(m.quantity) FROM project_boq_measurements m
+                WHERE m.boq_item_id = i.id
+             ), 0) AS measured
+        FROM project_boq_items i
+       WHERE i.boq_id = ${boqId}
+         AND i.quantity IS NOT NULL
+         AND i.rate IS NOT NULL
+    )
+    SELECT (SELECT COUNT(*) FROM project_boq_items WHERE boq_id = ${boqId})::int AS item_count,
+           COUNT(*)::int                                                AS priced_count,
+           COALESCE(SUM(quantity * rate), 0)::float8                    AS billed,
+           COALESCE(SUM(measured * rate), 0)::float8                    AS measured,
+           COUNT(*) FILTER (WHERE measured > 0)::int                    AS measured_count,
+           COUNT(*) FILTER (WHERE measured > quantity)::int             AS over_measured
+      FROM priced
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const billed = num(row?.billed);
+  const measured = num(row?.measured);
+  return {
+    itemCount: Number(row?.item_count ?? 0),
+    pricedCount: Number(row?.priced_count ?? 0),
+    measuredCount: Number(row?.measured_count ?? 0),
+    overMeasured: Number(row?.over_measured ?? 0),
+    billed,
+    measured,
+    /** Of the VALUE, which is what a quantity surveyor means by per cent. */
+    percent: billed > 0 ? Math.round((measured / billed) * 100) : 0,
+  };
+}
+
+export interface CreateBoqItemInput {
+  companyId: string;
+  boqId: string;
+  projectId: string;
+  parentItemId?: string | null;
+  itemCode?: string | null;
+  description: string;
+  isHeading?: boolean;
+  unit?: string | null;
+  quantity?: string | null;
+  rate?: string | null;
+  costCodeId?: string | null;
+  taskId?: string | null;
+  sortOrder?: number;
+  createdById?: string | null;
+  createdByName: string;
+}
+
+/**
+ * A new line in the bill. `path` is not supplied — the trigger owns it — and
+ * the frozen check, the leaf-pricing rule and the same-bill parent rule are all
+ * the database's, so this stays a plain insert.
+ */
+export async function createBoqItem(tx: Tx, input: CreateBoqItemInput) {
+  const [row] = await tx
+    .insert(projectBoqItems)
+    .values({
+      companyId: input.companyId,
+      boqId: input.boqId,
+      projectId: input.projectId,
+      parentItemId: input.parentItemId || null,
+      itemCode: input.itemCode?.trim() || null,
+      description: input.description.trim(),
+      isHeading: input.isHeading ?? false,
+      unit: input.unit?.trim() || null,
+      quantity: input.quantity ?? null,
+      rate: input.rate ?? null,
+      costCodeId: input.costCodeId || null,
+      taskId: input.taskId || null,
+      sortOrder: input.sortOrder ?? 0,
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+export type UpdateBoqItemInput = Partial<
+  Omit<CreateBoqItemInput, "companyId" | "boqId" | "projectId" | "createdById" | "createdByName">
+> & {
+  lastModifiedById?: string | null;
+  lastModifiedByName?: string | null;
+};
+
+/**
+ * An edit to a line. `project_boq_items_frozen` decides what is allowed once
+ * the bill is awarded — the cost code, the task link and the sort order still
+ * move, because none of them is a contractual figure and needing a new version
+ * of the bill to cross-reference an item to a programme activity would mean
+ * nobody ever does it.
+ */
+export async function updateBoqItem(
+  tx: Tx,
+  itemId: string,
+  input: UpdateBoqItemInput,
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.parentItemId !== undefined) patch.parentItemId = input.parentItemId || null;
+  if (input.itemCode !== undefined) patch.itemCode = input.itemCode?.trim() || null;
+  if (input.description !== undefined) patch.description = input.description.trim();
+  if (input.isHeading !== undefined) patch.isHeading = input.isHeading;
+  if (input.unit !== undefined) patch.unit = input.unit?.trim() || null;
+  if (input.quantity !== undefined) patch.quantity = input.quantity ?? null;
+  if (input.rate !== undefined) patch.rate = input.rate ?? null;
+  if (input.costCodeId !== undefined) patch.costCodeId = input.costCodeId || null;
+  if (input.taskId !== undefined) patch.taskId = input.taskId || null;
+  if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder;
+  if (input.lastModifiedById !== undefined) patch.lastModifiedById = input.lastModifiedById;
+  if (input.lastModifiedByName !== undefined) {
+    patch.lastModifiedByName = input.lastModifiedByName;
+  }
+
+  const [row] = await tx
+    .update(projectBoqItems)
+    .set(patch)
+    .where(eq(projectBoqItems.id, itemId))
+    .returning();
+  return row ?? null;
+}
+
+/** Refused by the foreign key while the item still has sub-items. */
+export async function deleteBoqItem(tx: Tx, itemId: string) {
+  const [row] = await tx
+    .delete(projectBoqItems)
+    .where(eq(projectBoqItems.id, itemId))
+    .returning();
+  return row ?? null;
+}
+
+/** The measurement log for one item, newest first — the audit of a remeasure. */
+export async function listBoqMeasurements(tx: Tx, itemId: string) {
+  return tx
+    .select()
+    .from(projectBoqMeasurements)
+    .where(eq(projectBoqMeasurements.boqItemId, itemId))
+    .orderBy(desc(projectBoqMeasurements.measuredOn), desc(projectBoqMeasurements.createdAt));
+}
+
+/**
+ * Record a measurement. Signed, and never zero.
+ *
+ * `project_boq_measurement_is_measurable` refuses a heading, an unpriced item
+ * and anything on a bill that has not been awarded. Nothing here caps the
+ * total against the billed quantity: measuring more than was billed is how a
+ * variation first shows up, and this module warns rather than blocking.
+ */
+export async function recordBoqMeasurement(
+  tx: Tx,
+  input: {
+    companyId: string;
+    boqItemId: string;
+    measuredOn?: string | null;
+    quantity: string;
+    reference?: string | null;
+    notes?: string | null;
+    measuredById?: string | null;
+    measuredByName: string;
+  },
+) {
+  const [row] = await tx
+    .insert(projectBoqMeasurements)
+    .values({
+      companyId: input.companyId,
+      boqItemId: input.boqItemId,
+      ...(input.measuredOn ? { measuredOn: input.measuredOn } : {}),
+      quantity: input.quantity,
+      reference: input.reference?.trim() ?? "",
+      notes: input.notes?.trim() ?? "",
+      measuredById: input.measuredById ?? null,
+      measuredByName: input.measuredByName,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Remove a measurement.
+ *
+ * Kept for a mis-keyed entry, and it is NOT how an over-measure is corrected:
+ * once a quantity has been certified the correction is a negative measurement,
+ * so the certificate and the remeasure that adjusted it both survive. The
+ * screen says so; the database cannot know which case it is looking at.
+ */
+export async function deleteBoqMeasurement(tx: Tx, measurementId: string) {
+  if (!isUuid(measurementId)) return null;
+  const [row] = await tx
+    .delete(projectBoqMeasurements)
+    .where(eq(projectBoqMeasurements.id, measurementId))
+    .returning();
+  return row ?? null;
 }

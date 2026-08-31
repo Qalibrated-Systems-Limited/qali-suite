@@ -45,6 +45,7 @@ import {
   User,
   Users,
   Wallet,
+  Ruler,
 } from "lucide-react";
 import Link from "next/link";
 import { SALES_ORDERS_AVAILABLE } from "@/lib/unported-modules";
@@ -402,7 +403,7 @@ const getNavigationGroups = (user) => {
   // ============================================
   // A dropdown group, like Inventory/Finance/HR below — matches the
   // module's own sub-nav (app/dashboard/projects/components/ProjectsNav.jsx)
-  // so the same nine sections are one click away from either place.
+  // so the same ten sections are one click away from either place.
   {
     type: "group",
     label: "Projects",
@@ -416,6 +417,12 @@ const getNavigationGroups = (user) => {
         label: "Dashboard",
         id: "projects-dashboard",
         href: "/dashboard/projects",
+      },
+      {
+        icon: Ruler,
+        label: "Bill of Quantities",
+        id: "projects-boq",
+        href: "/dashboard/projects/boq",
       },
       {
         icon: Target,
