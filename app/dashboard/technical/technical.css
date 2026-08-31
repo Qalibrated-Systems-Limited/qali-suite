@@ -490,3 +490,66 @@
 .tech-pill { font-size: 11px; padding: 6px 3px; }
 .tech-remark { padding: 6px 8px; font-size: 12px; }
 .tech-sectionbar { margin: 12px 0 8px; }
+
+/* ── stat tiles ───────────────────────────────────────────────────────────── */
+.tech-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 16px; }
+.tech-stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+.tech-stat .sl { font-size: 11px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted-foreground); }
+.tech-stat .sv { font-size: 28px; font-weight: 900; line-height: 1.1; margin-top: 4px; }
+.tech-stat.green .sv { color: var(--tech-green); }
+.tech-stat.amber .sv { color: var(--tech-amber); }
+.tech-stat.red .sv { color: var(--tech-red); }
+.tech-stat.blue .sv { color: #2e6fb0; }
+
+/* ── alert banner ─────────────────────────────────────────────────────────── */
+.tech-alert {
+  background: color-mix(in srgb, var(--tech-amber) 16%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--tech-amber) 45%, var(--border));
+  color: var(--foreground);
+  border-radius: 10px; padding: 12px 14px; font-size: 13.5px; margin-bottom: 16px;
+  display: flex; gap: 8px; align-items: center;
+}
+
+/* ── tabs ─────────────────────────────────────────────────────────────────── */
+.tech-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; overflow-x: auto; }
+.tech-tab {
+  padding: 10px 14px; font-size: 13.5px; font-weight: 700; color: var(--muted-foreground);
+  background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap;
+}
+.tech-tab:hover { color: var(--foreground); }
+.tech-tab.on { color: var(--foreground); border-bottom-color: var(--tech-gold); }
+
+/* ── filter row ───────────────────────────────────────────────────────────── */
+.tech-filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.tech-filters .tech-input, .tech-filters .tech-select { max-width: 260px; }
+
+/* ── data table ───────────────────────────────────────────────────────────── */
+.tech-tablewrap { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; overflow-x: auto; }
+table.tech-table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 640px; }
+.tech-table thead th {
+  background: var(--tech-coal); color: #fff; text-align: left; font-size: 11px; font-weight: 800;
+  letter-spacing: 0.04em; text-transform: uppercase; padding: 11px 14px; white-space: nowrap;
+}
+.dark .tech-table thead th { background: #0d1b2a; }
+.tech-table tbody td { padding: 11px 14px; border-top: 1px solid var(--border); color: var(--foreground); vertical-align: middle; }
+.tech-table tbody tr:hover { background: var(--muted); }
+.tech-table .mono { font-family: ui-monospace, monospace; font-size: 12.5px; }
+.tech-table .num { text-align: right; }
+
+/* status pills */
+.tech-b { display: inline-flex; align-items: center; font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 20px; white-space: nowrap; }
+.tech-b.green { background: color-mix(in srgb, var(--tech-green) 18%, transparent); color: var(--tech-green); }
+.tech-b.red { background: color-mix(in srgb, var(--tech-red) 18%, transparent); color: var(--tech-red); }
+.tech-b.amber { background: color-mix(in srgb, var(--tech-amber) 20%, transparent); color: var(--tech-amber); }
+.tech-b.blue { background: color-mix(in srgb, #2e6fb0 18%, transparent); color: #2e6fb0; }
+.tech-b.slate { background: color-mix(in srgb, var(--tech-slate) 20%, transparent); color: var(--tech-slate); }
+
+.tech-rowbtn { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 700; cursor: pointer; color: var(--foreground); }
+.tech-rowbtn:hover { border-color: var(--tech-gold); }
+
+/* ── dialog ───────────────────────────────────────────────────────────────── */
+.tech-overlay { position: fixed; inset: 0; background: rgba(10, 15, 25, 0.55); display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px; z-index: 60; }
+.tech-dialog { background: var(--card); border: 1px solid var(--border); border-radius: 14px; width: 100%; max-width: 640px; padding: 20px 22px; box-shadow: 0 20px 50px rgba(0,0,0,0.35); }
+.tech-dialog h3 { margin: 0 0 2px; font-size: 18px; font-weight: 900; }
+.tech-dialog .dsub { font-size: 12.5px; color: var(--muted-foreground); margin: 0 0 14px; }
+.tech-empty2 { text-align: center; padding: 40px 20px; color: var(--muted-foreground); border: 1px dashed var(--border); border-radius: 12px; }

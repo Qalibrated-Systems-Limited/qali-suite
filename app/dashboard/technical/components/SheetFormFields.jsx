@@ -77,7 +77,7 @@ export default function SheetFormFields({ template, data, onChange }) {
           const states = sec.states || defaultStates(sec.yes, sec.no);
           const reslen = states.length >= 3 ? "216px" : "150px";
           return (
-            <div key={si}>
+            <div key={si} className="span-all">
               <div className="tech-sectionbar">{sec.title}</div>
               <div className="tech-scroll">
                 <div className="tech-check" style={{ "--reslen": reslen }}>

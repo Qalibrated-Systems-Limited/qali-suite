@@ -63,7 +63,7 @@ export default function SheetDataView({ template, data }) {
           const states = sec.states || defaultStates(sec.yes, sec.no);
           const byKey = Object.fromEntries(states.map((s) => [s.key, s.label]));
           return (
-            <div key={si}>
+            <div key={si} className="span-all">
               <div className="tech-sectionbar">{sec.title}</div>
               <div>
                 {sec.items.map((it, ii) => {
