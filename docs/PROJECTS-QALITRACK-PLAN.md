@@ -349,7 +349,7 @@ one record either way:
 What differs is only where "work done to date" comes from:
 
 - `construction` → **measured** work (remeasure against a BOQ where one exists —
-  §6.4 is still open)
+  §6.4 is ANSWERED in §8: there is a BOQ, and it is the measured source)
 - `installation` → **milestone achieved**, yes or no
 
 A 50/50 weighbridge job is then two certificates with a milestone source — the
@@ -400,6 +400,9 @@ issue. Install → asset → operating revenue, in one chain.
 **These are decided BEFORE step 1, not during it.** Each one changes the shape
 of what gets built, and two of them are not the porter's to settle alone.
 
+**Four now, not five — number 2 is answered in §8**, and the sequence in §8
+supersedes the one above it.
+
 **1. IPC and Cash Requisitions — one section or two? (blocking)**
 
 They are today two nav entries running the identical pair of queries —
@@ -418,12 +421,12 @@ records, or one section until a second earns its place? **Ask the author before
 building over it.** Nothing in the sequence proceeds correctly until this is
 settled, because step 4 either replaces two pages or extends one.
 
-**2. Is there a bill of quantities?**
+**2. Is there a bill of quantities? — ANSWERED, see §8.**
 
-§6.4, still unanswered. It decides whether measured progress is real or whether
-typed percentages remain — and §4.1 is unambiguous that typed percentages are
-how a project reports 90% complete for four months. If there is a BOQ it is a
-table, and progress derives from it.
+There is, and it is the spine. §8 is the table, the five decisions and the
+place it takes in the sequence — at 2, ahead of `contracts`, because it depends
+on nothing but `projects` and it is the only item on the list that fixes a
+defect the module has TODAY. Progress stops being typed.
 
 **3. The type enum's values, for tenants we have not met.**
 
@@ -441,11 +444,177 @@ pre-fills. Not whether the mechanism exists: it does, for every contract type.
 Only what is suggested before the user overrides it.
 
 
-- **§6.4 stands: is there a bill of quantities?** It decides whether measured
-  progress is real or whether typed percentages remain, and §4.1 is unambiguous
-  that typed percentages are how a project reports 90% complete for four months.
+- ~~**§6.4: is there a bill of quantities?**~~ **Answered — §8.** There is one,
+  it is a table, and measured progress derives from it.
 - **Default retention on an installation job** — what percentage to pre-fill
   for a new `installation` contract. Not whether the mechanism exists: it does,
   for every type. Only what the form suggests before the user overrides it.
 - **Where the completion certificate sits for a two-payment job** — one
   certificate at the end, or one per milestone including the advance.
+
+---
+
+## 8. 6.4 answered — there IS a bill of quantities, and it is the spine
+
+§6.4 asked whether quantities are measured against a BOQ, and said that if they
+are, "the BOQ is the missing table and progress derives from it". They are. So
+this section is the table, and what falls out of it.
+
+It answers the second of §7's five blocking decisions. The other four stand.
+
+### Why this is the most valuable thing on the list
+
+§4.1 named typed progress as the module's worst defect — "how a project reports
+90% complete for four months, and every EOT argument that follows is had
+without evidence" — and 0071 could only half-fix it. A weighted roll-up of
+tasks is still somebody's opinion of each task, rolled up carefully.
+
+**A BOQ is the first thing in this module that makes progress a measurement
+rather than an assertion.** 8 of 20 km of subbase laid is 40%, and it is 40%
+because 8 km was measured, not because it was typed.
+
+It also needs nothing that does not exist. A BOQ hangs off `projects`. That
+makes it buildable BEFORE `contracts`, and it is the reason the sequence below
+moves it up.
+
+### Against the industry
+
+| | what the priced work is called | how a valuation is made |
+|---|---|---|
+| Candy / CCS, RIB BuildSmart | bill of quantities | remeasure: quantity this period × rate |
+| Procore, Autodesk Build | schedule of values (AIA G702/G703) | % complete per SOV line × scheduled value |
+| CMiC, Viewpoint | SOV over cost codes | as Procore |
+| Odoo, NetSuite, Xero Projects | — none | task state, or a sales-order line |
+| here today | — none | a typed percentage |
+
+Two families, and the important observation is that **they are the same table.**
+A schedule-of-values line is a BOQ item whose unit is `sum`, whose quantity is
+1, and which is measured as a percentage rather than a count. A remeasured road
+and a lump-sum weighbridge differ in how much of the same structure they use.
+
+That is the same conclusion §7 reached about certificates, for the same reason:
+one engine, varied by contract, and no "simplified" second path to drift.
+
+### The tables
+
+**`project_boq_items`** — an ltree tree, like `project_tasks` (0071) and
+`categories` (0062). A bill of quantities is hierarchically numbered — bill,
+section, sub-section, item — and the figures a QS reads are the section totals,
+which are roll-ups of the leaves. The house has built this shape twice; this is
+the third and it should look like the other two.
+
+    item_code        the BOQ reference as printed — "B.2.14"
+    description
+    is_heading       a section that carries no quantity of its own
+    unit             m, m2, m3, kg, no, sum, item, prov_sum
+    quantity         the billed quantity
+    rate             money
+    amount           GENERATED: quantity * rate
+    cost_code_id     nullable — what the earned value charges
+    task_id          nullable — the WBS activity this item measures
+
+**`project_boq_measurements`** — one row per measurement event, never a running
+total:
+
+    boq_item_id, measured_on, quantity, reference (sheet / chainage /
+    location), measured_by, and the certificate it was taken up in.
+
+### The five decisions
+
+> **Decision 1 — quantity to date is a SUM, never a column.**
+>
+> The same rule as the budget total in 0070 decision 5, the financials in
+> decision 1, and the task roll-up in 0071 decision 1: a rolled-up number with
+> a second copy is a number that will disagree with what it rolls up. A
+> remeasured quantity that can be typed over is a final account nobody can
+> defend.
+
+> **Decision 2 — `amount` is generated from quantity × rate.**
+>
+> A bill where the extension does not equal quantity × rate is the oldest error
+> in the trade, and it is arithmetic, so the database does it. `bills.total`
+> and `expenses.total` are already generated for the same reason.
+
+> **Decision 3 — a rate is frozen once the bill is awarded, and a variation
+> issues a NEW item or a NEW rate. It never edits the priced one.**
+>
+> This is what makes the final account answerable — the same reasoning as
+> `original_contract_value` beside the current one in the execution layer's
+> decision 5, and the same reasoning as every `*_at_*` snapshot column in this
+> schema. The BOQ therefore carries a status (`draft → priced → awarded`), and
+> `awarded` is what freezes it. It does NOT need `contracts` to exist first;
+> when `contracts` lands it supplies the award date rather than the concept.
+
+> **Decision 4 — the BOQ does not replace the WBS. One nullable `task_id`
+> joins them.**
+>
+> They answer different questions and both are standard: the programme is the
+> PLAN (what happens when, what is on the critical path), the bill is the
+> MEASUREMENT (what was done, what it is worth). Procore, Candy and MS Project
+> all keep both. Where an item names a task, that task's progress becomes
+> measured — earned from quantity — and 0071's `progress.source` gains a third
+> value, `measured`, ranking above `tasks` and `typed`. Where it does not, the
+> task keeps its weighted roll-up. Nothing regresses.
+
+> **Decision 5 — the BOQ is OPTIONAL, and its presence is what makes a project
+> measured.**
+>
+> §7 settled that the rules do not vary by type, only the shape does, and this
+> is that principle applied. A project with a priced BOQ values by measurement;
+> one without values by milestone. `construction` will usually have one and
+> `installation` usually will not, but neither is a code path — a supply
+> contract with a priced schedule is measured, and a construction job let as a
+> lump sum is not.
+
+### What falls out, free
+
+- **`work done to date` for a certificate** — §7's arithmetic needs exactly one
+  number it does not have, and this is it: Σ(measured quantity × rate) at the
+  valuation date.
+- **Earned value.** The execution layer noted CPI/SPI is "a read, not a table"
+  once tasks carry weight and milestones carry value. With a priced BOQ it is
+  the real thing rather than a proxy, because EV is measured work at billed
+  rates, which is what this sums.
+- **Budget versus actual gains its missing half.** `getProjectBudgetVsActual`
+  compares committed and spent against the budget. The BOQ adds what was EARNED
+  against the same cost codes — the third column, and the only one that says
+  whether the job is making money.
+- **The contract sum is checkable.** For a remeasured contract the priced BOQ
+  total IS the contract sum. Where `contracts` later carries its own figure and
+  the two disagree, the module WARNS and does not block — the budget rule and
+  the milestone rule, unchanged.
+
+### What this deliberately does not decide
+
+**The method of measurement is the tenant's, not ours.** CESMM4, SMM7, POMI and
+the various national standards each define units and how an item is measured,
+and they are not interchangeable. It is a field on the bill, offered as a list
+and overridable — never a rule in the code. This is §7's "observed practice is
+not the specification" applied to the one place it would be easiest to get
+wrong, because whichever standard our own bills happen to use would look like
+the obvious default.
+
+**Clause references and any percentage in this section are illustrations.** The
+mechanism — remeasurement, extension, section roll-up, rate freezing — is
+standard and is what is being built. Specific clause numbers and any figure
+that would become a form's default must be checked against a real contract the
+tenant holds before they are encoded. Carried forward from the 2026-08-31
+handoff note, and it applies here more than anywhere: a BOQ is where a wrong
+default becomes a wrong valuation.
+
+### Revised sequence — BOQ enters at 2
+
+1. **`projects.type`** — unchanged. Cheap now, expensive later.
+2. **`project_boq_items` + `project_boq_measurements`.** Moved ahead of
+   `contracts` because it depends on nothing but `projects`, and because it is
+   the one item on this list that fixes a defect the module has TODAY rather
+   than adding administration it does not yet do.
+3. **`contracts`** — sum, advance terms, retention terms, DLP. Supplies the
+   award date the BOQ freezes against.
+4. **Variations reach the contract sum** — and, with a BOQ, issue their own
+   items and rates rather than only moving a total.
+5. **Certificates** — one table, two valuation sources. The measured source is
+   now real.
+6. **Retention.** 7. **Notice deadlines.** 8. **Acceptance records and
+   `assets.project_id`.** 9. **Maintenance / recurring billing.**
+   10. **Programme dependencies.**
