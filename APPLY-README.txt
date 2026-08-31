@@ -1,31 +1,34 @@
-TECHNICAL — Calibration & Inspection rebuilt (real, DB-backed) + form fix
-========================================================================
+PROJECTS — Programme Gantt + spreadsheet upload
+===============================================
 
 WHAT'S IN THIS UPDATE
-- Calibration (17025) and Inspection (17020) are now REAL pages (were dummy
-  demos): real tables, tabs, filters, KPI tiles, and working create forms
-  (New Cal Job, New Reference Standard, New Inspection), all saving to Postgres.
-  Row actions let you advance status/result/billing and rulings/appeals inline.
-- Report-form fix: the checklist now spans full width, so a short field (e.g.
-  "Anything else you saw today") no longer sits beside a tall checklist leaving
-  blank space.
+- Projects -> Programme is restyled as a QaliTrack-style Gantt: sections as
+  grouped header rows, phase-coloured bars with a % fill, a sticky Activity
+  column, a month header, and a Start / Target end / Duration / Activities
+  strip.
+- New "Import programme" button: upload a .csv or .xlsx and it builds the
+  project's tasks for you (one section per Section, one task per Activity).
+
+NO migration, NO new npm packages (parsing reuses the installed exceljs).
 
 STEP 1 — extract into the project root (paste ONLY this line)
-    unzip -o "/Users/zawadi/Downloads/technical-calibration-inspection.zip" -d .
+    unzip -o "/Users/zawadi/Downloads/programme-gantt-upload.zip" -d .
 
-STEP 2 — DB migration (adds 3 tables: calibration_jobs, calibration_standards,
-inspections). Paste ONLY this line:
-    npm run db:migrate
-
-STEP 3 — run / refresh
+STEP 2 — run / refresh
     npm run dev
-  Then open Technical -> Calibration (17025) and Inspection (17020).
-  Click "+ New Cal Job" / "+ New Inspection" to create records; they appear in
-  the tables and drive the KPI tiles.
+  Then: Projects -> pick a project -> Programme -> "Import programme".
 
-NOTES
-- These two pages were DELIBERATELY rebuilt (they replaced the dummy-data demo
-  files). Every other pre-existing ERP file touched (schema/index, journal,
-  role-gates) is additive only.
-- The new tables are company-scoped with the same row-level security as every
-  other table. No MongoDB. No new npm packages.
+THE SPREADSHEET FORMAT
+  Columns (a header row is detected automatically; order can vary if headers
+  are present, otherwise put them in this order):
+      Section | Activity | Start | End | %
+  - Start / End accept 2026-04-01, 01/04/2026, or real Excel date cells.
+  - % is 0..100 (blank = 0).
+  - A blank Section carries the previous one forward (so you only write the
+    phase name on its first row).
+  There is a "Download template" link inside the import dialog.
+
+FILES (all new or the rebuilt Programme page):
+  app/db/actions/programme-actions.js            (server-side file parser + import)
+  app/dashboard/projects/components/ImportProgramme.jsx
+  app/dashboard/projects/programme/page.jsx      (the restyled Gantt)
