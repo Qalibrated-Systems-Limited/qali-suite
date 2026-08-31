@@ -12,13 +12,16 @@ import ProjectsNav from "./components/ProjectsNav";
  * The list page keeps its own `checkPlanAccess` call; it is harmless now and
  * costs one cached session read.
  *
- * ProjectsNav renders the module's sticky sub-navigation (Dashboard,
- * Milestone Tracker, Programme, Engineer's Instructions, Site Diary, Forms
- * Register, IPC & Payments, Cash Requisitions, Monthly Report) above every
- * page in the module — the same pattern HR uses for its own sub-nav. It
- * mirrors the "Projects" dropdown added to the sidebar in
- * components/sidebar-content-grouped.jsx, so the same nine destinations are
- * reachable both from the sidebar and from within any project page.
+ * ProjectsNav renders the module's sticky sub-navigation (Dashboard, Bill of
+ * Quantities, Programme, Engineer's Instructions, Site Diary, IPC & Payments,
+ * Cash Requisitions) above every page in the module — the same pattern HR uses
+ * for its own sub-nav. It mirrors the "Projects" dropdown in
+ * components/sidebar-content-grouped.jsx, so the same SEVEN destinations are
+ * reachable from either place.
+ *
+ * Seven, not ten: `/milestones` and `/forms` are redirects now and the Monthly
+ * Report is an action on the project record, because a nav entry must own
+ * records and those three did not. See PROJECTS-QALITRACK-PLAN.md §10.3.
  */
 export default async function ProjectsLayout({ children }) {
   const session = await auth();

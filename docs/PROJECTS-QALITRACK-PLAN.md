@@ -870,6 +870,30 @@ pages.**
 Everything else in the cut is a rearrangement of surfaces over tables that
 already exist. Nothing is deleted from the database.
 
+#### Done — 2026-08-31
+
+**Ten to seven**, and it will be six when the IPC/Cash Requisitions question is
+settled:
+
+| | |
+|---|---|
+| Milestone Tracker | folded into **Programme** as the *Work breakdown* view. Two views, two real URLs (`?view=list` / `?view=gantt`), one query. The views are named for what they are — there are no milestones to track. |
+| Forms Register | a collapsed **reference panel on Instructions**, where the four forms that DO exist as records live. A native `<details>`, so the page stays a server component. |
+| Monthly Report | a **button on the project record**. It is a rendering of four other sections, so it is something you produce, not somewhere you go. |
+| IPC & Cash Requisitions | **untouched**, deliberately. |
+
+`/dashboard/projects/milestones` and `/dashboard/projects/forms` are redirects
+rather than deletions, carrying `?project=` through, so no saved link and no
+link in anybody's email breaks.
+
+**And a defect fell out of it.** `revalidateTask` revalidated
+`/dashboard/projects/${projectId}/tasks`, which is not a route and never has
+been — the WBS is a card on the project page. So adding a task revalidated
+nothing beyond the project page itself, and the Programme kept showing the old
+tree until something else invalidated it. Written and never read, in the cache
+layer, which is the third instance of that shape this day. It now revalidates
+the programme and the bill, both of which read `project_tasks`.
+
 ### 10.4 Where we genuinely fall short, worst first
 
 **1. THE PROJECT IS NOT A DIMENSION ON THE LEDGER.** This is the architectural

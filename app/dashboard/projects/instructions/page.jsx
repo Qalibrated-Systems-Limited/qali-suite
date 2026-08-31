@@ -3,6 +3,7 @@ import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
 import AccessDenied from "../components/AccessDenied";
 import InstructionsLog from "../components/InstructionsLog";
+import FormsReference from "../components/FormsReference";
 import {
   getProjectInstructions,
   getInstructionsSummary,
@@ -48,6 +49,11 @@ export default async function InstructionsPage({ searchParams }) {
           canSignOff={hasRole(user, PROJECT_LOG_SIGNOFF_ROLES)}
         />
       )}
+
+      {/* The Forms Register, which used to be its own nav entry. It reads
+          beside the register rather than instead of it — four of the sixteen
+          forms below are what `project_instructions` holds. §10.3. */}
+      <FormsReference />
     </div>
   );
 }

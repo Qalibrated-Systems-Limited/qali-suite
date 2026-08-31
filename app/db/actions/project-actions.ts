@@ -1298,11 +1298,22 @@ export async function deleteProjectTask(taskId: string) {
   }
 }
 
+/**
+ * `/dashboard/projects/${projectId}/tasks` IS NOT A ROUTE and never has been —
+ * the WBS is a card on the project page, not a page of its own. So the second
+ * line of this function revalidated nothing, and adding a task left the
+ * Programme showing the old tree until something else happened to invalidate
+ * it. Written and never read, in the cache layer.
+ *
+ * The programme is where tasks are now read (it absorbed the Milestone Tracker,
+ * §10.3), and the bill lists the task an item measures, so both go.
+ */
 function revalidateTask(projectId?: string | null) {
   revalidatePath("/dashboard/projects");
+  revalidatePath("/dashboard/projects/programme");
+  revalidatePath("/dashboard/projects/boq");
   if (projectId) {
     revalidatePath(`/dashboard/projects/${projectId}`);
-    revalidatePath(`/dashboard/projects/${projectId}/tasks`);
   }
 }
 

@@ -4,14 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  Milestone,
   CalendarDays,
   FileEdit,
   BookOpen,
-  ClipboardList,
   Receipt,
   Wallet,
-  FileSpreadsheet,
   Ruler,
 } from "lucide-react";
 
@@ -19,21 +16,35 @@ import {
  * Module-level sub-navigation for the Projects module — same pattern as
  * HRNav (app/dashboard/hr/components/HRNav.jsx): a sticky strip of links
  * rendered once in the module layout, above every page under
- * /dashboard/projects/*. Gives every section reachable from the sidebar's
- * "Projects" dropdown a matching in-page way to jump between sections
- * without going back to the sidebar.
+ * /dashboard/projects/*. Mirrors the sidebar's "Projects" dropdown, so the
+ * same destinations are reachable from either place.
+ *
+ * SEVEN ENTRIES, DOWN FROM TEN. **A nav entry must own records.** Of the ten
+ * this had, five did not: Milestone Tracker and Programme were two views of
+ * `project_tasks` beside the Work breakdown card on the project detail page —
+ * one table, three doors — and the Milestone Tracker did not show milestones,
+ * because there is no milestone table. Forms Register was sixteen hardcoded
+ * strings with a disabled button. Monthly Report is a RENDERING of four other
+ * sections, which makes it something you produce, not somewhere you go.
+ *
+ * So: Milestone Tracker folded into Programme as a view, Forms Register became
+ * a reference panel on Instructions, and Monthly Report became an action on the
+ * project record. Every one of those routes still resolves — they redirect —
+ * so no saved link breaks.
+ *
+ * IPC & Payments and Cash Requisitions run the identical pair of queries and
+ * own nothing between them, and they are STILL HERE deliberately: whether they
+ * are one section or two is a product decision for the author, not a review
+ * finding. See PROJECTS-QALITRACK-PLAN.md §7 open question 1, §9.5 and §10.3.
  */
 const NAV_ITEMS = [
   { label: "Dashboard", href: "/dashboard/projects", icon: LayoutDashboard, exact: true },
   { label: "Bill of Quantities", href: "/dashboard/projects/boq", icon: Ruler },
-  { label: "Milestone Tracker", href: "/dashboard/projects/milestones", icon: Milestone },
   { label: "Programme", href: "/dashboard/projects/programme", icon: CalendarDays },
   { label: "Engineer's Instructions", href: "/dashboard/projects/instructions", icon: FileEdit },
   { label: "Site Diary", href: "/dashboard/projects/diary", icon: BookOpen },
-  { label: "Forms Register", href: "/dashboard/projects/forms", icon: ClipboardList },
   { label: "IPC & Payments", href: "/dashboard/projects/ipc", icon: Receipt },
   { label: "Cash Requisitions", href: "/dashboard/projects/cash-requisitions", icon: Wallet },
-  { label: "Monthly Report", href: "/dashboard/projects/monthly-report", icon: FileSpreadsheet },
 ];
 
 export default function ProjectsNav() {

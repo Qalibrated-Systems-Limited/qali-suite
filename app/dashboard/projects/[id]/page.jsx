@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
   Edit,
+  FileSpreadsheet,
   Activity,
   PauseCircle,
   CheckCircle2,
@@ -718,6 +719,19 @@ export default async function ProjectDetailPage({ params, searchParams }) {
             <Link href={`/dashboard/projects/${id}/budget`}>
               <Wallet className="h-4 w-4 sm:mr-1" />
               <span className="hidden sm:inline">Budget</span>
+            </Link>
+          </Button>
+          {/*
+            The Monthly Report used to be a nav entry of its own. It is a
+            RENDERING of the progress, financial, diary and instruction figures
+            on this page and elsewhere — which makes it something you produce
+            for a reporting period, not somewhere you go. So it is an action on
+            the project record. §10.3.
+          */}
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`/dashboard/projects/monthly-report?project=${id}`}>
+              <FileSpreadsheet className="h-4 w-4 sm:mr-1" />
+              <span className="hidden sm:inline">Monthly report</span>
             </Link>
           </Button>
         </div>
