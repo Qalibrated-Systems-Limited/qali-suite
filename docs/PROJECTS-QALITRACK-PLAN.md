@@ -160,7 +160,8 @@ Sequence, highest value first:
 4. **Milestones and phases** — with progress rolled up from measured work
    rather than typed, wherever a quantity exists.
 5. **Site diary and the form register** — high volume, low complexity, and the
-   evidence base for every claim above. Photos need blob storage.
+   evidence base for every claim above. ~~Photos need blob storage.~~ They need
+   the upload path that already exists — see §10.5.
 6. **Programme/Gantt** — last, and only with dependencies and a critical path.
    Without those it is a drawing.
 
@@ -749,3 +750,234 @@ now be that they do NOT collapse.
 
 Nothing here changes 0076. The bill of quantities is unaffected by all five —
 which is a small piece of evidence for having built it first.
+
+---
+
+## 10. Scope review — against SAP, and against ourselves
+
+The question: measured against what SAP and its peers offer, where is this
+module doing too much, and where is it genuinely short — given the goal is a
+module that is FIRST in its market and small enough that somebody can pick it up
+and use it.
+
+The answer in one line: **the overkill is not in the schema, it is in the
+navigation** — ten sections of which five own no records — **and the shortfall is
+one architectural gap that everything else is downstream of: the project is not
+a dimension on the ledger.**
+
+A note on the comparison. SAP PS is being used here as the benchmark for SHAPE,
+not for feature parity. Where this section names an SAP object it means the
+concept — a WBS element as an account-assignment object, a settlement rule, a
+results-analysis key — and not any particular release's behaviour. The useful
+thing about SAP as a yardstick is not what it has; it is what it costs to turn
+on.
+
+### 10.1 Where this module is already ahead, and should stay there
+
+Worth stating first, because the rest of this section is critical and the
+calibration matters.
+
+- **Progress is derived by default.** In SAP, quantity-proportional progress is
+  one of several measurement methods available once somebody has configured
+  progress versions. Here it is what a project does unless it has nothing to
+  derive from, and `progress.source` tells the screen which of `measured`,
+  `tasks` or `typed` it is looking at. Being honest about the provenance of a
+  percentage is rarer than deriving it.
+- **No cached financials.** Revenue, cost and commitment are computed from the
+  documents. The stored `financials` that 0070 removed is the class of thing
+  that makes a project report disagree with the ledger.
+- **The whole module is nine tables.** SAP PS needs a project profile, a network
+  profile, a planning profile, a budget profile and a settlement profile before
+  the first WBS element exists. A contractor here creates a project, prices a
+  bill, awards it, and measures.
+- **Warn, never block.** The budget warns at 90%, a milestone schedule that does
+  not sum to the contract warns, an over-measure warns. SAP's availability
+  control can be configured to ERROR a posting that breaks a budget. For a
+  contractor the work does not stop while the commercial argument is had, and a
+  system that blocks it will be worked around within a week.
+
+### 10.2 What SAP has that we should deliberately NOT build
+
+| SAP concept | what it is for | verdict here |
+|---|---|---|
+| **Settlement rules** | periodically settling a WBS element's costs to a cost centre, an asset under construction, or a profitability segment | **No.** A contractor's project IS the profit centre — it is not a temporary collector waiting to be emptied somewhere else. The one real case is an internal capex job building a fixed asset, and 0057 already links a bill to an asset. |
+| **Networks and activities beside the WBS** | separating what the work is from when it happens and who does it | **No.** One tree. `project_tasks` carries planned dates and an assignee; MS Project and Odoo both manage with one structure, and two structures means two things to keep in step. |
+| **Availability control that blocks** | refusing a posting that breaches the budget | **No.** See above. The warning stays. |
+| **Work centres, capacity, resource levelling** | scheduling people and plant against finite capacity | **No.** A different product, and nobody buying this is asking for it. |
+| **Results-analysis keys and versions** | a configuration framework for WIP and revenue recognition | **Not as a framework.** If WIP is ever built (10.4), it is ONE rule, not a configuration surface. |
+| **A Project Builder mega-transaction** | one screen that edits every object on a project | **No** — and this module is already the other way round, split by section. That is the right instinct and 10.3 is about not overdoing it. |
+| **Milestone billing plans** | a configured schedule that generates billing documents | **No.** The execution layer's decision — completing a payment milestone raises a DRAFT invoice — does the same job and is reversible by deleting a draft. |
+
+None of these is a gap. Each is a place where the honest answer to "SAP has it"
+is "and it is why SAP takes eighteen months to configure".
+
+### 10.3 Where WE are overkilling: ten sections, five with nothing behind them
+
+This is the finding. The module presents ten navigation entries; five of them
+own no records of their own:
+
+| section | own table | what it actually shows |
+|---|---|---|
+| Dashboard | `projects` | the project list |
+| **Bill of Quantities** | 3 tables | the bill, and measurement |
+| Milestone Tracker | — | `project_tasks` |
+| Programme | — | `project_tasks` again, as a Gantt |
+| **Engineer's Instructions** | `project_instructions` | the register |
+| **Site Diary** | `project_diary_entries` | the diary |
+| Forms Register | — | a hardcoded list of sixteen form names |
+| IPC & Payments | — | invoices + bills |
+| Cash Requisitions | — | claims + expenses, from the SAME pair of queries as IPC |
+| Monthly Report | — | a digest of the four above it |
+
+Two things fall out of that table and both are worth naming plainly.
+
+**`project_tasks` is presented three times** — the WBS card on the project detail
+page, the Milestone Tracker, and the Programme — and neither extra view
+introduces a record type. **And "Milestone Tracker" does not show milestones**,
+because there are none in the schema; it shows tasks. A section named after a
+thing the database does not have is the same class of defect as a figure read
+from a key that does not exist, and it lasts for the same reason: it looks
+right.
+
+**Three sections carry a banner explaining what they are not.** IPC & Payments
+says formal certificates are not a module yet; Cash Requisitions says the
+requisition workflow is not built; Forms Register says digital submission is
+coming. A page that has to apologise for itself in a banner is not a page yet.
+
+This is the SAP failure mode in miniature, and it is the exact thing the module
+is trying to beat: **menu entries for things that are not there.** A new user
+cannot tell from the navigation which five sections hold their data.
+
+#### The cut: ten to six
+
+| keep | what it becomes |
+|---|---|
+| **Overview** | the dashboard and the project record. The Monthly Report becomes a PRINT/EXPORT action here, not a nav entry — it is a rendering of other sections, and a report is something you produce, not somewhere you go. |
+| **Bill of Quantities** | unchanged. |
+| **Programme** | ONE section with two views of `project_tasks` — list and Gantt, as tabs. Absorbs the Milestone Tracker. Becomes "Programme & Milestones" when milestones are actually a table. |
+| **Instructions & Notices** | the register, plus the notice clocks when they land. The Forms Register folds in here as a reference panel — the list is genuinely useful and it does not need a nav slot to be read. |
+| **Site Diary** | unchanged. |
+| **Money** | budget vs actual, and what has been invoiced and spent against the project. IPC & Cash Requisitions collapse into it UNTIL a certificate record exists. |
+
+That last row needs care and is NOT a licence to act. §7's blocking decision 1
+and §9.5 both say the same thing from different directions: an IPC and a cash
+requisition are genuinely different documents and will probably end up as two
+tables. But **two empty pages today is not how you get there** — the honest
+intermediate is one section that says what it shows, and the second section
+arrives with the second record type. **Ask the author before merging those two
+pages.**
+
+Everything else in the cut is a rearrangement of surfaces over tables that
+already exist. Nothing is deleted from the database.
+
+### 10.4 Where we genuinely fall short, worst first
+
+**1. THE PROJECT IS NOT A DIMENSION ON THE LEDGER.** This is the architectural
+one and everything else is downstream of it.
+
+`journal_lines` has no `project_id`. `computeProjectActuals` therefore
+reconstructs a project's position by scanning five document tables — invoices,
+credit notes, bills, claims, expenses, stock requests — each with its own status
+rules. In SAP the WBS element is an account-assignment object: it is ON the
+posting, so a project's cost is a ledger query and reconciles to the trial
+balance by construction.
+
+What that costs us today, concretely:
+
+- **a manual journal cannot be charged to a project at all**
+- **payroll cannot reach a project** — payroll posts journals, and the execution
+  layer's own decision 4 says labour reaches the GL through payroll. So the one
+  cost that is usually a contractor's largest is structurally invisible to the
+  project.
+- **depreciation on plant working on a job cannot reach it either**
+- every new document type that carries a project needs a new arm in that query
+- **a project P&L can never be reconciled to the general ledger**, because the
+  two are computed from different places
+
+The fix is one nullable `project_id` on `journal_lines` (with `cost_code_id`
+beside it), stamped by the posting helpers that already know the source
+document's project. It does not require rewriting `computeProjectActuals` on day
+one — the two can run side by side and be compared, which is also how you find
+out whether the scan was ever right.
+
+**2. Commitments stop at bills.** A purchase order raised and not yet invoiced
+is invisible to the project, and that is precisely the money a project manager
+needs to see before committing more. SAP shows commitment from the purchase
+requisition onward. `purchase_orders.project_id` is one nullable column, already
+on the execution layer's step 5 and still unbuilt.
+
+**3. Nothing in the module notifies anybody.** The bell exists since 0074 and no
+project action writes to it. The notice clocks are the plan's own highest-value
+item and a clock nobody is told about is a column. Budget at 90%, an
+over-measure, an instruction awaiting a compliance decision, a diary entry
+unsigned for a week — the module knows all four and tells nobody.
+
+**4. No retention, no certificates.** Already the plan's steps 5 and 6. Named
+here only to say the ordering is right: retention is the thing stock Odoo cannot
+do at all (§9), and it is a real differentiator rather than catching up.
+
+**5. No revenue recognition or WIP.** SAP's results analysis computes
+work-in-progress and percentage-of-completion revenue at period end. With a
+priced bill and measured quantities the INPUT now exists — earned value is
+Σ(measured × rate). **Defer it, do not skip it:** it is an accounting build with
+audit consequences and it belongs after certificates, when "certified to date"
+and "earned to date" can be compared. That difference IS the WIP figure.
+
+**6. Attachments on project records.** See 10.5 — the reason this was excluded
+turns out to be false.
+
+### 10.5 A correction: blob storage exists
+
+`PROJECTS-EXECUTION-LAYER.md` §3 rules out the MD's phase 12 (documents) because
+it "needs blob storage, which nothing in this app has yet", and §5 of this
+document says photos need it too.
+
+**Both are wrong.** `lib/cloudinary.js` and `app/api/upload/route.js` have been
+there throughout: an authenticated upload endpoint taking a `folder` parameter,
+capped at 10MB, accepting JPEG/PNG/WebP/HEIC and PDF — and it is already used by
+expenses, by claims and by HR's `employee_documents`, which is the exact table
+shape a project attachment would copy.
+
+So site-diary photographs, an instruction's marked-up drawing, a calibration
+certificate and a measurement sheet are a small build on an existing path, not a
+blocked one. For a site diary the photograph often IS the evidence, which makes
+this better value than its position on any list suggests.
+
+Recorded as a correction rather than fixed in place, because an exclusion that
+rested on a false premise is worth seeing.
+
+### 10.6 The rules that keep it usable
+
+Stated as rules because "don't bloat it" is not actionable and these are:
+
+1. **A nav entry must own records.** If a section needs a banner to explain what
+   it is not, it is not a section yet. It is a panel inside one.
+2. **A section is named after the table it shows.** "Milestone Tracker" showing
+   tasks is the same defect as a figure read from a key that does not exist.
+3. **Sections appear when the project needs them.** This is what the type lookup
+   table (§9.1) is for: a supply job should never see a site diary. The measure
+   of success is that the average project shows FEWER than six sections.
+4. **One number, one place.** `project_tasks` rendered three times is three
+   places for the same number to be presented differently.
+5. **Warn, never block** — already the house rule, and it is the main thing
+   separating this from SAP's availability control.
+6. **A figure that names a subset is a link to that subset** — already codified
+   in `components/metric-bar.jsx`, and it is what stops a dashboard being
+   decoration.
+
+### 10.7 What this changes in the sequence
+
+The §8/§9 sequence stands. Two things move into it and one thing moves up:
+
+| | change |
+|---|---|
+| **new, before step 3** | `journal_lines.project_id` + `cost_code_id`. Everything about project cost is downstream of it, and it is cheaper now than after certificates post. |
+| **new, beside step 3** | `purchase_orders.project_id` — one column, closes the commitment gap. |
+| **moved up** | the notice clocks (was step 7) go with `contracts`, and they carry a NOTIFICATION, because a clock nobody is told about is a column. |
+| **added at the end** | WIP / earned-vs-certified, after certificates exist. One rule, not a configuration surface. |
+| **not in the sequence at all** | the nav cut in 10.3 — it is a day's work over tables that already exist, and it needs the author's agreement on IPC and Cash Requisitions first. |
+
+The shape to protect: **nine tables, six sections, and fewer than six on most
+projects.** Every item above either removes a surface or adds a column. The one
+thing that would make this module lose is answering "SAP has it" with "then we
+should have it too".

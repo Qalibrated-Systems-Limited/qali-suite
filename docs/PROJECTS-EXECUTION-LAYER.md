@@ -157,7 +157,7 @@ carry the data.
 | 9 — dashboard | falls out of the above; not a thing to design first. |
 | 10 — project-level roles | real work, and a change to `withAuthorizedTenant` rather than to projects. Not now. |
 | 11 — automation rules | a rules engine is a product. No. |
-| 12 — documents | needs blob storage, which nothing in this app has yet. |
+| 12 — documents | ~~needs blob storage, which nothing in this app has yet~~ — **WRONG, corrected 2026-08-31.** `lib/cloudinary.js` and `app/api/upload/route.js` have been there throughout and are used by expenses, claims and `employee_documents`. See `PROJECTS-QALITRACK-PLAN.md` §10.5. |
 
 And, separately from his list: **earned value** (PV, EV, AC, CPI, SPI) is
 free once milestones carry value and tasks carry weight — it is a read, not a
