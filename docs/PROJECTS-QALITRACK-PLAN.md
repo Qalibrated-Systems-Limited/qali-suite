@@ -179,3 +179,205 @@ Sequence, highest value first:
    and the limitation above stands.
 5. How many concurrent contracts, and how many site staff filing daily diaries?
    It decides whether the diary is a form or an offline-capable mobile surface.
+
+---
+
+## 7. Addendum — 2026-08-31: what the merge landed, and the type enum
+
+Section 6 asked five questions. The first is now answered, and it decides the
+rest.
+
+### 6.1 answered: it is a PRODUCT, so it must be flexible
+
+**QaliTrack is not for our own contracts alone — this application is
+multi-tenant.** Other contractors will run their own jobs in it, on their own
+contract terms. Two consequences, and both are design constraints rather than
+preferences:
+
+- **Nothing about a contract may be hardcoded.** Retention percentage, its cap,
+  advance percentage and recovery rule, the DLP length — all per contract. One
+  tenant runs 10% capped at 5% with a 12-month DLP; the next runs 5% with six
+  months. Answering 6.3 the same way: **one policy per contract.**
+- **The module must serve natures of work we do not do.** A tenant doing pure
+  supply, or consultancy, should not meet a site diary — and we cannot enumerate
+  their business in advance.
+
+And QSL itself runs at least two shapes: **a lot of construction jobs**, and
+plant installation (weighbridges, electrical). So this is not a choice between
+FIDIC machinery and a simpler milestone flow. It is both, in one module.
+
+### What the merge actually built, against §5's own sequence
+
+Zawadi's `feat/projects-module-dropdown` merged on 2026-08-31: two new tables
+(`project_instructions`, `project_diary_entries`), a project-scoped workspace
+with a switcher, and eight sections. It is careful work — RLS forced, correct
+grants, CHECK constraints that refuse a status flip with nobody attached, and a
+sign-off role that narrows the manage role with a cited precedent.
+
+But set against §5's sequence, it built the bottom of the list:
+
+| §5 rank | item | status after the merge |
+|---|---|---|
+| 1 | port `projects` | done earlier (0070) |
+| 2 | **notice register with deadlines** | **NOT built** — see below |
+| 3 | **IPC and retention** | **NOT built** — a view over invoices |
+| 4 | milestones, progress from measured work | a view; progress still typed |
+| 5 | site diary and form register | **built** |
+| 6 | programme / Gantt | **built, without dependencies** |
+
+Two of those need naming plainly, because §4 warned about both:
+
+- **The registers have no clocks.** `project_instructions` carries EI, VO, NCR
+  and RFI-response, which is the register §5 step 2 asked for — but with no
+  deadline, no expiry and no alert. §5 called that step "the smallest build,
+  largest consequence of not having it", and the consequence is the 24-hour and
+  28-day FIDIC notice clocks. The register records that an instruction exists;
+  it cannot tell you a notice is about to expire.
+- **The programme has no dependencies.** §4.2 said without predecessor links it
+  is "a picture of a programme, not a programme", and that an EOT claim is
+  argued on the critical path. The merged page is that picture.
+
+Neither is a defect in what was built. They are the difference between the
+records and the contract administration.
+
+### The decision: a project TYPE, and sections that follow it
+
+`billing_model` (`fixed | milestone | time_material`) already says HOW a project
+is paid. It does not say WHAT KIND of work it is, and that is what decides which
+sections make sense. A weighbridge installation and a road are both `milestone`
+and `measured` respectively, but a supply-only job is neither.
+
+So `projects.type`, set at creation:
+
+| type | what it is | typical billing |
+|---|---|---|
+| `construction` | civil / building works | measured, certified monthly |
+| `installation` | plant, weighbridge, electrical | milestone — often 50% advance, 50% on completion |
+| `maintenance` | recurring service agreement | periodic |
+| `supply` | goods only | on delivery |
+| `consultancy` | design, advisory | time and material |
+| `internal` | own capex, R&D | none |
+
+**Sections become conditional on it.** This is the whole point of the enum — the
+module shapes itself rather than showing every tenant every page:
+
+| section | constr | install | maint | supply | consult | internal |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|
+| Budget / cost codes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Milestones / programme | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| Site diary | ✓ | ✓ | — | — | — | — |
+| Instructions / VOs / notices | ✓ | ✓ | — | — | — | — |
+| **Certificates** | ✓ | ✓ | — | — | — | — |
+| **Retention** | ✓ | ✓ | — | — | — | — |
+| **Advance + recovery** | ✓ | ✓ | ✓ | — | ✓ | — |
+| Acceptance (FAT/SAT/calibration) | — | ✓ | — | — | — | — |
+| Recurring billing | — | — | ✓ | — | — | — |
+
+A default is offered per type and every section stays overridable, because a
+tenant will always have a job that breaks the pattern. **The type chooses
+defaults; it does not lock anything.**
+
+### THE RULES DO NOT VARY BY TYPE — only the shape does
+
+An earlier draft of this section had an installation job skipping retention and
+running a "simplified" two-payment flow. **That is wrong and is corrected here.**
+
+A weighbridge installation is a contract like any other: it is administered
+under FIDIC (Yellow Book, plant and design-build, rather than the Red Book a
+road uses), and every mechanism applies — certificates, retention, advance
+recovery, variations, notices, taking-over, defects liability. Building a
+shortcut path for "small" jobs would mean two engines to keep correct, and the
+one used less often would be the one that quietly drifts.
+
+**What varies is the SHAPE of the contract, not which rules govern it:**
+
+| | drives |
+|---|---|
+| **size** | how many certificates, and whether retention reaches its cap |
+| **period** | certificate frequency — monthly on a two-year road, per milestone on a three-month install |
+| **nature** | the valuation source (measured vs milestone) and which evidence sections appear |
+
+So a 50/50 weighbridge job is not "the flow without retention". It is a contract
+whose terms happen to be two milestones, whose retention percentage may be set
+to zero **on that contract**, and whose DLP is short. The engine is identical;
+the row in `contracts` differs. A tenant who does hold retention on installs —
+and many do — changes one field, not a code path.
+
+This is also what the mature systems do. Candy, RIB BuildSmart and CMiC run one
+valuation-and-certification engine and vary it by contract terms; none ships a
+"small job" mode. Procore's payment applications work the same way whether the
+job is a tower or a fit-out.
+
+### One mechanism for certificates, two valuation sources
+
+Do NOT build an IPC module and a completion-certificate module. A certificate is
+one record either way:
+
+```
+  work done to date          ← valuation source
+– previously certified
+= value this period
+– retention this period
+– advance recovery
+= net certified
+```
+
+What differs is only where "work done to date" comes from:
+
+- `construction` → **measured** work (remeasure against a BOQ where one exists —
+  §6.4 is still open)
+- `installation` → **milestone achieved**, yes or no
+
+A 50/50 weighbridge job is then two certificates with a milestone source — the
+same table, the same retention and advance machinery, and terms that happen to
+say two milestones rather than twenty-four months.
+
+### What installation needs that construction does not
+
+A weighbridge is a legal-for-trade instrument: in Kenya it must be verified and
+stamped by Weights and Measures before it can lawfully issue a ticket. So an
+installation carries acceptance evidence a road never does — FAT, SAT,
+**calibration certificate**, commissioning, operator training, and the serial
+numbers of the load cells and indicator.
+
+These are **milestones with evidence attached**, not a new subsystem:
+`project_tasks` plus a document reference.
+
+And one join is missing that closes a loop QSL owns end to end: `assets` has no
+`project_id`, so the weighbridge an installation project builds cannot point at
+the job that built it — nor forward to the `weighbridge_tickets` it will later
+issue. Install → asset → operating revenue, in one chain.
+
+### Revised sequence
+
+1. **`projects.type`** — cheap now, expensive later, because every section gate
+   and every certificate default hangs off it.
+2. **`contracts`** — sum, advance terms, retention terms, DLP. Per contract,
+   never per tenant. Nothing below this is buildable without it.
+3. **Variations reach the contract sum.** `project_instructions.estimated_cost`
+   currently feeds nothing, so the register says the scope grew and the contract
+   value does not move. Cheapest real fix on the board.
+4. **Certificates** — one table, two valuation sources, replacing the IPC and
+   Cash Requisitions pages, which today run the identical query under two names.
+5. **Retention** — a balance with a release schedule tied to the TOC and DLC
+   milestones, plus `1250 Retention Receivable` (does not exist in the chart).
+   Applies to every contract type that has a contract; the percentage may be
+   zero on a given job, which is a term, not a code path.
+6. **Notice deadlines** on the register — the 24-hour and 28-day clocks §5
+   ranked second and the merge did not build.
+7. **Acceptance records** for installation, and `assets.project_id`.
+8. **Maintenance contracts** — recurring billing. There is none in the
+   application at all; CURRENT-STATE lists it as the #2 missing item and calls
+   the manual re-keying "the #1 finance staff grind".
+9. **Programme dependencies** — only with predecessors and a critical path.
+
+### Still open
+
+- **§6.4 stands: is there a bill of quantities?** It decides whether measured
+  progress is real or whether typed percentages remain, and §4.1 is unambiguous
+  that typed percentages are how a project reports 90% complete for four months.
+- **Default retention on an installation job** — what percentage to pre-fill
+  for a new `installation` contract. Not whether the mechanism exists: it does,
+  for every type. Only what the form suggests before the user overrides it.
+- **Where the completion certificate sits for a two-payment job** — one
+  certificate at the end, or one per milestone including the advance.
