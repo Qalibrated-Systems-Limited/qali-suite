@@ -252,7 +252,7 @@ So `projects.type`, set at creation:
 | type | what it is | typical billing |
 |---|---|---|
 | `construction` | civil / building works | measured, certified monthly |
-| `installation` | plant, weighbridge, electrical | milestone — often 50% advance, 50% on completion |
+| `installation` | plant, weighbridge, electrical | milestone — payment on delivery and acceptance stages |
 | `maintenance` | recurring service agreement | periodic |
 | `supply` | goods only | on delivery |
 | `consultancy` | design, advisory | time and material |
@@ -276,6 +276,30 @@ module shapes itself rather than showing every tenant every page:
 A default is offered per type and every section stays overridable, because a
 tenant will always have a job that breaks the pattern. **The type chooses
 defaults; it does not lock anything.**
+
+### Present practice is not the specification
+
+A caution on how this document was written, because it nearly went wrong.
+
+Several of the shapes described here came from what QSL has been seen to do —
+"a weighbridge is usually 50% advance and 50% on completion, with no
+retention". That is a real observation and a useful one, and it is **not the
+standard**. It is what one contractor arrived at without a guide to work from.
+
+Encoding it would bake today's habit into a product other contractors use, and
+would be exactly the wrong direction: a tenant running a properly administered
+installation contract would find the system had decided on their behalf that
+installations do not hold retention.
+
+So: **the industry standard sets the mechanism; the tenant's contract sets the
+values.** Defaults offered on a form are suggestions to be overridden, never
+rules. Where this document names a percentage or a payment split, read it as an
+illustration of the arithmetic, not as a term to implement.
+
+The one place practice legitimately decides the design is **which sections a
+project shows** — a supply-only job has no site diary, and no standard says it
+should. That is what the type enum is for, and it is why the enum is necessary
+rather than merely convenient.
 
 ### THE RULES DO NOT VARY BY TYPE — only the shape does
 
