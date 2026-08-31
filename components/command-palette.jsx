@@ -95,6 +95,7 @@ const PAGES = [
 
   // ── Projects ───────────────────────────────────────
   { label: "Projects", href: "/dashboard/projects", icon: FolderKanban, module: "projects" },
+  { label: "Technical", href: "/dashboard/technical", icon: ClipboardList, module: "projects", aliases: ["workflow reports", "report registry", "site report", "service report", "calibration record", "technical report"] },
 
   // ── Admin ──────────────────────────────────────────
   { label: "Users", href: "/dashboard/users", icon: Users, category: "Admin" },
