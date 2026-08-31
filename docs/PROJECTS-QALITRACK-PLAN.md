@@ -428,16 +428,26 @@ place it takes in the sequence — at 2, ahead of `contracts`, because it depend
 on nothing but `projects` and it is the only item on the list that fixes a
 defect the module has TODAY. Progress stops being typed.
 
-**3. The type enum's values, for tenants we have not met.**
+**3. The type enum's values, for tenants we have not met. — ANSWERED by §9.1:
+it is a LOOKUP TABLE, not a `pgEnum`.**
 
-`construction | installation | maintenance | supply | consultancy | internal`.
-An enum is a migration to change. A manufacturer or a logistics firm may need
-something none of those covers, and this application is multi-tenant.
+`construction | installation | maintenance | supply | consultancy | internal`
+are the six to seed. The question this raised — a manufacturer or a logistics
+firm needing a value none of those covers — is not answered by picking better
+values, because a `pgEnum` is a migration to change and this application is
+multi-tenant. A seeded lookup table costs the same and needs no deploy per
+tenant. What remains open is only which six to seed, which is a smaller
+question.
 
 **4. Where the notice clocks belong.** `project_instructions` already carries
 EI, VO, NCR and RFI-response with no deadline field. The 24-hour and 28-day
 FIDIC clocks either extend that table or need a separate notice register. The
 author of that table should have the view.
+
+§9.3 raises the stakes on this one: the register needs the SERVICE TRAIL — who
+was notified, by what medium, the acknowledgement, and the chain from notice to
+particulars to determination — not only a deadline. That is more than a column
+on `project_instructions`, and it argues for the separate register.
 
 **5. Default retention on an installation contract** — what percentage the form
 pre-fills. Not whether the mechanism exists: it does, for every contract type.
@@ -604,7 +614,11 @@ default becomes a wrong valuation.
 
 ### Revised sequence — BOQ enters at 2
 
-1. **`projects.type`** — unchanged. Cheap now, expensive later.
+*Amended by §9. Step 1 is a lookup table rather than an enum; step 3 carries a
+retention direction; step 5 gains two valuation lines.*
+
+1. **`projects.type`** — a LOOKUP TABLE (§9.1), not a `pgEnum`. Cheap now,
+   expensive later.
 2. **`project_boq_items` + `project_boq_measurements`.** Moved ahead of
    `contracts` because it depends on nothing but `projects`, and because it is
    the one item on this list that fixes a defect the module has TODAY rather
@@ -618,3 +632,120 @@ default becomes a wrong valuation.
 6. **Retention.** 7. **Notice deadlines.** 8. **Acceptance records and
    `assets.project_id`.** 9. **Maintenance / recurring billing.**
    10. **Programme dependencies.**
+
+---
+
+## 9. Review — 2026-08-31: five things this document was missing
+
+A review of §§7–8 against the industry, from someone who has administered these
+contracts. The verdict on the mechanisms was that they are standard and in
+places more disciplined than the ERPs named — retention as a term rather than a
+code branch, measured progress from a bill, quantity-to-date as a sum, frozen
+rates with variations issuing new items, are all what the QS-grade tools
+enforce. **And the gaps were real.** Five of them, recorded here as findings
+rather than folded silently into the sections above, because each one arrived
+from experience this document did not have.
+
+Two are ahead of where a tenant would otherwise be, and worth stating so the
+comparison is not lost: **stock Odoo has no retention field at all.** Its
+documented workaround is a payment term of 90% now and the balance in six or
+twelve months, which is not retention — it does not accumulate, it does not
+release against a taking-over certificate, and it cannot be reported as a
+balance. A retention receivable with a TOC/DLC release schedule puts this above
+stock Odoo rather than catching up to it. Ledger-derived project P&L, likewise,
+is what NetSuite and Odoo's analytic accounting do; the cached `financials` that
+0070 removed was the thing to get rid of.
+
+### 9.1 The type enum should be a LOOKUP TABLE, not a Postgres enum
+
+**This changes step 1, and it is the one to act on before anything is built.**
+
+§7 already said the enum's values are an open question "for tenants we have not
+met", and then specified an enum anyway. Those two positions do not survive
+together: a `pgEnum` is a migration to change, and a multi-tenant product whose
+own document admits it cannot enumerate its tenants' business should not need a
+deploy to add `logistics`.
+
+A lookup table seeded with the six costs the same and needs no migration per
+tenant. The section matrix in §7 then hangs off a row rather than a literal.
+
+**Where this does NOT apply:** the enums that encode a MECHANISM this system
+owns — `project_boq_status`, `project_task_status`, `project_instruction_status`
+— are correctly enums. Their values are the state machine, and adding one is a
+change to how the software works, which is exactly when a migration is right.
+The distinction is whether the tenant or the product owns the vocabulary.
+
+### 9.2 Subcontract retention — `contracts` needs a DIRECTION from the start
+
+Absent from §7 entirely, and the review is right that it is structural rather
+than an addition: a main contractor holds retention on its subcontractors
+mirroring what the employer holds on it, back to back. Candy, Viewpoint, CMiC
+and the Odoo construction add-ons all run retention on the purchase side for
+this reason.
+
+**So `contracts` carries a direction — receivable (we are the contractor) or
+payable (we are the employer) — from step 3, not discovered at step 6.** The
+arithmetic is the same engine pointed the other way, which is the §7 principle
+again; what changes is which ledger account the retention sits in, and
+`1250 Retention Receivable` acquires a payable sibling.
+
+Getting this wrong is expensive in a specific way: retrofitting a direction onto
+a table that assumed one means every existing row needs a value and every query
+needs a filter it did not have.
+
+### 9.3 The notice register needs the EVIDENTIARY TRAIL, not just a clock
+
+§7 step 6 is "the 24-hour and 28-day clocks". That is step one of the register
+and not the whole of it. Aconex and Procore track who was notified, **by what
+medium**, the acknowledgement, and the chain from notice → particulars →
+determination.
+
+The reason is what the register is FOR. A deadline with an alert stops a notice
+being late. **What wins the claim is proving the notice was served** — and under
+FIDIC the particulars follow the notice on their own clock, so a register that
+records only the first document loses the thread at exactly the point the
+argument gets serious.
+
+### 9.4 A certificate needs MATERIALS ON SITE and DAYWORKS as valuation lines
+
+The arithmetic in §7 has one valuation source and no slot for either, and both
+are standard on an interim certificate:
+
+- **materials on site** — delivered, not yet built in, certified at a
+  percentage and recovered as the work is done. It is NOT a bill item and
+  cannot be one: nothing has been measured.
+- **dayworks** — work done on a daywork basis at scheduled rates rather than
+  measured against a bill item.
+
+Cheap to add to the certificate table now, awkward after certificates exist and
+have rows. **Note that the BOQ needs nothing for dayworks** — a daywork schedule
+is a section of the bill like any other, and 0076's tree already holds it. It is
+the certificate that needs the line.
+
+### 9.5 IPC and cash requisition: expect TWO records, and still ask
+
+§7's blocking decision 1 left this genuinely open and said to ask the author.
+The review's answer is the industry's: they are different documents. **An IPC is
+external** — contractor → engineer → employer, and it is a valuation. **A cash
+requisition is internal** — site → head office — and in most contractors it is a
+FORECAST driven by the programme, not a certificate of anything.
+
+That reframes the question rather than closing it. If the cash requisition is a
+forecast, it is not a second view of the certificate and it is not a small
+version of one: it is a different table with a different purpose, and step 4
+extends one page rather than replacing two. **The question stays open and the
+author still decides** — what changes is that the assumption in step 4 should
+now be that they do NOT collapse.
+
+### What this section changes
+
+| | was | now |
+|---|---|---|
+| step 1 | `projects.type` as a pgEnum | a lookup table, seeded with the six |
+| step 3 | `contracts` | with a retention DIRECTION, receivable and payable |
+| step 5 | certificates: one valuation source | plus materials-on-site and daywork lines |
+| step 6 | notice deadlines | deadlines AND the service/acknowledgement trail |
+| open 1 | assumed IPC and cash requisition collapse | assume they do not; the author still decides |
+
+Nothing here changes 0076. The bill of quantities is unaffected by all five —
+which is a small piece of evidence for having built it first.
