@@ -22,7 +22,7 @@ function formatCurrency(amount) {
     style: "decimal",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount || 0);
+  }).format(Number(amount) || 0);
 }
 
 export default async function CashRequisitionsPage({ searchParams }) {
@@ -41,7 +41,7 @@ export default async function CashRequisitionsPage({ searchParams }) {
           project={null}
           projects={projects}
         />
-        <NoProjectsCard />
+        <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />
       </div>
     );
   }
@@ -53,8 +53,20 @@ export default async function CashRequisitionsPage({ searchParams }) {
 
   const claims = transactions?.claims || [];
   const expenses = transactions?.expenses || [];
-  const total = (claims.reduce((s, c) => s + (c.totalAmount || 0), 0)) +
-    (expenses.reduce((s, e) => s + (e.total || 0), 0));
+  /**
+   * MONEY IS A STRING on both of these. `employee_claims.total_amount` and
+   * `expenses.total` are numeric(19,4) read in string mode, so `s + c.totalAmount`
+   * CONCATENATES rather than adds: one claim and one expense came out as
+   * "01500.00002000.0000", which Intl.NumberFormat renders as NaN.
+   *
+   * Every other figure on this page comes from `getProjectFinancialSummary`,
+   * which returns numbers because the screens do arithmetic on them. These two
+   * are the only ones the page sums for itself.
+   */
+  const num = (v) => Number(v) || 0;
+  const total =
+    claims.reduce((s, c) => s + num(c.totalAmount), 0) +
+    expenses.reduce((s, e) => s + num(e.total), 0);
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -127,7 +139,7 @@ export default async function CashRequisitionsPage({ searchParams }) {
                           </span>
                           <Badge variant="secondary" className="text-xs">{claim.status}</Badge>
                         </div>
-                        <p className="text-sm font-medium mt-0.5 truncate">{claim.employee?.name}</p>
+                        <p className="text-sm font-medium mt-0.5 truncate">{claim.employeeName}</p>
                       </div>
                       <p className="text-sm font-semibold shrink-0">
                         KES {formatCurrency(claim.totalAmount)}

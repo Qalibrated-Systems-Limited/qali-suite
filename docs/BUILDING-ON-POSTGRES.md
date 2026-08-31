@@ -910,6 +910,79 @@ followed twice out of three times.
 by an explicit decision — it is a ~3,900-line vertical that posts to the ledger,
 and a half-port would be the credit-note failure again.
 
+### Later the same day — the projects module read a shape it does not return
+
+No migration. A correctness pass over the whole Projects module, and every
+finding is the same class as the users stats cards above: **a key that has
+never existed, rendered as nothing.**
+
+**THE LINKED-TRANSACTION LISTS WERE WRITTEN AGAINST MONGO.** Three screens
+render the rows `getProjectTransactions` returns — the project detail page's
+Linked Transactions card, IPC & Payments and Cash Requisitions — and all three
+read a nested party off a flat row:
+
+| the screen read | the repository returns |
+|---|---|
+| `inv.customer.name` | `customerName` |
+| `bill.vendor.name` | `vendorName` |
+| `claim.employee.name` | `employeeName` |
+| `req.requester.name` | `requesterName` |
+| `bill.amounts.netPayable ?? bill.amounts.total` | `netPayable`, `total` |
+
+Nothing threw. Every party name rendered blank, and
+`formatCurrency(undefined || 0)` is a confident zero — **every supplier bill on
+all three screens showed KES 0.** A project with 4m of bills against it read as
+having none, on the page a project manager checks the spend on.
+
+The part worth carrying forward: **the test suite already disagreed with the
+screen and nothing compared them.** `tests/pg-projects.test.mjs` pinned
+`employeeName` on the claims arm, three lines from a screen reading
+`claim.employee.name`, and both were green. A test that pins the repository's
+answer proves the query; it says nothing about whether the caller can read it.
+The shape is now pinned with the nested forms asserted ABSENT, which is what
+stops the next port of a Mongo list bringing one back.
+
+**AND CASH REQUISITIONS RENDERED NaN.** It is the one page that sums two of
+these lists in JavaScript, and `employee_claims.total_amount` and
+`expenses.total` are `numeric(19,4)` read in drizzle's string mode — so
+`0 + "1500.0000"` CONCATENATES. One claim and one expense came out as
+`"01500.00002000.0000"`, which `Intl.NumberFormat` renders as NaN. The
+repository contract is money-as-string and it is right; the page has to coerce,
+and now does. Pinned as a type in the suite rather than "fixed" in the
+repository.
+
+**A FLAG WRITTEN AND NEVER READ — again.** `getWorkspaceContext` computed
+`notFound` for a `?project=` naming a project the tenant does not have, and
+left the silent `?? projects[0]` fallback in place beside it. No page read the
+flag. So the defect the earlier commit describes — a bookmarked link to a
+completed job's diary opening a DIFFERENT project's diary under the right page
+title — was still live, now with a correct diagnosis sitting unread next to it.
+Same shape as `token_version` this morning. The fallback is gone, the eight
+pages render the flag, and `getWorkspaceContext` has its own test file.
+
+**The id is now checked against the tenant's own list**, not with a second
+`getProjectById` round trip. `listProjectsForWorkspace` is unfiltered — RLS
+scopes it and nothing else does — so membership in it IS the question, answered
+by a list the page has already paid for.
+
+**And the Forms Register was paying for a financial aggregation.**
+`getWorkspaceContext` called `getProjectById` for all eight pages, which runs
+the live actuals, the effective budget and the WBS roll-up. Six of the eight
+read nothing that is not already on the switcher row; the Forms Register is a
+static reference table. `detail` is now opt-in, and only IPC & Payments
+(`contractValue`) and Programme (`startDate`/`endDate`) ask for it.
+
+**The programme clipped its own overruns.** The timeline range took
+`project.startDate`/`endDate` whenever they existed, so a task planned outside
+the contract dates was pinned to an edge by the width clamp: a task running
+three months late drew the same bar as one finishing on time — on the page an
+EOT is argued from. The range now spans the contract dates AND the programme.
+
+None of this touches the two pages' open product question. **IPC and Cash
+Requisitions still run the identical query under two names** and that is still
+§7's blocking decision 1, for the author to settle. What changed is that both
+now show the right numbers while it is settled.
+
 ## Handoff — 2026-08-29 — global search (§9P), and the count that could not see it
 
 No migration. `components/command-palette.jsx` — Ctrl-K, reachable from every

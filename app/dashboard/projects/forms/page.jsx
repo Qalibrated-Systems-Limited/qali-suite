@@ -54,7 +54,7 @@ export default async function FormsRegisterPage({ searchParams }) {
         projects={projects}
       />
 
-      {!project && <NoProjectsCard />}
+      {!project && <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />}
 
       <Card className="p-5 sm:p-6">
         <div className="flex items-center justify-between mb-4">

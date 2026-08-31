@@ -23,40 +23,57 @@ import {
  * invoice and wrong here: a site diary and an instruction register are read
  * most AFTER a job finishes, for the final account or a dispute. Filtering to
  * live jobs made the records of every completed one unreachable.
+ *
+ * ── The `?project=` that names nothing ──────────────────────────────────────
+ *
+ * A bookmarked link to a project this tenant does not have resolves to NO
+ * project and says so. It used to fall through to `projects[0]` silently,
+ * which meant the page rendered another project's records under the right
+ * page title — a wrong answer that looks right, which is worse than an empty
+ * one. An earlier pass computed `notFound` for exactly this and left the
+ * fallback in place beside it, so the flag was written and never read; the
+ * fallback is gone here and every page renders the flag.
+ *
+ * The id is checked against the tenant's OWN list rather than with a second
+ * `getProjectById` round trip. `listProjectsForWorkspace` is unfiltered — RLS
+ * scopes it and nothing else does — so membership in that list IS the
+ * question "does this tenant have this project", answered by a list the page
+ * has already paid for.
+ *
+ * ── `detail` ───────────────────────────────────────────────────────────────
+ *
+ * The switcher rows carry `id`, `projectNumber`, `name` and `status`, which
+ * is everything `WorkspaceHeader` renders and everything six of the eight
+ * pages ever read off the project. `getProjectById` additionally computes the
+ * live actuals, the effective budget and the WBS roll-up — three aggregate
+ * passes over invoices, bills, claims, expenses, stock requests and tasks.
+ * Only IPC & Payments (`contractValue`) and Programme (`startDate`,
+ * `endDate`) need a field that is not in the list row, so only those two ask
+ * for it. The Forms Register — a static reference table — was paying for a
+ * full financial aggregation on every render.
  */
-export async function getWorkspaceContext(searchParams) {
+export async function getWorkspaceContext(searchParams, { detail = false } = {}) {
   const session = await auth();
   if (!session?.user) redirect("/login");
   const { user } = session;
 
   if (!canSeeProjectsNav(user.role)) {
-    return { denied: true, user, projects: [], project: null };
+    return { denied: true, user, projects: [], project: null, notFound: false };
   }
 
   const projects = await getProjectsForWorkspace();
 
-  /**
-   * A `?project=` that names a project this tenant HAS is honoured, even when
-   * it is not in the switcher's list — and the switcher now lists everything,
-   * so that is a narrow case. The previous version fell back to `projects[0]`
-   * silently, which meant a bookmarked link to a completed job's diary quietly
-   * showed a DIFFERENT project's diary. A wrong answer that looks right is
-   * worse than an empty one.
-   *
-   * `getProjectById` is RLS-scoped and carries the uuid guard, so a made-up or
-   * another tenant's id comes back null rather than leaking or throwing.
-   */
   const requestedId = searchParams?.project;
-  const requested = requestedId ? await getProjectById(requestedId) : null;
+  const requested = requestedId
+    ? projects.find((p) => p.id === requestedId) ?? null
+    : null;
 
-  const project = requested ?? (projects[0] ? await getProjectById(projects[0].id) : null);
+  /** The link named a project that is gone, or was never this tenant's. */
+  const notFound = Boolean(requestedId && !requested);
 
-  return {
-    denied: false,
-    user,
-    projects,
-    project,
-    /** The link named a project that is gone, or was never this tenant's. */
-    notFound: Boolean(requestedId && !requested),
-  };
+  const summary = notFound ? null : requested ?? projects[0] ?? null;
+  const project =
+    summary && detail ? await getProjectById(summary.id) : summary;
+
+  return { denied: false, user, projects, project, notFound };
 }

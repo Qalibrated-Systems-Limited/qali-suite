@@ -29,7 +29,7 @@ export default async function SiteDiaryPage({ searchParams }) {
         projects={projects}
       />
 
-      {!project && <NoProjectsCard />}
+      {!project && <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />}
 
       {project && (
         <DiaryLog

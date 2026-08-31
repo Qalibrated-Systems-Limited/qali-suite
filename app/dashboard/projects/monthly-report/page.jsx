@@ -93,7 +93,7 @@ export default async function MonthlyReportPage({ searchParams }) {
         projects={projects}
       />
 
-      {!project && <NoProjectsCard />}
+      {!project && <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />}
 
       {project && (
         <>

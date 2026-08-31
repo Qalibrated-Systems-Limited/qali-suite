@@ -51,7 +51,9 @@ function monthLabels(rangeStart, rangeEnd) {
 
 export default async function ProgrammePage({ searchParams }) {
   const sp = await searchParams;
-  const ctx = await getWorkspaceContext(sp);
+  // `detail` — the timeline range comes from `project.startDate` /
+  // `project.endDate`, which the switcher row does not carry.
+  const ctx = await getWorkspaceContext(sp, { detail: true });
   if (ctx.denied) return <AccessDenied />;
 
   const { projects, project } = ctx;
@@ -65,7 +67,7 @@ export default async function ProgrammePage({ searchParams }) {
           project={null}
           projects={projects}
         />
-        <NoProjectsCard />
+        <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />
       </div>
     );
   }
@@ -75,18 +77,31 @@ export default async function ProgrammePage({ searchParams }) {
 
   const starts = scheduled.map((t) => new Date(t.plannedStart));
   const ends = scheduled.map((t) => new Date(t.plannedEnd));
-  const rangeStart = project.startDate
-    ? new Date(project.startDate)
-    : starts.length
-      ? new Date(Math.min(...starts))
-      : null;
-  const rangeEnd = project.endDate
-    ? new Date(project.endDate)
-    : ends.length
-      ? new Date(Math.max(...ends))
-      : null;
+  /**
+   * The range spans the CONTRACT dates AND the programme, rather than
+   * whichever of the two was written first.
+   *
+   * Taking `project.startDate` as the left edge whenever it exists clipped
+   * every task planned outside the contract dates — and an overrun past the
+   * end date is exactly what a programme is read for. Those bars were pinned
+   * to the right edge by the `Math.min(width, 100 - left)` clamp below, so a
+   * task running three months late drew the same bar as one finishing on
+   * time. The clamps stay as the guard they are; nothing should now reach
+   * them.
+   */
+  const bounds = [
+    ...starts,
+    ...ends,
+    ...(project.startDate ? [new Date(project.startDate)] : []),
+    ...(project.endDate ? [new Date(project.endDate)] : []),
+  ].filter((d) => !Number.isNaN(d.getTime()));
 
-  const hasRange = rangeStart && rangeEnd && rangeEnd > rangeStart;
+  const rangeStart = bounds.length ? new Date(Math.min(...bounds)) : null;
+  const rangeEnd = bounds.length ? new Date(Math.max(...bounds)) : null;
+
+  // `>=`, not `>`: a programme of one single-day task is a programme, and it
+  // was told there was "nothing to schedule".
+  const hasRange = rangeStart && rangeEnd && rangeEnd >= rangeStart;
   const months = hasRange ? monthLabels(rangeStart, rangeEnd) : [];
   const totalMonths = months.length || 1;
 

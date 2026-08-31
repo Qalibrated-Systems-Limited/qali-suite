@@ -66,7 +66,7 @@ function formatCurrency(amount) {
     style: "decimal",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount || 0);
+  }).format(Number(amount) || 0);
 }
 
 function formatDate(date) {
@@ -496,7 +496,7 @@ async function TransactionsCard({ projectId }) {
                       {claim.status}
                     </Badge>
                   </div>
-                  <p className="text-sm font-medium mt-0.5 truncate">{claim.employee?.name}</p>
+                  <p className="text-sm font-medium mt-0.5 truncate">{claim.employeeName}</p>
                   {claim.description && (
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">
                       {claim.description}
@@ -533,7 +533,7 @@ async function TransactionsCard({ projectId }) {
                       {inv.status}
                     </Badge>
                   </div>
-                  <p className="text-sm font-medium mt-0.5 truncate">{inv.customer?.name}</p>
+                  <p className="text-sm font-medium mt-0.5 truncate">{inv.customerName || "—"}</p>
                 </div>
                 <p className="text-sm font-semibold shrink-0">
                   KES {formatCurrency(inv.total)}
@@ -565,10 +565,10 @@ async function TransactionsCard({ projectId }) {
                       {bill.status}
                     </Badge>
                   </div>
-                  <p className="text-sm font-medium mt-0.5 truncate">{bill.vendor?.name}</p>
+                  <p className="text-sm font-medium mt-0.5 truncate">{bill.vendorName || "—"}</p>
                 </div>
                 <p className="text-sm font-semibold shrink-0">
-                  KES {formatCurrency(bill.amounts?.netPayable || bill.amounts?.total)}
+                  KES {formatCurrency(bill.netPayable ?? bill.total)}
                 </p>
               </Link>
             ))}
@@ -631,7 +631,7 @@ async function TransactionsCard({ projectId }) {
                       {req.status}
                     </Badge>
                   </div>
-                  <p className="text-sm font-medium mt-0.5 truncate">{req.requester?.name}</p>
+                  <p className="text-sm font-medium mt-0.5 truncate">{req.requesterName || "—"}</p>
                 </div>
                 <p className="text-sm font-semibold shrink-0">
                   KES {formatCurrency(req.totalValue)}

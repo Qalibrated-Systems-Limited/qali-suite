@@ -66,7 +66,7 @@ export default async function MilestonesPage({ searchParams }) {
           project={null}
           projects={projects}
         />
-        <NoProjectsCard />
+        <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />
       </div>
     );
   }

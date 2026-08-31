@@ -22,10 +22,10 @@ function formatCurrency(amount) {
     style: "decimal",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount || 0);
+  }).format(Number(amount) || 0);
 }
 
-function DocList({ title, items, hrefBase, numberKey, partyKey, amountFn }) {
+function DocList({ title, items, hrefBase, numberKey, nameKey, amountFn }) {
   if (!items?.length) return null;
   return (
     <div className="mb-6 last:mb-0">
@@ -44,7 +44,7 @@ function DocList({ title, items, hrefBase, numberKey, partyKey, amountFn }) {
                 <span className="font-mono text-xs text-muted-foreground">{doc[numberKey]}</span>
                 <Badge variant="secondary" className="text-xs">{doc.status}</Badge>
               </div>
-              <p className="text-sm font-medium mt-0.5 truncate">{doc[partyKey]?.name || "—"}</p>
+              <p className="text-sm font-medium mt-0.5 truncate">{doc[nameKey] || "—"}</p>
             </div>
             <p className="text-sm font-semibold shrink-0">KES {formatCurrency(amountFn(doc))}</p>
           </Link>
@@ -56,7 +56,9 @@ function DocList({ title, items, hrefBase, numberKey, partyKey, amountFn }) {
 
 export default async function IpcPaymentsPage({ searchParams }) {
   const sp = await searchParams;
-  const ctx = await getWorkspaceContext(sp);
+  // `detail` — this page reads `project.contractValue`, which the switcher
+  // row does not carry.
+  const ctx = await getWorkspaceContext(sp, { detail: true });
   if (ctx.denied) return <AccessDenied />;
 
   const { projects, project } = ctx;
@@ -70,7 +72,7 @@ export default async function IpcPaymentsPage({ searchParams }) {
           project={null}
           projects={projects}
         />
-        <NoProjectsCard />
+        <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />
       </div>
     );
   }
@@ -160,7 +162,7 @@ export default async function IpcPaymentsPage({ searchParams }) {
               items={invoices}
               hrefBase="/dashboard/invoices"
               numberKey="invoiceNumber"
-              partyKey="customer"
+              nameKey="customerName"
               amountFn={(d) => d.total}
             />
             <DocList
@@ -168,8 +170,8 @@ export default async function IpcPaymentsPage({ searchParams }) {
               items={bills}
               hrefBase="/dashboard/bills"
               numberKey="billNumber"
-              partyKey="vendor"
-              amountFn={(d) => d.amounts?.netPayable ?? d.amounts?.total}
+              nameKey="vendorName"
+              amountFn={(d) => d.netPayable ?? d.total}
             />
           </>
         )}

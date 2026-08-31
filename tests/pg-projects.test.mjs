@@ -845,6 +845,95 @@ suite("projects", () => {
       });
     });
 
+    /**
+     * WHAT THE SCREEN READS, pinned.
+     *
+     * Three lists render these rows — the project detail page's Linked
+     * Transactions card, IPC & Payments, and Cash Requisitions — and all
+     * three were written against the MONGO shapes: `inv.customer.name`,
+     * `bill.vendor.name`, `claim.employee.name`, `req.requester.name`, and
+     * `bill.amounts.netPayable`. Not one of those is a key on these rows.
+     *
+     * Nothing threw. React prints `undefined` as nothing, so every party name
+     * rendered blank, and `formatCurrency(undefined || 0)` is a confident
+     * zero — EVERY SUPPLIER BILL SHOWED KES 0 on all three screens.
+     *
+     * The test above already pinned `employeeName` and so already disagreed
+     * with the screen beside it; nothing compared the two. This pins the
+     * whole set, and the absence of the nested shapes with it.
+     */
+    it("carries every field the linked-transaction lists render", async () => {
+      const p = await seedProject();
+      await seedInvoice(p.id, 5000);
+      await seedBill(p.id, 4000, "approved", "paid");
+      await seedRequest(p.id, { status: "approved", approved: 2, fulfilled: 0 });
+      await admin`
+        INSERT INTO expenses (company_id, expense_number, expense_date, category,
+                              account_id, account_code_at_expense,
+                              account_name_at_expense, amount,
+                              payee_name_at_expense, description, project_id)
+        VALUES (${companyA}, 'EXP-1', CURRENT_DATE, 'other', ${travelAcct},
+                '6100', 'Travel', 2500, 'Jane Site', 'Site visit', ${p.id})`;
+
+      const t = await inA((tx) => repo.getProjectTransactions(tx, p.id));
+
+      expect(t.invoices[0]).toMatchObject({ customerName: "Kerra", total: 5000 });
+      expect(t.bills[0]).toMatchObject({
+        vendorName: "Supplier",
+        total: 4000,
+        netPayable: 4000,
+      });
+      expect(t.requests[0]).toMatchObject({
+        requesterName: "Jane",
+        totalValue: 2400,
+      });
+      expect(t.expenses[0]).toMatchObject({
+        expenseNumber: "EXP-1",
+        accountName: "Travel",
+      });
+
+      // The nested shapes the screens used to read. They have never existed
+      // on a Postgres row, and asserting their absence is what stops one
+      // coming back the next time somebody ports a list from the Mongo app.
+      expect(t.invoices[0].customer).toBeUndefined();
+      expect(t.bills[0].vendor).toBeUndefined();
+      expect(t.bills[0].amounts).toBeUndefined();
+      expect(t.requests[0].requester).toBeUndefined();
+      expect(t.claims.every((c) => c.employee === undefined)).toBe(true);
+    });
+
+    /**
+     * MONEY IS A STRING on the two arms that come from a repository rather
+     * than from hand-written SQL — `numeric(19,4)` in drizzle's string mode,
+     * where the SELECTs above cast to `float8`. Cash Requisitions adds these
+     * two lists up in JS, and `0 + "2500.0000"` CONCATENATES: one claim and
+     * one expense summed to `"02500.00002500.0000"`, which
+     * `Intl.NumberFormat` renders as NaN.
+     *
+     * Pinned as a type rather than fixed here, because the string is correct:
+     * the repository contract is money-as-string, and it is the page that has
+     * to coerce.
+     */
+    it("returns claim and expense money as strings, and the rest as numbers", async () => {
+      const p = await seedProject();
+      await seedInvoice(p.id, 5000);
+      await seedBill(p.id, 4000, "approved", "paid");
+      await admin`
+        INSERT INTO expenses (company_id, expense_number, expense_date, category,
+                              account_id, account_code_at_expense,
+                              account_name_at_expense, amount,
+                              payee_name_at_expense, description, project_id)
+        VALUES (${companyA}, 'EXP-2', CURRENT_DATE, 'other', ${travelAcct},
+                '6100', 'Travel', 2500, 'Jane Site', 'Site visit', ${p.id})`;
+
+      const t = await inA((tx) => repo.getProjectTransactions(tx, p.id));
+
+      expect(typeof t.expenses[0].total).toBe("string");
+      expect(Number(t.expenses[0].total)).toBe(2500);
+      expect(typeof t.invoices[0].total).toBe("number");
+      expect(typeof t.bills[0].netPayable).toBe("number");
+    });
+
     it("returns just the one type when asked for it", async () => {
       const p = await seedProject();
       await seedInvoice(p.id, 5000);

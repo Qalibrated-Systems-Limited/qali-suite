@@ -37,7 +37,7 @@ export default async function InstructionsPage({ searchParams }) {
         projects={projects}
       />
 
-      {!project && <NoProjectsCard />}
+      {!project && <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />}
 
       {project && (
         <InstructionsLog
