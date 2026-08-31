@@ -397,6 +397,50 @@ issue. Install → asset → operating revenue, in one chain.
 
 ### Still open
 
+**These are decided BEFORE step 1, not during it.** Each one changes the shape
+of what gets built, and two of them are not the porter's to settle alone.
+
+**1. IPC and Cash Requisitions — one section or two? (blocking)**
+
+They are today two nav entries running the identical pair of queries —
+`getProjectTransactions` + `getProjectFinancialSummary` — each carrying a banner
+admitting it is not the document its name implies. Step 4 assumes they collapse
+into one certificate section driven by contract type.
+
+That assumption is NOT a review finding and must not be actioned as one. They
+were built deliberately by somebody who may have had a reason not visible in the
+code — in real practice an IPC (what the client certifies and pays) and a cash
+requisition (what a site asks head office to fund) ARE different documents
+serving different readers, even though neither exists as a record here yet.
+
+So the question is genuinely open: are they one record with two views, two
+records, or one section until a second earns its place? **Ask the author before
+building over it.** Nothing in the sequence proceeds correctly until this is
+settled, because step 4 either replaces two pages or extends one.
+
+**2. Is there a bill of quantities?**
+
+§6.4, still unanswered. It decides whether measured progress is real or whether
+typed percentages remain — and §4.1 is unambiguous that typed percentages are
+how a project reports 90% complete for four months. If there is a BOQ it is a
+table, and progress derives from it.
+
+**3. The type enum's values, for tenants we have not met.**
+
+`construction | installation | maintenance | supply | consultancy | internal`.
+An enum is a migration to change. A manufacturer or a logistics firm may need
+something none of those covers, and this application is multi-tenant.
+
+**4. Where the notice clocks belong.** `project_instructions` already carries
+EI, VO, NCR and RFI-response with no deadline field. The 24-hour and 28-day
+FIDIC clocks either extend that table or need a separate notice register. The
+author of that table should have the view.
+
+**5. Default retention on an installation contract** — what percentage the form
+pre-fills. Not whether the mechanism exists: it does, for every contract type.
+Only what is suggested before the user overrides it.
+
+
 - **§6.4 stands: is there a bill of quantities?** It decides whether measured
   progress is real or whether typed percentages remain, and §4.1 is unambiguous
   that typed percentages are how a project reports 90% complete for four months.
