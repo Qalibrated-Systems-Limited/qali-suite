@@ -6,6 +6,7 @@ import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
 import AccessDenied from "../components/AccessDenied";
+import SectionNotForType from "../components/SectionNotForType";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -27,8 +28,19 @@ function formatCurrency(amount) {
 
 export default async function CashRequisitionsPage({ searchParams }) {
   const sp = await searchParams;
-  const ctx = await getWorkspaceContext(sp);
+  const ctx = await getWorkspaceContext(sp, { section: "cashRequisitions" });
   if (ctx.denied) return <AccessDenied />;
+  if (ctx.hidden) {
+    return (
+      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+        <SectionNotForType
+          section="Cash Requisitions"
+          project={ctx.project}
+          typeName={ctx.typeName}
+        />
+      </div>
+    );
+  }
 
   const { projects, project } = ctx;
 

@@ -2,6 +2,7 @@ import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
 import AccessDenied from "../components/AccessDenied";
+import SectionNotForType from "../components/SectionNotForType";
 import InstructionsLog from "../components/InstructionsLog";
 import FormsReference from "../components/FormsReference";
 import {
@@ -17,8 +18,19 @@ export const metadata = {
 
 export default async function InstructionsPage({ searchParams }) {
   const sp = await searchParams;
-  const ctx = await getWorkspaceContext(sp);
+  const ctx = await getWorkspaceContext(sp, { section: "instructions" });
   if (ctx.denied) return <AccessDenied />;
+  if (ctx.hidden) {
+    return (
+      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+        <SectionNotForType
+          section="Engineer's Instructions"
+          project={ctx.project}
+          typeName={ctx.typeName}
+        />
+      </div>
+    );
+  }
 
   const { projects, project, user } = ctx;
 

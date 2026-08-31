@@ -125,6 +125,7 @@ export default function ProjectForm({
   clients = [],
   users = [],
   parentProjects = [],
+  projectTypes = [],
   project = null,
   /** PARTY_MANAGE_ROLES. A Manager may raise a project but not a customer. */
   canCreateClient = false,
@@ -384,6 +385,41 @@ export default function ProjectForm({
                 Total contract value agreed with client
               </p>
               <FieldError errors={errors} field="contractValue" />
+            </div>
+
+            {/*
+              WHAT KIND of work this is — 0078, and it is not the same question
+              as the billing model beside it. `billingModel` says how the project
+              is PAID; the type says what the work IS, and that is what decides
+              which sections the project shows. A supply-only job has no site
+              diary and nothing to certify.
+
+              "No type" is offered and is the default, because it shows
+              everything — which is what every project did before the column
+              existed, and the honest state for one nobody has classified.
+            */}
+            <div className="space-y-2">
+              <Label htmlFor="typeId">Project Type</Label>
+              <Select
+                name="typeId"
+                defaultValue={project?.typeId || state?.values?.typeId || "none"}
+              >
+                <SelectTrigger className="h-11">
+                  <SelectValue placeholder="Select a type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No type — show every section</SelectItem>
+                  {projectTypes.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Decides which sections this project shows. You can change it later.
+              </p>
+              <FieldError errors={errors} field="typeId" />
             </div>
 
             <div className="space-y-2">

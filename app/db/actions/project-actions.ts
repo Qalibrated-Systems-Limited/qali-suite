@@ -13,6 +13,7 @@ import {
 } from "@/lib/utils/role-gates";
 import * as repo from "../repositories/projects";
 import * as partiesRepo from "../repositories/parties";
+import { createInvoice } from "../repositories/invoices";
 import type { Tx } from "../client";
 
 /**
@@ -90,6 +91,7 @@ function toScreenProject(
       name: row.projectManagerName ?? "",
     },
     parentProjectId: row.parentProjectId ?? null,
+    typeId: row.typeId ?? null,
     billingModel: row.billingModel ?? null,
     contractValue:
       row.contractValue === null || row.contractValue === undefined
@@ -428,6 +430,19 @@ const projectSchema = z.object({
   priority: optionalEnum(["low", "normal", "high", "critical"] as const),
   tags: optionalText,
   parentProjectId: optionalText,
+  /**
+   * A `project_types` id, or nothing for "no type" — which shows every section.
+   *
+   * The Select cannot use "" as an option value (Radix reserves it for the
+   * placeholder), so the form posts the sentinel "none". Normalising it HERE
+   * rather than at the call site means every caller of this schema gets it:
+   * the sentinel is truthy, so `typeId || null` would have sent the literal
+   * string "none" to a uuid column and turned a normal choice into a 22P02.
+   */
+  typeId: z.preprocess(
+    (v) => (v === "none" || v === null ? "" : v),
+    z.string().optional().or(z.literal("")),
+  ),
   billingModel: optionalEnum(["fixed", "milestone", "time_material"] as const).transform(
     (v) => v ?? null,
   ),
@@ -481,6 +496,7 @@ function projectFields(formData: FormData) {
     priority: formData.get("priority"),
     tags: formData.get("tags"),
     parentProjectId: formData.get("parentProjectId"),
+    typeId: formData.get("typeId"),
     billingModel: formData.get("billingModel"),
     contractValue: formData.get("contractValue"),
     progressPercent: formData.get("progressPercent"),
@@ -534,6 +550,7 @@ function toRepoInput(data: z.infer<typeof projectSchema>) {
     projectManagerUserId: data.projectManagerUserId || null,
     projectManagerName: data.projectManagerName || null,
     parentProjectId: data.parentProjectId || null,
+    typeId: data.typeId || null,
     billingModel: data.billingModel,
     contractValue: money(data.contractValue),
     progressPercent: Math.max(0, Math.min(100, Number.isNaN(pct) ? 0 : pct)),
@@ -1710,6 +1727,446 @@ export async function deleteProjectBoqMeasurement(
     );
     revalidateBoq(projectId);
     return { success: true, message: "Measurement removed" };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+/**
+ * The project types a tenant may pick from — the built-ins, plus its own.
+ *
+ * RLS does the filtering: the 0078 policy reads `company_id IS NULL OR
+ * company_id = current`, so a built-in is visible to everyone and a tenant's
+ * own to nobody else. Nothing here says anything about tenancy, which is why it
+ * cannot get it wrong.
+ */
+export async function getProjectTypes() {
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = await repo.listProjectTypes(tx);
+    return rows.map((r) => ({ ...r, _id: r.id, isBuiltIn: r.companyId === null }));
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The contract, and the interim payment certificate — 0077
+// ─────────────────────────────────────────────────────────────────────────────
+
+function revalidateCertificates(projectId?: string | null) {
+  revalidatePath("/dashboard/projects/ipc");
+  revalidatePath("/dashboard/projects");
+  if (projectId) revalidatePath(`/dashboard/projects/${projectId}`);
+}
+
+/**
+ * Everything the IPC section renders: the main contract, its certificates with
+ * every figure computed, and the contract's position.
+ *
+ * Returns `{ contract: null }` where a project has no contract — which is the
+ * common case and not an error. A project cannot be certified against terms
+ * nobody has entered, and saying so is more use than an empty table.
+ */
+export async function getProjectCertificates(projectId: string) {
+  if (!projectId) return null;
+  return withAuthorizedTenant([], async (tx) => {
+    const contract = await repo.getMainContract(tx, projectId);
+    if (!contract) {
+      return { contract: null, certificates: [], position: null, basis: null, boq: null };
+    }
+
+    const [certificates, position, basis, boq] = await Promise.all([
+      repo.listCertificates(tx, contract.id),
+      repo.getContractPosition(tx, contract.id),
+      repo.nextCertificateBasis(tx, contract.id),
+      /**
+       * The measured value, where an awarded bill exists — it is what the next
+       * certificate's "value of permanent work to date" should be, and having
+       * to copy it across from another page by hand is how a certificate comes
+       * to disagree with the remeasure it is supposed to be based on.
+       */
+      (async () => {
+        const bill = await repo.getEffectiveBoq(tx, projectId);
+        if (!bill || bill.status !== "awarded") return null;
+        const summary = await repo.getBoqSummary(tx, bill.id);
+        return { boqId: bill.id, version: bill.version, measured: summary.measured };
+      })(),
+    ]);
+
+    return {
+      contract: { ...contract, _id: contract.id },
+      certificates,
+      position,
+      basis,
+      boq,
+    };
+  });
+}
+
+const contractSchema = z.object({
+  projectId: z.string().min(1, "Project is required"),
+  reference: optionalTextMax(120, "Reference too long"),
+  title: optionalTextMax(200, "Title too long"),
+  counterpartyPartyId: optionalText,
+  counterpartyName: optionalTextMax(200, "Name too long"),
+  contractSum: optionalText,
+  currency: optionalText,
+  retentionPercent: optionalText,
+  retentionCapPercent: optionalText,
+  advanceAmount: optionalText,
+  advanceRecoveryPercent: optionalText,
+  defectsLiabilityMonths: optionalText,
+  commencementDate: optionalText,
+  completionDate: optionalText,
+  notes: optionalTextMax(2000, "Notes too long"),
+});
+
+function contractFields(formData: FormData) {
+  return {
+    projectId: formData.get("projectId"),
+    reference: formData.get("reference"),
+    title: formData.get("title"),
+    counterpartyPartyId: formData.get("counterpartyPartyId"),
+    counterpartyName: formData.get("counterpartyName"),
+    contractSum: formData.get("contractSum"),
+    currency: formData.get("currency"),
+    retentionPercent: formData.get("retentionPercent"),
+    retentionCapPercent: formData.get("retentionCapPercent"),
+    advanceAmount: formData.get("advanceAmount"),
+    advanceRecoveryPercent: formData.get("advanceRecoveryPercent"),
+    defectsLiabilityMonths: formData.get("defectsLiabilityMonths"),
+    commencementDate: formData.get("commencementDate"),
+    completionDate: formData.get("completionDate"),
+    notes: formData.get("notes"),
+  };
+}
+
+/** `numeric(5,2)` as a string, or null. Percentages, not money. */
+const percent = (v: string | undefined | null) => hours(v, 2);
+
+function toContractTerms(d: Record<string, string | undefined>) {
+  return {
+    reference: d.reference || null,
+    title: d.title || null,
+    counterpartyPartyId: d.counterpartyPartyId || null,
+    counterpartyName: d.counterpartyName || null,
+    contractSum: decimal(d.contractSum) ?? "0",
+    currency: d.currency || null,
+    retentionPercent: percent(d.retentionPercent) ?? "0",
+    retentionCapPercent: percent(d.retentionCapPercent),
+    advanceAmount: decimal(d.advanceAmount) ?? "0",
+    advanceRecoveryPercent: percent(d.advanceRecoveryPercent) ?? "0",
+    defectsLiabilityMonths: d.defectsLiabilityMonths
+      ? parseInt(d.defectsLiabilityMonths, 10) || null
+      : null,
+    commencementDate: d.commencementDate || null,
+    completionDate: d.completionDate || null,
+    notes: d.notes || null,
+  };
+}
+
+/**
+ * The contract's terms — FINANCE, not project management.
+ *
+ * Same gate and same reasoning as approving a budget and awarding a bill:
+ * `PROJECT_MANAGE_ROLES` includes `Manager`, and the retention percentage, the
+ * advance and the contract sum are the commercial terms every certificate is
+ * computed from.
+ */
+export async function saveProjectContract(prevState: unknown, formData: FormData) {
+  const values = valuesOf(formData);
+  const parsed = contractSchema.safeParse(contractFields(formData));
+  if (!parsed.success) return { errors: fieldErrorsFrom(parsed.error), values };
+
+  const d = parsed.data as Record<string, string | undefined>;
+  const contractId = String(formData.get("contractId") ?? "");
+
+  try {
+    await withAuthorizedTenant(
+      FINANCE_WRITE_ROLES as unknown as string[],
+      async (tx, { user, companyId }) => {
+        const actor = actorFrom(user);
+        const terms = toContractTerms(d);
+
+        if (contractId) {
+          const row = await repo.updateContract(tx, contractId, {
+            ...terms,
+            lastModifiedById: actor.id,
+            lastModifiedByName: actor.name,
+          });
+          if (!row) throw new Error("Contract not found");
+          return row;
+        }
+
+        const project = await repo.getProjectById(tx, d.projectId!);
+        if (!project) throw new Error("Project not found");
+        return repo.createContract(tx, {
+          companyId,
+          projectId: d.projectId!,
+          direction: "receivable",
+          ...terms,
+          createdById: actor.id,
+          createdByName: actor.name,
+        });
+      },
+    );
+    revalidateCertificates(d.projectId);
+    return { success: true, message: contractId ? "Contract updated" : "Contract saved" };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+const certificateSchema = z.object({
+  projectId: z.string().min(1, "Project is required"),
+  contractId: z.string().min(1, "Contract is required"),
+  periodFrom: optionalText,
+  periodTo: optionalText,
+  valuationDate: optionalText,
+  valuationSource: optionalEnum(["measured", "milestone", "manual"] as const),
+  workDoneToDate: optionalText,
+  materialsOnSite: optionalText,
+  dayworksToDate: optionalText,
+  retentionReleasedToDate: optionalText,
+  notes: optionalTextMax(2000, "Notes too long"),
+});
+
+function certificateFields(formData: FormData) {
+  return {
+    projectId: formData.get("projectId"),
+    contractId: formData.get("contractId"),
+    periodFrom: formData.get("periodFrom"),
+    periodTo: formData.get("periodTo"),
+    valuationDate: formData.get("valuationDate"),
+    valuationSource: formData.get("valuationSource"),
+    workDoneToDate: formData.get("workDoneToDate"),
+    materialsOnSite: formData.get("materialsOnSite"),
+    dayworksToDate: formData.get("dayworksToDate"),
+    retentionReleasedToDate: formData.get("retentionReleasedToDate"),
+    notes: formData.get("notes"),
+  };
+}
+
+export async function createProjectCertificate(
+  prevState: unknown,
+  formData: FormData,
+) {
+  const values = valuesOf(formData);
+  const parsed = certificateSchema.safeParse(certificateFields(formData));
+  if (!parsed.success) return { errors: fieldErrorsFrom(parsed.error), values };
+
+  const d = parsed.data;
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user, companyId }) => {
+        const actor = actorFrom(user);
+        return repo.createCertificate(tx, {
+          companyId,
+          projectId: d.projectId,
+          contractId: d.contractId,
+          periodFrom: d.periodFrom || null,
+          periodTo: d.periodTo || null,
+          valuationDate: d.valuationDate || null,
+          valuationSource: d.valuationSource ?? "manual",
+          workDoneToDate: decimal(d.workDoneToDate),
+          materialsOnSite: decimal(d.materialsOnSite),
+          dayworksToDate: decimal(d.dayworksToDate),
+          retentionReleasedToDate: decimal(d.retentionReleasedToDate),
+          notes: d.notes || null,
+          createdById: actor.id,
+          createdByName: actor.name,
+        });
+      },
+    );
+    revalidateCertificates(d.projectId);
+    return { success: true, message: "Certificate started" };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+export async function updateProjectCertificate(
+  certificateId: string,
+  prevState: unknown,
+  formData: FormData,
+) {
+  const values = valuesOf(formData);
+  const parsed = certificateSchema.safeParse(certificateFields(formData));
+  if (!parsed.success) return { errors: fieldErrorsFrom(parsed.error), values };
+
+  const d = parsed.data;
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user }) => {
+        const actor = actorFrom(user);
+        const row = await repo.updateCertificate(tx, certificateId, {
+          periodFrom: d.periodFrom || null,
+          periodTo: d.periodTo || null,
+          valuationDate: d.valuationDate || null,
+          valuationSource: d.valuationSource ?? undefined,
+          workDoneToDate: decimal(d.workDoneToDate),
+          materialsOnSite: decimal(d.materialsOnSite),
+          dayworksToDate: decimal(d.dayworksToDate),
+          retentionReleasedToDate: decimal(d.retentionReleasedToDate),
+          notes: d.notes || null,
+          lastModifiedById: actor.id,
+          lastModifiedByName: actor.name,
+        });
+        if (!row) throw new Error("Certificate not found");
+        return row;
+      },
+    );
+    revalidateCertificates(d.projectId);
+    return { success: true, message: "Certificate updated" };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+/**
+ * Certify — FINANCE, like awarding a bill and approving a budget.
+ *
+ * This is the act that freezes the figures and states what the client is being
+ * asked to pay. Raising the draft invoice is a SEPARATE step, deliberately:
+ * they are two decisions, and a certificate issued without an invoice is a
+ * normal state on a job where the invoice is raised elsewhere.
+ */
+export async function certifyProjectCertificate(
+  certificateId: string,
+  projectId: string,
+) {
+  try {
+    const row = await withAuthorizedTenant(
+      FINANCE_WRITE_ROLES as unknown as string[],
+      (tx, { user }) => repo.certifyCertificate(tx, certificateId, actorFrom(user)),
+    );
+    if (!row) return { success: false, error: "Certificate not found" };
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.certificateNumber} certified` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function cancelProjectCertificate(
+  certificateId: string,
+  projectId: string,
+) {
+  try {
+    const row = await withAuthorizedTenant(
+      FINANCE_WRITE_ROLES as unknown as string[],
+      (tx, { user }) => repo.cancelCertificate(tx, certificateId, actorFrom(user)),
+    );
+    if (!row) return { success: false, error: "Certificate not found" };
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.certificateNumber} cancelled` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function deleteProjectCertificate(
+  certificateId: string,
+  projectId: string,
+) {
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx) => {
+        const row = await repo.deleteCertificate(tx, certificateId);
+        if (!row) throw new Error("Certificate not found");
+        return row;
+      },
+    );
+    revalidateCertificates(projectId);
+    return { success: true, message: "Draft certificate removed" };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+/**
+ * Raise the DRAFT invoice for a certified certificate — 0077 decision 3, and
+ * the same decision the execution layer made for milestones.
+ *
+ * A DRAFT and nothing more: reviewable, editable and deletable, and it makes
+ * the certificate the source document without committing to a posting. It
+ * answers §6 open question 2 in the half that can be undone.
+ *
+ * ONE SERVICE LINE, at the net certified for THIS certificate. Not the gross,
+ * because the net is what the employer is being asked to pay; not with tax
+ * worked out here, because the invoice computes VAT with the engine that
+ * already exists and the withholding happens at payment.
+ */
+export async function raiseCertificateInvoice(
+  certificateId: string,
+  projectId: string,
+) {
+  try {
+    const result = await withAuthorizedTenant(
+      FINANCE_WRITE_ROLES as unknown as string[],
+      async (tx, { user, companyId }) => {
+        const certificate = await repo.getCertificateById(tx, certificateId);
+        if (!certificate) throw new Error("Certificate not found");
+        if (certificate.status !== "certified") {
+          throw new Error(
+            "Only a certified certificate raises an invoice. Certify it first.",
+          );
+        }
+        if (certificate.invoiceId) {
+          throw new Error("This certificate has already raised an invoice.");
+        }
+
+        const project = await repo.getProjectById(tx, certificate.projectId);
+        if (!project) throw new Error("Project not found");
+        if (!project.clientPartyId) {
+          throw new Error(
+            "This project has no client, so there is nobody to invoice. Set one on the project first.",
+          );
+        }
+
+        const contract = await repo.getContractById(tx, certificate.contractId);
+        if (!contract) throw new Error("Contract not found");
+
+        const chain = await repo.listCertificates(tx, certificate.contractId);
+        const figures = chain.find((c) => c.id === certificateId)?.figures;
+        if (!figures) throw new Error("Certificate figures could not be computed");
+        if (figures.netThisCertificate <= 0) {
+          throw new Error(
+            "This certificate certifies nothing further, so there is nothing to invoice.",
+          );
+        }
+
+        const invoice = await createInvoice(tx, {
+          companyId,
+          customerId: String(project.clientPartyId),
+          invoiceDate: certificate.valuationDate,
+          projectId: certificate.projectId,
+          title: `Certificate ${certificate.certificateNumber} (IPC ${certificate.sequence})`,
+          notes: certificate.notes || null,
+          lines: [
+            {
+              itemType: "service",
+              description: `Work executed to ${certificate.valuationDate} — IPC No. ${certificate.sequence}`,
+              quantity: "1",
+              unitPrice: figures.netThisCertificate.toFixed(2),
+            },
+          ],
+          createdById: user.id ?? null,
+          createdByName: user.name ?? null,
+        });
+
+        await repo.attachCertificateInvoice(tx, certificateId, invoice.id);
+        return { invoice, certificate };
+      },
+    );
+    revalidateCertificates(projectId);
+    revalidatePath("/dashboard/invoices");
+    return {
+      success: true,
+      message: `Draft invoice ${result.invoice.invoiceNumber} raised`,
+      invoiceId: result.invoice.id,
+    };
   } catch (error) {
     return { success: false, error: userMessage(error) };
   }

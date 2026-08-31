@@ -404,7 +404,14 @@ of what gets built, and two of them are not the porter's to settle alone.
 **Four now, not five — number 2 is answered in §8**, and the sequence in §8
 supersedes the one above it.
 
-**1. IPC and Cash Requisitions — one section or two? (blocking)**
+**1. IPC and Cash Requisitions — one section or two? — ANSWERED by §11: TWO.**
+
+Building the certificate settled it. It needed contract terms, a cumulative
+chain and a freeze on issue, and a cash requisition wants none of those: an IPC
+is EXTERNAL and a valuation, a requisition is INTERNAL and a forecast. The IPC
+page is now the certificate register; Cash Requisitions is untouched and is the
+next thing that deserves a record of its own. The original question, as it
+stood:
 
 They are today two nav entries running the identical pair of queries —
 `getProjectTransactions` + `getProjectFinancialSummary` — each carrying a banner
@@ -429,8 +436,8 @@ place it takes in the sequence — at 2, ahead of `contracts`, because it depend
 on nothing but `projects` and it is the only item on the list that fixes a
 defect the module has TODAY. Progress stops being typed.
 
-**3. The type enum's values, for tenants we have not met. — ANSWERED by §9.1:
-it is a LOOKUP TABLE, not a `pgEnum`.**
+**3. The type enum's values — ANSWERED by §9.1 and BUILT in 0078: it is a
+LOOKUP TABLE, not a `pgEnum`, seeded with the six and extensible per tenant.**
 
 `construction | installation | maintenance | supply | consultancy | internal`
 are the six to seed. The question this raised — a manufacturer or a logistics
@@ -1005,3 +1012,150 @@ The shape to protect: **nine tables, six sections, and fewer than six on most
 projects.** Every item above either removes a surface or adds a column. The one
 thing that would make this module lose is answering "SAP has it" with "then we
 should have it too".
+
+---
+
+## 11. Built — 2026-08-31: the type, the contract, and the certificate
+
+Steps 1, 3 and 5 of the §8 sequence, in that order once step 1 was noticed to be
+missing. §10's cut had reduced the navigation to seven entries on the rule that a
+section must own records — and left the OTHER half of §10.6 rule 3 unbuilt, so
+every project still showed every section. Adding certificates to that would have
+made an eighth entry every project sees, days after cutting three.
+
+### 0078 — `projects.type`, as a lookup table
+
+A LOOKUP TABLE, per §9.1, and the argument held up under building: §7 specified
+an enum while recording as an open question that we cannot enumerate the
+business of tenants we have not met, and those two do not survive together.
+
+Six built-ins seeded with the §7 matrix. `company_id IS NULL` is a built-in,
+readable by every tenant and writable by none — the RLS policy READS
+`company_id IS NULL OR company_id = current` and WRITES only
+`company_id = current`, so the asymmetry is the database's rather than something
+every query has to remember. A tenant adds its own types beside them.
+
+**A project with no type shows everything**, so nothing disappeared from anybody's
+screen when the column arrived. The narrowing is opted into.
+
+**The gate is in two places, and that is not redundancy.** The nav hides a
+section the type excludes; the page refuses it too. Hiding a link is a sign on
+an unlocked door — the same mistake the plan gate made when only the LIST page
+checked it and any project could still be opened by URL.
+
+**Where the section flags are resolved.** A layout does not receive
+`searchParams`, so it cannot know which project is selected — but it can hand the
+nav every project's flags and let it apply `selectProject`, the same rule the
+pages use, from the same module (`lib/sections.js`, pure, imported by both a
+server module and a client component). A rule stated twice is a rule that
+drifts, and this module has already paid for that once.
+
+### 0077 — the contract, and the interim payment certificate
+
+They land together because a certificate has nothing to compute against without
+terms, and §7 is unambiguous that nothing about a contract may be hardcoded.
+
+**The arithmetic is cumulative, and almost all of it is derived.** Four stored
+numbers — permanent work to date, materials on site, dayworks to date, retention
+released to date — and the terms produce every other figure:
+
+```
+  value of permanent work to date
++ materials on site
++ dayworks to date
+= gross valuation
+− retention held        min(pct × gross, cap% × contract sum)
++ retention released
+− advance recovered     min(pct × gross, advance paid)
+= net to date
+− previously certified  the last CERTIFIED certificate's net to date
+= net this certificate
+```
+
+This is not an aesthetic choice. Because every line is cumulative, **a
+correction to certificate 2 flows into 3 by itself** — there is a test for
+exactly that. A design storing "this period" would need every later certificate
+rewritten, which is how a final account stops reconciling.
+
+**The certificate stops at net certified.** VAT, VAT withholding and WHT are the
+invoice's and the payment's, both of which already have a tested engine. Putting
+the rates here would be a second engine to keep correct, and the one used less
+often is the one that drifts.
+
+**Certifying raises a DRAFT invoice, and nothing more** — the reversible half of
+§6 open question 2, and the same decision the execution layer made for
+milestones. One service line at the net for THIS certificate, which is what the
+employer is being asked to pay.
+
+**Retention is a balance, and it does not reach the ledger.** Said on the page
+as well as in the migration, because somebody reading the figure should not
+assume the ledger knows about it. `1250 Retention Receivable` still does not
+exist in the chart and the journal is still step 6.
+
+**A contract has a direction from the start** (§9.2) — `receivable` where the
+employer holds retention on us, `payable` where we hold it on a subcontractor,
+back to back. At most one receivable per project, because two would be two
+contract sums; as many payables as there are subcontractors.
+
+**Materials on site and dayworks are columns** (§9.4), not lines. Three known
+components of one valuation. Itemising what is on site is a line table hanging
+off this one and it does not change the arithmetic.
+
+### IPC and Cash Requisitions: two records, and the question is now closed
+
+§7 open question 1 asked whether they collapse. They do not. An IPC is EXTERNAL
+— contractor → engineer → employer — and it is a valuation; a cash requisition
+is INTERNAL — site → head office — and usually a forecast driven by the
+programme. §9.5 predicted this and building the certificate confirmed it: the
+certificate needed contract terms, a cumulative chain and a freeze, and none of
+those is anything a requisition wants.
+
+**So the IPC page is now the certificate register, and Cash Requisitions is
+untouched.** It remains a view over claims and expenses, and it is the next
+thing that deserves a record of its own — as a forecast, not as a small
+certificate.
+
+### Three things found while building
+
+**A biconditional that was right, refusing something reasonable.**
+`project_certificates_draft_is_uncertified` made cancelling a DRAFT impossible —
+status would leave `draft` while `certified_at` stayed NULL. The constraint is
+correct and stays; what changed is that the repository now says which of the two
+states the user is in ("nothing was issued, so delete the draft") rather than
+letting a raw check violation reach them.
+
+**A seed a TRUNCATE can wipe must be re-runnable.** 0078 seeded the six built-in
+types with a plain INSERT. `project_types.company_id` references `companies`, so
+`TRUNCATE companies CASCADE` empties the table COMPLETELY — cascade follows the
+foreign key, not the rows, so `company_id IS NULL` does not protect them. Every
+Postgres suite here opens with that truncate, so the first suite to run deleted
+the built-in types for every suite after it and for the developer's database
+until migrations were re-run. 0079 makes the seed an idempotent function.
+
+The general rule this repo now has an instance of: **reference data a TRUNCATE
+can reach must be re-runnable, not a one-shot INSERT.**
+
+**And the sentinel that would have reached a uuid column.** The type picker
+cannot use `""` as a Select value, so the form posts `"none"` — which is truthy,
+so `typeId || null` would have sent the literal string to a uuid column and
+turned an ordinary choice into a 22P02. Normalised in the schema rather than at
+the call site, so every caller gets it.
+
+### Where the sequence is now
+
+Done: 1 (type), 2 (bill of quantities, 0076), 3 (contract, 0077), 5
+(certificates, 0077).
+
+Next, in the order that pays:
+
+1. **`journal_lines.project_id`** — §10.4's architectural gap, and now more
+   pressing than before: a certificate raises an invoice that posts, so the
+   project's revenue reaches the ledger by document while payroll and manual
+   journals still cannot reach it at all.
+2. **Variations** (step 4) — `project_instructions.estimated_cost` feeds nothing,
+   and `contract_sum` now exists for it to move, with `original_sum` beside it to
+   make the variance answerable.
+3. **Retention to the ledger** (step 6) — the balance is computed; the account
+   and the journal are not.
+4. **Notice deadlines with a NOTIFICATION** — the bell has existed since 0074 and
+   nothing in this module writes to it.

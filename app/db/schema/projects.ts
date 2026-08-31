@@ -47,6 +47,9 @@ import {
   projectPartyTypeEnum,
   projectTaskStatusEnum,
   projectBoqStatusEnum,
+  projectContractDirectionEnum,
+  projectCertificateStatusEnum,
+  projectValuationSourceEnum,
 } from "./enums";
 
 /** `ltree` has no Drizzle builder. Declared as `categories` declares it. */
@@ -91,6 +94,12 @@ export const projects = pgTable(
      */
     parentProjectId: uuid("parent_project_id"),
 
+    /**
+     * WHAT KIND of work this is — 0078. A lookup row, not an enum, because the
+     * tenant owns this vocabulary (§9.1). NULL shows every section, which is
+     * what every project had before the column existed.
+     */
+    typeId: uuid("type_id"),
     billingModel: projectBillingModelEnum("billing_model"),
     contractValue: money("contract_value"),
 
@@ -831,5 +840,299 @@ export const projectBoqMeasurements = pgTable(
     index("project_boq_measurements_item_idx").on(t.boqItemId, t.measuredOn),
     index("project_boq_measurements_company_idx").on(t.companyId, t.measuredOn),
     check("project_boq_measurements_quantity_not_zero", sql`${t.quantity} <> 0`),
+  ],
+);
+
+/**
+ * The contract terms — 0077. Per contract, never per tenant.
+ *
+ * §7 of `docs/PROJECTS-QALITRACK-PLAN.md`: nothing about a contract may be
+ * hardcoded. One tenant retains 10% capped at 5% with a twelve-month defects
+ * period; the next retains 5% with six. So none of the terms below carries a
+ * default that pretends to know the contract — they default to ZERO, which is
+ * itself a valid term and is the honest thing to show on a form nobody has
+ * filled in yet.
+ *
+ * THE CONTRACT SUM IS THE CONTRACT'S. `projects.contractValue` becomes the
+ * fallback where no contract exists — one figure, one rule, exactly what 0070
+ * decision 5 did to the budget total and 0076 did to progress.
+ */
+export const projectContracts = pgTable(
+  "project_contracts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+
+    /** §9.2 — receivable (we are the contractor) or payable (a subcontract). */
+    direction: projectContractDirectionEnum("direction")
+      .notNull()
+      .default("receivable"),
+
+    reference: text("reference"),
+    title: text("title"),
+
+    counterpartyPartyId: uuid("counterparty_party_id").references(
+      () => parties.id,
+      { onDelete: "set null" },
+    ),
+    counterpartyName: text("counterparty_name"),
+
+    contractSum: money("contract_sum").notNull().default("0"),
+    /** Beside the current one, so a variation can move the sum and the
+     *  variance stays answerable. */
+    originalSum: money("original_sum").notNull().default("0"),
+    currency: text("currency").notNull().default("KES"),
+
+    retentionPercent: numeric("retention_percent", { precision: 5, scale: 2, mode: "string" })
+      .notNull()
+      .default("0"),
+    /** As a percentage of the contract sum — "10% retained, to a limit of 5%".
+     *  NULL is uncapped. */
+    retentionCapPercent: numeric("retention_cap_percent", { precision: 5, scale: 2, mode: "string" }),
+    advanceAmount: money("advance_amount").notNull().default("0"),
+    advanceRecoveryPercent: numeric("advance_recovery_percent", { precision: 5, scale: 2, mode: "string" })
+      .notNull()
+      .default("0"),
+    defectsLiabilityMonths: integer("defects_liability_months"),
+
+    commencementDate: date("commencement_date"),
+    completionDate: date("completion_date"),
+    notes: text("notes").notNull().default(""),
+
+    createdById: text("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdByName: text("created_by_name").notNull().default("System"),
+    lastModifiedById: text("last_modified_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    lastModifiedByName: text("last_modified_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /** One MAIN contract per project — two would be two contract sums. */
+    uniqueIndex("project_contracts_one_receivable")
+      .on(t.projectId)
+      .where(sql`${t.direction} = 'receivable'`),
+    uniqueIndex("project_contracts_id_project_uq").on(t.id, t.projectId),
+    index("project_contracts_project_idx").on(t.companyId, t.projectId, t.direction),
+
+    check(
+      "project_contracts_sums_non_negative",
+      sql`${t.contractSum} >= 0 AND ${t.originalSum} >= 0`,
+    ),
+    check(
+      "project_contracts_retention_in_range",
+      sql`${t.retentionPercent} BETWEEN 0 AND 100 AND (${t.retentionCapPercent} IS NULL OR ${t.retentionCapPercent} BETWEEN 0 AND 100)`,
+    ),
+    check(
+      "project_contracts_advance_sane",
+      sql`${t.advanceAmount} >= 0 AND ${t.advanceRecoveryPercent} BETWEEN 0 AND 100`,
+    ),
+    /** An advance nobody recovers is a half-filled form, not a term. */
+    check(
+      "project_contracts_advance_is_recoverable",
+      sql`${t.advanceAmount} = 0 OR ${t.advanceRecoveryPercent} > 0`,
+    ),
+    check(
+      "project_contracts_dlp_positive",
+      sql`${t.defectsLiabilityMonths} IS NULL OR ${t.defectsLiabilityMonths} > 0`,
+    ),
+    check(
+      "project_contracts_dates_ordered",
+      sql`${t.commencementDate} IS NULL OR ${t.completionDate} IS NULL OR ${t.completionDate} >= ${t.commencementDate}`,
+    ),
+    check(
+      "project_contracts_counterparty_pair",
+      sql`${t.counterpartyPartyId} IS NULL OR length(btrim(COALESCE(${t.counterpartyName}, ''))) > 0`,
+    ),
+  ],
+);
+
+/**
+ * The interim payment certificate — 0077.
+ *
+ * FOUR STORED NUMBERS, all cumulative as at the valuation date, and every other
+ * figure derived from them and the contract terms:
+ *
+ *     value of permanent work to date
+ *   + materials on site
+ *   + dayworks to date
+ *   = gross valuation
+ *   − retention held          min(pct × gross, cap × contract sum)
+ *   + retention released
+ *   − advance recovered       min(pct × gross, advance paid)
+ *   = net to date
+ *   − previously certified    the last CERTIFIED certificate's net to date
+ *   = net this certificate
+ *
+ * Cumulative is not an aesthetic choice: a correction to certificate 2 flows
+ * into 3 by itself. Storing "this period" would need every later certificate
+ * rewritten, which is how a final account stops reconciling.
+ *
+ * NOTHING HERE IS TAX. VAT, VAT withholding and WHT belong to the invoice this
+ * raises and to the payment that settles it, both of which already have a
+ * tested engine — see `computeCertificate` in the repository.
+ */
+export const projectCertificates = pgTable(
+  "project_certificates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    contractId: uuid("contract_id").notNull(),
+
+    certificateNumber: text("certificate_number").notNull(),
+    /** "IPC No. 3" — the number a certificate is argued about by. */
+    sequence: integer("sequence").notNull(),
+
+    status: projectCertificateStatusEnum("status").notNull().default("draft"),
+
+    periodFrom: date("period_from"),
+    periodTo: date("period_to"),
+    valuationDate: date("valuation_date").notNull().default(sql`CURRENT_DATE`),
+    valuationSource: projectValuationSourceEnum("valuation_source")
+      .notNull()
+      .default("manual"),
+
+    workDoneToDate: money("work_done_to_date").notNull().default("0"),
+    materialsOnSite: money("materials_on_site").notNull().default("0"),
+    dayworksToDate: money("dayworks_to_date").notNull().default("0"),
+    /** What makes "half at taking-over, half at the end of the defects period"
+     *  expressible without a release-schedule table. */
+    retentionReleasedToDate: money("retention_released_to_date").notNull().default("0"),
+
+    notes: text("notes").notNull().default(""),
+
+    /**
+     * The DRAFT invoice this certificate raised, if it has.
+     *
+     * Declared WITHOUT a drizzle `.references()`: `invoices.ts` already imports
+     * this file for its own `project_id`, and pointing back would make the two
+     * schema modules a cycle for a constraint the database holds either way —
+     * `project_certificates_invoice_id_invoices_id_fk`, in 0077. Same reason
+     * `contractId` and `taskId` are declared bare above.
+     */
+    invoiceId: uuid("invoice_id"),
+
+    certifiedById: text("certified_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    certifiedByName: text("certified_by_name"),
+    certifiedAt: timestamp("certified_at", { withTimezone: true }),
+
+    createdById: text("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdByName: text("created_by_name").notNull().default("System"),
+    lastModifiedById: text("last_modified_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    lastModifiedByName: text("last_modified_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_certificates_sequence_uq").on(t.contractId, t.sequence),
+    uniqueIndex("project_certificates_number_uq").on(t.companyId, t.certificateNumber),
+    /** Two half-made drafts on one contract is two people preparing the same
+     *  valuation without knowing it. */
+    uniqueIndex("project_certificates_one_draft")
+      .on(t.contractId)
+      .where(sql`${t.status} = 'draft'`),
+    uniqueIndex("project_certificates_invoice_uq")
+      .on(t.invoiceId)
+      .where(sql`${t.invoiceId} IS NOT NULL`),
+    index("project_certificates_project_idx").on(t.companyId, t.projectId, t.valuationDate),
+
+    check("project_certificates_sequence_positive", sql`${t.sequence} > 0`),
+    check(
+      "project_certificates_amounts_non_negative",
+      sql`${t.workDoneToDate} >= 0 AND ${t.materialsOnSite} >= 0 AND ${t.dayworksToDate} >= 0 AND ${t.retentionReleasedToDate} >= 0`,
+    ),
+    check(
+      "project_certificates_period_ordered",
+      sql`${t.periodFrom} IS NULL OR ${t.periodTo} IS NULL OR ${t.periodTo} >= ${t.periodFrom}`,
+    ),
+    check(
+      "project_certificates_draft_is_uncertified",
+      sql`(${t.status} = 'draft') = (${t.certifiedAt} IS NULL)`,
+    ),
+    check(
+      "project_certificates_certifier_pair",
+      sql`(${t.certifiedAt} IS NULL) = (length(btrim(COALESCE(${t.certifiedByName}, ''))) = 0)`,
+    ),
+  ],
+);
+
+/**
+ * What kind of work a project is, and which sections follow — 0078.
+ *
+ * A LOOKUP TABLE, not a `pgEnum` (§9.1). §7 specified an enum while recording,
+ * as an open question, that we cannot enumerate the business of tenants we have
+ * not met — and those two do not survive together, because an enum is a
+ * migration to change. The distinction that keeps this from over-applying: the
+ * TENANT owns this vocabulary, so it is a table; the PRODUCT owns
+ * `project_boq_status` and `project_task_status`, whose values are a state
+ * machine, so those stay enums.
+ *
+ * `companyId` NULL is a BUILT-IN — readable by every tenant and writable by
+ * none. The RLS policy in 0078 reads `company_id IS NULL OR company_id =
+ * current` and writes only `company_id = current`, so that asymmetry is the
+ * database's rather than something every query has to remember.
+ *
+ * The SECTION FLAGS are columns because the product owns the section list: a
+ * section exists because a page was built for it, so adding one is a code
+ * change and a migration beside it is honest.
+ */
+export const projectTypes = pgTable(
+  "project_types",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** NULL = built-in. */
+    companyId: uuid("company_id").references(() => companies.id, {
+      onDelete: "cascade",
+    }),
+
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+
+    showsBoq: boolean("shows_boq").notNull().default(true),
+    showsProgramme: boolean("shows_programme").notNull().default(true),
+    showsInstructions: boolean("shows_instructions").notNull().default(true),
+    showsDiary: boolean("shows_diary").notNull().default(true),
+    showsCertificates: boolean("shows_certificates").notNull().default(true),
+    showsCashRequisitions: boolean("shows_cash_requisitions").notNull().default(true),
+
+    sortOrder: integer("sort_order").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    /** Two partial indexes, not one on (company_id, code): NULL is not equal to
+     *  NULL, so a plain unique index would let a second built-in exist. */
+    uniqueIndex("project_types_company_code_uq")
+      .on(t.companyId, t.code)
+      .where(sql`${t.companyId} IS NOT NULL`),
+    uniqueIndex("project_types_builtin_code_uq")
+      .on(t.code)
+      .where(sql`${t.companyId} IS NULL`),
+    index("project_types_lookup_idx").on(t.companyId, t.isActive, t.sortOrder),
+
+    check("project_types_code_not_blank", sql`length(btrim(${t.code})) > 0`),
+    check("project_types_name_not_blank", sql`length(btrim(${t.name})) > 0`),
   ],
 );

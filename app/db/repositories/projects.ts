@@ -11,6 +11,9 @@ import {
   projectBoqs,
   projectBoqItems,
   projectBoqMeasurements,
+  projectContracts,
+  projectCertificates,
+  projectTypes,
   accounts,
 } from "../schema";
 import { getProjectClaimsByAccount, listClaims } from "./claims";
@@ -231,18 +234,67 @@ export async function getProjectById(tx: Tx, projectId: string) {
  * dropdown, and `listProjects` runs four more queries per page to build a card.
  */
 export async function listProjectsForWorkspace(tx: Tx) {
+  /**
+   * The section flags come with the row — 0078.
+   *
+   * The module's sub-navigation is rendered in the LAYOUT, above pages that
+   * each resolve their own project from `?project=`, and a layout does not
+   * receive searchParams. So the nav is handed every project's flags and picks
+   * by the same rule the pages use (`selectProject`), rather than the layout
+   * trying to know which project is selected.
+   *
+   * A LEFT JOIN and COALESCE, not an inner join: a project with no type shows
+   * every section, which is what every project did before the column existed.
+   */
   return tx
     .select({
       id: projects.id,
       projectNumber: projects.projectNumber,
       name: projects.name,
       status: projects.status,
+      typeId: projects.typeId,
+      typeName: projectTypes.name,
+      showsBoq: sql<boolean>`COALESCE(${projectTypes.showsBoq}, true)`,
+      showsProgramme: sql<boolean>`COALESCE(${projectTypes.showsProgramme}, true)`,
+      showsInstructions: sql<boolean>`COALESCE(${projectTypes.showsInstructions}, true)`,
+      showsDiary: sql<boolean>`COALESCE(${projectTypes.showsDiary}, true)`,
+      showsCertificates: sql<boolean>`COALESCE(${projectTypes.showsCertificates}, true)`,
+      showsCashRequisitions: sql<boolean>`COALESCE(${projectTypes.showsCashRequisitions}, true)`,
     })
     .from(projects)
+    .leftJoin(projectTypes, eq(projectTypes.id, projects.typeId))
     .orderBy(
       sql`CASE WHEN ${projects.status} IN ('planning','active') THEN 0 ELSE 1 END`,
       asc(projects.name),
     );
+}
+
+/**
+ * The types a tenant may pick from: the built-ins, plus its own.
+ *
+ * RLS does the filtering — the policy reads `company_id IS NULL OR company_id =
+ * current` — so this query says nothing about tenancy and cannot get it wrong.
+ * Built-ins first, then the tenant\'s, each in its own sort order.
+ */
+export async function listProjectTypes(tx: Tx) {
+  return tx
+    .select()
+    .from(projectTypes)
+    .where(eq(projectTypes.isActive, true))
+    .orderBy(
+      sql`CASE WHEN ${projectTypes.companyId} IS NULL THEN 0 ELSE 1 END`,
+      asc(projectTypes.sortOrder),
+      asc(projectTypes.name),
+    );
+}
+
+export async function getProjectTypeById(tx: Tx, typeId: string) {
+  if (!isUuid(typeId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectTypes)
+    .where(eq(projectTypes.id, typeId));
+  return row ?? null;
 }
 
 export async function getActiveProjects(tx: Tx) {
@@ -1202,6 +1254,8 @@ export interface CreateProjectInput {
   projectManagerUserId?: string | null;
   projectManagerName?: string | null;
   parentProjectId?: string | null;
+  /** What KIND of work — a `project_types` row (0078). NULL shows every section. */
+  typeId?: string | null;
   billingModel?: "fixed" | "milestone" | "time_material" | null;
   contractValue?: string | null;
   progressPercent?: number;
@@ -1231,6 +1285,7 @@ export async function createProject(tx: Tx, input: CreateProjectInput) {
       projectManagerUserId: input.projectManagerUserId || null,
       projectManagerName: input.projectManagerName?.trim() || null,
       parentProjectId: input.parentProjectId || null,
+      typeId: input.typeId || null,
       billingModel: input.billingModel ?? null,
       contractValue: input.contractValue ?? null,
       progressPercent: input.progressPercent ?? 0,
@@ -1281,6 +1336,7 @@ export async function updateProject(
     patch.projectManagerName = input.projectManagerName?.trim() || null;
   }
   set("parentProjectId", "parentProjectId");
+  set("typeId", "typeId");
   set("billingModel", "billingModel");
   set("contractValue", "contractValue");
   set("progressPercent", "progressPercent");
@@ -2463,4 +2519,599 @@ export async function deleteBoqMeasurement(tx: Tx, measurementId: string) {
     .where(eq(projectBoqMeasurements.id, measurementId))
     .returning();
   return row ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The contract, and the interim payment certificate — 0077
+//
+// MONEY IS A STRING on the stored rows and a NUMBER on the computed
+// certificate, for the reason the header gives: the screens do arithmetic on a
+// certificate — a percentage of the contract, a comparison with the bill — and
+// a numeric read in string mode concatenates under `+`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Every contract on a project — the main one and any subcontracts. */
+export async function listProjectContracts(tx: Tx, projectId: string) {
+  return tx
+    .select()
+    .from(projectContracts)
+    .where(eq(projectContracts.projectId, projectId))
+    .orderBy(asc(projectContracts.direction), asc(projectContracts.createdAt));
+}
+
+/**
+ * THE contract for a project — the single `receivable` one.
+ *
+ * `project_contracts_one_receivable` is what guarantees there is at most one,
+ * so this cannot quietly pick between two contract sums.
+ */
+export async function getMainContract(tx: Tx, projectId: string) {
+  const [row] = await tx
+    .select()
+    .from(projectContracts)
+    .where(
+      and(
+        eq(projectContracts.projectId, projectId),
+        eq(projectContracts.direction, "receivable"),
+      ),
+    );
+  return row ?? null;
+}
+
+export async function getContractById(tx: Tx, contractId: string) {
+  if (!isUuid(contractId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectContracts)
+    .where(eq(projectContracts.id, contractId));
+  return row ?? null;
+}
+
+export interface ContractTermsInput {
+  direction?: "receivable" | "payable";
+  reference?: string | null;
+  title?: string | null;
+  counterpartyPartyId?: string | null;
+  counterpartyName?: string | null;
+  contractSum?: string | null;
+  originalSum?: string | null;
+  currency?: string | null;
+  retentionPercent?: string | null;
+  retentionCapPercent?: string | null;
+  advanceAmount?: string | null;
+  advanceRecoveryPercent?: string | null;
+  defectsLiabilityMonths?: number | null;
+  commencementDate?: string | null;
+  completionDate?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * A contract, with its terms.
+ *
+ * `originalSum` defaults to the sum on creation — they are the same figure
+ * until a variation moves one of them, and defaulting it means a project that
+ * never has a variation still answers "how much has this contract grown" with
+ * zero rather than with a null.
+ */
+export async function createContract(
+  tx: Tx,
+  input: ContractTermsInput & {
+    companyId: string;
+    projectId: string;
+    createdById?: string | null;
+    createdByName: string;
+  },
+) {
+  const sum = input.contractSum ?? "0";
+  const [row] = await tx
+    .insert(projectContracts)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      direction: input.direction ?? "receivable",
+      reference: input.reference?.trim() || null,
+      title: input.title?.trim() || null,
+      counterpartyPartyId: input.counterpartyPartyId || null,
+      counterpartyName: input.counterpartyName?.trim() || null,
+      contractSum: sum,
+      originalSum: input.originalSum ?? sum,
+      currency: input.currency?.trim() || "KES",
+      retentionPercent: input.retentionPercent ?? "0",
+      retentionCapPercent: input.retentionCapPercent ?? null,
+      advanceAmount: input.advanceAmount ?? "0",
+      advanceRecoveryPercent: input.advanceRecoveryPercent ?? "0",
+      defectsLiabilityMonths: input.defectsLiabilityMonths ?? null,
+      commencementDate: input.commencementDate || null,
+      completionDate: input.completionDate || null,
+      notes: input.notes?.trim() ?? "",
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * The terms, changed.
+ *
+ * `originalSum` is NOT updatable here. It is the figure the contract was let
+ * at, and the whole reason it sits beside the current sum is that nothing
+ * ordinary may move it — same instinct as every `*_at_*` snapshot column.
+ */
+export async function updateContract(
+  tx: Tx,
+  contractId: string,
+  input: ContractTermsInput & {
+    lastModifiedById?: string | null;
+    lastModifiedByName?: string | null;
+  },
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  const text_ = (v?: string | null) => (v?.trim() ? v.trim() : null);
+
+  if (input.reference !== undefined) patch.reference = text_(input.reference);
+  if (input.title !== undefined) patch.title = text_(input.title);
+  if (input.counterpartyPartyId !== undefined) {
+    patch.counterpartyPartyId = input.counterpartyPartyId || null;
+  }
+  if (input.counterpartyName !== undefined) {
+    patch.counterpartyName = text_(input.counterpartyName);
+  }
+  if (input.contractSum !== undefined) patch.contractSum = input.contractSum ?? "0";
+  if (input.currency !== undefined) patch.currency = text_(input.currency) ?? "KES";
+  if (input.retentionPercent !== undefined) {
+    patch.retentionPercent = input.retentionPercent ?? "0";
+  }
+  if (input.retentionCapPercent !== undefined) {
+    patch.retentionCapPercent = input.retentionCapPercent ?? null;
+  }
+  if (input.advanceAmount !== undefined) patch.advanceAmount = input.advanceAmount ?? "0";
+  if (input.advanceRecoveryPercent !== undefined) {
+    patch.advanceRecoveryPercent = input.advanceRecoveryPercent ?? "0";
+  }
+  if (input.defectsLiabilityMonths !== undefined) {
+    patch.defectsLiabilityMonths = input.defectsLiabilityMonths ?? null;
+  }
+  if (input.commencementDate !== undefined) {
+    patch.commencementDate = input.commencementDate || null;
+  }
+  if (input.completionDate !== undefined) {
+    patch.completionDate = input.completionDate || null;
+  }
+  if (input.notes !== undefined) patch.notes = input.notes?.trim() ?? "";
+  if (input.lastModifiedById !== undefined) patch.lastModifiedById = input.lastModifiedById;
+  if (input.lastModifiedByName !== undefined) {
+    patch.lastModifiedByName = input.lastModifiedByName;
+  }
+
+  const [row] = await tx
+    .update(projectContracts)
+    .set(patch)
+    .where(eq(projectContracts.id, contractId))
+    .returning();
+  return row ?? null;
+}
+
+/** Refused while certificates have been raised against it. */
+export async function deleteContract(tx: Tx, contractId: string) {
+  const [{ n }] = (await tx.execute(sql`
+    SELECT COUNT(*)::int AS n FROM project_certificates WHERE contract_id = ${contractId}
+  `)) as unknown as Array<{ n: number }>;
+  if (Number(n) > 0) {
+    throw new Error(
+      `This contract has ${n} certificate${Number(n) === 1 ? "" : "s"} against it and cannot be deleted.`,
+    );
+  }
+  const [row] = await tx
+    .delete(projectContracts)
+    .where(eq(projectContracts.id, contractId))
+    .returning();
+  return row ?? null;
+}
+
+export interface CertificateFigures {
+  grossValuation: number;
+  workDoneToDate: number;
+  materialsOnSite: number;
+  dayworksToDate: number;
+  /** Cumulative, before anything released. */
+  retentionHeld: number;
+  retentionReleased: number;
+  /** What the employer is actually still holding. */
+  retentionOutstanding: number;
+  /** True where the cap bit — worth showing, because it is why the retention
+   *  stopped growing and it looks like an error otherwise. */
+  retentionCapped: boolean;
+  advanceRecovered: number;
+  advanceOutstanding: number;
+  netToDate: number;
+  previouslyCertified: number;
+  netThisCertificate: number;
+}
+
+type ContractRow = typeof projectContracts.$inferSelect;
+type CertificateRow = typeof projectCertificates.$inferSelect;
+
+/**
+ * The certificate arithmetic — 0077 decision 1, in one place.
+ *
+ *     value of permanent work to date
+ *   + materials on site
+ *   + dayworks to date
+ *   = gross valuation
+ *   − retention held        min(pct × gross, cap% × contract sum)
+ *   + retention released
+ *   − advance recovered     min(pct × gross, advance paid)
+ *   = net to date
+ *   − previously certified  the last CERTIFIED certificate's net to date
+ *   = net this certificate
+ *
+ * EVERY LINE IS CUMULATIVE, which is what makes a correction to certificate 2
+ * flow into 3 without rewriting it. `previouslyCertified` is passed in rather
+ * than looked up, because the caller listing a whole contract already has the
+ * chain in hand and doing it per row would be a query per certificate.
+ *
+ * NO TAX. VAT, VAT withholding and WHT are the invoice's and the payment's —
+ * decision 2.
+ */
+export function computeCertificate(
+  contract: Pick<
+    ContractRow,
+    "contractSum" | "retentionPercent" | "retentionCapPercent" | "advanceAmount" | "advanceRecoveryPercent"
+  >,
+  certificate: Pick<
+    CertificateRow,
+    "workDoneToDate" | "materialsOnSite" | "dayworksToDate" | "retentionReleasedToDate"
+  >,
+  previouslyCertified = 0,
+): CertificateFigures {
+  const workDoneToDate = num(certificate.workDoneToDate);
+  const materialsOnSite = num(certificate.materialsOnSite);
+  const dayworksToDate = num(certificate.dayworksToDate);
+  const grossValuation = workDoneToDate + materialsOnSite + dayworksToDate;
+
+  const contractSum = num(contract.contractSum);
+  const retentionPct = num(contract.retentionPercent) / 100;
+  const capPct =
+    contract.retentionCapPercent === null ? null : num(contract.retentionCapPercent) / 100;
+
+  const uncapped = grossValuation * retentionPct;
+  const cap = capPct === null ? null : contractSum * capPct;
+  /**
+   * The cap bites only where there IS a contract sum. A contract entered with
+   * a cap and a sum of zero would otherwise retain nothing at all, which looks
+   * like the retention term was ignored.
+   */
+  const retentionHeld = cap !== null && contractSum > 0 ? Math.min(uncapped, cap) : uncapped;
+  const retentionCapped = cap !== null && contractSum > 0 && uncapped > cap;
+
+  const retentionReleased = Math.min(
+    num(certificate.retentionReleasedToDate),
+    retentionHeld,
+  );
+
+  const advanceAmount = num(contract.advanceAmount);
+  const recoveryPct = num(contract.advanceRecoveryPercent) / 100;
+  // Never more than was advanced: the recovery stops when the advance is repaid,
+  // which is the whole point of tracking it against the contract rather than
+  // deducting a percentage for ever.
+  const advanceRecovered = Math.min(grossValuation * recoveryPct, advanceAmount);
+
+  const netToDate =
+    grossValuation - retentionHeld + retentionReleased - advanceRecovered;
+
+  return {
+    grossValuation: round2(grossValuation),
+    workDoneToDate: round2(workDoneToDate),
+    materialsOnSite: round2(materialsOnSite),
+    dayworksToDate: round2(dayworksToDate),
+    retentionHeld: round2(retentionHeld),
+    retentionReleased: round2(retentionReleased),
+    retentionOutstanding: round2(retentionHeld - retentionReleased),
+    retentionCapped,
+    advanceRecovered: round2(advanceRecovered),
+    advanceOutstanding: round2(advanceAmount - advanceRecovered),
+    netToDate: round2(netToDate),
+    previouslyCertified: round2(previouslyCertified),
+    netThisCertificate: round2(netToDate - previouslyCertified),
+  };
+}
+
+/** Money to the cent. Float arithmetic on money needs a stated rounding point. */
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * A contract's certificates, oldest first, each with its figures computed and
+ * its `previouslyCertified` taken from the last CERTIFIED one before it.
+ *
+ * A CANCELLED certificate does not advance the chain — it was withdrawn, so the
+ * next certificate carries on from the last one that stands. A DRAFT does not
+ * either, because nothing has been certified yet.
+ */
+export async function listCertificates(tx: Tx, contractId: string) {
+  const contract = await getContractById(tx, contractId);
+  if (!contract) return [];
+
+  const rows = await tx
+    .select()
+    .from(projectCertificates)
+    .where(eq(projectCertificates.contractId, contractId))
+    .orderBy(asc(projectCertificates.sequence));
+
+  let previous = 0;
+  return rows.map((row) => {
+    const figures = computeCertificate(contract, row, previous);
+    if (row.status === "certified") previous = figures.netToDate;
+    return { ...row, _id: row.id, figures };
+  });
+}
+
+export async function getCertificateById(tx: Tx, certificateId: string) {
+  if (!isUuid(certificateId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectCertificates)
+    .where(eq(projectCertificates.id, certificateId));
+  return row ?? null;
+}
+
+/**
+ * What the NEXT certificate on this contract starts from: its sequence, and the
+ * net certified to date that it must exceed to be worth anything.
+ */
+export async function nextCertificateBasis(tx: Tx, contractId: string) {
+  const certificates = await listCertificates(tx, contractId);
+  const certified = certificates.filter((c) => c.status === "certified");
+  const last = certified[certified.length - 1] ?? null;
+  return {
+    sequence: certificates.length + 1,
+    previouslyCertified: last ? last.figures.netToDate : 0,
+    lastWorkDoneToDate: last ? num(last.workDoneToDate) : 0,
+    lastRetentionReleased: last ? num(last.retentionReleasedToDate) : 0,
+  };
+}
+
+/**
+ * A new certificate, always a draft.
+ *
+ * The number comes from `next_entry_number`, the same race-free counter every
+ * other document uses. The SEQUENCE is per contract and
+ * `project_certificates_sequence_uq` is what actually guarantees it: two people
+ * starting IPC 4 at once both read 3, and one of them loses the insert — which
+ * is the correct outcome. `project_certificates_one_draft` stops the other
+ * shape of the same problem.
+ */
+export async function createCertificate(
+  tx: Tx,
+  input: {
+    companyId: string;
+    projectId: string;
+    contractId: string;
+    periodFrom?: string | null;
+    periodTo?: string | null;
+    valuationDate?: string | null;
+    valuationSource?: "measured" | "milestone" | "manual";
+    workDoneToDate?: string | null;
+    materialsOnSite?: string | null;
+    dayworksToDate?: string | null;
+    retentionReleasedToDate?: string | null;
+    notes?: string | null;
+    createdById?: string | null;
+    createdByName: string;
+  },
+) {
+  const [{ certificate_number }] = (await tx.execute(
+    sql`SELECT next_entry_number(${input.companyId}::uuid, 'IPC') AS certificate_number`,
+  )) as unknown as Array<{ certificate_number: string }>;
+
+  const { sequence } = await nextCertificateBasis(tx, input.contractId);
+
+  const [row] = await tx
+    .insert(projectCertificates)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      contractId: input.contractId,
+      certificateNumber: certificate_number,
+      sequence,
+      periodFrom: input.periodFrom || null,
+      periodTo: input.periodTo || null,
+      ...(input.valuationDate ? { valuationDate: input.valuationDate } : {}),
+      valuationSource: input.valuationSource ?? "manual",
+      workDoneToDate: input.workDoneToDate ?? "0",
+      materialsOnSite: input.materialsOnSite ?? "0",
+      dayworksToDate: input.dayworksToDate ?? "0",
+      retentionReleasedToDate: input.retentionReleasedToDate ?? "0",
+      notes: input.notes?.trim() ?? "",
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+/** The figures on a DRAFT. `project_certificates_frozen` refuses the rest. */
+export async function updateCertificate(
+  tx: Tx,
+  certificateId: string,
+  input: {
+    periodFrom?: string | null;
+    periodTo?: string | null;
+    valuationDate?: string | null;
+    valuationSource?: "measured" | "milestone" | "manual";
+    workDoneToDate?: string | null;
+    materialsOnSite?: string | null;
+    dayworksToDate?: string | null;
+    retentionReleasedToDate?: string | null;
+    notes?: string | null;
+    lastModifiedById?: string | null;
+    lastModifiedByName?: string | null;
+  },
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.periodFrom !== undefined) patch.periodFrom = input.periodFrom || null;
+  if (input.periodTo !== undefined) patch.periodTo = input.periodTo || null;
+  if (input.valuationDate) patch.valuationDate = input.valuationDate;
+  if (input.valuationSource !== undefined) patch.valuationSource = input.valuationSource;
+  if (input.workDoneToDate !== undefined) patch.workDoneToDate = input.workDoneToDate ?? "0";
+  if (input.materialsOnSite !== undefined) patch.materialsOnSite = input.materialsOnSite ?? "0";
+  if (input.dayworksToDate !== undefined) patch.dayworksToDate = input.dayworksToDate ?? "0";
+  if (input.retentionReleasedToDate !== undefined) {
+    patch.retentionReleasedToDate = input.retentionReleasedToDate ?? "0";
+  }
+  if (input.notes !== undefined) patch.notes = input.notes?.trim() ?? "";
+  if (input.lastModifiedById !== undefined) patch.lastModifiedById = input.lastModifiedById;
+  if (input.lastModifiedByName !== undefined) {
+    patch.lastModifiedByName = input.lastModifiedByName;
+  }
+
+  const [row] = await tx
+    .update(projectCertificates)
+    .set(patch)
+    .where(eq(projectCertificates.id, certificateId))
+    .returning();
+  return row ?? null;
+}
+
+/** Certify — the stamp, and the freeze. */
+export async function certifyCertificate(
+  tx: Tx,
+  certificateId: string,
+  actor: { id?: string | null; name: string },
+) {
+  const current = await getCertificateById(tx, certificateId);
+  if (!current) return null;
+  if (current.status === "certified") return current;
+  if (current.status === "cancelled") {
+    throw new Error(
+      `Certificate ${current.certificateNumber} was cancelled and cannot be certified.`,
+    );
+  }
+
+  const [row] = await tx
+    .update(projectCertificates)
+    .set({
+      status: "certified",
+      certifiedById: actor.id ?? null,
+      certifiedByName: actor.name,
+      certifiedAt: new Date(),
+      lastModifiedById: actor.id ?? null,
+      lastModifiedByName: actor.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectCertificates.id, certificateId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Withdraw an issued certificate.
+ *
+ * Cancelling rather than deleting, and the chain skips it: the next
+ * certificate's `previouslyCertified` comes from the last one that STANDS, so a
+ * withdrawn valuation does not silently remain in the running total.
+ */
+export async function cancelCertificate(
+  tx: Tx,
+  certificateId: string,
+  actor: { id?: string | null; name: string },
+) {
+  /**
+   * CANCELLING IS FOR ISSUED CERTIFICATES. A draft has not been put to anybody,
+   * so there is nothing to withdraw — it is deleted.
+   *
+   * The database says the same thing and said it first:
+   * `project_certificates_draft_is_uncertified` is a biconditional against
+   * `draft`, so a draft moved to `cancelled` would still have a NULL
+   * `certified_at` and the CHECK would refuse it. That refusal is correct and
+   * the constraint stays as it is — but a raw check violation tells the user
+   * nothing, so the answer is given here, where the two states can be named.
+   */
+  const current = await getCertificateById(tx, certificateId);
+  if (!current) return null;
+  if (current.status === "draft") {
+    throw new Error(
+      `${current.certificateNumber} has not been issued, so there is nothing to withdraw. Delete the draft instead.`,
+    );
+  }
+  if (current.status === "cancelled") return current;
+
+  const [row] = await tx
+    .update(projectCertificates)
+    .set({
+      status: "cancelled",
+      lastModifiedById: actor.id ?? null,
+      lastModifiedByName: actor.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectCertificates.id, certificateId))
+    .returning();
+  return row ?? null;
+}
+
+/** Refused by `project_certificates_no_delete_issued` on anything issued. */
+export async function deleteCertificate(tx: Tx, certificateId: string) {
+  const [row] = await tx
+    .delete(projectCertificates)
+    .where(eq(projectCertificates.id, certificateId))
+    .returning();
+  return row ?? null;
+}
+
+/** Record the draft invoice a certificate raised. */
+export async function attachCertificateInvoice(
+  tx: Tx,
+  certificateId: string,
+  invoiceId: string,
+) {
+  const [row] = await tx
+    .update(projectCertificates)
+    .set({ invoiceId, updatedAt: new Date() })
+    .where(eq(projectCertificates.id, certificateId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * The contract's position: certified to date, retention outstanding, advance
+ * outstanding, and how far through the contract sum the certificates have got.
+ *
+ * RETENTION DOES NOT REACH THE LEDGER (0077 decision 4). This is the balance,
+ * computed from the certificates that stand. The journal that moves it out of
+ * receivables — and `1250 Retention Receivable`, which is not in the chart —
+ * is step 6.
+ */
+export async function getContractPosition(tx: Tx, contractId: string) {
+  const contract = await getContractById(tx, contractId);
+  if (!contract) return null;
+
+  const certificates = await listCertificates(tx, contractId);
+  const certified = certificates.filter((c) => c.status === "certified");
+  const last = certified[certified.length - 1] ?? null;
+
+  const contractSum = num(contract.contractSum);
+  const grossCertified = last ? last.figures.grossValuation : 0;
+
+  return {
+    contractSum,
+    originalSum: num(contract.originalSum),
+    currency: contract.currency,
+    certificateCount: certified.length,
+    draftCount: certificates.filter((c) => c.status === "draft").length,
+    grossCertified,
+    netCertified: last ? last.figures.netToDate : 0,
+    retentionHeld: last ? last.figures.retentionHeld : 0,
+    retentionReleased: last ? last.figures.retentionReleased : 0,
+    retentionOutstanding: last ? last.figures.retentionOutstanding : 0,
+    advanceAmount: num(contract.advanceAmount),
+    advanceRecovered: last ? last.figures.advanceRecovered : 0,
+    advanceOutstanding: last
+      ? last.figures.advanceOutstanding
+      : num(contract.advanceAmount),
+    /** Of the contract sum, and it may exceed 100 — that is a variation the
+     *  register has not caught up with, and it is worth seeing. */
+    percentCertified:
+      contractSum > 0 ? Math.round((grossCertified / contractSum) * 100) : 0,
+  };
 }

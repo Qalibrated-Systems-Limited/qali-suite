@@ -868,3 +868,44 @@ export const projectBoqStatusEnum = pgEnum("project_boq_status", [
   "awarded",
   "superseded",
 ]);
+
+// ── Contracts and certificates (0077) ────────────────────────────────────────
+
+/**
+ * `receivable` — we are the contractor, and the employer holds retention on us.
+ * `payable` — we are the employer, holding it on a subcontractor, back to back.
+ *
+ * Every construction system runs retention on both sides. The direction is here
+ * from the start because retrofitting one onto a table that assumed it means
+ * every existing row needs a value and every query needs a filter it did not
+ * have. See PROJECTS-QALITRACK-PLAN.md §9.2.
+ */
+export const projectContractDirectionEnum = pgEnum("project_contract_direction", [
+  "receivable",
+  "payable",
+]);
+
+/**
+ * `draft → certified → cancelled`. Certifying FREEZES the figures: a
+ * certificate is what somebody was asked to pay against, and a payment may
+ * already refer to the invoice it raised. A correction goes on the NEXT
+ * certificate, which works because the arithmetic is cumulative.
+ */
+export const projectCertificateStatusEnum = pgEnum("project_certificate_status", [
+  "draft",
+  "certified",
+  "cancelled",
+]);
+
+/**
+ * Where the value of permanent work came from. `measured` is a remeasure
+ * against an awarded bill (0076) and is the only one that is evidence;
+ * `milestone` is a stage achieved; `manual` is somebody's figure. Recorded for
+ * the same reason `progress.source` is — three numbers that look identical on a
+ * certificate, and only one of them can be defended.
+ */
+export const projectValuationSourceEnum = pgEnum("project_valuation_source", [
+  "measured",
+  "milestone",
+  "manual",
+]);

@@ -6,6 +6,7 @@ import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
 import AccessDenied from "../components/AccessDenied";
+import SectionNotForType from "../components/SectionNotForType";
 import { Card } from "@/components/ui/card";
 import Link from "next/link";
 import {
@@ -132,8 +133,19 @@ export default async function ProgrammePage({ searchParams }) {
   const sp = await searchParams;
   // `detail` — the schedule's range comes from `project.startDate` /
   // `project.endDate`, which the switcher row does not carry.
-  const ctx = await getWorkspaceContext(sp, { detail: true });
+  const ctx = await getWorkspaceContext(sp, { detail: true, section: "programme" });
   if (ctx.denied) return <AccessDenied />;
+  if (ctx.hidden) {
+    return (
+      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+        <SectionNotForType
+          section="The programme"
+          project={ctx.project}
+          typeName={ctx.typeName}
+        />
+      </div>
+    );
+  }
 
   const { projects, project } = ctx;
   const view = sp?.view === "gantt" ? "gantt" : "list";

@@ -2,6 +2,7 @@ import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
 import AccessDenied from "../components/AccessDenied";
+import SectionNotForType from "../components/SectionNotForType";
 import BoqRegister from "../components/BoqRegister";
 import {
   getProjectBoq,
@@ -32,8 +33,19 @@ export const metadata = {
  */
 export default async function BoqPage({ searchParams }) {
   const sp = await searchParams;
-  const ctx = await getWorkspaceContext(sp, { detail: true });
+  const ctx = await getWorkspaceContext(sp, { detail: true, section: "boq" });
   if (ctx.denied) return <AccessDenied />;
+  if (ctx.hidden) {
+    return (
+      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+        <SectionNotForType
+          section="Bill of Quantities"
+          project={ctx.project}
+          typeName={ctx.typeName}
+        />
+      </div>
+    );
+  }
 
   const { projects, project, user } = ctx;
 

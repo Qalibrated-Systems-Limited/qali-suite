@@ -2,6 +2,9 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { PlanGate } from "@/components/plan-gate-boundary";
 import ProjectsNav from "./components/ProjectsNav";
+import { workspaceProjects } from "./lib/workspace";
+import { canSeeProjectsNav } from "@/lib/permissions";
+import { Suspense } from "react";
 
 /**
  * Projects is a Professional module, and only its LIST page checked that.
@@ -27,10 +30,29 @@ export default async function ProjectsLayout({ children }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
+  /**
+   * The nav needs every project's section flags, because a layout does not
+   * receive `searchParams` and so cannot know which project is selected — the
+   * client component applies `selectProject` instead, the same rule the pages
+   * use. `workspaceProjects` is React-cached, so the page below this does not
+   * repeat the query.
+   *
+   * Skipped entirely for a role that cannot see projects: the pages render
+   * their own Access Denied, and fetching a list for somebody who may not read
+   * it is work done to be thrown away.
+   */
+  const projects = canSeeProjectsNav(session.user.role)
+    ? await workspaceProjects()
+    : [];
+
   return (
     <PlanGate module="projects" feature="Project Management">
       <div className="flex flex-col">
-        <ProjectsNav />
+        {/* `useSearchParams` in the nav needs a Suspense boundary, or the whole
+            module opts out of static rendering. */}
+        <Suspense fallback={<div className="h-12 border-b border-border bg-card" />}>
+          <ProjectsNav projects={projects} />
+        </Suspense>
         <main className="flex-1">{children}</main>
       </div>
     </PlanGate>
