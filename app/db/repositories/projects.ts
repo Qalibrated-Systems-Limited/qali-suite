@@ -3115,3 +3115,163 @@ export async function getContractPosition(tx: Tx, contractId: string) {
       contractSum > 0 ? Math.round((grossCertified / contractSum) * 100) : 0,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The project as a ledger dimension — 0080
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ProjectLedgerActuals {
+  /** Revenue: credits less debits on revenue accounts. */
+  revenue: number;
+  /** Cost: debits less credits on expense accounts. */
+  costs: number;
+  /** How many posted lines carry this project. Zero is the honest answer for a
+   *  project whose documents all pre-date 0080. */
+  lineCount: number;
+}
+
+/**
+ * A project's position FROM THE LEDGER — 0080, and the other half of §10.4.
+ *
+ * `computeProjectActuals` answers the same question by scanning five document
+ * tables. This one asks the general ledger, which is the only version that can
+ * reconcile to a trial balance, because it is reading the same rows the trial
+ * balance reads.
+ *
+ * POSTED ONLY. A draft entry is not in anybody's accounts and must not be in a
+ * project's either; a REVERSED entry stays in, together with its reversal, so
+ * the two net to nothing exactly as they do everywhere else.
+ *
+ * ── The two figures will NOT agree yet, and it is worth knowing why ─────────
+ *
+ * Read this beside `reconcileProjectActuals` before treating a difference as a
+ * bug. Three known reasons, none of them a defect in either query:
+ *
+ *  1. **Nothing is backfilled.** Every entry posted before 0080 has no project
+ *     on it, so a project that has been running for months reads near zero here
+ *     and correctly in the document scan.
+ *  2. **Stock issued to a project posts NOTHING.** `recordMovement`,
+ *     `issueStock` and `createCheckout` insert rows and none of them creates a
+ *     journal entry — while a bill for an inventory purchase DEBITS Inventory.
+ *     So materials are relieved from stock in quantity and never in the ledger.
+ *     The document scan counts them; the ledger cannot. On a construction job
+ *     that is usually the largest cost line. See the plan §12.
+ *  3. **Commitment is not an accounting concept.** The scan's `committed` —
+ *     approved and unpaid — has no journal entry by definition, which is
+ *     exactly why 0070 decision 2 computed it from documents in the first
+ *     place.
+ *
+ * So this is NOT a replacement for `computeProjectActuals` and nothing has been
+ * switched over to it. It is the figure that becomes correct as the reasons
+ * above are closed, and the instrument for finding out which of them bites.
+ */
+export async function getProjectLedgerActuals(
+  tx: Tx,
+  projectIds: readonly string[],
+): Promise<Map<string, ProjectLedgerActuals>> {
+  const result = new Map<string, ProjectLedgerActuals>();
+  if (!projectIds.length) return result;
+
+  const ids = anyOf([...new Set(projectIds)], "uuid[]");
+
+  const rows = (await tx.execute(sql`
+    SELECT l.project_id::text                                        AS project_id,
+           COALESCE(SUM(l.credit - l.debit) FILTER (
+             WHERE a.account_type = 'revenue'
+           ), 0)::float8                                             AS revenue,
+           COALESCE(SUM(l.debit - l.credit) FILTER (
+             WHERE a.account_type = 'expense'
+           ), 0)::float8                                             AS costs,
+           COUNT(*)::int                                             AS line_count
+      FROM journal_lines l
+      JOIN journal_entries e ON e.id = l.entry_id
+      JOIN accounts a        ON a.id = l.account_id
+     WHERE l.project_id = ${ids}
+       AND e.status = 'posted'
+     GROUP BY l.project_id
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  for (const r of rows) {
+    result.set(String(r.project_id), {
+      revenue: num(r.revenue),
+      costs: num(r.costs),
+      lineCount: Number(r.line_count ?? 0),
+    });
+  }
+  for (const id of projectIds) {
+    if (!result.has(id)) result.set(id, { revenue: 0, costs: 0, lineCount: 0 });
+  }
+  return result;
+}
+
+/**
+ * The two answers, side by side, with their difference.
+ *
+ * §10.4 argued the project should be a ledger dimension and this is how anybody
+ * finds out whether it worked — and, just as usefully, whether the DOCUMENT
+ * SCAN was ever right. Two independent derivations of one number that agree are
+ * worth more than either alone; where they disagree, one of them is wrong and
+ * until now there was no way to tell.
+ *
+ * Nothing consumes this yet. It is a read for a test and for whoever wires the
+ * reconciliation onto a page.
+ */
+export async function reconcileProjectActuals(tx: Tx, projectId: string) {
+  const [fromDocuments, fromLedger] = await Promise.all([
+    computeProjectActuals(tx, projectId),
+    getProjectLedgerActuals(tx, [projectId]),
+  ]);
+  const ledger = fromLedger.get(projectId) ?? {
+    revenue: 0,
+    costs: 0,
+    lineCount: 0,
+  };
+
+  return {
+    documents: {
+      revenue: fromDocuments.revenue,
+      costs: fromDocuments.costs,
+      committed: fromDocuments.committed,
+    },
+    ledger,
+    difference: {
+      revenue: round2(fromDocuments.revenue - ledger.revenue),
+      costs: round2(fromDocuments.costs - ledger.costs),
+    },
+    /** True where the ledger has never been told about this project at all —
+     *  which is a different statement from "the figures disagree". */
+    ledgerSilent: ledger.lineCount === 0,
+  };
+}
+
+/**
+ * A project's ledger cost broken down by COST CODE — the dimension a budget is
+ * actually checked against.
+ *
+ * `getProjectBudgetVsActual` answers this from bills, claims and expenses. This
+ * answers it from the postings, and the same three caveats above apply.
+ */
+export async function getProjectLedgerByCostCode(tx: Tx, projectId: string) {
+  const rows = (await tx.execute(sql`
+    SELECT l.cost_code_id::text                        AS cost_code_id,
+           cc.code                                     AS code,
+           cc.name                                     AS name,
+           COALESCE(SUM(l.debit - l.credit), 0)::float8 AS actual
+      FROM journal_lines l
+      JOIN journal_entries e   ON e.id = l.entry_id
+      JOIN accounts a          ON a.id = l.account_id
+      LEFT JOIN project_cost_codes cc ON cc.id = l.cost_code_id
+     WHERE l.project_id = ${projectId}
+       AND e.status = 'posted'
+       AND a.account_type = 'expense'
+     GROUP BY l.cost_code_id, cc.code, cc.name
+     ORDER BY cc.code NULLS LAST
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    costCodeId: r.cost_code_id === null ? null : String(r.cost_code_id),
+    code: (r.code as string) ?? null,
+    name: (r.name as string) ?? null,
+    actual: num(r.actual),
+  }));
+}

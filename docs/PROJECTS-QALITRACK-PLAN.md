@@ -919,8 +919,11 @@ What that costs us today, concretely:
 - **payroll cannot reach a project** — payroll posts journals, and the execution
   layer's own decision 4 says labour reaches the GL through payroll. So the one
   cost that is usually a contractor's largest is structurally invisible to the
-  project.
-- **depreciation on plant working on a job cannot reach it either**
+  project. **CORRECTED in §12:** the column does NOT fix this. It removes the
+  structural barrier and leaves the data one — nothing records which project a
+  person worked on, and that is timesheets.
+- **depreciation on plant working on a job cannot reach it either** — and still
+  cannot, because `assets` has no `project_id`
 - every new document type that carries a project needs a new arm in that query
 - **a project P&L can never be reconciled to the general ledger**, because the
   two are computed from different places
@@ -1159,3 +1162,107 @@ Next, in the order that pays:
    and the journal are not.
 4. **Notice deadlines with a NOTIFICATION** — the bell has existed since 0074 and
    nothing in this module writes to it.
+
+---
+
+## 12. The ledger dimension, and the question it exposed
+
+Migration 0080 makes the project a dimension on `journal_lines` — §10.4's item
+1, the gap everything else about project cost sits downstream of. Building it
+turned up an accounting question that is not the porter's to answer, and
+corrected something §10.4 got wrong.
+
+### What 0080 does
+
+`journal_lines.project_id` and `cost_code_id`, nullable, on the LINE rather than
+the entry because one entry can span projects. Stamped by the five postings
+whose source document knows a project — invoice (revenue and cost of sales),
+bill, expense, employee claim, credit note (from the invoice it credits) — and
+by a manual journal, which is the case that could not be done at all before.
+
+`getProjectLedgerActuals` reads it; `reconcileProjectActuals` puts the ledger
+figure beside the document scan with the difference between them. **Nothing has
+been switched over.** `computeProjectActuals` is untouched and still answers
+every screen, for the reasons below.
+
+### The correction §10.4 needs
+
+§10.4 listed, as things the missing dimension cost us, that "**payroll cannot
+reach a project**" and depreciation cannot either — implying the column fixes
+them. **It does not.** The column removes the STRUCTURAL barrier and leaves the
+DATA barrier untouched:
+
+- **Payroll** posts wages, PAYE and NSSF, and nothing in this system records
+  which project a person worked on. That is timesheets. `project_assignments`
+  already holds the RATE (`rate_amount` + `rate_unit`: hour, day, month, fixed)
+  and nothing multiplies it by anything; `attendance` holds hours but carries no
+  project, and field staff who report from home straight to site never clock in
+  — which is already why payroll deductions are not derived from it.
+- **Depreciation** posts, and `assets` has no `project_id`, so plant working a
+  job cannot charge it.
+
+So: rate in one table, hours in another that cannot be trusted for this, money
+in a third that posts. Three thirds of an answer and no joins between them.
+
+### The question this exposed, and it is an accounting one
+
+**Stock issued to a project posts nothing at all.** `recordMovement`,
+`issueStock` and `createCheckout` each insert a row and none of them creates a
+journal entry — while a bill for an inventory purchase DEBITS Inventory
+(`bills.ts`, the `isInventoryPurchase` arm). So material bought for a job and
+issued to it is relieved from stock in QUANTITY and never in the LEDGER.
+
+On a construction project that is usually the largest cost line. It means a
+ledger-derived project P&L would be missing materials however well 0080's column
+is populated — and it would look authoritative while being wrong, which is the
+failure this module has spent a day removing.
+
+`computeProjectActuals` counts it, because it reads the movements. That is
+precisely why the two figures disagree, and why `reconcileProjectActuals`
+reports the difference rather than either one claiming to be the answer.
+
+**Three options, and the choice is the tenant's accounting policy, not a
+porting decision:**
+
+| | what it means |
+|---|---|
+| **(a) analytic only** | project cost lives in project reporting; the GL stays document-level. What Odoo, NetSuite and Procore do. Cheap and honest, and the project P&L never reconciles to the trial balance. |
+| **(b) allocated** | issues post DR project cost / CR Inventory; labour is moved from a payroll control account to project cost by ONE period-end journal on the timesheets. SAP settlement, Candy cost allocation. The only version where a project P&L reconciles. |
+| **(c) expensed at purchase** | material bought against a job is charged to the job when PURCHASED, so the bill already carries the cost and the issue is a stock record only. Common in practice, and it makes today's behaviour nearly right. |
+
+**Materials and labour are the same question**, and it should be answered once
+for both rather than twice. If the answer is (b), note the shape: one allocation
+journal per period, never a posting per timesheet — per-timesheet postings are
+how a ledger acquires fifty thousand lines a month and no clean way to reverse a
+correction.
+
+Until it is answered, the ledger figure is an instrument and not the answer, and
+this document should not claim otherwise.
+
+### Where the two figures differ today, and why
+
+Pinned in `tests/pg-project-ledger-dimension.test.mjs` as facts rather than left
+to be rediscovered as bugs:
+
+1. **Nothing is backfilled.** Entries posted before 0080 carry no project. A job
+   running for months reads near zero from the ledger and correctly from the
+   scan.
+2. **Materials, as above.**
+3. **Commitment is not an accounting concept.** The scan's `committed` —
+   approved and unpaid — has no journal entry by definition, which is why 0070
+   decision 2 computed it from documents in the first place.
+
+### What is now unblocked
+
+The **timesheet** is the join between projects and payroll, and its shape is
+already decided by the execution layer's decision 4: it does NOT post — labour
+reaches the GL through payroll once, where the statutory deductions are, and
+posting the timesheet too books the same wage twice. It is an analytic record
+that produces project labour cost and makes `billing_model = 'time_material'`
+mean something for the first time.
+
+One thing to settle before that table exists: the roster's four rate units do
+not all multiply the same way. `hour` and `day` are a straight multiplication;
+`month` is a salary that has to be APPORTIONED across the days and jobs worked;
+`fixed` is a lump sum against the project and is closer to a milestone than a
+timesheet. That decides whether the timesheet stores hours, days, or both.

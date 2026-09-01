@@ -22,6 +22,13 @@ export interface JournalLineInput {
   debit?: MoneyString;
   credit?: MoneyString;
   description?: string | null;
+  /**
+   * The project dimension — 0080. Usually supplied once on the ENTRY and
+   * applied to every line; set here only where the lines of one entry belong
+   * to different projects.
+   */
+  projectId?: string | null;
+  costCodeId?: string | null;
 }
 
 export interface CreateJournalEntryInput {
@@ -37,6 +44,18 @@ export interface CreateJournalEntryInput {
   sourceType?: (typeof journalEntries.sourceType.enumValues)[number] | null;
   sourceId?: string | null;
   lines: JournalLineInput[];
+  /**
+   * THE PROJECT THIS ENTRY IS FOR, applied to every line that does not name its
+   * own — 0080.
+   *
+   * On the entry as a convenience and on the LINE as the truth: every posting
+   * that has a project has it for the whole document (an invoice's receivable
+   * and its revenue are both that job's), so making each of two dozen call
+   * sites repeat it per line would be the kind of duplication that gets one
+   * line wrong and nothing notices.
+   */
+  projectId?: string | null;
+  costCodeId?: string | null;
   createdById?: string | null;
   postImmediately?: boolean;
 }
@@ -87,15 +106,33 @@ export async function createJournalEntry(
     .returning();
 
   await tx.insert(journalLines).values(
-    input.lines.map((line, i) => ({
-      companyId: input.companyId,
-      entryId: entry.id,
-      accountId: line.accountId,
-      lineNumber: i + 1,
-      debit: line.debit ?? "0",
-      credit: line.credit ?? "0",
-      description: line.description ?? null,
-    })),
+    input.lines.map((line, i) => {
+      /**
+       * The line wins where it says something, the entry supplies the rest.
+       * `undefined` means "not stated" and falls back; an explicit `null` on
+       * the line means "deliberately no project", which is how one line of an
+       * otherwise project-tagged entry opts out.
+       */
+      const projectId =
+        line.projectId === undefined ? (input.projectId ?? null) : line.projectId;
+      const costCodeId =
+        line.costCodeId === undefined ? (input.costCodeId ?? null) : line.costCodeId;
+
+      return {
+        companyId: input.companyId,
+        entryId: entry.id,
+        accountId: line.accountId,
+        lineNumber: i + 1,
+        debit: line.debit ?? "0",
+        credit: line.credit ?? "0",
+        description: line.description ?? null,
+        projectId,
+        // `journal_lines_cost_code_needs_project` refuses a code with no
+        // project; drop it rather than fail the posting, because a cost code
+        // without its project is meaningless rather than fatal.
+        costCodeId: projectId ? costCodeId : null,
+      };
+    }),
   );
 
   return entry;

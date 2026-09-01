@@ -1141,6 +1141,10 @@ export async function payAdvance(
     partyId: claim.partyId,
     sourceType: "employee_claim",
     sourceId: claim.id,
+    // The project dimension — 0080. A claim carries the cost code too,
+    // and it is the one the budget is checked against.
+    projectId: claim.projectId ?? null,
+    costCodeId: claim.costCodeId ?? null,
     lines: [
       {
         accountId: advanceAccount.id,
@@ -1354,6 +1358,10 @@ export async function closeSettlement(
     partyId: settlement.partyId,
     sourceType: "employee_claim",
     sourceId: settlement.id,
+    // The project dimension — 0080. A claim carries the cost code too,
+    // and it is the one the budget is checked against.
+    projectId: settlement.projectId ?? null,
+    costCodeId: settlement.costCodeId ?? null,
     lines,
     createdById: by.id ?? null,
     postImmediately: true,
@@ -1448,6 +1456,8 @@ export async function recordAdvanceReturn(
     partyId: settlement.partyId,
     sourceType: "employee_claim",
     sourceId: settlement.id,
+    projectId: settlement.projectId ?? null,
+    costCodeId: settlement.costCodeId ?? null,
     lines: [
       {
         accountId: opts.paymentAccountId,
@@ -1531,6 +1541,8 @@ export async function paySettlementBalance(
     partyId: settlement.partyId,
     sourceType: "employee_claim",
     sourceId: settlement.id,
+    projectId: settlement.projectId ?? null,
+    costCodeId: settlement.costCodeId ?? null,
     lines: [
       {
         accountId: payablesAccount.id,
@@ -1627,6 +1639,8 @@ export async function payReimbursement(
     partyId: claim.partyId,
     sourceType: "employee_claim",
     sourceId: claim.id,
+    projectId: claim.projectId ?? null,
+    costCodeId: claim.costCodeId ?? null,
     lines: [
       ...expenseLines.map((l) => ({
         accountId: l.accountId,
@@ -1661,6 +1675,8 @@ export async function payReimbursement(
     partyId: claim.partyId,
     sourceType: "employee_claim",
     sourceId: claim.id,
+    projectId: claim.projectId ?? null,
+    costCodeId: claim.costCodeId ?? null,
     lines: [
       {
         accountId: payablesAccount.id,
