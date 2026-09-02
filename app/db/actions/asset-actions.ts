@@ -568,7 +568,7 @@ export async function getAssetRollforward(opts: {
 }
 
 
-/** The bills half of an asset's running costs. See asset-cost-queries.js. */
+/** The bills half of an asset's running costs. See app/db/queries/asset-costs.js. */
 export async function listAssetBillCostsPg(assetId: string) {
   try {
     return await withAuthorizedTenant([], (tx) =>

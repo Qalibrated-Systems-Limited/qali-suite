@@ -24,7 +24,7 @@ import {
 import {
   loadFleetAssetCount,
   loadFleetInsights,
-} from "@/app/mongodb/queries/fleet-insights-queries";
+} from "@/app/db/queries/fleet-insights";
 
 export const metadata = {
   title: "Fleet Insights | Fixed Assets",

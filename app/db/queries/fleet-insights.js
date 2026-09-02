@@ -1,7 +1,6 @@
 import "server-only";
 import { cache } from "react";
 
-import dbConnect from "@/app/config/dbConnect";
 import {
   countFleetAssetsPg,
   getFleetUsagePg,
@@ -137,8 +136,6 @@ export const loadFleetInsights = cache(async (category = "") => {
         window: null,
       };
     }
-    await dbConnect();
-
     const now = new Date();
     const windowEnd = new Date(now);
     const windowStart = new Date(now);

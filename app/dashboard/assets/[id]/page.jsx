@@ -50,7 +50,7 @@ import {
 import {
   getAssetExpenses,
   getAssetRunningCosts,
-} from "@/app/mongodb/queries/asset-cost-queries";
+} from "@/app/db/queries/asset-costs";
 import DisposeAssetDialog from "@/app/dashboard/assets/components/DisposeAssetDialog";
 import CancelDepreciationButton from "@/app/dashboard/assets/components/CancelDepreciationButton";
 import TransferAssetDialog from "@/app/dashboard/assets/components/TransferAssetDialog";
