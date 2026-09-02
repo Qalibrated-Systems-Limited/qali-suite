@@ -1,52 +1,61 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
-import { FolderKanban } from "lucide-react";
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { FolderKanban, ChevronsUpDown, Check } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { SELECTED_PROJECT_COOKIE } from "../lib/sections";
 
 /**
- * Which project the current section (Milestones, Programme, IPC & Payments,
- * etc.) is showing. Changing it keeps the page but swaps `?project=` so the
- * server component re-fetches for the new project — every section reads the
- * same query param, so switching once here follows you across the module.
+ * Which project the current section is showing.
  *
- * FINISHED JOBS ARE LISTED, and marked. The list used to be live projects
- * only, which made the diary and instruction register of every completed job
- * unreachable — the records people come back for during a final account or a
- * dispute. Now everything is offered, live first, and anything not live wears
- * its status so a completed job is never mistaken for a running one.
+ * A SEARCH, NOT A SCROLL. This was a `Select` listing every project, which is
+ * fine for three and unusable for eighty — and a contractor's project list only
+ * ever grows, because finished jobs stay in it. The codebase already argued
+ * this once, on the account picker: "a scroll-and-select over 39 accounts
+ * ordered by code is a search problem pretending to be a list". Same component
+ * pattern, same reason.
+ *
+ * Typing matches the NUMBER or the NAME, because people know a job by either —
+ * "RWC 772" or "Otho–Got Kachola".
+ *
+ * FINISHED JOBS ARE LISTED, and marked. Limiting this to live projects made the
+ * diary and instruction register of every completed job unreachable, and those
+ * are the records people come back for during a final account or a dispute. So
+ * everything is offered, live first, and anything not live wears its status.
+ *
+ * Choosing writes a cookie as well as the URL: most ways into a section — the
+ * sidebar, a typed address, the command palette — carry no `?project=`, and
+ * without the cookie every one of them fell back to whichever job sorted first.
  */
 export default function ProjectSwitcher({ projects, selectedId }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [open, setOpen] = useState(false);
 
   if (!projects?.length) return null;
 
-  function handleChange(id) {
-    /**
-     * Remember it, then navigate.
-     *
-     * The URL alone was not enough: the sidebar links, a typed address and the
-     * command palette all arrive without `?project=`, and every one of those
-     * fell back to the first live project — so a choice made here survived
-     * exactly until the next click. The cookie is what `getWorkspaceContext`
-     * reads when the URL is silent, and it validates the id against the
-     * tenant's own list before trusting it.
-     *
-     * A year, because "which project am I working on" is not a thing anybody
-     * wants to re-answer weekly. `SameSite=Lax` so it rides ordinary
-     * navigation; no `Secure` flag hardcoded, since that would drop it on
-     * http://localhost during development.
-     */
+  const selected = projects.find((p) => p.id === selectedId) ?? null;
+  const isLive = (p) => p.status === "planning" || p.status === "active";
+
+  function choose(id) {
+    setOpen(false);
     document.cookie = `${SELECTED_PROJECT_COOKIE}=${encodeURIComponent(id)}; path=/; max-age=31536000; SameSite=Lax`;
     const params = new URLSearchParams(searchParams.toString());
     params.set("project", id);
@@ -54,32 +63,74 @@ export default function ProjectSwitcher({ projects, selectedId }) {
   }
 
   return (
-    <Select value={selectedId || undefined} onValueChange={handleChange}>
-      <SelectTrigger className="w-full sm:w-72 h-10 bg-background">
-        <FolderKanban className="h-4 w-4 text-muted-foreground shrink-0 mr-1.5" />
-        <SelectValue placeholder="Select a project" />
-      </SelectTrigger>
-      <SelectContent>
-        {projects.map((p) => {
-          const live = p.status === "planning" || p.status === "active";
-          return (
-            <SelectItem key={p.id} value={p.id}>
-              <span className="font-mono text-xs text-muted-foreground mr-2">
-                {p.projectNumber}
-              </span>
-              {p.name}
-              {!live && (
-                <Badge
-                  variant="outline"
-                  className="ml-2 text-[10px] font-normal capitalize"
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full sm:w-72 h-10 justify-between bg-background font-normal"
+        >
+          <span className="flex items-center gap-1.5 min-w-0">
+            <FolderKanban className="h-4 w-4 text-muted-foreground shrink-0" />
+            {selected ? (
+              <>
+                <span className="font-mono text-xs text-muted-foreground shrink-0">
+                  {selected.projectNumber}
+                </span>
+                <span className="truncate">{selected.name}</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">Select a project</span>
+            )}
+          </span>
+          <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
+        </Button>
+      </PopoverTrigger>
+
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command
+          filter={(value, search) =>
+            value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
+          }
+        >
+          <CommandInput placeholder="Search by number or name..." />
+          <CommandList>
+            <CommandEmpty>No project matches that.</CommandEmpty>
+            <CommandGroup>
+              {projects.map((p) => (
+                <CommandItem
+                  key={p.id}
+                  /* Both fields are searchable, so either way of naming a job
+                     finds it. */
+                  value={`${p.projectNumber} ${p.name}`}
+                  onSelect={() => choose(p.id)}
+                  className="gap-2"
                 >
-                  {String(p.status ?? "").replace("_", " ")}
-                </Badge>
-              )}
-            </SelectItem>
-          );
-        })}
-      </SelectContent>
-    </Select>
+                  <Check
+                    className={cn(
+                      "h-4 w-4 shrink-0",
+                      p.id === selectedId ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <span className="font-mono text-xs text-muted-foreground shrink-0">
+                    {p.projectNumber}
+                  </span>
+                  <span className="truncate">{p.name}</span>
+                  {!isLive(p) && (
+                    <Badge
+                      variant="outline"
+                      className="ml-auto text-[10px] font-normal capitalize shrink-0"
+                    >
+                      {String(p.status ?? "").replace("_", " ")}
+                    </Badge>
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
