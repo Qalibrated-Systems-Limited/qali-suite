@@ -29,7 +29,7 @@ import {
 import { toast } from "sonner";
 
 /**
- * Interim payment certificates — 0077.
+ * Interim payment certificates — 0081.
  *
  * TWO THINGS ON ONE PAGE, and the order is the point: the CONTRACT first,
  * because a certificate cannot be computed without terms, and then the
@@ -42,7 +42,7 @@ import { toast } from "sonner";
  * they will do is ask for the breakdown.
  *
  * NOTHING HERE IS TAX. VAT, VAT withholding and WHT belong to the invoice this
- * raises and the payment that settles it — 0077 decision 2.
+ * raises and the payment that settles it — 0081 decision 2.
  */
 
 const STATUS_BADGE = {

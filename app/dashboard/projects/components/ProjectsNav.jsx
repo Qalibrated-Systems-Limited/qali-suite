@@ -29,7 +29,7 @@ import { SECTIONS, selectProject, sectionsFor } from "../lib/sections";
  * something you produce, not somewhere you go. All three folded in; their routes
  * still resolve as redirects, so no saved link breaks.
  *
- * **And a section appears only where the project needs it** — 0078. A
+ * **And a section appears only where the project needs it** — 0082. A
  * supply-only job has no site diary and nothing to certify, and no standard says
  * it should. The type chooses the defaults; a project with no type shows
  * everything, so nothing disappeared from anybody's screen when the column

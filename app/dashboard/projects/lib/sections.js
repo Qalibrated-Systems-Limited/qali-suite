@@ -13,7 +13,7 @@
  * decides whether each appears.
  *
  * Dashboard is not here: it is the module itself and every project has one.
- * `key` matches the column name in 0078 minus the `shows_` prefix.
+ * `key` matches the column name in 0082 minus the `shows_` prefix.
  */
 export const SECTIONS = [
   { key: "boq", href: "/dashboard/projects/boq", label: "Bill of Quantities" },
@@ -32,7 +32,7 @@ export const ALL_SECTIONS = Object.freeze(
 /**
  * The section flags for one workspace row.
  *
- * A project with NO TYPE shows everything (0078 decision 4): the type is a
+ * A project with NO TYPE shows everything (0082 decision 4): the type is a
  * narrowing a tenant opts into, not a wall that arrives with a deploy. The same
  * is true of a row this function has never seen — an unknown shape shows more
  * rather than less, because a hidden section is indistinguishable from a

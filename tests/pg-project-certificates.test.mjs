@@ -1,5 +1,5 @@
 /**
- * Contracts, interim payment certificates and the project type — 0077 and 0078.
+ * Contracts, interim payment certificates and the project type — 0081 and 0082.
  *
  * Most of this file is arithmetic, because a certificate IS arithmetic and a
  * wrong one is a wrong payment. The rest is what the database refuses: an
@@ -41,7 +41,7 @@ suite("contracts and certificates", () => {
    * that truncate, so the first one to run used to delete the built-in types
    * for every suite after it.
    *
-   * `seed_builtin_project_types()` (0079) puts them back, and the fixture is
+   * `seed_builtin_project_types()` (0083) puts them back, and the fixture is
    * therefore the migration's own rows rather than a second copy of the six
    * that could drift from it.
    */

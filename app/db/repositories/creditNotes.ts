@@ -283,7 +283,7 @@ export async function issueCreditNote(
   });
 
   /**
-   * THE PROJECT COMES FROM THE INVOICE — 0080.
+   * THE PROJECT COMES FROM THE INVOICE — 0084.
    *
    * A credit note has no project of its own and should not: it reverses part
    * of an invoice, so it belongs to whatever job that invoice was raised

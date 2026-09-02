@@ -21,7 +21,7 @@ export const metadata = {
 };
 
 /**
- * The bill of quantities — 0076.
+ * The bill of quantities — 0080.
  *
  * `detail` — this page reads `project.contractValue`, which the switcher row
  * does not carry: for a remeasured contract the priced bill total IS the

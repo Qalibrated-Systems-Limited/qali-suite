@@ -1335,7 +1335,7 @@ function revalidateTask(projectId?: string | null) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The bill of quantities — 0076
+// The bill of quantities — 0080
 //
 // The measured half. `getProjectBoq` is the whole page in one call; everything
 // below it writes.
@@ -1735,7 +1735,7 @@ export async function deleteProjectBoqMeasurement(
 /**
  * The project types a tenant may pick from — the built-ins, plus its own.
  *
- * RLS does the filtering: the 0078 policy reads `company_id IS NULL OR
+ * RLS does the filtering: the 0082 policy reads `company_id IS NULL OR
  * company_id = current`, so a built-in is visible to everyone and a tenant's
  * own to nobody else. Nothing here says anything about tenancy, which is why it
  * cannot get it wrong.
@@ -1748,7 +1748,7 @@ export async function getProjectTypes() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The contract, and the interim payment certificate — 0077
+// The contract, and the interim payment certificate — 0081
 // ─────────────────────────────────────────────────────────────────────────────
 
 function revalidateCertificates(projectId?: string | null) {
@@ -2086,7 +2086,7 @@ export async function deleteProjectCertificate(
 }
 
 /**
- * Raise the DRAFT invoice for a certified certificate — 0077 decision 3, and
+ * Raise the DRAFT invoice for a certified certificate — 0081 decision 3, and
  * the same decision the execution layer made for milestones.
  *
  * A DRAFT and nothing more: reviewable, editable and deletable, and it makes

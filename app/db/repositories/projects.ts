@@ -235,7 +235,7 @@ export async function getProjectById(tx: Tx, projectId: string) {
  */
 export async function listProjectsForWorkspace(tx: Tx) {
   /**
-   * The section flags come with the row — 0078.
+   * The section flags come with the row — 0082.
    *
    * The module's sub-navigation is rendered in the LAYOUT, above pages that
    * each resolve their own project from `?project=`, and a layout does not
@@ -1254,7 +1254,7 @@ export interface CreateProjectInput {
   projectManagerUserId?: string | null;
   projectManagerName?: string | null;
   parentProjectId?: string | null;
-  /** What KIND of work — a `project_types` row (0078). NULL shows every section. */
+  /** What KIND of work — a `project_types` row (0082). NULL shows every section. */
   typeId?: string | null;
   billingModel?: "fixed" | "milestone" | "time_material" | null;
   contractValue?: string | null;
@@ -1629,7 +1629,7 @@ const LEAVES = sql`
 `;
 
 /**
- * The measured value of an awarded bill — 0076.
+ * The measured value of an awarded bill — 0080.
  *
  * `billed` is the bill total, `earned` is what has been measured against it at
  * the same rates. Both are money, which is what a quantity surveyor means by
@@ -1722,7 +1722,7 @@ export async function computeProgressFor(
       : num(r.rolled_up);
 
     /**
-     * MEASURED BEATS TASKS BEATS TYPED — 0076.
+     * MEASURED BEATS TASKS BEATS TYPED — 0080.
      *
      * A remeasure against a signed bill is evidence; a weighted roll-up of
      * tasks is a careful opinion; the slider is an assertion. Where more than
@@ -2038,7 +2038,7 @@ export async function countTasks(tx: Tx, projectId: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The bill of quantities — 0076
+// The bill of quantities — 0080
 //
 // The measured half of the module. Everything above this line values a project
 // by what was spent or asserted; this values it by what was measured against a
@@ -2522,7 +2522,7 @@ export async function deleteBoqMeasurement(tx: Tx, measurementId: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The contract, and the interim payment certificate — 0077
+// The contract, and the interim payment certificate — 0081
 //
 // MONEY IS A STRING on the stored rows and a NUMBER on the computed
 // certificate, for the reason the header gives: the screens do arithmetic on a
@@ -2734,7 +2734,7 @@ type ContractRow = typeof projectContracts.$inferSelect;
 type CertificateRow = typeof projectCertificates.$inferSelect;
 
 /**
- * The certificate arithmetic — 0077 decision 1, in one place.
+ * The certificate arithmetic — 0081 decision 1, in one place.
  *
  *     value of permanent work to date
  *   + materials on site
@@ -3077,7 +3077,7 @@ export async function attachCertificateInvoice(
  * The contract's position: certified to date, retention outstanding, advance
  * outstanding, and how far through the contract sum the certificates have got.
  *
- * RETENTION DOES NOT REACH THE LEDGER (0077 decision 4). This is the balance,
+ * RETENTION DOES NOT REACH THE LEDGER (0081 decision 4). This is the balance,
  * computed from the certificates that stand. The journal that moves it out of
  * receivables — and `1250 Retention Receivable`, which is not in the chart —
  * is step 6.
@@ -3117,7 +3117,7 @@ export async function getContractPosition(tx: Tx, contractId: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The project as a ledger dimension — 0080
+// The project as a ledger dimension — 0084
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ProjectLedgerActuals {
@@ -3126,12 +3126,12 @@ export interface ProjectLedgerActuals {
   /** Cost: debits less credits on expense accounts. */
   costs: number;
   /** How many posted lines carry this project. Zero is the honest answer for a
-   *  project whose documents all pre-date 0080. */
+   *  project whose documents all pre-date 0084. */
   lineCount: number;
 }
 
 /**
- * A project's position FROM THE LEDGER — 0080, and the other half of §10.4.
+ * A project's position FROM THE LEDGER — 0084, and the other half of §10.4.
  *
  * `computeProjectActuals` answers the same question by scanning five document
  * tables. This one asks the general ledger, which is the only version that can
@@ -3147,7 +3147,7 @@ export interface ProjectLedgerActuals {
  * Read this beside `reconcileProjectActuals` before treating a difference as a
  * bug. Three known reasons, none of them a defect in either query:
  *
- *  1. **Nothing is backfilled.** Every entry posted before 0080 has no project
+ *  1. **Nothing is backfilled.** Every entry posted before 0084 has no project
  *     on it, so a project that has been running for months reads near zero here
  *     and correctly in the document scan.
  *  2. **Stock issued to a project posts NOTHING.** `recordMovement`,

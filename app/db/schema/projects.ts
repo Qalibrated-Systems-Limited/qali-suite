@@ -95,7 +95,7 @@ export const projects = pgTable(
     parentProjectId: uuid("parent_project_id"),
 
     /**
-     * WHAT KIND of work this is — 0078. A lookup row, not an enum, because the
+     * WHAT KIND of work this is — 0082. A lookup row, not an enum, because the
      * tenant owns this vocabulary (§9.1). NULL shows every section, which is
      * what every project had before the column existed.
      */
@@ -586,7 +586,7 @@ export const projectTasks = pgTable(
 );
 
 /**
- * The bill header — 0076. Versioned, one awarded at a time.
+ * The bill header — 0080. Versioned, one awarded at a time.
  *
  * §8 of `docs/PROJECTS-QALITRACK-PLAN.md` described two tables; building it
  * showed the bill-level facts have nowhere to live in the items. The precedent
@@ -669,7 +669,7 @@ export const projectBoqs = pgTable(
  * (0071). A bill of quantities is numbered hierarchically and the figures a QS
  * reads are the section totals, which are roll-ups of the leaves.
  *
- * ONLY A LEAF IS PRICED (0076 decision 4). A section takes its amount from what
+ * ONLY A LEAF IS PRICED (0080 decision 4). A section takes its amount from what
  * is under it; `project_boq_items_leaf_owns_quantity` refuses a rate on a row
  * with sub-items, and `project_boq_items_refuse_child_of_priced` refuses the
  * other direction rather than silently discarding a contractual figure.
@@ -795,7 +795,7 @@ export const projectBoqItems = pgTable(
 );
 
 /**
- * One row per measurement event — 0076 decision 2. NEVER a running total.
+ * One row per measurement event — 0080 decision 2. NEVER a running total.
  *
  * The quantity measured to date is `SUM(quantity)` over these rows. Last
  * month's over-measure is corrected by a NEGATIVE row rather than by editing
@@ -844,7 +844,7 @@ export const projectBoqMeasurements = pgTable(
 );
 
 /**
- * The contract terms — 0077. Per contract, never per tenant.
+ * The contract terms — 0081. Per contract, never per tenant.
  *
  * §7 of `docs/PROJECTS-QALITRACK-PLAN.md`: nothing about a contract may be
  * hardcoded. One tenant retains 10% capped at 5% with a twelve-month defects
@@ -855,7 +855,7 @@ export const projectBoqMeasurements = pgTable(
  *
  * THE CONTRACT SUM IS THE CONTRACT'S. `projects.contractValue` becomes the
  * fallback where no contract exists — one figure, one rule, exactly what 0070
- * decision 5 did to the budget total and 0076 did to progress.
+ * decision 5 did to the budget total and 0080 did to progress.
  */
 export const projectContracts = pgTable(
   "project_contracts",
@@ -956,7 +956,7 @@ export const projectContracts = pgTable(
 );
 
 /**
- * The interim payment certificate — 0077.
+ * The interim payment certificate — 0081.
  *
  * FOUR STORED NUMBERS, all cumulative as at the valuation date, and every other
  * figure derived from them and the contract terms:
@@ -1020,7 +1020,7 @@ export const projectCertificates = pgTable(
      * Declared WITHOUT a drizzle `.references()`: `invoices.ts` already imports
      * this file for its own `project_id`, and pointing back would make the two
      * schema modules a cycle for a constraint the database holds either way —
-     * `project_certificates_invoice_id_invoices_id_fk`, in 0077. Same reason
+     * `project_certificates_invoice_id_invoices_id_fk`, in 0081. Same reason
      * `contractId` and `taskId` are declared bare above.
      */
     invoiceId: uuid("invoice_id"),
@@ -1076,7 +1076,7 @@ export const projectCertificates = pgTable(
 );
 
 /**
- * What kind of work a project is, and which sections follow — 0078.
+ * What kind of work a project is, and which sections follow — 0082.
  *
  * A LOOKUP TABLE, not a `pgEnum` (§9.1). §7 specified an enum while recording,
  * as an open question, that we cannot enumerate the business of tenants we have
@@ -1087,7 +1087,7 @@ export const projectCertificates = pgTable(
  * machine, so those stay enums.
  *
  * `companyId` NULL is a BUILT-IN — readable by every tenant and writable by
- * none. The RLS policy in 0078 reads `company_id IS NULL OR company_id =
+ * none. The RLS policy in 0082 reads `company_id IS NULL OR company_id =
  * current` and writes only `company_id = current`, so that asymmetry is the
  * database's rather than something every query has to remember.
  *

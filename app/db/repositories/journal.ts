@@ -23,7 +23,7 @@ export interface JournalLineInput {
   credit?: MoneyString;
   description?: string | null;
   /**
-   * The project dimension — 0080. Usually supplied once on the ENTRY and
+   * The project dimension — 0084. Usually supplied once on the ENTRY and
    * applied to every line; set here only where the lines of one entry belong
    * to different projects.
    */
@@ -46,7 +46,7 @@ export interface CreateJournalEntryInput {
   lines: JournalLineInput[];
   /**
    * THE PROJECT THIS ENTRY IS FOR, applied to every line that does not name its
-   * own — 0080.
+   * own — 0084.
    *
    * On the entry as a convenience and on the LINE as the truth: every posting
    * that has a project has it for the whole document (an invoice's receivable

@@ -190,13 +190,13 @@ export const journalLines = pgTable(
     accountNameAtPosting: text("account_name_at_posting").notNull().default(""),
 
     /**
-     * THE PROJECT DIMENSION — 0080.
+     * THE PROJECT DIMENSION — 0084.
      *
      * On the LINE, not the entry: one entry can span projects, and a payment
      * settling two invoices on different jobs is the obvious case. Same place
      * SAP puts the WBS element and Odoo puts its analytic account.
      *
-     * Nullable, and nothing backfills. Entries posted before 0080 have no
+     * Nullable, and nothing backfills. Entries posted before 0084 have no
      * project and will not acquire one — the information is on the source
      * DOCUMENT, and inferring it would write a number nobody observed into the
      * ledger.

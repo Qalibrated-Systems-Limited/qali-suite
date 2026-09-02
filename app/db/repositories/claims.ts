@@ -1141,7 +1141,7 @@ export async function payAdvance(
     partyId: claim.partyId,
     sourceType: "employee_claim",
     sourceId: claim.id,
-    // The project dimension — 0080. A claim carries the cost code too,
+    // The project dimension — 0084. A claim carries the cost code too,
     // and it is the one the budget is checked against.
     projectId: claim.projectId ?? null,
     costCodeId: claim.costCodeId ?? null,
@@ -1358,7 +1358,7 @@ export async function closeSettlement(
     partyId: settlement.partyId,
     sourceType: "employee_claim",
     sourceId: settlement.id,
-    // The project dimension — 0080. A claim carries the cost code too,
+    // The project dimension — 0084. A claim carries the cost code too,
     // and it is the one the budget is checked against.
     projectId: settlement.projectId ?? null,
     costCodeId: settlement.costCodeId ?? null,

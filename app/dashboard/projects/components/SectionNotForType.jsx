@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { EyeOff } from "lucide-react";
 
 /**
- * This section is not part of what this KIND of project does — 0078.
+ * This section is not part of what this KIND of project does — 0082.
  *
  * NOT an error and not a permission refusal, and the wording matters: the
  * reader has not done anything wrong and nothing is being withheld from them.

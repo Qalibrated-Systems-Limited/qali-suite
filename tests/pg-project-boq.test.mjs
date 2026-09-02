@@ -1,5 +1,5 @@
 /**
- * The bill of quantities — 0076 — against a real PostgreSQL.
+ * The bill of quantities — 0080 — against a real PostgreSQL.
  *
  * This is the table that makes progress a MEASUREMENT rather than an opinion,
  * so most of what is worth testing is what the database REFUSES: a section
@@ -489,7 +489,7 @@ suite("the bill of quantities", () => {
     });
 
     it("is MEASURED once a bill is awarded, and outranks both", async () => {
-      // The whole point of 0076: 8 of 20 km laid is 40% because 8 km was
+      // The whole point of 0080: 8 of 20 km laid is 40% because 8 km was
       // measured, not because anybody thought so.
       await inA((tx) => repo.setProjectProgress(tx, projectA, 90, actor));
       const t = await addTask();

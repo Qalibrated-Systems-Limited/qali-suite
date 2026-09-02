@@ -33,7 +33,7 @@ import {
 import { toast } from "sonner";
 
 /**
- * The bill of quantities — 0076, and the screen where progress stops being an
+ * The bill of quantities — 0080, and the screen where progress stops being an
  * opinion.
  *
  * TWO MODES, and the bill's status decides which. A DRAFT is edited: lines are
@@ -55,7 +55,7 @@ const STATUS_BADGE = {
 
 /**
  * Offered, never enforced. The method of measurement decides the real list and
- * it belongs to the tenant's contract — see 0076 decision 7 — so this is a
+ * it belongs to the tenant's contract — see 0080 decision 7 — so this is a
  * convenience on a free-text field.
  */
 const UNITS = ["m", "m2", "m3", "kg", "t", "no", "sum", "item", "hr", "day", "%"];

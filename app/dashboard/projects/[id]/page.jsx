@@ -797,7 +797,7 @@ export default async function ProjectDetailPage({ params, searchParams }) {
           </div>
         )}
 
-        {/* Progress — MEASURED against a bill where there is one (0076),
+        {/* Progress — MEASURED against a bill where there is one (0080),
             earned from the WBS where there is one (0071 decision 1), typed
             where there is neither. Saying WHICH matters: all three look
             identical on a bar and only one of them is evidence. */}

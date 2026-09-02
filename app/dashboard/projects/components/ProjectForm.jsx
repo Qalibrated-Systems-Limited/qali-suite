@@ -388,7 +388,7 @@ export default function ProjectForm({
             </div>
 
             {/*
-              WHAT KIND of work this is — 0078, and it is not the same question
+              WHAT KIND of work this is — 0082, and it is not the same question
               as the billing model beside it. `billingModel` says how the project
               is PAID; the type says what the work IS, and that is what decides
               which sections the project shows. A supply-only job has no site

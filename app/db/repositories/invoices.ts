@@ -492,7 +492,7 @@ export async function completeInvoice(
     dueDate: invoice.dueDate,
     sourceType: "invoice",
     sourceId: invoice.id,
-    // The project dimension — 0080. Every line of a sale belongs to the job it
+    // The project dimension — 0084. Every line of a sale belongs to the job it
     // was raised against, receivable and revenue alike.
     projectId: invoice.projectId ?? null,
     createdById: opts.completedById,

@@ -983,7 +983,7 @@ Requisitions still run the identical query under two names** and that is still
 §7's blocking decision 1, for the author to settle. What changed is that both
 now show the right numbers while it is settled.
 
-### 0076 — the bill of quantities, and progress that is a measurement
+### 0080 — the bill of quantities, and progress that is a measurement
 
 The same day again, and the first migration since the merge. §8 of
 `PROJECTS-QALITRACK-PLAN.md` answered §6.4 — there IS a bill of quantities — and

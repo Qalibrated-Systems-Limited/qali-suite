@@ -31,7 +31,11 @@ export default defineConfig([
       // Next's automatic JSX runtime lets files use JSX without importing
       // React, but some reference `React.` directly — declare it as a global
       // so no-undef doesn't false-positive on it.
-      globals: { React: "readonly" },
+      // `FormDataEntryValue` is a TYPE-ONLY DOM lib name — it exists for tsc
+      // and never at runtime, so `no-undef` cannot see it and reports a file
+      // that typechecks clean. Declared here rather than weakening the rule,
+      // which is the one that caught the formatAddress regression.
+      globals: { React: "readonly", FormDataEntryValue: "readonly" },
     },
     rules: {
       // ── ERROR: real bugs ────────────────────────────────────────

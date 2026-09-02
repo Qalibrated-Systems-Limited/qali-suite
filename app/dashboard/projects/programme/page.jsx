@@ -7,6 +7,7 @@ import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
 import AccessDenied from "../components/AccessDenied";
 import SectionNotForType from "../components/SectionNotForType";
+import ImportProgramme from "../components/ImportProgramme";
 import { Card } from "@/components/ui/card";
 import Link from "next/link";
 import {
@@ -16,29 +17,35 @@ import {
   Circle,
   AlertTriangle,
   XCircle,
+  CalendarDays,
+  Flag,
+  Target,
+  ListChecks,
 } from "lucide-react";
 
 export const metadata = {
   title: "Programme | Projects",
-  description: "The work breakdown and schedule for a project",
+  description: "The work breakdown and Gantt schedule for a project",
 };
 
 /**
  * The programme — ONE section over `project_tasks`, with two views.
  *
- * WHAT THIS ABSORBED. There were two pages: "Milestone Tracker" and
- * "Programme", both reading the same table, neither introducing a record type,
- * beside the Work breakdown card on the project detail page — so one table had
- * three doors and a person adding a task had three places it might appear.
+ * WHAT THIS ABSORBED. There were two pages, "Milestone Tracker" and
+ * "Programme", both reading the same table and neither introducing a record
+ * type, beside the Work breakdown card on the project detail page — so one
+ * table had three doors and a person adding a task had three places it might
+ * appear. And the Milestone Tracker DID NOT SHOW MILESTONES: there is no
+ * milestone table in this schema. The views are named for what they are.
  *
- * And the Milestone Tracker DID NOT SHOW MILESTONES. There is no milestone
- * table in this schema; it showed tasks. A section named after a thing the
- * database does not have is the same defect as a figure read from a key that
- * does not exist — it looks right, nothing errors, and it is wrong. So the
- * views are named for what they are: the work breakdown, and the schedule.
+ * MERGED 2026-09-02. Two people rewrote this page in parallel. The Work
+ * breakdown view and the tab structure are one side; the SCHEDULE view —
+ * sections in colour, a sticky month header, a sticky activity column, and a
+ * bar carrying its own percent-complete — is the other, and it is a better
+ * Gantt than the flat list it replaces. The range calculation below is the
+ * first side's, because the other kept a bug it fixes; see the note there.
  *
- * `/dashboard/projects/milestones` redirects here, so no saved link breaks.
- * See PROJECTS-QALITRACK-PLAN.md §10.3.
+ * `/dashboard/projects/milestones` redirects here.
  */
 
 // Same task-status vocabulary as project_task_status in app/db/schema/enums.ts.
@@ -50,13 +57,8 @@ const STATUS_CONFIG = {
   cancelled: { label: "Cancelled", icon: XCircle, color: "text-muted-foreground", bar: "bg-muted-foreground/30" },
 };
 
-const BAR_COLOR = {
-  todo: "bg-muted-foreground/40",
-  in_progress: "bg-yellow-500",
-  blocked: "bg-red-500",
-  done: "bg-emerald-500",
-  cancelled: "bg-muted-foreground/25",
-};
+/** One colour per section, cycled — the QaliTrack phase-colour look. */
+const SECTION_COLORS = ["#2e6fb0", "#c8960c", "#1f6b45", "#7c5cbf", "#c05621", "#0e7490", "#b03a5b"];
 
 function formatDate(date) {
   if (!date) return "—";
@@ -67,14 +69,24 @@ function formatDate(date) {
   });
 }
 
+function fmtMonthYear(d) {
+  return d.toLocaleDateString("en-KE", { month: "short", year: "2-digit" });
+}
+
+function fmtLong(d) {
+  return d
+    ? new Date(d).toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" })
+    : "—";
+}
+
 function daysInMonth(date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
 }
 
-// Fractional "months since the range start" — used for BOTH the month
-// header ticks and the task bars, so a bar always lines up under the month
-// it actually falls in even though the header ticks are drawn evenly
-// spaced rather than strictly proportional to days-in-month.
+// Fractional "months since the range start" — used for BOTH the month header
+// ticks and the task bars, so a bar always lines up under the month it falls
+// in even though the ticks are drawn evenly spaced rather than strictly
+// proportional to days-in-month.
 function monthIndex(date, rangeStart) {
   return (
     (date.getFullYear() - rangeStart.getFullYear()) * 12 +
@@ -99,6 +111,18 @@ function StatCard({ label, value, tone }) {
     <div className="rounded-lg border bg-card p-4">
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
       <p className={`text-2xl font-bold mt-1 ${tone || "text-foreground"}`}>{value}</p>
+    </div>
+  );
+}
+
+function Meta({ icon: Icon, label, value, tone }) {
+  return (
+    <div className="flex items-center gap-2">
+      <Icon className={`h-4 w-4 ${tone || "text-muted-foreground"}`} />
+      <div className="leading-tight">
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className={`text-sm font-semibold ${tone || "text-foreground"}`}>{value}</div>
+      </div>
     </div>
   );
 }
@@ -181,9 +205,46 @@ export default async function ProgrammePage({ searchParams }) {
     { todo: 0, in_progress: 0, blocked: 0, done: 0, cancelled: 0 },
   );
 
-  const scheduled = tasks.filter((t) => t.plannedStart && t.plannedEnd);
-  const starts = scheduled.map((t) => new Date(t.plannedStart));
-  const ends = scheduled.map((t) => new Date(t.plannedEnd));
+  // ── The schedule: sections, and the dated activities under each ───────────
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const rootOf = (t) => {
+    let c = t;
+    let guard = 0;
+    while (c.parentTaskId && byId.get(c.parentTaskId) && guard++ < 30) c = byId.get(c.parentTaskId);
+    return c;
+  };
+  const topLevel = tasks
+    .filter((t) => !t.parentTaskId)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+  const actsByRoot = new Map();
+  for (const t of tasks) {
+    if (t.plannedStart && t.plannedEnd) {
+      const r = rootOf(t);
+      if (!actsByRoot.has(r.id)) actsByRoot.set(r.id, []);
+      actsByRoot.get(r.id).push(t);
+    }
+  }
+  const sortActs = (arr) =>
+    [...arr].sort(
+      (a, b) =>
+        (a.plannedStart || "").localeCompare(b.plannedStart || "") ||
+        (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
+    );
+
+  const groups = topLevel.map((section, i) => {
+    const color = SECTION_COLORS[i % SECTION_COLORS.length];
+    const dated = sortActs((actsByRoot.get(section.id) || []).filter((a) => a.id !== section.id));
+    if (dated.length > 0) return { section, color, activities: dated, selfBar: null };
+    if (section.plannedStart && section.plannedEnd) {
+      return { section, color, activities: [], selfBar: section };
+    }
+    return { section, color, activities: [], selfBar: null };
+  });
+
+  const allDated = tasks.filter((t) => t.plannedStart && t.plannedEnd);
+  const starts = allDated.map((t) => new Date(t.plannedStart));
+  const ends = allDated.map((t) => new Date(t.plannedEnd));
 
   /**
    * The range spans the CONTRACT dates AND the programme, rather than
@@ -192,10 +253,9 @@ export default async function ProgrammePage({ searchParams }) {
    * Taking `project.startDate` as the left edge whenever it exists clipped
    * every task planned outside the contract dates — and an overrun past the
    * end date is exactly what a programme is read for. Those bars were pinned
-   * to the right edge by the `Math.min(width, 100 - left)` clamp below, so a
-   * task running three months late drew the same bar as one finishing on
-   * time. The clamps stay as the guard they are; nothing should now reach
-   * them.
+   * to an edge by the width clamp, so a task running three months late drew
+   * the same bar as one finishing on time. The clamps stay as the guard they
+   * are; nothing should now reach them.
    */
   const bounds = [
     ...starts,
@@ -212,6 +272,33 @@ export default async function ProgrammePage({ searchParams }) {
   const hasRange = rangeStart && rangeEnd && rangeEnd >= rangeStart;
   const months = hasRange ? monthLabels(rangeStart, rangeEnd) : [];
   const totalMonths = months.length || 1;
+  const durationMonths = hasRange
+    ? Math.max(1, Math.round((rangeEnd - rangeStart) / (30.44 * 86400000)))
+    : 0;
+
+  function Bar({ task, color }) {
+    const start = new Date(task.plannedStart);
+    const end = new Date(task.plannedEnd);
+    const left = Math.max((monthIndex(start, rangeStart) / totalMonths) * 100, 0);
+    const rawWidth =
+      ((monthIndex(end, rangeStart) - monthIndex(start, rangeStart)) / totalMonths) * 100;
+    const width = Math.min(Math.max(rawWidth, 1.2), 100 - left);
+    const pct = Math.max(0, Math.min(100, task.progressPercent ?? 0));
+    return (
+      <div
+        className="absolute top-1/2 -translate-y-1/2 h-5 rounded-[5px] overflow-hidden"
+        style={{
+          left: `${Math.min(left, 99)}%`,
+          width: `${width}%`,
+          background: `${color}44`,
+          border: `1px solid ${color}`,
+        }}
+        title={`${task.title}: ${task.plannedStart} → ${task.plannedEnd} · ${pct}%`}
+      >
+        <div className="h-full rounded-[4px]" style={{ width: `${pct}%`, background: color }} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -219,13 +306,18 @@ export default async function ProgrammePage({ searchParams }) {
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <ViewTabs view={view} projectId={project.id} />
-        <Link
-          href={`/dashboard/projects/${project.id}`}
-          className="text-sm text-primary hover:underline inline-flex items-center gap-1 shrink-0"
-        >
-          Manage tasks
-          <ArrowUpRight className="h-3.5 w-3.5" />
-        </Link>
+        <div className="flex items-center gap-3">
+          {/* Importing creates tasks, which both views read — so it belongs
+              beside the tabs rather than inside one of them. */}
+          <ImportProgramme projectId={project.id} />
+          <Link
+            href={`/dashboard/projects/${project.id}`}
+            className="text-sm text-primary hover:underline inline-flex items-center gap-1 shrink-0"
+          >
+            Manage tasks
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
       </div>
 
       {/* Overall progress — on both views, because it is the answer the page
@@ -272,7 +364,7 @@ export default async function ProgrammePage({ searchParams }) {
                 <Link href={`/dashboard/projects/${project.id}`} className="text-primary hover:underline">
                   Add the first one
                 </Link>
-                .
+                , or import a programme.
               </p>
             ) : (
               <div className="space-y-1">
@@ -320,80 +412,95 @@ export default async function ProgrammePage({ searchParams }) {
           </Card>
         </>
       ) : (
-        <Card className="p-5 sm:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="font-semibold text-lg">Programme of works</h2>
-              {hasRange && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {rangeStart.toLocaleDateString("en-KE", { month: "short", year: "numeric" })} –{" "}
-                  {rangeEnd.toLocaleDateString("en-KE", { month: "short", year: "numeric" })}
-                </p>
-              )}
+        <>
+          <Card className="p-4 sm:p-5">
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+              <Meta icon={Flag} label="Start" value={fmtLong(rangeStart)} />
+              <Meta icon={Target} label="Target end" value={fmtLong(rangeEnd)} tone="text-yellow-600" />
+              <Meta
+                icon={CalendarDays}
+                label="Duration"
+                value={durationMonths ? `${durationMonths} months` : "—"}
+              />
+              <Meta icon={ListChecks} label="Activities" value={String(allDated.length)} />
             </div>
-          </div>
+          </Card>
 
-          {!hasRange || scheduled.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-10">
-              No tasks with both a planned start and end date yet, so there is
-              nothing to schedule.{" "}
-              <Link href={`/dashboard/projects/${project.id}`} className="text-primary hover:underline">
-                Set planned dates on a task
-              </Link>{" "}
-              to see it here.
-            </p>
-          ) : (
-            <div className="overflow-x-auto border rounded-lg">
-              <div style={{ minWidth: `${Math.max(totalMonths * 64, 480)}px` }}>
-                {/* Month header */}
-                <div className="flex bg-muted/40 border-b">
-                  <div className="w-44 shrink-0 px-3 py-2 text-xs font-medium text-muted-foreground border-r">
-                    Task
-                  </div>
-                  <div className="flex flex-1">
-                    {months.map((m, i) => (
-                      <div
-                        key={i}
-                        className="flex-1 text-center py-2 text-[10px] font-medium text-muted-foreground border-r last:border-r-0"
-                      >
-                        {m.toLocaleDateString("en-KE", { month: "short", year: "2-digit" })}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Rows */}
-                {scheduled.map((t) => {
-                  const start = new Date(t.plannedStart);
-                  const end = new Date(t.plannedEnd);
-                  const left = Math.max((monthIndex(start, rangeStart) / totalMonths) * 100, 0);
-                  const rawWidth = ((monthIndex(end, rangeStart) - monthIndex(start, rangeStart)) / totalMonths) * 100;
-                  const width = Math.max(rawWidth, 1.5);
-                  const barColor = BAR_COLOR[t.status] || BAR_COLOR.todo;
-
-                  return (
-                    <div key={t.id} className="flex border-b last:border-0 min-h-10">
-                      <div
-                        className="w-44 shrink-0 px-3 py-2 text-xs border-r flex items-center truncate"
-                        style={{ paddingLeft: `${12 + Math.min(t.depth, 4) * 10}px` }}
-                        title={t.title}
-                      >
-                        {t.title}
-                      </div>
-                      <div className="flex-1 relative py-2">
-                        <div
-                          className={`absolute h-4 top-1/2 -translate-y-1/2 rounded ${barColor} opacity-90`}
-                          style={{ left: `${Math.min(left, 99)}%`, width: `${Math.min(width, 100 - left)}%` }}
-                          title={`${t.title}: ${t.plannedStart} → ${t.plannedEnd}`}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+          <Card className="p-0 overflow-hidden">
+            {!hasRange || groups.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">
+                No programme yet.{" "}
+                <span className="text-foreground font-medium">Import a programme</span> (a .csv or
+                .xlsx of Section / Activity / Start / End / %), or set planned dates on tasks, to
+                see the Gantt here.
               </div>
-            </div>
-          )}
-        </Card>
+            ) : (
+              <div className="overflow-x-auto">
+                <div style={{ minWidth: `${Math.max(totalMonths * 66 + 224, 640)}px` }}>
+                  {/* Month header */}
+                  <div className="flex bg-muted/50 border-b border-border sticky top-0 z-20">
+                    <div className="w-56 shrink-0 px-3 py-2.5 text-xs font-semibold text-muted-foreground border-r border-border sticky left-0 bg-muted/50 z-10">
+                      Activity
+                    </div>
+                    <div className="flex flex-1">
+                      {months.map((m, i) => (
+                        <div
+                          key={i}
+                          className="flex-1 text-center py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border-r border-border last:border-r-0"
+                        >
+                          {fmtMonthYear(m)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {groups.map(({ section, color, activities, selfBar }) => (
+                    <div key={section.id}>
+                      {/* Section header row */}
+                      <div className="flex border-b border-border bg-muted/30">
+                        <div className="w-56 shrink-0 px-3 py-2 border-r border-border sticky left-0 bg-muted/30 z-10 flex items-center gap-2">
+                          <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ background: color }} />
+                          <span
+                            className="text-[11px] font-bold uppercase tracking-wider truncate"
+                            style={{ color }}
+                          >
+                            {section.title}
+                          </span>
+                        </div>
+                        <div className="flex-1 relative py-2">
+                          {selfBar && <Bar task={selfBar} color={color} />}
+                        </div>
+                      </div>
+
+                      {/* Activity rows */}
+                      {activities.map((a) => (
+                        <div
+                          key={a.id}
+                          className="flex border-b border-border last:border-0 hover:bg-muted/20"
+                        >
+                          <div
+                            className="w-56 shrink-0 px-3 py-2 text-[13px] border-r border-border sticky left-0 bg-card z-10 flex items-center truncate"
+                            title={a.title}
+                          >
+                            <span className="truncate">{a.title}</span>
+                            {a.progressPercent > 0 && (
+                              <span className="ml-auto pl-2 text-[10px] tabular-nums text-muted-foreground shrink-0">
+                                {a.progressPercent}%
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex-1 relative py-2.5">
+                            <Bar task={a} color={color} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card>
+        </>
       )}
     </div>
   );

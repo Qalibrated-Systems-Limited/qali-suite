@@ -230,7 +230,7 @@ export default function ProjectTasks({
             </Badge>
           )}
           {/* The project's headline percentage now comes from the bill, so this
-              card must not imply the WBS is where it came from — 0076. */}
+              card must not imply the WBS is where it came from — 0080. */}
           {progress?.source === "measured" && (
             <Badge variant="outline" className="text-xs shrink-0 font-normal">
               {progress.doneCount}/{progress.taskCount} done · project progress

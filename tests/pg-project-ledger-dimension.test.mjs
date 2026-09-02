@@ -1,5 +1,5 @@
 /**
- * The project as a dimension on the ledger — 0080.
+ * The project as a dimension on the ledger — 0084.
  *
  * Two things are tested and they are different. First, that every posting whose
  * document knows a project STAMPS it: an invoice, a bill, an expense, a claim

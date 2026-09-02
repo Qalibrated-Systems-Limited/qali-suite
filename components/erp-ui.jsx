@@ -57,7 +57,7 @@ export function Badge({ children, variant = "default", size = "sm" }) {
 
 export function Card({ children, style = {}, onClick }) {
   return (
-    <div onClick={onClick} style={{ background: T.white, borderRadius: 10, padding: 20, boxShadow: "0 1px 3px rgba(27,58,92,.08)", border: `1px solid ${T.lgrey}`, cursor: onClick ? "pointer" : "default", ...style }}>
+    <div onClick={onClick} style={{ background: "var(--card)", color: "var(--foreground)", borderRadius: 10, padding: 20, boxShadow: "0 1px 3px rgba(27,58,92,.08)", border: "1px solid var(--border)", cursor: onClick ? "pointer" : "default", ...style }}>
       {children}
     </div>
   );
@@ -70,9 +70,9 @@ export function Stat({ label, value, sub, icon, variant }) {
     <Card style={{ padding: "16px 18px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div style={{ flex: 1 }}>
-          <p style={{ fontSize: 10, color: T.mgrey, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 5 }}>{label}</p>
-          <p style={{ fontSize: 20, fontWeight: 700, color: cols[variant] || T.navy, lineHeight: 1 }}>{value}</p>
-          {sub && <p style={{ fontSize: 11, color: T.mgrey, marginTop: 4 }}>{sub}</p>}
+          <p style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 5 }}>{label}</p>
+          <p style={{ fontSize: 20, fontWeight: 700, color: cols[variant] || "var(--foreground)", lineHeight: 1 }}>{value}</p>
+          {sub && <p style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 4 }}>{sub}</p>}
         </div>
         {icon && <div style={{ width: 36, height: 36, background: bgs[variant] || "#DCE8F5", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{icon}</div>}
       </div>
@@ -86,13 +86,13 @@ export function Btn({ children, variant = "primary", onClick, size = "md", disab
     gold: { bg: T.gold, color: T.white },
     outline: { bg: "transparent", color: T.navy, border: `1.5px solid ${T.navy}` },
     danger: { bg: T.red, color: T.white },
-    ghost: { bg: T.offwt, color: T.dgrey, border: `1px solid ${T.lgrey}` },
+    ghost: { bg: "var(--muted)", color: "var(--foreground)", border: "1px solid var(--border)" },
     green: { bg: T.green, color: T.white },
   };
   const s = styles[variant] || styles.primary;
   const pads = { sm: "5px 12px", md: "8px 18px", lg: "11px 24px" };
   return (
-    <button onClick={onClick} disabled={disabled} style={{ background: disabled ? T.lgrey : s.bg, color: disabled ? T.mgrey : s.color, border: s.border || "none", padding: pads[size], borderRadius: 7, fontSize: size === "sm" ? 12 : 13, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", ...style }}>
+    <button onClick={onClick} disabled={disabled} style={{ background: disabled ? "var(--muted)" : s.bg, color: disabled ? "var(--muted-foreground)" : s.color, border: s.border || "none", padding: pads[size], borderRadius: 7, fontSize: size === "sm" ? 12 : 13, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", ...style }}>
       {children}
     </button>
   );
@@ -115,7 +115,7 @@ export function Alert({ type = "info", children }) {
 
 export function Progress({ value, height = 6 }) {
   return (
-    <div style={{ background: T.lgrey, borderRadius: 99, overflow: "hidden", height }}>
+    <div style={{ background: "var(--muted)", borderRadius: 99, overflow: "hidden", height }}>
       <div style={{ width: `${Math.min((value || 0) * 100, 100)}%`, height: "100%", background: value >= 0.95 ? T.red : value >= 0.8 ? T.amber : T.green, borderRadius: 99, transition: "width .3s" }} />
     </div>
   );
@@ -124,9 +124,9 @@ export function Progress({ value, height = 6 }) {
 export function Input({ label, value, onChange, type = "text", placeholder = "", required, note, readOnly }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.dgrey, marginBottom: 5 }}>{label}{required && <span style={{ color: T.red }}> *</span>}</label>
-      <input type={type} value={value || ""} onChange={(e) => onChange && onChange(e.target.value)} placeholder={placeholder} readOnly={readOnly} style={{ width: "100%", padding: "9px 12px", border: `1.5px solid ${T.lgrey}`, borderRadius: 7, fontSize: 13, color: T.dgrey, background: readOnly ? T.offwt : T.white, outline: "none", boxSizing: "border-box" }} />
-      {note && <p style={{ fontSize: 11, color: T.mgrey, marginTop: 3 }}>{note}</p>}
+      <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", marginBottom: 5 }}>{label}{required && <span style={{ color: T.red }}> *</span>}</label>
+      <input type={type} value={value || ""} onChange={(e) => onChange && onChange(e.target.value)} placeholder={placeholder} readOnly={readOnly} style={{ width: "100%", padding: "9px 12px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, color: "var(--foreground)", background: readOnly ? "var(--muted)" : "var(--background)", outline: "none", boxSizing: "border-box" }} />
+      {note && <p style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 3 }}>{note}</p>}
     </div>
   );
 }
@@ -134,8 +134,8 @@ export function Input({ label, value, onChange, type = "text", placeholder = "",
 export function Select({ label, value, onChange, options, required }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.dgrey, marginBottom: 5 }}>{label}{required && <span style={{ color: T.red }}> *</span>}</label>
-      <select value={value || ""} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "9px 12px", border: `1.5px solid ${T.lgrey}`, borderRadius: 7, fontSize: 13, color: T.dgrey, background: T.white, outline: "none", boxSizing: "border-box" }}>
+      <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", marginBottom: 5 }}>{label}{required && <span style={{ color: T.red }}> *</span>}</label>
+      <select value={value || ""} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "9px 12px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, color: "var(--foreground)", background: "var(--background)", outline: "none", boxSizing: "border-box" }}>
         {options.map((o) => <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>)}
       </select>
     </div>
@@ -145,7 +145,7 @@ export function Select({ label, value, onChange, options, required }) {
 export function Modal({ title, children, onClose, width = 540 }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(13,34,56,.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: T.white, borderRadius: 12, width: "100%", maxWidth: width, maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 60px rgba(0,0,0,.3)" }}>
+      <div style={{ background: "var(--card)", color: "var(--foreground)", borderRadius: 12, width: "100%", maxWidth: width, maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 60px rgba(0,0,0,.3)" }}>
         <div style={{ padding: "16px 22px", borderBottom: `1px solid ${T.lgrey}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: T.navy, borderRadius: "12px 12px 0 0" }}>
           <h3 style={{ color: T.white, fontSize: 15, fontWeight: 700, margin: 0 }}>{title}</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.white, fontSize: 22, cursor: "pointer", lineHeight: 1, padding: 0 }}>×</button>
@@ -175,8 +175,8 @@ export function DataTable({ headers, rows, empty = "No records found.", searchab
     <div>
       {showSearch && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 13px 6px" }}>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔎  Search this table…" aria-label="Search this table" style={{ flex: 1, maxWidth: 340, padding: "8px 12px", border: `1.5px solid ${T.lgrey}`, borderRadius: 8, fontSize: 13 }} />
-          {q && <span style={{ fontSize: 12, color: T.mgrey }}>{visible.length} of {rows.length} rows</span>}
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔎  Search this table…" aria-label="Search this table" style={{ flex: 1, maxWidth: 340, padding: "8px 12px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, background: "var(--background)", color: "var(--foreground)" }} />
+          {q && <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{visible.length} of {rows.length} rows</span>}
         </div>
       )}
       <div style={{ overflowX: "auto" }}>
@@ -186,8 +186,8 @@ export function DataTable({ headers, rows, empty = "No records found.", searchab
           </thead>
           <tbody>
             {visible.length === 0
-              ? <tr><td colSpan={headers.length} style={{ padding: 40, textAlign: "center", color: T.mgrey }}>{q ? `Nothing matches "${q}".` : empty}</td></tr>
-              : visible.map((row, i) => <tr key={i} style={{ background: i % 2 === 0 ? T.white : T.offwt }}>{row.map((cell, j) => <td key={j} style={{ padding: "9px 13px", borderBottom: `1px solid ${T.lgrey}`, verticalAlign: "middle" }}>{cell}</td>)}</tr>)}
+              ? <tr><td colSpan={headers.length} style={{ padding: 40, textAlign: "center", color: "var(--muted-foreground)" }}>{q ? `Nothing matches "${q}".` : empty}</td></tr>
+              : visible.map((row, i) => <tr key={i} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}>{row.map((cell, j) => <td key={j} style={{ padding: "9px 13px", borderBottom: "1px solid var(--border)", verticalAlign: "middle", color: "var(--foreground)" }}>{cell}</td>)}</tr>)}
           </tbody>
         </table>
       </div>
@@ -198,7 +198,7 @@ export function DataTable({ headers, rows, empty = "No records found.", searchab
 export function SectionHeader({ title, sub, action }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-      <div><h2 style={{ fontSize: 16, fontWeight: 700, color: T.navy, margin: 0 }}>{title}</h2>{sub && <p style={{ fontSize: 12, color: T.mgrey, marginTop: 3, margin: 0 }}>{sub}</p>}</div>
+      <div><h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>{title}</h2>{sub && <p style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 3, margin: 0 }}>{sub}</p>}</div>
       {action}
     </div>
   );
@@ -215,9 +215,9 @@ export function Loading() {
 
 export function Tabs({ tabs, active, setActive }) {
   return (
-    <div style={{ display: "flex", gap: 0, marginBottom: 22, borderBottom: `1px solid ${T.lgrey}` }}>
+    <div style={{ display: "flex", gap: 0, marginBottom: 22, borderBottom: "1px solid var(--border)" }}>
       {tabs.map((t) => (
-        <button key={t.id} onClick={() => setActive(t.id)} style={{ padding: "9px 18px", background: "none", border: "none", cursor: "pointer", fontSize: 13, fontWeight: active === t.id ? 700 : 400, color: active === t.id ? T.navy : T.mgrey, borderBottom: active === t.id ? `2px solid ${T.gold}` : "2px solid transparent", marginBottom: -1 }}>
+        <button key={t.id} onClick={() => setActive(t.id)} style={{ padding: "9px 18px", background: "none", border: "none", cursor: "pointer", fontSize: 13, fontWeight: active === t.id ? 700 : 400, color: active === t.id ? "var(--foreground)" : "var(--muted-foreground)", borderBottom: active === t.id ? `2px solid ${T.gold}` : "2px solid transparent", marginBottom: -1 }}>
           {t.label}
         </button>
       ))}

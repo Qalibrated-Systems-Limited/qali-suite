@@ -186,7 +186,7 @@ product and a separate decision. See `PROJECTS-QALITRACK-PLAN.md` §5.
 
 **Amended 2026-08-31 — the BOQ arrived, and it lands above step 2 of this
 list.** `PROJECTS-QALITRACK-PLAN.md` §8 answers that document's §6.4: quantities
-ARE measured against a bill, so migration 0076 built one — and it finishes what
+ARE measured against a bill, so migration 0080 built one — and it finishes what
 step 1 above could only half-do. Decision 1 here demoted `progress_percent` to
 the fallback for a project with no WBS, and 0071 delivered that; but a weighted
 roll-up of tasks is a careful OPINION, because every leaf percentage in it was

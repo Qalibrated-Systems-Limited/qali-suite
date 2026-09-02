@@ -436,7 +436,7 @@ place it takes in the sequence — at 2, ahead of `contracts`, because it depend
 on nothing but `projects` and it is the only item on the list that fixes a
 defect the module has TODAY. Progress stops being typed.
 
-**3. The type enum's values — ANSWERED by §9.1 and BUILT in 0078: it is a
+**3. The type enum's values — ANSWERED by §9.1 and BUILT in 0082: it is a
 LOOKUP TABLE, not a `pgEnum`, seeded with the six and extensible per tenant.**
 
 `construction | installation | maintenance | supply | consultancy | internal`
@@ -727,7 +727,7 @@ are standard on an interim certificate:
 
 Cheap to add to the certificate table now, awkward after certificates exist and
 have rows. **Note that the BOQ needs nothing for dayworks** — a daywork schedule
-is a section of the bill like any other, and 0076's tree already holds it. It is
+is a section of the bill like any other, and 0080's tree already holds it. It is
 the certificate that needs the line.
 
 ### 9.5 IPC and cash requisition: expect TWO records, and still ask
@@ -755,7 +755,7 @@ now be that they do NOT collapse.
 | step 6 | notice deadlines | deadlines AND the service/acknowledgement trail |
 | open 1 | assumed IPC and cash requisition collapse | assume they do not; the author still decides |
 
-Nothing here changes 0076. The bill of quantities is unaffected by all five —
+Nothing here changes 0080. The bill of quantities is unaffected by all five —
 which is a small piece of evidence for having built it first.
 
 ---
@@ -1026,7 +1026,7 @@ section must own records — and left the OTHER half of §10.6 rule 3 unbuilt, s
 every project still showed every section. Adding certificates to that would have
 made an eighth entry every project sees, days after cutting three.
 
-### 0078 — `projects.type`, as a lookup table
+### 0082 — `projects.type`, as a lookup table
 
 A LOOKUP TABLE, per §9.1, and the argument held up under building: §7 specified
 an enum while recording as an open question that we cannot enumerate the
@@ -1053,7 +1053,7 @@ pages use, from the same module (`lib/sections.js`, pure, imported by both a
 server module and a client component). A rule stated twice is a rule that
 drifts, and this module has already paid for that once.
 
-### 0077 — the contract, and the interim payment certificate
+### 0081 — the contract, and the interim payment certificate
 
 They land together because a certificate has nothing to compute against without
 terms, and §7 is unambiguous that nothing about a contract may be hardcoded.
@@ -1127,13 +1127,13 @@ correct and stays; what changed is that the repository now says which of the two
 states the user is in ("nothing was issued, so delete the draft") rather than
 letting a raw check violation reach them.
 
-**A seed a TRUNCATE can wipe must be re-runnable.** 0078 seeded the six built-in
+**A seed a TRUNCATE can wipe must be re-runnable.** 0082 seeded the six built-in
 types with a plain INSERT. `project_types.company_id` references `companies`, so
 `TRUNCATE companies CASCADE` empties the table COMPLETELY — cascade follows the
 foreign key, not the rows, so `company_id IS NULL` does not protect them. Every
 Postgres suite here opens with that truncate, so the first suite to run deleted
 the built-in types for every suite after it and for the developer's database
-until migrations were re-run. 0079 makes the seed an idempotent function.
+until migrations were re-run. 0083 makes the seed an idempotent function.
 
 The general rule this repo now has an instance of: **reference data a TRUNCATE
 can reach must be re-runnable, not a one-shot INSERT.**
@@ -1146,8 +1146,8 @@ the call site, so every caller gets it.
 
 ### Where the sequence is now
 
-Done: 1 (type), 2 (bill of quantities, 0076), 3 (contract, 0077), 5
-(certificates, 0077).
+Done: 1 (type), 2 (bill of quantities, 0080), 3 (contract, 0081), 5
+(certificates, 0081).
 
 Next, in the order that pays:
 
@@ -1167,12 +1167,12 @@ Next, in the order that pays:
 
 ## 12. The ledger dimension, and the question it exposed
 
-Migration 0080 makes the project a dimension on `journal_lines` — §10.4's item
+Migration 0084 makes the project a dimension on `journal_lines` — §10.4's item
 1, the gap everything else about project cost sits downstream of. Building it
 turned up an accounting question that is not the porter's to answer, and
 corrected something §10.4 got wrong.
 
-### What 0080 does
+### What 0084 does
 
 `journal_lines.project_id` and `cost_code_id`, nullable, on the LINE rather than
 the entry because one entry can span projects. Stamped by the five postings
@@ -1213,7 +1213,7 @@ journal entry — while a bill for an inventory purchase DEBITS Inventory
 issued to it is relieved from stock in QUANTITY and never in the LEDGER.
 
 On a construction project that is usually the largest cost line. It means a
-ledger-derived project P&L would be missing materials however well 0080's column
+ledger-derived project P&L would be missing materials however well 0084's column
 is populated — and it would look authoritative while being wrong, which is the
 failure this module has spent a day removing.
 
@@ -1244,7 +1244,7 @@ this document should not claim otherwise.
 Pinned in `tests/pg-project-ledger-dimension.test.mjs` as facts rather than left
 to be rediscovered as bugs:
 
-1. **Nothing is backfilled.** Entries posted before 0080 carry no project. A job
+1. **Nothing is backfilled.** Entries posted before 0084 carry no project. A job
    running for months reads near zero from the ledger and correctly from the
    scan.
 2. **Materials, as above.**

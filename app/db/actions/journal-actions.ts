@@ -52,7 +52,7 @@ const createSchema = z.object({
   notes: z.string().optional(),
   lines: z.array(lineSchema).min(2, "At least 2 lines required"),
   /**
-   * THE PROJECT THIS ENTRY IS FOR — 0080, and the thing that could not be done
+   * THE PROJECT THIS ENTRY IS FOR — 0084, and the thing that could not be done
    * at all before it.
    *
    * A manual journal has no source document, so nothing could infer its
