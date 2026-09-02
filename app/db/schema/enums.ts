@@ -909,31 +909,3 @@ export const projectValuationSourceEnum = pgEnum("project_valuation_source", [
   "milestone",
   "manual",
 ]);
-
-// ── Technical / Workflow Reports ─────────────────────────────────────────────
-
-/**
- * Technical / Workflow Reports — 0076, revised 0078.
- *
- * The report's KIND is the QSL sheet code (WB01–WB06, SI01, TR01), stored as
- * free text on `workflow_reports.type` rather than an enum, so the sheet
- * catalogue in `app/dashboard/technical/lib/meta.js` grows in code without a
- * migration. The `workflow_report_type` enum 0076 first shipped was dropped by
- * 0078; only the status enum below remains.
- *
- * draft → submitted → reviewed → approved, and back to draft on reopen.
- *
- * This is the review workflow the old app was built around, carried over
- * intact: whoever owns the work drafts and submits; a supervisor
- * (`PROJECT_LOG_SIGNOFF_ROLES`) reviews, then approves. Each forward step out
- * of draft stamps a name and a timestamp — enforced by
- * `workflow_reports_review_signed` / `_approval_signed`, the same "a status
- * flip with nobody attached to it is a checkbox, not a decision" rule the
- * instruction and diary sign-offs carry.
- */
-export const workflowReportStatusEnum = pgEnum("workflow_report_status", [
-  "draft",
-  "submitted",
-  "reviewed",
-  "approved",
-]);

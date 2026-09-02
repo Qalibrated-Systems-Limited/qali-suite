@@ -666,23 +666,6 @@ const getNavigationGroups = (user) => {
   // ============================================
   {
     type: "group",
-    label: "Technical",
-    icon: FlaskConical,
-    id: "technical",
-    defaultOpen: false,
-    items: [
-      // QSL field-service reporting, folded in under the existing Technical
-      // group. Pages are plan-gated on the projects module in their layout.
-      // Order: dashboard, new report, registry, then the ISO tools.
-      { icon: LayoutDashboard, label: "Technical dashboard", id: "technical-overview", href: "/dashboard/technical/overview" },
-      { icon: FileText, label: "New report", id: "technical-new", href: "/dashboard/technical/new" },
-      { icon: List, label: "Report registry", id: "technical-registry", href: "/dashboard/technical" },
-      { icon: FlaskConical, label: "Calibration (17025)", id: "calibration", href: "/dashboard/calibration" },
-      { icon: Search, label: "Inspection (17020)", id: "inspection", href: "/dashboard/inspection" },
-    ],
-  },
-  {
-    type: "group",
     label: "Operations",
     icon: Truck,
     id: "operations",

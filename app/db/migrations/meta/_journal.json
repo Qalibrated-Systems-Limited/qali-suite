@@ -535,34 +535,6 @@
       "breakpoints": true
     },
     {
-      "idx": 76,
-      "version": "7",
-      "when": 1787049149566,
-      "tag": "0076_workflow_reports",
-      "breakpoints": true
-    },
-    {
-      "idx": 77,
-      "version": "7",
-      "when": 1787049150566,
-      "tag": "0077_technical_sheet_codes",
-      "breakpoints": true
-    },
-    {
-      "idx": 78,
-      "version": "7",
-      "when": 1787049151566,
-      "tag": "0078_workflow_report_data",
-      "breakpoints": true
-    },
-    {
-      "idx": 79,
-      "version": "7",
-      "when": 1787049152566,
-      "tag": "0079_technical_calibration_inspection",
-      "breakpoints": true
-    },
-    {
       "idx": 80,
       "version": "7",
       "when": 1787049153566,
