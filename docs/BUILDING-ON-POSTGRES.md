@@ -737,6 +737,131 @@ raises if the current connection would bypass RLS — worth a health check.
 
 ---
 
+## Handoff — 2026-09-01/02 — the merge, the boundary, and the projects module growing up
+
+No module ported until the very end. This was the day the branch stopped being
+one person's, and the day the projects module acquired the things a contractor
+actually bills with.
+
+### The merge, and the collision that would have been silent
+
+`qsl/feat/postgres-migration` had moved eight commits — a colleague's Technical
+module: QSL sheet forms, a registry, ISO 17025 calibration and ISO 17020
+inspection, plus `ImportProgramme`. This branch had moved eight of its own.
+
+**The dangerous part was not the filenames.** Both sides numbered migrations
+0076–0079, which git merges happily because the names differ. But both also
+appended `+1000` to the same `when` value from 0075, so the four TIMESTAMPS
+collided exactly — and drizzle applies a migration only when its journal `when`
+exceeds the newest `created_at` in the database. A naive merge would have left
+`workflow_reports`, `calibration_jobs`, `inspections` and the sheet-code ALTER
+silently never applied to any database that had already run ours. Not an error:
+four missing objects and a green "✓ Migrations applied".
+
+Theirs kept 0076–0079; ours renumbered to 0080–0084. 78 stale cross-references
+in 27 files, rewritten in ONE pass — sequentially would have chained
+0076 → 0080 → 0084.
+
+One casualty of that sweep, caught and reverted: `enums.ts` now holds both
+sides, so the blanket rewrite also renumbered THEIR comment about THEIR
+migrations.
+
+### The module boundary
+
+The repo now holds general ERP modules and an industry module side by side.
+`lib/modules.mjs` declares the tiers; `local/no-core-imports-vertical` enforces
+the one rule that matters — **a vertical may import from core, core may never
+import from a vertical**. Wired as an ERROR, because a single crossing import is
+invisible in review.
+
+**The rule was proven, not assumed.** The first version matched nothing: the
+manifest lists paths with extensions and an import names a module without one.
+It linted clean and would have shipped as a guard that guards nothing.
+
+A build with the industry modules stripped is derivable from the manifest at any
+time, which is the point of declaring them: it is regenerated rather than
+maintained as a second line. `merge -s ours` records it as an ancestor so a
+future merge never replays its deletions.
+
+### What the projects module gained
+
+- **0080 bill of quantities** — measured progress; `progress.source` gains
+  `measured`, above `tasks` and `typed`.
+- **0081 contracts and certificates** — cumulative arithmetic, so a correction
+  to certificate 2 flows into 3 by itself. Certifying raises a draft invoice.
+- **0082/0083 project types** — a LOOKUP TABLE, not an enum, gating which
+  sections a project shows. Nav AND page, because hiding a link is a sign on an
+  unlocked door.
+- **0084 the project as a ledger dimension** — `journal_lines.project_id`,
+  stamped by six posting paths and, for the first time, by a manual journal.
+- **0085/0086 project cost reaches the ledger** — see below.
+
+### Two ledger holes closed, and the reasoning both times
+
+**Stock issued to a job posted NOTHING**, while a bill for an inventory purchase
+DEBITS Inventory. Inventory was overstated by every item ever issued to a
+project. Now `DR 5410 Project Materials / CR 1130 Inventory`, one entry per
+fulfilment. Returnable issues — demo, repair, loan — are deliberately excluded:
+that stock is coming back.
+
+`5410` already existed and simply had no `system_account` handle. `1125
+Retention Receivable` is new — NOT 1250, which the plan claimed was free and is
+Computer Equipment.
+
+**A certificate invoiced the NET.** Wrong twice: revenue understated by the
+retention every month, and — the one that matters — **VAT charged on the net**,
+when tax is due on the value of the SUPPLY. Every certificate on every retaining
+job under-declared output VAT. Now the invoice is the gross and completing it
+posts `DR Retention Receivable / CR Accounts Receivable`.
+
+### The navigation, which was wrong in four ways
+
+Reported as "I always see the first project", and it was worse than that:
+
+1. `selectProject` returned `projects[0]` when nothing was chosen — so arriving
+   from the dashboard put you on a job you never picked, under the right title.
+   It now ASKS, unless there is exactly one project.
+2. The switcher set `?project=` and nothing carried it — not the nav links, not
+   the sidebar. A choice survived one click. The switcher now also writes a
+   cookie, which the server reads when the URL is silent.
+3. A project URL is a project context: the nav reads the id out of
+   `/dashboard/projects/<id>`.
+4. Sections now appear only once there is a project.
+
+### And a React loop worth remembering
+
+Creating a cost code from the budget form: "Maximum update depth exceeded".
+Three links, none wrong alone — an effect keyed on `[state, onCreated]`, an
+inline arrow so `onCreated` is new every render, and `updateLine` building
+`[...lines]` unconditionally so it never bails.
+
+**An action succeeding is an EVENT, not a derived value.** It now fires once per
+created id, held in a ref — correct however the caller declares its callback,
+which is the property worth having. Two more of the same shape were guarded;
+two outside this module were left alone and noted.
+
+### Still open, and none of it is the porter's to settle
+
+- **When retention releases** — the balance accrues; the schedule is a contract
+  term tied to taking-over and the defects period.
+- **Labour on a project** — timesheets remain the missing join to payroll.
+  `project_assignments` holds a rate nothing multiplies by anything, and
+  attendance cannot be trusted for field staff who never clock in.
+- **Nothing.** Both remotes are current as of this handoff.
+
+### Where the count is
+
+**57 screen files, 17 modules**, from 59 across 18. Only `assets` came off — and
+it came off without a line of logic changing, because both its files already
+read Postgres exclusively and one still opened a Mongo connection it never used,
+four lines above a comment saying "POSTGRES".
+
+That is the global search's lesson pointing the other way: **a module count
+measures which path a file imports, not which store it reads, and it is wrong in
+both directions.** Worth checking the remaining 57 for the same thing before
+assuming any of them is real work. `executive` and `reports` are one file each
+and read query modules whose collections have already moved.
+
 ## Handoff — 2026-08-31 — sessions, the bell, profile, cost codes, and a colleague's module
 
 Twelve commits and one merge. No single module port — this was the day the
