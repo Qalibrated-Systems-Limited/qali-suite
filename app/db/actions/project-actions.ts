@@ -2191,3 +2191,9 @@ export async function raiseCertificateInvoice(
     return { success: false, error: userMessage(error) };
   }
 }
+
+/** What a project still needs before it can be run — see the repository. */
+export async function getProjectSetupState(projectId: string) {
+  if (!projectId) return null;
+  return withAuthorizedTenant([], (tx) => repo.getProjectSetupState(tx, projectId));
+}

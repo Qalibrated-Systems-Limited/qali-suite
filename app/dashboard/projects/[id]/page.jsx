@@ -32,6 +32,9 @@ import { getEmployees, getSuppliers } from "@/app/db/actions/party-actions";
 import ProjectStatusActions from "../components/ProjectStatusActions";
 import ProjectTeam from "../components/ProjectTeam";
 import ProjectTasks from "../components/ProjectTasks";
+import ProjectSetup from "../components/ProjectSetup";
+import { workspaceProjects } from "../lib/workspace";
+import { sectionsFor } from "../lib/sections";
 import { FormBanner } from "@/components/ui/form-banner";
 
 // Roles allowed to manage the project team — mirrors the server action gate.
@@ -665,6 +668,17 @@ export default async function ProjectDetailPage({ params, searchParams }) {
     getSubprojects(id),
   ]);
 
+  /**
+   * Which sections this project's TYPE says it has — so the set-up card does
+   * not ask a supply job to price a bill of quantities.
+   *
+   * `workspaceProjects` is React-cached and the module layout has already
+   * called it this request, so this is free.
+   */
+  const sections = sectionsFor(
+    (await workspaceProjects()).find((p) => p.id === id) ?? null,
+  );
+
   const statusCfg = STATUS_CONFIG[project.status] || STATUS_CONFIG.planning;
   const StatusIcon = statusCfg.icon;
   const canManageTeam = PROJECT_TEAM_MANAGE_ROLES.has(session.user.role);
@@ -891,6 +905,16 @@ export default async function ProjectDetailPage({ params, searchParams }) {
           </div>
         </Card>
       )}
+
+      {/*
+        WHAT THIS PROJECT STILL NEEDS — above the figures, because a job that is
+        not set up has no figures worth reading, and because this is where
+        somebody lands. It renders nothing once the steps are done, so it does
+        not become furniture on a running project.
+      */}
+      <Suspense fallback={null}>
+        <ProjectSetup projectId={id} sections={sections} />
+      </Suspense>
 
       {/* Financial Summary */}
       <Suspense

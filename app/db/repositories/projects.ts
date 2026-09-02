@@ -3313,3 +3313,58 @@ export async function getProjectLedgerByCostCode(tx: Tx, projectId: string) {
     actual: num(r.actual),
   }));
 }
+
+/**
+ * What this project still needs before it can be run — one pass.
+ *
+ * A new project needs a type, contract terms, cost codes, a budget, and a
+ * priced bill before anything can be certified against it, and today nothing
+ * says so: you find out by opening six screens and inferring it from what is
+ * empty. This is the query behind the card that tells you instead.
+ *
+ * Subselects rather than joins, because every answer is an EXISTS and a join
+ * would multiply rows for no reason. Nothing here is expensive enough to want
+ * caching.
+ */
+export async function getProjectSetupState(tx: Tx, projectId: string) {
+  const [row] = (await tx.execute(sql`
+    SELECT
+      (p.type_id IS NOT NULL)                                       AS has_type,
+      (p.client_party_id IS NOT NULL)                               AS has_client,
+      EXISTS (SELECT 1 FROM project_contracts c
+               WHERE c.project_id = p.id AND c.direction = 'receivable')
+                                                                    AS has_contract,
+      -- A cost code scoped to this project OR company-wide: a budget can be
+      -- built from either, so either counts as "there is a vocabulary".
+      EXISTS (SELECT 1 FROM project_cost_codes cc
+               WHERE cc.is_active
+                 AND (cc.project_id = p.id OR cc.project_id IS NULL))
+                                                                    AS has_cost_codes,
+      EXISTS (SELECT 1 FROM project_budgets b WHERE b.project_id = p.id)
+                                                                    AS has_budget,
+      EXISTS (SELECT 1 FROM project_budgets b
+               WHERE b.project_id = p.id AND b.status = 'approved')  AS has_approved_budget,
+      EXISTS (SELECT 1 FROM project_boqs q WHERE q.project_id = p.id)
+                                                                    AS has_boq,
+      EXISTS (SELECT 1 FROM project_boqs q
+               WHERE q.project_id = p.id AND q.status = 'awarded')   AS has_awarded_boq,
+      EXISTS (SELECT 1 FROM project_tasks t WHERE t.project_id = p.id)
+                                                                    AS has_tasks
+      FROM projects p
+     WHERE p.id = ${projectId}
+  `)) as unknown as Array<Record<string, boolean>>;
+
+  if (!row) return null;
+  const b = (k: string) => Boolean(row[k]);
+  return {
+    hasType: b("has_type"),
+    hasClient: b("has_client"),
+    hasContract: b("has_contract"),
+    hasCostCodes: b("has_cost_codes"),
+    hasBudget: b("has_budget"),
+    hasApprovedBudget: b("has_approved_budget"),
+    hasBoq: b("has_boq"),
+    hasAwardedBoq: b("has_awarded_boq"),
+    hasTasks: b("has_tasks"),
+  };
+}
