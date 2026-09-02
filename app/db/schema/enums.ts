@@ -94,6 +94,8 @@ export const sourceDocumentTypeEnum = pgEnum("source_document_type", [
   "petty_cash_return",
   /** 0066 — an approved stock adjustment's inventory entry. */
   "stock_adjustment",
+  /** 0086 — materials issued against a request, consumed on a project. */
+  "stock_request",
 ]);
 
 // ── Invoices slice ───────────────────────────────────────────────────────────

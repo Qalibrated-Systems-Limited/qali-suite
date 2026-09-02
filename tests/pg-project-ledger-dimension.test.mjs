@@ -21,6 +21,8 @@ import { sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as repo from "@/app/db/repositories/projects";
 import * as journal from "@/app/db/repositories/journal";
+import * as fulfilment from "@/app/db/repositories/fulfilment";
+import * as accounts from "@/app/db/repositories/accounts";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const ADMIN_URL = process.env.DIRECT_DATABASE_URL || DATABASE_URL;
@@ -29,6 +31,7 @@ const suite = DATABASE_URL ? describe : describe.skip;
 suite("the project dimension on the ledger", () => {
   let client, admin, db;
   let companyA, projectA, customer, revenueAcct, expenseAcct, arAcct, cashAcct, costCode;
+  let materialsAcct, inventoryAcct;
 
   const asTenant = (companyId, fn) =>
     db.transaction(async (tx) => {
@@ -77,6 +80,8 @@ suite("the project dimension on the ledger", () => {
     expenseAcct = randomUUID();
     arAcct = randomUUID();
     cashAcct = randomUUID();
+    materialsAcct = randomUUID();
+    inventoryAcct = randomUUID();
 
     await admin`
       INSERT INTO companies (id, name, slug)
@@ -92,6 +97,13 @@ suite("the project dimension on the ledger", () => {
                (${expenseAcct}, ${companyA}, '6200', 'Materials',        'expense'),
                (${arAcct},      ${companyA}, '1200', 'Receivables',      'asset'),
                (${cashAcct},    ${companyA}, '1000', 'Cash',             'asset')`);
+      // The two 0085 handles, so `getSystemAccount` can find them. A real
+      // company gets these from the standard chart; this fixture builds only
+      // what it uses.
+      await tx.execute(sql`
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, system_account)
+        VALUES (${materialsAcct}, ${companyA}, '5410', 'Project Materials', 'expense', 'project_materials'),
+               (${inventoryAcct}, ${companyA}, '1130', 'Inventory',         'asset',   'inventory')`);
     });
 
     projectA = (
@@ -277,23 +289,21 @@ suite("the project dimension on the ledger", () => {
       expect(r.difference).toEqual({ revenue: 0, costs: 0 });
     });
 
-    it("PINS THE MATERIALS GAP: stock issued to a project posts nothing", async () => {
+    it("MATERIALS ISSUED TO A JOB NOW REACH THE LEDGER — 0085", async () => {
       /**
-       * Not a defect in either query — a fact about the system, pinned so it is
-       * not rediscovered as a bug.
+       * This test used to pin the opposite, and its own note said to rewrite it
+       * rather than delete it if somebody made issues post. Somebody did.
        *
-       * A bill for an inventory purchase DEBITS Inventory. Issuing that stock
-       * to a job records a movement and decrements the product, and creates NO
-       * journal entry — so materials are relieved from stock in quantity and
-       * never in the ledger. The document scan counts them; the ledger cannot
-       * see them at all.
-       *
-       * If this test ever fails because the ledger figure moved, somebody has
-       * made issues post — which is the accounting decision in plan §12, and
-       * this test should then be rewritten rather than deleted.
+       * A bill for an inventory purchase DEBITS Inventory. Issuing that stock to
+       * a job used to record a movement and decrement the product and create NO
+       * journal entry — so Inventory was overstated by every item ever issued to
+       * a project, and a construction job's largest cost line was invisible to
+       * the accounts. It now posts DR Project Materials / CR Inventory, one
+       * entry per fulfilment, at the movement's own cost.
        */
       const product = randomUUID();
       const requestId = randomUUID();
+      const itemId = randomUUID();
       await asTenant(companyA, (tx) =>
         tx.execute(sql`
           INSERT INTO products (id, company_id, sku, name, cost_price, quantity_on_hand)
@@ -306,21 +316,88 @@ suite("the project dimension on the ledger", () => {
         VALUES (${requestId}, ${companyA}, 'REQ-1', 'approved', 'internal',
                 'Jane', 'Technical', 12000, ${projectA})`;
       await admin`
-        INSERT INTO stock_request_items (company_id, request_id, line_number,
+        INSERT INTO stock_request_items (id, company_id, request_id, line_number,
                                          product_id, product_name_at_request,
                                          sku_at_request, stock_at_request,
                                          requested_quantity, approved_quantity,
                                          total_fulfilled, unit_price, unit)
-        VALUES (${companyA}, ${requestId}, 1, ${product}, 'Cable',
+        VALUES (${itemId}, ${companyA}, ${requestId}, 1, ${product}, 'Cable',
                 'CBL-1', 100, 10, 10, 0, 1200, 'm')`;
 
-      const r = await inA((tx) => repo.reconcileProjectActuals(tx, projectA));
+      const materials = await inA((tx) => accounts.getSystemAccount(tx, "project_materials"));
+      const inventory = await inA((tx) => accounts.getSystemAccount(tx, "inventory"));
+      expect(materials, "0085 gives 5410 a system_account handle").toBeTruthy();
 
-      // The scan sees an approved, unfulfilled request as COMMITMENT...
-      expect(r.documents.committed).toBe(12000);
-      // ...and the ledger sees nothing, because no entry was ever made.
-      expect(r.ledger.costs).toBe(0);
-      expect(r.ledgerSilent).toBe(true);
+      await inA((tx) =>
+        fulfilment.fulfilStockRequest(
+          tx,
+          requestId,
+          [{ itemId, quantity: "6" }],
+          {
+            fulfilledById: null,
+            fulfilledByName: "Store",
+            projectMaterialsAccountId: materials.id,
+            inventoryAccountId: inventory.id,
+          },
+        ),
+      );
+
+      // Six at the product's cost of 1,000.
+      const p = (await inA((tx) => repo.getProjectLedgerActuals(tx, [projectA]))).get(projectA);
+      expect(p.costs).toBe(6000);
+      expect(p.lineCount).toBe(2);
+
+      // And the ledger balances, which is the thing that must never break.
+      const [bal] = await admin`
+        SELECT SUM(debit)::float8 d, SUM(credit)::float8 c FROM journal_lines l
+         JOIN journal_entries e ON e.id = l.entry_id
+        WHERE e.source_type = 'stock_request'`;
+      expect(bal.d).toBe(6000);
+      expect(bal.c).toBe(6000);
+    });
+
+    it("does NOT expense stock that is coming back", async () => {
+      // A demo, repair, installation or employee_borrow issue is still the
+      // company's asset sitting somewhere else — `createCheckout` tracks it.
+      // Expensing it would write off inventory that is on its way home.
+      const product = randomUUID();
+      const requestId = randomUUID();
+      const itemId = randomUUID();
+      await asTenant(companyA, (tx) =>
+        tx.execute(sql`
+          INSERT INTO products (id, company_id, sku, name, cost_price, quantity_on_hand)
+          VALUES (${product}::uuid, ${companyA}::uuid, 'MTR-1', 'Meter', 5000, 20)`),
+      );
+      await admin`
+        INSERT INTO stock_requests (id, company_id, request_number, status,
+                                    request_type, requester_name_at_request,
+                                    requester_department, total_value, project_id,
+                                    customer_id, customer_name_at_request)
+        VALUES (${requestId}, ${companyA}, 'REQ-2', 'approved', 'demo',
+                'Jane', 'Technical', 5000, ${projectA}, ${customer}, 'KeRRA')`;
+      await admin`
+        INSERT INTO stock_request_items (id, company_id, request_id, line_number,
+                                         product_id, product_name_at_request,
+                                         sku_at_request, stock_at_request,
+                                         requested_quantity, approved_quantity,
+                                         total_fulfilled, unit_price, unit)
+        VALUES (${itemId}, ${companyA}, ${requestId}, 1, ${product}, 'Meter',
+                'MTR-1', 20, 1, 1, 0, 5000, 'no')`;
+
+      const materials = await inA((tx) => accounts.getSystemAccount(tx, "project_materials"));
+      const inventory = await inA((tx) => accounts.getSystemAccount(tx, "inventory"));
+      const res = await inA((tx) =>
+        fulfilment.fulfilStockRequest(tx, requestId, [{ itemId, quantity: "1" }], {
+          fulfilledById: null,
+          fulfilledByName: "Store",
+          projectMaterialsAccountId: materials.id,
+          inventoryAccountId: inventory.id,
+        }),
+      );
+      expect(res.journalEntryId).toBeNull();
+
+      const p = (await inA((tx) => repo.getProjectLedgerActuals(tx, [projectA]))).get(projectA);
+      expect(p.costs).toBe(0);
     });
   });
 });

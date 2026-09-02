@@ -1315,6 +1315,13 @@ export async function fulfilStockRequest(
     fulfilledByName: string;
     expectedReturnDate?: string | null;
     notes?: string | null;
+    /**
+     * The two accounts a project's consumed stock moves between — 0085.
+     * Required only when the request names a project AND the stock is
+     * consumed; the action resolves them and throws if the chart lacks them.
+     */
+    projectMaterialsAccountId?: string | null;
+    inventoryAccountId?: string | null;
   },
 ) {
   const [request] = await tx
@@ -1335,6 +1342,7 @@ export async function fulfilStockRequest(
   const byId = new Map(items.map((i) => [i.id, i]));
 
   const results = [];
+  let consumedCost = 0;
 
   for (const issue of issues) {
     if (/^-?0(\.0*)?$/.test(issue.quantity)) continue;
@@ -1396,10 +1404,75 @@ export async function fulfilStockRequest(
     });
 
     results.push({ item, movement, checkout, fulfilment });
+
+    /**
+     * Only CONSUMED stock is a cost. A returnable issue — demo, repair,
+     * installation, employee_borrow — is still the company's asset sitting
+     * somewhere else, and `createCheckout` above is what tracks it; expensing
+     * it here would write off inventory that is coming back.
+     */
+    if (!RETURNABLE_TYPES.has(request.requestType)) {
+      consumedCost += Number(movement.totalCost ?? 0);
+    }
   }
 
   if (!results.length) {
     throw new Error("Nothing to issue — every quantity was zero");
+  }
+
+  /**
+   * MATERIAL ISSUED TO A JOB REACHES THE LEDGER — 0085.
+   *
+   * This posted nothing at all before: `recordMovement` and `issueStock` insert
+   * rows and neither creates a journal entry, while a bill for an inventory
+   * purchase DEBITS Inventory. So material bought for a job and issued to it was
+   * relieved from stock in QUANTITY and never in the LEDGER — Inventory
+   * overstated by every item ever issued to a project, and a construction job's
+   * largest cost line invisible to the accounts.
+   *
+   * SAP issues goods to a WBS element against a consumption account and Odoo's
+   * stock moves hit the valuation accounts in real time. There is no reading of
+   * standard practice where this stays unposted.
+   *
+   * ONE ENTRY PER FULFILMENT, not per line — a goods issue is one document, and
+   * a line-by-line posting is how a ledger acquires thousands of rows a month
+   * with no clean way to reverse a correction.
+   *
+   * At the movement's own cost, which is the cost the stock actually left at.
+   */
+  let entry = null;
+  if (request.projectId && consumedCost > 0) {
+    if (!opts.projectMaterialsAccountId || !opts.inventoryAccountId) {
+      throw new Error(
+        "Project Materials (5410) or Inventory is not configured in the chart of accounts, so stock issued to a project cannot be costed.",
+      );
+    }
+    const amount = consumedCost.toFixed(4);
+    entry = await createJournalEntry(tx, {
+      companyId: request.companyId,
+      entryDate: new Date().toISOString().slice(0, 10),
+      entryType: "inventory_adjustment",
+      description: `Materials issued to project — ${request.requestNumber}`,
+      reference: request.requestNumber,
+      sourceType: "stock_request",
+      sourceId: request.id,
+      projectId: request.projectId,
+      costCodeId: request.costCodeId ?? null,
+      createdById: opts.fulfilledById ?? null,
+      postImmediately: true,
+      lines: [
+        {
+          accountId: opts.projectMaterialsAccountId,
+          debit: amount,
+          description: `Issued against ${request.requestNumber}`,
+        },
+        {
+          accountId: opts.inventoryAccountId,
+          credit: amount,
+          description: "Out of stock",
+        },
+      ],
+    });
   }
 
   // Re-read: status and the item totals are the triggers' output, not this
@@ -1410,7 +1483,7 @@ export async function fulfilStockRequest(
     .from(stockRequests)
     .where(eq(stockRequests.id, requestId));
 
-  return { request: updated, issued: results.length };
+  return { request: updated, issued: results.length, journalEntryId: entry?.id ?? null };
 }
 
 /**
