@@ -102,6 +102,11 @@ export default function BudgetForm({
   };
 
   const updateLine = (index, field, value) => {
+    // Bail when nothing changed. `[...lines]` unconditionally is a new array
+    // every call, so React re-renders even when the value is identical — which
+    // is what turned a repeating effect in the cost-code dialog into an
+    // infinite loop rather than a no-op.
+    if (lines[index]?.[field] === value) return;
     const updated = [...lines];
     updated[index] = { ...updated[index], [field]: value };
     setLines(updated);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useActionState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
@@ -569,8 +569,15 @@ export default function ProjectForm({
 function NewClientDialog({ open, onOpenChange, onCreated }) {
   const [state, formAction, isPending] = useActionState(createParty, null);
 
+  /**
+   * Fired once per created party. Same shape as `NewCostCodeDialog`, and it
+   * escaped looping only because both of its setState calls happen to bail on
+   * equal values — which is luck, not a design. See the note there.
+   */
+  const notifiedFor = useRef(null);
   useEffect(() => {
-    if (state?.success && state.partyId) {
+    if (state?.success && state.partyId && notifiedFor.current !== state.partyId) {
+      notifiedFor.current = state.partyId;
       onCreated({
         _id: state.partyId,
         id: state.partyId,

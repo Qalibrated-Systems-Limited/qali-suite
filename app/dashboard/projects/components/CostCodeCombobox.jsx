@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/command";
 import { ChevronsUpDown, Check, Plus, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState, useActionState, useEffect } from "react";
+import { useState, useActionState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -187,8 +187,29 @@ function NewCostCodeDialog({ open, onOpenChange, accounts, projectId, onCreated 
   const [accountList, setAccountList] = useState(accounts);
   useEffect(() => setAccountList(accounts), [accounts]);
 
+  /**
+   * AN ACTION SUCCEEDING IS AN EVENT, NOT A DERIVED VALUE — fire it once per
+   * created code.
+   *
+   * This looped. `onCreated` is an inline arrow from the parent, so it gets a
+   * fresh identity on every render, and it is in this effect's deps. The
+   * handler selects the new code on the line, which calls `updateLine`, which
+   * builds `[...lines]` unconditionally — so it never bails, the parent always
+   * re-renders, `onCreated` is new again, and the effect fires again with
+   * `state.success` still true. The dialog stays mounted at `open=false`, so
+   * nothing broke the cycle: "Maximum update depth exceeded".
+   *
+   * The ref keys on the created id, so the handler runs once however many times
+   * the effect re-runs — correct regardless of how the parent declares its
+   * callback, which is the property worth having.
+   */
+  const notifiedFor = useRef(null);
   useEffect(() => {
-    if (state?.success && state.costCode) onCreated(state.costCode);
+    const created = state?.success ? state.costCode : null;
+    if (created && notifiedFor.current !== created._id) {
+      notifiedFor.current = created._id;
+      onCreated(created);
+    }
   }, [state, onCreated]);
 
   const err = (field) =>

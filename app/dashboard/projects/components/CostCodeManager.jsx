@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useActionState, useEffect } from "react";
+import { useState, useTransition, useActionState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -169,12 +169,25 @@ function CostCodeForm({ costCode = null, accounts, projects, onDone }) {
   const action = isEdit ? updateCostCode.bind(null, costCode._id) : createCostCode;
   const [state, formAction, isPending] = useActionState(action, null);
 
+  /**
+   * Once per outcome. `onDone` is an inline arrow from the parent, so it is a
+   * new identity every render and this effect re-runs on each — and `state`
+   * stays successful, so without the guard the toast fires repeatedly and
+   * `onDone` is called again each time.
+   *
+   * It does not loop TODAY only because `onDone` unmounts this form, which is
+   * luck rather than a design — the same shape in `NewCostCodeDialog`, whose
+   * dialog stays mounted, produced "Maximum update depth exceeded".
+   */
+  const handled = useRef(null);
   useEffect(() => {
-    if (state?.success) {
+    if (!state || handled.current === state) return;
+    handled.current = state;
+    if (state.success) {
       toast.success(state.message);
       onDone?.();
     }
-    if (state?.errors?._form) toast.error(state.errors._form[0]);
+    if (state.errors?._form) toast.error(state.errors._form[0]);
   }, [state, onDone]);
 
   const err = (field) =>
