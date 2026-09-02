@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import { FolderKanban } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { SELECTED_PROJECT_COOKIE } from "../lib/sections";
 
 /**
  * Which project the current section (Milestones, Programme, IPC & Payments,
@@ -31,6 +32,22 @@ export default function ProjectSwitcher({ projects, selectedId }) {
   if (!projects?.length) return null;
 
   function handleChange(id) {
+    /**
+     * Remember it, then navigate.
+     *
+     * The URL alone was not enough: the sidebar links, a typed address and the
+     * command palette all arrive without `?project=`, and every one of those
+     * fell back to the first live project — so a choice made here survived
+     * exactly until the next click. The cookie is what `getWorkspaceContext`
+     * reads when the URL is silent, and it validates the id against the
+     * tenant's own list before trusting it.
+     *
+     * A year, because "which project am I working on" is not a thing anybody
+     * wants to re-answer weekly. `SameSite=Lax` so it rides ordinary
+     * navigation; no `Secure` flag hardcoded, since that would drop it on
+     * http://localhost during development.
+     */
+    document.cookie = `${SELECTED_PROJECT_COOKIE}=${encodeURIComponent(id)}; path=/; max-age=31536000; SameSite=Lax`;
     const params = new URLSearchParams(searchParams.toString());
     params.set("project", id);
     router.push(`${pathname}?${params.toString()}`);

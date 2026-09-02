@@ -9,6 +9,21 @@
  */
 
 /**
+ * Where the switcher records the current project.
+ *
+ * A cookie rather than server state because a SERVER COMPONENT CANNOT SET
+ * COOKIES — a value written during an RSC render is never persisted, the same
+ * thing that made the session-refresh throttle an in-process map. The switcher
+ * is a client component, so it writes it there and `getWorkspaceContext` reads
+ * it when the URL is silent.
+ *
+ * Declared HERE rather than in `workspace.js` because that module imports
+ * `next/headers` and `@/auth` and is server-only; a client component importing
+ * the constant from there would drag both into the browser bundle.
+ */
+export const SELECTED_PROJECT_COOKIE = "project.selected";
+
+/**
  * The module's sections, in nav order, and the flag on `project_types` that
  * decides whether each appears.
  *

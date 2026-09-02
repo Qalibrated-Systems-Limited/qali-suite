@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { cookies } from "next/headers";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { canSeeProjectsNav } from "@/lib/permissions";
@@ -6,7 +7,7 @@ import {
   getProjectsForWorkspace,
   getProjectById,
 } from "@/app/db/actions/project-actions";
-import { selectProject, sectionsFor } from "./sections";
+import { selectProject, sectionsFor, SELECTED_PROJECT_COOKIE } from "./sections";
 
 /**
  * The switcher's list, once per request.
@@ -64,7 +65,33 @@ export async function getWorkspaceContext(
   }
 
   const projects = await workspaceProjects();
-  const { project: summary, notFound } = selectProject(projects, searchParams?.project);
+
+  /**
+   * WHICH PROJECT, when the URL does not say.
+   *
+   * The switcher sets `?project=`, but most ways into a section do not carry
+   * it — the sidebar links are bare, and so is a typed URL or the command
+   * palette. Every one of those fell back to `projects[0]`, so whatever sorted
+   * first among the live jobs was what you got, however carefully you had just
+   * chosen something else. "I always see the first project."
+   *
+   * So the switcher also writes the choice to a cookie and this reads it when
+   * the URL is silent. The URL still WINS where it speaks, which keeps a link
+   * shareable and a bookmark honest.
+   *
+   * The cookie is not trusted: it is matched against the tenant's own list,
+   * which RLS scopes, so a stale id or one copied from another company
+   * resolves to nothing and falls through rather than leaking a name.
+   */
+  let requested = searchParams?.project;
+  if (!requested) {
+    const remembered = (await cookies()).get(SELECTED_PROJECT_COOKIE)?.value;
+    if (remembered && projects.some((p) => p.id === remembered)) {
+      requested = remembered;
+    }
+  }
+
+  const { project: summary, notFound } = selectProject(projects, requested);
 
   const project =
     summary && detail ? await getProjectById(summary.id) : summary;

@@ -67,11 +67,28 @@ export default function ProjectsNav({ projects = [] }) {
   const { project } = selectProject(projects, searchParams.get("project"));
   const sections = sectionsFor(project);
 
+  /**
+   * EVERY SECTION LINK CARRIES THE SELECTED PROJECT.
+   *
+   * The switcher sets `?project=` and pushes; these links did not carry it, so
+   * moving from the Bill of Quantities to the Site Diary dropped the parameter
+   * and `getWorkspaceContext` fell back to `projects[0]` — whichever job sorts
+   * first among the live ones. You arrived at the right page showing a
+   * DIFFERENT project, with nothing on screen saying so.
+   *
+   * That is the same failure the `?project=` bookmark fix addressed, on the
+   * path nobody had checked: a wrong answer that looks right.
+   *
+   * The Dashboard is the project LIST and is not project-scoped, so it is left
+   * bare.
+   */
   const items = [
     DASHBOARD,
     ...SECTIONS.filter((s) => sections[s.key]).map((s) => ({
       label: s.label,
-      href: s.href,
+      href: project ? `${s.href}?project=${project.id}` : s.href,
+      // The active check compares paths, so it must not see the query string.
+      match: s.href,
       icon: ICONS[s.key],
     })),
   ];
@@ -80,13 +97,14 @@ export default function ProjectsNav({ projects = [] }) {
     <nav className="sticky top-14 z-10 border-b border-border bg-card">
       <div className="flex items-center gap-1 overflow-x-auto px-4 sm:px-6 py-0">
         {items.map((item) => {
+          const path = item.match ?? item.href;
           const active = item.exact
-            ? pathname === item.href
-            : pathname === item.href || pathname.startsWith(item.href + "/");
+            ? pathname === path
+            : pathname === path || pathname.startsWith(path + "/");
           const Icon = item.icon;
           return (
             <Link
-              key={item.href}
+              key={item.match ?? item.href}
               href={item.href}
               className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-3 text-sm transition-colors ${
                 active
