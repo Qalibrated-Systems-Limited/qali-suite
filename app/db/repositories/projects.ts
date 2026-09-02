@@ -2723,11 +2723,18 @@ export interface CertificateFigures {
   /** True where the cap bit — worth showing, because it is why the retention
    *  stopped growing and it looks like an error otherwise. */
   retentionCapped: boolean;
+  /** What this certificate holds back, as opposed to what is held in total —
+   *  the cumulative figure less what the previous certificate already held. */
+  retentionThisCertificate: number;
   advanceRecovered: number;
   advanceOutstanding: number;
   netToDate: number;
   previouslyCertified: number;
   netThisCertificate: number;
+  /** The GROSS valuation the last certificate stood at — what this period's
+   *  gross is measured from, and what the tax invoice is raised for. */
+  previouslyGross: number;
+  grossThisPeriod: number;
 }
 
 type ContractRow = typeof projectContracts.$inferSelect;
@@ -2765,6 +2772,8 @@ export function computeCertificate(
     "workDoneToDate" | "materialsOnSite" | "dayworksToDate" | "retentionReleasedToDate"
   >,
   previouslyCertified = 0,
+  previouslyRetained = 0,
+  previouslyGross = 0,
 ): CertificateFigures {
   const workDoneToDate = num(certificate.workDoneToDate);
   const materialsOnSite = num(certificate.materialsOnSite);
@@ -2807,6 +2816,7 @@ export function computeCertificate(
     materialsOnSite: round2(materialsOnSite),
     dayworksToDate: round2(dayworksToDate),
     retentionHeld: round2(retentionHeld),
+    retentionThisCertificate: round2(retentionHeld - previouslyRetained),
     retentionReleased: round2(retentionReleased),
     retentionOutstanding: round2(retentionHeld - retentionReleased),
     retentionCapped,
@@ -2815,6 +2825,8 @@ export function computeCertificate(
     netToDate: round2(netToDate),
     previouslyCertified: round2(previouslyCertified),
     netThisCertificate: round2(netToDate - previouslyCertified),
+    previouslyGross: round2(previouslyGross),
+    grossThisPeriod: round2(grossValuation - previouslyGross),
   };
 }
 
@@ -2840,9 +2852,17 @@ export async function listCertificates(tx: Tx, contractId: string) {
     .orderBy(asc(projectCertificates.sequence));
 
   let previous = 0;
+  let previousRetention = 0;
+  let previousGross = 0;
   return rows.map((row) => {
-    const figures = computeCertificate(contract, row, previous);
-    if (row.status === "certified") previous = figures.netToDate;
+    const figures = computeCertificate(
+      contract, row, previous, previousRetention, previousGross,
+    );
+    if (row.status === "certified") {
+      previous = figures.netToDate;
+      previousRetention = figures.retentionHeld;
+      previousGross = figures.grossValuation;
+    }
     return { ...row, _id: row.id, figures };
   });
 }
@@ -3057,6 +3077,24 @@ export async function deleteCertificate(tx: Tx, certificateId: string) {
     .where(eq(projectCertificates.id, certificateId))
     .returning();
   return row ?? null;
+}
+
+/**
+ * The certificate an invoice was raised from, with its figures.
+ *
+ * Used when the invoice is COMPLETED, to reclassify the retention it holds out
+ * of receivables. Returns null for the overwhelming majority of invoices, which
+ * have no certificate behind them.
+ */
+export async function getCertificateForInvoice(tx: Tx, invoiceId: string) {
+  if (!isUuid(invoiceId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectCertificates)
+    .where(eq(projectCertificates.invoiceId, invoiceId));
+  if (!row) return null;
+  const chain = await listCertificates(tx, row.contractId);
+  return chain.find((c) => c.id === row.id) ?? null;
 }
 
 /** Record the draft invoice a certificate raised. */

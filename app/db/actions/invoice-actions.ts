@@ -13,6 +13,7 @@ import {
   PRICING_OVERRIDE_ROLES,
 } from "@/lib/utils/role-gates";
 import * as invoices from "../repositories/invoices";
+import * as projectsRepo from "../repositories/projects";
 import * as accountsRepo from "../repositories/accounts";
 import * as payments from "../repositories/payments";
 import * as partiesRepo from "../repositories/parties";
@@ -276,7 +277,38 @@ export async function completeInvoicePg(
           "technician_stock",
         );
 
+        /**
+         * A certificate's retention, if this invoice came from one.
+         *
+         * Looked up HERE rather than inside `completeInvoice`, so the invoice
+         * repository need not know that certificates exist. Null for almost
+         * every invoice.
+         */
+        let retention = null;
+        const certificate = await projectsRepo.getCertificateForInvoice(
+          tx,
+          invoiceId,
+        );
+        if (certificate && certificate.figures.retentionHeld > 0) {
+          const held = await accountsRepo.getSystemAccount(
+            tx,
+            "retention_receivable",
+          );
+          if (!held) {
+            throw new Error(
+              "Retention Receivable (1125) is not configured in the chart of accounts, so this certificate's retention cannot be held back.",
+            );
+          }
+          // What THIS certificate holds back, not the running total — the
+          // previous certificate already reclassified its own share.
+          retention = {
+            amount: certificate.figures.retentionThisCertificate.toFixed(2),
+            accountId: held.id,
+          };
+        }
+
         return invoices.completeInvoice(tx, invoiceId, {
+          retention,
           arAccountId: ar.id,
           revenueAccountId: revenue.id,
           vatOutputAccountId: vatOutput?.id ?? null,

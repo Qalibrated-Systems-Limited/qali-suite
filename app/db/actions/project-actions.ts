@@ -2131,7 +2131,27 @@ export async function raiseCertificateInvoice(
         const chain = await repo.listCertificates(tx, certificate.contractId);
         const figures = chain.find((c) => c.id === certificateId)?.figures;
         if (!figures) throw new Error("Certificate figures could not be computed");
-        if (figures.netThisCertificate <= 0) {
+        /**
+         * THE INVOICE IS FOR THE GROSS VALUE CERTIFIED THIS PERIOD, not the net.
+         *
+         * This raised the NET, and that was wrong twice over. Revenue would
+         * read short by the retention every month and long when it was
+         * released — retention is not a discount, it is money earned and
+         * deferred. And VAT is due on the value of the SUPPLY, so invoicing net
+         * under-declares output VAT on every certificate for the life of a job
+         * that retains.
+         *
+         * The prototype this module was specified from says the same:
+         * "Tax Invoice = Gross Certified × 1.16" — VAT on the gross, retention
+         * deducted from the PAYMENT. Every QS-grade system bills it this way.
+         *
+         * What the employer holds back is reclassified out of receivables when
+         * the invoice is completed — DR Retention Receivable / CR Accounts
+         * Receivable — so the money owed splits into the part due now and the
+         * part held, without touching revenue.
+         */
+        const grossThisPeriod = figures.grossThisPeriod;
+        if (grossThisPeriod <= 0) {
           throw new Error(
             "This certificate certifies nothing further, so there is nothing to invoice.",
           );
@@ -2149,7 +2169,7 @@ export async function raiseCertificateInvoice(
               itemType: "service",
               description: `Work executed to ${certificate.valuationDate} — IPC No. ${certificate.sequence}`,
               quantity: "1",
-              unitPrice: figures.netThisCertificate.toFixed(2),
+              unitPrice: grossThisPeriod.toFixed(2),
             },
           ],
           createdById: user.id ?? null,

@@ -458,6 +458,24 @@ export async function completeInvoice(
      * Without them the stock leaves and its value never comes off the balance
      * sheet — see migration 0027.
      */
+    /**
+     * RETENTION HELD ON THIS INVOICE — the contract's, not the invoice's.
+     *
+     * The invoice is raised for the GROSS value certified, because VAT is due
+     * on the value of the supply and not on what is paid after deductions.
+     * What the employer holds back is then reclassified out of receivables:
+     *
+     *     DR Retention Receivable / CR Accounts Receivable
+     *
+     * Revenue stays at the gross, VAT stays on the gross, and the receivable
+     * splits into the part due now and the part held. Invoicing the NET
+     * instead would understate both revenue and output VAT for the life of
+     * every job that retains.
+     *
+     * Passed IN rather than looked up, so this file need not know that
+     * certificates exist. The caller knows.
+     */
+    retention?: { amount: string; accountId: string } | null;
     cogsAccountId?: string | null;
     inventoryAccountId?: string | null;
     technicianStockAccountId?: string | null;
@@ -530,6 +548,44 @@ export async function completeInvoice(
           ]),
     ],
   });
+
+  /**
+   * The retention split, as its own entry rather than a line on the sale.
+   *
+   * A separate document because it is a different event: the sale recognised
+   * the revenue, and this records that part of the resulting receivable will
+   * not be collected until the works are taken over. Keeping them apart means
+   * the sale entry still reads as a sale, and the retention can be released
+   * later by reversing this and nothing else.
+   */
+  if (opts.retention && Number(opts.retention.amount) > 0) {
+    await createJournalEntry(tx, {
+      companyId: invoice.companyId,
+      entryDate: invoice.invoiceDate,
+      entryType: "adjustment",
+      description: `Retention held — invoice ${invoice.invoiceNumber}`,
+      reference: invoice.invoiceNumber,
+      partyType: "customer",
+      partyId: invoice.customerId,
+      sourceType: "invoice",
+      sourceId: invoice.id,
+      projectId: invoice.projectId ?? null,
+      createdById: opts.completedById,
+      postImmediately: true,
+      lines: [
+        {
+          accountId: opts.retention.accountId,
+          debit: opts.retention.amount,
+          description: "Held by the employer until taking-over",
+        },
+        {
+          accountId: opts.arAccountId,
+          credit: opts.retention.amount,
+          description: "Not collectable this certificate",
+        },
+      ],
+    });
+  }
 
   // ── Stock issue + COGS, per line ───────────────────────────────────────
   const cogsSkipped: string[] = [];

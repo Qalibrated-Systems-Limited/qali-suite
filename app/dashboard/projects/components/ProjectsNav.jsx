@@ -65,18 +65,24 @@ const DASHBOARD = {
   exact: true,
 };
 
-export default function ProjectsNav({ projects = [] }) {
+export default function ProjectsNav({ projects = [], rememberedProjectId = null }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   /**
-   * `?project=` first, then the project the URL is already about — opening a
-   * project from the dashboard and clicking a section should carry THAT
-   * project, not drop back to nothing chosen.
+   * `?project=` first; then the project the URL is already about, so opening
+   * one from the dashboard and clicking a section carries THAT project; then
+   * whatever the switcher last remembered, so the sections do not vanish when
+   * you step back to the dashboard.
+   *
+   * `selectProject` validates whichever id wins against the tenant's own list,
+   * so a stale cookie resolves to nothing rather than to somebody else's job.
    */
   const { project } = selectProject(
     projects,
-    searchParams.get("project") ?? projectIdFromPath(pathname),
+    searchParams.get("project") ??
+      projectIdFromPath(pathname) ??
+      rememberedProjectId,
   );
   const sections = sectionsFor(project);
 
@@ -95,9 +101,26 @@ export default function ProjectsNav({ projects = [] }) {
    * The Dashboard is the project LIST and is not project-scoped, so it is left
    * bare.
    */
+  /**
+   * THE SECTIONS APPEAR ONCE THERE IS A PROJECT.
+   *
+   * Every one of them shows a single project's records, so offering them with
+   * nothing chosen is offering a question the page cannot answer — and until
+   * `selectProject` stopped guessing, clicking one silently picked whichever
+   * job sorted first. Hiding them keeps the dashboard to what the dashboard is
+   * about: the list.
+   *
+   * The route in is the list itself. Open a project and the nav reads its id
+   * out of the path, so the sections appear already pointed at it. On a section
+   * page reached without a project — a bookmark, say — the switcher is still in
+   * the header above, which is where the "Choose a project" card points.
+   *
+   * This is the same rule as the type gate one level up: a section shows when
+   * it has something to show.
+   */
   const items = [
     DASHBOARD,
-    ...SECTIONS.filter((s) => sections[s.key]).map((s) => ({
+    ...(project ? SECTIONS.filter((s) => sections[s.key]) : []).map((s) => ({
       label: s.label,
       href: project ? `${s.href}?project=${project.id}` : s.href,
       // The active check compares paths, so it must not see the query string.
