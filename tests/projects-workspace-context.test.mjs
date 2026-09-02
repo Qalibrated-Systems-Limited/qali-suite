@@ -17,6 +17,15 @@ const session = { value: { user: { id: "u1", name: "Ann", role: "Admin" } } };
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/auth", () => ({ auth: async () => session.value }));
+const cookieJar = { value: null };
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name) =>
+      cookieJar.value && name === "project.selected"
+        ? { value: cookieJar.value }
+        : undefined,
+  }),
+}));
 vi.mock("next/navigation", () => ({
   redirect: (to) => {
     throw new Error(`REDIRECT:${to}`);
@@ -46,14 +55,51 @@ const { getWorkspaceContext } = await import("@/app/dashboard/projects/lib/works
 describe("the workspace context", () => {
   beforeEach(() => {
     session.value = { user: { id: "u1", name: "Ann", role: "Admin" } };
+    cookieJar.value = null;
     getProjectsForWorkspace.mockClear();
     getProjectById.mockClear();
   });
 
-  it("selects the first project when the link names none", async () => {
+  it("ASKS rather than guessing when several projects exist and none is chosen", async () => {
+    // It used to return `projects[0]`, so arriving from the dashboard — which
+    // lists every project — put you on whichever job sorts first, titled as
+    // though you had chosen it.
+    const ctx = await getWorkspaceContext({});
+    expect(ctx.project).toBeNull();
+    expect(ctx.unselected).toBe(true);
+    expect(ctx.notFound).toBe(false);
+  });
+
+  it("selects the only project without asking, because there is no decision", async () => {
+    getProjectsForWorkspace.mockResolvedValueOnce([listed[0]]);
     const ctx = await getWorkspaceContext({});
     expect(ctx.project.id).toBe("p-live");
+    expect(ctx.unselected).toBe(false);
+  });
+
+  it("remembers the last choice when the URL is silent", async () => {
+    // The sidebar links, a typed address and the command palette all arrive
+    // with no `?project=`; the cookie is what carries the choice across them.
+    cookieJar.value = "p-done";
+    const ctx = await getWorkspaceContext({});
+    expect(ctx.project.id).toBe("p-done");
+    expect(ctx.unselected).toBe(false);
+  });
+
+  it("ignores a remembered project this tenant does not have", async () => {
+    // Never trusted: matched against the tenant's own RLS-scoped list, so a
+    // stale id or one copied from another company falls through.
+    cookieJar.value = "p-someone-elses";
+    const ctx = await getWorkspaceContext({});
+    expect(ctx.project).toBeNull();
+    expect(ctx.unselected).toBe(true);
     expect(ctx.notFound).toBe(false);
+  });
+
+  it("lets the URL win over what was remembered", async () => {
+    cookieJar.value = "p-done";
+    const ctx = await getWorkspaceContext({ project: "p-live" });
+    expect(ctx.project.id).toBe("p-live");
   });
 
   it("honours a ?project= that names a finished job", async () => {
@@ -75,10 +121,10 @@ describe("the workspace context", () => {
     // roll-up. Six of the eight pages read nothing that is not already on the
     // switcher row, and the Forms Register — a static reference table — was
     // paying for a financial aggregation on every render.
-    await getWorkspaceContext({});
+    await getWorkspaceContext({ project: "p-live" });
     expect(getProjectById).not.toHaveBeenCalled();
 
-    const ctx = await getWorkspaceContext({}, { detail: true });
+    const ctx = await getWorkspaceContext({ project: "p-live" }, { detail: true });
     expect(getProjectById).toHaveBeenCalledWith("p-live");
     expect(ctx.project.contractValue).toBe(1_000_000);
   });

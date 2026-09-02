@@ -7,13 +7,34 @@ import { FolderKanban, Plus, SearchX } from "lucide-react";
  * Shown by every project-scoped section when there is no project to show data
  * for — instead of an empty table or a chart with nothing on it.
  *
- * TWO REASONS, and they are not the same answer. `notFound` means the link
+ * THREE REASONS, and they are not the same answer. `unselected` means several
+ * projects exist and none has been chosen — this used to silently show the
+ * first one, so arriving from the dashboard put you on a job you did not pick. `notFound` means the link
  * carried a `?project=` this tenant does not have: the company may well have a
  * dozen projects, so telling that reader "no projects yet" is false, and
  * quietly opening a different project is worse. It says which id failed and
  * points at the switcher, which is already on the page above this card.
  */
-export default function NoProjectsCard({ notFound = false, requestedId = null }) {
+export default function NoProjectsCard({
+  notFound = false,
+  requestedId = null,
+  unselected = false,
+}) {
+  if (unselected) {
+    return (
+      <Card className="p-8 sm:p-10 text-center">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+          <FolderKanban className="h-6 w-6 text-primary" />
+        </div>
+        <h2 className="font-semibold text-lg mb-1">Choose a project</h2>
+        <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+          This section shows one project at a time. Pick one from the switcher
+          above — it will follow you across the other sections.
+        </p>
+      </Card>
+    );
+  }
+
   if (notFound) {
     return (
       <Card className="p-8 sm:p-10 text-center">

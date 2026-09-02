@@ -65,7 +65,11 @@ export default async function IpcPaymentsPage({ searchParams }) {
       />
 
       {!project && (
-        <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />
+        <NoProjectsCard
+          notFound={ctx.notFound}
+          unselected={ctx.unselected}
+          requestedId={sp?.project}
+        />
       )}
 
       {project && (

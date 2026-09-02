@@ -41,7 +41,11 @@ export default async function SiteDiaryPage({ searchParams }) {
         projects={projects}
       />
 
-      {!project && <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />}
+      {!project && <NoProjectsCard
+          notFound={ctx.notFound}
+          unselected={ctx.unselected}
+          requestedId={sp?.project}
+        />}
 
       {project && (
         <DiaryLog

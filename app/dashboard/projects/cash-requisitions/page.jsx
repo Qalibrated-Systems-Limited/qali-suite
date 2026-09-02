@@ -53,7 +53,11 @@ export default async function CashRequisitionsPage({ searchParams }) {
           project={null}
           projects={projects}
         />
-        <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />
+        <NoProjectsCard
+          notFound={ctx.notFound}
+          unselected={ctx.unselected}
+          requestedId={sp?.project}
+        />
       </div>
     );
   }

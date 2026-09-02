@@ -55,6 +55,7 @@ export async function getWorkspaceContext(
     return {
       denied: true,
       hidden: false,
+      unselected: false,
       user,
       projects: [],
       project: null,
@@ -91,7 +92,7 @@ export async function getWorkspaceContext(
     }
   }
 
-  const { project: summary, notFound } = selectProject(projects, requested);
+  const { project: summary, notFound, unselected } = selectProject(projects, requested);
 
   const project =
     summary && detail ? await getProjectById(summary.id) : summary;
@@ -110,6 +111,9 @@ export async function getWorkspaceContext(
      * asks too, and a `section` that is not named here is not gated at all.
      */
     hidden: Boolean(section && summary && sections[section] === false),
+    /** Several projects exist and none has been chosen. Not the same as having
+     *  none, and not the same as a link naming one that is gone. */
+    unselected,
     user,
     projects,
     project,

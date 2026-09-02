@@ -187,7 +187,11 @@ export default async function ProgrammePage({ searchParams }) {
     return (
       <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
         {header}
-        <NoProjectsCard notFound={ctx.notFound} requestedId={sp?.project} />
+        <NoProjectsCard
+          notFound={ctx.notFound}
+          unselected={ctx.unselected}
+          requestedId={sp?.project}
+        />
       </div>
     );
   }

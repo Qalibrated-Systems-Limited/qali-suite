@@ -82,7 +82,39 @@ export function selectProject(projects, requestedId) {
   const list = projects ?? [];
   if (requestedId) {
     const match = list.find((p) => p.id === requestedId) ?? null;
-    return { project: match, notFound: !match };
+    return { project: match, notFound: !match, unselected: false };
   }
-  return { project: list[0] ?? null, notFound: false };
+
+  /**
+   * NOTHING CHOSEN — and this is where it used to GUESS.
+   *
+   * It returned `list[0]`, so arriving at a section without having picked
+   * anything showed whichever job sorts first among the live ones. From the
+   * dashboard — which lists every project — clicking Bill of Quantities landed
+   * you on a bill you did not choose, titled as though you had.
+   *
+   * With ONE project there is no decision to make, so it is selected. With
+   * more than one there is, and the honest answer is to ask: `unselected` is a
+   * different state from "this tenant has no projects" and from "the link
+   * named one that does not exist", and the three read differently on screen.
+   */
+  if (list.length === 1) {
+    return { project: list[0], notFound: false, unselected: false };
+  }
+  return { project: null, notFound: false, unselected: list.length > 1 };
+}
+
+/**
+ * The project a URL is already about.
+ *
+ * `/dashboard/projects/<uuid>` IS a project context — the detail page, its
+ * edit form, its budget. Reading it means that opening a project from the
+ * dashboard and then clicking a section carries that project, instead of
+ * dropping back to "nothing chosen".
+ */
+const UUID_SEGMENT =
+  /^\/dashboard\/projects\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i;
+
+export function projectIdFromPath(pathname) {
+  return UUID_SEGMENT.exec(pathname ?? "")?.[1] ?? null;
 }

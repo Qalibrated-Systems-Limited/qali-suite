@@ -11,7 +11,12 @@ import {
   Wallet,
   Ruler,
 } from "lucide-react";
-import { SECTIONS, selectProject, sectionsFor } from "../lib/sections";
+import {
+  SECTIONS,
+  selectProject,
+  sectionsFor,
+  projectIdFromPath,
+} from "../lib/sections";
 
 /**
  * Module-level sub-navigation for the Projects module — same pattern as HRNav
@@ -64,7 +69,15 @@ export default function ProjectsNav({ projects = [] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const { project } = selectProject(projects, searchParams.get("project"));
+  /**
+   * `?project=` first, then the project the URL is already about — opening a
+   * project from the dashboard and clicking a section should carry THAT
+   * project, not drop back to nothing chosen.
+   */
+  const { project } = selectProject(
+    projects,
+    searchParams.get("project") ?? projectIdFromPath(pathname),
+  );
   const sections = sectionsFor(project);
 
   /**
