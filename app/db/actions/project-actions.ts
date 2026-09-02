@@ -14,6 +14,7 @@ import {
 import * as repo from "../repositories/projects";
 import * as partiesRepo from "../repositories/parties";
 import { createInvoice } from "../repositories/invoices";
+import { getSystemAccount } from "../repositories/accounts";
 import type { Tx } from "../client";
 
 /**
@@ -2038,7 +2039,21 @@ export async function certifyProjectCertificate(
   try {
     const row = await withAuthorizedTenant(
       FINANCE_WRITE_ROLES as unknown as string[],
-      (tx, { user }) => repo.certifyCertificate(tx, certificateId, actorFrom(user)),
+      async (tx, { user }) => {
+        /**
+         * Resolved before certifying, because a certificate that releases
+         * retention posts the release as part of being certified — see
+         * `certifyCertificate`. Passed as ids so the repository stays one.
+         */
+        const [held, ar] = await Promise.all([
+          getSystemAccount(tx, "retention_receivable"),
+          getSystemAccount(tx, "accounts_receivable"),
+        ]);
+        return repo.certifyCertificate(tx, certificateId, actorFrom(user), {
+          retentionAccountId: held?.id ?? "",
+          arAccountId: ar?.id ?? "",
+        });
+      },
     );
     if (!row) return { success: false, error: "Certificate not found" };
     revalidateCertificates(projectId);

@@ -33,7 +33,7 @@ async function expectRejection(promise, pattern) {
 
 suite("contracts and certificates", () => {
   let client, admin, db;
-  let companyA, projectA, customerA;
+  let companyA, projectA, customerA, retentionAcct, arAcct;
   /**
    * `TRUNCATE companies CASCADE` empties `project_types` COMPLETELY — cascade
    * follows the foreign key, not the rows, so the built-ins go with it even
@@ -81,7 +81,18 @@ suite("contracts and certificates", () => {
       }),
     );
 
-  const certify = (id) => inA((tx) => repo.certifyCertificate(tx, id, actor));
+  /**
+   * Certifying carries the two accounts a RELEASE moves money between. The
+   * action resolves them from the chart; this fixture builds only what it uses,
+   * so it seeds them and passes the same pair.
+   */
+  const certify = (id) =>
+    inA((tx) =>
+      repo.certifyCertificate(tx, id, actor, {
+        retentionAccountId: retentionAcct,
+        arAccountId: arAcct,
+      }),
+    );
 
   beforeAll(async () => {
     admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
@@ -103,10 +114,18 @@ suite("contracts and certificates", () => {
     await admin`SELECT seed_builtin_project_types()`;
 
     customerA = randomUUID();
+    retentionAcct = randomUUID();
+    arAcct = randomUUID();
     await asTenant(companyA, (tx) =>
       tx.execute(sql`
         INSERT INTO parties (id, company_id, primary_type, is_customer, name)
         VALUES (${customerA}::uuid, ${companyA}::uuid, 'customer', true, 'KeRRA')`),
+    );
+    await asTenant(companyA, (tx) =>
+      tx.execute(sql`
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, system_account)
+        VALUES (${retentionAcct}, ${companyA}, '1125', 'Retention Receivable', 'asset', 'retention_receivable'),
+               (${arAcct},        ${companyA}, '1120', 'Accounts Receivable',  'asset', 'accounts_receivable')`),
     );
     projectA = (
       await inA((tx) =>
@@ -259,6 +278,61 @@ suite("contracts and certificates", () => {
       expect(rows[1].figures.retentionReleased).toBe(2500000);
       expect(rows[1].figures.retentionOutstanding).toBe(2500000);
       expect(rows[1].figures.netThisCertificate).toBe(2500000);
+    });
+
+    it("RELEASES what this certificate releases, and posts it to the ledger", async () => {
+      /**
+       * The other half of the money cycle. Holding moves receivables into
+       * `1125 Retention Receivable`; releasing moves them back, and the client
+       * can be asked for them.
+       *
+       * It posts at CERTIFICATION, not with an invoice — a release is not a
+       * supply. The revenue was recognised and the VAT charged when the work
+       * was certified; this only makes an existing receivable collectable. A
+       * certificate that ONLY releases retention certifies no new work, so
+       * there is nothing to invoice and waiting for one would strand it.
+       */
+      const c = await newContract();
+      const one = await newCertificate(c.id, { workDoneToDate: "50000000" });
+      await certify(one.id);
+
+      // 10% of 50m is 5m, under the 5m cap.
+      const before = await inA((tx) => repo.listCertificates(tx, c.id));
+      expect(before[0].figures.retentionOutstanding).toBe(5000000);
+
+      // A release-only certificate: no new work, half the retention back.
+      const two = await newCertificate(c.id, {
+        workDoneToDate: "50000000",
+        retentionReleasedToDate: "2500000",
+      });
+      await certify(two.id);
+
+      const after = await inA((tx) => repo.listCertificates(tx, c.id));
+      expect(after[1].figures.releasedThisCertificate).toBe(2500000);
+      expect(after[1].figures.retentionOutstanding).toBe(2500000);
+      // No new work, so nothing further is certified as gross...
+      expect(after[1].figures.grossThisPeriod).toBe(0);
+      // ...but the release is money now due.
+      expect(after[1].figures.netThisCertificate).toBe(2500000);
+
+      const [entry] = await admin`
+        SELECT e.description, SUM(l.debit)::float8 d, SUM(l.credit)::float8 c
+          FROM journal_entries e JOIN journal_lines l ON l.entry_id = e.id
+         WHERE e.description LIKE 'Retention released%'
+         GROUP BY e.description`;
+      expect(entry).toBeTruthy();
+      expect(entry.d).toBe(2500000);
+      expect(entry.c).toBe(2500000);
+    });
+
+    it("posts nothing when a certificate releases nothing", async () => {
+      const c = await newContract();
+      const cert = await newCertificate(c.id, { workDoneToDate: "20000000" });
+      await certify(cert.id);
+      const [row] = await admin`
+        SELECT count(*)::int n FROM journal_entries
+         WHERE description LIKE 'Retention released%'`;
+      expect(row.n).toBe(0);
     });
 
     it("never releases more retention than was held", async () => {

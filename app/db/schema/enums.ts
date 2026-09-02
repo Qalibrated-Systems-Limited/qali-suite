@@ -96,6 +96,8 @@ export const sourceDocumentTypeEnum = pgEnum("source_document_type", [
   "stock_adjustment",
   /** 0086 — materials issued against a request, consumed on a project. */
   "stock_request",
+  /** 0087 — a payment certificate: releasing retention back into receivables. */
+  "project_certificate",
 ]);
 
 // ── Invoices slice ───────────────────────────────────────────────────────────

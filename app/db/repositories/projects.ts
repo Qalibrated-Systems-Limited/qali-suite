@@ -17,6 +17,7 @@ import {
   accounts,
 } from "../schema";
 import { getProjectClaimsByAccount, listClaims } from "./claims";
+import { createJournalEntry } from "./journal";
 import { getProjectExpensesByAccount, listProjectExpenses } from "./expenses";
 
 /**
@@ -2718,6 +2719,9 @@ export interface CertificateFigures {
   /** Cumulative, before anything released. */
   retentionHeld: number;
   retentionReleased: number;
+  /** What THIS certificate releases, as opposed to the running total — the
+   *  amount that becomes collectable now. */
+  releasedThisCertificate: number;
   /** What the employer is actually still holding. */
   retentionOutstanding: number;
   /** True where the cap bit — worth showing, because it is why the retention
@@ -2774,6 +2778,7 @@ export function computeCertificate(
   previouslyCertified = 0,
   previouslyRetained = 0,
   previouslyGross = 0,
+  previouslyReleased = 0,
 ): CertificateFigures {
   const workDoneToDate = num(certificate.workDoneToDate);
   const materialsOnSite = num(certificate.materialsOnSite);
@@ -2818,6 +2823,7 @@ export function computeCertificate(
     retentionHeld: round2(retentionHeld),
     retentionThisCertificate: round2(retentionHeld - previouslyRetained),
     retentionReleased: round2(retentionReleased),
+    releasedThisCertificate: round2(retentionReleased - previouslyReleased),
     retentionOutstanding: round2(retentionHeld - retentionReleased),
     retentionCapped,
     advanceRecovered: round2(advanceRecovered),
@@ -2854,14 +2860,16 @@ export async function listCertificates(tx: Tx, contractId: string) {
   let previous = 0;
   let previousRetention = 0;
   let previousGross = 0;
+  let previousReleased = 0;
   return rows.map((row) => {
     const figures = computeCertificate(
-      contract, row, previous, previousRetention, previousGross,
+      contract, row, previous, previousRetention, previousGross, previousReleased,
     );
     if (row.status === "certified") {
       previous = figures.netToDate;
       previousRetention = figures.retentionHeld;
       previousGross = figures.grossValuation;
+      previousReleased = figures.retentionReleased;
     }
     return { ...row, _id: row.id, figures };
   });
@@ -2999,6 +3007,14 @@ export async function certifyCertificate(
   tx: Tx,
   certificateId: string,
   actor: { id?: string | null; name: string },
+  /**
+   * The two accounts a RELEASE moves money between — 0085's receivable, and
+   * ordinary receivables.
+   *
+   * Required only when this certificate actually releases something. Supplied
+   * by the action, which is where the chart is read.
+   */
+  release?: { retentionAccountId: string; arAccountId: string } | null,
 ) {
   const current = await getCertificateById(tx, certificateId);
   if (!current) return null;
@@ -3022,7 +3038,66 @@ export async function certifyCertificate(
     })
     .where(eq(projectCertificates.id, certificateId))
     .returning();
-  return row ?? null;
+  if (!row) return null;
+
+  /**
+   * RELEASING RETENTION, and why it posts HERE rather than with the invoice.
+   *
+   * A release is not revenue and not a supply. The work was certified and the
+   * income recognised when it was done, and VAT was charged then on the gross —
+   * this only makes an existing receivable collectable:
+   *
+   *     DR Accounts Receivable / CR Retention Receivable
+   *
+   * Which is why it needs no tax invoice, and why it cannot wait for one: a
+   * certificate that only releases retention certifies no new work, so there is
+   * nothing to invoice and `raiseCertificateInvoice` would rightly refuse it.
+   *
+   * The HOLD posts at invoice completion because it needs the receivable that
+   * the invoice creates. The RELEASE posts at certification because the
+   * receivable it moves already exists. Asymmetric, and each at the only moment
+   * its counterpart is there.
+   */
+  const chain = await listCertificates(tx, row.contractId);
+  const figures = chain.find((c) => c.id === certificateId)?.figures;
+  const released = figures?.releasedThisCertificate ?? 0;
+
+  if (released > 0) {
+    if (!release?.retentionAccountId || !release?.arAccountId) {
+      throw new Error(
+        "Retention Receivable (1125) or Accounts Receivable is not configured, so this release cannot be recorded.",
+      );
+    }
+    const amount = released.toFixed(4);
+    await createJournalEntry(tx, {
+      companyId: row.companyId,
+      entryDate: row.valuationDate,
+      entryType: "adjustment",
+      description: `Retention released — ${row.certificateNumber}`,
+      reference: row.certificateNumber,
+      // The certificate, not its invoice — a release-only certificate has no
+      // invoice, and the document that decided the release is this one.
+      sourceType: "project_certificate",
+      sourceId: row.id,
+      projectId: row.projectId,
+      createdById: actor.id ?? null,
+      postImmediately: true,
+      lines: [
+        {
+          accountId: release.arAccountId,
+          debit: amount,
+          description: "Now collectable",
+        },
+        {
+          accountId: release.retentionAccountId,
+          credit: amount,
+          description: "Released from retention",
+        },
+      ],
+    });
+  }
+
+  return row;
 }
 
 /**
