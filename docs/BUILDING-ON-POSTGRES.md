@@ -840,6 +840,56 @@ created id, held in a ref — correct however the caller declares its callback,
 which is the property worth having. Two more of the same shape were guarded;
 two outside this module were left alone and noted.
 
+### And then three things that made the module usable rather than correct
+
+Written after the section above, which is why they read as an afterthought and
+are not one — the module was CORRECT before them and still took a day of typing
+to start a job.
+
+**A bill of quantities imports from a spreadsheet.** The largest friction left,
+and not a convenience problem: a priced bill arrives as a spreadsheet and a
+three-hundred-line one was going to be typed by hand, so it would not be, and a
+project with no bill has no measured progress, no earned value and nothing for a
+certificate to value against. The whole measured half sat behind a day of
+typing. Same control and wording as the colleague's programme import, so the two
+read as one feature. It handles what a REAL bill contains — narrative lines with
+no quantity land as unpriced headings rather than being dropped, thousands
+separators and currency symbols survive, and a blank section carries forward the
+way a printed bill writes its heading once. It refuses an awarded bill, because
+frozen rates are what make a final account answerable.
+
+The two spreadsheet readers moved to `lib/spreadsheet.js`, extracted UNCHANGED —
+a `"use server"` file can only export async functions, so the helpers could not
+be shared from where they were.
+
+**The project record says what is still to set up.** Six unguided screens was the
+loudest complaint about running a job. The card lists what is outstanding, why
+each matters, and where to do it, offering the first outstanding step as one
+obvious action. It disappears when done — a checklist that stays forever becomes
+furniture — and asks only for what the project's TYPE says exists, so a supply
+job is never asked to price a bill.
+
+**Retention releases.** Holding was built and releasing was not, so the balance
+accrued and nothing gave it back. Certifying a release now posts
+`DR Accounts Receivable / CR Retention Receivable`.
+
+It posts at CERTIFICATION while the hold posts at INVOICE COMPLETION, and the
+asymmetry is the point: the hold needs the receivable the invoice creates, the
+release moves one that already exists — and a certificate that only releases
+retention certifies no new work, raises no invoice, and would otherwise be
+stranded. A release is not a supply; the revenue was recognised and the VAT
+charged when the work was certified.
+
+0087 makes a certificate a SOURCE DOCUMENT. The first attempt claimed
+`source_type = 'invoice'` with an `invoice_id` that is null on a release-only
+certificate, and `journal_entries_source_pair` refused it — a source type with
+no id is a provenance nobody can follow. Naming the certificate is also the
+truthful answer.
+
+**What is still not there: the release SCHEDULE.** Half at taking-over and the
+rest at the end of the defects period needs milestones, which are not a table.
+The mechanism is complete; the calendar is not.
+
 ### Still open, and none of it is the porter's to settle
 
 - **When retention releases** — the balance accrues; the schedule is a contract
@@ -847,6 +897,15 @@ two outside this module were left alone and noted.
 - **Labour on a project** — timesheets remain the missing join to payroll.
   `project_assignments` holds a rate nothing multiplies by anything, and
   attendance cannot be trusted for field staff who never clock in.
+
+  The SHAPE is decided: an entry records a quantity and a unit (hour or day),
+  and cost is DERIVED through the assignment's own `rate_unit`. Conversion is
+  configuration, not code — `attendance_config.standard_hours` exists already
+  and a `working_days_per_month` does not. A `fixed` assignment yields no
+  timesheet cost at all: it is a lump sum, closer to a milestone. And the
+  timesheet does NOT post — labour reaches the ledger through payroll once,
+  where the statutory deductions are. Entry belongs on the project record,
+  beside the roster whose rate gives it meaning.
 - **Nothing.** Both remotes are current as of this handoff.
 
 ### Where the count is
