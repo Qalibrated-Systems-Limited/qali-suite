@@ -537,6 +537,71 @@ suite("the bill of quantities", () => {
     });
   });
 
+
+  // ───────────────────────────────────────────────────────────────────────────
+  describe("importing a bill", () => {
+    /**
+     * A priced bill arrives as a spreadsheet. These pin the SHAPE a real one
+     * has — sections written once, narrative lines with no quantity, thousands
+     * separators, a currency symbol — because every one of those is a row that
+     * a strict parser drops silently and a QS then cannot find.
+     */
+    const csv = (lines) => ({
+      name: "bill.csv",
+      size: 1,
+      arrayBuffer: async () => new TextEncoder().encode(lines.join("\n")).buffer,
+    });
+
+    it("reads sections, priced items and narrative lines", async () => {
+      const { rowsFromFile } = await import("@/lib/spreadsheet");
+      const rows = await rowsFromFile(
+        csv([
+          "Section,Item code,Description,Unit,Quantity,Rate",
+          "Bill 2 — Earthworks,B.2.1,Clear and grub,ha,12,45000",
+          ",B.2.2,\"Excavate, to formation\",m3,\"18,000\",350",
+          ",,Rates to include for all fixings,,,",
+          "Bill 3 — Concrete,B.3.1,Mass concrete,m3,240,\"KES 12,500\"",
+        ]),
+      );
+      expect(rows).toHaveLength(5);
+      // The quoted comma inside a description survives.
+      expect(rows[2][2]).toBe("Excavate, to formation");
+    });
+
+    it("PRICES only the rows that carry a unit and a quantity", async () => {
+      // `project_boq_items_quantity_needs_unit` refuses a quantity with no
+      // unit, and a narrative line is a legitimate row rather than an error —
+      // so those land as unpriced headings instead of being dropped.
+      const section = await addItem({ description: "Bill 2", isHeading: true });
+      const narrative = await addItem({
+        description: "Rates to include for all fixings",
+        isHeading: true,
+        parentItemId: section.id,
+      });
+      const priced = await addPriced({
+        description: "Excavate",
+        parentItemId: section.id,
+        quantity: "18000",
+        rate: "350",
+      });
+
+      const rows = await inA((tx) => repo.listBoqItems(tx, boqA));
+      const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+      expect(byId[narrative.id].quantity).toBeNull();
+      expect(byId[priced.id].amount).toBe(6300000);
+      // The section rolls up only what is priced beneath it.
+      expect(byId[section.id].billedAmount).toBe(6300000);
+    });
+
+    it("refuses to import into an awarded bill", async () => {
+      // The rates are frozen, which is what makes a final account answerable.
+      await addPriced();
+      await award();
+      const boq = await inA((tx) => repo.getEffectiveBoq(tx, projectA));
+      expect(boq.status).toBe("awarded");
+    });
+  });
+
   // ───────────────────────────────────────────────────────────────────────────
   describe("the bill's own facts", () => {
     it("versions per project", async () => {

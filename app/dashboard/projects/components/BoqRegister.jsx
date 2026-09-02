@@ -31,6 +31,7 @@ import {
   recordProjectBoqMeasurement,
 } from "@/app/db/actions/project-actions";
 import { toast } from "sonner";
+import ImportBoq from "./ImportBoq";
 
 /**
  * The bill of quantities — 0080, and the screen where progress stops being an
@@ -210,14 +211,19 @@ export default function BoqRegister({
           against. A lump-sum or supply job legitimately has none.
         </p>
         {canManage && (
-          <Button size="sm" onClick={startBill} disabled={isPending}>
-            {isPending ? (
-              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4 mr-1.5" />
-            )}
-            Start a bill
-          </Button>
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            {/* Importing comes first: a real bill arrives as a spreadsheet, and
+                typing one in is the reason a project ends up without one. */}
+            <ImportBoq projectId={projectId} />
+            <Button size="sm" variant="outline" onClick={startBill} disabled={isPending}>
+              {isPending ? (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4 mr-1.5" />
+              )}
+              Start an empty bill
+            </Button>
+          </div>
         )}
       </Card>
     );
@@ -247,6 +253,7 @@ export default function BoqRegister({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {isDraft && canManage && <ImportBoq projectId={projectId} />}
             {isDraft && canManage && !showForm && (
               <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>
                 <Plus className="h-4 w-4 sm:mr-1" />
