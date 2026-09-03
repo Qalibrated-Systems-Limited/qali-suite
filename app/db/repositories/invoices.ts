@@ -476,6 +476,23 @@ export async function completeInvoice(
      * certificates exist. The caller knows.
      */
     retention?: { amount: string; accountId: string } | null;
+    /**
+     * The advance recovered by this certificate, if any — the mirror of the
+     * retention split, on the other side of the balance sheet:
+     *
+     *     DR Customer Advance / CR Accounts Receivable
+     *
+     * The employer paid this money before any work was done, and it sits as a
+     * liability until the works earn it. Recovering it is not revenue and not
+     * a discount: the certificate is still worth its gross, the client simply
+     * pays less cash because they have already paid this part. Without the
+     * entry the receivable is overstated by every shilling recovered and the
+     * advance sits on the balance sheet at its full value for ever.
+     *
+     * No VAT adjustment: output VAT was accounted on the gross valuation, and
+     * how the client settles it does not change the value of the supply.
+     */
+    advanceRecovery?: { amount: string; accountId: string } | null;
     cogsAccountId?: string | null;
     inventoryAccountId?: string | null;
     technicianStockAccountId?: string | null;
@@ -582,6 +599,41 @@ export async function completeInvoice(
           accountId: opts.arAccountId,
           credit: opts.retention.amount,
           description: "Not collectable this certificate",
+        },
+      ],
+    });
+  }
+
+  /**
+   * The advance recovery, likewise its own entry. Separate from the retention
+   * so that either can be reversed without disturbing the other, and so a
+   * reader of the ledger sees two distinct reasons the client pays less than
+   * the invoice says.
+   */
+  if (opts.advanceRecovery && Number(opts.advanceRecovery.amount) > 0) {
+    await createJournalEntry(tx, {
+      companyId: invoice.companyId,
+      entryDate: invoice.invoiceDate,
+      entryType: "adjustment",
+      description: `Advance recovered — invoice ${invoice.invoiceNumber}`,
+      reference: invoice.invoiceNumber,
+      partyType: "customer",
+      partyId: invoice.customerId,
+      sourceType: "invoice",
+      sourceId: invoice.id,
+      projectId: invoice.projectId ?? null,
+      createdById: opts.completedById,
+      postImmediately: true,
+      lines: [
+        {
+          accountId: opts.advanceRecovery.accountId,
+          debit: opts.advanceRecovery.amount,
+          description: "Advance earned by the work certified",
+        },
+        {
+          accountId: opts.arAccountId,
+          credit: opts.advanceRecovery.amount,
+          description: "Already paid by the employer in advance",
         },
       ],
     });

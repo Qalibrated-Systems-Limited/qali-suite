@@ -641,15 +641,31 @@ suite("projects", () => {
       expect(actuals.revenue).toBe(85000);
     });
 
-    it("splits bills into cost and commitment, and ignores a cancelled one", async () => {
+    it("counts an approved bill as cost whether or not it is paid", async () => {
+      // 0088: approval is when the bill posts (DR expense / CR AP), so it is
+      // when the project incurred it. Counting at payment instead put cost on
+      // a cash basis while revenue stayed on an accrual one, and margin then
+      // moved with supplier terms rather than with the job.
       const p = await seedProject();
       await seedBill(p.id, 40000, "approved", "paid");
       await seedBill(p.id, 25000, "approved", "unpaid");
       await seedBill(p.id, 90000, "cancelled", "paid");
 
       const actuals = await inA((tx) => repo.computeProjectActuals(tx, p.id));
-      expect(actuals.costs).toBe(40000);
-      expect(actuals.committed).toBe(25000);
+      expect(actuals.costs).toBe(65000);
+      expect(actuals.committed).toBe(0);
+    });
+
+    it("counts a bill still awaiting approval as commitment, not cost", async () => {
+      const p = await seedProject();
+      await seedBill(p.id, 12000, "draft", "unpaid");
+      await seedBill(p.id, 8000, "submitted", "unpaid");
+      // Rejected is neither: it will never be a cost and is not expected to be.
+      await seedBill(p.id, 50000, "rejected", "unpaid");
+
+      const actuals = await inA((tx) => repo.computeProjectActuals(tx, p.id));
+      expect(actuals.costs).toBe(0);
+      expect(actuals.committed).toBe(20000);
     });
 
     it("counts an approved stock request as commitment, which no ledger query could", async () => {
@@ -727,15 +743,17 @@ suite("projects", () => {
       await seedInvoice(p.id, 200000);
       await seedBill(p.id, 50000, "approved", "paid");
       await seedBill(p.id, 30000, "approved", "unpaid");
+      await seedBill(p.id, 20000, "draft", "unpaid");
 
       const summary = await inA((tx) => repo.getProjectFinancialSummary(tx, p.id));
       expect(summary.revenue).toBe(200000);
-      expect(summary.costs).toBe(50000);
-      expect(summary.committed).toBe(30000);
-      expect(summary.margin).toBe(150000);
-      expect(summary.marginPercent).toBe(75);
-      expect(summary.budgetUtilization).toBe(80);
-      expect(summary.available).toBe(20000);
+      // Both approved bills, paid or not.
+      expect(summary.costs).toBe(80000);
+      expect(summary.committed).toBe(20000);
+      expect(summary.margin).toBe(120000);
+      expect(summary.marginPercent).toBe(60);
+      expect(summary.budgetUtilization).toBe(100);
+      expect(summary.available).toBe(0);
     });
 
     it("answers for many projects in one query", async () => {

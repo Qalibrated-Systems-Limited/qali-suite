@@ -285,6 +285,7 @@ export async function completeInvoicePg(
          * every invoice.
          */
         let retention = null;
+        let advanceRecovery = null;
         const certificate = await projectsRepo.getCertificateForInvoice(
           tx,
           invoiceId,
@@ -307,8 +308,30 @@ export async function completeInvoicePg(
           };
         }
 
+        /**
+         * The advance this certificate recovers. Same shape as the retention
+         * and looked up for the same reason — the invoice repository does not
+         * know what a certificate is.
+         */
+        if (certificate && certificate.figures.advanceThisCertificate > 0) {
+          const advance = await accountsRepo.getSystemAccount(
+            tx,
+            "customer_advance",
+          );
+          if (!advance) {
+            throw new Error(
+              "Customer Advance (2190) is not configured in the chart of accounts, so this certificate's advance recovery cannot be posted.",
+            );
+          }
+          advanceRecovery = {
+            amount: certificate.figures.advanceThisCertificate.toFixed(2),
+            accountId: advance.id,
+          };
+        }
+
         return invoices.completeInvoice(tx, invoiceId, {
           retention,
+          advanceRecovery,
           arAccountId: ar.id,
           revenueAccountId: revenue.id,
           vatOutputAccountId: vatOutput?.id ?? null,

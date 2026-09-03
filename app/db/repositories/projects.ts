@@ -454,28 +454,49 @@ export async function computeActualsFor(
        GROUP BY i.project_id
     ),
 
-    -- Bills: paid is cost, approved-and-unpaid is commitment. A bill
-    -- cancelled after payment is neither.
+    -- Bills: APPROVED is cost, whether or not it has been paid. Approval is
+    -- the point the bill posts (DR expense / CR Accounts Payable), so that is
+    -- the point the project incurred it. Paying it later moves cash and
+    -- changes nothing about the cost.
+    --
+    -- Counting cost at payment instead — which this did until 0088 — put the
+    -- cost side on a cash basis while revenue stayed on an accrual one, and a
+    -- job on 60-day supplier terms then showed two months of revenue against
+    -- none of its cost. Margin peaked early and sagged later, from payment
+    -- timing rather than anything about the job.
+    --
+    -- A bill still in draft or submitted is a commitment: received, not yet
+    -- accepted. Rejected and cancelled are neither.
     bill_totals AS (
       SELECT b.project_id,
              SUM(b.net_payable) FILTER (
-               WHERE b.payment_status = 'paid' AND b.status <> 'cancelled'
-             )::float8                                              AS paid,
+               WHERE b.status = 'approved'
+                  OR (b.payment_status <> 'unpaid'
+                      AND b.status NOT IN ('cancelled', 'rejected'))
+             )::float8                                              AS incurred,
              SUM(b.net_payable) FILTER (
-               WHERE b.status = 'approved' AND b.payment_status <> 'paid'
+               WHERE b.status IN ('draft', 'submitted')
+                 AND b.payment_status = 'unpaid'
              )::float8                                              AS committed
         FROM bills b
        WHERE b.project_id IN (SELECT project_id FROM ids)
        GROUP BY b.project_id
     ),
 
+    -- Claims, on the same basis: APPROVED is the point the company owes the
+    -- employee, so it is the point the project incurred the cost. Everything
+    -- downstream of approval — awaiting payment, paid, closed — is likewise
+    -- incurred. Only a submitted claim is still a commitment; draft and
+    -- rejected are neither.
     claim_totals AS (
       SELECT c.project_id,
              SUM(s.total_amount) FILTER (
-               WHERE c.status IN ('paid', 'closed')
+               WHERE c.status IN (
+                 'approved', 'pending_payment', 'pending_return', 'paid', 'closed'
+               )
              )::float8                                              AS actual,
              SUM(s.total_amount) FILTER (
-               WHERE c.status IN ('submitted', 'approved')
+               WHERE c.status = 'submitted'
              )::float8                                              AS committed
         FROM employee_claims c
         JOIN employee_claim_state s ON s.claim_id = c.id
@@ -484,10 +505,15 @@ export async function computeActualsFor(
        GROUP BY c.project_id
     ),
 
+    -- Expenses, likewise. POSTED is the point it reaches the ledger — an
+    -- unpaid posted expense already credits Accrued Expenses, so it is in the
+    -- company's P&L and belongs in the project's. Splitting on payment_status
+    -- kept a cost the accounts had already recognised out of the project that
+    -- caused it. Only a draft is still a commitment.
     expense_totals AS (
       SELECT e.project_id,
-             SUM(e.total) FILTER (WHERE e.payment_status = 'paid')::float8   AS paid,
-             SUM(e.total) FILTER (WHERE e.payment_status = 'unpaid')::float8 AS committed
+             SUM(e.total) FILTER (WHERE e.status IN ('posted', 'paid'))::float8 AS incurred,
+             SUM(e.total) FILTER (WHERE e.status = 'draft')::float8             AS committed
         FROM expenses e
        WHERE e.project_id IN (SELECT project_id FROM ids)
          AND e.status <> 'void'
@@ -569,11 +595,11 @@ export async function computeActualsFor(
     SELECT ids.project_id::text                        AS project_id,
            COALESCE(ir.amount, 0)                      AS invoice_revenue,
            COALESCE(cr.amount, 0)                      AS credited,
-           COALESCE(bt.paid, 0)                        AS bill_paid,
+           COALESCE(bt.incurred, 0)                    AS bill_incurred,
            COALESCE(bt.committed, 0)                   AS bill_committed,
            COALESCE(ct.actual, 0)                      AS claim_actual,
            COALESCE(ct.committed, 0)                   AS claim_committed,
-           COALESCE(et.paid, 0)                        AS expense_paid,
+           COALESCE(et.incurred, 0)                    AS expense_incurred,
            COALESCE(et.committed, 0)                   AS expense_committed,
            COALESCE(ri.amount, 0)                      AS request_issued,
            COALESCE(ro.amount, 0)                      AS request_committed,
@@ -599,8 +625,8 @@ export async function computeActualsFor(
       costs: Math.max(
         0,
         num(r.claim_actual) +
-          num(r.expense_paid) +
-          num(r.bill_paid) +
+          num(r.expense_incurred) +
+          num(r.bill_incurred) +
           num(r.request_issued) +
           num(r.invoice_cogs) -
           num(r.returned_cogs),
@@ -2731,6 +2757,11 @@ export interface CertificateFigures {
    *  the cumulative figure less what the previous certificate already held. */
   retentionThisCertificate: number;
   advanceRecovered: number;
+  /** What THIS certificate recovers, as opposed to what has been recovered in
+   *  total. Derived from `previouslyGross` rather than carried in, because the
+   *  cumulative recovery is a pure function of the cumulative gross — deriving
+   *  it cannot drift from the figure it is supposed to be the delta of. */
+  advanceThisCertificate: number;
   advanceOutstanding: number;
   netToDate: number;
   previouslyCertified: number;
@@ -2811,6 +2842,13 @@ export function computeCertificate(
   // which is the whole point of tracking it against the contract rather than
   // deducting a percentage for ever.
   const advanceRecovered = Math.min(grossValuation * recoveryPct, advanceAmount);
+  // What the PREVIOUS certificate had recovered, by the same rule applied to
+  // the gross it stood at. The difference is what this certificate recovers,
+  // and it is what reaches the ledger.
+  const previouslyRecovered = Math.min(
+    previouslyGross * recoveryPct,
+    advanceAmount,
+  );
 
   const netToDate =
     grossValuation - retentionHeld + retentionReleased - advanceRecovered;
@@ -2827,6 +2865,7 @@ export function computeCertificate(
     retentionOutstanding: round2(retentionHeld - retentionReleased),
     retentionCapped,
     advanceRecovered: round2(advanceRecovered),
+    advanceThisCertificate: round2(advanceRecovered - previouslyRecovered),
     advanceOutstanding: round2(advanceAmount - advanceRecovered),
     netToDate: round2(netToDate),
     previouslyCertified: round2(previouslyCertified),

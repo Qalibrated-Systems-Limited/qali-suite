@@ -1266,3 +1266,142 @@ not all multiply the same way. `hour` and `day` are a straight multiplication;
 `month` is a salary that has to be APPORTIONED across the days and jobs worked;
 `fixed` is a lump sum against the project and is closer to a milestone than a
 timesheet. That decides whether the timesheet stores hours, days, or both.
+
+---
+
+## 13. Two corrections to the money — 2026-09-03 (0088)
+
+Walking the whole chain through with figures — contract → BOQ → certificate →
+invoice → ledger — turned up two things that were wrong. Neither was a bug in
+the sense of something failing; both were numbers that looked right and were
+not.
+
+### 13.1 Advance recovery was computed and never posted
+
+`computeCertificate` has always worked out `min(pct × gross, advance paid)`,
+shown it on the certificate, and correctly reduced what the employer pays.
+Nothing ever journalled it.
+
+On a 100,000,000 contract with a 10,000,000 advance recovered at 20%:
+
+| cert | gross to date | recovered | AR overstated by |
+|---|---|---|---|
+| 1 | 20,000,000 | 4,000,000 | 4,000,000 |
+| 2 | 35,000,000 | 7,000,000 | 7,000,000 |
+
+and the advance sat as a liability at its full 10,000,000 for the life of the
+contract, long after the work that earned it was certified. Receivables
+overstated, liabilities overstated, and the two never clearing each other.
+
+**What posts now**, beside the retention split and on the other side of the
+balance sheet:
+
+```
+DR  Customer Advance (2190)   /   CR  Accounts Receivable
+```
+
+Not revenue and not a discount. The certificate is still worth its gross and
+output VAT was already accounted on that gross — the employer simply pays less
+cash because part of it was paid before the work began. A separate entry from
+the retention so either can be reversed without disturbing the other, and so a
+reader of the ledger sees two distinct reasons the client pays less than the
+invoice says.
+
+**The period figure is derived, not carried.** `advanceThisCertificate` is the
+cumulative recovery less `min(previouslyGross × pct, advance)` — the same rule
+applied to the gross the last certificate stood at. Deriving it from
+`previouslyGross` rather than passing it in means it cannot drift from the
+figure it is supposed to be the delta of, and capping BOTH sides is what stops
+the delta going negative once the advance is repaid and crediting it back.
+
+Worked through: 100,000,000 sum, 20,000,000 first valuation.
+
+```
+Invoice — the GROSS this period, plus VAT
+  DR  Accounts Receivable   23,200,000
+      CR  Revenue                        20,000,000
+      CR  VAT Output                      3,200,000
+  DR  Retention Receivable   2,000,000
+      CR  Accounts Receivable             2,000,000
+  DR  Customer Advance       4,000,000
+      CR  Accounts Receivable             4,000,000
+
+Receivable left standing: 17,200,000 — the certificate's net of
+14,000,000 plus the 3,200,000 of VAT. Which is what the employer owes.
+```
+
+`tests/pg-invoice-actions.test.mjs` asserts exactly that split end to end.
+
+### 13.2 Project cost was on a cash basis, revenue on an accrual one
+
+`computeActualsFor` counted a supplier bill as cost when it was **paid**, a
+claim when it was **paid or closed**, and an expense by its `payment_status` —
+while revenue counted an invoice the moment it **completed**.
+
+A job on 60-day supplier terms therefore showed two months of revenue against
+none of its cost. Margin peaked early and sagged later, from payment timing
+rather than from anything about the job. It is the kind of number that makes a
+contractor under-price the *next* tender.
+
+All three arms now recognise cost at the point it reaches the ledger:
+
+| | cost | commitment |
+|---|---|---|
+| Bills | `approved` (or paid) | `draft`, `submitted` |
+| Claims | `approved` onward | `submitted` |
+| Expenses | `posted`, `paid` | `draft` |
+
+An unpaid posted expense already credits Accrued Expenses — it is in the
+company's P&L, so keeping it out of the project's was leaving a cost the
+accounts had recognised against no project at all.
+
+`committed` now means what it should: ordered or claimed, not yet accepted.
+
+### 13.3 What this did NOT fix — labour and plant
+
+The remaining distortion is larger than either of the above, and it is not a
+filter.
+
+Payroll posts a correct accrual journal. **No line carries a `project_id`.** So
+a contractor's own labour — often the single biggest cost on a job — is
+properly in the P&L and entirely absent from every project.
+
+The plumbing exists: 0084 put `project_id` and `cost_code_id` on
+`journal_lines`, and `getProjectLedgerActuals` reads them. Anything posted
+*with* a project appears automatically. Payroll simply does not post one.
+
+Which is what the timesheet decision was actually about. A timesheet's job is
+not recording hours; it is attributing labour cost to a project and a cost
+code. Until it exists, project margin is overstated by every shilling of own
+labour, and the CVR by cost code — the one table that tells a site agent which
+trade is losing money while there is still time to act — cannot be trusted on
+any labour-heavy code.
+
+### 13.4 A note on the chart, found in passing
+
+0085 picked the parent for `1125 Retention Receivable` by account code alone.
+That assumes every company runs the standard chart. This repo's dev database
+has one that does not: its `2100` is *WHT Payable*, and the first cut of 0088
+duly filed Customer Advance underneath it.
+
+0088 now requires the parent to be a non-postable liability header at 2100 or
+2000, and repairs any `customer_advance` or `retention_receivable` already
+parented to a postable account by detaching it to the root of the chart. A flat
+chart gets a root-level account, which is right; no chart gets an account
+hidden under an unrelated payable.
+
+**The general rule:** an account code is a label a company chooses, not a
+structure the system may rely on. Match on `system_account`, or on structure.
+
+### 13.5 Still open
+
+- **Advance recovery convention.** This implements straight-line recovery from
+  certificate one — the common Kenyan public-works form. FIDIC 14.2 starts
+  recovery only once certified value passes a threshold and completes it by
+  another. If the contracts in hand use that form, it is two threshold columns
+  and a different expression. **Check a real contract before changing it** —
+  the same caution the 2026-08-31 handoff raised about FIDIC percentages.
+- **Retention release schedule** — still needs milestones, which are still not
+  a table.
+- **Timesheets** — shape decided (quantity + unit, cost through
+  `project_assignments.rate_unit`, no ledger posting of its own), not built.

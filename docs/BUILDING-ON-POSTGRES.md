@@ -2408,3 +2408,65 @@ applies cleanly has proved nothing about its triggers.
 - **Restart `next dev` after touching `app/db/schema/`.** Turbopack caches the
   module scope, so adding an import produces `ReferenceError: x is not defined`
   against source that plainly imports it.
+
+---
+
+## Handoff — 2026-09-03: two corrections to project money (0088)
+
+Walking the certificate chain through with real figures found two numbers that
+looked right and were not. Both are now fixed; the third and largest is not.
+
+**1. Advance recovery was computed and never posted.** The certificate showed
+it and correctly reduced what the employer paid, but no journal moved it, so
+Accounts Receivable was overstated by every shilling recovered and the advance
+sat as a liability at full value for the life of the contract. It now posts
+`DR Customer Advance (2190) / CR Accounts Receivable` at invoice completion, as
+its own entry beside the retention split.
+
+The period figure, `advanceThisCertificate`, is **derived** from
+`previouslyGross` rather than carried in — the cumulative recovery is a pure
+function of the cumulative gross, so deriving the delta means it cannot drift
+from the figure it is a delta of. Capping both sides is what stops the delta
+going negative once the advance is repaid.
+
+**2. Project cost was cash-basis while revenue was accrual.** Bills counted at
+payment, claims at payment, expenses by `payment_status` — against revenue
+counted at invoice completion. A job on 60-day supplier terms showed two months
+of revenue against none of its cost. All three now recognise cost where the
+ledger does: a bill at `approved`, a claim from `approved` onward, an expense at
+`posted`. `committed` now means ordered-not-yet-accepted, which is what the
+budget should be checked against.
+
+The CTE columns were renamed `paid` → `incurred` to match.
+
+### The one that is still wrong, and it is the big one
+
+**Payroll posts a correct accrual journal and no line carries a `project_id`.**
+A contractor's own labour — often the largest cost on a job — is in the P&L and
+absent from every project. On a worked example the reported margin was 45.6%
+against a true 18.9%.
+
+The plumbing exists: 0084 put `project_id` and `cost_code_id` on
+`journal_lines` and `getProjectLedgerActuals` reads them, so anything posted
+with a project appears automatically. This is what the timesheet work is
+actually for — attributing labour to a project and a cost code, not recording
+hours. Until then, do not trust project margin on a labour-heavy job.
+
+### A chart-of-accounts trap, found in passing
+
+**An account code is a label a company chooses, not a structure to rely on.**
+0085 picked a parent by matching `account_code = '1100'`. The dev database has a
+company whose `2100` is *WHT Payable*, not Current Liabilities — so the first
+cut of 0088 filed Customer Advance underneath it. 0088 now requires the parent
+to be a non-postable liability header, and repairs any `customer_advance` or
+`retention_receivable` already parented to a postable account.
+
+Match on `system_account`, or on structure. Never on the code alone.
+
+### Verified this session
+
+- All 88 migrations apply in order to a `stockvault_test` dropped and recreated
+  from scratch.
+- The ledger split is asserted end to end in `tests/pg-invoice-actions.test.mjs`
+  — revenue and VAT on the gross, AR net of both the retention and the advance.
+- `tsc --noEmit` and `eslint --quiet` clean.

@@ -410,6 +410,100 @@ suite("invoice actions (end to end)", () => {
     expect(rows.je.n).toBeGreaterThan(0);
   });
 
+  it("splits a certificate's invoice into due, retained and advance recovered", async () => {
+    // 0088. A certificate invoices its GROSS — revenue and output VAT are due
+    // on the value of the supply — and two separate entries then reclassify
+    // the parts of the receivable that will not be collected as cash:
+    //
+    //   DR Retention Receivable / CR AR   held until taking-over
+    //   DR Customer Advance     / CR AR   already paid before the work began
+    //
+    // Before this, only the retention posted. The advance recovery was shown
+    // on the certificate, deducted from what the employer paid, and never
+    // journalled — so AR was overstated by every shilling recovered.
+    const retentionAcct = randomUUID();
+    const advanceAcct = randomUUID();
+    const projectId = randomUUID();
+    const contractId = randomUUID();
+    const certId = randomUUID();
+
+    const created = await invoiceActions.createInvoicePg(
+      null,
+      form({
+        customerId,
+        invoiceDate: "2026-08-01",
+        serviceItems: [
+          {
+            name: "Interim certificate 1",
+            serviceCategory: "installation",
+            unit: "each",
+            quantity: 1,
+            unitPrice: 20000000,
+            taxRate: 16,
+          },
+        ],
+      }),
+    );
+    expect(created.success).toBe(true);
+
+    await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      await tx`
+        INSERT INTO accounts (id, company_id, account_code, account_name, account_type, sub_type, system_account) VALUES
+          (${retentionAcct}, ${companyUuid}, '1125', 'Retention Receivable', 'asset',     'receivable',      'retention_receivable'),
+          (${advanceAcct},   ${companyUuid}, '2190', 'Customer Advance',     'liability', 'customer_deposit', 'customer_advance')`;
+      await tx`
+        INSERT INTO projects (id, company_id, name, project_number, status, created_by_name)
+        VALUES (${projectId}, ${companyUuid}, 'Otho–Got Kachola Road', 'PRJ-0088', 'active', 'Seed')`;
+      await tx`
+        INSERT INTO project_contracts (id, company_id, project_id, direction,
+                                       counterparty_party_id, counterparty_name,
+                                       title, contract_sum, original_sum, currency,
+                                       retention_percent, retention_cap_percent,
+                                       advance_amount, advance_recovery_percent)
+        VALUES (${contractId}, ${companyUuid}, ${projectId}, 'receivable',
+                ${customerId}, 'KeRRA',
+                'KeRRA works', 100000000, 100000000, 'KES', 10, 5, 10000000, 20)`;
+      // 20m of work: 2m retained (cap not reached), 4m of the advance recovered.
+      await tx`
+        INSERT INTO project_certificates (id, company_id, project_id, contract_id,
+                                          certificate_number, sequence, period_to,
+                                          status, work_done_to_date, invoice_id)
+        VALUES (${certId}, ${companyUuid}, ${projectId}, ${contractId}, 'IPC-1', 1,
+                '2026-08-31', 'draft', 20000000, ${created.invoiceId})`;
+      await tx`UPDATE invoices SET project_id = ${projectId} WHERE id = ${created.invoiceId}`;
+    });
+
+    const done = await invoiceActions.completeInvoicePg(created.invoiceId);
+    expect(done.success).toBe(true);
+
+    const rows = await admin.begin(async (tx) => {
+      await tx`SELECT set_config('app.company_id', ${companyUuid}, true)`;
+      return tx`
+        SELECT a.account_code,
+               COALESCE(SUM(l.debit), 0)::float8  AS dr,
+               COALESCE(SUM(l.credit), 0)::float8 AS cr
+          FROM journal_lines l
+          JOIN journal_entries e ON e.id = l.entry_id
+          JOIN accounts a ON a.id = l.account_id
+         WHERE e.status = 'posted'
+         GROUP BY a.account_code
+         ORDER BY a.account_code`;
+    });
+    const at = (code) => rows.find((r) => r.account_code === code) ?? { dr: 0, cr: 0 };
+
+    // Revenue and VAT on the GROSS, not the net.
+    expect(at("4000").cr).toBe(20000000);
+    expect(at("2300").cr).toBe(3200000);
+    // The receivable: raised at 23.2m, less 2m retained and 4m advance.
+    expect(at("1200").dr).toBe(23200000);
+    expect(at("1200").cr).toBe(6000000);
+    expect(at("1125").dr).toBe(2000000);
+    expect(at("2190").dr).toBe(4000000);
+    // What the employer actually owes now — the net of 14m plus VAT.
+    expect(at("1200").dr - at("1200").cr).toBe(17200000);
+  });
+
   it("re-reserves stock by the difference when lines change", async () => {
     const created = await invoiceActions.createInvoicePg(
       null,

@@ -262,6 +262,43 @@ suite("contracts and certificates", () => {
       expect(row.figures.advanceOutstanding).toBe(0);
     });
 
+    it("recovers the advance in period steps that sum to the cumulative figure", async () => {
+      // 0088. The cumulative recovery is what the certificate shows; the
+      // period delta is what reaches the ledger, and it is derived from the
+      // previous certificate's GROSS rather than carried in, so the two can
+      // never drift apart.
+      const c = await newContract();
+      const one = await newCertificate(c.id, { workDoneToDate: "20000000" });
+      await certify(one.id);
+      const two = await newCertificate(c.id, { workDoneToDate: "35000000" });
+      await certify(two.id);
+
+      const chain = await inA((tx) => repo.listCertificates(tx, c.id));
+      expect(chain[0].figures.advanceRecovered).toBe(4000000);
+      expect(chain[0].figures.advanceThisCertificate).toBe(4000000);
+      // 20% of 35m is 7m cumulative, of which 3m is new this period.
+      expect(chain[1].figures.advanceRecovered).toBe(7000000);
+      expect(chain[1].figures.advanceThisCertificate).toBe(3000000);
+    });
+
+    it("recovers nothing once the advance is repaid, so nothing posts", async () => {
+      // The certificate that crosses the line recovers only the remainder;
+      // every one after it recovers zero. Without the cap on BOTH the
+      // cumulative figure and the one it is measured from, the period delta
+      // would go negative and credit the advance back.
+      const c = await newContract();
+      const one = await newCertificate(c.id, { workDoneToDate: "60000000" });
+      await certify(one.id);
+      const two = await newCertificate(c.id, { workDoneToDate: "80000000" });
+      await certify(two.id);
+
+      const chain = await inA((tx) => repo.listCertificates(tx, c.id));
+      // 20% of 60m is 12m, capped at the 10m advanced.
+      expect(chain[0].figures.advanceThisCertificate).toBe(10000000);
+      expect(chain[1].figures.advanceRecovered).toBe(10000000);
+      expect(chain[1].figures.advanceThisCertificate).toBe(0);
+    });
+
     it("releases retention when the certificate says it was released", async () => {
       const c = await newContract();
       const one = await newCertificate(c.id, { workDoneToDate: "50000000" });

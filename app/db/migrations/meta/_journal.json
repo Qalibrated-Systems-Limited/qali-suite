@@ -617,6 +617,13 @@
       "when": 1787049160566,
       "tag": "0087_a_certificate_is_a_source_document",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1787049161566,
+      "tag": "0088_advance_recovery_reaches_the_ledger",
+      "breakpoints": true
     }
   ]
 }
