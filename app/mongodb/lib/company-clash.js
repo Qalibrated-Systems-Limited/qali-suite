@@ -1,4 +1,4 @@
-import Company from "@/app/models/company";
+import Company from "@/app/models/Company";
 
 /**
  * Is this name / code / slug already taken?
