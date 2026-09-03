@@ -18,7 +18,7 @@ import {
   getCompanyIdForCreate,
   buildTenantMatch,
 } from "@/lib/utils/tenant-utils";
-import { getCompanyThresholds } from "@/app/mongodb/queries/threshold-queries";
+import { getCompanyThresholds } from "@/app/db/companyConfig";
 import { submitApproval } from "@/app/mongodb/actions/approval-actions";
 
 // ============================================

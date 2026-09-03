@@ -19,7 +19,6 @@ import {
   notifyApprovalDecided,
 } from "@/lib/notifications/approval-notify";
 import ErpCounter from "@/app/models/erp-counter";
-import Project from "@/app/models/project";
 
 // ============================================
 // APPROVAL ENGINE — SERVER ACTIONS
@@ -542,18 +541,29 @@ async function applyExpensePayment(approval, user) {
     return { success: false, error: result?.error || "Failed to record payment" };
   }
 
-  // Payment moves the cost from committed to actual on the project. Projects
-  // are still Mongo, so this stays where it is — but the amount now comes back
-  // from the Postgres row rather than from a Mongo document that no longer
-  // exists.
-  if (result.projectId) {
-    await Project.findByIdAndUpdate(result.projectId, {
-      $inc: {
-        "financials.totalCosts": Number(result.total ?? 0),
-        "financials.totalCommitted": -Number(result.total ?? 0),
-      },
-    });
-  }
+  /**
+   * NOTHING TO INCREMENT ANY MORE, and incrementing it was throwing.
+   *
+   * This used to move the cost from committed to actual on the Mongo Project,
+   * with a comment saying projects were still Mongo. They are not — and
+   * `result.projectId` has been a Postgres UUID since that port, which
+   * `Project.findByIdAndUpdate` casts to an ObjectId and refuses:
+   *
+   *     CastError: Cast to ObjectId failed for value "0f9c1a2e-…"
+   *
+   * The throw escaped this function, escaped `applyApprovalPayload`, and was
+   * caught by the outer handler in `approveApproval` — which rolls the lease
+   * back to "submitted" only on `!applyResult.success`, never on an exception.
+   * So an over-threshold expense payment against a PROJECT was: recorded in
+   * Postgres, reported to the approver as failed, and left stuck in the
+   * "applying" lease for the reaper to find. The money moved; the queue said
+   * it had not.
+   *
+   * Deleted rather than ported, because there is no Postgres column to
+   * increment. `computeActualsFor` derives a project's costs and commitments
+   * from the expenses themselves on every read — the derived-not-stored rule
+   * this module is built on. Recording the payment IS the update.
+   */
 
   return {
     success: true,

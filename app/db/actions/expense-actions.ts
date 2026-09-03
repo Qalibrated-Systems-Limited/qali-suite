@@ -415,9 +415,7 @@ async function requestApprovalIfOverThreshold(
   const amount = Number(expense.total ?? 0);
   if (!(amount > 0)) return null;
 
-  const { getCompanyThresholds } = await import(
-    "@/app/mongodb/queries/threshold-queries"
-  );
+  const { getCompanyThresholds } = await import("@/app/db/companyConfig");
   const thresholds = await getCompanyThresholds(expense.companyId);
   const threshold = Number(thresholds?.expensePaymentValue) || 0;
   if (!(threshold > 0) || amount <= threshold) return null;

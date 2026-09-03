@@ -32,7 +32,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-vi.mock("@/app/mongodb/queries/threshold-queries", () => ({
+// Thresholds are Postgres (0035); the action reads them from companyConfig
+// directly rather than through the retired Mongo-path forwarder.
+vi.mock("@/app/db/companyConfig", () => ({
   getCompanyThresholds: vi.fn(async () => ({ billPaymentValue: 100_000 })),
 }));
 

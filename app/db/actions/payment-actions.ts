@@ -369,9 +369,7 @@ async function requestApprovalIfOverThreshold(
   );
   if (user.role && PAYMENT_APPROVAL_BYPASS.has(user.role)) return null;
 
-  const { getCompanyThresholds } = await import(
-    "@/app/mongodb/queries/threshold-queries"
-  );
+  const { getCompanyThresholds } = await import("@/app/db/companyConfig");
   const thresholds = await getCompanyThresholds(companyId);
   const threshold = Number(thresholds?.billPaymentValue) || 0;
   if (!(threshold > 0) || meta.amount <= threshold) return null;

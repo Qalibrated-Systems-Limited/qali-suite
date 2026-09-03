@@ -11,7 +11,7 @@ import {
   withTenantScope,
 } from "@/lib/utils/tenant-utils";
 import { submitApproval } from "./approval-actions";
-import { getCompanyThresholds } from "@/app/mongodb/queries/threshold-queries";
+import { getCompanyThresholds } from "@/app/db/companyConfig";
 
 // ============================================
 // STOCK ADJUSTMENT APPROVAL POLICY

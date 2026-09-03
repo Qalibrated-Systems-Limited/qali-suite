@@ -21,9 +21,11 @@ vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 // Threshold pinned; submitApproval mocked so we observe routing without its
-// internals. Both are still Mongo — approvals are their own unported module,
-// and that seam is the point of the dynamic imports in the action.
-vi.mock("@/app/mongodb/queries/threshold-queries", () => ({
+// internals. The thresholds themselves have been Postgres since 0035 and are
+// now read straight from `@/app/db/companyConfig` — the Mongo-path module that
+// used to forward the call was a detour, not a store. Approvals remain their
+// own unported module, and that seam is the point of the dynamic imports.
+vi.mock("@/app/db/companyConfig", () => ({
   getCompanyThresholds: vi.fn(async () => ({ expensePaymentValue: 50_000 })),
 }));
 const submitApproval = vi.fn(async () => ({

@@ -995,7 +995,7 @@ export async function updateProductPricing(productId, prevState, formData) {
 
     // Margin floor — per-tenant configurable
     const { getCompanyThresholds } = await import(
-      "@/app/mongodb/queries/threshold-queries"
+      "@/app/db/companyConfig"
     );
     const thresholds = await getCompanyThresholds(
       companyId?.toString?.() || companyId,
