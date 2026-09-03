@@ -3,8 +3,6 @@ import { redirect } from "next/navigation";
 import { PlanGate } from "@/components/plan-gate-boundary";
 import ProjectsNav from "./components/ProjectsNav";
 import { workspaceProjects } from "./lib/workspace";
-import { SELECTED_PROJECT_COOKIE } from "./lib/sections";
-import { cookies } from "next/headers";
 import { canSeeProjectsNav } from "@/lib/permissions";
 import { Suspense } from "react";
 
@@ -59,7 +57,6 @@ export default async function ProjectsLayout({ children }) {
    * that URL carries no `?project=` and is not a project path — even though
    * every section page still knew perfectly well which project was chosen.
    */
-  const remembered = (await cookies()).get(SELECTED_PROJECT_COOKIE)?.value ?? null;
 
   return (
     <PlanGate module="projects" feature="Project Management">
@@ -67,7 +64,7 @@ export default async function ProjectsLayout({ children }) {
         {/* `useSearchParams` in the nav needs a Suspense boundary, or the whole
             module opts out of static rendering. */}
         <Suspense fallback={<div className="h-12 border-b border-border bg-card" />}>
-          <ProjectsNav projects={projects} rememberedProjectId={remembered} />
+          <ProjectsNav projects={projects} />
         </Suspense>
         <main className="flex-1">{children}</main>
       </div>

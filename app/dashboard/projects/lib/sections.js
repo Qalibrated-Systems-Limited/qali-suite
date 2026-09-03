@@ -21,7 +21,6 @@
  * `next/headers` and `@/auth` and is server-only; a client component importing
  * the constant from there would drag both into the browser bundle.
  */
-export const SELECTED_PROJECT_COOKIE = "project.selected";
 
 /**
  * The module's sections, in nav order, and the flag on `project_types` that
@@ -93,15 +92,20 @@ export function selectProject(projects, requestedId) {
    * dashboard — which lists every project — clicking Bill of Quantities landed
    * you on a bill you did not choose, titled as though you had.
    *
-   * With ONE project there is no decision to make, so it is selected. With
-   * more than one there is, and the honest answer is to ask: `unselected` is a
+   * IT THEN KEPT GUESSING FOR A TENANT WITH ONE PROJECT, on the reasoning that
+   * with one there is no decision to make. There is no decision, but there is
+   * still a claim: opening Bill of Quantities from the global sidebar, having
+   * chosen nothing, put a project's name in the header as though it had been
+   * selected. On a tenant whose single project is "Otho Road construction
+   * project", that is indistinguishable from the bug above — and it is why
+   * removing the remembered-project cookie did not fix it on its own.
+   *
+   * So nothing is selected until something says which. `unselected` is a
    * different state from "this tenant has no projects" and from "the link
-   * named one that does not exist", and the three read differently on screen.
+   * named one that does not exist", and the three read differently on screen;
+   * with a single project the card that asks is a one-click list of one.
    */
-  if (list.length === 1) {
-    return { project: list[0], notFound: false, unselected: false };
-  }
-  return { project: null, notFound: false, unselected: list.length > 1 };
+  return { project: null, notFound: false, unselected: list.length > 0 };
 }
 
 /**

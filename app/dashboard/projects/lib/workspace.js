@@ -1,5 +1,4 @@
 import { cache } from "react";
-import { cookies } from "next/headers";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { canSeeProjectsNav } from "@/lib/permissions";
@@ -7,7 +6,7 @@ import {
   getProjectsForWorkspace,
   getProjectById,
 } from "@/app/db/actions/project-actions";
-import { selectProject, sectionsFor, SELECTED_PROJECT_COOKIE } from "./sections";
+import { selectProject, sectionsFor } from "./sections";
 
 /**
  * The switcher's list, once per request.
@@ -68,29 +67,25 @@ export async function getWorkspaceContext(
   const projects = await workspaceProjects();
 
   /**
-   * WHICH PROJECT, when the URL does not say.
+   * WHICH PROJECT — the URL, and only the URL.
    *
-   * The switcher sets `?project=`, but most ways into a section do not carry
-   * it — the sidebar links are bare, and so is a typed URL or the command
-   * palette. Every one of those fell back to `projects[0]`, so whatever sorted
-   * first among the live jobs was what you got, however carefully you had just
-   * chosen something else. "I always see the first project."
+   * This used to fall back to a cookie the switcher wrote, so that a section
+   * reached without `?project=` still showed the last job chosen. It was added
+   * when the section links were bare and losing the project after one click;
+   * they have carried `?project=` since, and the switcher pushes it too, so
+   * the URL alone already preserves the choice everywhere inside the module.
    *
-   * So the switcher also writes the choice to a cookie and this reads it when
-   * the URL is silent. The URL still WINS where it speaks, which keeps a link
-   * shareable and a bookmark honest.
+   * What the cookie was still doing was answering for the ways in from
+   * OUTSIDE it: the global sidebar's bare links, the command palette, a typed
+   * URL. Opening Bill of Quantities from the sidebar, having chosen nothing,
+   * silently opened whichever project was picked last — days earlier, since
+   * the cookie was written with a year's max-age. Which is the same complaint
+   * as "I always see the first project", with a different wrong answer.
    *
-   * The cookie is not trusted: it is matched against the tenant's own list,
-   * which RLS scopes, so a stale id or one copied from another company
-   * resolves to nothing and falls through rather than leaking a name.
+   * So a section reached without a project now ASKS. `unselected` is a state
+   * the pages already render, and the switcher sits in the header above it.
    */
-  let requested = searchParams?.project;
-  if (!requested) {
-    const remembered = (await cookies()).get(SELECTED_PROJECT_COOKIE)?.value;
-    if (remembered && projects.some((p) => p.id === remembered)) {
-      requested = remembered;
-    }
-  }
+  const requested = searchParams?.project;
 
   const { project: summary, notFound, unselected } = selectProject(projects, requested);
 

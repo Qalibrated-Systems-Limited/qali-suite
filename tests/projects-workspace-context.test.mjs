@@ -70,33 +70,42 @@ describe("the workspace context", () => {
     expect(ctx.notFound).toBe(false);
   });
 
-  it("selects the only project without asking, because there is no decision", async () => {
+  it("ASKS even when the tenant has exactly one project", async () => {
+    // It used to select it, on the reasoning that with one project there is no
+    // decision to make. There is no decision, but there is still a CLAIM:
+    // opening a section from the global sidebar, having chosen nothing, put
+    // that project's name in the header as though it had been picked. On a
+    // tenant whose single job is "Otho Road construction project" that reads
+    // exactly like the guessing bug above — and it is why removing the
+    // remembered-project cookie did not fix the report on its own.
     getProjectsForWorkspace.mockResolvedValueOnce([listed[0]]);
-    const ctx = await getWorkspaceContext({});
-    expect(ctx.project.id).toBe("p-live");
-    expect(ctx.unselected).toBe(false);
-  });
-
-  it("remembers the last choice when the URL is silent", async () => {
-    // The sidebar links, a typed address and the command palette all arrive
-    // with no `?project=`; the cookie is what carries the choice across them.
-    cookieJar.value = "p-done";
-    const ctx = await getWorkspaceContext({});
-    expect(ctx.project.id).toBe("p-done");
-    expect(ctx.unselected).toBe(false);
-  });
-
-  it("ignores a remembered project this tenant does not have", async () => {
-    // Never trusted: matched against the tenant's own RLS-scoped list, so a
-    // stale id or one copied from another company falls through.
-    cookieJar.value = "p-someone-elses";
     const ctx = await getWorkspaceContext({});
     expect(ctx.project).toBeNull();
     expect(ctx.unselected).toBe(true);
-    expect(ctx.notFound).toBe(false);
   });
 
-  it("lets the URL win over what was remembered", async () => {
+  it("does NOT remember a past choice when the URL is silent", async () => {
+    // A cookie used to answer here, so the sidebar's bare links, a typed
+    // address and the command palette all reopened whatever was last chosen —
+    // written with a year's max-age, so "last chosen" could be days ago. The
+    // in-module links carry ?project= themselves, which is what the cookie was
+    // added for, so nothing is lost by asking.
+    cookieJar.value = "p-done";
+    const ctx = await getWorkspaceContext({});
+    expect(ctx.project).toBeNull();
+    expect(ctx.unselected).toBe(true);
+  });
+
+  it("ignores an id this tenant does not have, and says so", async () => {
+    // Never trusted: matched against the tenant's own RLS-scoped list, so a
+    // stale link or one copied from another company falls through rather than
+    // leaking a name.
+    const ctx = await getWorkspaceContext({ project: "p-someone-elses" });
+    expect(ctx.project).toBeNull();
+    expect(ctx.notFound).toBe(true);
+  });
+
+  it("takes the project from the URL", async () => {
     cookieJar.value = "p-done";
     const ctx = await getWorkspaceContext({ project: "p-live" });
     expect(ctx.project.id).toBe("p-live");

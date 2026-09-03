@@ -65,7 +65,7 @@ const DASHBOARD = {
   exact: true,
 };
 
-export default function ProjectsNav({ projects = [], rememberedProjectId = null }) {
+export default function ProjectsNav({ projects = [] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -78,34 +78,26 @@ export default function ProjectsNav({ projects = [], rememberedProjectId = null 
    * `selectProject` validates whichever id wins against the tenant's own list,
    * so a stale cookie resolves to nothing rather than to somebody else's job.
    */
-  const explicitId =
-    searchParams.get("project") ?? projectIdFromPath(pathname);
-
-  const { project: resolved } = selectProject(
-    projects,
-    explicitId ?? rememberedProjectId,
-  );
-
   /**
-   * ON THE DASHBOARD, NOTHING IS OPEN.
+   * THE URL, AND ONLY THE URL — `?project=` first, then the project the path
+   * is already about, so opening one from the dashboard and clicking a section
+   * carries THAT project.
    *
-   * The rule below — sections appear once there is a project — was written in
-   * the same commit as the `rememberedProjectId` fallback above, and the
-   * fallback quietly defeated it. The gate held only while the cookie was
-   * empty, so it looked right on a first visit and stopped being right the
-   * moment the switcher was used once: from then on, arriving at the project
-   * LIST showed a full set of section tabs for a job nobody had opened.
+   * There used to be a third fallback: a cookie the switcher wrote with a
+   * year's max-age. It was added when these links were bare and the sections
+   * vanished after one click; they carry `?project=` now, so the URL does that
+   * job. What the cookie still did was make the tabs appear for a project
+   * nobody had opened — on the dashboard, and on any section reached from the
+   * global sidebar — naming a job chosen days ago.
    *
-   * `selectProject` auto-selects when the tenant has exactly one project,
-   * which reached the same place by a second route.
-   *
-   * So the cookie no longer resolves anything on the module root. It still
-   * does everywhere else, which is what stops the sections vanishing after one
-   * click — the bug it was added for. An explicit `?project=` still wins even
-   * here, because choosing from the switcher is not a default.
+   * `selectProject` validates whichever id wins against the tenant's own list,
+   * so an id from a stale link resolves to nothing rather than to somebody
+   * else's job.
    */
-  const isModuleRoot = pathname === DASHBOARD.href;
-  const project = explicitId || !isModuleRoot ? resolved : null;
+  const { project } = selectProject(
+    projects,
+    searchParams.get("project") ?? projectIdFromPath(pathname),
+  );
   const sections = sectionsFor(project);
 
   /**

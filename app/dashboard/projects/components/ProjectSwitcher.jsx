@@ -19,7 +19,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { FolderKanban, ChevronsUpDown, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SELECTED_PROJECT_COOKIE } from "../lib/sections";
 
 /**
  * Which project the current section is showing.
@@ -56,7 +55,9 @@ export default function ProjectSwitcher({ projects, selectedId }) {
 
   function choose(id) {
     setOpen(false);
-    document.cookie = `${SELECTED_PROJECT_COOKIE}=${encodeURIComponent(id)}; path=/; max-age=31536000; SameSite=Lax`;
+    // The pushed `?project=` below is the whole record of the choice. This
+    // also wrote a year-long cookie, which is what made a section opened
+    // from the global sidebar days later reopen this project unasked.
     const params = new URLSearchParams(searchParams.toString());
     params.set("project", id);
     router.push(`${pathname}?${params.toString()}`);
