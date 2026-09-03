@@ -3,6 +3,10 @@
 import { z } from "zod";
 import { provisionCompany } from "@/app/db/provisioning";
 import {
+  findCompanyClash,
+  duplicateKeyError,
+} from "@/app/mongodb/lib/company-clash";
+import {
   syncCompanyRecord,
   setCompanyActive,
   resetCompanyBooks,
@@ -235,17 +239,29 @@ export async function createCompany(prevState, formData) {
   try {
     await connectDB();
 
-    // Duplicate check in Postgres, because that is where the constraint is:
-    // companies_code_uq is a unique index, so a race past this check still
-    // fails at the database rather than producing two companies that share a
-    // document-number prefix. The Mongo version also interpolated the name
-    // straight into a RegExp, so a company called "C++ (K) Ltd" threw.
-    const { findCompanyByNameOrCode } = await import("@/app/db/platform");
-    const clash = await findCompanyByNameOrCode(data.name, data.code);
+    /**
+     * Duplicate check in MONGO, because that is where this insert lands and
+     * where the unique indexes are — `code_1` and `slug_1` on the companies
+     * collection.
+     *
+     * It used to ask Postgres alone, "because that is where the constraint
+     * is". Postgres holds a SUBSET: it is provisioned from the Mongo document
+     * after the fact, so a company that exists only in Mongo is invisible to
+     * it — and `provisionCompany` never carried the code across, so every
+     * Postgres `code` was NULL and `companies_code_uq` is partial
+     * (`WHERE code IS NOT NULL`). The check therefore compared a code against
+     * a column that held none, passed every time, and left `Company.create`
+     * to raise a raw duplicate-key error at the user.
+     *
+     * The name interpolation that made the older Mongo check throw on
+     * "C++ (K) Ltd" is gone with it: this matches on equality, never a RegExp.
+     */
+    const clash = await findCompanyClash({ name: data.name, code: data.code });
     if (clash) {
-      return clash.conflict === "code"
-        ? { errors: { code: ["This company code is already in use"] }, values: formValues }
-        : { errors: { name: ["A company with this name already exists"] }, values: formValues };
+      return {
+        errors: { [clash.field]: [clash.message] },
+        values: formValues,
+      };
     }
 
     // The administrator must not already have a login: a user belongs to one
@@ -433,7 +449,22 @@ export async function createCompany(prevState, formData) {
     revalidatePath("/dashboard/admin/companies");
   } catch (error) {
     console.error("Create company error:", error);
-    return { errors: { _form: [error.message || "Failed to create company"] }, values: formValues };
+    /**
+     * NEVER THE DRIVER'S MESSAGE. `error.message` published Mongo's raw
+     * duplicate-key text — collection, index name and the offending key — for
+     * what is an ordinary "that code is taken", and would publish anything
+     * else a failing driver chose to say. A race past the check above still
+     * reaches the unique index, so that case is translated; everything else
+     * gets one sentence and lands in the server log.
+     */
+    const dup = duplicateKeyError(error);
+    if (dup) {
+      return { errors: { [dup.field]: [dup.message] }, values: formValues };
+    }
+    return {
+      errors: { _form: ["Could not create the company. Please try again."] },
+      values: formValues,
+    };
   }
 
   // The company and its ledger are real either way. If the administrator did
@@ -537,13 +568,14 @@ export async function updateCompany(prevState, formData) {
     if (data.code) {
       const canUpdateCode = session.user.role === "SuperAdmin" || !company.code;
       if (canUpdateCode) {
-        // Checked in Postgres, where companies_code_uq actually enforces it.
-        const { findCompanyByNameOrCode } = await import("@/app/db/platform");
-        const codeInUse = await findCompanyByNameOrCode(
-          null,
-          data.code,
-          companyId,
-        );
+        // Checked in Mongo, where `code_1` actually enforces it and where the
+        // codes actually live — Postgres holds no code for any company it was
+        // provisioned with, so the check that asked it could not fail.
+        const codeInUse = await findCompanyClash({
+          name: null,
+          code: data.code,
+          excludeId: companyId,
+        });
         if (codeInUse) {
           return { errors: { code: ["This company code is already in use"] }, values: formValues };
         }
@@ -566,11 +598,17 @@ export async function updateCompany(prevState, formData) {
 
       // Ensure uniqueness against the index that enforces it, and bound the
       // search: an unbounded while-loop against a database is a hang waiting
-      // for a pathological name.
-      const { findCompanyByNameOrCode } = await import("@/app/db/platform");
+      // for a pathological name. Asking Postgres here found nothing to collide
+      // with — every code there is NULL — so the FIRST candidate was always
+      // taken to be free and the generated code went straight into Mongo's
+      // unique index to fail.
       let finalCode = generatedCode;
       for (let suffix = 1; suffix < 100; suffix++) {
-        const taken = await findCompanyByNameOrCode(null, finalCode, companyId);
+        const taken = await findCompanyClash({
+          name: null,
+          code: finalCode,
+          excludeId: companyId,
+        });
         if (!taken) break;
         finalCode = `${generatedCode.slice(0, 4)}${suffix}`;
       }
@@ -688,7 +726,14 @@ export async function updateCompany(prevState, formData) {
     revalidatePath("/dashboard/company");
   } catch (error) {
     console.error("Update company error:", error);
-    return { errors: { _form: [error.message || "Failed to update company"] }, values: formValues };
+    const dup = duplicateKeyError(error);
+    if (dup) {
+      return { errors: { [dup.field]: [dup.message] }, values: formValues };
+    }
+    return {
+      errors: { _form: ["Could not save the company. Please try again."] },
+      values: formValues,
+    };
   }
 
   // Redirect based on role (must be outside try/catch)
@@ -993,14 +1038,25 @@ export async function createCompanyWithOnboarding(prevState, formData) {
   try {
     await connectDB();
 
-    // Duplicate check in Postgres, where the company record lives (0035). The
-    // Mongo version interpolated the name straight into a RegExp, so a company
-    // called "C++ (K) Ltd" threw instead of being created.
-    const { findCompanyByNameOrCode } = await import("@/app/db/platform");
-    const existingCompany = await findCompanyByNameOrCode(data.name, null);
+    /**
+     * Duplicate check in Mongo, where this insert lands and where `slug_1`
+     * and `code_1` enforce it. Asking Postgres checked a register that is
+     * provisioned FROM this one and therefore never holds more than a subset.
+     *
+     * Name, code and slug together — the slug is derived from the name, so
+     * two names that differ only in punctuation collide on an index nothing
+     * used to check.
+     */
+    const existingCompany = await findCompanyClash({
+      name: data.name,
+      code: data.code ?? null,
+    });
 
     if (existingCompany) {
-      return { errors: { name: ["A company with this name already exists"] }, values: formValues };
+      return {
+        errors: { [existingCompany.field]: [existingCompany.message] },
+        values: formValues,
+      };
     }
 
     // Create company with full setup

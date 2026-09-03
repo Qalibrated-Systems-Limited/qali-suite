@@ -73,17 +73,39 @@ export default function ProjectsNav({ projects = [], rememberedProjectId = null 
    * `?project=` first; then the project the URL is already about, so opening
    * one from the dashboard and clicking a section carries THAT project; then
    * whatever the switcher last remembered, so the sections do not vanish when
-   * you step back to the dashboard.
+   * you click from one section to the next.
    *
    * `selectProject` validates whichever id wins against the tenant's own list,
    * so a stale cookie resolves to nothing rather than to somebody else's job.
    */
-  const { project } = selectProject(
+  const explicitId =
+    searchParams.get("project") ?? projectIdFromPath(pathname);
+
+  const { project: resolved } = selectProject(
     projects,
-    searchParams.get("project") ??
-      projectIdFromPath(pathname) ??
-      rememberedProjectId,
+    explicitId ?? rememberedProjectId,
   );
+
+  /**
+   * ON THE DASHBOARD, NOTHING IS OPEN.
+   *
+   * The rule below — sections appear once there is a project — was written in
+   * the same commit as the `rememberedProjectId` fallback above, and the
+   * fallback quietly defeated it. The gate held only while the cookie was
+   * empty, so it looked right on a first visit and stopped being right the
+   * moment the switcher was used once: from then on, arriving at the project
+   * LIST showed a full set of section tabs for a job nobody had opened.
+   *
+   * `selectProject` auto-selects when the tenant has exactly one project,
+   * which reached the same place by a second route.
+   *
+   * So the cookie no longer resolves anything on the module root. It still
+   * does everywhere else, which is what stops the sections vanishing after one
+   * click — the bug it was added for. An explicit `?project=` still wins even
+   * here, because choosing from the switcher is not a default.
+   */
+  const isModuleRoot = pathname === DASHBOARD.href;
+  const project = explicitId || !isModuleRoot ? resolved : null;
   const sections = sectionsFor(project);
 
   /**
