@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { mapProgrammeColumns } from "@/lib/project-import-columns";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import { PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
@@ -54,20 +55,8 @@ function statusFor(pct) {
   return "todo";
 }
 
-/** Minimal CSV row split — handles quoted fields containing commas. */
-function mapColumns(headerRow) {
-  const lower = headerRow.map((c) => String(c ?? "").toLowerCase().trim());
-  const find = (...names) => lower.findIndex((h) => names.some((n) => h === n || h.includes(n)));
-  const idx = {
-    section: find("section", "phase", "group"),
-    activity: find("activity", "task", "description", "item"),
-    start: find("start", "from"),
-    end: find("end", "finish", "to"),
-    percent: find("percent", "%", "progress", "complete"),
-  };
-  const looksLikeHeader = idx.section !== -1 || idx.activity !== -1;
-  return { idx, looksLikeHeader };
-}
+// Column vocabulary: `lib/project-import-columns.js`, shared with the bill
+// importer and asserted against the downloadable templates.
 
 export async function importProgrammeFile(projectId, formData) {
   if (!projectId) return { error: "No project selected" };
@@ -85,7 +74,7 @@ export async function importProgrammeFile(projectId, formData) {
   if (!raw.length) return { error: "The file has no rows" };
   if (raw.length > MAX_ROWS) return { error: `Too many rows (max ${MAX_ROWS})` };
 
-  const { idx, looksLikeHeader } = mapColumns(raw[0]);
+  const { idx, looksLikeHeader } = mapProgrammeColumns(raw[0]);
   const dataRows = looksLikeHeader ? raw.slice(1) : raw;
   const col = {
     section: idx.section !== -1 ? idx.section : 0,

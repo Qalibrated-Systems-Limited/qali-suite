@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { mapBoqColumns, BOQ_POSITIONAL } from "@/lib/project-import-columns";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import { PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
@@ -43,25 +44,10 @@ function text(v) {
   return v == null ? "" : String(v).trim();
 }
 
-function mapColumns(headerRow) {
-  const lower = headerRow.map((c) => String(c ?? "").toLowerCase().trim());
-  const find = (...names) =>
-    lower.findIndex((h) => names.some((n) => h === n || h.includes(n)));
-  const idx = {
-    section: find("section", "bill", "phase", "group"),
-    code: find("item code", "code", "ref", "item no", "no."),
-    description: find("description", "item", "particulars", "activity"),
-    unit: find("unit", "uom"),
-    quantity: find("quantity", "qty"),
-    rate: find("rate", "price", "unit rate"),
-  };
-  // A header is only a header if it names the two things every bill has.
-  const looksLikeHeader = idx.description !== -1 && (idx.rate !== -1 || idx.quantity !== -1);
-  return { idx, looksLikeHeader };
-}
-
-/** Positional fallback, for a sheet with no header row at all. */
-const POSITIONAL = { section: 0, code: 1, description: 2, unit: 3, quantity: 4, rate: 5 };
+// The column vocabulary lives in `lib/project-import-columns.js`, because a
+// "use server" module can export nothing but async functions — so it could not
+// be tested here, and the template the dialog hands out could not be checked
+// against it. It shipped the wrong template for exactly that long.
 
 export async function importBoqFile(projectId, formData) {
   const file = formData.get("file");
@@ -80,8 +66,8 @@ export async function importBoqFile(projectId, formData) {
     return { error: `That file has ${rows.length} rows; the limit is ${MAX_ROWS}.` };
   }
 
-  const { idx: headerIdx, looksLikeHeader } = mapColumns(rows[0] ?? []);
-  const idx = looksLikeHeader ? headerIdx : POSITIONAL;
+  const { idx: headerIdx, looksLikeHeader } = mapBoqColumns(rows[0] ?? []);
+  const idx = looksLikeHeader ? headerIdx : BOQ_POSITIONAL;
   const body = looksLikeHeader ? rows.slice(1) : rows;
   const at = (row, key) => (idx[key] >= 0 ? row[idx[key]] : undefined);
 
