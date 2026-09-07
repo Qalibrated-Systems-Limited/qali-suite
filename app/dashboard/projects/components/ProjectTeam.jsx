@@ -14,9 +14,14 @@ import { toast } from "sonner";
 
 const RATE_UNITS = ["day", "hour", "month", "fixed"];
 
-// The project labor roster. Assigning a party posts no cost — actual cost still
-// flows through expenses/bills tagged to the party + project. This is the
-// operational "who's on the job" view (works without the HR module).
+// The project labour roster. Assigning a party posts no cost, and it never
+// will — labour reaches the ledger through payroll, once.
+//
+// The RATE here is what the Time card costs a day at (0089), so it is no
+// longer decoration: an employee's rate produces project labour cost, and a
+// supplier's does not, because their bill already carries it. Everything else
+// still arrives through expenses and bills tagged to the party and project.
+// This is the operational "who's on the job" view (works without HR).
 export default function ProjectTeam({ projectId, members = [], parties = [], canManage }) {
   const [isPending, startTransition] = useTransition();
   const [adding, setAdding] = useState(false);
@@ -63,8 +68,8 @@ export default function ProjectTeam({ projectId, members = [], parties = [], can
   }
 
   return (
-    <Card className="p-5 sm:p-6">
-      <div className="flex items-center justify-between mb-4">
+    <Card className="p-4 sm:p-5">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
           <div className="rounded-lg p-2.5 bg-violet-500/10">
             <Users className="h-5 w-5 text-violet-500" />

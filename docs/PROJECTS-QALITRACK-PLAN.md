@@ -1239,6 +1239,26 @@ correction.
 Until it is answered, the ledger figure is an instrument and not the answer, and
 this document should not claim otherwise.
 
+> **ANSWERED — 2026-09-07, and the answer is (b).** Materials post at issue
+> since 0085 (`DR 5410 Project Materials / CR Inventory`). Labour reaches the
+> ledger with 0090: payroll's own expense lines now carry `project_id`,
+> apportioned from approved timesheets by day, burdened with employer NSSF and
+> AHL, with the unbooked remainder left on the same account with no project.
+>
+> **Labour got there by DIMENSION rather than by an account transfer**, which is
+> the same answer in a cheaper form. There is no `Project Labour` account and no
+> contra: 0084 already made the project a dimension, and a second expense
+> account would hold the same money under a different name. Jane's 100,000 is
+> debited to the salary expense account it always was, split three ways by
+> project. Total expense is unchanged — which is the whole point, since any
+> entry crediting cash or a payable would have made 160,000 of expense out of a
+> 100,000 salary.
+>
+> So a project P&L now reconciles to the trial balance for the two largest cost
+> lines on a construction job. What stays analytic is what has to: `committed`
+> has no journal entry by definition, and the roster-rate figures 0089 produces
+> are a management estimate rather than a ledger one.
+
 ### Where the two figures differ today, and why
 
 Pinned in `tests/pg-project-ledger-dimension.test.mjs` as facts rather than left
@@ -1403,5 +1423,17 @@ structure the system may rely on. Match on `system_account`, or on structure.
   the same caution the 2026-08-31 handoff raised about FIDIC percentages.
 - **Retention release schedule** — still needs milestones, which are still not
   a table.
-- **Timesheets** — shape decided (quantity + unit, cost through
-  `project_assignments.rate_unit`, no ledger posting of its own), not built.
+- ~~**Timesheets**~~ — **built, 0089.** Quantity + unit, cost through
+  `project_assignments.rate_unit`, no ledger posting of its own, as decided.
+  Three things the shape did not yet answer, now answered: only an EMPLOYEE'S
+  time carries cost (a subcontractor's arrives on their bill, and counting both
+  would charge the job twice); a `month` rate is apportioned by
+  `working_days()` rather than a flat divisor, so a month split across two jobs
+  sums back to the salary; and `fixed` cannot be costed from a timesheet at all
+  — a lump sum is a milestone.
+
+  **What this does NOT close is §12's accounting question.** Project labour is
+  now visible in project reporting and is still absent from the ledger, because
+  a timesheet does not post. Whether it should reach the GL by a period-end
+  allocation is the (a)/(b)/(c) decision below, unchanged — and the rows the
+  allocation would run over now exist.

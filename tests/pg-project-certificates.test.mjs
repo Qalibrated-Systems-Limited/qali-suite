@@ -143,11 +143,46 @@ suite("contracts and certificates", () => {
     it("defaults the original sum to the sum it was let at", async () => {
       const c = await newContract();
       expect(Number(c.originalSum)).toBe(100000000);
-      // And a variation moving the current sum does not move the original —
-      // which is the entire reason the second column exists.
+    });
+
+    /**
+     * CHANGED BY 0091, deliberately.
+     *
+     * This used to type a new contract sum to SIMULATE a variation, because
+     * variations did not exist — and the effect was 12m of growth with nothing
+     * on the record explaining it, which is the exact hole 0091 closes.
+     *
+     * Editing the terms now corrects the figure the contract was LET at, and
+     * growth comes only from an approved variation.
+     */
+    it("treats a retyped sum as a correction of the base, not as growth", async () => {
+      const c = await newContract();
       await inA((tx) => repo.updateContract(tx, c.id, { contractSum: "112000000" }));
       const after = await inA((tx) => repo.getContractById(tx, c.id));
+      expect(Number(after.originalSum)).toBe(112000000);
       expect(Number(after.contractSum)).toBe(112000000);
+    });
+
+    it("moves the current sum, and only the current sum, on a variation", async () => {
+      const c = await newContract();
+      const v = await inA((tx) =>
+        repo.createVariation(tx, {
+          companyId: companyA,
+          projectId: projectA,
+          contractId: c.id,
+          title: "Additional culverts",
+          costEffect: 12000000,
+          issuedDate: "2026-06-01",
+          createdByName: "Seed",
+        }),
+      );
+      await inA((tx) =>
+        repo.setVariationStatus(tx, v.id, "approved", { id: null, name: "The QS" }),
+      );
+
+      const after = await inA((tx) => repo.getContractById(tx, c.id));
+      expect(Number(after.contractSum)).toBe(112000000);
+      // The whole reason the second column exists.
       expect(Number(after.originalSum)).toBe(100000000);
     });
 
@@ -436,6 +471,78 @@ suite("contracts and certificates", () => {
       const rows = await inA((tx) => repo.listCertificates(tx, c.id));
       // Three carries on from ONE, because two was withdrawn.
       expect(rows[2].figures.previouslyCertified).toBe(rows[0].figures.netToDate);
+    });
+
+    /**
+     * WHY THE FORM MUST OPEN ON THE LAST CERTIFICATE'S FIGURES.
+     *
+     * Every box is cumulative, so a blank is not "nothing entered yet" — it is
+     * a claim that the figure has fallen to zero, and the arithmetic believes
+     * it. The register form used to open on blanks with `nextCertificateBasis`
+     * already computing two of these and being ignored.
+     */
+    it("carries every cumulative figure into the next certificate's basis", async () => {
+      const c = await newContract();
+      const one = await newCertificate(c.id, {
+        workDoneToDate: "20000000",
+        materialsOnSite: "2000000",
+        dayworksToDate: "500000",
+        periodTo: "2026-05-31",
+      });
+      await certify(one.id);
+
+      const basis = await inA((tx) => repo.nextCertificateBasis(tx, c.id));
+      expect(basis.lastWorkDoneToDate).toBe(20000000);
+      expect(basis.lastMaterialsOnSite).toBe(2000000);
+      expect(basis.lastDayworksToDate).toBe(500000);
+      expect(String(basis.lastPeriodTo)).toContain("2026-05-31");
+      expect(basis.lastCertificateNumber).toBe(one.certificateNumber);
+    });
+
+    it("under-claims when a cumulative figure is left blank", async () => {
+      // The failure the carry-forward exists to prevent, asserted as a fact so
+      // nobody removes the default thinking it is only a convenience.
+      const c = await newContract();
+      const one = await newCertificate(c.id, {
+        workDoneToDate: "20000000",
+        materialsOnSite: "2000000",
+      });
+      await certify(one.id);
+
+      // IPC 2: the work-done figure is updated and materials are left blank.
+      const two = await newCertificate(c.id, { workDoneToDate: "24000000" });
+      const rows = await inA((tx) => repo.listCertificates(tx, c.id));
+      const second = rows.find((r) => r.id === two.id);
+
+      // The gross is 24,000,000 rather than 26,000,000 — two million of
+      // materials already certified has silently vanished from the valuation.
+      expect(second.figures.grossValuation).toBe(24000000);
+      expect(second.figures.grossThisPeriod).toBe(2000000);
+    });
+
+    it("claws back a release when retention released is left blank", async () => {
+      // The dangerous one: money the employer has already agreed to return
+      // comes off the next certificate.
+      const c = await newContract();
+      const one = await newCertificate(c.id, { workDoneToDate: "20000000" });
+      await certify(one.id);
+      const held = (await inA((tx) => repo.listCertificates(tx, c.id)))[0].figures
+        .retentionHeld;
+      expect(held).toBeGreaterThan(0);
+
+      const two = await newCertificate(c.id, {
+        workDoneToDate: "20000000",
+        retentionReleasedToDate: String(held / 2),
+      });
+      await certify(two.id);
+
+      // IPC 3 values no new work and forgets the release.
+      const three = await newCertificate(c.id, { workDoneToDate: "20000000" });
+      const rows = await inA((tx) => repo.listCertificates(tx, c.id));
+      const third = rows.find((r) => r.id === three.id);
+
+      // Negative: the certificate hands back what IPC 2 released.
+      expect(third.figures.netThisCertificate).toBe(-(held / 2));
     });
 
     it("does not let a DRAFT advance the chain", async () => {

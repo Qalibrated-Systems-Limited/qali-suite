@@ -25,12 +25,15 @@ import {
   getProjectTransactions,
   getSubprojects,
   getProjectAssignments,
+  getProjectTimesheets,
+  getProjectLabourSummary,
   getProjectTasks,
   getProjectProgress,
 } from "@/app/db/actions/project-actions";
 import { getEmployees, getSuppliers } from "@/app/db/actions/party-actions";
 import ProjectStatusActions from "../components/ProjectStatusActions";
 import ProjectTeam from "../components/ProjectTeam";
+import ProjectTimesheets from "../components/ProjectTimesheets";
 import ProjectTasks from "../components/ProjectTasks";
 import ProjectSetup from "../components/ProjectSetup";
 import { workspaceProjects } from "../lib/workspace";
@@ -109,6 +112,36 @@ async function TeamCard({ projectId, canManage }) {
 }
 
 // ============================================
+// TIME (0089)
+// ============================================
+// The card that closes the module's largest cost hole. Labour reached the P&L
+// through payroll and reached no project at all — 45.6% reported margin
+// against a true 18.9% on the 2026-09-03 worked example.
+//
+// The roster is the person list, because the roster carries the rate. The task
+// list is optional: time booked to a job with no WBS is still time.
+async function TimesheetsCard({ projectId, canManage, readOnly }) {
+  const [entries, summary, members, tasks] = await Promise.all([
+    getProjectTimesheets(projectId, { limit: 50 }),
+    getProjectLabourSummary(projectId),
+    getProjectAssignments(projectId),
+    getProjectTasks(projectId),
+  ]);
+
+  return (
+    <ProjectTimesheets
+      projectId={projectId}
+      entries={entries}
+      summary={summary}
+      members={members}
+      tasks={tasks}
+      canManage={canManage}
+      readOnly={readOnly}
+    />
+  );
+}
+
+// ============================================
 // WORK BREAKDOWN (0071)
 // ============================================
 // The percentage on the info card above comes from here whenever there is a
@@ -155,15 +188,15 @@ async function FinancialSummaryCard({ projectId, budget }) {
   const utilPct = budgetAmount > 0 ? Math.round(((costs + committed) / budgetAmount) * 100) : 0;
 
   return (
-    <Card className="p-5 sm:p-6">
-      <div className="flex items-center gap-3 mb-4">
+    <Card className="p-4 sm:p-5">
+      <div className="flex items-center gap-3 mb-3">
         <div className="rounded-lg p-2.5 bg-blue-500/10">
           <TrendingUp className="h-5 w-5 text-blue-500" />
         </div>
         <h2 className="font-semibold text-lg">Financial Summary</h2>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {budgetAmount > 0 && (
           <div>
             <p className="text-xs text-muted-foreground">Budget</p>
@@ -262,8 +295,8 @@ async function BudgetVsActualCard({ projectId }) {
   if (!data) return null;
 
   return (
-    <Card className="p-5 sm:p-6">
-      <div className="flex items-center gap-3 mb-4">
+    <Card className="p-4 sm:p-5">
+      <div className="flex items-center gap-3 mb-3">
         <div className="rounded-lg p-2.5 bg-purple-500/10">
           <BarChart3 className="h-5 w-5 text-purple-500" />
         </div>
@@ -466,7 +499,7 @@ async function TransactionsCard({ projectId }) {
 
   if (!hasClaims && !hasInvoices && !hasBills && !hasExpenses && !hasRequests) {
     return (
-      <Card className="p-5 sm:p-6">
+      <Card className="p-4 sm:p-5">
         <h2 className="font-semibold text-lg mb-3">Linked Transactions</h2>
         <p className="text-sm text-muted-foreground text-center py-8">
           No transactions linked to this project yet
@@ -476,7 +509,7 @@ async function TransactionsCard({ projectId }) {
   }
 
   return (
-    <Card className="p-5 sm:p-6">
+    <Card className="p-4 sm:p-5">
       <h2 className="font-semibold text-lg mb-4">Linked Transactions</h2>
 
       {hasClaims && (
@@ -684,7 +717,7 @@ export default async function ProjectDetailPage({ params, searchParams }) {
   const canManageTeam = PROJECT_TEAM_MANAGE_ROLES.has(session.user.role);
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       <FormBanner searchParams={resolvedSearchParams} />
       {/* Header */}
       <div className="space-y-3">
@@ -752,7 +785,7 @@ export default async function ProjectDetailPage({ params, searchParams }) {
       </div>
 
       {/* Project Info Card */}
-      <Card className="p-5 sm:p-6 space-y-4">
+      <Card className="p-4 sm:p-5 space-y-4">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
             <p className="text-xs text-muted-foreground">Client</p>
@@ -863,7 +896,7 @@ export default async function ProjectDetailPage({ params, searchParams }) {
 
       {/* Subprojects */}
       {subprojects.length > 0 && (
-        <Card className="p-5 sm:p-6">
+        <Card className="p-4 sm:p-5">
           <h2 className="font-semibold text-lg mb-3">
             Subprojects ({subprojects.length})
           </h2>
@@ -964,6 +997,22 @@ export default async function ProjectDetailPage({ params, searchParams }) {
         }
       >
         <TeamCard projectId={id} canManage={canManageTeam} />
+      </Suspense>
+
+      {/* Time booked to the job (0089) */}
+      <Suspense
+        fallback={
+          <Card className="p-6 animate-pulse">
+            <div className="h-6 w-40 bg-muted rounded mb-4" />
+            <div className="h-20 w-full bg-muted rounded" />
+          </Card>
+        }
+      >
+        <TimesheetsCard
+          projectId={id}
+          canManage={canManageTeam}
+          readOnly={project.status === "closed"}
+        />
       </Suspense>
 
       {/* Budget vs Actual */}

@@ -1,10 +1,15 @@
-import { getProjectCertificates } from "@/app/db/actions/project-actions";
+import {
+  getProjectCertificates,
+  getProjectVariations,
+} from "@/app/db/actions/project-actions";
+import { getProjectInstructions } from "@/app/db/actions/project-log-actions";
 import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
 import AccessDenied from "../components/AccessDenied";
 import SectionNotForType from "../components/SectionNotForType";
 import CertificateRegister from "../components/CertificateRegister";
+import VariationRegister from "../components/VariationRegister";
 import {
   hasRole,
   PROJECT_MANAGE_ROLES,
@@ -41,7 +46,7 @@ export default async function IpcPaymentsPage({ searchParams }) {
   if (ctx.denied) return <AccessDenied />;
   if (ctx.hidden) {
     return (
-      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
         <SectionNotForType
           section="IPC & Payments"
           project={ctx.project}
@@ -53,10 +58,23 @@ export default async function IpcPaymentsPage({ searchParams }) {
 
   const { projects, project, user } = ctx;
 
-  const data = project ? await getProjectCertificates(project.id) : null;
+  /**
+   * The variation register sits with the certificates — 0091 — rather than in
+   * a section of its own. An approved variation moves the contract sum, and
+   * the contract sum is the denominator of "% certified" on this page: they
+   * are one conversation, and splitting them puts the cause on a screen the
+   * person reading the effect is not looking at.
+   */
+  const [data, variationData, instructions] = project
+    ? await Promise.all([
+        getProjectCertificates(project.id),
+        getProjectVariations(project.id),
+        getProjectInstructions(project.id),
+      ])
+    : [null, null, []];
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       <WorkspaceHeader
         title="IPC & Payments"
         description="What has been certified against this project's contract, and what is still held."
@@ -75,13 +93,28 @@ export default async function IpcPaymentsPage({ searchParams }) {
       {project && (
         <CertificateRegister
           projectId={project.id}
+          project={project}
           contract={data?.contract ?? null}
           certificates={data?.certificates ?? []}
           position={data?.position ?? null}
           basis={data?.basis ?? null}
           boq={data?.boq ?? null}
+          billableTime={data?.billableTime ?? null}
           canManage={hasRole(user, PROJECT_MANAGE_ROLES)}
           canCertify={hasRole(user, FINANCE_WRITE_ROLES)}
+        />
+      )}
+
+      {project && data?.contract && (
+        <VariationRegister
+          projectId={project.id}
+          contract={data.contract}
+          variations={variationData?.variations ?? []}
+          summary={variationData?.summary ?? null}
+          instructions={instructions ?? []}
+          canManage={hasRole(user, PROJECT_MANAGE_ROLES)}
+          canDecide={hasRole(user, FINANCE_WRITE_ROLES)}
+          readOnly={project.status === "closed"}
         />
       )}
     </div>

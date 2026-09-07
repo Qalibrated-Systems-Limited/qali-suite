@@ -914,6 +914,50 @@ export const projectValuationSourceEnum = pgEnum("project_valuation_source", [
   "manual",
 ]);
 
+// ── Project timesheets (0089) ────────────────────────────────────────────────
+
+/**
+ * What a timesheet line is measured in.
+ *
+ * Two units, not four: a timesheet records TIME. The roster's `month` and
+ * `fixed` are how somebody is PAID, which is a different question, and 0089
+ * decision 3 is the conversion between them. Hours become days through
+ * `attendance_config.standard_hours`, so this cannot disagree with attendance
+ * about how long a day is.
+ */
+export const projectTimesheetUnitEnum = pgEnum("project_timesheet_unit", [
+  "hour",
+  "day",
+]);
+
+/**
+ * Approved is cost — the same basis 0088 put bills, claims and expenses on.
+ *
+ * `submitted` is a commitment: the time was worked and the company will owe
+ * it, but nobody has accepted the number yet. `draft` is somebody typing, and
+ * `rejected` is not a claim on the day at all, which is why 0089 decision 5's
+ * overbooking check excludes it.
+ */
+/**
+ * A variation moves the contract only once it is APPROVED — 0091 decision 3.
+ * A `submitted` one is a claim, and the register shows it while the contract
+ * sum does not move. The same "approved is the point it counts" rule 0088 put
+ * bills, claims and expenses on.
+ */
+export const projectVariationStatusEnum = pgEnum("project_variation_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
+]);
+
+export const projectTimesheetStatusEnum = pgEnum("project_timesheet_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
+]);
+
 // ── Technical / Workflow Reports ─────────────────────────────────────────────
 
 /**

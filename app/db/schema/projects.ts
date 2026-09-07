@@ -50,6 +50,9 @@ import {
   projectContractDirectionEnum,
   projectCertificateStatusEnum,
   projectValuationSourceEnum,
+  projectTimesheetUnitEnum,
+  projectTimesheetStatusEnum,
+  projectVariationStatusEnum,
 } from "./enums";
 
 /** `ltree` has no Drizzle builder. Declared as `categories` declares it. */
@@ -362,9 +365,18 @@ export const projectBudgetLines = pgTable(
 /**
  * The labour roster — who is on a project, without needing the HR module.
  *
- * Assigning somebody posts nothing. Cost arrives when they are paid, through
- * an expense or a bill carrying this project, which is why the rate here is
- * nullable planning metadata and has no ledger meaning.
+ * Assigning somebody posts nothing, and neither does the rate: it has NO
+ * LEDGER MEANING and never will, because labour reaches the general ledger
+ * through payroll once, where the PAYE and the NSSF are.
+ *
+ * IT STOPPED BEING INERT WITH 0089. The rate is what a timesheet is costed at
+ * — `project_timesheet_cost` reads it, and `rate_unit` decides how: `hour` and
+ * `day` multiply, `month` is apportioned by `working_days()`, and `fixed` is a
+ * lump sum that a timesheet cannot cost at all. A supplier's rate still
+ * produces no cost, because their bill is the number (0089 decision 2).
+ *
+ * Still nullable: a roster is also a list of who is on site, and not everybody
+ * on it is being costed by the day.
  */
 export const projectAssignments = pgTable(
   "project_assignments",
@@ -882,6 +894,13 @@ export const projectContracts = pgTable(
     ),
     counterpartyName: text("counterparty_name"),
 
+    /**
+     * DERIVED since 0091: `original_sum` plus the approved variations, written
+     * by `project_contracts_derive_current`. Do not write it — the terms form
+     * edits `original_sum`, the figure the contract was LET at. Typing a new
+     * contract sum on a job with three approved variations used to overwrite
+     * their effect silently.
+     */
     contractSum: money("contract_sum").notNull().default("0"),
     /** Beside the current one, so a variation can move the sum and the
      *  variance stays answerable. */
@@ -901,7 +920,18 @@ export const projectContracts = pgTable(
     defectsLiabilityMonths: integer("defects_liability_months"),
 
     commencementDate: date("commencement_date"),
+    /**
+     * DERIVED since 0091: `original_completion_date` plus the approved
+     * variations' time effects, written by `project_contracts_derive_current`.
+     * Setting it directly is overwritten by the trigger.
+     */
     completionDate: date("completion_date"),
+    /**
+     * When the contract was let to finish. Without it, "when was this due"
+     * has no answer after the first extension of time — which is the question
+     * every delay claim starts from.
+     */
+    originalCompletionDate: date("original_completion_date"),
     notes: text("notes").notNull().default(""),
 
     createdById: text("created_by_id").references(() => users.id, {
@@ -1134,5 +1164,290 @@ export const projectTypes = pgTable(
 
     check("project_types_code_not_blank", sql`length(btrim(${t.code})) > 0`),
     check("project_types_name_not_blank", sql`length(btrim(${t.name})) > 0`),
+  ],
+);
+
+/**
+ * The timesheet — 0089, and step 4 of the execution layer.
+ *
+ * The join between a project and labour, and the end of a contractor's own
+ * wages being invisible to the job that consumed them. On the worked example
+ * in the 2026-09-03 handoff, reported margin was 45.6% against a true 18.9%
+ * for exactly this reason.
+ *
+ * IT DOES NOT POST, AND IT NEVER WILL. Execution-layer decision 4: labour
+ * reaches the general ledger through PAYROLL, once, where the PAYE and the
+ * NSSF are. Posting the timesheet as well books the same wage twice. If
+ * project labour is ever to reconcile to the trial balance it is by ONE
+ * period-end allocation journal over these rows — never a posting per line.
+ *
+ * ONLY AN EMPLOYEE'S TIME PRODUCES COST (0089 decision 2). A supplier's cost
+ * arrives on a bill carrying the project and is already counted at `approved`;
+ * their timesheet records quantity for T&M billing and progress, and carries
+ * no money. `project_timesheets_cost_is_employee_labour` makes that structural.
+ *
+ * NOTHING HERE IS TYPED THAT CAN BE DERIVED. The party, the rate snapshot, the
+ * cost, the account and the bill amount are all written by
+ * `project_timesheets_derive` — the same shape as `project_budget_lines`
+ * (0073), so there is no write path that can produce a line whose cost
+ * disagrees with the rate it was charged at.
+ *
+ * AND THIS IS 0071'S MISSING COLUMN. `project_tasks` deliberately has no
+ * `actual_hours`: a task's actual hours are the sum of its timesheets, and
+ * these are them.
+ */
+export const projectTimesheets = pgTable(
+  "project_timesheets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+
+    /**
+     * The roster row is the join: it carries the rate, the party, and whether
+     * this person's time is costed at all. `restrict` — taking somebody off a
+     * project must not delete the record of the time they worked.
+     */
+    assignmentId: uuid("assignment_id")
+      .notNull()
+      .references(() => projectAssignments.id, { onDelete: "restrict" }),
+
+    /** Snapshots, written by the trigger from the assignment. */
+    partyId: uuid("party_id")
+      .notNull()
+      .references(() => parties.id, { onDelete: "restrict" }),
+    partyName: text("party_name").notNull(),
+    partyType: projectPartyTypeEnum("party_type").notNull(),
+
+    /** Nullable: time booked to a job with no WBS is still time. */
+    taskId: uuid("task_id").references(() => projectTasks.id, {
+      onDelete: "set null",
+    }),
+
+    /** The budget-holder's vocabulary; its account is derived, never typed. */
+    costCodeId: uuid("cost_code_id").references(() => projectCostCodes.id, {
+      onDelete: "restrict",
+    }),
+    accountId: uuid("account_id").references(() => accounts.id, {
+      onDelete: "restrict",
+    }),
+
+    workDate: date("work_date").notNull(),
+    quantity: numeric("quantity", { precision: 12, scale: 4, mode: "string" }).notNull(),
+    unit: projectTimesheetUnitEnum("unit").notNull(),
+
+    /** What this was charged at, snapshot at entry — a raise in March must not
+     *  restate January's project cost. */
+    rateAmount: money("rate_amount"),
+    rateUnit: projectRateUnitEnum("rate_unit"),
+    /** NULL is "no cost", never "zero cost": a supplier's time is invoiced. */
+    costAmount: money("cost_amount"),
+
+    /** T&M billing. The rate is per this row's OWN unit — see 0089. */
+    billable: boolean("billable").notNull().default(true),
+    billRate: money("bill_rate"),
+    billAmount: money("bill_amount"),
+
+    status: projectTimesheetStatusEnum("status").notNull().default("draft"),
+    notes: text("notes").notNull().default(""),
+
+    enteredById: text("entered_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    enteredByName: text("entered_by_name"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedById: text("approved_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    approvedByName: text("approved_by_name"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("project_timesheets_project_idx").on(
+      t.companyId,
+      t.projectId,
+      t.workDate,
+    ),
+    index("project_timesheets_project_status_idx").on(t.projectId, t.status),
+    /** 0089 decision 5 reads by party and date across every project. */
+    index("project_timesheets_party_day_idx").on(
+      t.companyId,
+      t.partyId,
+      t.workDate,
+    ),
+    index("project_timesheets_task_idx")
+      .on(t.taskId)
+      .where(sql`${t.taskId} IS NOT NULL`),
+    index("project_timesheets_cost_code_idx")
+      .on(t.projectId, t.costCodeId)
+      .where(sql`${t.costCodeId} IS NOT NULL`),
+
+    check("project_timesheets_quantity_positive", sql`${t.quantity} > 0`),
+    /** A day is a day. The real limit is the overbooking trigger. */
+    check(
+      "project_timesheets_quantity_within_a_day",
+      sql`(${t.unit} = 'hour' AND ${t.quantity} <= 24)
+          OR (${t.unit} = 'day' AND ${t.quantity} <= 1)`,
+    ),
+
+    check(
+      "project_timesheets_rate_pair",
+      sql`(${t.rateAmount} IS NULL) = (${t.rateUnit} IS NULL)`,
+    ),
+    check(
+      "project_timesheets_rate_non_negative",
+      sql`${t.rateAmount} IS NULL OR ${t.rateAmount} >= 0`,
+    ),
+
+    /** Decision 2, structurally. */
+    check(
+      "project_timesheets_cost_is_employee_labour",
+      sql`${t.costAmount} IS NULL
+          OR (${t.partyType} = 'employee'
+              AND ${t.rateAmount} IS NOT NULL
+              AND ${t.rateUnit} <> 'fixed')`,
+    ),
+    check(
+      "project_timesheets_cost_non_negative",
+      sql`${t.costAmount} IS NULL OR ${t.costAmount} >= 0`,
+    ),
+
+    check(
+      "project_timesheets_bill_needs_billable",
+      sql`(${t.billRate} IS NULL AND ${t.billAmount} IS NULL) OR ${t.billable}`,
+    ),
+    check(
+      "project_timesheets_bill_pair",
+      sql`(${t.billRate} IS NULL) = (${t.billAmount} IS NULL)`,
+    ),
+    check(
+      "project_timesheets_bill_non_negative",
+      sql`${t.billRate} IS NULL OR ${t.billRate} >= 0`,
+    ),
+
+    check(
+      "project_timesheets_cost_code_pair",
+      sql`(${t.costCodeId} IS NULL) = (${t.accountId} IS NULL)`,
+    ),
+    check(
+      "project_timesheets_approval_pair",
+      sql`(${t.status} = 'approved') = (${t.approvedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * The variation register — 0091.
+ *
+ * Step 3 of the execution layer, and the one thing that stood between this
+ * module and a FIDIC-form contract. `project_contracts.contract_sum` was typed
+ * once with nothing that could ever move it, so from the first variation the
+ * sum was wrong, "% of contract certified" was wrong, and
+ * `project_instructions.estimated_cost` — collected since 0075 — fed nothing.
+ *
+ * THE ORIGINALS ARE KEPT AND THE CURRENT FIGURES ARE DERIVED.
+ * `contract_sum = original_sum + Σ approved cost effects` and
+ * `completion_date = original_completion_date + Σ approved time effects`,
+ * both by trigger. It is the only arrangement where the two cannot disagree,
+ * and it is what makes the variance answerable at a final account.
+ *
+ * ONLY AN APPROVED VARIATION MOVES ANYTHING. A submitted one is a claim: the
+ * register shows it and the contract does not move.
+ *
+ * NOTHING HERE POSTS. A variation changes what the contract is WORTH; the
+ * ledger records what has been EARNED, and the varied work reaches the books
+ * through a certificate that values it, like every other piece of work.
+ */
+export const projectVariations = pgTable(
+  "project_variations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    contractId: uuid("contract_id")
+      .notNull()
+      .references(() => projectContracts.id, { onDelete: "cascade" }),
+
+    /** VO-00001, from `next_entry_number`. */
+    variationNumber: text("variation_number").notNull(),
+
+    /**
+     * The engineer's instruction this came from, where there was one.
+     * Nullable — a contractor-initiated variation has no EI behind it.
+     *
+     * THE FOREIGN KEY IS IN THE DDL ONLY (`ON DELETE SET NULL`, 0091), not
+     * declared here: `projectLogs.ts` already imports from this module, so
+     * referencing `projectInstructions` back would make the two schema files
+     * circular. Drizzle's references are lazy and would probably survive it;
+     * Turbopack's module cache is what has broken on this codebase before.
+     * `payrollRunJournals` carries its foreign keys the same way.
+     */
+    instructionId: uuid("instruction_id"),
+
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+
+    /** Both may be negative: an omission, or an acceleration. */
+    costEffect: money("cost_effect").notNull().default("0"),
+    timeEffectDays: integer("time_effect_days").notNull().default(0),
+
+    status: projectVariationStatusEnum("status").notNull().default("draft"),
+    issuedDate: date("issued_date").notNull(),
+    reference: text("reference"),
+    notes: text("notes").notNull().default(""),
+
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedById: text("decided_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    decidedByName: text("decided_by_name"),
+    decisionNotes: text("decision_notes"),
+
+    createdById: text("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdByName: text("created_by_name").notNull().default("System"),
+    lastModifiedById: text("last_modified_by_id"),
+    lastModifiedByName: text("last_modified_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_variations_number_uq").on(t.companyId, t.variationNumber),
+    index("project_variations_register_idx").on(t.projectId, t.status, t.issuedDate),
+    index("project_variations_contract_idx").on(t.contractId, t.status),
+    index("project_variations_instruction_idx")
+      .on(t.instructionId)
+      .where(sql`${t.instructionId} IS NOT NULL`),
+
+    check("project_variations_title_not_blank", sql`length(btrim(${t.title})) > 0`),
+    /** No cost and no time is a note, not a variation. */
+    check(
+      "project_variations_has_an_effect",
+      sql`${t.costEffect} <> 0 OR ${t.timeEffectDays} <> 0`,
+    ),
+    check(
+      "project_variations_decision_pair",
+      sql`(${t.status} IN ('approved', 'rejected')) = (${t.decidedAt} IS NOT NULL)`,
+    ),
+    check(
+      "project_variations_decider_named",
+      sql`${t.decidedAt} IS NULL OR ${t.decidedByName} IS NOT NULL`,
+    ),
+    check(
+      "project_variations_submission_pair",
+      sql`${t.status} = 'draft' OR ${t.submittedAt} IS NOT NULL`,
+    ),
   ],
 );

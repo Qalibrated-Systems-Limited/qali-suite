@@ -82,9 +82,26 @@ function Row({ label, value, tone, strong, hint }) {
   );
 }
 
+/**
+ * A NEW CONTRACT OPENS ON WHAT THE PROJECT ALREADY KNOWS.
+ *
+ * It used to open on eleven empty boxes, so somebody who had already typed
+ * the job's name, its client, its contract value and its dates on the project
+ * form typed all four again — and the two records then disagreed the moment
+ * one of them was corrected.
+ *
+ * Five come straight across. The rest are contract TERMS: retention, its cap,
+ * the advance and its recovery rate exist nowhere else and cannot be guessed
+ * from a project — which is the whole reason this form exists.
+ *
+ * `counterpartyPartyId` travels with the name so the contract is LINKED to the
+ * customer record rather than merely labelled with it. The form never sent it
+ * before, so every contract saved here had a null counterparty.
+ */
 const EMPTY_TERMS = {
   reference: "",
   title: "",
+  counterpartyPartyId: "",
   counterpartyName: "",
   contractSum: "",
   retentionPercent: "",
@@ -96,26 +113,60 @@ const EMPTY_TERMS = {
   completionDate: "",
 };
 
+const asDate = (v) => (v ? String(v).slice(0, 10) : "");
+const asAmount = (v) => (Number(v) > 0 ? String(Number(v)) : "");
+
+function termsFromProject(project) {
+  if (!project) return { ...EMPTY_TERMS };
+  return {
+    ...EMPTY_TERMS,
+    title: project.name ?? "",
+    counterpartyPartyId: project.client?.partyId ?? "",
+    counterpartyName: project.client?.name ?? "",
+    /** The figure the project form already collected, if it collected one. */
+    contractSum: asAmount(project.contractValue),
+    commencementDate: asDate(project.startDate),
+    completionDate: asDate(project.endDate),
+  };
+}
+
 export default function CertificateRegister({
   projectId,
+  project,
   contract,
   certificates = [],
   position,
   basis,
   boq,
+  billableTime,
   canManage = false,
   canCertify = false,
 }) {
   const [isPending, startTransition] = useTransition();
-  const [showTerms, setShowTerms] = useState(!contract);
+  /**
+   * `!contract` alone opened the terms form for everybody, and the form itself
+   * renders only for `canCertify` — so a Manager (who is in
+   * PROJECT_MANAGE_ROLES and NOT in FINANCE_WRITE_ROLES) landed on a page with
+   * no terms form, no certificate button and no empty state, because the
+   * "No contract terms yet" card below is only reached when this is false.
+   * A blank page, on the section they were sent to.
+   */
+  const [showTerms, setShowTerms] = useState(!contract && canCertify);
   const [showNew, setShowNew] = useState(false);
   const [terms, setTerms] = useState(
     contract
       ? {
           reference: contract.reference || "",
           title: contract.title || "",
+          counterpartyPartyId: contract.counterpartyPartyId || "",
           counterpartyName: contract.counterpartyName || "",
-          contractSum: contract.contractSum || "",
+          /**
+           * THE ORIGINAL, not the current sum — 0091. `contract_sum` is now
+           * derived from this plus the approved variations, so showing the
+           * derived figure in an editable box would let somebody save the
+           * variations' effect back into the base and double it.
+           */
+          contractSum: contract.originalSum ?? contract.contractSum ?? "",
           retentionPercent: contract.retentionPercent || "",
           retentionCapPercent: contract.retentionCapPercent || "",
           advanceAmount: contract.advanceAmount || "",
@@ -124,18 +175,44 @@ export default function CertificateRegister({
           commencementDate: contract.commencementDate || "",
           completionDate: contract.completionDate || "",
         }
-      : EMPTY_TERMS,
+      : termsFromProject(project),
   );
 
   const today = new Date().toISOString().slice(0, 10);
+
+  /**
+   * THE FORM OPENS ON THE LAST CERTIFICATE'S POSITION, not on blanks.
+   *
+   * Every box here is cumulative, so an empty box is not "nothing entered
+   * yet" — it is a claim that the figure has fallen to zero, and the
+   * arithmetic believes it. Opening blank made the commonest mistake on the
+   * page invisible: type the new work-done figure, leave the other three as
+   * you found them, and the certificate silently under-claims by whatever
+   * materials and dayworks stood at, and CLAWS BACK any retention already
+   * released.
+   *
+   * So the QS edits figures upward from where they were, which is what
+   * "cumulative" means in practice, and the panel below states what each one
+   * carried forward from.
+   */
+  const carried = (n) => (Number(n) > 0 ? String(Number(n)) : "");
+  const dayAfter = (d) => {
+    if (!d) return "";
+    const next = new Date(`${String(d).slice(0, 10)}T00:00:00Z`);
+    if (Number.isNaN(next.getTime())) return "";
+    next.setUTCDate(next.getUTCDate() + 1);
+    return next.toISOString().slice(0, 10);
+  };
+
   const [draftForm, setDraftForm] = useState({
-    workDoneToDate: "",
-    materialsOnSite: "",
-    dayworksToDate: "",
-    retentionReleasedToDate: "",
+    workDoneToDate: carried(basis?.lastWorkDoneToDate),
+    materialsOnSite: carried(basis?.lastMaterialsOnSite),
+    dayworksToDate: carried(basis?.lastDayworksToDate),
+    retentionReleasedToDate: carried(basis?.lastRetentionReleased),
     valuationDate: today,
-    periodFrom: "",
-    periodTo: "",
+    /** The day after the last certificate's period ended — never typed. */
+    periodFrom: dayAfter(basis?.lastPeriodTo),
+    periodTo: today,
   });
 
   const hasDraft = certificates.some((c) => c.status === "draft");
@@ -191,7 +268,7 @@ export default function CertificateRegister({
   // ── No contract ────────────────────────────────────────────────────────────
   if (!contract && !showTerms) {
     return (
-      <Card className="p-8 sm:p-10 text-center">
+      <Card className="p-5 sm:p-6 text-center">
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
           <Receipt className="h-6 w-6 text-primary" />
         </div>
@@ -201,11 +278,16 @@ export default function CertificateRegister({
           retention percentage and its cap, the advance and how it is recovered.
           Every one of them may be zero; none of them can be guessed.
         </p>
-        {canCertify && (
+        {canCertify ? (
           <Button size="sm" onClick={() => setShowTerms(true)}>
             <Plus className="h-4 w-4 mr-1.5" />
             Enter the terms
           </Button>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Finance enters the contract terms. Once they are in, a certificate
+            can be raised against them here.
+          </p>
         )}
       </Card>
     );
@@ -298,18 +380,19 @@ export default function CertificateRegister({
           )}
 
           {/*
-            Said on the page, not only in the migration: the retention BALANCE is
-            here and the retention JOURNAL is not. Somebody reading this figure
-            should not assume the ledger knows about it.
+            This used to say the retention did NOT reach the ledger, and that
+            stopped being true with 0085: certifying holds it as
+            `1125 Retention Receivable` and releasing it clears the account.
+            A stale reassurance about somebody's own books is worse than none.
           */}
           {position?.retentionOutstanding > 0 && (
             <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-900/50 dark:bg-blue-950/40">
               <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
               <p className="text-blue-900 dark:text-blue-200">
                 Retention of {contract.currency} {money(position.retentionOutstanding)} is
-                held against this contract. It is tracked here and does not yet post
-                to the ledger — a retention receivable account and its release
-                schedule are the next step.
+                held against this contract and sits in Retention Receivable (1125)
+                in the ledger. Release it by raising a certificate with a higher
+                &ldquo;retention released to date&rdquo;.
               </p>
             </div>
           )}
@@ -332,21 +415,43 @@ export default function CertificateRegister({
             may be zero — a job that holds no retention is a contract with a zero
             percentage, not a different kind of project.
           </p>
+          <p className="text-xs text-muted-foreground">
+            The sum and the completion date are the figures the contract was{" "}
+            <span className="font-medium text-foreground">let at</span>. Approved
+            variations move the current ones from here, and both are shown on
+            the contract card.
+          </p>
 
+          {/*
+            PLACEHOLDERS SHOW WHAT A BLANK SAVES, NOT WHAT IT OUGHT TO BE.
+            
+            This grid used to placeholder the percentages with 10, 5, 20 and 12
+            — the common values on a Kenyan public-works contract — in grey
+            text that reads exactly like a filled-in field. Every term here is
+            optional and a blank stores ZERO, so saving the form untouched gave
+            a contract with retention 0% while the screen appeared to say 10,
+            and every certificate on that job then held nothing back.
+            
+            So the placeholder is now the figure a blank actually produces, and
+            the common value is a hint underneath where it cannot be mistaken
+            for an entry. The text placeholders carry "e.g." for the same
+            reason: on a form headed "Constructions of Sori Road", a greyed
+            "Otho–Got Kachola Road" reads as the wrong contract having loaded.
+          */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              ["reference", "Contract reference", "text", "RWC 772"],
-              ["title", "Title", "text", "Otho–Got Kachola Road"],
-              ["counterpartyName", "Employer / client", "text", "KeRRA"],
-              ["contractSum", "Contract sum", "number", "0.00"],
-              ["retentionPercent", "Retention %", "number", "10"],
-              ["retentionCapPercent", "Retention cap % of sum", "number", "5"],
-              ["advanceAmount", "Advance paid", "number", "0.00"],
-              ["advanceRecoveryPercent", "Advance recovery %", "number", "20"],
-              ["defectsLiabilityMonths", "Defects liability (months)", "number", "12"],
-              ["commencementDate", "Commencement", "date", ""],
-              ["completionDate", "Completion", "date", ""],
-            ].map(([key, label, type, placeholder]) => (
+              ["reference", "Contract reference", "text", "e.g. RWC 772", ""],
+              ["title", "Title", "text", "e.g. Otho–Got Kachola Road", ""],
+              ["counterpartyName", "Employer / client", "text", "e.g. KeRRA", ""],
+              ["contractSum", "Contract sum (as let)", "number", "0.00", ""],
+              ["retentionPercent", "Retention %", "number", "0", "Commonly 10"],
+              ["retentionCapPercent", "Retention cap % of sum", "number", "0", "Commonly 5"],
+              ["advanceAmount", "Advance paid", "number", "0.00", ""],
+              ["advanceRecoveryPercent", "Advance recovery %", "number", "0", "Commonly 20"],
+              ["defectsLiabilityMonths", "Defects liability (months)", "number", "", "Commonly 12"],
+              ["commencementDate", "Commencement", "date", "", ""],
+              ["completionDate", "Completion (as let)", "date", "", ""],
+            ].map(([key, label, type, placeholder, hint]) => (
               <div key={key} className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">{label}</label>
                 <Input
@@ -355,11 +460,35 @@ export default function CertificateRegister({
                   placeholder={placeholder}
                   className="h-9"
                   value={terms[key] ?? ""}
-                  onChange={(e) => setTerms((t) => ({ ...t, [key]: e.target.value }))}
+                  onChange={(e) =>
+                    setTerms((t) => ({
+                      ...t,
+                      [key]: e.target.value,
+                      /**
+                       * Retyping the employer breaks the link to the project's
+                       * client, rather than leaving the contract pointing at a
+                       * party whose name is no longer on it. The employer under
+                       * a contract is not always the project's client.
+                       */
+                      ...(key === "counterpartyName"
+                        ? { counterpartyPartyId: "" }
+                        : null),
+                    }))
+                  }
                 />
+                {hint && (
+                  <p className="text-[11px] leading-tight text-muted-foreground/80">{hint}</p>
+                )}
               </div>
             ))}
           </div>
+
+          {/* A term left blank is a term of zero, and that is worth saying once. */}
+          <p className="text-xs text-muted-foreground">
+            A box left blank is saved as <span className="font-medium text-foreground">zero</span>,
+            not as &ldquo;not yet decided&rdquo;. A contract with retention 0% holds
+            nothing back on any certificate.
+          </p>
 
           <div className="flex justify-end gap-2">
             {contract && (
@@ -409,7 +538,24 @@ export default function CertificateRegister({
             by subtracting the last one, which is why a correction here fixes
             itself on the next.
           </p>
+          {basis?.lastCertificateNumber && (
+            <p className="text-xs rounded-md border bg-background px-3 py-2 text-muted-foreground">
+              Carried forward from{" "}
+              <span className="font-medium text-foreground">
+                {basis.lastCertificateNumber}
+              </span>
+              . Edit each figure UP to today&apos;s position — clearing a box claims
+              that it has fallen to zero.
+            </p>
+          )}
 
+          {/*
+            What the project already knows, offered rather than filled in. The
+            measured bill is EVIDENCE for the permanent work; approved billable
+            time is the dayworks figure on a time-and-material job and a
+            different thing with a similar name on a lump-sum one, which is why
+            neither is written into the box without somebody pressing it.
+          */}
           {boq && (
             <div className="flex items-center justify-between gap-3 rounded-lg border bg-background p-3 text-sm">
               <span className="text-muted-foreground">
@@ -425,21 +571,66 @@ export default function CertificateRegister({
                   setDraftForm((f) => ({ ...f, workDoneToDate: String(boq.measured) }))
                 }
               >
-                Use this
+                Use for work done
               </Button>
             </div>
           )}
 
+          {billableTime?.amount > 0 && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border bg-background p-3 text-sm">
+              <span className="text-muted-foreground">
+                Billable time approved to date ({billableTime.entries} entr
+                {billableTime.entries === 1 ? "y" : "ies"}):{" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  {money(billableTime.amount)}
+                </span>
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setDraftForm((f) => ({
+                    ...f,
+                    dayworksToDate: String(billableTime.amount),
+                  }))
+                }
+              >
+                Use for dayworks
+              </Button>
+            </div>
+          )}
+
+          {/*
+            The amounts carry a hint each. "Value of permanent work to date" is
+            the correct term and it is not an obvious one — the field somebody
+            arrives looking for is "the amount", and without the hint they read
+            past it and report that the form has nowhere to type a figure.
+          */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              ["workDoneToDate", "Value of permanent work to date", "number"],
-              ["materialsOnSite", "Materials on site", "number"],
-              ["dayworksToDate", "Dayworks to date", "number"],
-              ["retentionReleasedToDate", "Retention released to date", "number"],
-              ["valuationDate", "Valuation date", "date"],
-              ["periodFrom", "Period from", "date"],
-              ["periodTo", "Period to", "date"],
-            ].map(([key, label, type]) => (
+              [
+                "workDoneToDate",
+                "Value of permanent work to date",
+                "number",
+                "The main amount — everything measured or agreed since the job started, not just this month",
+              ],
+              [
+                "materialsOnSite",
+                "Materials on site",
+                "number",
+                "Delivered and unfixed, if the contract pays for them",
+              ],
+              ["dayworksToDate", "Dayworks to date", "number", "Work done on daywork rates"],
+              [
+                "retentionReleasedToDate",
+                "Retention released to date",
+                "number",
+                "Raise this to release retention — usually at completion, then after the defects period",
+              ],
+              ["valuationDate", "Valuation date", "date", "The date the work was valued"],
+              ["periodFrom", "Period from", "date", ""],
+              ["periodTo", "Period to", "date", ""],
+            ].map(([key, label, type, hint]) => (
               <div key={key} className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">{label}</label>
                 <Input
@@ -449,6 +640,9 @@ export default function CertificateRegister({
                   value={draftForm[key] ?? ""}
                   onChange={(e) => setDraftForm((f) => ({ ...f, [key]: e.target.value }))}
                 />
+                {hint && (
+                  <p className="text-[11px] leading-tight text-muted-foreground/80">{hint}</p>
+                )}
               </div>
             ))}
           </div>

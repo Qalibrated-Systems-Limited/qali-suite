@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import { anyOf } from "./sqlHelpers";
 import type { Tx } from "../client";
 import {
   payrollConfigs,
@@ -675,10 +676,183 @@ async function getRunRow(tx: Tx, id: string) {
  * question. A small missing leg hides under the tolerance and posts; two
  * missing legs can CANCEL, and NSSF then appears nowhere in the books at all.
  */
+/**
+ * How much of this run's labour belongs to each project — 0090.
+ *
+ * The answer to the question 0089 could not reach: a timesheet says John spent
+ * 12 of his 22 days on Otho Road, and THIS turns that into money the ledger
+ * can carry. Before it, payroll posted one undifferentiated gross figure and
+ * a contractor's own labour — usually the largest cost on a job — was in the
+ * P&L and absent from every project.
+ *
+ * ── It is an APPORTIONMENT, never a second expense ──────────────────────────
+ *
+ * The company pays John 100,000 whatever his timesheet says. This does not add
+ * a shilling: it splits the debit that already exists across the projects that
+ * consumed it, using `journal_lines.project_id` (0084). Total expense is
+ * unchanged, and the residual — office time, leave, anything unbooked — stays
+ * on the same account with no project, which is exactly what it is.
+ *
+ * ── The money is PAYROLL'S, the days are the TIMESHEET'S ────────────────────
+ *
+ * 0089 costs a day at the ROSTER rate, which is a number somebody typed on the
+ * team card: an estimate, and the right one for the project report as time is
+ * entered. It is NOT the right one for the ledger, because the ledger has to
+ * agree with what was actually paid. So this apportions the ACTUAL payslip —
+ * and the two figures will differ, which is intended and is the same
+ * estimate-versus-actual split `reconcileProjectActuals` already reports.
+ *
+ * ── And it is BURDENED ──────────────────────────────────────────────────────
+ *
+ * Gross, employer NSSF and employer AHL are split on the same day-shares.
+ * John costs a project more than his salary line, and a contractor pricing the
+ * next job off a report that omits the employer contributions will underbid.
+ *
+ * ── The divisor, and the one case it protects against ───────────────────────
+ *
+ * Each employee's share is their days on a project over the WORKING DAYS in
+ * the period — `working_days()`, the same function 0089 apportions a monthly
+ * salary by and payroll already stores as `working_days_total`.
+ *
+ * Except when somebody booked MORE than that. The overbooking trigger caps a
+ * person at one day per day, but nothing stops a Saturday, so 24 booked days
+ * in a 22-day month would otherwise allocate 109% of a fixed salary and invent
+ * expense out of a rounding rule. `GREATEST(booked, working_days)` divides by
+ * what was actually worked in that case, so the shares can never sum above 1
+ * and the allocation can never exceed what was paid.
+ */
+export interface ProjectLabourShare {
+  projectId: string;
+  projectName: string;
+  gross: number;
+  employerNssf: number;
+  employerAhl: number;
+}
+
+async function getProjectLabourShares(
+  tx: Tx,
+  run: NonNullable<Awaited<ReturnType<typeof getRunRow>>>,
+): Promise<ProjectLabourShare[]> {
+  const rows = (await tx.execute(sql`
+    WITH employee_days AS (
+      SELECT pe.employee_id,
+             t.project_id,
+             SUM(project_timesheet_days(t.company_id, t.quantity, t.unit)) AS days
+        FROM payroll_entries pe
+        JOIN employees e ON e.id = pe.employee_id
+        JOIN project_timesheets t ON t.party_id = e.party_id
+       WHERE pe.payroll_run_id = ${run.id}::uuid
+         -- APPROVED only. A submitted timesheet is a commitment in the project
+         -- report; it is not evidence the ledger should move money on.
+         AND t.status = 'approved'
+         AND t.work_date >= ${run.periodFrom}::date
+         AND t.work_date <= ${run.periodTo}::date
+       GROUP BY pe.employee_id, t.project_id
+    ),
+    divisor AS (
+      SELECT ed.employee_id,
+             GREATEST(
+               SUM(ed.days),
+               working_days(${run.companyId}::uuid,
+                            ${run.periodFrom}::date,
+                            ${run.periodTo}::date)::numeric
+             ) AS days_in_period
+        FROM employee_days ed
+       GROUP BY ed.employee_id
+    )
+    SELECT ed.project_id::text                                          AS project_id,
+           p.name                                                       AS project_name,
+           SUM(COALESCE(pe.gross_pay, 0) * ed.days / d.days_in_period)::float8
+                                                                        AS gross,
+           SUM(pe.employer_nssf * ed.days / d.days_in_period)::float8    AS employer_nssf,
+           SUM(pe.employer_housing_levy * ed.days / d.days_in_period)::float8
+                                                                        AS employer_ahl
+      FROM employee_days ed
+      JOIN divisor d       ON d.employee_id = ed.employee_id
+      JOIN payroll_entries pe
+             ON pe.employee_id = ed.employee_id
+            AND pe.payroll_run_id = ${run.id}::uuid
+      JOIN projects p      ON p.id = ed.project_id
+     WHERE d.days_in_period > 0
+     GROUP BY ed.project_id, p.name
+     ORDER BY p.name
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    projectId: String(r.project_id),
+    projectName: String(r.project_name),
+    gross: Number(r.gross ?? 0),
+    employerNssf: Number(r.employer_nssf ?? 0),
+    employerAhl: Number(r.employer_ahl ?? 0),
+  }));
+}
+
+/**
+ * One aggregate expense line becomes one line per project, plus the residual.
+ *
+ * THE RESIDUAL IS COMPUTED, NOT APPORTIONED — `total - Σ(project lines)`. It
+ * has to be, or fourth-decimal rounding across twenty projects breaks the
+ * balanced-lines check on the entry and payroll stops posting at all. Deriving
+ * the remainder means the split sums to the total by construction.
+ */
+function splitByProject(
+  accountId: string,
+  total: number,
+  description: string,
+  shares: ProjectLabourShare[],
+  pick: (s: ProjectLabourShare) => number,
+) {
+  const lines: Array<{
+    accountId: string;
+    debit: string;
+    credit: string;
+    description: string;
+    projectId?: string | null;
+  }> = [];
+
+  let allocated = 0;
+  for (const s of shares) {
+    const amount = Number(pick(s).toFixed(4));
+    if (amount <= 0) continue;
+    allocated += amount;
+    lines.push({
+      accountId,
+      debit: money(amount),
+      credit: "0",
+      description: `${description} · ${s.projectName}`,
+      projectId: s.projectId,
+    });
+  }
+
+  // Never allocate more than was paid. The shares cannot sum above 1, so this
+  // only ever trims a rounding hair off the last line.
+  let residual = Number((total - allocated).toFixed(4));
+  if (residual < 0 && lines.length) {
+    const last = lines[lines.length - 1];
+    last.debit = money(Number(last.debit) + residual);
+    residual = 0;
+  }
+
+  if (residual !== 0 || !lines.length) {
+    lines.push({
+      accountId,
+      debit: money(residual),
+      credit: "0",
+      // Said plainly: this is the part of the payroll no project claimed —
+      // office time, leave, and anybody with no timesheet at all.
+      description: lines.length ? `${description} · unallocated` : description,
+      projectId: null,
+    });
+  }
+
+  return lines;
+}
+
 function buildAccrualLines(
   rates: PayrollRates,
   totals: NonNullable<Awaited<ReturnType<typeof getRunRow>>>["totals"],
   label: string,
+  shares: ProjectLabourShare[] = [],
 ) {
   const gl = rates.glMapping;
   const required: Array<[string, string | null, number, "debit" | "credit", string]> = [
@@ -703,14 +877,40 @@ function buildAccrualLines(
     );
   }
 
+  // The three EXPENSE lines carry the project; the payables and the net do
+  // not, and must not. What a project consumed is labour cost — the PAYE and
+  // the NSSF owed on it are the company's obligation to KRA, not the job's,
+  // and tagging them would put a statutory liability inside a contract's cost.
+  //
+  // With no approved timesheets this returns exactly what it always did: one
+  // aggregate line per account, no project. That is the pre-0090 behaviour and
+  // it stays the behaviour for any company that never logs time.
+  const pickFor = (name: string) => {
+    if (name === "Salary expense") return (s: ProjectLabourShare) => s.gross;
+    if (name === "Employer NSSF expense")
+      return (s: ProjectLabourShare) => s.employerNssf;
+    if (name === "Employer AHL expense")
+      return (s: ProjectLabourShare) => s.employerAhl;
+    return null;
+  };
+
   return required
     .filter(([, account, amount]) => amount !== 0 && account)
-    .map(([, account, amount, side, description]) => ({
-      accountId: account as string,
-      debit: side === "debit" ? money(amount) : "0",
-      credit: side === "credit" ? money(amount) : "0",
-      description,
-    }));
+    .flatMap(([name, account, amount, side, description]) => {
+      const pick = shares.length ? pickFor(name) : null;
+      if (pick) {
+        return splitByProject(account as string, amount, description, shares, pick);
+      }
+      return [
+        {
+          accountId: account as string,
+          debit: side === "debit" ? money(amount) : "0",
+          credit: side === "credit" ? money(amount) : "0",
+          description,
+          projectId: null,
+        },
+      ];
+    });
 }
 
 /**
@@ -753,7 +953,12 @@ export async function approveRun(
   if (!rates) throw new Error("The payroll rates for this period are missing.");
 
   const label = periodLabel(run.periodMonth, run.periodYear);
-  const lines = buildAccrualLines(rates, run.totals, label);
+
+  // 0090 — what each project consumed of this run, from the approved
+  // timesheets that fall in the period. Empty is the normal answer for a
+  // company that does not log time, and produces the pre-0090 entry exactly.
+  const shares = await getProjectLabourShares(tx, run);
+  const lines = buildAccrualLines(rates, run.totals, label, shares);
 
   // Dated the last day of the period, not today: the expense belongs to the
   // month it was earned in, and the fiscal-period trigger then enforces the
@@ -1538,4 +1743,163 @@ export async function getP9Data(
       netPay: n("net_pay"),
     };
   });
+}
+
+/**
+ * Re-apportion a posted run after its timesheets changed — 0090.
+ *
+ * The accrual splits by project at the moment it posts, which is right when
+ * the week is closed before payroll runs and wrong the rest of the time: a
+ * timesheet approved on the 5th, for work done on the 28th, arrives after the
+ * expense is already in the ledger.
+ *
+ * THE PAYROLL JOURNAL IS NOT REOPENED. It carries the PAYE, the NSSF and the
+ * SHIF that a P10 reconciles to, and amending a posted statutory return
+ * because somebody fixed a timesheet is not a trade anybody would take. This
+ * posts the DIFFERENCE instead, as its own entry.
+ *
+ * IT IS A DIMENSION MOVE, NOT AN EXPENSE. Every line debits and credits THE
+ * SAME ACCOUNT — the project changes, the account does not — so each account
+ * nets to zero, the trial balance by account is untouched, and total expense
+ * is exactly what payroll said it was. This is why no new account was needed:
+ * `journal_lines.project_id` (0084) is the thing being corrected.
+ *
+ * IDEMPOTENT. It compares what the ledger already carries for this run against
+ * what the timesheets now say and posts only the delta, so running it twice
+ * produces one journal and then nothing. Nothing to reverse, nothing doubled.
+ */
+export async function reallocateProjectLabour(
+  tx: Tx,
+  input: { companyId: string; payrollRunId: string; actor: { id: string | null; name: string } },
+) {
+  const run = await getRunRow(tx, input.payrollRunId);
+  if (!run) throw new Error("Payroll run not found.");
+  if (run.status !== "approved" && run.status !== "paid") {
+    throw new Error(
+      "Only a run whose accrual has posted can be re-allocated. Approve it first.",
+    );
+  }
+
+  const rates = run.payrollConfigId
+    ? await getRatesById(tx, run.payrollConfigId)
+    : await getRatesForPeriod(tx, run.periodYear, run.periodMonth);
+  if (!rates) throw new Error("The payroll rates for this period are missing.");
+
+  const gl = rates.glMapping;
+  const buckets: Array<[string, string | null, (s: ProjectLabourShare) => number]> = [
+    ["Gross pay", gl.salaryExpense, (s) => s.gross],
+    ["Employer NSSF", gl.employerNssfExpense, (s) => s.employerNssf],
+    ["Employer AHL", gl.employerAhlExpense, (s) => s.employerAhl],
+  ];
+  const accountIds = buckets.map(([, a]) => a).filter(Boolean) as string[];
+  if (!accountIds.length) return null;
+
+  const shares = await getProjectLabourShares(tx, run);
+
+  // What this run has ALREADY put on each account, by project — the accrual
+  // plus every earlier re-allocation. Reversed entries are excluded: a
+  // reversal is not a thing the ledger still carries.
+  const posted = (await tx.execute(sql`
+    SELECT jl.account_id::text                       AS account_id,
+           COALESCE(jl.project_id::text, '')         AS project_id,
+           SUM(jl.debit - jl.credit)::float8         AS amount
+      FROM journal_lines jl
+      JOIN journal_entries je ON je.id = jl.entry_id
+      JOIN payroll_run_journals prj ON prj.journal_entry_id = je.id
+     WHERE prj.payroll_run_id = ${run.id}::uuid
+       AND je.status = 'posted'
+       AND jl.account_id = ${anyOf(accountIds, "uuid[]")}
+     GROUP BY jl.account_id, jl.project_id
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const current = new Map<string, number>();
+  for (const r of posted) {
+    current.set(`${r.account_id}|${r.project_id}`, Number(r.amount ?? 0));
+  }
+
+  const label = periodLabel(run.periodMonth, run.periodYear);
+  const lines: Array<{
+    accountId: string;
+    debit: string;
+    credit: string;
+    description: string;
+    projectId: string | null;
+  }> = [];
+
+  for (const [name, accountId, pick] of buckets) {
+    if (!accountId) continue;
+
+    let moved = 0;
+    for (const share of shares) {
+      const want = Number(pick(share).toFixed(4));
+      const have = current.get(`${accountId}|${share.projectId}`) ?? 0;
+      const delta = Number((want - have).toFixed(4));
+      if (delta === 0) continue;
+
+      moved += delta;
+      lines.push({
+        accountId,
+        debit: delta > 0 ? money(delta) : "0",
+        credit: delta < 0 ? money(-delta) : "0",
+        description: `${name} re-allocated — ${label} · ${share.projectName}`,
+        projectId: share.projectId,
+      });
+    }
+
+    // A project that was allocated and now has no approved time at all never
+    // appears in `shares`, so it needs finding here or its old figure stands
+    // for ever.
+    for (const [key, have] of current) {
+      const [acc, proj] = key.split("|");
+      if (acc !== accountId || !proj) continue;
+      if (shares.some((s) => s.projectId === proj)) continue;
+      if (have === 0) continue;
+
+      moved -= have;
+      lines.push({
+        accountId,
+        debit: have < 0 ? money(-have) : "0",
+        credit: have > 0 ? money(have) : "0",
+        description: `${name} re-allocated — ${label} · no longer charged`,
+        projectId: proj,
+      });
+    }
+
+    // The other side, always the same account with no project. This is what
+    // makes the entry a reclassification: the account nets to zero.
+    if (moved !== 0) {
+      lines.push({
+        accountId,
+        debit: moved < 0 ? money(-moved) : "0",
+        credit: moved > 0 ? money(moved) : "0",
+        description: `${name} re-allocated — ${label} · unallocated`,
+        projectId: null,
+      });
+    }
+  }
+
+  if (!lines.length) return null;
+
+  const entry = await createJournalEntry(tx, {
+    companyId: input.companyId,
+    // The period the labour was earned in, not today — the same rule the
+    // accrual follows, and the fiscal-period trigger then decides whether it
+    // is allowed at all.
+    entryDate: run.periodTo,
+    entryType: "payroll",
+    description: `Project labour re-allocation — ${label} (${run.payrollNumber})`,
+    reference: run.payrollNumber,
+    lines,
+    createdById: input.actor.id,
+    postImmediately: true,
+  });
+
+  await tx.insert(payrollRunJournals).values({
+    companyId: input.companyId,
+    payrollRunId: run.id,
+    journalEntryId: entry.id,
+    kind: "reallocation",
+  });
+
+  return { entryId: entry.id, lineCount: lines.length };
 }

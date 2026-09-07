@@ -13,6 +13,7 @@ import {
   voidPayrollRun,
   markPayrollPaid,
   updatePayslip,
+  reallocatePayrollToProjects,
 } from "@/app/db/actions/hr-payroll-actions";
 
 const voidInitial = { success: false, error: null, fieldErrors: null };
@@ -171,6 +172,10 @@ export function PayrollActions({ payrollRun, can = {} }) {
   const canApprove = ["processing", "review"].includes(status) && can.approve;
   const canMarkPaid = status === "approved" && can.approve;
   const canVoid = !["paid", "voided"].includes(status) && can.void;
+  // 0090. Once the accrual has posted, its project split is fixed — so a
+  // timesheet approved afterwards needs this to reach the ledger. It posts
+  // only the difference, and nothing at all when there is none.
+  const canReallocate = ["approved", "paid"].includes(status) && can.approve;
 
   function handleGenerate() {
     startTransition(async () => {
@@ -236,7 +241,24 @@ export function PayrollActions({ payrollRun, can = {} }) {
     });
   }
 
-  if (!canGenerate && !canReview && !canApprove && !canMarkPaid && !canVoid) return null;
+  function handleReallocate() {
+    startTransition(async () => {
+      const result = await reallocatePayrollToProjects(runId);
+      if (result?.success === false) {
+        toast.error(result.error);
+      } else {
+        toast.success(result.message);
+        router.refresh();
+      }
+    });
+  }
+
+  if (
+    !canGenerate && !canReview && !canApprove && !canMarkPaid && !canVoid &&
+    !canReallocate
+  ) {
+    return null;
+  }
 
   return (
     <>
@@ -268,6 +290,17 @@ export function PayrollActions({ payrollRun, can = {} }) {
           <Button onClick={handleMarkPaid} disabled={isPending} className="bg-emerald-600 hover:bg-emerald-700 text-white">
             {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
             <span className="hidden sm:inline">Mark as Paid</span>
+          </Button>
+        )}
+        {canReallocate && (
+          <Button
+            variant="outline"
+            onClick={handleReallocate}
+            disabled={isPending}
+            title="Re-split this run's labour across projects from the approved timesheets. Posts only the difference; the payroll journal is not touched."
+          >
+            {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpen className="h-4 w-4" />}
+            <span className="hidden sm:inline">Re-allocate to projects</span>
           </Button>
         )}
         {canVoid && (
