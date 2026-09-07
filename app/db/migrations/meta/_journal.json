@@ -666,6 +666,13 @@
       "when": 1787049167566,
       "tag": "0094_a_variation_is_priced_by_its_lines",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1787049168566,
+      "tag": "0095_an_invoice_remembers_who_sold_it",
+      "breakpoints": true
     }
   ]
 }

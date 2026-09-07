@@ -973,6 +973,13 @@ export async function convertQuoteToInvoice(
   const invoice = await invoicesRepo.createInvoice(tx, {
     companyId: quote.companyId,
     customerId: quote.customerId,
+    /**
+     * WHO SOLD IT — 0097. The quote has always known, and this mapping used to
+     * drop it: customer, lines, discounts and dates crossed over and the rep
+     * did not, so Sales by Rep had nothing to group by on this side.
+     */
+    salespersonPartyId: quote.salespersonPartyId ?? null,
+    salespersonName: quote.salespersonName ?? null,
     invoiceDate: input.invoiceDate,
     dueDate: input.dueDate ?? null,
     title: quote.title ?? null,

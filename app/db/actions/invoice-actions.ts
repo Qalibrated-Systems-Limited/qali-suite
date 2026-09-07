@@ -613,3 +613,30 @@ export async function getOverdueInvoicesPg(limit = 4) {
     invoices.listOverdueInvoices(tx, limit),
   );
 }
+
+/**
+ * Sales by rep — 0097, and the last `reports` screen off Mongo.
+ *
+ * The Mongo pair keyed on `salesPerson.employeeId`, a User. These key on a
+ * PARTY, which is what the quote has always carried and what survives a rep
+ * leaving. The screen's drill-down link changes with it.
+ */
+export async function getSalesByRepPg(year?: number | null, month?: number | null) {
+  return withAuthorizedTenant([], (tx) =>
+    invoices.getSalesByRep(tx, { year: year ?? null, month: month ?? null }),
+  );
+}
+
+export async function getRepInvoicesPg(
+  partyId: string,
+  year?: number | null,
+  month?: number | null,
+) {
+  if (!partyId) return [];
+  return withAuthorizedTenant([], (tx) =>
+    invoices.getRepInvoices(tx, partyId, {
+      year: year ?? null,
+      month: month ?? null,
+    }),
+  );
+}

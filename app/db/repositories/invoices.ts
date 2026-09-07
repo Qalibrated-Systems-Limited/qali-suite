@@ -73,6 +73,9 @@ export interface InvoiceLineInput {
 export interface CreateInvoiceInput {
   companyId: string;
   customerId: string;
+  /** Who sold it — 0097. Carried from the quote; null on a direct invoice. */
+  salespersonPartyId?: string | null;
+  salespersonName?: string | null;
   invoiceDate: string;
   dueDate?: string | null;
   title?: string | null;
@@ -278,6 +281,13 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
       invoiceDate: input.invoiceDate,
       dueDate: input.dueDate ?? null,
       customerId: input.customerId,
+      /**
+       * `invoices_salesperson_pair` refuses an id with no name — a row the
+       * report can group and cannot label — so they travel together or not
+       * at all.
+       */
+      salespersonPartyId: input.salespersonName ? (input.salespersonPartyId ?? null) : null,
+      salespersonName: input.salespersonPartyId ? (input.salespersonName ?? null) : null,
       title: input.title ?? null,
       notes: input.notes ?? null,
       projectId: input.projectId ?? null,
@@ -1465,4 +1475,123 @@ export async function createOpeningBalanceInvoice(
   });
 
   return { invoice, entry };
+}
+
+// ── Sales by rep — 0097 ─────────────────────────────────────────────────────
+
+/** float8 comes back as a string on some drivers; this file had no helper. */
+const num = (v: unknown) => {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+};
+
+//
+// The last `reports` screen reading Mongo. It could not be transcribed: the
+// Mongo query groups by `salesPerson.employeeId` and the Postgres invoice had
+// no salesperson at all, so a faithful port would have returned one row —
+// "Unattributed" — for every invoice ever raised, and looked like it worked.
+
+export interface SalesByRepRow {
+  partyId: string | null;
+  name: string;
+  invoices: number;
+  revenue: number;
+  collected: number;
+  outstanding: number;
+}
+
+/**
+ * Billed revenue per salesperson, for a month or for all time.
+ *
+ * SENT AND COMPLETED, the Mongo query's own filter: a draft is not billed and
+ * a cancelled invoice is not revenue.
+ *
+ * UNATTRIBUTED IS AN EXPLICIT BUCKET, not a dropped row. Invoices raised
+ * directly carry no rep, and silently omitting them would make the report's
+ * total disagree with the sales figure on every other screen — which is worse
+ * than a bucket somebody has to explain.
+ *
+ * OUTSTANDING IS DERIVED. Mongo stored `amountDue` beside `amountPaid` and the
+ * two could drift; here it is `total - amount_paid`, never below zero, because
+ * an over-payment is a credit and not a negative debt.
+ */
+export async function getSalesByRep(
+  tx: Tx,
+  opts: { year?: number | null; month?: number | null } = {},
+): Promise<SalesByRepRow[]> {
+  const { year, month } = opts;
+  const period =
+    year && month
+      ? sql`AND i.invoice_date >= make_date(${year}, ${month}, 1)
+            AND i.invoice_date <  (make_date(${year}, ${month}, 1) + interval '1 month')`
+      : sql``;
+
+  const rows = (await tx.execute(sql`
+    SELECT i.salesperson_party_id::text                       AS party_id,
+           MAX(i.salesperson_name)                            AS name,
+           COUNT(*)::int                                      AS invoices,
+           COALESCE(SUM(i.total), 0)::float8                  AS revenue,
+           COALESCE(SUM(i.amount_paid), 0)::float8            AS collected,
+           COALESCE(SUM(GREATEST(i.total - i.amount_paid, 0)), 0)::float8
+                                                              AS outstanding
+      FROM invoices i
+     WHERE i.status IN ('sent', 'completed')
+       ${period}
+     GROUP BY i.salesperson_party_id
+     ORDER BY revenue DESC
+     LIMIT 100
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    partyId: r.party_id ? String(r.party_id) : null,
+    name: r.party_id ? (r.name ? String(r.name) : "Unknown rep") : "Unattributed",
+    invoices: Number(r.invoices ?? 0),
+    revenue: num(r.revenue),
+    collected: num(r.collected),
+    outstanding: num(r.outstanding),
+  }));
+}
+
+/** One rep's invoices — the drill-down, capped the way the Mongo one was. */
+export async function getRepInvoices(
+  tx: Tx,
+  partyId: string,
+  opts: { year?: number | null; month?: number | null } = {},
+) {
+  if (!isUuid(partyId)) return [];
+  const { year, month } = opts;
+  const period =
+    year && month
+      ? sql`AND i.invoice_date >= make_date(${year}, ${month}, 1)
+            AND i.invoice_date <  (make_date(${year}, ${month}, 1) + interval '1 month')`
+      : sql``;
+
+  const rows = (await tx.execute(sql`
+    SELECT i.id::text                                    AS id,
+           i.invoice_number                              AS invoice_number,
+           p.name                                        AS customer,
+           i.invoice_date                                AS invoice_date,
+           i.total::float8                               AS total,
+           i.amount_paid::float8                         AS amount_paid,
+           GREATEST(i.total - i.amount_paid, 0)::float8  AS amount_due,
+           i.payment_status                              AS payment_status
+      FROM invoices i
+      LEFT JOIN parties p ON p.id = i.customer_id
+     WHERE i.salesperson_party_id = ${partyId}::uuid
+       AND i.status IN ('sent', 'completed')
+       ${period}
+     ORDER BY i.invoice_date DESC
+     LIMIT 100
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    _id: String(r.id),
+    invoiceNumber: String(r.invoice_number),
+    customer: r.customer ? String(r.customer) : "",
+    invoiceDate: r.invoice_date ? String(r.invoice_date) : null,
+    total: num(r.total),
+    amountPaid: num(r.amount_paid),
+    amountDue: num(r.amount_due),
+    paymentStatus: r.payment_status ? String(r.payment_status) : null,
+  }));
 }
