@@ -2,7 +2,10 @@ import Link from "next/link";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { canSeeSalesNav } from "@/lib/permissions";
-import { cLeads, cLeadStats } from "@/app/mongodb/queries/lead-queries";
+import {
+  getLeadsPg as cLeads,
+  getLeadStatsPg as cLeadStats,
+} from "@/app/db/actions/crm-actions";
 import { Card, CardContent } from "@/components/ui/card";
 import LeadCreateForm from "./components/LeadCreateForm";
 import LeadRowActions from "./components/LeadRowActions";

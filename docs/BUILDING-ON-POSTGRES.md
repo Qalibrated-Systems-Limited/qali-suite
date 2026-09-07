@@ -3202,3 +3202,100 @@ Next, in the revised order:
 4. **Notice / Claims / EOT** — the register with a contractual deadline, a
    responsible person, status, documents, and a notification. The bell has
    existed since 0074 with nothing in this module writing to it.
+
+---
+
+## Handoff — 2026-09-07: the funnel before the quote (0096)
+
+`docs/CURRENT-STATE.md` has listed this as a whole missing module since the
+snapshot: "CRM / Lead pipeline ⬜ — First touch is the Quote — nothing tracks
+the funnel before that." Three Mongo models, ~1,166 lines of queries and
+actions, and nine screens that could not move until the tables existed.
+
+**Mongo screens: 56 → 47.** Leads (4), opportunities (3), the executive
+overview's last read (1) and the CRM activity composer (1). The executive one
+has been carried in these handoffs as "NOT WORK — the CRM genuinely is still on
+Mongo, so that read is correct until opportunities port". This is that port.
+
+### Two things that are NOT transcriptions
+
+**PROBABILITY WAS FROZEN, AND IS NOW A FIX.** Mongo seeded it from the stage in
+a pre-save hook that fired only when it was null — so once seeded it never moved
+again. A deal created at qualification (10%) and advanced to negotiation still
+forecast at 10%, which means the weighted pipeline on the board has been wrong
+for every deal anybody ever advanced. That is most of them.
+
+The column is now NULL unless somebody overrides it, and the effective value is
+`COALESCE(probability, the stage's default)` computed in ONE place —
+`effectiveProbability` — so the board, the detail page and the forecast cannot
+disagree. A deal with no override tracks its stage; an override sticks through a
+stage change. Both are asserted.
+
+**THE STAGE TRAIL IS THE DATABASE'S.** Mongo kept it as an embedded array
+appended by the same pre-save hook, so any update that did not go through
+`save()` left the trail short. `opportunities_record_stage` fires on insert and
+on `UPDATE OF stage`, which cannot be skipped — and does not fire on an update
+that leaves the stage alone, or velocity would be nonsense. It is a table rather
+than folded into `crm_activities`: velocity is the most actionable pipeline
+metric there is and should not depend on a log people delete rows from.
+
+### Three decisions carried over deliberately
+
+**A LEAD IS NOT A PARTY.** The Mongo model's own reasoning and it is right: a
+lead has no credit terms and no balance, and putting tyre-kickers in `parties`
+would corrupt AR aging and every customer count. `company_name` is free text
+until conversion.
+
+**CONVERSION IS A TRANSACTION, NOT A STATUS FLIP.** Party, opportunity and the
+lead's stamp in one `withTenant` callback. `setLeadStatus` REFUSES `converted`
+on purpose, and the database backs it: `leads_conversion_pair` needs the date
+and `leads_conversion_made_a_party` needs the party, so all three land together
+or the row is rejected. A lead marked converted with nothing to show for it is
+the state this prevents, and there is a test for it.
+
+**THE ACTIVITY TARGET HAS NO FOREIGN KEY**, and the migration says so rather
+than papering over it. Six target types make one key impossible; nothing stops
+an activity pointing at a deleted row, and a test asserts the reader survives it.
+
+### Two constraints Mongo did not have
+
+`lost_reason` only on a lost deal, `won_at` only on a won one. Both were free
+before, so a deal could carry a lost reason into negotiation.
+
+### The numbering trap, and it nearly bit
+
+The qsl merge pushed this machine's migration high-water mark to
+`1787049170566`. A naive 0096 numbered from the branch's own last entry would
+have landed at `…169566` — BELOW the mark — and drizzle would have skipped it in
+silence and reported success, leaving four tables uncreated. It is numbered at
+`…180566` instead, and the tables were checked in `information_schema` rather
+than trusted to the `✓`.
+
+### Deliberately unwired
+
+`updateLeadPg` and `createOpportunityPg` have no caller — and neither did their
+Mongo originals, which was confirmed rather than assumed: no screen has ever
+called `updateLead` or `createOpportunity`. Deals arrive by lead conversion,
+and there is no lead edit form. Ported anyway because they are the obvious next
+two screens; `find-unwired-actions.mjs` will keep flagging them until those
+exist.
+
+### Verified
+
+- 96 migrations apply on dev and test, and the four tables exist.
+- 19 tests in `tests/pg-crm.test.mjs`, green first run.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Where the port stands
+
+**47 screens, 15 modules.** Of those, banking (8) stays on Mongo by decision,
+sales-orders (3) is switched off behind `lib/unported-modules.js`, and
+`adjustments`'s single hit is a FALSE POSITIVE — a historical comment in an
+already-ported file that the counting grep matches. So the real remaining
+surface is about **35 screens**.
+
+The ledger sweep is down to one genuine connector: the weighbridge, in
+`integration-actions.js:467`. The kpi hits are `Array.prototype.reverse`.
+
+Next cheapest: **kpis (7)**, one self-contained module with no Postgres
+destination yet, or **employee (4)** and **settings (3)**.

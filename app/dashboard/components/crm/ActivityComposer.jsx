@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { logActivity } from "@/app/mongodb/actions/activity-actions";
+import { logActivityPg as logActivity } from "@/app/db/actions/crm-actions";
 
 // Logs an interaction (note/call/email/meeting) against any CRM entity.
 // `relatedKind` + `relatedId` are passed as hidden fields so one component

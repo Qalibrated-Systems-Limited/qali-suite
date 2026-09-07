@@ -997,3 +997,44 @@ export const workflowReportStatusEnum = pgEnum("workflow_report_status", [
   "reviewed",
   "approved",
 ]);
+
+// ── CRM — 0096 ───────────────────────────────────────────────────────────────
+
+export const leadSourceEnum = pgEnum("lead_source", [
+  "website", "referral", "walk_in", "campaign",
+  "cold_call", "trade_show", "social", "other",
+]);
+
+/**
+ * `converted` and `unqualified` are the two terminal states, and neither is
+ * "open" — a lead that graduated is out of the funnel and one that was walked
+ * away from never enters it.
+ */
+export const leadStatusEnum = pgEnum("lead_status", [
+  "new", "contacted", "qualified", "unqualified", "converted",
+]);
+
+export const leadRatingEnum = pgEnum("lead_rating", ["hot", "warm", "cold"]);
+
+export const opportunityStageEnum = pgEnum("opportunity_stage", [
+  "qualification", "needs_analysis", "proposal",
+  "negotiation", "closed_won", "closed_lost",
+]);
+
+export const opportunityLostReasonEnum = pgEnum("opportunity_lost_reason", [
+  "price", "competitor", "timing", "no_budget", "no_decision", "other",
+]);
+
+export const crmActivityTypeEnum = pgEnum("crm_activity_type", [
+  "note", "call", "email", "meeting", "whatsapp",
+  "sms", "stage_change", "conversion", "system",
+]);
+
+/** Six targets, which is why `crm_activities.target_id` can carry no key. */
+export const crmActivityTargetEnum = pgEnum("crm_activity_target", [
+  "lead", "opportunity", "party", "contact", "invoice", "quote",
+]);
+
+export const crmActivityDirectionEnum = pgEnum("crm_activity_direction", [
+  "inbound", "outbound", "none",
+]);

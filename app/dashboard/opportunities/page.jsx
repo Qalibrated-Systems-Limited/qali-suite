@@ -2,7 +2,7 @@ import Link from "next/link";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { canSeeSalesNav } from "@/lib/permissions";
-import { cPipeline } from "@/app/mongodb/queries/opportunity-queries";
+import { getPipelinePg as cPipeline } from "@/app/db/actions/crm-actions";
 import { Card, CardContent } from "@/components/ui/card";
 import StageActions from "./components/StageActions";
 import AccessDenied from "@/app/dashboard/components/crm/AccessDenied";

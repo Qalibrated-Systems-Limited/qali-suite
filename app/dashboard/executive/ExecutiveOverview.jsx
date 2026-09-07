@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { getExecutiveSnapshotPg } from "@/app/db/actions/report-actions";
-import { cPipelineTotal } from "@/app/mongodb/queries/opportunity-queries";
+import { getPipelineTotalPg as cPipelineTotal } from "@/app/db/actions/crm-actions";
 
 // Compact for phones, full for desktop — same convention as the reports.
 const compact = (n) =>
