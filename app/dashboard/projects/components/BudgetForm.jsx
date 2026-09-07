@@ -141,8 +141,8 @@ export default function BudgetForm({
   };
 
   return (
-    <Card className="p-5 sm:p-6">
-      <div className="flex items-center justify-between mb-4">
+    <Card className="p-4 sm:p-5">
+      <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold">
           {isEdit ? `Edit Budget (v${budget.version})` : "Create New Budget"}
         </h2>

@@ -17,7 +17,7 @@ import { EyeOff } from "lucide-react";
  */
 export default function SectionNotForType({ section, project, typeName }) {
   return (
-    <Card className="p-8 sm:p-10 text-center">
+    <Card className="p-5 sm:p-6 text-center">
       <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
         <EyeOff className="h-6 w-6 text-muted-foreground" />
       </div>

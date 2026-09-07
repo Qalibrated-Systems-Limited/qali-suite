@@ -18,7 +18,7 @@ export default async function SiteDiaryPage({ searchParams }) {
   if (ctx.denied) return <AccessDenied />;
   if (ctx.hidden) {
     return (
-      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
         <SectionNotForType
           section="The site diary"
           project={ctx.project}
@@ -33,7 +33,7 @@ export default async function SiteDiaryPage({ searchParams }) {
   const entries = project ? await getProjectDiaryEntries(project.id) : [];
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       <WorkspaceHeader
         title="Site Diary"
         description="The contractor's daily record of weather, activities, plant, manpower and incidents on site."

@@ -161,7 +161,7 @@ export default async function ProgrammePage({ searchParams }) {
   if (ctx.denied) return <AccessDenied />;
   if (ctx.hidden) {
     return (
-      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
         <SectionNotForType
           section="The programme"
           project={ctx.project}
@@ -185,7 +185,7 @@ export default async function ProgrammePage({ searchParams }) {
 
   if (!project) {
     return (
-      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
         {header}
         <NoProjectsCard
           notFound={ctx.notFound}
@@ -305,7 +305,7 @@ export default async function ProgrammePage({ searchParams }) {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       {header}
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -326,7 +326,7 @@ export default async function ProgrammePage({ searchParams }) {
 
       {/* Overall progress — on both views, because it is the answer the page
           exists to give and it does not change with the arrangement. */}
-      <Card className="p-5 sm:p-6">
+      <Card className="p-4 sm:p-5">
         <div className="flex items-center justify-between text-sm mb-2">
           <span className="text-muted-foreground">
             Overall progress
@@ -359,7 +359,7 @@ export default async function ProgrammePage({ searchParams }) {
             <StatCard label="Done" value={counts.done} tone="text-emerald-600 dark:text-emerald-400" />
           </div>
 
-          <Card className="p-5 sm:p-6">
+          <Card className="p-4 sm:p-5">
             <h2 className="font-semibold text-lg mb-4">Work breakdown</h2>
 
             {tasks.length === 0 ? (

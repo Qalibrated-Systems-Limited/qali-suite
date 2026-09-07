@@ -240,7 +240,7 @@ export default function ProjectForm({
           </div>
 
           {/* Client and PM */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Client</Label>
               <div className="flex items-center gap-2">
@@ -294,7 +294,7 @@ export default function ProjectForm({
           </div>
 
           {/* Dates */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="startDate">Start Date</Label>
               <Input
@@ -327,7 +327,7 @@ export default function ProjectForm({
           </div>
 
           {/* Budget and Priority */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="budgetAmount">Budget Amount (KES)</Label>
               <Input
@@ -367,7 +367,7 @@ export default function ProjectForm({
           </div>
 
           {/* Contract & Billing */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="contractValue">Contract Value (KES)</Label>
               <Input
@@ -444,7 +444,7 @@ export default function ProjectForm({
           </div>
 
           {/* Parent Project & Progress */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Parent Project</Label>
               <PartyCombobox
