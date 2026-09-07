@@ -139,6 +139,7 @@ export default function CertificateRegister({
   basis,
   boq,
   billableTime,
+  milestones,
   canManage = false,
   canCertify = false,
 }) {
@@ -590,6 +591,61 @@ export default function CertificateRegister({
                 variant="outline"
                 onClick={() =>
                   setDraftForm((f) => ({ ...f, workDoneToDate: String(boq.measured) }))
+                }
+              >
+                Use for work done
+              </Button>
+            </div>
+          )}
+
+          {/*
+            The milestone schedule's figure — 0093. A job values by REMEASURING
+            a bill or by ACHIEVING stages; it is unusual to do both, so this
+            and the measured figure above rarely appear together.
+
+            The retention line is the schedule's real prize: releasing
+            retention used to mean somebody typing a cumulative figure and
+            remembering when it fell due.
+          */}
+          {milestones?.value > 0 && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border bg-background p-3 text-sm">
+              <span className="text-muted-foreground">
+                {milestones.stages} stage{milestones.stages === 1 ? "" : "s"} achieved
+                to date:{" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  {money(milestones.value)}
+                </span>
+                {milestones.releasePercent > 0 && (
+                  <>
+                    {" · releases "}
+                    <span className="font-medium text-foreground">
+                      {milestones.releasePercent}%
+                    </span>
+                    {" of retention"}
+                  </>
+                )}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setDraftForm((f) => {
+                    const next = { ...f, workDoneToDate: String(milestones.value) };
+                    /**
+                     * The release is a PERCENTAGE OF WHAT IS HELD, and what is
+                     * held is the chain's business — so it is applied to this
+                     * contract's retention rather than carried as a figure the
+                     * schedule cannot know.
+                     */
+                    if (milestones.releasePercent > 0 && position?.retentionHeld) {
+                      next.retentionReleasedToDate = String(
+                        Math.round(
+                          (position.retentionHeld * milestones.releasePercent) / 100,
+                        ),
+                      );
+                    }
+                    return next;
+                  })
                 }
               >
                 Use for work done

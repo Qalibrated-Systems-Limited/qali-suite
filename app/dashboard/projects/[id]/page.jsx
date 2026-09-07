@@ -25,6 +25,7 @@ import {
   getProjectTransactions,
   getSubprojects,
   getProjectAssignments,
+  getProjectClosingBlockers,
   getProjectTimesheets,
   getProjectLabourSummary,
   getProjectTasks,
@@ -892,6 +893,11 @@ export default async function ProjectDetailPage({ params, searchParams }) {
         projectId={id}
         currentStatus={project.status}
         userRole={session.user.role}
+        /* Only asked where Close is actually offered — one query, not on every
+           project page. */
+        closingBlockers={
+          project.status === "completed" ? await getProjectClosingBlockers(id) : []
+        }
       />
 
       {/* Subprojects */}

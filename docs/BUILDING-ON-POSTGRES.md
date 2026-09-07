@@ -2995,3 +2995,114 @@ computed with right now. What it buys is that they cannot drift from here.
 - Milestones, cash requisitions as a record, notice deadlines with a
   notification, earned value, and any guard on closing a project with retention
   outstanding. Unchanged from the previous handoff.
+
+---
+
+## Handoff — 2026-09-07: milestones, and a project that cannot be closed over money
+
+Two pieces, and the full suite is green end to end for the first time this
+session: **94 files, 1538 tests, no failures.**
+
+## 1. Milestones (0093) — the last table the execution layer was missing
+
+"Milestone" meant nothing here. Three references and every one a placeholder:
+`/dashboard/projects/milestones` was a second view of `project_tasks` that
+showed no milestones because there were none (a redirect now);
+`billing_model = 'milestone'` was declared with NOTHING acting on it, so a
+milestone-billed job billed exactly as `fixed`; and
+`valuation_source = 'milestone'` was a column no code had ever set.
+
+**Why it matters most on an installation contract.** A road job values by
+REMEASURING a priced bill — 0080 built that, and a certificate takes the
+measured total. An installation job has no bill to remeasure: it has stages,
+each worth an agreed part of the sum, and without this table the only way to
+certify one was to type the figure and mark it `manual`. 0082 already
+distinguishes the two kinds of job; this is the other half of that.
+
+### The three decisions
+
+**The sum may fall short and may not exceed.** Over-allocating certifies more
+than the job is worth — a hard refusal, with both numbers in the message.
+Falling short is a schedule being built, and enforcing the total both ways
+would make the table unusable, because the first stage entered is never the
+whole contract. The register shows what is unallocated instead. Same shape as a
+budget whose lines have not yet reached the budget amount.
+
+**Achieving is a DATE, not a flag.** `achieved_on` is what a certificate reads
+— the cumulative value of stages achieved ON OR BEFORE its valuation date. A
+boolean cannot answer that, and a stage signed off in May must not land on a
+March certificate. `setMilestoneStatus` refuses to achieve without a date and
+deliberately does not default to today, because most sign-offs are recorded
+after the fact and a default would quietly put them on the wrong month.
+
+**It offers a figure; it does not certify one.** Achieving posts nothing and
+raises nothing. It makes a number available to the next certificate, offered
+with a button exactly as the measured bill is — a stage being achieved and the
+employer being asked to pay for it are two decisions, which is how 0081 treats
+every other pair like it.
+
+### And it carries the retention release
+
+The reason the plan called milestones a blocker rather than a feature:
+"retention release schedule — still needs milestones, which are still not a
+table". `retention_release_percent` is what proportion of the retention HELD
+falls due when a stage is achieved; they may not add up to more than 100%.
+
+The release is a percentage of what is held, and what is held is the certificate
+chain's arithmetic — so the repository returns the PERCENTAGE and the screen
+applies it to this contract's own retention. The certificate remains the only
+place a release is recorded and posted.
+
+## 2. A project that cannot be closed over outstanding money
+
+**Closing is terminal.** `ProjectStatusActions` offers no transition out of
+`closed`, and a closed project then refuses edits, roster changes, time and
+variations. It is the one status change nobody can walk back, and nothing stood
+in its way.
+
+`getProjectClosingBlockers` returns a LIST, because "you cannot close this" is
+not an answer anybody can act on. Five things hold a project open:
+
+- **retention outstanding** — the reason this exists. It falls due at practical
+  completion and again after the defects period, both AFTER the point somebody
+  wants to close the job. The figure comes from `getContractPosition`, which
+  owns that arithmetic, rather than a second count.
+- **a certified certificate with no invoice** — work the employer agreed to pay
+  for and was never asked to pay. Certifying and invoicing are two steps on
+  purpose; this is the gap that separation opens.
+- **an open draft certificate**.
+- **submitted timesheets** — labour the job consumed that nobody approved, and
+  after closing it could never BE approved, so it would sit outside the job's
+  cost and outside the ledger for good.
+- **submitted variations** — claims with no decision.
+
+No migration. The guard is in `updateProjectStatus`, and the Close button is
+disabled with the blockers listed under it, so the answer arrives before the
+press rather than as a toast after it.
+
+A CANCELLED certificate blocks nothing: withdrawn is settled.
+
+## Verified
+
+- 93 migrations apply in order on dev and test.
+- **The full suite: 94 files, 1538 tests, zero failures.** The two
+  `pg-payment-actions` failures the last handoff left open are confirmed fixed
+  — they were the suite's own missing `company_settings` seed.
+- 16 new milestone tests and 9 closing-guard tests, both green first run.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+## Still not built
+
+- **Cash requisitions as a RECORD** — raise, approve, disburse. The page is a
+  read-only view over claims and expenses and says so.
+- **Notice deadlines with a notification.** The bell has existed since 0074 and
+  nothing in this module writes to it. Under a FIDIC form a missed notice
+  deadline is a lost claim, and this is the next thing worth building.
+- **Earned value (CPI/SPI)**, which is blocked on something real: `progress_percent`
+  is a single current number with no history, so there is no "progress as at 30
+  June" and no S-curve. A `project_progress_snapshots` row written when a
+  certificate is certified would come nearly free, since certifying already
+  establishes a cumulative position at a date.
+- **Materials on site drawn from stock**, blocked on the stock model: "issued to
+  a job" currently means CONSUMED, not delivered-and-unfixed, and certifying
+  issued stock would double-count it against the work it was built into.

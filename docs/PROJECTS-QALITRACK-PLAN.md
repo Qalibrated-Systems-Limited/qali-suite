@@ -1421,8 +1421,12 @@ structure the system may rely on. Match on `system_account`, or on structure.
   another. If the contracts in hand use that form, it is two threshold columns
   and a different expression. **Check a real contract before changing it** —
   the same caution the 2026-08-31 handoff raised about FIDIC percentages.
-- **Retention release schedule** — still needs milestones, which are still not
-  a table.
+- ~~**Retention release schedule**~~ — **unblocked, 0093.** Milestones are a
+  table now, and each stage carries `retention_release_percent` — what
+  proportion of the retention HELD falls due when it is achieved. Half at
+  practical completion and the balance at the end of the defects period is two
+  rows. The certificate is still where a release is recorded and posted (0081);
+  the schedule only offers the figure.
 - ~~**Timesheets**~~ — **built, 0089.** Quantity + unit, cost through
   `project_assignments.rate_unit`, no ledger posting of its own, as decided.
   Three things the shape did not yet answer, now answered: only an EMPLOYEE'S

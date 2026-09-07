@@ -666,6 +666,29 @@ export async function updateProjectStatus(projectId: string, newStatus: string) 
         ) {
           throw new Error("Only Admin or Accountant can close a project");
         }
+
+        /**
+         * CLOSING IS TERMINAL — `ProjectStatusActions` offers no way back out
+         * of `closed`, and a closed project then refuses edits, roster
+         * changes, time and variations. So it is the one status change worth
+         * stopping, and the message names what is outstanding rather than
+         * saying no.
+         *
+         * Retention is the reason this exists: it falls due at practical
+         * completion and again after the defects period, both AFTER the point
+         * somebody wants to close the job, and a closed project is how a
+         * contractor forgets to collect the last 5%.
+         */
+        if (newStatus === "closed") {
+          const blockers = await repo.getProjectClosingBlockers(tx, projectId);
+          if (blockers.length) {
+            throw new Error(
+              `This project cannot be closed yet — ${blockers
+                .map((b) => b.detail)
+                .join("; ")}. Closing is final, so settle these first.`,
+            );
+          }
+        }
         const row = await repo.setProjectStatus(
           tx,
           projectId,
@@ -1774,7 +1797,8 @@ export async function getProjectCertificates(projectId: string) {
       return { contract: null, certificates: [], position: null, basis: null, boq: null };
     }
 
-    const [certificates, position, basis, boq, billableTime] = await Promise.all([
+    const [certificates, position, basis, boq, billableTime, milestones] =
+      await Promise.all([
       repo.listCertificates(tx, contract.id),
       repo.getContractPosition(tx, contract.id),
       repo.nextCertificateBasis(tx, contract.id),
@@ -1797,6 +1821,13 @@ export async function getProjectCertificates(projectId: string) {
        * similar name. The QS decides.
        */
       repo.getProjectBillableTimeToDate(tx, projectId),
+      /**
+       * The schedule's answer to "value of permanent work to date" — 0093, and
+       * the reason `valuation_source = 'milestone'` has been a column nothing
+       * ever set. Offered beside the measured bill; a job has one or the other,
+       * never usually both.
+       */
+      repo.getMilestoneValueToDate(tx, projectId),
     ]);
 
     return {
@@ -1806,6 +1837,7 @@ export async function getProjectCertificates(projectId: string) {
       basis,
       boq,
       billableTime,
+      milestones,
     };
   });
 }
@@ -2227,6 +2259,18 @@ export async function getProjectSpendElsewhere(projectId: string) {
   if (!projectId) return { claims: 0, expenses: 0, projects: [] };
   return withAuthorizedTenant([], (tx) =>
     repo.countProjectSpendElsewhere(tx, projectId),
+  );
+}
+
+/**
+ * What would stop this project being closed, for the screen that offers the
+ * button — so the answer arrives before somebody presses it rather than as a
+ * refusal afterwards.
+ */
+export async function getProjectClosingBlockers(projectId: string) {
+  if (!projectId) return [];
+  return withAuthorizedTenant([], (tx) =>
+    repo.getProjectClosingBlockers(tx, projectId),
   );
 }
 
@@ -2779,6 +2823,222 @@ export async function deleteProjectVariation(
     }
     revalidateCertificates(projectId);
     return { success: true, message: `${row.variationNumber} removed` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Milestones — 0093.
+//
+// The valuation method for a job with no bill to remeasure. `billing_model =
+// 'milestone'` has been declared since 0070 with nothing behind it, and
+// `valuation_source = 'milestone'` has been a column no code ever set.
+//
+// ACHIEVING POSTS NOTHING. It makes a figure available to the next
+// certificate, offered with a button exactly as the measured bill is. A stage
+// being achieved and the employer being asked to pay for it are two decisions.
+//
+// WHO DOES WHAT: a project manager builds the schedule and records that a stage
+// was achieved; that is a site fact. Nothing here is finance's, because nothing
+// here moves money — the certificate does, and finance certifies that.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MILESTONE_STATUSES = ["pending", "achieved", "cancelled"] as const;
+type MilestoneStatus = (typeof MILESTONE_STATUSES)[number];
+
+export async function getProjectMilestones(projectId: string) {
+  if (!projectId) return { milestones: [], summary: null };
+  return withAuthorizedTenant([], async (tx) => {
+    const [rows, summary] = await Promise.all([
+      repo.listMilestones(tx, projectId),
+      repo.getMilestoneSummary(tx, projectId),
+    ]);
+    return {
+      milestones: rows.map((m) => ({
+        _id: String(m.id),
+        id: String(m.id),
+        name: m.name,
+        description: m.description,
+        sequence: m.sequence,
+        value: Number(m.value),
+        dueDate: m.dueDate,
+        achievedOn: m.achievedOn,
+        retentionReleasePercent:
+          m.retentionReleasePercent === null ? null : Number(m.retentionReleasePercent),
+        status: m.status,
+        achievedByName: m.achievedByName,
+        notes: m.notes,
+      })),
+      summary,
+    };
+  });
+}
+
+export async function createProjectMilestone(
+  _prevState: unknown,
+  formData: FormData,
+) {
+  const values = valuesOf(formData);
+  const projectId = String(formData.get("projectId") ?? "");
+  const contractId = String(formData.get("contractId") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+
+  const errors: FieldErrors = {};
+  if (!projectId) errors.projectId = ["A project is required"];
+  if (!contractId) {
+    errors.contractId = ["Enter the contract terms before building a schedule"];
+  }
+  if (!name) errors.name = ["A stage needs a name"];
+
+  const value = Number(formData.get("value") ?? 0) || 0;
+  if (value < 0) errors.value = ["A stage cannot be worth less than nothing"];
+  if (Object.keys(errors).length) return { errors, values };
+
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user, companyId }) => {
+        const project = await repo.getProjectById(tx, projectId);
+        if (!project) throw new Error("Project not found");
+        if (project.status === "closed") {
+          throw new Error("A closed project's schedule cannot be changed.");
+        }
+        const actor = actorFrom(user);
+        return repo.createMilestone(tx, {
+          companyId,
+          projectId,
+          contractId,
+          name,
+          description: String(formData.get("description") ?? ""),
+          value,
+          sequence: Number(formData.get("sequence") ?? 0) || 0,
+          dueDate: String(formData.get("dueDate") ?? "") || null,
+          retentionReleasePercent:
+            String(formData.get("retentionReleasePercent") ?? "") || null,
+          notes: String(formData.get("notes") ?? ""),
+          createdById: actor.id,
+          createdByName: actor.name,
+        });
+      },
+    );
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.name} added to the schedule` };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+export async function updateProjectMilestone(
+  milestoneId: string,
+  projectId: string,
+  input: {
+    name?: string;
+    description?: string;
+    value?: number | string;
+    sequence?: number;
+    dueDate?: string | null;
+    retentionReleasePercent?: number | string | null;
+    notes?: string;
+  } = {},
+) {
+  if (!milestoneId) return { success: false, error: "Invalid milestone id" };
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx, { user }) => {
+        const actor = actorFrom(user);
+        return repo.updateMilestone(tx, milestoneId, {
+          ...input,
+          lastModifiedById: actor.id,
+          lastModifiedByName: actor.name,
+        });
+      },
+    );
+    if (!row) {
+      return {
+        success: false,
+        error:
+          "An achieved stage cannot be amended — its value is in a certificate's valuation. Take the achievement back first.",
+      };
+    }
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.name} updated` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+/**
+ * Record that a stage was achieved, on a DATE.
+ *
+ * The date is not optional and does not default to today: a certificate values
+ * what was achieved by its valuation date, so the date decides which
+ * certificate picks the stage up. Defaulting it would quietly put a late
+ * sign-off on the wrong month, which is most sign-offs.
+ */
+export async function setProjectMilestoneStatus(
+  milestoneId: string,
+  projectId: string,
+  status: string,
+  achievedOn?: string,
+) {
+  if (!milestoneId) return { success: false, error: "Invalid milestone id" };
+  if (!MILESTONE_STATUSES.includes(status as MilestoneStatus)) {
+    return { success: false, error: "Unknown milestone status" };
+  }
+  if (status === "achieved" && !/^\d{4}-\d{2}-\d{2}$/.test(achievedOn ?? "")) {
+    return {
+      success: false,
+      error: "Give the date the stage was achieved — it decides which certificate values it.",
+    };
+  }
+
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx, { user }) =>
+        repo.setMilestoneStatus(
+          tx,
+          milestoneId,
+          status as MilestoneStatus,
+          actorFrom(user),
+          achievedOn ?? null,
+        ),
+    );
+    if (!row) return { success: false, error: "Milestone not found" };
+    revalidateCertificates(projectId);
+    return {
+      success: true,
+      message:
+        status === "achieved"
+          ? `${row.name} achieved — the next certificate can value it`
+          : `${row.name} ${status}`,
+    };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function deleteProjectMilestone(
+  milestoneId: string,
+  projectId: string,
+) {
+  if (!milestoneId) return { success: false, error: "Invalid milestone id" };
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx) => repo.deleteMilestone(tx, milestoneId),
+    );
+    if (!row) {
+      return {
+        success: false,
+        error:
+          "An achieved stage cannot be deleted — a certificate has valued it. Take the achievement back, or cancel the stage so the record says what happened.",
+      };
+    }
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.name} removed` };
   } catch (error) {
     return { success: false, error: userMessage(error) };
   }

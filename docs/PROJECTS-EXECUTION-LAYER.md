@@ -31,7 +31,7 @@ below standard, and where the system already answers him.
 |---|---|---|---|---|---|
 | WBS / tasks | ✅ core | ✅ | ✅ | ✅ phase 2 | ❌ |
 | progress from measured work | ✅ from quantities | ✅ from the bill | ⬜ from task state | ❌ typed % | ❌ typed % |
-| milestones with value | ✅ | ✅ | ✅ | ✅ phase 2 | ❌ |
+| milestones with value | ✅ | ✅ | ✅ | ✅ phase 2 | ✅ 0093 |
 | timesheets | ✅ | ✅ | ✅ | ✅ phase 2 | ✅ 0089 |
 | timesheet posts to the GL | ❌ | ❌ | ❌ | — | ❌ by decision |
 | change orders / variations | ✅ | ✅ | partial | ✅ phase 7 | ✅ 0091 |
@@ -171,7 +171,15 @@ table — and it is what Candy gives a QS. Worth adding when the tables exist.
    fallback.~~ **Done — migration 0071.** The table, the repository, the
    actions, the WBS card on the detail page, and 26 tests. `progress.source`
    tells a screen whether the number was earned or asserted.
-2. `project_milestones`, and milestone → draft invoice.
+2. ~~`project_milestones`, and milestone → draft invoice.~~ **Done — migration
+   0093.** Not milestone → invoice, though: a stage OFFERS its figure to the
+   next certificate, which is still the thing that certifies. A road contract
+   values by remeasuring a bill; an installation contract has no bill and
+   values by stage, and 0082 already knew the difference. The schedule may fall
+   short of the contract and may not exceed it, and a stage is achieved on a
+   DATE, so a certificate values only what was achieved by its valuation date.
+   It also carries `retention_release_percent`, which is what unblocked the
+   release schedule. 16 tests.
 3. ~~`project_change_orders`, contract value and end date moving with them.~~
    **Done — migration 0091, as `project_variations`.** The originals are kept
    and the current figures DERIVE: `contract_sum = original_sum + Σ approved`

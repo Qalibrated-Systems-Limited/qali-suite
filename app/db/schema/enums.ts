@@ -944,6 +944,18 @@ export const projectTimesheetUnitEnum = pgEnum("project_timesheet_unit", [
  * sum does not move. The same "approved is the point it counts" rule 0088 put
  * bills, claims and expenses on.
  */
+/**
+ * A stage of the works — 0093. `achieved` means a DATE was recorded, not a box
+ * ticked: a certificate for March must not pick up a stage signed off in May,
+ * and only a date can answer that. `cancelled` is a stage that was dropped,
+ * and its value returns to the unallocated part of the contract.
+ */
+export const projectMilestoneStatusEnum = pgEnum("project_milestone_status", [
+  "pending",
+  "achieved",
+  "cancelled",
+]);
+
 export const projectVariationStatusEnum = pgEnum("project_variation_status", [
   "draft",
   "submitted",

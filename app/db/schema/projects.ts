@@ -53,6 +53,7 @@ import {
   projectTimesheetUnitEnum,
   projectTimesheetStatusEnum,
   projectVariationStatusEnum,
+  projectMilestoneStatusEnum,
 } from "./enums";
 
 /** `ltree` has no Drizzle builder. Declared as `categories` declares it. */
@@ -1478,6 +1479,110 @@ export const projectVariations = pgTable(
     check(
       "project_variations_submission_pair",
       sql`${t.status} = 'draft' OR ${t.submittedAt} IS NOT NULL`,
+    ),
+  ],
+);
+
+/**
+ * The milestone schedule — 0093.
+ *
+ * A road contract values by REMEASUREMENT against a priced bill (0080). An
+ * installation contract has no bill to remeasure: it has stages, each worth an
+ * agreed part of the sum, and until this table the only way to certify one was
+ * to type the figure and mark it `manual`. 0082 already knows the difference
+ * between the two kinds of job; this is the other half of it.
+ *
+ * THE VALUE IS MONEY, NOT A PERCENTAGE. A percentage of a contract sum that
+ * moves with every approved variation is a value that changes under a stage
+ * after it was agreed.
+ *
+ * THE SUM MAY FALL SHORT AND MAY NOT EXCEED. Enforcing the total both ways
+ * would make the table unusable — the first stage entered is never the whole
+ * contract — so under-allocation is a work-in-progress state the register
+ * shows, and over-allocation is refused by
+ * `project_milestones_within_the_contract`.
+ *
+ * ACHIEVING POSTS NOTHING. It makes a figure available to the next
+ * certificate, offered with a button exactly as the measured bill is, because
+ * a stage being achieved and the employer being asked to pay for it are two
+ * decisions — which is how 0081 treats every other pair like it.
+ *
+ * AND IT CARRIES THE RETENTION RELEASE, which is why the plan called this a
+ * blocker rather than a feature: the release schedule had nowhere to live.
+ */
+export const projectMilestones = pgTable(
+  "project_milestones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    contractId: uuid("contract_id")
+      .notNull()
+      .references(() => projectContracts.id, { onDelete: "cascade" }),
+
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    sequence: integer("sequence").notNull().default(0),
+
+    value: money("value").notNull().default("0"),
+
+    dueDate: date("due_date"),
+    /** What the certificate reads — achieved ON OR BEFORE its valuation date. */
+    achievedOn: date("achieved_on"),
+
+    /**
+     * What proportion of the retention HELD falls due when this stage is
+     * achieved. Half at practical completion and the balance at the end of the
+     * defects period is the ordinary form. NULL and 0 mean the same thing, and
+     * both are ordinary — most stages release nothing.
+     */
+    retentionReleasePercent: numeric("retention_release_percent", {
+      precision: 5,
+      scale: 2,
+      mode: "string",
+    }),
+
+    status: projectMilestoneStatusEnum("status").notNull().default("pending"),
+    notes: text("notes").notNull().default(""),
+
+    achievedById: text("achieved_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    achievedByName: text("achieved_by_name"),
+    createdById: text("created_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdByName: text("created_by_name").notNull().default("System"),
+    lastModifiedById: text("last_modified_by_id"),
+    lastModifiedByName: text("last_modified_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("project_milestones_schedule_idx").on(t.projectId, t.sequence),
+    index("project_milestones_achieved_idx")
+      .on(t.contractId, t.achievedOn)
+      .where(sql`${t.achievedOn} IS NOT NULL`),
+
+    check("project_milestones_name_not_blank", sql`length(btrim(${t.name})) > 0`),
+    check("project_milestones_value_non_negative", sql`${t.value} >= 0`),
+    check(
+      "project_milestones_release_in_range",
+      sql`${t.retentionReleasePercent} IS NULL
+          OR (${t.retentionReleasePercent} >= 0 AND ${t.retentionReleasePercent} <= 100)`,
+    ),
+    /** Achieved means a date, and a date means achieved. */
+    check(
+      "project_milestones_achievement_pair",
+      sql`(${t.status} = 'achieved') = (${t.achievedOn} IS NOT NULL)`,
+    ),
+    check(
+      "project_milestones_achiever_named",
+      sql`${t.achievedOn} IS NULL OR ${t.achievedByName} IS NOT NULL`,
     ),
   ],
 );

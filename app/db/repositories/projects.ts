@@ -16,6 +16,7 @@ import {
   projectTypes,
   projectTimesheets,
   projectVariations,
+  projectMilestones,
   accounts,
 } from "../schema";
 import { getProjectClaimsByAccount, listClaims } from "./claims";
@@ -4236,6 +4237,378 @@ export async function getProjectBillableTimeToDate(
   return {
     amount,
     entries: Number(row?.entries ?? 0),
+    latest: row?.latest ? String(row.latest) : null,
+  };
+}
+
+/**
+ * What stands in the way of closing this project.
+ *
+ * CLOSING IS TERMINAL. `ProjectStatusActions` offers no transition out of
+ * `closed`, and a closed project refuses edits, roster changes, time and
+ * variations. So it is the one status change that cannot be walked back by the
+ * person who made it, and the only one worth stopping.
+ *
+ * Each of these is money or work that a closed project would strand:
+ *
+ *   RETENTION OUTSTANDING is the big one. It is a receivable — 1125 since 0085
+ *   — falling due at practical completion and again at the end of the defects
+ *   period, which are both AFTER the point somebody wants to close the job.
+ *   Closing over it is how a contractor forgets to collect the last 5%.
+ *
+ *   A CERTIFIED CERTIFICATE WITH NO INVOICE is work the employer has agreed to
+ *   pay for and has never been asked to pay. Certifying and invoicing are two
+ *   steps on purpose (0081), and this is the gap that separation opens.
+ *
+ *   AN OPEN DRAFT is a valuation somebody was part way through.
+ *
+ *   SUBMITTED TIMESHEETS are labour the job has consumed and nobody has
+ *   approved, so it is absent from the project's cost and from the ledger —
+ *   and after closing it can never be approved, because a closed project
+ *   refuses the status change.
+ *
+ *   SUBMITTED VARIATIONS are claims against the contract that have had no
+ *   decision. Closing leaves them neither agreed nor rejected.
+ *
+ * Returned as a LIST rather than a boolean because "you cannot close this" is
+ * not an answer anybody can act on.
+ */
+export interface ProjectClosingBlocker {
+  kind:
+    | "retention"
+    | "uninvoiced_certificate"
+    | "draft_certificate"
+    | "unapproved_timesheets"
+    | "undecided_variations";
+  detail: string;
+}
+
+export async function getProjectClosingBlockers(
+  tx: Tx,
+  projectId: string,
+): Promise<ProjectClosingBlocker[]> {
+  if (!isUuid(projectId)) return [];
+  const blockers: ProjectClosingBlocker[] = [];
+
+  const [counts] = (await tx.execute(sql`
+    SELECT
+      (SELECT COUNT(*) FROM project_certificates c
+        WHERE c.project_id = ${projectId}::uuid AND c.status = 'draft')::int
+                                                              AS draft_certificates,
+      (SELECT COUNT(*) FROM project_certificates c
+        WHERE c.project_id = ${projectId}::uuid
+          AND c.status = 'certified' AND c.invoice_id IS NULL)::int
+                                                              AS uninvoiced,
+      (SELECT COUNT(*) FROM project_timesheets t
+        WHERE t.project_id = ${projectId}::uuid AND t.status = 'submitted')::int
+                                                              AS timesheets,
+      (SELECT COUNT(*) FROM project_variations v
+        WHERE v.project_id = ${projectId}::uuid AND v.status = 'submitted')::int
+                                                              AS variations
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const n = (k: string) => Number(counts?.[k] ?? 0);
+  const plural = (count: number, one: string, many: string) =>
+    `${count} ${count === 1 ? one : many}`;
+
+  /**
+   * Retention comes from the contract position rather than a count, because it
+   * is the arithmetic of the whole certificate chain and there is exactly one
+   * function that owns it.
+   */
+  const contract = await getMainContract(tx, projectId);
+  if (contract) {
+    const position = await getContractPosition(tx, contract.id);
+    if (position && position.retentionOutstanding > 0) {
+      blockers.push({
+        kind: "retention",
+        detail: `${position.retentionOutstanding.toLocaleString()} of retention is still held and has not been released`,
+      });
+    }
+  }
+
+  if (n("uninvoiced")) {
+    blockers.push({
+      kind: "uninvoiced_certificate",
+      detail: `${plural(n("uninvoiced"), "certificate has", "certificates have")} been certified without an invoice raised`,
+    });
+  }
+  if (n("draft_certificates")) {
+    blockers.push({
+      kind: "draft_certificate",
+      detail: "a certificate is still in draft",
+    });
+  }
+  if (n("timesheets")) {
+    blockers.push({
+      kind: "unapproved_timesheets",
+      detail: `${plural(n("timesheets"), "timesheet is", "timesheets are")} awaiting approval`,
+    });
+  }
+  if (n("variations")) {
+    blockers.push({
+      kind: "undecided_variations",
+      detail: `${plural(n("variations"), "variation has", "variations have")} been submitted and not decided`,
+    });
+  }
+
+  return blockers;
+}
+
+// ── Milestones — 0093 ───────────────────────────────────────────────────────
+//
+// The valuation method for a job with no bill to remeasure. Nothing here
+// posts: achieving a stage makes a figure AVAILABLE to the next certificate,
+// and the certificate is still the thing that certifies it.
+
+export interface MilestoneInput {
+  companyId: string;
+  projectId: string;
+  contractId: string;
+  name: string;
+  description?: string | null;
+  value?: number | string | null;
+  sequence?: number | null;
+  dueDate?: string | null;
+  retentionReleasePercent?: number | string | null;
+  notes?: string | null;
+  createdById?: string | null;
+  createdByName: string;
+}
+
+const optionalPercent = (v: number | string | null | undefined) =>
+  v === null || v === undefined || String(v).trim() === ""
+    ? null
+    : Number(v).toFixed(2);
+
+export async function createMilestone(tx: Tx, input: MilestoneInput) {
+  const [row] = await tx
+    .insert(projectMilestones)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      contractId: input.contractId,
+      name: input.name.trim(),
+      description: input.description?.trim() ?? "",
+      sequence: Math.trunc(Number(input.sequence ?? 0)) || 0,
+      value: Number(input.value ?? 0).toFixed(4),
+      dueDate: input.dueDate || null,
+      retentionReleasePercent: optionalPercent(input.retentionReleasePercent),
+      notes: input.notes?.trim() ?? "",
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Amend a stage.
+ *
+ * An ACHIEVED one is not amended: its value is in a certificate's valuation
+ * and in every net since. Un-achieve it first, which is a decision somebody
+ * makes rather than a side effect of editing a number.
+ */
+export async function updateMilestone(
+  tx: Tx,
+  milestoneId: string,
+  input: {
+    name?: string;
+    description?: string;
+    value?: number | string;
+    sequence?: number;
+    dueDate?: string | null;
+    retentionReleasePercent?: number | string | null;
+    notes?: string;
+    lastModifiedById?: string | null;
+    lastModifiedByName?: string | null;
+  },
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.description !== undefined) patch.description = input.description.trim();
+  if (input.value !== undefined) patch.value = Number(input.value).toFixed(4);
+  if (input.sequence !== undefined)
+    patch.sequence = Math.trunc(Number(input.sequence)) || 0;
+  if (input.dueDate !== undefined) patch.dueDate = input.dueDate || null;
+  if (input.retentionReleasePercent !== undefined)
+    patch.retentionReleasePercent = optionalPercent(input.retentionReleasePercent);
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.lastModifiedById !== undefined)
+    patch.lastModifiedById = input.lastModifiedById;
+  if (input.lastModifiedByName !== undefined)
+    patch.lastModifiedByName = input.lastModifiedByName;
+
+  const [row] = await tx
+    .update(projectMilestones)
+    .set(patch)
+    .where(
+      and(
+        eq(projectMilestones.id, milestoneId),
+        inArray(projectMilestones.status, ["pending", "cancelled"]),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Achieve a stage, or take the achievement back.
+ *
+ * THE DATE IS THE POINT. `achieved_on` is what a certificate reads — the
+ * cumulative value of stages achieved on or before its valuation date — so a
+ * stage signed off in May must not appear on a March certificate. Defaulting
+ * it to today would quietly do exactly that whenever somebody records a
+ * sign-off late, which is most of the time.
+ */
+export async function setMilestoneStatus(
+  tx: Tx,
+  milestoneId: string,
+  status: "pending" | "achieved" | "cancelled",
+  actor: { id?: string | null; name?: string | null },
+  achievedOn?: string | null,
+) {
+  const achieving = status === "achieved";
+  if (achieving && !achievedOn) {
+    throw new Error(
+      "A stage is achieved on a DATE — a certificate values what was achieved by its valuation date, so the date decides which certificate picks it up.",
+    );
+  }
+
+  const [row] = await tx
+    .update(projectMilestones)
+    .set({
+      status,
+      achievedOn: achieving ? achievedOn! : null,
+      achievedById: achieving ? (actor.id ?? null) : null,
+      achievedByName: achieving ? (actor.name || "Unknown User") : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectMilestones.id, milestoneId))
+    .returning();
+  return row ?? null;
+}
+
+export async function deleteMilestone(tx: Tx, milestoneId: string) {
+  const [row] = await tx
+    .delete(projectMilestones)
+    .where(
+      and(
+        eq(projectMilestones.id, milestoneId),
+        inArray(projectMilestones.status, ["pending", "cancelled"]),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+export async function listMilestones(tx: Tx, projectId: string) {
+  if (!isUuid(projectId)) return [];
+  return tx
+    .select()
+    .from(projectMilestones)
+    .where(eq(projectMilestones.projectId, projectId))
+    .orderBy(asc(projectMilestones.sequence), asc(projectMilestones.createdAt))
+    .limit(500);
+}
+
+/**
+ * The schedule against the contract.
+ *
+ * `unallocated` is the figure that matters while a schedule is being built:
+ * the contract sum less what the stages come to. It is legitimately positive —
+ * the database refuses only the other direction.
+ */
+export interface MilestoneSummary {
+  total: number;
+  achieved: number;
+  pending: number;
+  unallocated: number;
+  releaseScheduled: number;
+  count: number;
+  achievedCount: number;
+}
+
+export async function getMilestoneSummary(
+  tx: Tx,
+  projectId: string,
+): Promise<MilestoneSummary> {
+  const empty: MilestoneSummary = {
+    total: 0, achieved: 0, pending: 0, unallocated: 0,
+    releaseScheduled: 0, count: 0, achievedCount: 0,
+  };
+  if (!isUuid(projectId)) return empty;
+
+  const [row] = (await tx.execute(sql`
+    SELECT
+      COALESCE(SUM(m.value) FILTER (WHERE m.status <> 'cancelled'), 0)::float8   AS total,
+      COALESCE(SUM(m.value) FILTER (WHERE m.status = 'achieved'), 0)::float8     AS achieved,
+      COALESCE(SUM(m.value) FILTER (WHERE m.status = 'pending'), 0)::float8      AS pending,
+      COALESCE(SUM(COALESCE(m.retention_release_percent, 0))
+               FILTER (WHERE m.status <> 'cancelled'), 0)::float8                AS release_scheduled,
+      COUNT(*) FILTER (WHERE m.status <> 'cancelled')::int                       AS count,
+      COUNT(*) FILTER (WHERE m.status = 'achieved')::int                         AS achieved_count
+      FROM project_milestones m
+     WHERE m.project_id = ${projectId}::uuid
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  if (!row) return empty;
+  const contract = await getMainContract(tx, projectId);
+  const contractSum = contract ? num(contract.contractSum) : 0;
+  const total = num(row.total);
+
+  return {
+    total,
+    achieved: num(row.achieved),
+    pending: num(row.pending),
+    unallocated: round2(Math.max(0, contractSum - total)),
+    releaseScheduled: num(row.release_scheduled),
+    count: Number(row.count ?? 0),
+    achievedCount: Number(row.achieved_count ?? 0),
+  };
+}
+
+/**
+ * What the certificate may claim from the schedule, at a date.
+ *
+ * TWO FIGURES, and they are the two boxes on the certificate form that a
+ * milestone job would otherwise have to type by hand: the cumulative value of
+ * stages achieved by the valuation date, and the cumulative retention those
+ * stages have released.
+ *
+ * Both are OFFERED, never written — 0093 decision 3. The certificate stays the
+ * thing that certifies, and `valuation_source = 'milestone'` is how it records
+ * that the figure was earned by a stage rather than typed.
+ *
+ * The retention figure is a PERCENTAGE OF WHAT IS HELD, and what is held is
+ * the chain's business, so this returns the percentage and the caller applies
+ * it to the certificate's own retention.
+ */
+export async function getMilestoneValueToDate(
+  tx: Tx,
+  projectId: string,
+  upTo?: string | null,
+) {
+  if (!isUuid(projectId)) return null;
+
+  const [row] = (await tx.execute(sql`
+    SELECT COALESCE(SUM(m.value), 0)::float8                              AS value,
+           COALESCE(SUM(COALESCE(m.retention_release_percent, 0)), 0)::float8
+                                                                          AS release_percent,
+           COUNT(*)::int                                                  AS stages,
+           MAX(m.achieved_on)                                             AS latest
+      FROM project_milestones m
+     WHERE m.project_id = ${projectId}::uuid
+       AND m.status = 'achieved'
+       ${upTo ? sql`AND m.achieved_on <= ${upTo}::date` : sql``}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const stages = Number(row?.stages ?? 0);
+  if (!stages) return null;
+  return {
+    value: num(row?.value),
+    releasePercent: num(row?.release_percent),
+    stages,
     latest: row?.latest ? String(row.latest) : null,
   };
 }

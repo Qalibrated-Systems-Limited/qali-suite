@@ -1,6 +1,7 @@
 import {
   getProjectCertificates,
   getProjectVariations,
+  getProjectMilestones,
 } from "@/app/db/actions/project-actions";
 import { getProjectInstructions } from "@/app/db/actions/project-log-actions";
 import { getWorkspaceContext } from "../lib/workspace";
@@ -10,6 +11,7 @@ import AccessDenied from "../components/AccessDenied";
 import SectionNotForType from "../components/SectionNotForType";
 import CertificateRegister from "../components/CertificateRegister";
 import VariationRegister from "../components/VariationRegister";
+import MilestoneRegister from "../components/MilestoneRegister";
 import {
   hasRole,
   PROJECT_MANAGE_ROLES,
@@ -65,13 +67,14 @@ export default async function IpcPaymentsPage({ searchParams }) {
    * are one conversation, and splitting them puts the cause on a screen the
    * person reading the effect is not looking at.
    */
-  const [data, variationData, instructions] = project
+  const [data, variationData, instructions, milestoneData] = project
     ? await Promise.all([
         getProjectCertificates(project.id),
         getProjectVariations(project.id),
         getProjectInstructions(project.id),
+        getProjectMilestones(project.id),
       ])
-    : [null, null, []];
+    : [null, null, [], null];
 
   return (
     <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
@@ -100,8 +103,24 @@ export default async function IpcPaymentsPage({ searchParams }) {
           basis={data?.basis ?? null}
           boq={data?.boq ?? null}
           billableTime={data?.billableTime ?? null}
+          milestones={data?.milestones ?? null}
           canManage={hasRole(user, PROJECT_MANAGE_ROLES)}
           canCertify={hasRole(user, FINANCE_WRITE_ROLES)}
+        />
+      )}
+
+      {/*
+        The schedule sits above the variations, in the order the money moves:
+        what the contract is billed against, then what has changed it.
+      */}
+      {project && data?.contract && (
+        <MilestoneRegister
+          projectId={project.id}
+          contract={data.contract}
+          milestones={milestoneData?.milestones ?? []}
+          summary={milestoneData?.summary ?? null}
+          canManage={hasRole(user, PROJECT_MANAGE_ROLES)}
+          readOnly={project.status === "closed"}
         />
       )}
 
