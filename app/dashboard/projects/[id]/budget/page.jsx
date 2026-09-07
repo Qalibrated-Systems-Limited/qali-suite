@@ -54,7 +54,7 @@ export default async function BudgetPage({ params }) {
   const canManageCostCodes = FINANCE_WRITE_ROLES.includes(session.user.role);
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6 max-w-4xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-3 sm:gap-4">
         <Button variant="ghost" size="icon" asChild>

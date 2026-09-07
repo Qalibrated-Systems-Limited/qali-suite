@@ -666,6 +666,29 @@ export async function updateProjectStatus(projectId: string, newStatus: string) 
         ) {
           throw new Error("Only Admin or Accountant can close a project");
         }
+
+        /**
+         * CLOSING IS TERMINAL — `ProjectStatusActions` offers no way back out
+         * of `closed`, and a closed project then refuses edits, roster
+         * changes, time and variations. So it is the one status change worth
+         * stopping, and the message names what is outstanding rather than
+         * saying no.
+         *
+         * Retention is the reason this exists: it falls due at practical
+         * completion and again after the defects period, both AFTER the point
+         * somebody wants to close the job, and a closed project is how a
+         * contractor forgets to collect the last 5%.
+         */
+        if (newStatus === "closed") {
+          const blockers = await repo.getProjectClosingBlockers(tx, projectId);
+          if (blockers.length) {
+            throw new Error(
+              `This project cannot be closed yet — ${blockers
+                .map((b) => b.detail)
+                .join("; ")}. Closing is final, so settle these first.`,
+            );
+          }
+        }
         const row = await repo.setProjectStatus(
           tx,
           projectId,
@@ -1774,7 +1797,8 @@ export async function getProjectCertificates(projectId: string) {
       return { contract: null, certificates: [], position: null, basis: null, boq: null };
     }
 
-    const [certificates, position, basis, boq] = await Promise.all([
+    const [certificates, position, basis, boq, billableTime, milestones] =
+      await Promise.all([
       repo.listCertificates(tx, contract.id),
       repo.getContractPosition(tx, contract.id),
       repo.nextCertificateBasis(tx, contract.id),
@@ -1788,8 +1812,45 @@ export async function getProjectCertificates(projectId: string) {
         const bill = await repo.getEffectiveBoq(tx, projectId);
         if (!bill || bill.status !== "awarded") return null;
         const summary = await repo.getBoqSummary(tx, bill.id);
-        return { boqId: bill.id, version: bill.version, measured: summary.measured };
+        /**
+         * The PRICED items come with it — 0094. A variation line raised
+         * against the bill takes that item's description, unit and rate, and
+         * making somebody find the item on another page and retype its rate is
+         * how a variation comes to be priced at a rate nobody agreed.
+         *
+         * Headings and unpriced narrative lines are excluded: there is nothing
+         * to omit or remeasure on a line that carries no quantity.
+         */
+        const items = await repo.listBoqItems(tx, bill.id);
+        return {
+          boqId: bill.id,
+          version: bill.version,
+          measured: summary.measured,
+          items: items
+            .filter((i) => !i.isHeading && i.quantity !== null && i.unit)
+            .map((i) => ({
+              _id: String(i.id),
+              itemCode: i.itemCode ?? "",
+              description: i.description,
+              unit: i.unit,
+              rate: Number(i.rate ?? 0),
+            })),
+        };
       })(),
+      /**
+       * Billable time approved on this job, offered beside the dayworks box.
+       * OFFERED, not filled: on a time-and-material job it is the dayworks
+       * figure, and on a lump-sum contract it is a different thing with a
+       * similar name. The QS decides.
+       */
+      repo.getProjectBillableTimeToDate(tx, projectId),
+      /**
+       * The schedule's answer to "value of permanent work to date" — 0093, and
+       * the reason `valuation_source = 'milestone'` has been a column nothing
+       * ever set. Offered beside the measured bill; a job has one or the other,
+       * never usually both.
+       */
+      repo.getMilestoneValueToDate(tx, projectId),
     ]);
 
     return {
@@ -1798,6 +1859,8 @@ export async function getProjectCertificates(projectId: string) {
       position,
       basis,
       boq,
+      billableTime,
+      milestones,
     };
   });
 }
@@ -2208,7 +2271,920 @@ export async function raiseCertificateInvoice(
 }
 
 /** What a project still needs before it can be run — see the repository. */
+/**
+ * Where this tenant's project-tagged spend actually is, other than here.
+ *
+ * The empty state on Cash Requisitions used to say only "nothing linked to
+ * this project yet" — true, and indistinguishable from "the claim you tagged
+ * did not save".
+ */
+export async function getProjectSpendElsewhere(projectId: string) {
+  if (!projectId) return { claims: 0, expenses: 0, projects: [] };
+  return withAuthorizedTenant([], (tx) =>
+    repo.countProjectSpendElsewhere(tx, projectId),
+  );
+}
+
+/**
+ * What would stop this project being closed, for the screen that offers the
+ * button — so the answer arrives before somebody presses it rather than as a
+ * refusal afterwards.
+ */
+export async function getProjectClosingBlockers(projectId: string) {
+  if (!projectId) return [];
+  return withAuthorizedTenant([], (tx) =>
+    repo.getProjectClosingBlockers(tx, projectId),
+  );
+}
+
 export async function getProjectSetupState(projectId: string) {
   if (!projectId) return null;
   return withAuthorizedTenant([], (tx) => repo.getProjectSetupState(tx, projectId));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Timesheets — 0089.
+//
+// The join between a project and labour. See the migration for the five
+// decisions; the two that matter at this layer:
+//
+//   A TIMESHEET DOES NOT POST. Nothing below writes a journal entry, and
+//   nothing below ever should — labour reaches the ledger through payroll,
+//   once, where the PAYE and the NSSF are.
+//
+//   ALMOST NOTHING IS SENT. The party, the rate, the cost, the account and the
+//   bill amount are the database's, written by `project_timesheets_derive`.
+//   These actions carry intent and read back what it decided.
+//
+// PERMISSION IS PROJECT_MANAGE_ROLES throughout, including for logging. There
+// is no self-service entry route — an employee cannot open a project and book
+// their own day — and inventing one here would be inventing a permission
+// model. Where that is wanted it is a role gate, not a looser action.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TIMESHEET_UNITS = ["hour", "day"] as const;
+type TimesheetUnit = (typeof TIMESHEET_UNITS)[number];
+
+const TIMESHEET_STATUSES = ["draft", "submitted", "approved", "rejected"] as const;
+type TimesheetStatus = (typeof TIMESHEET_STATUSES)[number];
+
+/** YYYY-MM-DD, and a date the database will accept. */
+function workDateOf(value: unknown): string | null {
+  const s = String(value ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? null : s;
+}
+
+export async function logProjectTime(
+  projectId: string,
+  input: {
+    assignmentId?: string;
+    workDate?: string;
+    quantity?: number | string;
+    unit?: string;
+    taskId?: string | null;
+    costCodeId?: string | null;
+    billable?: boolean;
+    billRate?: number | string | null;
+    notes?: string;
+  } = {},
+) {
+  try {
+    await requirePlanAccess("projects");
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+
+  if (!projectId) return { success: false, error: "Invalid project id" };
+  if (!input.assignmentId) {
+    return { success: false, error: "Choose who the time is for." };
+  }
+
+  const workDate = workDateOf(input.workDate);
+  if (!workDate) return { success: false, error: "A valid date is required." };
+
+  const quantity = Number(input.quantity);
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return { success: false, error: "Enter how long was worked." };
+  }
+
+  const unit = TIMESHEET_UNITS.includes(input.unit as TimesheetUnit)
+    ? (input.unit as TimesheetUnit)
+    : "hour";
+
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user, companyId }) => {
+        const project = await repo.getProjectById(tx, projectId);
+        if (!project) throw new Error("Project not found");
+        // Same rule the roster carries: a closed job does not acquire new
+        // cost. Correcting a line already on it is a different action.
+        if (project.status === "closed") {
+          throw new Error("A closed project cannot have time logged against it.");
+        }
+
+        const actor = actorFrom(user);
+        return repo.createTimesheet(tx, {
+          companyId,
+          projectId,
+          assignmentId: input.assignmentId!,
+          workDate,
+          quantity,
+          unit,
+          taskId: input.taskId ?? null,
+          costCodeId: input.costCodeId ?? null,
+          billable: input.billable ?? true,
+          billRate: input.billRate ?? null,
+          notes: input.notes ?? "",
+          enteredById: actor.id,
+          enteredByName: actor.name,
+        });
+      },
+    );
+
+    revalidatePath(`/dashboard/projects/${projectId}`);
+    return {
+      success: true,
+      timesheetId: row.id,
+      message: `${row.quantity} ${unit}${Number(row.quantity) === 1 ? "" : "s"} logged for ${row.partyName}`,
+    };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function updateProjectTimesheet(
+  timesheetId: string,
+  input: {
+    workDate?: string;
+    quantity?: number | string;
+    unit?: string;
+    taskId?: string | null;
+    costCodeId?: string | null;
+    billable?: boolean;
+    billRate?: number | string | null;
+    notes?: string;
+  } = {},
+) {
+  if (!timesheetId) return { success: false, error: "Invalid timesheet id" };
+
+  const patch: Parameters<typeof repo.updateTimesheet>[2] = {};
+  if (input.workDate !== undefined) {
+    const workDate = workDateOf(input.workDate);
+    if (!workDate) return { success: false, error: "A valid date is required." };
+    patch.workDate = workDate;
+  }
+  if (input.quantity !== undefined) {
+    const quantity = Number(input.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return { success: false, error: "Enter how long was worked." };
+    }
+    patch.quantity = quantity;
+  }
+  if (input.unit !== undefined) {
+    if (!TIMESHEET_UNITS.includes(input.unit as TimesheetUnit)) {
+      return { success: false, error: "Time is logged in hours or days." };
+    }
+    patch.unit = input.unit as TimesheetUnit;
+  }
+  if (input.taskId !== undefined) patch.taskId = input.taskId;
+  if (input.costCodeId !== undefined) patch.costCodeId = input.costCodeId;
+  if (input.billable !== undefined) patch.billable = input.billable;
+  if (input.billRate !== undefined) patch.billRate = input.billRate;
+  if (input.notes !== undefined) patch.notes = input.notes;
+
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx) => repo.updateTimesheet(tx, timesheetId, patch),
+    );
+    if (!row) return { success: false, error: "Timesheet entry not found" };
+    revalidatePath(`/dashboard/projects/${row.projectId}`);
+    return { success: true, message: "Timesheet updated" };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+/**
+ * Submit, approve, reject, or send a line back to draft.
+ *
+ * Approving is what makes the time COST — `computeActualsFor` counts approved
+ * lines as incurred and submitted ones as committed, on the same basis 0088
+ * put bills, claims and expenses on.
+ */
+export async function setProjectTimesheetStatus(
+  timesheetId: string,
+  status: string,
+) {
+  if (!timesheetId) return { success: false, error: "Invalid timesheet id" };
+  if (!TIMESHEET_STATUSES.includes(status as TimesheetStatus)) {
+    return { success: false, error: "Unknown timesheet status" };
+  }
+
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx, { user }) =>
+        repo.setTimesheetStatus(
+          tx,
+          timesheetId,
+          status as TimesheetStatus,
+          actorFrom(user),
+        ),
+    );
+    if (!row) return { success: false, error: "Timesheet entry not found" };
+    revalidatePath(`/dashboard/projects/${row.projectId}`);
+    return { success: true, message: `Timesheet ${status}` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+/** Approve a week in one statement — see the repository for why not a loop. */
+export async function approveProjectTimesheets(
+  projectId: string,
+  timesheetIds: string[],
+) {
+  if (!Array.isArray(timesheetIds) || !timesheetIds.length) {
+    return { success: false, error: "Nothing selected" };
+  }
+
+  try {
+    const rows = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx, { user }) =>
+        repo.approveTimesheets(tx, timesheetIds, actorFrom(user)),
+    );
+    if (projectId) revalidatePath(`/dashboard/projects/${projectId}`);
+    return {
+      success: true,
+      approved: rows.length,
+      message:
+        rows.length === timesheetIds.length
+          ? `${rows.length} approved`
+          : // Says what happened rather than claiming everything went
+            // through: only a SUBMITTED line is approvable, so a stale
+            // checkbox on an already-approved row is silently skipped.
+            `${rows.length} of ${timesheetIds.length} approved — the rest were not awaiting approval`,
+    };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function deleteProjectTimesheet(timesheetId: string) {
+  if (!timesheetId) return { success: false, error: "Invalid timesheet id" };
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx) => repo.deleteTimesheet(tx, timesheetId),
+    );
+    if (!row) {
+      return {
+        success: false,
+        // The delete filters on status, so "not found" here usually means
+        // "approved". Say the second thing, because the first is confusing
+        // when the row is on screen.
+        error:
+          "An approved entry cannot be deleted. Reject it instead, so the correction is on the record.",
+      };
+    }
+    revalidatePath(`/dashboard/projects/${row.projectId}`);
+    return { success: true, message: "Timesheet entry removed" };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+/** The project's time, in the shape a table renders. */
+export async function getProjectTimesheets(
+  projectId: string,
+  filters: {
+    partyId?: string | null;
+    taskId?: string | null;
+    status?: string | null;
+    from?: string | null;
+    to?: string | null;
+    limit?: number;
+  } = {},
+) {
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = await repo.listProjectTimesheets(tx, projectId, {
+      partyId: filters.partyId ?? null,
+      taskId: filters.taskId ?? null,
+      status: TIMESHEET_STATUSES.includes(filters.status as TimesheetStatus)
+        ? (filters.status as TimesheetStatus)
+        : null,
+      from: filters.from ?? null,
+      to: filters.to ?? null,
+      limit: filters.limit,
+    });
+
+    return rows.map((r) => ({
+      _id: String(r.id),
+      id: String(r.id),
+      projectId: String(r.projectId),
+      assignmentId: String(r.assignmentId),
+      partyId: String(r.partyId),
+      partyName: r.partyName,
+      partyType: r.partyType,
+      taskId: r.taskId ? String(r.taskId) : null,
+      costCodeId: r.costCodeId ? String(r.costCodeId) : null,
+      workDate: r.workDate,
+      quantity: Number(r.quantity),
+      unit: r.unit,
+      // NULL is "not costed here" — a supplier's time is invoiced, not free.
+      // The screen must show a dash rather than a zero, so it stays null.
+      cost: r.costAmount === null ? null : Number(r.costAmount),
+      rate: r.rateAmount === null ? null : Number(r.rateAmount),
+      rateUnit: r.rateUnit,
+      billable: r.billable,
+      billAmount: r.billAmount === null ? null : Number(r.billAmount),
+      status: r.status,
+      notes: r.notes,
+      enteredByName: r.enteredByName,
+      approvedByName: r.approvedByName,
+      approvedAt: r.approvedAt,
+    }));
+  });
+}
+
+/** Labour cost, days and hours for one project — the roster card's figures. */
+export async function getProjectLabourSummary(projectId: string) {
+  return withAuthorizedTenant([], async (tx) => {
+    const map = await repo.getProjectLabourSummary(tx, [projectId]);
+    return (
+      map.get(projectId) ?? {
+        costIncurred: 0,
+        costCommitted: 0,
+        days: 0,
+        hours: 0,
+        billable: 0,
+        entries: 0,
+      }
+    );
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Variations — 0091.
+//
+// The register that lets a contract sum move, and the last thing standing
+// between this module and a FIDIC-form contract.
+//
+// WHO DOES WHAT, and it is the certificate's split exactly: a project manager
+// raises and submits a variation; FINANCE approves or rejects it, because
+// approving one changes the contract sum and therefore every "% of contract
+// certified" figure downstream of it.
+//
+// NOTHING HERE POSTS. A variation changes what the contract is WORTH. The
+// ledger records what has been EARNED, and the varied work reaches the books
+// through a certificate that values it, like every other piece of work.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const VARIATION_STATUSES = ["draft", "submitted", "approved", "rejected"] as const;
+type VariationStatus = (typeof VARIATION_STATUSES)[number];
+
+export async function getProjectVariations(projectId: string) {
+  if (!projectId) return { variations: [], summary: null };
+  return withAuthorizedTenant([], async (tx) => {
+    const [rows, summary] = await Promise.all([
+      repo.listVariations(tx, projectId),
+      repo.getVariationSummary(tx, projectId),
+    ]);
+    return {
+      variations: rows.map((v) => ({
+        _id: String(v.id),
+        id: String(v.id),
+        variationNumber: v.variationNumber,
+        title: v.title,
+        description: v.description,
+        costEffect: Number(v.costEffect),
+        timeEffectDays: v.timeEffectDays,
+        status: v.status,
+        issuedDate: v.issuedDate,
+        reference: v.reference,
+        instructionId: v.instructionId ? String(v.instructionId) : null,
+        decidedByName: v.decidedByName,
+        decidedAt: v.decidedAt,
+        decisionNotes: v.decisionNotes,
+        createdByName: v.createdByName,
+      })),
+      summary,
+    };
+  });
+}
+
+export async function createProjectVariation(
+  _prevState: unknown,
+  formData: FormData,
+) {
+  const values = valuesOf(formData);
+  const projectId = String(formData.get("projectId") ?? "");
+  const contractId = String(formData.get("contractId") ?? "");
+  const title = String(formData.get("title") ?? "").trim();
+  const issuedDate = String(formData.get("issuedDate") ?? "").trim();
+
+  const errors: FieldErrors = {};
+  if (!projectId) errors.projectId = ["A project is required"];
+  if (!contractId) {
+    errors.contractId = ["Enter the contract terms before raising a variation"];
+  }
+  if (!title) errors.title = ["A variation needs a title"];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(issuedDate)) {
+    errors.issuedDate = ["A valid date is required"];
+  }
+
+  const costEffect = Number(formData.get("costEffect") ?? 0) || 0;
+  const timeEffectDays = Math.trunc(Number(formData.get("timeEffectDays") ?? 0)) || 0;
+  // The CHECK says the same thing, but a form error beats a constraint here:
+  // "a variation with no effect" is a sentence somebody can act on.
+  if (costEffect === 0 && timeEffectDays === 0) {
+    errors.costEffect = [
+      "A variation changes the money, the time, or both. One of them must be non-zero.",
+    ];
+  }
+  if (Object.keys(errors).length) return { errors, values };
+
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user, companyId }) => {
+        const project = await repo.getProjectById(tx, projectId);
+        if (!project) throw new Error("Project not found");
+        if (project.status === "closed") {
+          throw new Error("A closed project's contract cannot be varied.");
+        }
+        const actor = actorFrom(user);
+        return repo.createVariation(tx, {
+          companyId,
+          projectId,
+          contractId,
+          title,
+          description: String(formData.get("description") ?? ""),
+          costEffect,
+          timeEffectDays,
+          issuedDate,
+          reference: String(formData.get("reference") ?? ""),
+          instructionId: String(formData.get("instructionId") ?? "") || null,
+          notes: String(formData.get("notes") ?? ""),
+          createdById: actor.id,
+          createdByName: actor.name,
+        });
+      },
+    );
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.variationNumber} raised` };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+export async function updateProjectVariation(
+  variationId: string,
+  projectId: string,
+  input: {
+    title?: string;
+    description?: string;
+    costEffect?: number | string;
+    timeEffectDays?: number | string;
+    issuedDate?: string;
+    reference?: string | null;
+    instructionId?: string | null;
+    notes?: string;
+  } = {},
+) {
+  if (!variationId) return { success: false, error: "Invalid variation id" };
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx, { user }) => {
+        const actor = actorFrom(user);
+        return repo.updateVariation(tx, variationId, {
+          ...input,
+          lastModifiedById: actor.id,
+          lastModifiedByName: actor.name,
+        });
+      },
+    );
+    if (!row) {
+      return {
+        success: false,
+        // The filter is on status, so "not found" here almost always means
+        // approved — say the thing that is actually true.
+        error:
+          "An approved variation cannot be amended. Its figures are in the contract sum and in every certificate since. Reject it and raise another.",
+      };
+    }
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.variationNumber} updated` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+/**
+ * Submit, approve, reject, or send back.
+ *
+ * Approving is the act that moves the contract sum and the completion date —
+ * by trigger, not here. FINANCE_WRITE_ROLES for a decision; the project
+ * manager who raised it may only submit it.
+ */
+export async function setProjectVariationStatus(
+  variationId: string,
+  projectId: string,
+  status: string,
+  decisionNotes?: string,
+) {
+  if (!variationId) return { success: false, error: "Invalid variation id" };
+  if (!VARIATION_STATUSES.includes(status as VariationStatus)) {
+    return { success: false, error: "Unknown variation status" };
+  }
+
+  const deciding = status === "approved" || status === "rejected";
+  const roles = deciding ? FINANCE_WRITE_ROLES : PROJECT_MANAGE_ROLES;
+
+  try {
+    const row = await withAuthorizedTenant(
+      roles as unknown as string[],
+      (tx, { user }) =>
+        repo.setVariationStatus(
+          tx,
+          variationId,
+          status as VariationStatus,
+          actorFrom(user),
+          decisionNotes,
+        ),
+    );
+    if (!row) return { success: false, error: "Variation not found" };
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.variationNumber} ${status}` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function deleteProjectVariation(
+  variationId: string,
+  projectId: string,
+) {
+  if (!variationId) return { success: false, error: "Invalid variation id" };
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx) => repo.deleteVariation(tx, variationId),
+    );
+    if (!row) {
+      return {
+        success: false,
+        error:
+          "Only a draft or rejected variation can be deleted. An approved one has moved the contract sum — reject it instead, so the register says so.",
+      };
+    }
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.variationNumber} removed` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Milestones — 0093.
+//
+// The valuation method for a job with no bill to remeasure. `billing_model =
+// 'milestone'` has been declared since 0070 with nothing behind it, and
+// `valuation_source = 'milestone'` has been a column no code ever set.
+//
+// ACHIEVING POSTS NOTHING. It makes a figure available to the next
+// certificate, offered with a button exactly as the measured bill is. A stage
+// being achieved and the employer being asked to pay for it are two decisions.
+//
+// WHO DOES WHAT: a project manager builds the schedule and records that a stage
+// was achieved; that is a site fact. Nothing here is finance's, because nothing
+// here moves money — the certificate does, and finance certifies that.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MILESTONE_STATUSES = ["pending", "achieved", "cancelled"] as const;
+type MilestoneStatus = (typeof MILESTONE_STATUSES)[number];
+
+export async function getProjectMilestones(projectId: string) {
+  if (!projectId) return { milestones: [], summary: null };
+  return withAuthorizedTenant([], async (tx) => {
+    const [rows, summary] = await Promise.all([
+      repo.listMilestones(tx, projectId),
+      repo.getMilestoneSummary(tx, projectId),
+    ]);
+    return {
+      milestones: rows.map((m) => ({
+        _id: String(m.id),
+        id: String(m.id),
+        name: m.name,
+        description: m.description,
+        sequence: m.sequence,
+        value: Number(m.value),
+        dueDate: m.dueDate,
+        achievedOn: m.achievedOn,
+        retentionReleasePercent:
+          m.retentionReleasePercent === null ? null : Number(m.retentionReleasePercent),
+        status: m.status,
+        achievedByName: m.achievedByName,
+        notes: m.notes,
+      })),
+      summary,
+    };
+  });
+}
+
+export async function createProjectMilestone(
+  _prevState: unknown,
+  formData: FormData,
+) {
+  const values = valuesOf(formData);
+  const projectId = String(formData.get("projectId") ?? "");
+  const contractId = String(formData.get("contractId") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+
+  const errors: FieldErrors = {};
+  if (!projectId) errors.projectId = ["A project is required"];
+  if (!contractId) {
+    errors.contractId = ["Enter the contract terms before building a schedule"];
+  }
+  if (!name) errors.name = ["A stage needs a name"];
+
+  const value = Number(formData.get("value") ?? 0) || 0;
+  if (value < 0) errors.value = ["A stage cannot be worth less than nothing"];
+  if (Object.keys(errors).length) return { errors, values };
+
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user, companyId }) => {
+        const project = await repo.getProjectById(tx, projectId);
+        if (!project) throw new Error("Project not found");
+        if (project.status === "closed") {
+          throw new Error("A closed project's schedule cannot be changed.");
+        }
+        const actor = actorFrom(user);
+        return repo.createMilestone(tx, {
+          companyId,
+          projectId,
+          contractId,
+          name,
+          description: String(formData.get("description") ?? ""),
+          value,
+          sequence: Number(formData.get("sequence") ?? 0) || 0,
+          dueDate: String(formData.get("dueDate") ?? "") || null,
+          retentionReleasePercent:
+            String(formData.get("retentionReleasePercent") ?? "") || null,
+          notes: String(formData.get("notes") ?? ""),
+          createdById: actor.id,
+          createdByName: actor.name,
+        });
+      },
+    );
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.name} added to the schedule` };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+export async function updateProjectMilestone(
+  milestoneId: string,
+  projectId: string,
+  input: {
+    name?: string;
+    description?: string;
+    value?: number | string;
+    sequence?: number;
+    dueDate?: string | null;
+    retentionReleasePercent?: number | string | null;
+    notes?: string;
+  } = {},
+) {
+  if (!milestoneId) return { success: false, error: "Invalid milestone id" };
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx, { user }) => {
+        const actor = actorFrom(user);
+        return repo.updateMilestone(tx, milestoneId, {
+          ...input,
+          lastModifiedById: actor.id,
+          lastModifiedByName: actor.name,
+        });
+      },
+    );
+    if (!row) {
+      return {
+        success: false,
+        error:
+          "An achieved stage cannot be amended — its value is in a certificate's valuation. Take the achievement back first.",
+      };
+    }
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.name} updated` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+/**
+ * Record that a stage was achieved, on a DATE.
+ *
+ * The date is not optional and does not default to today: a certificate values
+ * what was achieved by its valuation date, so the date decides which
+ * certificate picks the stage up. Defaulting it would quietly put a late
+ * sign-off on the wrong month, which is most sign-offs.
+ */
+export async function setProjectMilestoneStatus(
+  milestoneId: string,
+  projectId: string,
+  status: string,
+  achievedOn?: string,
+) {
+  if (!milestoneId) return { success: false, error: "Invalid milestone id" };
+  if (!MILESTONE_STATUSES.includes(status as MilestoneStatus)) {
+    return { success: false, error: "Unknown milestone status" };
+  }
+  if (status === "achieved" && !/^\d{4}-\d{2}-\d{2}$/.test(achievedOn ?? "")) {
+    return {
+      success: false,
+      error: "Give the date the stage was achieved — it decides which certificate values it.",
+    };
+  }
+
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx, { user }) =>
+        repo.setMilestoneStatus(
+          tx,
+          milestoneId,
+          status as MilestoneStatus,
+          actorFrom(user),
+          achievedOn ?? null,
+        ),
+    );
+    if (!row) return { success: false, error: "Milestone not found" };
+    revalidateCertificates(projectId);
+    return {
+      success: true,
+      message:
+        status === "achieved"
+          ? `${row.name} achieved — the next certificate can value it`
+          : `${row.name} ${status}`,
+    };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function deleteProjectMilestone(
+  milestoneId: string,
+  projectId: string,
+) {
+  if (!milestoneId) return { success: false, error: "Invalid milestone id" };
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx) => repo.deleteMilestone(tx, milestoneId),
+    );
+    if (!row) {
+      return {
+        success: false,
+        error:
+          "An achieved stage cannot be deleted — a certificate has valued it. Take the achievement back, or cancel the stage so the record says what happened.",
+      };
+    }
+    revalidateCertificates(projectId);
+    return { success: true, message: `${row.name} removed` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+// ── Variation lines — 0094 ──────────────────────────────────────────────────
+//
+// Where there are lines they ARE the cost effect, so nothing below sends one:
+// the trigger sums them onto the variation and 0091's chain moves the contract
+// sum from there. An approved variation's lines are refused by the database.
+
+export async function getVariationItems(projectId: string) {
+  if (!projectId) return {};
+  return withAuthorizedTenant([], async (tx) => {
+    const map = await repo.listVariationItemsForProject(tx, projectId);
+    const out: Record<string, unknown[]> = {};
+    for (const [variationId, rows] of map) {
+      out[variationId] = rows.map((r) => ({
+        _id: String(r.id),
+        id: String(r.id),
+        boqItemId: r.boqItemId ? String(r.boqItemId) : null,
+        itemCode: r.itemCode ?? null,
+        description: r.description,
+        unit: r.unit ?? null,
+        quantity: Number(r.quantity),
+        rate: Number(r.rate),
+        amount: Number(r.amount),
+      }));
+    }
+    return out;
+  });
+}
+
+export async function addProjectVariationItem(
+  variationId: string,
+  projectId: string,
+  input: {
+    description?: string;
+    itemCode?: string | null;
+    unit?: string | null;
+    quantity?: number | string;
+    rate?: number | string;
+    boqItemId?: string | null;
+    sequence?: number;
+  } = {},
+) {
+  if (!variationId) return { success: false, error: "Invalid variation id" };
+
+  const quantity = Number(input.quantity ?? 0);
+  if (!Number.isFinite(quantity) || quantity === 0) {
+    // Zero moves nothing, and a line that moves nothing is a note.
+    return {
+      success: false,
+      error: "Give a quantity. Negative omits work that is in the bill.",
+    };
+  }
+
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx, { companyId }) =>
+        repo.addVariationItem(tx, {
+          companyId,
+          variationId,
+          description: input.description ?? null,
+          itemCode: input.itemCode ?? null,
+          unit: input.unit ?? null,
+          quantity,
+          rate: input.rate ?? null,
+          boqItemId: input.boqItemId ?? null,
+          sequence: input.sequence ?? 0,
+        }),
+    );
+    revalidateCertificates(projectId);
+    return {
+      success: true,
+      message: `${row.description} priced at ${Number(row.amount).toLocaleString()}`,
+    };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function updateProjectVariationItem(
+  itemId: string,
+  projectId: string,
+  input: {
+    description?: string;
+    itemCode?: string | null;
+    unit?: string | null;
+    quantity?: number | string;
+    rate?: number | string;
+    sequence?: number;
+  } = {},
+) {
+  if (!itemId) return { success: false, error: "Invalid line id" };
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx) => repo.updateVariationItem(tx, itemId, input),
+    );
+    if (!row) return { success: false, error: "Line not found" };
+    revalidateCertificates(projectId);
+    return { success: true, message: "Line updated" };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function deleteProjectVariationItem(
+  itemId: string,
+  projectId: string,
+) {
+  if (!itemId) return { success: false, error: "Invalid line id" };
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx) => repo.deleteVariationItem(tx, itemId),
+    );
+    if (!row) return { success: false, error: "Line not found" };
+    revalidateCertificates(projectId);
+    return { success: true, message: "Line removed" };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
 }

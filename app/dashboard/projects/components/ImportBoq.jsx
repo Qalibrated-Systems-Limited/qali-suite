@@ -7,14 +7,22 @@ import { Upload, Loader2, FileSpreadsheet, Download, X } from "lucide-react";
 import { importBoqFile } from "@/app/db/actions/boq-import-actions";
 import { toast } from "sonner";
 
-const TEMPLATE =
-  "Section,Activity,Start,End,%\n" +
-  "Mobilisation,Site establishment,2026-04-01,2026-04-20,100\n" +
-  "Earthworks,Clearance — Front 1,2026-04-15,2026-05-31,100\n" +
-  "Earthworks,Earthworks — Front 1,2026-05-01,2026-09-30,60\n" +
-  "Drainage,Culverts 2500LM,2026-06-01,2026-11-30,20\n";
+import {
+  BOQ_TEMPLATE,
+  BOQ_TEMPLATE_NAME,
+  BOQ_RULES,
+  templateHref,
+} from "../lib/import-templates";
 
-const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(TEMPLATE)}`;
+/**
+ * THIS FILE USED TO CARRY THE PROGRAMME TEMPLATE. The dialog described the
+ * bill's columns correctly and the download handed over
+ * `Section,Activity,Start,End,%` under the name `programme-template.csv` —
+ * so anybody who took the template at its word imported a file with no
+ * quantities, no units and no rates, and got a bill of narrative headings.
+ * Both templates now come from one module beside the parsers that read them.
+ */
+const href = templateHref(BOQ_TEMPLATE);
 
 /**
  * Upload a priced bill of quantities.
@@ -103,17 +111,25 @@ export default function ImportBoq({ projectId }) {
 
             <div className="mt-3 flex items-center justify-between">
               <a
-                href={templateHref}
-                download="programme-template.csv"
+                href={href}
+                download={BOQ_TEMPLATE_NAME}
                 className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
               >
                 <Download className="h-3.5 w-3.5" />
                 Download template
               </a>
               <span className="text-xs text-muted-foreground">
-                Rows become sections &amp; activities.
+                Rows become sections &amp; priced items.
               </span>
             </div>
+
+            <ul className="mt-3 space-y-1 rounded-lg border bg-muted/30 p-3">
+              {BOQ_RULES.map((rule) => (
+                <li key={rule} className="text-xs text-muted-foreground leading-snug">
+                  • {rule}
+                </li>
+              ))}
+            </ul>
 
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setOpen(false)} disabled={isPending}>

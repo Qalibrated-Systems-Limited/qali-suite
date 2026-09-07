@@ -200,7 +200,7 @@ export default function BoqRegister({
   // ── No bill at all ─────────────────────────────────────────────────────────
   if (!boq) {
     return (
-      <Card className="p-8 sm:p-10 text-center">
+      <Card className="p-5 sm:p-6 text-center">
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
           <Ruler className="h-6 w-6 text-primary" />
         </div>

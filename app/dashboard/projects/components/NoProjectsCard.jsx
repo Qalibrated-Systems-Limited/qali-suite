@@ -22,7 +22,7 @@ export default function NoProjectsCard({
 }) {
   if (unselected) {
     return (
-      <Card className="p-8 sm:p-10 text-center">
+      <Card className="p-5 sm:p-6 text-center">
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
           <FolderKanban className="h-6 w-6 text-primary" />
         </div>
@@ -37,7 +37,7 @@ export default function NoProjectsCard({
 
   if (notFound) {
     return (
-      <Card className="p-8 sm:p-10 text-center">
+      <Card className="p-5 sm:p-6 text-center">
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
           <SearchX className="h-6 w-6 text-muted-foreground" />
         </div>
@@ -57,7 +57,7 @@ export default function NoProjectsCard({
   }
 
   return (
-    <Card className="p-8 sm:p-10 text-center">
+    <Card className="p-5 sm:p-6 text-center">
       <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
         <FolderKanban className="h-6 w-6 text-primary" />
       </div>

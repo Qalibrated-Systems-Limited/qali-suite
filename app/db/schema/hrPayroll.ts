@@ -8,7 +8,9 @@ import {
   timestamp,
   index,
   unique,
+  check,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { companies } from "./companies";
 
 /**
@@ -173,10 +175,26 @@ export const payrollRunJournals = pgTable(
       .references(() => companies.id, { onDelete: "cascade" }),
     payrollRunId: uuid("payroll_run_id").notNull(),
     journalEntryId: uuid("journal_entry_id").notNull(),
+    /**
+     * `reallocation` is 0090's: an entry that moves labour between projects
+     * after the accrual posted, debiting and crediting the SAME account so it
+     * nets to zero. A void must not mistake one for an accrual.
+     */
     kind: text("kind").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("payroll_run_journals_run_idx").on(t.payrollRunId)],
+  (t) => [
+    index("payroll_run_journals_run_idx").on(t.payrollRunId),
+    /**
+     * Declared here as well as in the DDL. It was in 0048 and NOT in this
+     * file, so the constraint was invisible to anybody reading the schema —
+     * which is how 0090 came to be written believing no migration was needed.
+     */
+    check(
+      "payroll_run_journals_kind_valid",
+      sql`${t.kind} IN ('accrual', 'payment', 'reversal', 'reallocation')`,
+    ),
+  ],
 );
 
 export const payrollEntries = pgTable(

@@ -1,6 +1,7 @@
 import {
   getProjectTransactions,
   getProjectFinancialSummary,
+  getProjectSpendElsewhere,
 } from "@/app/db/actions/project-actions";
 import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
@@ -32,7 +33,7 @@ export default async function CashRequisitionsPage({ searchParams }) {
   if (ctx.denied) return <AccessDenied />;
   if (ctx.hidden) {
     return (
-      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
         <SectionNotForType
           section="Cash Requisitions"
           project={ctx.project}
@@ -46,7 +47,7 @@ export default async function CashRequisitionsPage({ searchParams }) {
 
   if (!project) {
     return (
-      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
         <WorkspaceHeader
           title="Cash Requisitions"
           description="Cash claimed and spent against a project so far."
@@ -62,9 +63,10 @@ export default async function CashRequisitionsPage({ searchParams }) {
     );
   }
 
-  const [transactions, financials] = await Promise.all([
+  const [transactions, financials, elsewhere] = await Promise.all([
     getProjectTransactions(project.id),
     getProjectFinancialSummary(project.id),
+    getProjectSpendElsewhere(project.id),
   ]);
 
   const claims = transactions?.claims || [];
@@ -85,7 +87,7 @@ export default async function CashRequisitionsPage({ searchParams }) {
     expenses.reduce((s, e) => s + num(e.total), 0);
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       <WorkspaceHeader
         title="Cash Requisitions"
         description="Cash claimed and spent against a project so far."
@@ -103,20 +105,27 @@ export default async function CashRequisitionsPage({ searchParams }) {
         </AlertDescription>
       </Alert>
 
-      <Card className="p-5 sm:p-6">
-        <div className="flex items-center gap-3 mb-4">
+      <Card className="p-4 sm:p-5">
+        <div className="flex items-center gap-3 mb-3">
           <div className="rounded-lg p-2.5 bg-primary/10">
             <Wallet className="h-5 w-5 text-primary" />
           </div>
           <h2 className="font-semibold text-lg">Cash &amp; expense summary</h2>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 sm:gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <div>
             <p className="text-xs text-muted-foreground">Claims + expenses logged</p>
             <p className="text-lg font-bold text-red-600">KES {formatCurrency(total)}</p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Total project costs (paid)</p>
+            {/*
+              NOT "(paid)". Since 0088 project cost is recognised where the
+              ledger recognises it — a bill at approved, a claim from approved
+              onward, an expense at posted — because counting cost at payment
+              while counting revenue at invoice put the two halves of the
+              margin on different bases.
+            */}
+            <p className="text-xs text-muted-foreground">Total project costs (incurred)</p>
             <p className="text-lg font-bold">KES {formatCurrency(financials?.costs || 0)}</p>
           </div>
           <div>
@@ -128,12 +137,40 @@ export default async function CashRequisitionsPage({ searchParams }) {
         </div>
       </Card>
 
-      <Card className="p-5 sm:p-6">
+      <Card className="p-4 sm:p-5">
         <h2 className="font-semibold text-lg mb-4">Linked claims &amp; expenses</h2>
         {claims.length === 0 && expenses.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-8">
-            No expense claims or operating expenses linked to this project yet.
-          </p>
+          <div className="text-center py-8 space-y-2">
+            <p className="text-sm text-muted-foreground">
+              No expense claims or operating expenses linked to this project yet.
+            </p>
+            {/*
+              A claim tagged to a job and then looked for from the global
+              sidebar arrives here with no `?project=`, so the module asks
+              which project rather than guessing — and the honest empty state
+              above was indistinguishable from "the tag did not save".
+            */}
+            {elsewhere?.claims + elsewhere?.expenses > 0 && (
+              <p className="text-sm text-muted-foreground">
+                {elsewhere.claims > 0 && (
+                  <>
+                    {elsewhere.claims} claim{elsewhere.claims === 1 ? " is" : "s are"}
+                  </>
+                )}
+                {elsewhere.claims > 0 && elsewhere.expenses > 0 && " and "}
+                {elsewhere.expenses > 0 && (
+                  <>
+                    {elsewhere.expenses} expense{elsewhere.expenses === 1 ? " is" : "s are"}
+                  </>
+                )}{" "}
+                tagged to {elsewhere.projects.length === 1 ? "" : "other projects, including "}
+                <span className="font-medium text-foreground">
+                  {elsewhere.projects.slice(0, 2).join(", ")}
+                </span>
+                . Switch project in the header above to see them.
+              </p>
+            )}
+          </div>
         ) : (
           <>
             {claims.length > 0 && (

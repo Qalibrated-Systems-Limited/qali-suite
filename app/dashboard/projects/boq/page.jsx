@@ -37,7 +37,7 @@ export default async function BoqPage({ searchParams }) {
   if (ctx.denied) return <AccessDenied />;
   if (ctx.hidden) {
     return (
-      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
         <SectionNotForType
           section="Bill of Quantities"
           project={ctx.project}
@@ -58,7 +58,7 @@ export default async function BoqPage({ searchParams }) {
     : [null, [], []];
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       <WorkspaceHeader
         title="Bill of Quantities"
         description="The priced bill this project's work is measured against — and where progress stops being a typed percentage."

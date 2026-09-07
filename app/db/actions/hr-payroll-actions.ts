@@ -648,3 +648,55 @@ export async function getPayrollSettings() {
     };
   });
 }
+
+/**
+ * Re-apportion a posted run's labour across projects — 0090.
+ *
+ * For the timesheet approved after payroll posted. It never reopens the
+ * payroll journal, which carries the statutory figures a P10 reconciles to;
+ * it posts the difference as a dimension-only entry that nets to zero on
+ * every account it touches.
+ *
+ * APPROVE_ROLES, not HR's: it writes to the ledger, and that split is the
+ * whole reason this file has two role lists.
+ */
+export async function reallocatePayrollToProjects(
+  runId: string,
+): Promise<ActionResult> {
+  if (!runId) return { success: false, error: "Payroll run ID is required" };
+
+  try {
+    const result = await withAuthorizedTenant(
+      APPROVE_ROLES,
+      (tx, { user, companyId }) =>
+        payroll.reallocateProjectLabour(tx, {
+          companyId,
+          payrollRunId: runId,
+          actor: { id: user.id, name: user.name },
+        }),
+    );
+
+    revalidatePath(`/dashboard/hr/payroll/${runId}`);
+    revalidatePath("/dashboard/projects");
+
+    // Nothing to move is the normal answer, and it is a success. Saying
+    // "re-allocated" when no journal was posted would be a lie somebody acts
+    // on at month end.
+    return result
+      ? {
+          success: true,
+          id: runId,
+          message: `Project labour re-allocated — ${result.lineCount} line(s) posted.`,
+        }
+      : {
+          success: true,
+          id: runId,
+          message: "Already up to date — the ledger matches the approved timesheets.",
+        };
+  } catch (err) {
+    return {
+      success: false,
+      error: userMessage(err, "Could not re-allocate the payroll."),
+    };
+  }
+}

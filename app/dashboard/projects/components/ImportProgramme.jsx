@@ -7,14 +7,14 @@ import { Upload, Loader2, FileSpreadsheet, Download, X } from "lucide-react";
 import { importProgrammeFile } from "@/app/db/actions/programme-actions";
 import { toast } from "sonner";
 
-const TEMPLATE =
-  "Section,Activity,Start,End,%\n" +
-  "Mobilisation,Site establishment,2026-04-01,2026-04-20,100\n" +
-  "Earthworks,Clearance — Front 1,2026-04-15,2026-05-31,100\n" +
-  "Earthworks,Earthworks — Front 1,2026-05-01,2026-09-30,60\n" +
-  "Drainage,Culverts 2500LM,2026-06-01,2026-11-30,20\n";
+import {
+  PROGRAMME_TEMPLATE,
+  PROGRAMME_TEMPLATE_NAME,
+  PROGRAMME_RULES,
+  templateHref,
+} from "../lib/import-templates";
 
-const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(TEMPLATE)}`;
+const href = templateHref(PROGRAMME_TEMPLATE);
 
 /**
  * Bulk-import a programme of works from a .csv / .xlsx into the project's WBS.
@@ -94,8 +94,8 @@ export default function ImportProgramme({ projectId }) {
 
             <div className="mt-3 flex items-center justify-between">
               <a
-                href={templateHref}
-                download="programme-template.csv"
+                href={href}
+                download={PROGRAMME_TEMPLATE_NAME}
                 className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
               >
                 <Download className="h-3.5 w-3.5" />
@@ -105,6 +105,14 @@ export default function ImportProgramme({ projectId }) {
                 Rows become sections &amp; activities.
               </span>
             </div>
+
+            <ul className="mt-3 space-y-1 rounded-lg border bg-muted/30 p-3">
+              {PROGRAMME_RULES.map((rule) => (
+                <li key={rule} className="text-xs text-muted-foreground leading-snug">
+                  • {rule}
+                </li>
+              ))}
+            </ul>
 
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setOpen(false)} disabled={isPending}>

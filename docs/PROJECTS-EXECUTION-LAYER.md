@@ -31,10 +31,10 @@ below standard, and where the system already answers him.
 |---|---|---|---|---|---|
 | WBS / tasks | ✅ core | ✅ | ✅ | ✅ phase 2 | ❌ |
 | progress from measured work | ✅ from quantities | ✅ from the bill | ⬜ from task state | ❌ typed % | ❌ typed % |
-| milestones with value | ✅ | ✅ | ✅ | ✅ phase 2 | ❌ |
-| timesheets | ✅ | ✅ | ✅ | ✅ phase 2 | ❌ |
-| timesheet posts to the GL | ❌ | ❌ | ❌ | — | — |
-| change orders / variations | ✅ | ✅ | partial | ✅ phase 7 | ❌ |
+| milestones with value | ✅ | ✅ | ✅ | ✅ phase 2 | ✅ 0093 |
+| timesheets | ✅ | ✅ | ✅ | ✅ phase 2 | ✅ 0089 |
+| timesheet posts to the GL | ❌ | ❌ | ❌ | — | ❌ by decision |
+| change orders / variations | ✅ | ✅ | partial | ✅ phase 7 | ✅ 0091 |
 | budget vs actual by account | ⬜ | ✅ | ✅ | ✅ phase 1 | ✅ |
 | commitment (approved, unpaid) | ✅ | ✅ | ✅ | ✅ phase 1 | ✅ |
 | earned value (CPI/SPI) | ⬜ | ✅ | ❌ | ❌ | ❌ |
@@ -171,9 +171,30 @@ table — and it is what Candy gives a QS. Worth adding when the tables exist.
    fallback.~~ **Done — migration 0071.** The table, the repository, the
    actions, the WBS card on the detail page, and 26 tests. `progress.source`
    tells a screen whether the number was earned or asserted.
-2. `project_milestones`, and milestone → draft invoice.
-3. `project_change_orders`, contract value and end date moving with them.
-4. `project_timesheets`, feeding project labour cost and T&M billing.
+2. ~~`project_milestones`, and milestone → draft invoice.~~ **Done — migration
+   0093.** Not milestone → invoice, though: a stage OFFERS its figure to the
+   next certificate, which is still the thing that certifies. A road contract
+   values by remeasuring a bill; an installation contract has no bill and
+   values by stage, and 0082 already knew the difference. The schedule may fall
+   short of the contract and may not exceed it, and a stage is achieved on a
+   DATE, so a certificate values only what was achieved by its valuation date.
+   It also carries `retention_release_percent`, which is what unblocked the
+   release schedule. 16 tests.
+3. ~~`project_change_orders`, contract value and end date moving with them.~~
+   **Done — migration 0091, as `project_variations`.** The originals are kept
+   and the current figures DERIVE: `contract_sum = original_sum + Σ approved`
+   and `completion_date = original_completion_date + Σ approved days`, both by
+   trigger, so the two cannot disagree however they are written to. Only an
+   approved variation moves anything; a submitted one is a claim, and the
+   register shows the exposure separately. 19 tests.
+4. ~~`project_timesheets`, feeding project labour cost and T&M billing.~~
+   **Done — migration 0089.** The table, the derivation in SQL, the repository,
+   six actions, the Time card on the detail page, and 31 tests. Decision 4
+   held: it posts nothing. Only an EMPLOYEE'S time carries cost — a
+   subcontractor's arrives on their bill, and counting both would charge the
+   job twice. A monthly salary is apportioned by `working_days()`, the same
+   function payroll uses, so a month split across two jobs sums back to the
+   salary.
 5. `project_id` on `purchase_orders` and `quotes`; `task_id` on
    `stock_requests`. One migration, three columns, four gaps closed.
 6. Earned value on the detail page.

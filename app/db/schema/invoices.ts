@@ -63,6 +63,24 @@ export const invoices = pgTable(
     dueDate: date("due_date"),
 
     customerId: uuid("customer_id").notNull(),
+
+    /**
+     * Who sold it — 0097.
+     *
+     * A PARTY, not a user: a rep who leaves keeps their invoices, and a
+     * commission is owed to a person the company has a relationship with
+     * rather than to a login. The quote already answers with a party.
+     *
+     * The NAME is a snapshot beside the id, exactly as `supplier_name_at_bill`
+     * is — a rep whose party record is corrected must not rewrite the name on
+     * invoices raised last year, which a report labelled from a live join
+     * would do on every render.
+     *
+     * Set by `convertQuoteToInvoice` from the quote. An invoice raised
+     * directly has none and reports as unattributed, which is the truth.
+     */
+    salespersonPartyId: uuid("salesperson_party_id"),
+    salespersonName: text("salesperson_name"),
     /**
      * The project this invoice bills against (0054). `CreateInvoiceForm` has
      * posted a `projectId` since it was written and there was no column to put

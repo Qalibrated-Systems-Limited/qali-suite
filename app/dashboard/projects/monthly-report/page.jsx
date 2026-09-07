@@ -85,7 +85,7 @@ export default async function MonthlyReportPage({ searchParams }) {
   });
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       <WorkspaceHeader
         title="Monthly Report"
         description="The consolidated monthly progress report, pulling together schedule, financial and site-record data for one reporting period."
@@ -108,7 +108,7 @@ export default async function MonthlyReportPage({ searchParams }) {
             </Suspense>
           </div>
 
-          <Card className="p-5 sm:p-6 space-y-1">
+          <Card className="p-4 sm:p-5 space-y-1">
             <div className="flex items-center gap-2">
               <FileSpreadsheet className="h-5 w-5 text-primary" />
               <h2 className="font-semibold text-lg">
@@ -121,7 +121,7 @@ export default async function MonthlyReportPage({ searchParams }) {
           </Card>
 
           {/* Schedule progress — from the Milestone Tracker / Programme's task data */}
-          <Card className="p-5 sm:p-6 space-y-4">
+          <Card className="p-4 sm:p-5 space-y-4">
             <div className="flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-primary" />
               <h3 className="font-semibold">Schedule progress</h3>
@@ -154,7 +154,7 @@ export default async function MonthlyReportPage({ searchParams }) {
           </Card>
 
           {/* Financial summary — from IPC & Payments */}
-          <Card className="p-5 sm:p-6 space-y-4">
+          <Card className="p-4 sm:p-5 space-y-4">
             <div className="flex items-center gap-2">
               <Wallet className="h-5 w-5 text-primary" />
               <h3 className="font-semibold">Financial summary</h3>
@@ -172,7 +172,7 @@ export default async function MonthlyReportPage({ searchParams }) {
           </Card>
 
           {/* Site diary highlights — from Site Diary, this period only */}
-          <Card className="p-5 sm:p-6 space-y-4">
+          <Card className="p-4 sm:p-5 space-y-4">
             <div className="flex items-center gap-2">
               <BookOpen className="h-5 w-5 text-primary" />
               <h3 className="font-semibold">Site diary — this period</h3>
@@ -213,7 +213,7 @@ export default async function MonthlyReportPage({ searchParams }) {
           </Card>
 
           {/* Instructions highlights — from Engineer's Instructions, all-time totals */}
-          <Card className="p-5 sm:p-6 space-y-4">
+          <Card className="p-4 sm:p-5 space-y-4">
             <div className="flex items-center gap-2">
               <FileEdit className="h-5 w-5 text-primary" />
               <h3 className="font-semibold">Engineer's instructions</h3>

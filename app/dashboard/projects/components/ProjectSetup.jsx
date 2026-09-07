@@ -104,7 +104,7 @@ export default async function ProjectSetup({ projectId, sections }) {
   const next = outstanding[0];
 
   return (
-    <Card className="p-5 sm:p-6 space-y-4">
+    <Card className="p-4 sm:p-5 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="font-semibold text-lg">Still to set up</h2>

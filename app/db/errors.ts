@@ -233,6 +233,25 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   project_assignments_removal_pair:
     "A removed assignment carries the date it was removed.",
 
+  // ── Timesheets (0089) ─────────────────────────────────────────────────────
+  project_timesheets_quantity_positive:
+    "Enter how long was worked.",
+  project_timesheets_quantity_within_a_day:
+    "One line cannot be longer than a day. Split it across the days it was worked.",
+  project_timesheets_cost_is_employee_labour:
+    "Only an employee's time carries a cost here — a supplier's work is invoiced.",
+  project_timesheets_cost_non_negative: "A cost cannot be negative.",
+  project_timesheets_rate_pair:
+    "A rate needs both an amount and a unit, or neither.",
+  project_timesheets_bill_needs_billable:
+    "A line that is not billable cannot carry a bill rate.",
+  project_timesheets_bill_pair:
+    "A bill rate and its amount go together.",
+  project_timesheets_approval_pair:
+    "An approved entry carries the date it was approved.",
+  project_timesheets_cost_code_pair:
+    "A cost code brings its account with it.",
+
   // ── The work breakdown (0071) ─────────────────────────────────────────────
   project_tasks_title_not_blank: "A task needs a title.",
   project_tasks_progress_in_range: "Progress is a percentage between 0 and 100.",

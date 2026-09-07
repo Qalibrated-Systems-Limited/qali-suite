@@ -33,7 +33,7 @@ export default async function CreateProjectPage() {
   ]);
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6 max-w-4xl mx-auto">
       <ProjectForm canCreateClient={PARTY_MANAGE_ROLES.includes(session?.user?.role)} clients={clients} users={users} parentProjects={parentProjects} projectTypes={projectTypes} />
     </div>
   );

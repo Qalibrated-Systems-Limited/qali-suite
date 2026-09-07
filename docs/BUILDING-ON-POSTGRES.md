@@ -2470,3 +2470,735 @@ Match on `system_account`, or on structure. Never on the code alone.
 - The ledger split is asserted end to end in `tests/pg-invoice-actions.test.mjs`
   — revenue and VAT on the gross, AR net of both the retention and the advance.
 - `tsc --noEmit` and `eslint --quiet` clean.
+
+---
+
+## Handoff — 2026-09-07: labour reaches the project (0089)
+
+The 2026-09-03 handoff ended with "the one that is still wrong, and it is the
+big one": payroll posts a correct accrual and no line carries a `project_id`,
+so a contractor's own labour — usually the largest cost on a job — was in the
+P&L and absent from every project. On the worked example, 45.6% reported margin
+against a true 18.9%.
+
+`project_timesheets` is step 4 of the execution layer and the record that
+closes it: whose time, on which job, for how long.
+
+### It does not post, and it never will
+
+Execution-layer decision 4, restated in the migration because that is the file
+somebody will have open when they are tempted. Labour reaches the general
+ledger through PAYROLL, once, where the PAYE and the NSSF are; posting the
+timesheet as well books the same wage twice. Odoo, NetSuite OpenAir and Procore
+all treat a timesheet as an analytic record for exactly this reason.
+
+**So §12's accounting question is still open and this did not answer it.**
+Project labour is now visible in project reporting and still absent from the
+ledger. If it is ever to reconcile to the trial balance it is by ONE
+period-end allocation journal over these rows — never a posting per timesheet,
+which is how a ledger acquires fifty thousand lines a month and no clean way to
+reverse a correction. The rows that allocation would run over now exist.
+
+### The four decisions
+
+**1. Only an EMPLOYEE'S time produces cost.** The roster holds employees,
+suppliers and both. A subcontractor's cost already arrives on a bill carrying
+the project, and `computeActualsFor` counts it at `approved` — so charging
+their timesheet too would bill the job twice for the same work. Their line
+records QUANTITY and carries no money, which is the line Odoo and Procore both
+draw between internal labour cost and subcontract cost.
+
+`both` is costed like a supplier: a party you also buy from will invoice you,
+and the invoice is the authoritative number.
+
+It is a CHECK, not a rule the write path is trusted to remember —
+`project_timesheets_cost_is_employee_labour`. The column is nullable rather
+than zero because NULL is "no cost" and 0 is "this was free", and the screen
+shows a dash accordingly.
+
+**2. A monthly salary is apportioned by `working_days()`** — the same function
+0045 gave payroll and leave, and the same convention `payroll_entries` already
+stores as `working_days_total`. Not a flat 22 and not an annualised 260:
+dividing by the month's OWN working days is what makes a month split across two
+jobs sum back to the salary. February 2026 divides by 20 and September by 22,
+and a fixed divisor would have made those two days cost the same and both of
+them wrong. Holidays come out of the divisor, from the company's own calendar.
+
+`hour` and `day` multiply straight, through
+`attendance_config.standard_hours` so this cannot disagree with attendance
+about how long a day is. `fixed` cannot be costed at all — a lump sum is a
+milestone, so the days are recorded and the money comes from the contract.
+
+**3. The cost is written by the database.** Same shape as
+`project_budget_lines_derive_account` (0073): a trigger reads the assignment,
+snapshots the party and the rate onto the row, and computes the money. There is
+no write path — including the import somebody will want — that can produce a
+timesheet whose cost disagrees with the rate it was charged at. The rate is a
+SNAPSHOT: a raise in March must not restate January.
+
+**4. A person's day cannot be sold twice.** Decision 2's apportionment only
+holds if the days charged across every job sum to the days worked, and nothing
+else in the schema stopped eight hours going to three projects — which inflates
+labour cost above the salary actually paid, the same failure this migration
+exists to remove, pointing the other way. An AFTER trigger sums day-equivalents
+for a party on a date across ALL of that company's projects and refuses more
+than one. It is best-effort, not serialisable: two concurrent inserts can each
+pass, the same guarantee every other cross-row rule here gives.
+
+### Where it shows
+
+`computeActualsFor` gained one arm: approved is INCURRED, submitted is
+COMMITTED, on the basis 0088 put bills, claims and expenses on. Nothing else in
+that function moved, and `ProjectActuals` is the same three keys, so no caller
+changed.
+
+The Time card sits under the roster on the project detail page — log, submit,
+approve (singly or a week at once), reject, delete. An approved line is
+rejected rather than deleted: it has been counted, and a hole in a week proves
+nothing.
+
+`project_tasks` also stopped being short a column. 0071 deliberately stored no
+`actual_hours` because "actual hours are the sum of a task's timesheets, and
+timesheets are step 4" — `getTaskActualHours` is that sum, still computed
+rather than stored.
+
+### Two things found doing it
+
+**The roster's rate was documented as inert and is not any more.** Both the
+schema comment and `ProjectTeam.jsx` said assigning somebody posts no cost and
+the rate is "planning metadata with no ledger meaning". The ledger half is
+still true. The rest is not: `rate_unit` now decides how a day is costed, and
+`fixed` versus `day` is the difference between a costable line and one that
+records quantity only. Both comments are corrected — a rate somebody types
+casually now moves a project's reported margin.
+
+**The error mapper genericises an unnamed CHECK.** Three of the new
+constraints came back as "That combination of values is not allowed", which is
+useless in front of somebody who typed 25 hours. They are named in
+`CONSTRAINT_MESSAGES` now. Worth the habit: a CHECK without an entry there is a
+constraint whose message the user cannot act on.
+
+### Deliberately unwired
+
+`updateProjectTimesheet` has no caller. Correcting a line today is delete and
+re-log for a draft, reject and re-log for an approved one, and both leave a
+better record than a silent edit of a number somebody already approved. The
+action and its repository function exist and are tested, because an edit dialog
+is the obvious next screen; `find-unwired-actions.mjs` will keep flagging it
+until there is one. Everything else in the module's action file is wired.
+
+### Verified this session
+
+- All 89 migrations apply in order, on both the dev and the test database.
+- 31 new tests in `tests/pg-project-timesheets.test.mjs`, including the
+  February-versus-September divisor, the holiday coming out of it, the
+  subcontractor charged nothing, and the day refused to a second job.
+- The project suite re-run whole — 204 tests across nine files, no regression
+  from the new arm in `computeActualsFor`.
+- `tsc --noEmit` and `eslint . --quiet` clean.
+
+### Next, in order
+
+1. **§12's (a)/(b)/(c) accounting decision** — analytic, allocated, or expensed
+   at purchase. Materials post today (0085) and labour does not, so the two
+   halves of "project cost in the ledger" now answer differently, which is the
+   strongest argument yet for settling it. It is the tenant's accounting
+   policy, not a porting decision.
+2. **Variations** (execution-layer step 3, plan step 4) —
+   `project_instructions.estimated_cost` still feeds nothing, and `contract_sum`
+   with `original_sum` beside it now exist for it to move.
+3. **Notice deadlines with a NOTIFICATION** — the bell has existed since 0074
+   and nothing in this module writes to it.
+4. **The remaining Mongo screens** — 57 files across 17 modules, of which
+   banking (8) stays by decision and sales-orders (3) is switched off. kpis or
+   leads/opportunities is the cheapest real port from here.
+
+---
+
+## Handoff — 2026-09-07: payroll labour reaches the project (0090)
+
+0089 built the timesheet and left the sentence unfinished: it said John spent 12
+of his 22 days on Otho Road and stopped at project reporting. This is the other
+half — payroll's own expense lines now carry `project_id`, so the largest cost
+on a labour-heavy job is in the ledger against the job that consumed it.
+
+### The audit that came first, and what it corrected
+
+Asked to confirm the accounts exist and are posted, three things came back that
+change how this had to be built:
+
+**The payment run posts no expense at all.** `markRunPaid` is DR Salaries
+Payable / CR Bank, full stop. Every expense is on the ACCRUAL, at approve. So
+the project dimension belongs on the accrual and nowhere near the payment — a
+split built on the payment side would have been tagging a liability clearing.
+
+**Payroll does not address its accounts by `system_account`.** It reads a
+per-company GL MAPPING — `salary_expense_account_id`,
+`employer_nssf_expense_account_id`, `employer_ahl_expense_account_id`, and the
+rest — configured under Settings → Payroll. A company can map salary expense
+anywhere it likes, so the allocation follows `rates.glMapping` and never looks
+up `salaries_expense`. This is the same class of trap as 0088's account-code
+lesson, one level further out: not the code, and not the system account either.
+
+**And the gap was one line.** Every accrual line was built from `run.totals` —
+one aggregate amount per account — and `projectId` was never set, though
+`createJournalEntry` has accepted it per line since 0084.
+
+### No new account, and why that was the right call
+
+The first design here had a `5415 Project Labour` account and a contra. It was
+wrong, and the argument against it is short: **0084 already made the project a
+dimension.** A second expense account holds the same money under a different
+name and gives the reader two places to look.
+
+So Jane's 100,000 is debited to the same salary expense account it always was:
+
+```
+DR Salary expense  60,000   project = Otho Road
+DR Salary expense  30,000   project = Bridge
+DR Salary expense  10,000   (no project — office time, leave)
+   CR PAYE / NSSF / SHIF / AHL payable, staff loans, Salaries payable  100,000
+```
+
+Total expense is exactly what it was. This is what Odoo's analytic
+distribution, SAP's WBS on a primary cost element, and Xero's tracking
+categories all do. **A second account, or any entry crediting cash or a
+payable, would have made 160,000 of expense out of a 100,000 salary** — which
+is the failure the whole design exists to avoid, and the one thing every test
+in `pg-payroll-project-allocation.test.mjs` is really checking.
+
+**The statutory lines carry no project, deliberately.** PAYE, NSSF, SHIF and
+AHL are owed to the state, not to a job. Tagging them would file a statutory
+liability inside a contract's cost.
+
+### The four decisions
+
+**1. The money is payroll's; the days are the timesheet's.** 0089 costs a day
+at the ROSTER rate — a number somebody typed on the team card. That is the
+right number for the project report as time is entered and the wrong one for
+the ledger, which has to agree with what was actually paid. So this apportions
+the actual payslip by timesheet days, and the two figures differ on purpose —
+the same estimate-versus-actual split `reconcileProjectActuals` already reports.
+A roster row with no rate at all still allocates payroll, which is asserted.
+
+**2. It is burdened.** Gross, employer NSSF and employer AHL split on the same
+day-shares. John costs a project more than his salary line, and a contractor
+pricing the next job off a report that omits the employer contributions will
+underbid.
+
+**3. `GREATEST(booked, working_days())` is the divisor.** Normally an
+employee's share is days-on-project over the period's working days — the same
+`working_days()` 0089 apportions a monthly salary by. But the overbooking
+trigger caps a person at one day PER DAY and nothing stops a Saturday, so 24
+booked days in a 20-day month would otherwise allocate 120% of a fixed salary
+and invent expense out of a rounding rule. Dividing by what was actually worked
+in that case means the shares can never sum above 1.
+
+**4. The residual is computed, not apportioned.** `total - Σ(project lines)`.
+It has to be: fourth-decimal rounding across twenty projects otherwise breaks
+the balanced-lines check and payroll stops posting at all. Deriving the
+remainder means the split sums to the total by construction, and the remainder
+is the honest thing anyway — office time, leave, and anybody with no timesheet.
+
+### The timesheet that arrives late
+
+The accrual splits at the moment it posts, which is right when the week closes
+before payroll runs and wrong the rest of the time. `reallocateProjectLabour`
+handles the difference:
+
+- **It does not reopen the payroll journal.** That entry carries the PAYE and
+  the NSSF a P10 reconciles to, and amending a posted statutory return because
+  somebody fixed a timesheet is not a trade anybody would take.
+- **Every line debits and credits the SAME account** — the project changes, the
+  account does not — so each account nets to zero and the trial balance by
+  account is untouched. It moves a dimension; it is not an expense.
+- **It is idempotent.** It compares what the ledger already carries for the run
+  against what the timesheets now say and posts only the delta. Running it
+  twice posts one journal and then nothing.
+- **It takes labour back off** a project whose time was later rejected — that
+  project is absent from the new shares, so it has to be found from what was
+  posted or its old figure stands for ever.
+
+Button on the payroll run: "Re-allocate to projects", on an approved or paid
+run, under APPROVE_ROLES because it writes to the ledger.
+
+### The one thing I got wrong
+
+I said no migration was needed, having read `payrollRunJournals` in
+`app/db/schema/hrPayroll.ts` — where `kind` is declared as plain `text()`. The
+CHECK restricting it to `accrual | payment | reversal` is in 0048's DDL and was
+never declared in the schema file, so three tests failed on a constraint
+invisible from the file I checked. 0090 extends it to include `reallocation`,
+**and declares the check in the Drizzle schema too**, so the next reader sees
+it. Worth the habit: for a constraint question, grep the migrations, not the
+schema — they do not agree everywhere.
+
+### This closes §12, for both halves
+
+Materials post at issue since 0085 (`DR 5410 Project Materials / CR Inventory`)
+and labour is now a dimension on the payroll accrual. The plan's (a)/(b)/(c)
+question is answered as **(b) allocated** — reached by dimension for labour
+rather than by an account transfer, which is the same answer in a cheaper form.
+A project P&L can now reconcile to the trial balance for the two largest cost
+lines on a construction job, which is the thing neither could do before.
+
+Still analytic-only, and correctly so: `committed` (approved and unpaid) has no
+journal entry by definition, and the `estimate` figures 0089 produces from the
+roster rate are a management view rather than a ledger one.
+
+### Verified this session
+
+- All 90 migrations apply in order, on both dev and test.
+- 12 new tests in `tests/pg-payroll-project-allocation.test.mjs`, built on the
+  worked example: 100,000 gross, February 2026's 20 working days, 12 days on A
+  and 6 on B → 60,000 / 30,000 / 10,000 unallocated, with the account total
+  still exactly 100,000.
+- 154 tests across payroll, payroll config, payroll tax, timesheets, the ledger
+  dimension, projects and project financials — no regression.
+- `tsc --noEmit`, `eslint . --quiet` and `npm run build` clean.
+
+---
+
+## Handoff — 2026-09-07: variations, import templates, and three screen bugs
+
+Three separate pieces of work, from one question — "is the projects module
+ready to deploy" — and the honest answer had been no, for one reason.
+
+## 1. Variations (0091) — the deployment blocker, closed
+
+`project_contracts.contract_sum` was typed once and had nothing that could ever
+change it. From the FIRST variation: the sum on the IPC page was wrong, "% of
+contract certified" — the figure in front of whoever certifies — was wrong with
+it, `project_instructions.estimated_cost` had been collected since 0075 and fed
+nothing, and there was no register to answer "what were we instructed to do,
+what did it cost, what did it do to the completion date". That is the whole of
+an EOT argument and the whole of a final account.
+
+**The originals are kept and the current figures derive.** `original_sum`
+already existed and was already immutable; 0091 makes the other half true too:
+
+```
+contract_sum    = original_sum + Σ(approved cost effects)
+completion_date = original_completion_date + Σ(approved time effects)
+```
+
+both by trigger, in ONE function, so no arrangement of writes can make them
+disagree. `original_completion_date` is new and backfilled from the current one
+— before 0091 nothing could move it, so what was there IS the original.
+
+**Only an approved variation moves anything.** A submitted one is a claim: the
+register shows it and the contract does not move. The register shows four
+figures rather than one, and the fourth is the one no system shows by default —
+**claimed, not agreed**, which is the exposure a contracts manager actually
+wants.
+
+**A negative cost effect is ordinary.** An omission reduces the sum; an
+acceleration pulls the date back. What is refused is a variation with neither a
+cost nor a time effect, which is a note.
+
+**Nothing here posts.** A variation changes what the contract is WORTH; the
+ledger records what has been EARNED, and varied work reaches the books through
+a certificate that values it. A variation that posted would book revenue on an
+instruction nobody has carried out.
+
+### Two things this changed that were already tested
+
+**`updateContract` now edits the ORIGINALS.** It used to write `contract_sum`
+directly, which on a job with three approved variations overwrote their effect
+silently. The terms form is relabelled "Contract sum (as let)" / "Completion
+(as let)". An existing test asserted the old behaviour — it typed a new sum to
+SIMULATE a variation, because variations did not exist — and it is rewritten to
+say what the rule now is: a retyped sum CORRECTS the base, and growth comes only
+from an approved variation.
+
+**`createContract` never set `original_completion_date`.** Found by writing the
+tests, not by reading the code: a contract created after 0091 would have had
+NULL there, and every approved extension of time would have moved nothing at
+all. Both originals are now written at creation.
+
+## 2. Import templates — and the parser bug the template was hiding
+
+The BOQ importer's "Download template" served the **PROGRAMME** template. The
+dialog described the bill's columns correctly — Section, Item code, Description,
+Unit, Quantity, Rate — and the file that came down was
+`Section,Activity,Start,End,%`, named `programme-template.csv`. Anybody who took
+the offered template at its word imported a file with no units, no quantities
+and no rates.
+
+Both templates now come from `app/dashboard/projects/lib/import-templates.js`,
+written to demonstrate the things the parser does that nobody would guess: a
+blank section carrying forward, and a narrative line surviving as an unpriced
+heading. Each dialog also states the parser's rules on screen.
+
+**And asserting the template against the parser found a live bug in the parser.**
+The matcher could not be tested at all — both importers are `"use server"`
+modules, and Next requires every export from one to be an async function — so it
+moved to `lib/project-import-columns.js`. The first assertion failed:
+
+> With the canonical header the dialog itself tells people to use,
+> **`Description` resolved to the `Item code` column** — `description`'s aliases
+> include `"item"`, matching is by `includes()`, and "item code" comes first.
+
+Every row imported with its code as its description, and a row with a blank code
+was dropped for having no description. Matching is now two passes — an exact
+header name wins its column outright, then the forgiving substring pass fills
+what is left from columns nobody claimed — which fixes it without narrowing what
+a real export may be called. A Candy header (`Bill, Item No., Particulars, Unit,
+Qty, Unit Rate`) and an MS Project one (`Phase, Task Name, Start, Finish,
+% Complete`) are both asserted.
+
+## 3. Three screen bugs on the IPC and Cash Requisitions pages
+
+**A blank page for a Manager.** `showTerms` initialised to `!contract`, opening
+the contract-terms form — which renders only for `FINANCE_WRITE_ROLES`. A
+`Manager` is in `PROJECT_MANAGE_ROLES` and NOT in finance, so on a project with
+no contract they got no terms form, no "New certificate" button (it requires a
+contract), and no empty state (only reached when `showTerms` is false). Nothing
+at all, on the section they were sent to.
+
+**A stale reassurance about somebody's own books.** The register said retention
+"does not yet post to the ledger — a retention receivable account and its
+release schedule are the next step". That stopped being true with 0085.
+
+**The amount field nobody could find.** It exists and is called "Value of
+permanent work to date", which is the correct FIDIC term and not what somebody
+hunting for "amount" reads. Every money field on the certificate form now
+carries a hint; the main one says so in as many words.
+
+## 4. Cash Requisitions — the claim that "did not show"
+
+Reported as: an employee tagged a claim to a project, it reached the budget, and
+the requisitions tab showed nothing.
+
+**The data layer is correct, and this was verified rather than reasoned about.**
+The claim exists, carries its `project_id`, survives all four joins in
+`CLAIM_FROM`, passes the tenant policy as `app_user` with RLS live, and the
+section flag on that project's type is on. `listClaims({ projectId })` returns
+it.
+
+**Two things worth recording from the probing itself.** A first pass reported
+"zero claims in the entire database" — that was `app_user` under FORCE ROW LEVEL
+SECURITY with no `app.company_id` set, which reads empty rather than erroring. A
+second pass as the superuser showed the same claim under three different
+companies, because a superuser BYPASSES RLS and `set_config` did nothing. Both
+are easy ways to draw a confident wrong conclusion from this schema.
+
+**The mechanism is `selectProject`.** Which project a workspace section shows
+comes from `?project=` and ONLY the URL — the cookie fallback was removed
+deliberately, because it silently opened whichever job was picked last. So
+reaching Cash Requisitions from the global sidebar shows "choose a project",
+and the budget figure that DID show was on the project detail page, which
+carries the project in its own URL.
+
+Working as designed, and the design is right. What was wrong is that the empty
+state said only "nothing linked to this project yet" — true, and
+indistinguishable from "the claim you tagged did not save". It now says how many
+claims and expenses are tagged to other projects and names them.
+
+Also on that page: "Total project costs (paid)" has been the wrong label since
+0088, when cost moved to an accrual basis. It says "(incurred)".
+
+### Still not built, and this is the honest list
+
+- **Milestones.** `billing_model = 'milestone'` has nothing behind it, and the
+  retention release schedule needs milestones that are still not a table.
+- **Cash requisitions as a RECORD** — raise, approve, disburse. The page is a
+  read-only view over claims and expenses and says so.
+- **Notice deadlines with a notification.** The bell has existed since 0074 and
+  nothing in this module writes to it. Under a FIDIC form a missed notice
+  deadline is a lost claim.
+- **Earned value (CPI/SPI).**
+- **No guard on closing a project.** It can be closed with retention
+  outstanding, an open draft certificate, or unapproved timesheets.
+- **Variations have no UI for amending a draft** — `updateProjectVariation` is
+  wired to nothing, the same deliberate gap `updateProjectTimesheet` has.
+
+### Verified this session
+
+- All 91 migrations apply in order, on both dev and test.
+- 19 new tests for variations, 17 for the import templates (no database — a
+  parser contract), and the certificate suite rewritten where 0091 changed the
+  rule: 56 across those two files.
+- `tsc --noEmit`, `eslint . --quiet` and `npm run build` clean.
+
+---
+
+## Handoff — 2026-09-07: a certificate keeps the terms it was signed under (0092)
+
+Found by answering "why do we fill the contract terms before the IPC", and the
+honest answer turned out to be worse than "because the arithmetic needs them".
+
+`listCertificates` recomputed EVERY certificate — certified ones included —
+from the contract as it stands today. `project_certificates_frozen` freezes the
+four figures somebody TYPED and says nothing about the retention percentage
+they are multiplied by, because that lives on the contract. And
+`saveProjectContract` has no guard against editing terms once certificates
+exist.
+
+So: certify IPC 1 for 5,000,000 with retention at 0%, raise the invoice, then
+correct retention to 10% next week — an entirely reasonable thing to do — and
+IPC 1 now reads retention 500,000, net 4,500,000. A document that was issued,
+signed and paid against had silently changed, and the invoice behind it had
+not. Everything downstream moved with it: the chain's `previouslyCertified`,
+"% of contract certified", retention outstanding, the advance position.
+
+Same class as a re-priced bill restating a final account, which 0076 froze for
+the same reason.
+
+### The fix is the idiom this schema already has
+
+The five commercial terms are SNAPSHOT onto the certificate when it is
+certified — `contract_sum`, `retention_percent`, `retention_cap_percent`,
+`advance_amount`, `advance_recovery_percent` — and an issued certificate is
+computed from its own snapshot. `account_code_at_budget` (0073),
+`supplier_name_at_bill`, the rate snapshot on `project_timesheets` (0089): the
+figure a document was computed with belongs to the document.
+
+**A DRAFT STILL FOLLOWS THE LIVE CONTRACT**, deliberately — that is what a draft
+is for. Enter the terms, look at what the certificate would be, correct the
+terms, look again. Only certifying fixes them.
+
+**The snapshot is frozen with everything else.** Without adding the five columns
+to `project_certificates_frozen` the hole reopens one level down: the terms
+could no longer drift from the contract, and could still be edited directly.
+
+### Two details worth keeping
+
+**The cap is nullable INSIDE the snapshot.** `retention_cap_percent` NULL means
+uncapped, which is a value — so it cannot answer "is there a snapshot".
+`project_certificates_snapshot_pair` asks that of the percentage instead, and
+the other three are tied to the same condition. A pair CHECK needs both columns
+or neither; the cap is neither.
+
+**Backfilling stamps today's terms** on every already-issued certificate. It is
+the only knowable answer — the contract carries no history of what its
+retention used to be, which is exactly the hole — and it changes no figure on
+the day it runs, because today's terms are what those certificates are being
+computed with right now. What it buys is that they cannot drift from here.
+
+### Verified
+
+- 92 migrations apply in order on dev and test.
+- 44 tests on the certificate suite, four of them new: an issued certificate
+  holding its figures through a terms change, a draft correctly following the
+  contract, two certificates each computed on the terms in force when IT was
+  signed, and the snapshot refused on an issued certificate.
+- 76 across variations, projects and project financials — no regression.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Still open on this module
+
+- **No guard on editing terms after certification**, and now it matters less —
+  a terms change no longer rewrites history, it only affects drafts and future
+  certificates, which is correct behaviour. A warning on the terms form when
+  certificates exist would still be kind.
+- Milestones, cash requisitions as a record, notice deadlines with a
+  notification, earned value, and any guard on closing a project with retention
+  outstanding. Unchanged from the previous handoff.
+
+---
+
+## Handoff — 2026-09-07: milestones, and a project that cannot be closed over money
+
+Two pieces, and the full suite is green end to end for the first time this
+session: **94 files, 1538 tests, no failures.**
+
+## 1. Milestones (0093) — the last table the execution layer was missing
+
+"Milestone" meant nothing here. Three references and every one a placeholder:
+`/dashboard/projects/milestones` was a second view of `project_tasks` that
+showed no milestones because there were none (a redirect now);
+`billing_model = 'milestone'` was declared with NOTHING acting on it, so a
+milestone-billed job billed exactly as `fixed`; and
+`valuation_source = 'milestone'` was a column no code had ever set.
+
+**Why it matters most on an installation contract.** A road job values by
+REMEASURING a priced bill — 0080 built that, and a certificate takes the
+measured total. An installation job has no bill to remeasure: it has stages,
+each worth an agreed part of the sum, and without this table the only way to
+certify one was to type the figure and mark it `manual`. 0082 already
+distinguishes the two kinds of job; this is the other half of that.
+
+### The three decisions
+
+**The sum may fall short and may not exceed.** Over-allocating certifies more
+than the job is worth — a hard refusal, with both numbers in the message.
+Falling short is a schedule being built, and enforcing the total both ways
+would make the table unusable, because the first stage entered is never the
+whole contract. The register shows what is unallocated instead. Same shape as a
+budget whose lines have not yet reached the budget amount.
+
+**Achieving is a DATE, not a flag.** `achieved_on` is what a certificate reads
+— the cumulative value of stages achieved ON OR BEFORE its valuation date. A
+boolean cannot answer that, and a stage signed off in May must not land on a
+March certificate. `setMilestoneStatus` refuses to achieve without a date and
+deliberately does not default to today, because most sign-offs are recorded
+after the fact and a default would quietly put them on the wrong month.
+
+**It offers a figure; it does not certify one.** Achieving posts nothing and
+raises nothing. It makes a number available to the next certificate, offered
+with a button exactly as the measured bill is — a stage being achieved and the
+employer being asked to pay for it are two decisions, which is how 0081 treats
+every other pair like it.
+
+### And it carries the retention release
+
+The reason the plan called milestones a blocker rather than a feature:
+"retention release schedule — still needs milestones, which are still not a
+table". `retention_release_percent` is what proportion of the retention HELD
+falls due when a stage is achieved; they may not add up to more than 100%.
+
+The release is a percentage of what is held, and what is held is the certificate
+chain's arithmetic — so the repository returns the PERCENTAGE and the screen
+applies it to this contract's own retention. The certificate remains the only
+place a release is recorded and posted.
+
+## 2. A project that cannot be closed over outstanding money
+
+**Closing is terminal.** `ProjectStatusActions` offers no transition out of
+`closed`, and a closed project then refuses edits, roster changes, time and
+variations. It is the one status change nobody can walk back, and nothing stood
+in its way.
+
+`getProjectClosingBlockers` returns a LIST, because "you cannot close this" is
+not an answer anybody can act on. Five things hold a project open:
+
+- **retention outstanding** — the reason this exists. It falls due at practical
+  completion and again after the defects period, both AFTER the point somebody
+  wants to close the job. The figure comes from `getContractPosition`, which
+  owns that arithmetic, rather than a second count.
+- **a certified certificate with no invoice** — work the employer agreed to pay
+  for and was never asked to pay. Certifying and invoicing are two steps on
+  purpose; this is the gap that separation opens.
+- **an open draft certificate**.
+- **submitted timesheets** — labour the job consumed that nobody approved, and
+  after closing it could never BE approved, so it would sit outside the job's
+  cost and outside the ledger for good.
+- **submitted variations** — claims with no decision.
+
+No migration. The guard is in `updateProjectStatus`, and the Close button is
+disabled with the blockers listed under it, so the answer arrives before the
+press rather than as a toast after it.
+
+A CANCELLED certificate blocks nothing: withdrawn is settled.
+
+## Verified
+
+- 93 migrations apply in order on dev and test.
+- **The full suite: 94 files, 1538 tests, zero failures.** The two
+  `pg-payment-actions` failures the last handoff left open are confirmed fixed
+  — they were the suite's own missing `company_settings` seed.
+- 16 new milestone tests and 9 closing-guard tests, both green first run.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+## Still not built
+
+- **Cash requisitions as a RECORD** — raise, approve, disburse. The page is a
+  read-only view over claims and expenses and says so.
+- **Notice deadlines with a notification.** The bell has existed since 0074 and
+  nothing in this module writes to it. Under a FIDIC form a missed notice
+  deadline is a lost claim, and this is the next thing worth building.
+- **Earned value (CPI/SPI)**, which is blocked on something real: `progress_percent`
+  is a single current number with no history, so there is no "progress as at 30
+  June" and no S-curve. A `project_progress_snapshots` row written when a
+  certificate is certified would come nearly free, since certifying already
+  establishes a cumulative position at a date.
+- **Materials on site drawn from stock**, blocked on the stock model: "issued to
+  a job" currently means CONSUMED, not delivered-and-unfixed, and certifying
+  issued stock would double-count it against the work it was built into.
+
+---
+
+## Handoff — 2026-09-07: a variation is priced by its lines (0094)
+
+Working down the revised roadmap, which puts variations first and milestones
+last. 0093 was built out of that order; this closes the one item still open on
+variations: **link variations to BOQ items.**
+
+### A variation is one of three things, and only one is a reference
+
+0091 let the contract sum move and left the movement as ONE TYPED FIGURE. That
+keeps the sum honest and cannot defend it: at a final account "the contract grew
+by 2.4m" is not an answer, and neither is a register of eleven such sentences.
+
+  * an OMISSION of billed work — a negative quantity at the bill's own rate
+  * a REMEASURE of billed work — more or less of an item
+  * NEW WORK never in the bill — its own description, unit and rate
+
+A single `boq_item_id` on the variation covers the first two and cannot express
+the third, which is the commonest. So the link is a LINE, and `boq_item_id` on
+the line is nullable: **null means new work.**
+
+### The four decisions
+
+**The line is self-contained; the link is provenance.** It carries its own
+description, unit, quantity and rate. Raising one against a bill item copies
+that item's figures as the starting point — an omission is priced at the bill's
+own rate, which is the contractual position, and making somebody retype it is
+how a variation comes to be priced at a rate nobody agreed. COPIED, not read
+through: a bill can be superseded, and an agreed variation must not be repriced
+by a document raised after it was agreed. Same rule as `account_code_at_budget`
+and the certificate snapshot in 0092, and it is asserted.
+
+**The amount is the database's** — `quantity × rate`, by trigger. A line whose
+amount disagrees with its own quantity and rate is the commonest defect in a
+hand-built variation account. A negative QUANTITY is ordinary; a negative RATE
+is a typing error and the CHECK says so.
+
+**Where there are lines, they ARE the cost effect.**
+`project_variations.cost_effect` becomes their sum by trigger, and the contract
+sum follows through 0091's existing chain with nothing new — lines →
+cost_effect → `project_variations_touch_contract` →
+`project_contracts_derive_current`. Two places holding one figure is two places
+that will disagree.
+
+Removing the LAST line leaves the figure where it stands rather than zeroing
+it: zeroing would trip `project_variations_has_an_effect` on a variation whose
+effect is entirely a time one, and the sum its lines came to is the only
+defensible lump sum to fall back to.
+
+**An approved variation's lines are frozen.** Its figures are in the contract
+sum and in every certificate's percentage since. 0091 refuses to amend the
+variation; a line is the same figure one level down, and refusing there too is
+what stops that guard being decorative. DELETE needs its own trigger arm — a
+delete has no NEW row — and that arm returns OLD when the parent is already
+gone, so it does not fight the cascade.
+
+### On the screen
+
+The register's rows open onto their lines. The line form leads with a picker of
+the awarded bill's PRICED items — headings and narrative lines excluded, since
+there is nothing to omit or remeasure on a line carrying no quantity — and
+choosing one fills the description, unit and rate rather than hiding them, so
+the rate stays visible and correctable before it is agreed. A variation with no
+lines says "lump sum" and offers the reason to add them.
+
+### Verified
+
+- 94 migrations apply in order on dev and test.
+- 13 new tests inside the variations suite, including the omission priced at the
+  bill's rate, the copy that survives the bill being repriced afterwards, the
+  approved-variation refusal on both insert and delete, and the cost effect
+  recomputing rather than accumulating.
+- 138 across variations, BOQ, certificates, milestones and closing.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Where the roadmap now stands
+
+Done: variations (0091 + 0094), BOQ import with templates, programme import,
+milestones (0093).
+
+Next, in the revised order:
+
+1. **Import framework** — column mapping, validation, PREVIEW and import
+   history. Today an import commits blind and silently drops rows it cannot
+   read, which is where adoption dies.
+2. **Programme** — duration, DEPENDENCIES, and baseline versus current. Planned
+   dates are overwritten on a re-plan, so the original programme is lost, which
+   is the same class of hole `original_sum` filled for money.
+3. **BOQ ↔ Programme** — activities linked to bill items, planned value, earned
+   value. This is what makes EVM possible, and it also needs the progress
+   history that does not exist yet.
+4. **Notice / Claims / EOT** — the register with a contractual deadline, a
+   responsible person, status, documents, and a notification. The bell has
+   existed since 0074 with nothing in this module writing to it.

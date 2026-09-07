@@ -119,15 +119,15 @@ export default function HelpdeskBoard({ tickets = [], categories = [], stats, us
   const rows = filtered.map((t) => {
     const sla = slaState(t);
     return [
-      <button onClick={() => setDetailId(t.id)} style={{ background: "none", border: "none", color: T.blue, fontWeight: 700, cursor: "pointer", padding: 0, fontSize: 13 }}>
+      <button key="number" onClick={() => setDetailId(t.id)} style={{ background: "none", border: "none", color: T.blue, fontWeight: 700, cursor: "pointer", padding: 0, fontSize: 13 }}>
         {t.ticketNumber}
       </button>,
-      <span title={t.title}>{t.title.length > 46 ? t.title.slice(0, 44) + "…" : t.title}</span>,
+      <span key="title" title={t.title}>{t.title.length > 46 ? t.title.slice(0, 44) + "…" : t.title}</span>,
       t.categoryName || "—",
       pill(PRIORITY, t.priority),
       pill(STATUS, t.status),
-      t.assigneeName || <span style={{ color: T.mgrey }}>Unassigned</span>,
-      <Badge variant={sla.variant}>{sla.label}</Badge>,
+      t.assigneeName || <span key="assignee" style={{ color: T.mgrey }}>Unassigned</span>,
+      <Badge key="sla" variant={sla.variant}>{sla.label}</Badge>,
       fmt.date(t.createdAt),
     ];
   });

@@ -22,7 +22,7 @@ export default async function InstructionsPage({ searchParams }) {
   if (ctx.denied) return <AccessDenied />;
   if (ctx.hidden) {
     return (
-      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
         <SectionNotForType
           section="Engineer's Instructions"
           project={ctx.project}
@@ -42,7 +42,7 @@ export default async function InstructionsPage({ searchParams }) {
     : [[], null];
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       <WorkspaceHeader
         title="Engineer's Instructions"
         description="Instructions and non-conformances issued by the supervising engineer or client representative, and the contractor's compliance status."
