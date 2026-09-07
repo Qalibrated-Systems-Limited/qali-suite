@@ -16,6 +16,7 @@ import {
   projectTypes,
   projectTimesheets,
   projectVariations,
+  projectVariationItems,
   projectMilestones,
   accounts,
 } from "../schema";
@@ -4611,4 +4612,166 @@ export async function getMilestoneValueToDate(
     stages,
     latest: row?.latest ? String(row.latest) : null,
   };
+}
+
+// ── Variation lines — 0094 ──────────────────────────────────────────────────
+//
+// Nothing here writes `amount` or `cost_effect`: the first is
+// `quantity × rate` by trigger and the second is the sum of the lines, which
+// then moves the contract sum through 0091's own chain. These functions carry
+// intent and read back what the database decided.
+
+export interface VariationItemInput {
+  companyId: string;
+  variationId: string;
+  description?: string | null;
+  itemCode?: string | null;
+  unit?: string | null;
+  quantity?: number | string | null;
+  rate?: number | string | null;
+  sequence?: number | null;
+  notes?: string | null;
+  /** Where it came from, when it came from the bill. */
+  boqItemId?: string | null;
+}
+
+/**
+ * Add a line.
+ *
+ * WHEN IT IS RAISED AGAINST A BILL ITEM the item's description, unit and rate
+ * are copied as the starting point — an omission is priced at the bill's own
+ * rate, which is the contractual position, and making somebody retype it is
+ * how a variation comes to be priced at a rate nobody agreed.
+ *
+ * They are COPIED, not read through. The bill can be superseded by a new
+ * version and an agreed variation must not be repriced by a document raised
+ * after it was agreed.
+ */
+export async function addVariationItem(tx: Tx, input: VariationItemInput) {
+  let { description, itemCode, unit, rate } = input;
+
+  if (input.boqItemId && isUuid(input.boqItemId)) {
+    const [item] = await tx
+      .select()
+      .from(projectBoqItems)
+      .where(eq(projectBoqItems.id, input.boqItemId))
+      .limit(1);
+    if (!item) throw new Error("That bill item no longer exists.");
+    description = description?.trim() || item.description;
+    itemCode = itemCode?.trim() || item.itemCode;
+    unit = unit?.trim() || item.unit;
+    rate = rate === undefined || rate === null || String(rate).trim() === ""
+      ? (item.rate ?? "0")
+      : rate;
+  }
+
+  if (!description?.trim()) throw new Error("A variation line needs a description.");
+
+  const [row] = await tx
+    .insert(projectVariationItems)
+    .values({
+      companyId: input.companyId,
+      variationId: input.variationId,
+      boqItemId: optionalId(input.boqItemId),
+      itemCode: itemCode?.trim() || null,
+      description: description.trim(),
+      unit: unit?.trim() || null,
+      quantity: Number(input.quantity ?? 0).toFixed(4),
+      rate: Number(rate ?? 0).toFixed(4),
+      sequence: Math.trunc(Number(input.sequence ?? 0)) || 0,
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning();
+  return row;
+}
+
+export async function updateVariationItem(
+  tx: Tx,
+  itemId: string,
+  input: {
+    description?: string;
+    itemCode?: string | null;
+    unit?: string | null;
+    quantity?: number | string;
+    rate?: number | string;
+    sequence?: number;
+    notes?: string;
+  },
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.description !== undefined) patch.description = input.description.trim();
+  if (input.itemCode !== undefined) patch.itemCode = input.itemCode?.trim() || null;
+  if (input.unit !== undefined) patch.unit = input.unit?.trim() || null;
+  if (input.quantity !== undefined)
+    patch.quantity = Number(input.quantity).toFixed(4);
+  if (input.rate !== undefined) patch.rate = Number(input.rate).toFixed(4);
+  if (input.sequence !== undefined)
+    patch.sequence = Math.trunc(Number(input.sequence)) || 0;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+
+  const [row] = await tx
+    .update(projectVariationItems)
+    .set(patch)
+    .where(eq(projectVariationItems.id, itemId))
+    .returning();
+  return row ?? null;
+}
+
+/** An approved variation's lines are refused by the database, not by this. */
+export async function deleteVariationItem(tx: Tx, itemId: string) {
+  const [row] = await tx
+    .delete(projectVariationItems)
+    .where(eq(projectVariationItems.id, itemId))
+    .returning();
+  return row ?? null;
+}
+
+export async function listVariationItems(tx: Tx, variationId: string) {
+  if (!isUuid(variationId)) return [];
+  return tx
+    .select()
+    .from(projectVariationItems)
+    .where(eq(projectVariationItems.variationId, variationId))
+    .orderBy(asc(projectVariationItems.sequence), asc(projectVariationItems.createdAt))
+    .limit(500);
+}
+
+/**
+ * Every line on a project's variations, by variation.
+ *
+ * One query for the whole register rather than one per variation — a job with
+ * forty variations is forty round trips otherwise, which is the mistake
+ * `computeActualsFor` was written to avoid.
+ */
+export async function listVariationItemsForProject(tx: Tx, projectId: string) {
+  const result = new Map<string, Array<Record<string, unknown>>>();
+  if (!isUuid(projectId)) return result;
+
+  const rows = await tx
+    .select({
+      id: projectVariationItems.id,
+      variationId: projectVariationItems.variationId,
+      boqItemId: projectVariationItems.boqItemId,
+      itemCode: projectVariationItems.itemCode,
+      description: projectVariationItems.description,
+      unit: projectVariationItems.unit,
+      quantity: projectVariationItems.quantity,
+      rate: projectVariationItems.rate,
+      amount: projectVariationItems.amount,
+      sequence: projectVariationItems.sequence,
+    })
+    .from(projectVariationItems)
+    .innerJoin(
+      projectVariations,
+      eq(projectVariations.id, projectVariationItems.variationId),
+    )
+    .where(eq(projectVariations.projectId, projectId))
+    .orderBy(asc(projectVariationItems.sequence));
+
+  for (const r of rows) {
+    const key = String(r.variationId);
+    if (!result.has(key)) result.set(key, []);
+    result.get(key)!.push(r as Record<string, unknown>);
+  }
+  return result;
 }

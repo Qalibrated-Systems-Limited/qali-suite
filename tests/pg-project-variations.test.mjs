@@ -311,6 +311,176 @@ suite("variations move the contract", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
+  describe("priced by its lines — 0094", () => {
+    /** A bill to raise omissions against. */
+    const billItem = async (over = {}) => {
+      const boq = await inA((tx) =>
+        repo.createBoq(tx, {
+          companyId: companyA,
+          projectId: over.projectId ?? project,
+          createdByName: "Seed",
+        }),
+      );
+      const item = await inA((tx) =>
+        repo.createBoqItem(tx, {
+          companyId: companyA,
+          boqId: boq.id,
+          projectId: over.projectId ?? project,
+          itemCode: over.itemCode ?? "B/1",
+          description: over.description ?? "Clear and grub, including disposal",
+          unit: over.unit ?? "m2",
+          quantity: over.quantity ?? "12500",
+          rate: over.rate ?? "180",
+          createdByName: "Seed",
+        }),
+      );
+      return item;
+    };
+
+    /**
+     * `??` would swallow an explicit null, and null is the whole point on a
+     * line raised against the bill: it means "take the bill's figure".
+     */
+    const pick = (over, key, fallback) => (key in over ? over[key] : fallback);
+    const line = (variationId, over = {}) =>
+      inA((tx) =>
+        repo.addVariationItem(tx, {
+          companyId: companyA,
+          variationId,
+          description: pick(over, "description", "Additional 600mm culvert"),
+          unit: pick(over, "unit", "m"),
+          quantity: pick(over, "quantity", 100),
+          rate: pick(over, "rate", 8900),
+          boqItemId: pick(over, "boqItemId", null),
+        }),
+      );
+
+    it("prices a line at quantity times rate", async () => {
+      const v = await raise({ costEffect: 1 });
+      const l = await line(v.id, { quantity: 100, rate: 8900 });
+      expect(Number(l.amount)).toBe(890000);
+    });
+
+    it("makes the lines the variation's cost effect", async () => {
+      // Two places holding one figure is two places that will disagree.
+      const v = await raise({ costEffect: 1 });
+      await line(v.id, { quantity: 100, rate: 8900 });
+      await line(v.id, { description: "Headwalls", quantity: 4, rate: 42000 });
+
+      const rows = await inA((tx) => repo.listVariations(tx, project));
+      const found = rows.find((r) => r.id === v.id);
+      expect(Number(found.costEffect)).toBe(890000 + 168000);
+    });
+
+    it("carries that through to the contract sum on approval", async () => {
+      const v = await raise({ costEffect: 1 });
+      await line(v.id, { quantity: 100, rate: 8900 });
+      await approve(v.id);
+      expect((await contractRow()).contract_sum).toBe(10000000 + 890000);
+    });
+
+    it("omits billed work at the bill's own rate", async () => {
+      // A negative quantity is how an omission is written, and the rate comes
+      // from the bill because that is the contractual position.
+      const item = await billItem();
+      const v = await raise({ costEffect: 1 });
+      const l = await line(v.id, {
+        boqItemId: item.id,
+        description: null,
+        unit: null,
+        quantity: -500,
+        rate: null,
+      });
+
+      expect(l.description).toBe("Clear and grub, including disposal");
+      expect(l.itemCode).toBe("B/1");
+      expect(l.unit).toBe("m2");
+      expect(Number(l.rate)).toBe(180);
+      expect(Number(l.amount)).toBe(-90000);
+    });
+
+    it("reduces the contract when the omission is approved", async () => {
+      const item = await billItem();
+      const v = await raise({ costEffect: 1 });
+      await line(v.id, { boqItemId: item.id, description: null, quantity: -500, rate: null });
+      await approve(v.id);
+      expect((await contractRow()).contract_sum).toBe(10000000 - 90000);
+    });
+
+    it("copies the bill's figures rather than reading through to them", async () => {
+      // An agreed variation must not be repriced by a bill revised afterwards.
+      const item = await billItem();
+      const v = await raise({ costEffect: 1 });
+      const l = await line(v.id, { boqItemId: item.id, description: null, quantity: -500, rate: null });
+
+      await inA((tx) =>
+        tx.execute(sql`
+          UPDATE project_boq_items SET rate = 999 WHERE id = ${item.id}::uuid`),
+      );
+
+      const after = await inA((tx) => repo.listVariationItems(tx, v.id));
+      expect(Number(after[0].rate)).toBe(180);
+      expect(Number(after[0].amount)).toBe(Number(l.amount));
+    });
+
+    it("refuses a negative rate — the quantity carries the sign", async () => {
+      const v = await raise({ costEffect: 1 });
+      await failsWith(
+        () => line(v.id, { rate: -100 }),
+        /rate_non_negative|not allowed/i,
+      );
+    });
+
+    it("refuses a line on an approved variation", async () => {
+      const v = await raise({ costEffect: 500000 });
+      await approve(v.id);
+      await failsWith(
+        () => line(v.id),
+        /approved and its figures are in the contract sum/i,
+      );
+    });
+
+    it("refuses to delete a line off an approved variation", async () => {
+      const v = await raise({ costEffect: 1 });
+      const l = await line(v.id, { quantity: 100, rate: 8900 });
+      await approve(v.id);
+      await failsWith(
+        () => inA((tx) => repo.deleteVariationItem(tx, l.id)),
+        /approved and its figures are in the contract sum/i,
+      );
+    });
+
+    it("refuses a bill item from another project", async () => {
+      const stray = await billItem({ projectId: otherProject });
+      const v = await raise({ costEffect: 1 });
+      await failsWith(
+        () => line(v.id, { boqItemId: stray.id }),
+        /different project/i,
+      );
+    });
+
+    it("leaves the figure where it stands when the last line goes", async () => {
+      // Zeroing would trip `has_an_effect` on a time-only variation, and the
+      // sum the lines came to is the only defensible lump sum to fall back to.
+      const v = await raise({ costEffect: 1 });
+      const l = await line(v.id, { quantity: 100, rate: 8900 });
+      await inA((tx) => repo.deleteVariationItem(tx, l.id));
+
+      const rows = await inA((tx) => repo.listVariations(tx, project));
+      expect(Number(rows.find((r) => r.id === v.id).costEffect)).toBe(890000);
+    });
+
+    it("re-prices the variation when a line is corrected", async () => {
+      const v = await raise({ costEffect: 1 });
+      const l = await line(v.id, { quantity: 100, rate: 8900 });
+      await inA((tx) => repo.updateVariationItem(tx, l.id, { quantity: 150 }));
+
+      const rows = await inA((tx) => repo.listVariations(tx, project));
+      expect(Number(rows.find((r) => r.id === v.id).costEffect)).toBe(1335000);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
   describe("the register", () => {
     it("separates what is agreed from what is only claimed", async () => {
       const agreed = await raise({ costEffect: 500000, timeEffectDays: 14 });

@@ -1812,7 +1812,30 @@ export async function getProjectCertificates(projectId: string) {
         const bill = await repo.getEffectiveBoq(tx, projectId);
         if (!bill || bill.status !== "awarded") return null;
         const summary = await repo.getBoqSummary(tx, bill.id);
-        return { boqId: bill.id, version: bill.version, measured: summary.measured };
+        /**
+         * The PRICED items come with it — 0094. A variation line raised
+         * against the bill takes that item's description, unit and rate, and
+         * making somebody find the item on another page and retype its rate is
+         * how a variation comes to be priced at a rate nobody agreed.
+         *
+         * Headings and unpriced narrative lines are excluded: there is nothing
+         * to omit or remeasure on a line that carries no quantity.
+         */
+        const items = await repo.listBoqItems(tx, bill.id);
+        return {
+          boqId: bill.id,
+          version: bill.version,
+          measured: summary.measured,
+          items: items
+            .filter((i) => !i.isHeading && i.quantity !== null && i.unit)
+            .map((i) => ({
+              _id: String(i.id),
+              itemCode: i.itemCode ?? "",
+              description: i.description,
+              unit: i.unit,
+              rate: Number(i.rate ?? 0),
+            })),
+        };
       })(),
       /**
        * Billable time approved on this job, offered beside the dayworks box.
@@ -3039,6 +3062,128 @@ export async function deleteProjectMilestone(
     }
     revalidateCertificates(projectId);
     return { success: true, message: `${row.name} removed` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+// ── Variation lines — 0094 ──────────────────────────────────────────────────
+//
+// Where there are lines they ARE the cost effect, so nothing below sends one:
+// the trigger sums them onto the variation and 0091's chain moves the contract
+// sum from there. An approved variation's lines are refused by the database.
+
+export async function getVariationItems(projectId: string) {
+  if (!projectId) return {};
+  return withAuthorizedTenant([], async (tx) => {
+    const map = await repo.listVariationItemsForProject(tx, projectId);
+    const out: Record<string, unknown[]> = {};
+    for (const [variationId, rows] of map) {
+      out[variationId] = rows.map((r) => ({
+        _id: String(r.id),
+        id: String(r.id),
+        boqItemId: r.boqItemId ? String(r.boqItemId) : null,
+        itemCode: r.itemCode ?? null,
+        description: r.description,
+        unit: r.unit ?? null,
+        quantity: Number(r.quantity),
+        rate: Number(r.rate),
+        amount: Number(r.amount),
+      }));
+    }
+    return out;
+  });
+}
+
+export async function addProjectVariationItem(
+  variationId: string,
+  projectId: string,
+  input: {
+    description?: string;
+    itemCode?: string | null;
+    unit?: string | null;
+    quantity?: number | string;
+    rate?: number | string;
+    boqItemId?: string | null;
+    sequence?: number;
+  } = {},
+) {
+  if (!variationId) return { success: false, error: "Invalid variation id" };
+
+  const quantity = Number(input.quantity ?? 0);
+  if (!Number.isFinite(quantity) || quantity === 0) {
+    // Zero moves nothing, and a line that moves nothing is a note.
+    return {
+      success: false,
+      error: "Give a quantity. Negative omits work that is in the bill.",
+    };
+  }
+
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx, { companyId }) =>
+        repo.addVariationItem(tx, {
+          companyId,
+          variationId,
+          description: input.description ?? null,
+          itemCode: input.itemCode ?? null,
+          unit: input.unit ?? null,
+          quantity,
+          rate: input.rate ?? null,
+          boqItemId: input.boqItemId ?? null,
+          sequence: input.sequence ?? 0,
+        }),
+    );
+    revalidateCertificates(projectId);
+    return {
+      success: true,
+      message: `${row.description} priced at ${Number(row.amount).toLocaleString()}`,
+    };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function updateProjectVariationItem(
+  itemId: string,
+  projectId: string,
+  input: {
+    description?: string;
+    itemCode?: string | null;
+    unit?: string | null;
+    quantity?: number | string;
+    rate?: number | string;
+    sequence?: number;
+  } = {},
+) {
+  if (!itemId) return { success: false, error: "Invalid line id" };
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx) => repo.updateVariationItem(tx, itemId, input),
+    );
+    if (!row) return { success: false, error: "Line not found" };
+    revalidateCertificates(projectId);
+    return { success: true, message: "Line updated" };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function deleteProjectVariationItem(
+  itemId: string,
+  projectId: string,
+) {
+  if (!itemId) return { success: false, error: "Invalid line id" };
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx) => repo.deleteVariationItem(tx, itemId),
+    );
+    if (!row) return { success: false, error: "Line not found" };
+    revalidateCertificates(projectId);
+    return { success: true, message: "Line removed" };
   } catch (error) {
     return { success: false, error: userMessage(error) };
   }

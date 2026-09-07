@@ -5,11 +5,15 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { GitBranch, Plus, Check, X, Loader2, Send, Trash2 } from "lucide-react";
+import {
+  GitBranch, Plus, Check, X, Loader2, Send, Trash2, ChevronRight, ChevronDown,
+} from "lucide-react";
 import {
   createProjectVariation,
   setProjectVariationStatus,
   deleteProjectVariation,
+  addProjectVariationItem,
+  deleteProjectVariationItem,
 } from "@/app/db/actions/project-actions";
 import { toast } from "sonner";
 
@@ -62,12 +66,28 @@ export default function VariationRegister({
   variations = [],
   summary,
   instructions = [],
+  items = {},
+  boqItems = [],
   canManage = false,
   canDecide = false,
   readOnly = false,
 }) {
   const [isPending, startTransition] = useTransition();
   const [showNew, setShowNew] = useState(false);
+  const [open, setOpen] = useState(null);
+  /**
+   * A line is either raised AGAINST a bill item — taking its description, unit
+   * and rate — or typed as new work. Picking an item fills the boxes rather
+   * than hiding them, so the rate stays visible and correctable before it is
+   * agreed.
+   */
+  const [lineForm, setLineForm] = useState({
+    boqItemId: "",
+    description: "",
+    unit: "",
+    quantity: "",
+    rate: "",
+  });
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -119,6 +139,40 @@ export default function VariationRegister({
       const res = await setProjectVariationStatus(id, projectId, status);
       if (res?.success) toast.success(res.message);
       else toast.error(res?.error || "Could not update it");
+    });
+  }
+
+  function pickBillItem(id) {
+    const item = boqItems.find((i) => i._id === id);
+    setLineForm((f) => ({
+      ...f,
+      boqItemId: id,
+      description: item ? item.description : "",
+      unit: item ? item.unit : "",
+      rate: item ? String(item.rate) : "",
+    }));
+  }
+
+  function addLine(variationId) {
+    startTransition(async () => {
+      const res = await addProjectVariationItem(variationId, projectId, {
+        ...lineForm,
+        boqItemId: lineForm.boqItemId || null,
+      });
+      if (res?.success) {
+        toast.success(res.message);
+        setLineForm({ boqItemId: "", description: "", unit: "", quantity: "", rate: "" });
+      } else {
+        toast.error(res?.error || "Could not add the line");
+      }
+    });
+  }
+
+  function removeLine(itemId) {
+    startTransition(async () => {
+      const res = await deleteProjectVariationItem(itemId, projectId);
+      if (res?.success) toast.success(res.message);
+      else toast.error(res?.error || "Could not remove the line");
     });
   }
 
@@ -281,9 +335,27 @@ export default function VariationRegister({
       ) : (
         <ul className="divide-y">
           {variations.map((v) => (
-            <li key={v._id} className="flex items-start justify-between gap-3 py-2.5">
+            <li key={v._id} className="py-2.5">
+            <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
+                  {/*
+                    A variation priced by its LINES is the defensible kind, so
+                    the row opens onto them rather than hiding them behind a
+                    detail page.
+                  */}
+                  <button
+                    type="button"
+                    onClick={() => setOpen(open === v._id ? null : v._id)}
+                    className="text-muted-foreground hover:text-foreground"
+                    aria-label={`${open === v._id ? "Hide" : "Show"} ${v.variationNumber} lines`}
+                  >
+                    {open === v._id ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                  </button>
                   <span className="font-mono text-xs text-muted-foreground">
                     {v.variationNumber}
                   </span>
@@ -298,6 +370,9 @@ export default function VariationRegister({
                 <p className="text-xs text-muted-foreground">
                   {v.issuedDate}
                   {v.decidedByName ? ` · ${v.status} by ${v.decidedByName}` : ""}
+                  {items[v._id]?.length
+                    ? ` · ${items[v._id].length} line${items[v._id].length === 1 ? "" : "s"}`
+                    : " · lump sum"}
                 </p>
               </div>
               <div className="flex items-center gap-3 shrink-0">
@@ -362,6 +437,141 @@ export default function VariationRegister({
                   </div>
                 )}
               </div>
+            </div>
+
+            {open === v._id && (
+              <div className="mt-2 rounded-lg border bg-muted/20 p-3 space-y-2">
+                {items[v._id]?.length ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-muted-foreground">
+                          <th className="text-left font-medium pb-1">Item</th>
+                          <th className="text-left font-medium pb-1">Unit</th>
+                          <th className="text-right font-medium pb-1">Qty</th>
+                          <th className="text-right font-medium pb-1">Rate</th>
+                          <th className="text-right font-medium pb-1">Amount</th>
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {items[v._id].map((it) => (
+                          <tr key={it._id} className="border-t">
+                            <td className="py-1 pr-2">
+                              {it.itemCode && (
+                                <span className="font-mono text-muted-foreground mr-1.5">
+                                  {it.itemCode}
+                                </span>
+                              )}
+                              {it.description}
+                              {/* Provenance: raised against the bill, or new work. */}
+                              {!it.boqItemId && (
+                                <span className="ml-1.5 text-muted-foreground">(new)</span>
+                              )}
+                            </td>
+                            <td className="py-1 pr-2 text-muted-foreground">{it.unit}</td>
+                            <td className="py-1 pr-2 text-right tabular-nums">
+                              {it.quantity}
+                            </td>
+                            <td className="py-1 pr-2 text-right tabular-nums">
+                              {money(it.rate)}
+                            </td>
+                            <td className="py-1 pr-2 text-right tabular-nums font-medium">
+                              {money(it.amount)}
+                            </td>
+                            <td className="py-1 text-right">
+                              {canManage && !readOnly && v.status !== "approved" && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeLine(it._id)}
+                                  disabled={isPending}
+                                  className="text-muted-foreground hover:text-foreground"
+                                  aria-label="Remove line"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Priced as a lump sum. Add lines to make the figure traceable to
+                    items and rates — which is what a final account is argued from.
+                  </p>
+                )}
+
+                {canManage && !readOnly && v.status !== "approved" && (
+                  <div className="grid grid-cols-1 sm:grid-cols-[1.6fr_2fr_auto_auto_auto] gap-2 pt-1">
+                    <select
+                      className="h-8 rounded-md border bg-background px-2 text-xs"
+                      value={lineForm.boqItemId}
+                      onChange={(e) => pickBillItem(e.target.value)}
+                    >
+                      <option value="">New work — not in the bill</option>
+                      {boqItems.map((i) => (
+                        <option key={i._id} value={i._id}>
+                          {i.itemCode ? `${i.itemCode} — ` : ""}
+                          {i.description.slice(0, 50)}
+                        </option>
+                      ))}
+                    </select>
+                    <Input
+                      className="h-8 text-xs"
+                      placeholder="Description"
+                      value={lineForm.description}
+                      onChange={(e) =>
+                        setLineForm((f) => ({ ...f, description: e.target.value }))
+                      }
+                    />
+                    <Input
+                      className="h-8 w-16 text-xs"
+                      placeholder="Unit"
+                      value={lineForm.unit}
+                      onChange={(e) => setLineForm((f) => ({ ...f, unit: e.target.value }))}
+                    />
+                    <Input
+                      className="h-8 w-24 text-xs"
+                      type="number"
+                      step="0.01"
+                      placeholder="Qty ±"
+                      title="Negative omits work that is in the bill"
+                      value={lineForm.quantity}
+                      onChange={(e) =>
+                        setLineForm((f) => ({ ...f, quantity: e.target.value }))
+                      }
+                    />
+                    <div className="flex gap-1">
+                      <Input
+                        className="h-8 w-24 text-xs"
+                        type="number"
+                        step="0.01"
+                        placeholder="Rate"
+                        value={lineForm.rate}
+                        onChange={(e) =>
+                          setLineForm((f) => ({ ...f, rate: e.target.value }))
+                        }
+                      />
+                      <Button
+                        size="sm"
+                        className="h-8"
+                        onClick={() => addLine(v._id)}
+                        disabled={isPending}
+                      >
+                        {isPending ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          "Add"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             </li>
           ))}
         </ul>

@@ -3106,3 +3106,99 @@ A CANCELLED certificate blocks nothing: withdrawn is settled.
 - **Materials on site drawn from stock**, blocked on the stock model: "issued to
   a job" currently means CONSUMED, not delivered-and-unfixed, and certifying
   issued stock would double-count it against the work it was built into.
+
+---
+
+## Handoff — 2026-09-07: a variation is priced by its lines (0094)
+
+Working down the revised roadmap, which puts variations first and milestones
+last. 0093 was built out of that order; this closes the one item still open on
+variations: **link variations to BOQ items.**
+
+### A variation is one of three things, and only one is a reference
+
+0091 let the contract sum move and left the movement as ONE TYPED FIGURE. That
+keeps the sum honest and cannot defend it: at a final account "the contract grew
+by 2.4m" is not an answer, and neither is a register of eleven such sentences.
+
+  * an OMISSION of billed work — a negative quantity at the bill's own rate
+  * a REMEASURE of billed work — more or less of an item
+  * NEW WORK never in the bill — its own description, unit and rate
+
+A single `boq_item_id` on the variation covers the first two and cannot express
+the third, which is the commonest. So the link is a LINE, and `boq_item_id` on
+the line is nullable: **null means new work.**
+
+### The four decisions
+
+**The line is self-contained; the link is provenance.** It carries its own
+description, unit, quantity and rate. Raising one against a bill item copies
+that item's figures as the starting point — an omission is priced at the bill's
+own rate, which is the contractual position, and making somebody retype it is
+how a variation comes to be priced at a rate nobody agreed. COPIED, not read
+through: a bill can be superseded, and an agreed variation must not be repriced
+by a document raised after it was agreed. Same rule as `account_code_at_budget`
+and the certificate snapshot in 0092, and it is asserted.
+
+**The amount is the database's** — `quantity × rate`, by trigger. A line whose
+amount disagrees with its own quantity and rate is the commonest defect in a
+hand-built variation account. A negative QUANTITY is ordinary; a negative RATE
+is a typing error and the CHECK says so.
+
+**Where there are lines, they ARE the cost effect.**
+`project_variations.cost_effect` becomes their sum by trigger, and the contract
+sum follows through 0091's existing chain with nothing new — lines →
+cost_effect → `project_variations_touch_contract` →
+`project_contracts_derive_current`. Two places holding one figure is two places
+that will disagree.
+
+Removing the LAST line leaves the figure where it stands rather than zeroing
+it: zeroing would trip `project_variations_has_an_effect` on a variation whose
+effect is entirely a time one, and the sum its lines came to is the only
+defensible lump sum to fall back to.
+
+**An approved variation's lines are frozen.** Its figures are in the contract
+sum and in every certificate's percentage since. 0091 refuses to amend the
+variation; a line is the same figure one level down, and refusing there too is
+what stops that guard being decorative. DELETE needs its own trigger arm — a
+delete has no NEW row — and that arm returns OLD when the parent is already
+gone, so it does not fight the cascade.
+
+### On the screen
+
+The register's rows open onto their lines. The line form leads with a picker of
+the awarded bill's PRICED items — headings and narrative lines excluded, since
+there is nothing to omit or remeasure on a line carrying no quantity — and
+choosing one fills the description, unit and rate rather than hiding them, so
+the rate stays visible and correctable before it is agreed. A variation with no
+lines says "lump sum" and offers the reason to add them.
+
+### Verified
+
+- 94 migrations apply in order on dev and test.
+- 13 new tests inside the variations suite, including the omission priced at the
+  bill's rate, the copy that survives the bill being repriced afterwards, the
+  approved-variation refusal on both insert and delete, and the cost effect
+  recomputing rather than accumulating.
+- 138 across variations, BOQ, certificates, milestones and closing.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Where the roadmap now stands
+
+Done: variations (0091 + 0094), BOQ import with templates, programme import,
+milestones (0093).
+
+Next, in the revised order:
+
+1. **Import framework** — column mapping, validation, PREVIEW and import
+   history. Today an import commits blind and silently drops rows it cannot
+   read, which is where adoption dies.
+2. **Programme** — duration, DEPENDENCIES, and baseline versus current. Planned
+   dates are overwritten on a re-plan, so the original programme is lost, which
+   is the same class of hole `original_sum` filled for money.
+3. **BOQ ↔ Programme** — activities linked to bill items, planned value, earned
+   value. This is what makes EVM possible, and it also needs the progress
+   history that does not exist yet.
+4. **Notice / Claims / EOT** — the register with a contractual deadline, a
+   responsible person, status, documents, and a notification. The bell has
+   existed since 0074 with nothing in this module writing to it.

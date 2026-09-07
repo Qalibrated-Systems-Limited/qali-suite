@@ -1586,3 +1586,81 @@ export const projectMilestones = pgTable(
     ),
   ],
 );
+
+/**
+ * Variation lines — 0094.
+ *
+ * 0091 let the contract sum move and left the movement as ONE TYPED FIGURE.
+ * That keeps the sum honest and cannot defend it: at a final account "the
+ * contract grew by 2.4m" is not an answer.
+ *
+ * A variation is an OMISSION of billed work, a REMEASURE of it, or NEW WORK
+ * that was never in the bill — and the third is the commonest, which is why
+ * the link to the bill is a nullable column on a LINE rather than a column on
+ * the variation. `boqItemId` null means new work.
+ *
+ * THE LINE IS SELF-CONTAINED and the link is provenance. Description, unit,
+ * quantity and rate are the line's own; raising one against a bill item copies
+ * them as a starting point. Not read through on every render, for the reason
+ * every `*_at_*` column here exists — a bill can be superseded, and an agreed
+ * variation must not be repriced by a document raised after it was agreed.
+ *
+ * THE AMOUNT IS THE DATABASE'S — `quantity × rate`, by trigger. A negative
+ * QUANTITY is ordinary: that is how an omission is written. A negative rate is
+ * a typing error, and the CHECK says so.
+ *
+ * AND WHERE THERE ARE LINES, THEY ARE THE COST EFFECT.
+ * `project_variations.cost_effect` becomes their sum by trigger, and
+ * `contract_sum` follows through 0091's chain with nothing new. Two places
+ * holding one figure is two places that will disagree.
+ */
+export const projectVariationItems = pgTable(
+  "project_variation_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    variationId: uuid("variation_id")
+      .notNull()
+      .references(() => projectVariations.id, { onDelete: "cascade" }),
+
+    /**
+     * NULL is NEW WORK. `set null` on delete: superseding a bill must not
+     * delete the priced lines raised against it — the line keeps its figures
+     * and only the provenance goes.
+     */
+    boqItemId: uuid("boq_item_id").references(() => projectBoqItems.id, {
+      onDelete: "set null",
+    }),
+
+    itemCode: text("item_code"),
+    description: text("description").notNull(),
+    unit: text("unit"),
+    /** Signed: negative is an omission. */
+    quantity: numeric("quantity", { precision: 19, scale: 4, mode: "string" })
+      .notNull()
+      .default("0"),
+    rate: money("rate").notNull().default("0"),
+    /** Written by `project_variation_items_derive`, never typed. */
+    amount: money("amount").notNull().default("0"),
+
+    sequence: integer("sequence").notNull().default(0),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("project_variation_items_variation_idx").on(t.variationId, t.sequence),
+    index("project_variation_items_boq_item_idx")
+      .on(t.boqItemId)
+      .where(sql`${t.boqItemId} IS NOT NULL`),
+
+    check(
+      "project_variation_items_description_not_blank",
+      sql`length(btrim(${t.description})) > 0`,
+    ),
+    /** The quantity carries the sign; a negative rate is a typing error. */
+    check("project_variation_items_rate_non_negative", sql`${t.rate} >= 0`),
+  ],
+);

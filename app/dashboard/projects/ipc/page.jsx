@@ -2,6 +2,7 @@ import {
   getProjectCertificates,
   getProjectVariations,
   getProjectMilestones,
+  getVariationItems,
 } from "@/app/db/actions/project-actions";
 import { getProjectInstructions } from "@/app/db/actions/project-log-actions";
 import { getWorkspaceContext } from "../lib/workspace";
@@ -67,14 +68,15 @@ export default async function IpcPaymentsPage({ searchParams }) {
    * are one conversation, and splitting them puts the cause on a screen the
    * person reading the effect is not looking at.
    */
-  const [data, variationData, instructions, milestoneData] = project
+  const [data, variationData, instructions, milestoneData, variationItems] = project
     ? await Promise.all([
         getProjectCertificates(project.id),
         getProjectVariations(project.id),
         getProjectInstructions(project.id),
         getProjectMilestones(project.id),
+        getVariationItems(project.id),
       ])
-    : [null, null, [], null];
+    : [null, null, [], null, {}];
 
   return (
     <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
@@ -131,6 +133,8 @@ export default async function IpcPaymentsPage({ searchParams }) {
           variations={variationData?.variations ?? []}
           summary={variationData?.summary ?? null}
           instructions={instructions ?? []}
+          items={variationItems ?? {}}
+          boqItems={data?.boq?.items ?? []}
           canManage={hasRole(user, PROJECT_MANAGE_ROLES)}
           canDecide={hasRole(user, FINANCE_WRITE_ROLES)}
           readOnly={project.status === "closed"}
