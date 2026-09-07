@@ -44,4 +44,6 @@ export * from "./projects";
 export * from "./projectLogs";
 export * from "./workflowReports";
 export * from "./technical";
+export * from "./helpdesk";
+export * from "./hse";
 export * from "./notifications";

@@ -25,6 +25,7 @@ import {
   Gavel,
   HardHat,
   LayoutDashboard,
+  LifeBuoy,
   Link2,
   List,
   ListChecks,
@@ -690,6 +691,7 @@ const getNavigationGroups = (user) => {
     items: [
       { icon: Truck, label: "Fleet", id: "fleet", href: "/dashboard/fleet" },
       { icon: ListChecks, label: "Tasks", id: "tasks", href: "/dashboard/tasks" },
+      { icon: LifeBuoy, label: "Help Desk", id: "helpdesk", href: "/dashboard/helpdesk" },
       { icon: HardHat, label: "HSE", id: "hse", href: "/dashboard/hse" },
     ],
   },
