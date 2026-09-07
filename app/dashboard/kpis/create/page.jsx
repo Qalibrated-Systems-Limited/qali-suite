@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { roleAllowed } from "@/lib/permissions";
-import { getKpiOwnerCandidates } from "@/app/mongodb/queries/kpi-queries";
+import { getKpiOwnerCandidatesPg } from "@/app/db/actions/kpi-actions";
 import KpiForm from "../components/KpiForm";
 
 export const metadata = { title: "New KPI" };
@@ -16,7 +16,7 @@ export default async function CreateKpiPage() {
   if (!roleAllowed(session.user.role, MANAGE_ROLES)) redirect("/dashboard/kpis");
 
   // Empty array if HR isn't set up — the form falls back to free-text name.
-  const ownerCandidates = await getKpiOwnerCandidates();
+  const ownerCandidates = await getKpiOwnerCandidatesPg();
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

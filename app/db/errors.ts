@@ -274,6 +274,22 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   project_tasks_parent_same_project_fk:
     "A subtask belongs to the same project as the task above it.",
   project_tasks_id_project_uq: "That task already exists.",
+
+  // ── KPIs (0097) ───────────────────────────────────────────────────────────
+  kpis_name_uq:
+    "A KPI with that name already exists. Two metrics with one name cannot be told apart on the board.",
+  kpis_name_not_blank: "A KPI needs a name.",
+  kpis_thresholds_agree_with_direction:
+    "The on-track band has to be harder to reach than the at-risk one. For a lower-is-better metric that means a smaller ratio, not a bigger one.",
+  kpis_thresholds_positive: "A threshold is a share of the target, so it has to be above zero.",
+  kpi_snapshots_period_uq:
+    "That period already has an actual recorded. Edit it rather than adding a second one.",
+  kpi_snapshots_month_in_range: "The month has to be between 1 and 12.",
+  kpi_snapshots_year_in_range: "That is not a year this system records against.",
+  kpi_snapshots_period_shape:
+    "That period does not fit the KPI's periodicity — a quarterly figure is filed on the quarter's last month, a yearly one on December.",
+  kpis_owner_employee_id_employees_id_fk:
+    "That employee is not in this company's register.",
 };
 
 interface PgLike {

@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Pencil } from "lucide-react";
 import { roleAllowed } from "@/lib/permissions";
-import { getKpiWithSnapshots } from "@/app/mongodb/queries/kpi-queries";
+import { getKpiWithSnapshotsPg } from "@/app/db/actions/kpi-actions";
 import { Button } from "@/components/ui/button";
 import KpiDetailView from "./KpiDetailView";
 
@@ -19,7 +19,7 @@ export default async function KpiDetailPage(props) {
   if (!roleAllowed(session.user.role, VIEW_ROLES)) redirect("/dashboard");
 
   const params = await props.params;
-  const kpi = await getKpiWithSnapshots(params.id, { limit: 24 });
+  const kpi = await getKpiWithSnapshotsPg(params.id, { limit: 24 });
   if (!kpi) notFound();
 
   const canManage = roleAllowed(session.user.role, MANAGE_ROLES);

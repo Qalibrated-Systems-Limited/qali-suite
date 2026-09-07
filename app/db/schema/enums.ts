@@ -1038,3 +1038,47 @@ export const crmActivityTargetEnum = pgEnum("crm_activity_target", [
 export const crmActivityDirectionEnum = pgEnum("crm_activity_direction", [
   "inbound", "outbound", "none",
 ]);
+
+// ── KPIs — 0097 ──────────────────────────────────────────────────────────────
+
+export const kpiCategoryEnum = pgEnum("kpi_category", [
+  "financial", "operational", "hr", "customer", "compliance",
+]);
+
+/**
+ * Where the actual comes from. `manual` means somebody types it; everything
+ * else is computed from the ledger, payroll or HR by `computeKpiActual`.
+ *
+ * This is an ENUM rather than free text because the source is a dispatch key:
+ * a value with no computer behind it is a KPI that silently never updates.
+ */
+export const kpiSourceEnum = pgEnum("kpi_source", [
+  "manual",
+  "monthly_revenue",
+  "monthly_payroll_cost",
+  "ar_days_outstanding",
+  "cash_position",
+  "active_headcount",
+  "gross_margin_percent",
+  "opex_ratio",
+  "payroll_to_revenue_ratio",
+  "avg_order_value",
+]);
+
+export const kpiUnitEnum = pgEnum("kpi_unit", [
+  "currency", "percentage", "days", "count", "ratio",
+]);
+
+export const kpiPeriodicityEnum = pgEnum("kpi_periodicity", [
+  "monthly", "quarterly", "yearly",
+]);
+
+/** Whether being over the target is green or red. */
+export const kpiTargetDirectionEnum = pgEnum("kpi_target_direction", [
+  "higher_is_better", "lower_is_better",
+]);
+
+/** How one snapshot was produced — typed by a person, or computed. */
+export const kpiSnapshotSourceEnum = pgEnum("kpi_snapshot_source", [
+  "manual", "auto",
+]);

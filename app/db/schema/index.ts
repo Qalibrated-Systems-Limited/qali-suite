@@ -46,3 +46,4 @@ export * from "./projectLogs";
 export * from "./workflowReports";
 export * from "./technical";
 export * from "./notifications";
+export * from "./kpis";

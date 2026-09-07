@@ -680,6 +680,13 @@
       "when": 1787049180566,
       "tag": "0096_the_funnel_before_the_quote",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1787049181566,
+      "tag": "0097_the_number_somebody_is_accountable_for",
+      "breakpoints": true
     }
   ]
 }

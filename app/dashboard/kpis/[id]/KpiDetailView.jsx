@@ -10,7 +10,7 @@ import {
   deleteKpiSnapshot,
   setKpiActive,
   updateKpiTarget,
-} from "@/app/mongodb/actions/kpi-actions";
+} from "@/app/db/actions/kpi-actions";
 import {
   formatKpiValue,
   kpiStatus,

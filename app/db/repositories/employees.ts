@@ -931,7 +931,14 @@ export async function listEmployeesForPicker(
   tx: Tx,
   opts: { search?: string; excludeId?: string | null; limit?: number } = {},
 ) {
-  const limit = Math.min(Math.max(opts.limit ?? 20, 1), 50);
+  /*
+   * The ceiling was 50, and `listEmployeesForOwnerPicker(200)` silently got
+   * 50 — so on the KPI owner picker, which loads the list once and filters it
+   * in the browser, a company with more than 50 staff could not select anyone
+   * past the fiftieth name alphabetically. Every other caller passes 50 or
+   * less explicitly, so raising the cap changes nothing for them.
+   */
+  const limit = Math.min(Math.max(opts.limit ?? 20, 1), 500);
   const filters = [sql`e.status <> 'terminated'`];
   if (opts.search?.trim()) {
     const like = likeContains(opts.search.trim());

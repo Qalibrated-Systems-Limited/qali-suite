@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Plus, Target } from "lucide-react";
-import { listKpis } from "@/app/mongodb/queries/kpi-queries";
+import { listKpisPg } from "@/app/db/actions/kpi-actions";
 import { roleAllowed } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,7 +17,7 @@ const VIEW_ROLES = ["SuperAdmin", "Admin", "Viewer", "Manager", "CFO", "HR Manag
 const MANAGE_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR Manager"];
 
 async function KpiListLoader({ canManage }) {
-  const kpis = await listKpis({ includeInactive: false });
+  const kpis = await listKpisPg({ includeInactive: false });
 
   if (kpis.length === 0) {
     return (

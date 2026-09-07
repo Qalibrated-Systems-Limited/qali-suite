@@ -3299,3 +3299,155 @@ The ledger sweep is down to one genuine connector: the weighbridge, in
 
 Next cheapest: **kpis (7)**, one self-contained module with no Postgres
 destination yet, or **employee (4)** and **settings (3)**.
+
+---
+
+## Handoff — 2026-09-07: the number somebody is accountable for (0097)
+
+KPIs. Two Mongo models, ~1,193 lines of queries and actions, seven screens and
+nine auto-compute formulas. `docs/CURRENT-STATE.md` lists this module as ✅
+shipped, and on this branch it was shipped and WRONG — which is the reason it
+is written up as a fix rather than a move.
+
+**Mongo screens: 46 → 39.** Measured, not assumed: `git stash` the change and
+re-run the counting grep. The whole `kpis` module goes, and nothing else was
+touching it.
+
+### The module was not stranded. It was answering.
+
+All nine formulas read the Mongo `JournalEntry`, `Account`, `PayrollRun` and
+`Invoice` collections. Every one of those moved to Postgres long ago, so a KPI
+on `monthly_revenue` has been aggregating a ledger that stopped receiving
+entries — returning 0, and the board painting it red against target. Nothing
+errored. It is the executive-snapshot defect again, one module along: a page
+that reports the business at a standstill, confidently.
+
+`active_headcount` was the exception, already reaching into Postgres through
+`getActiveHeadcount`, and it is the only formula whose answer was right.
+
+### Three formulas now give a DIFFERENT number, deliberately
+
+Each is marked DEVIATION at the formula in `repositories/kpis.ts` and has a
+test naming the old behaviour.
+
+**GROSS MARGIN SUBTRACTS DIRECT COSTS.** Mongo matched `systemAccount IN
+('cogs','cost_of_sales')` — account 5100 alone, plus a name the Postgres
+seeder never wrote. The standard chart puts project materials, subcontractors,
+equipment hire, project transport and site expenses at 5410–5490 under
+`sub_type = 'direct_cost'`, and for a contractor that IS the cost of sales.
+Excluding them made gross margin ≈ 100% on a job that lost money, and
+simultaneously inflated the Operating Expense Ratio, which the template library
+sells as "the defensive twin of Revenue" and defines as everything that is NOT
+cost of sales. One predicate now serves both, so the two ratios partition the
+expenses instead of double-counting them. There is a test that asserts exactly
+that: margin − opex = net, and the shillings add up.
+
+**PAYROLL IS COSTED TO THE MONTH IT WAS EARNED IN.** Mongo matched `status IN
+('paid','approved','posted')` AND `paidAt` inside the window. `paid_at` is only
+stamped on payment, so an approved run's null fell out of the range test
+regardless — the `approved` in that list never selected anything, and `posted`
+is not a status a run can reach at all (0048 dropped it). The filter named
+three states and meant one. It matches on `period_year` / `period_month` now:
+March's payroll is March's cost even when it is paid on 4 April, and it puts
+this on the same accrual basis as `monthly_revenue`, which matters because
+`payroll_to_revenue_ratio` divides one by the other.
+
+**CASH POSITION SEES EVERY BANK ACCOUNT.** Mongo matched five `systemAccount`
+values of which the chart seeds three. Worse, `system_account` is UNIQUE per
+company — so the SECOND bank a business opens can never carry one, and half its
+cash was invisible. `sub_type IN ('cash','bank','mpesa')` is the same predicate
+the executive overview's cash tile uses, so the two pages now agree, which they
+did not.
+
+### Four rules the database enforces that the action layer only asked for
+
+- `kpi_snapshots_period_shape` — the quarterly-on-the-quarter-end convention
+  lived in `normalisePeriod()` and nowhere else. A writer that skipped it could
+  file a quarterly row on month 5 with quarter 4, and the unique index would
+  then accept a SECOND row for that quarter on month 6.
+- `kpis_name_uq`, on `lower(btrim(name))` — the seeder deduped by reading the
+  names and diffing in JS. Two people pressing "Use starter templates" together
+  both read an empty list and both insert. `ON CONFLICT DO NOTHING` now.
+- `kpis_thresholds_agree_with_direction` — `parseKpiFormData` was the only
+  thing checking that the on-track band was stricter than the at-risk one, with
+  the sense flipped for lower-is-better.
+- `kpi_snapshots` cascades from `kpis`; the KPI restricts against `companies`.
+
+### The owner is an employee again
+
+Mongo's `owner.partyId / profileId / userId` were all ObjectId. Once employees
+became Postgres uuids, `buildOwnerSubdoc` was cut back to a name and a typed-in
+number, with a fair comment saying an id that cannot resolve is worse than
+none. It was still a dead link: rename an employee and every KPI they own keeps
+the old name for ever. `owner_employee_id` is a real FK now, ON DELETE SET
+NULL, and the read resolves the CURRENT name through it, falling back to the
+stored snapshot when the employee record goes. `KpiForm` changed accordingly —
+the picker's value is the id, not the name, which also stops two people who
+share a name collapsing into one option.
+
+Found on the way: `listEmployeesForPicker` capped at 50 however much was asked
+for, so `listEmployeesForOwnerPicker(200)` silently returned 50 and a company
+with more than fifty staff could not select anyone past the fiftieth name. The
+picker loads once and filters in the browser, so there was no second chance.
+Cap raised to 500; every other caller passes 50 or less explicitly.
+
+### A three-valued-logic bug, caught by a test rather than by reading
+
+`a.system_account IN ('cogs','cost_of_sales')` is NULL — not false — for the
+accounts carrying no system handle, which is most of them. NULL is falsy in a
+WHERE, so the POSITIVE use (gross margin) looked fine; the NEGATED one in the
+opex ratio is `NOT NULL`, which is NULL, which drops the row. Rent has no
+system account, so the opex ratio came out at ZERO with expenses posted against
+it. `COALESCE(..., '')` on both classification columns.
+
+Swept for the same trap: every other negated predicate in the repositories
+(`assets.status`, `invoices.status`, `bills.status`, `project_budgets.status`,
+and the two `id NOT IN (subquery)` forms) is over a NOT NULL column, checked
+against `information_schema` rather than by eye. `sub_type` and
+`system_account` are the two nullable classification columns in the schema,
+which is why this was the only instance.
+
+### Also
+
+`resetCompanyBooks` in `app/db/companyAdmin.ts` is discovery-driven from
+`information_schema`, so 0097's tables joined it the moment they existed — and
+would have WIPED KPI definitions that `RESET_KEEP_COLLECTIONS` deliberately
+keeps on the Mongo side, which is the disagreement that file's own comment
+warns about. `kpis` is added to `KEEP`; `kpi_snapshots` is deliberately not,
+because a definition is configuration and its actuals are transactional.
+
+`npm run ledger-sweep` no longer lists the kpi hits — they were
+`Array.prototype.reverse` and they are gone with the Mongo file. One genuine
+connector remains: the weighbridge, `integration-actions.js:467`.
+
+### Deliberately unwired
+
+`getKpiSummaryForDashboardPg`, and its Mongo original had no caller either —
+confirmed by grep, not assumed. `find-unwired-actions.mjs` flags it and will
+until a role dashboard grows a KPI strip.
+
+### The numbering, checked rather than trusted
+
+The high-water mark on this machine was `1787049180566` (0096). 0097 is at
+`…181566`, and both tables were confirmed present in `information_schema` on
+dev AND test, along with their ten constraints, six indexes and RLS
+enabled+forced — rather than trusting the migrator's ✓.
+
+### Verified
+
+- 97 migrations apply on dev and test; tables, constraints, indexes and RLS
+  checked in `information_schema` / `pg_constraint` / `pg_class`.
+- 52 tests in `tests/pg-kpis.test.mjs`, green.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` all clean.
+
+### Where the port stands
+
+**39 screens, 12 modules.** Of those, banking (8) stays on Mongo by decision,
+sales-orders (3) is switched off behind `lib/unported-modules.js`, and
+`adjustments`'s single hit remains a FALSE POSITIVE — a historical comment in
+an already-ported file that the counting grep matches. So the real remaining
+surface is about **27 screens**.
+
+Next: **sales orders (3)** — switched off rather than ported in §9K, and the
+only module in the app that is deliberately dark. Then **employee (4)** and
+**settings (3)**.

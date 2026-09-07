@@ -278,6 +278,16 @@ const KEEP = new Set([
   "fiscal_periods",
   "parties", // wiped only with wipeParties
   "products", // catalogue kept, quantities zeroed
+  /*
+   * A KPI DEFINITION IS CONFIGURATION; ITS ACTUALS ARE NOT. `kpi_snapshots`
+   * is deliberately absent — the numbers go with the rest of the
+   * transactional data, and the targets, owners and thresholds somebody sat
+   * down and agreed survive, which is what `kpis` in RESET_KEEP_COLLECTIONS
+   * has always meant on the Mongo side. This table is discovery-driven, so
+   * without this line 0097's new tables would have been wiped on one side
+   * and kept on the other from the moment they existed.
+   */
+  "kpis",
 ]);
 
 /**

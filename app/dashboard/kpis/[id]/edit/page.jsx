@@ -3,7 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { roleAllowed } from "@/lib/permissions";
-import { getKpiById, getKpiOwnerCandidates } from "@/app/mongodb/queries/kpi-queries";
+import { getKpiByIdPg, getKpiOwnerCandidatesPg } from "@/app/db/actions/kpi-actions";
 import KpiForm from "../../components/KpiForm";
 
 export const metadata = { title: "Edit KPI" };
@@ -17,8 +17,8 @@ export default async function EditKpiPage(props) {
 
   const params = await props.params;
   const [kpi, ownerCandidates] = await Promise.all([
-    getKpiById(params.id),
-    getKpiOwnerCandidates(),
+    getKpiByIdPg(params.id),
+    getKpiOwnerCandidatesPg(),
   ]);
   if (!kpi) notFound();
 
