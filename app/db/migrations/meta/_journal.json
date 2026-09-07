@@ -645,6 +645,13 @@
       "when": 1787049164566,
       "tag": "0091_variations_move_the_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1787049165566,
+      "tag": "0092_a_certificate_keeps_the_terms_it_was_signed_under",
+      "breakpoints": true
     }
   ]
 }

@@ -2961,13 +2961,34 @@ export async function listCertificates(tx: Tx, contractId: string) {
     .where(eq(projectCertificates.contractId, contractId))
     .orderBy(asc(projectCertificates.sequence));
 
+  /**
+   * AN ISSUED CERTIFICATE IS COMPUTED FROM ITS OWN TERMS — 0092.
+   *
+   * This used to pass `contract` for every row, so a certificate signed months
+   * ago recomputed against whatever the contract says today: correcting a
+   * retention percentage restated documents that had already been issued,
+   * signed and invoiced, and the invoices behind them did not move.
+   *
+   * A DRAFT still follows the live contract, which is the point of a draft.
+   */
+  const termsFor = (row: typeof rows[number]) =>
+    row.retentionPercentAtCertificate === null
+      ? contract
+      : {
+          contractSum: row.contractSumAtCertificate ?? "0",
+          retentionPercent: row.retentionPercentAtCertificate,
+          retentionCapPercent: row.retentionCapPercentAtCertificate,
+          advanceAmount: row.advanceAmountAtCertificate ?? "0",
+          advanceRecoveryPercent: row.advanceRecoveryPercentAtCertificate ?? "0",
+        };
+
   let previous = 0;
   let previousRetention = 0;
   let previousGross = 0;
   let previousReleased = 0;
   return rows.map((row) => {
     const figures = computeCertificate(
-      contract, row, previous, previousRetention, previousGross, previousReleased,
+      termsFor(row), row, previous, previousRetention, previousGross, previousReleased,
     );
     if (row.status === "certified") {
       previous = figures.netToDate;
@@ -3155,6 +3176,18 @@ export async function certifyCertificate(
     );
   }
 
+  /**
+   * The terms this certificate is being signed under — 0092.
+   *
+   * Stamped in the SAME statement that issues it, so there is no instant at
+   * which a certified certificate has no snapshot and
+   * `project_certificates_snapshot_pair` would refuse the row.
+   */
+  const contract = await getContractById(tx, current.contractId);
+  if (!contract) {
+    throw new Error("That certificate's contract no longer exists.");
+  }
+
   const [row] = await tx
     .update(projectCertificates)
     .set({
@@ -3162,6 +3195,11 @@ export async function certifyCertificate(
       certifiedById: actor.id ?? null,
       certifiedByName: actor.name,
       certifiedAt: new Date(),
+      contractSumAtCertificate: contract.contractSum,
+      retentionPercentAtCertificate: contract.retentionPercent,
+      retentionCapPercentAtCertificate: contract.retentionCapPercent,
+      advanceAmountAtCertificate: contract.advanceAmount,
+      advanceRecoveryPercentAtCertificate: contract.advanceRecoveryPercent,
       lastModifiedById: actor.id ?? null,
       lastModifiedByName: actor.name,
       updatedAt: new Date(),

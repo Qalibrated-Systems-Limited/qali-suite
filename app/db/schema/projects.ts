@@ -1055,6 +1055,36 @@ export const projectCertificates = pgTable(
      */
     invoiceId: uuid("invoice_id"),
 
+    /**
+     * THE COMMERCIAL TERMS THIS CERTIFICATE WAS SIGNED UNDER — 0092.
+     *
+     * Written at CERTIFICATION, not at creation: a draft follows the live
+     * contract on purpose, so the terms can be corrected and the effect seen
+     * before anything is issued.
+     *
+     * Without them every certificate recomputed from the contract as it stands
+     * today, so raising retention from 0% to 10% next week silently restated
+     * an IPC issued last month — and the invoice already in the ledger did not
+     * move with it. Same idiom as `account_code_at_budget` and the timesheet
+     * rate snapshot: the figure a document was computed with belongs to the
+     * document.
+     *
+     * The CAP is nullable inside the snapshot. NULL there means uncapped,
+     * which is a value, so it cannot answer "is there a snapshot" —
+     * `project_certificates_snapshot_pair` asks that of the percentage.
+     */
+    contractSumAtCertificate: money("contract_sum_at_certificate"),
+    retentionPercentAtCertificate: numeric("retention_percent_at_certificate", {
+      precision: 5, scale: 2, mode: "string",
+    }),
+    retentionCapPercentAtCertificate: numeric("retention_cap_percent_at_certificate", {
+      precision: 5, scale: 2, mode: "string",
+    }),
+    advanceAmountAtCertificate: money("advance_amount_at_certificate"),
+    advanceRecoveryPercentAtCertificate: numeric("advance_recovery_percent_at_certificate", {
+      precision: 5, scale: 2, mode: "string",
+    }),
+
     certifiedById: text("certified_by_id").references(() => users.id, {
       onDelete: "set null",
     }),

@@ -545,6 +545,73 @@ suite("contracts and certificates", () => {
       expect(third.figures.netThisCertificate).toBe(-(held / 2));
     });
 
+    /**
+     * 0092. The failure was that a document already issued, signed and
+     * invoiced against changed its figures when somebody corrected a term.
+     */
+    it("keeps the terms an issued certificate was signed under", async () => {
+      const c = await newContract({ retentionPercent: "0", advanceAmount: "0" });
+      const cert = await newCertificate(c.id, { workDoneToDate: "5000000" });
+      await certify(cert.id);
+
+      const before = (await inA((tx) => repo.listCertificates(tx, c.id)))[0];
+      expect(before.figures.retentionHeld).toBe(0);
+      expect(before.figures.netToDate).toBe(5000000);
+
+      // A correction of an omission — an entirely reasonable thing to do.
+      await inA((tx) => repo.updateContract(tx, c.id, { retentionPercent: "10" }));
+
+      const after = (await inA((tx) => repo.listCertificates(tx, c.id)))[0];
+      expect(after.figures.retentionHeld).toBe(0);
+      expect(after.figures.netToDate).toBe(5000000);
+    });
+
+    it("lets a DRAFT follow the contract, which is what a draft is for", async () => {
+      const c = await newContract({ retentionPercent: "0", advanceAmount: "0" });
+      const draft = await newCertificate(c.id, { workDoneToDate: "5000000" });
+
+      await inA((tx) => repo.updateContract(tx, c.id, { retentionPercent: "10" }));
+
+      const rows = await inA((tx) => repo.listCertificates(tx, c.id));
+      const row = rows.find((r) => r.id === draft.id);
+      expect(row.figures.retentionHeld).toBe(500000);
+    });
+
+    it("computes each certificate on the terms in force when IT was signed", async () => {
+      const c = await newContract({ retentionPercent: "0", advanceAmount: "0" });
+      const one = await newCertificate(c.id, { workDoneToDate: "5000000" });
+      await certify(one.id);
+
+      await inA((tx) => repo.updateContract(tx, c.id, { retentionPercent: "10" }));
+
+      const two = await newCertificate(c.id, { workDoneToDate: "9000000" });
+      await certify(two.id);
+
+      const rows = await inA((tx) => repo.listCertificates(tx, c.id));
+      // IPC 1 holds nothing; IPC 2 holds 10% of its own gross. The chain
+      // carries on from IPC 1's net, not from a restated version of it.
+      expect(rows[0].figures.retentionHeld).toBe(0);
+      expect(rows[1].figures.retentionHeld).toBe(900000);
+      expect(rows[1].figures.previouslyCertified).toBe(5000000);
+      expect(rows[1].figures.netThisCertificate).toBe(9000000 - 900000 - 5000000);
+    });
+
+    it("refuses a snapshot edited on an issued certificate", async () => {
+      const c = await newContract({ retentionPercent: "10", advanceAmount: "0" });
+      const cert = await newCertificate(c.id, { workDoneToDate: "5000000" });
+      await certify(cert.id);
+
+      await expectRejection(
+        inA((tx) =>
+          tx.execute(sql`
+            UPDATE project_certificates
+               SET retention_percent_at_certificate = 0
+             WHERE id = ${cert.id}::uuid`),
+        ),
+        /has been issued|cannot be changed/i,
+      );
+    });
+
     it("does not let a DRAFT advance the chain", async () => {
       const c = await newContract();
       const one = await newCertificate(c.id, { workDoneToDate: "20000000" });

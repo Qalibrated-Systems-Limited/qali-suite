@@ -2920,3 +2920,78 @@ Also on that page: "Total project costs (paid)" has been the wrong label since
   parser contract), and the certificate suite rewritten where 0091 changed the
   rule: 56 across those two files.
 - `tsc --noEmit`, `eslint . --quiet` and `npm run build` clean.
+
+---
+
+## Handoff — 2026-09-07: a certificate keeps the terms it was signed under (0092)
+
+Found by answering "why do we fill the contract terms before the IPC", and the
+honest answer turned out to be worse than "because the arithmetic needs them".
+
+`listCertificates` recomputed EVERY certificate — certified ones included —
+from the contract as it stands today. `project_certificates_frozen` freezes the
+four figures somebody TYPED and says nothing about the retention percentage
+they are multiplied by, because that lives on the contract. And
+`saveProjectContract` has no guard against editing terms once certificates
+exist.
+
+So: certify IPC 1 for 5,000,000 with retention at 0%, raise the invoice, then
+correct retention to 10% next week — an entirely reasonable thing to do — and
+IPC 1 now reads retention 500,000, net 4,500,000. A document that was issued,
+signed and paid against had silently changed, and the invoice behind it had
+not. Everything downstream moved with it: the chain's `previouslyCertified`,
+"% of contract certified", retention outstanding, the advance position.
+
+Same class as a re-priced bill restating a final account, which 0076 froze for
+the same reason.
+
+### The fix is the idiom this schema already has
+
+The five commercial terms are SNAPSHOT onto the certificate when it is
+certified — `contract_sum`, `retention_percent`, `retention_cap_percent`,
+`advance_amount`, `advance_recovery_percent` — and an issued certificate is
+computed from its own snapshot. `account_code_at_budget` (0073),
+`supplier_name_at_bill`, the rate snapshot on `project_timesheets` (0089): the
+figure a document was computed with belongs to the document.
+
+**A DRAFT STILL FOLLOWS THE LIVE CONTRACT**, deliberately — that is what a draft
+is for. Enter the terms, look at what the certificate would be, correct the
+terms, look again. Only certifying fixes them.
+
+**The snapshot is frozen with everything else.** Without adding the five columns
+to `project_certificates_frozen` the hole reopens one level down: the terms
+could no longer drift from the contract, and could still be edited directly.
+
+### Two details worth keeping
+
+**The cap is nullable INSIDE the snapshot.** `retention_cap_percent` NULL means
+uncapped, which is a value — so it cannot answer "is there a snapshot".
+`project_certificates_snapshot_pair` asks that of the percentage instead, and
+the other three are tied to the same condition. A pair CHECK needs both columns
+or neither; the cap is neither.
+
+**Backfilling stamps today's terms** on every already-issued certificate. It is
+the only knowable answer — the contract carries no history of what its
+retention used to be, which is exactly the hole — and it changes no figure on
+the day it runs, because today's terms are what those certificates are being
+computed with right now. What it buys is that they cannot drift from here.
+
+### Verified
+
+- 92 migrations apply in order on dev and test.
+- 44 tests on the certificate suite, four of them new: an issued certificate
+  holding its figures through a terms change, a draft correctly following the
+  contract, two certificates each computed on the terms in force when IT was
+  signed, and the snapshot refused on an issued certificate.
+- 76 across variations, projects and project financials — no regression.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Still open on this module
+
+- **No guard on editing terms after certification**, and now it matters less —
+  a terms change no longer rewrites history, it only affects drafts and future
+  certificates, which is correct behaviour. A warning on the terms form when
+  certificates exist would still be kind.
+- Milestones, cash requisitions as a record, notice deadlines with a
+  notification, earned value, and any guard on closing a project with retention
+  outstanding. Unchanged from the previous handoff.
