@@ -216,6 +216,8 @@ export default function CertificateRegister({
   });
 
   const hasDraft = certificates.some((c) => c.status === "draft");
+  /** Issued, whether it still stands or was withdrawn — both keep a snapshot. */
+  const issuedCount = certificates.filter((c) => c.status !== "draft").length;
 
   function saveTerms() {
     startTransition(async () => {
@@ -421,6 +423,25 @@ export default function CertificateRegister({
             variations move the current ones from here, and both are shown on
             the contract card.
           </p>
+
+          {/*
+            Said where the edit happens, because "which certificates does this
+            move" is the first thing anybody changing a retention percentage
+            wants to know — and before 0092 the answer was "all of them,
+            including the ones you have already invoiced".
+          */}
+          {issuedCount > 0 && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm dark:border-amber-900/50 dark:bg-amber-950/30">
+              <Info className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+              <p className="text-amber-900 dark:text-amber-200">
+                {issuedCount} certificate{issuedCount === 1 ? " has" : "s have"} already
+                been issued against this contract.{" "}
+                {issuedCount === 1 ? "It keeps" : "They keep"} the terms{" "}
+                {issuedCount === 1 ? "it was" : "they were"} signed under — changes
+                here apply to the open draft and to future certificates only.
+              </p>
+            </div>
+          )}
 
           {/*
             PLACEHOLDERS SHOW WHAT A BLANK SAVES, NOT WHAT IT OUGHT TO BE.
