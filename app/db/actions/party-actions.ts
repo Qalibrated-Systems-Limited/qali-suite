@@ -2,9 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
 import { withAuthorizedTenant } from "../tenant";
+import { userMessage } from "../errors";
 import { PARTY_MANAGE_ROLES } from "@/lib/utils/role-gates";
 import * as partiesRepo from "../repositories/parties";
+import {
+  linkUserToPartyDirect,
+  unlinkUserFromPartyDirect,
+} from "../userAdmin";
 
 /**
  * Postgres-backed party actions — customers, suppliers and employees.
@@ -412,4 +418,215 @@ export async function searchParties(
     });
     return rows.map((r) => ({ ...r, _id: r.id }));
   });
+}
+
+// ── Linking a login to an employee party ────────────────────────────────────
+
+/**
+ * Which login is attached to this employee party, if any.
+ *
+ * THE LINK IS THE GRANT, not `parties.user_id`. That column is `uuid` and
+ * `users.id` is `text` — 0036 made it text deliberately ("every actor column
+ * and user_company_access.user_id already" hold it that way) — so
+ * `parties.user_id` CANNOT hold a user id, and nothing in the Postgres layer
+ * has ever written it. It is a leftover of the Mongo shape.
+ *
+ * `user_company_access.party_id` is the real seam, and the one sign-in and the
+ * invite flow already use (`linkUserToPartyDirect`, 0036). Its composite
+ * foreign key on (party_id, company_id) is what stops a grant pointing at
+ * another company's party.
+ */
+export async function getPartyLinkedUser(partyId: string) {
+  try {
+    return await withAuthorizedTenant([], async (tx) => {
+      const rows = (await tx.execute(sql`
+        SELECT u.id, u.name, u.email
+          FROM user_company_access a
+          JOIN users u ON u.id = a.user_id
+         WHERE a.party_id = ${partyId}::uuid
+         LIMIT 1
+      `)) as unknown as Array<Record<string, unknown>>;
+      if (!rows[0]) return null;
+      return {
+        _id: String(rows[0].id),
+        id: String(rows[0].id),
+        name: String(rows[0].name ?? ""),
+        email: String(rows[0].email ?? ""),
+      };
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Attach a login to an employee party.
+ *
+ * The Mongo original set `party.userId` on a MONGO party while every party
+ * screen reads Postgres — so the link appeared to save and the page it
+ * returned to showed the party still unlinked.
+ *
+ * The three refusals it made are kept, because each is a real confusion to
+ * prevent: the party must exist and be an employee, the login must exist in
+ * this company, and neither may already be spoken for.
+ */
+export async function linkUserToParty(
+  _prevState: unknown,
+  formData: FormData,
+): Promise<{ success: boolean; message?: string; errors?: Record<string, string[]> }> {
+  const partyId = String(formData.get("partyId") ?? "").trim();
+  const userId = String(formData.get("userId") ?? "").trim();
+
+  const errors: Record<string, string[]> = {};
+  if (!partyId) errors.partyId = ["Party ID is required"];
+  if (!userId) errors.userId = ["User ID is required"];
+  if (Object.keys(errors).length) return { success: false, errors };
+
+  try {
+    return await withAuthorizedTenant(
+      [...PARTY_MANAGE_ROLES],
+      async (tx, { companyId }) => {
+        const [party] = (await tx.execute(sql`
+          SELECT id, name, primary_type, is_employee
+            FROM parties WHERE id = ${partyId}::uuid
+        `)) as unknown as Array<Record<string, unknown>>;
+        if (!party) {
+          return { success: false, errors: { _form: ["Party not found"] } };
+        }
+        if (party.primary_type !== "employee" && party.is_employee !== true) {
+          return {
+            success: false,
+            errors: { _form: ["Party must be of type 'employee'"] },
+          };
+        }
+
+        /*
+         * The login has to hold a grant IN THIS COMPANY. A user row alone is
+         * not enough — `users` has no company column, and membership is the
+         * grant (0036). Without this check the update below would match no
+         * rows and report success.
+         */
+        const [grant] = (await tx.execute(sql`
+          SELECT a.id, a.party_id::text AS party_id, u.name
+            FROM user_company_access a
+            JOIN users u ON u.id = a.user_id
+           WHERE a.user_id = ${userId}
+             AND a.company_id = ${companyId}::uuid
+        `)) as unknown as Array<Record<string, unknown>>;
+        if (!grant) {
+          return { success: false, errors: { _form: ["User not found"] } };
+        }
+
+        const [takenByOther] = (await tx.execute(sql`
+          SELECT u.name
+            FROM user_company_access a
+            JOIN users u ON u.id = a.user_id
+           WHERE a.party_id = ${partyId}::uuid
+             AND a.user_id <> ${userId}
+           LIMIT 1
+        `)) as unknown as Array<Record<string, unknown>>;
+        if (takenByOther) {
+          return {
+            success: false,
+            errors: {
+              _form: [
+                `This employee is already linked to ${takenByOther.name}.`,
+              ],
+            },
+          };
+        }
+
+        if (grant.party_id && String(grant.party_id) !== partyId) {
+          const [other] = (await tx.execute(sql`
+            SELECT name FROM parties WHERE id = ${String(grant.party_id)}::uuid
+          `)) as unknown as Array<Record<string, unknown>>;
+          return {
+            success: false,
+            errors: {
+              _form: [
+                `User is already linked to employee party: ${other?.name ?? "another party"}`,
+              ],
+            },
+          };
+        }
+
+        /*
+         * THE WRITE IS PRIVILEGED, AND HAS TO BE. `user_company_access` lets a
+         * person write their OWN grant (0033's `own_grants`) and only READ a
+         * colleague's (0037's `visible_within_company`, which is FOR SELECT).
+         * An administrator linking somebody else is precisely the case those
+         * policies decline — so on the tenant connection the UPDATE matches
+         * zero rows and reports success. A test caught exactly that.
+         *
+         * Every check above ran inside the tenant scope, under RLS, so what is
+         * handed to the privileged write has already been proved to belong to
+         * this company. `linkUserToPartyDirect` also sets `employees.user_id`,
+         * which the Mongo original never did: without it the person signs in
+         * and is told they have no employee record — no leave, no payslips,
+         * nowhere to clock in.
+         */
+        await linkUserToPartyDirect({ userId, companyId, partyId });
+
+        revalidatePath("/dashboard/parties");
+        revalidatePath(`/dashboard/parties/${partyId}`);
+        return {
+          success: true,
+          message: `User ${grant.name} successfully linked to ${party.name}`,
+        };
+      },
+    );
+  } catch (error) {
+    return {
+      success: false,
+      errors: { _form: [userMessage(error, "Failed to link user to party")] },
+    };
+  }
+}
+
+/** Detach whichever login is on this party, and its employment record with it. */
+export async function unlinkUserFromParty(
+  partyId: string,
+): Promise<{ success: boolean; message?: string; errors?: Record<string, string[]> }> {
+  if (!partyId) {
+    return { success: false, errors: { _form: ["Party not found"] } };
+  }
+  try {
+    return await withAuthorizedTenant(
+      [...PARTY_MANAGE_ROLES],
+      async (tx, { companyId }) => {
+        /*
+         * Confirm INSIDE the tenant scope that this party is ours and that
+         * something is actually linked — RLS is what makes that a real check —
+         * and only then let the privileged write clear it. Same reasoning as
+         * the link above: an administrator clearing a colleague's grant is a
+         * write `own_grants` and `visible_within_company` decline.
+         */
+        const [linked] = (await tx.execute(sql`
+          SELECT a.user_id
+            FROM user_company_access a
+            JOIN parties p ON p.id = a.party_id
+           WHERE a.party_id = ${partyId}::uuid
+           LIMIT 1
+        `)) as unknown as Array<Record<string, unknown>>;
+
+        if (!linked) {
+          return {
+            success: false,
+            errors: { _form: ["No user linked to this party"] },
+          };
+        }
+
+        await unlinkUserFromPartyDirect({ companyId, partyId });
+
+        revalidatePath("/dashboard/parties");
+        revalidatePath(`/dashboard/parties/${partyId}`);
+        return { success: true, message: "User unlinked successfully" };
+      },
+    );
+  } catch (error) {
+    return {
+      success: false,
+      errors: { _form: [userMessage(error, "Failed to unlink user")] },
+    };
+  }
 }

@@ -694,6 +694,13 @@
       "when": 1787049182566,
       "tag": "0098_the_order_between_the_quote_and_the_bill",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1787049183566,
+      "tag": "0099_the_history_of_a_subscription",
+      "breakpoints": true
     }
   ]
 }

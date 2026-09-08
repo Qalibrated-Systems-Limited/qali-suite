@@ -1,16 +1,39 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import dbConnect from "@/app/config/dbConnect";
-import { getCompanySubscription } from "@/app/db/platform";
-import User from "@/app/models/user";
-import SubscriptionAuditLog from "@/app/models/SubscriptionAuditLog";
+import {
+  getCompanySubscription,
+  countActiveUsersForCompany,
+  listSubscriptionAudit,
+} from "@/app/db/platform";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { updateSubscription } from "@/lib/subscription-helpers";
 import { PLAN_LIMITS } from "@/lib/plans";
 import { invalidatePlanCache } from "@/lib/plans-server";
 import { addMonths } from "@/lib/dates";
 
+/*
+ * MOVED HERE FROM app/mongodb/actions/ (0099), and two of its three Mongo
+ * dependencies were bugs rather than dependencies.
+ *
+ * THE SEAT CHECK COUNTED THE WRONG STORE. `User.countDocuments(...)` read the
+ * MONGO users collection, which nothing has written since users moved:
+ * `app/mongodb/user-actions.js` has no importer and every screen creates users
+ * through `createUserPg`. So the count came back 0 or stale, and the guard that
+ * stops a fifty-seat company being downgraded onto a three-seat plan passed
+ * everything. It reads Postgres now.
+ *
+ * THE AUDIT LOG was the last Mongo collection here, and 0099 moved it.
+ *
+ * The subscription STATE was already Postgres — `getCompanySubscription` and
+ * `updateSubscription` have written there since 0035. What remains Mongo in
+ * this flow is one deliberate mirror in `lib/subscription-helpers.js`, which
+ * keeps `Company.subscription.*` in step for the SuperAdmin dashboard's Mongo
+ * aggregations, and says so.
+ *
+ * `dbConnect()` is gone from every function: nothing here opens a Mongo
+ * connection any more, and calling it would connect for nothing.
+ */
 function requireSuperAdmin(user) {
   if (user.role !== "SuperAdmin") {
     throw new Error("Only SuperAdmin can manage subscriptions");
@@ -19,7 +42,6 @@ function requireSuperAdmin(user) {
 
 export async function updateCompanyPlan(_prevState, formData) {
   try {
-    await dbConnect();
     const { user } = await getTenantContext();
     requireSuperAdmin(user);
 
@@ -52,10 +74,7 @@ export async function updateCompanyPlan(_prevState, formData) {
 
     // Seat-count check on downgrade
     if (planConfig.maxUsers !== -1) {
-      const activeUsers = await User.countDocuments({
-        companyId,
-        status: { $ne: "Inactive" },
-      });
+      const activeUsers = await countActiveUsersForCompany(String(companyId));
       if (activeUsers > planConfig.maxUsers && !force) {
         return {
           success: false,
@@ -126,7 +145,6 @@ export async function updateCompanyPlan(_prevState, formData) {
  */
 export async function renewSubscription(_prevState, formData) {
   try {
-    await dbConnect();
     const { user } = await getTenantContext();
     requireSuperAdmin(user);
 
@@ -178,7 +196,6 @@ export async function renewSubscription(_prevState, formData) {
 
 export async function updateCompanyStatus(_prevState, formData) {
   try {
-    await dbConnect();
     const { user } = await getTenantContext();
     requireSuperAdmin(user);
 
@@ -207,7 +224,6 @@ export async function updateCompanyStatus(_prevState, formData) {
 
 export async function extendTrial(_prevState, formData) {
   try {
-    await dbConnect();
     const { user } = await getTenantContext();
     requireSuperAdmin(user);
 
@@ -259,7 +275,6 @@ export async function extendTrial(_prevState, formData) {
  */
 export async function cancelSubscription(_prevState, formData) {
   try {
-    await dbConnect();
     const { user } = await getTenantContext();
     requireSuperAdmin(user);
 
@@ -299,16 +314,11 @@ export async function cancelSubscription(_prevState, formData) {
 
 export async function getSubscriptionAuditLog(companyId) {
   try {
-    await dbConnect();
     const { user } = await getTenantContext();
     requireSuperAdmin(user);
-
-    const logs = await SubscriptionAuditLog.find({ companyId })
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .lean();
-
-    return JSON.parse(JSON.stringify(logs));
+    // Already plain objects with ISO strings — no JSON round-trip needed to
+    // get them across the server/client boundary.
+    return await listSubscriptionAudit(String(companyId), 50);
   } catch (error) {
     console.error("[getSubscriptionAuditLog]:", error.message);
     return [];

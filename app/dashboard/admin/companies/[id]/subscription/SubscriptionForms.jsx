@@ -19,7 +19,7 @@ import {
   extendTrial,
   renewSubscription,
   cancelSubscription,
-} from "@/app/mongodb/actions/subscription-actions";
+} from "@/app/db/actions/subscription-actions";
 import { DEFAULT_PLANS } from "@/lib/plans";
 
 function planLabel(p) {

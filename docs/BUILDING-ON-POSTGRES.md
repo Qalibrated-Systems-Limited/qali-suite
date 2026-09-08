@@ -3744,3 +3744,146 @@ components 2  approvals 2  parties 1  company 1  adjustments 1
 banking (8) stays on Mongo by decision, `employee` (4) is unreachable, and
 `adjustments`'s single hit is a FALSE POSITIVE. The real remaining surface is
 about **19 screens**, of which integrations is half.
+
+---
+
+## Handoff — 2026-09-08 (2): the small modules, and what the count was hiding
+
+Four pieces: the dead technician dashboard deleted, the subscription history
+moved (0099), the seat check pointed at the right store, and the link-user
+screens ported. **Mongo screens: 32 → 25.**
+
+### The counting grep has been missing a file
+
+`grep -rln "@/app/mongodb" app/dashboard --include="*.jsx" --include="*.tsx"`
+does not look at `.js`, and `app/dashboard/parties/components/PartyDetails.js`
+is one. So the count has been ONE LOW throughout — 33, not 32, before this
+session's second half. The count below includes `--include="*.js"` and
+`--include="*.ts"`; there is exactly one `.js` hit and no `.ts` ones, so this
+is the whole of the correction.
+
+### The dead technician dashboard is gone
+
+Five components under `app/dashboard/employee/`, no page, no importer, and a
+243-line `tech-dashboard-queries.js` behind them — 1,166 lines that no user
+could reach. Every export was checked individually for references before
+deleting. The live employee dashboard is
+`app/dashboard/components/EmployeeDashborad.tsx` and was already on Postgres.
+
+### 0099 — the history of a subscription
+
+`lib/subscription-helpers.js` had carried a note since 0035: "The subscription
+state lives in Postgres since 0035. The audit LOG is still a Mongo
+collection … Moving SubscriptionAuditLog is its own migration." This is it.
+
+- A PLATFORM table, read on `privilegedDb` alongside the rest of
+  `app/db/platform.ts`, because a SuperAdmin looking at one company's billing
+  history is a cross-tenant read by definition.
+- `previous` and `updated` are twelve COLUMNS rather than two `jsonb` blobs:
+  the screen reads six of them by name, and "every company downgraded off
+  enterprise last quarter" is a WHERE clause on a column.
+- One row per change, which Mongo already did and which is what makes "when
+  did the plan change" answerable.
+
+**And a grant discovery worth carrying:** 0023 set `ALTER DEFAULT PRIVILEGES …
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user`, so **every table
+created since arrives fully writable** and the explicit `GRANT … TO app_user`
+line at the bottom of each later migration — 0096's, 0097's, 0098's — is a
+no-op restating what already happened. 0099 wanted SELECT only, so it REVOKEs
+first; without that the grant line would have read as a restriction and been
+none. Verified on a database built from zero: 19 columns, 3 constraints, RLS
+forced, `app_user=[SELECT]`, identical to dev and test.
+
+### The seat check was counting a store nothing writes
+
+`updateCompanyPlan` asked `User.countDocuments({ companyId, status: { $ne:
+"Inactive" } })` — the MONGO users collection. `app/mongodb/user-actions.js`
+has no importer and every screen creates users through `createUserPg`, so the
+count came back 0 or stale, `activeUsers > planConfig.maxUsers` was never true,
+and **the guard against downgrading a fifty-seat company onto a three-seat plan
+passed everything.**
+
+Two decisions in the replacement:
+
+- **A seat is a GRANT, not a `home_company_id`.** `users` has no company
+  column; 0036's own comment says "keyed through the grants, so 'who is in this
+  company' has exactly one answer and it is the same rows the tenant gate
+  reads". A seat limit that disagreed with `/dashboard/users` would be
+  indefensible to whoever hit it, and a test asserts the two numbers match.
+- **Platform staff are not seats.** 0064 established `granted_via =
+  'superadmin'` as standing access rather than membership. Counting it would
+  bill a customer for every support visit — and where `grantAllTenants` tops up
+  standing access for every tenant, bill every customer for every operator.
+
+### Linking a login to an employee, and the column that cannot hold one
+
+The Mongo action set `party.userId` on a MONGO party while every party screen
+reads Postgres, and the picker it chose from read the Mongo `users` collection,
+which stopped being written when auth ported — so it had been **empty for every
+tenant**. A Postgres `getUsers` written for exactly this problem in 0070 was
+already sitting unused two files away.
+
+**`parties.user_id` is `uuid` and `users.id` is `text`.** 0036 made the id text
+deliberately. So that column CANNOT hold a user id, nothing in the Postgres
+layer has ever written it, and the one place that reads it carries a stale
+comment saying "users are not ported". The real link is
+`user_company_access.party_id`, which sign-in and the invite flow already use.
+`parties.user_id` is now dead weight and could be dropped in a later migration.
+
+**RLS caught the first implementation.** The write ran on the tenant
+connection, where `user_company_access` lets a person write their OWN grant
+(0033's `own_grants`) and only READ a colleague's (0037's
+`visible_within_company`, `FOR SELECT`). An administrator linking somebody else
+is exactly what those decline, so the UPDATE matched zero rows and returned
+success. The checks stay inside the tenant scope, under RLS, and only the write
+goes through `linkUserToPartyDirect` / the new `unlinkUserFromPartyDirect` —
+which also set `employees.user_id`, something the Mongo original never did.
+Without it the person signs in and is told they have no employee record.
+
+### Verified
+
+- 18 tests in `tests/pg-subscription-audit.test.mjs`, 14 in
+  `tests/pg-link-user-party.test.mjs`.
+- 190 more across platform, provisioning, user admin, real-session, api-key
+  tenancy, parties, employees, invites, picker ids and global search.
+- 99 migrations apply on dev, on test, and on a database built from zero, the
+  three agreeing constraint-for-constraint.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Where the port stands
+
+**25 screens, 7 modules** — counted with `.js` and `.ts` included this time:
+
+```
+integrations 10  banking 8  components 2  approvals 2
+company 1  admin 1  adjustments 1
+```
+
+- **banking (8)** stays on Mongo by decision.
+- **adjustments (1)** is a FALSE POSITIVE — a historical comment.
+- **components (2)** is `AccountantDashboard` (reads bank-feed-queries, so it
+  moves with banking) and `AlertsStrip` (reads approval-queries, so it moves
+  with approvals).
+- **admin (1)** is `ResetTransactionsCard`, and it should STAY: it deliberately
+  resets BOTH stores and reads the Mongo db handle to do it. It is correct
+  until Mongo is gone entirely.
+
+So the real remaining surface is about **14 screens**: integrations (10) and
+approvals (2 + AlertsStrip).
+
+### Next, and one warning about each
+
+**approvals** is not the small job the count suggests: 1,282 lines across
+`approval-actions.js`, `approval-queries.js`, `pending-approvals-queries.js`
+and the model, with NO Postgres table — it needs a migration and is CRM-sized.
+`docs/APPROVALS-PLAN.md` also records that only 3 of 6 enum types are wired, so
+the port is a chance to close that or a chance to carry it over deliberately.
+
+**company (1)** is `companyForm`, and it is not one screen's worth of work
+either: `createCompany` is ~300 lines calling `CompanyOnboardingService`, and
+it is the TENANT ONBOARDING path — the from-scratch path that everything else
+depends on being right. Worth its own session with the scratch-database
+comparison run before and after.
+
+**integrations (10)** is the largest block and holds the last genuine ledger
+seam, the weighbridge connector at `integration-actions.js:467`.

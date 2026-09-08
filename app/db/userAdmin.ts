@@ -648,3 +648,38 @@ export async function updateOwnProfile(
      WHERE id = ${String(userId)}
   `);
 }
+
+/**
+ * Detach whichever login is on a party, and its employment record with it.
+ *
+ * The mirror of `linkUserToPartyDirect`, and privileged for the same reason it
+ * is: `user_company_access` lets a person write their OWN grant (0033's
+ * `own_grants`) and only READ a colleague's (0037's `visible_within_company`,
+ * which is `FOR SELECT`). An administrator unlinking somebody else is exactly
+ * the case those two policies decline, so the write cannot run on the tenant
+ * connection — it would match zero rows and report success.
+ *
+ * The CALLER is responsible for having checked, inside the tenant scope, that
+ * this party belongs to the company it is acting in. That check is what makes
+ * the privileged write safe; this function does not repeat it.
+ */
+export async function unlinkUserFromPartyDirect(input: {
+  companyId: string;
+  partyId: string;
+}) {
+  const cleared = (await privilegedDb().execute(sql`
+    UPDATE user_company_access
+       SET party_id = NULL, updated_at = now()
+     WHERE party_id = ${input.partyId}::uuid
+       AND company_id = ${input.companyId}::uuid
+    RETURNING user_id
+  `)) as unknown as Array<{ user_id: string }>;
+
+  await privilegedDb().execute(sql`
+    UPDATE employees SET user_id = NULL, updated_at = now()
+     WHERE party_id = ${input.partyId}::uuid
+       AND company_id = ${input.companyId}::uuid
+  `);
+
+  return { cleared: cleared.length, userIds: cleared.map((r) => r.user_id) };
+}

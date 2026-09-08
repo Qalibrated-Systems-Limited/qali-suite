@@ -647,3 +647,190 @@ export async function updateCompanySubscription(
 export async function getCompanyForDocuments(idOrSourceId: string) {
   return getCompanyRecord(idOrSourceId);
 }
+
+/**
+ * Resolve a company id that may be a uuid or a pre-migration ObjectId.
+ *
+ * The admin routes still carry the old id — `/dashboard/admin/companies/[id]`
+ * — so every function on this surface has to accept both. Factored out of the
+ * copies that were doing it inline.
+ */
+async function companyUuidFromEither(idOrSourceId: string) {
+  const key = String(idOrSourceId ?? "").trim();
+  if (!key) return null;
+  const looksUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
+
+  const rows = (await privilegedDb().execute(sql`
+    SELECT c.id
+      FROM companies c
+      LEFT JOIN _migration_id_map m
+        ON m.new_uuid = c.id AND m.collection = 'companies'
+     WHERE ${looksUuid ? sql`c.id = ${key}::uuid` : sql`m.old_object_id = ${key}`}
+     LIMIT 1
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows[0] ? String(rows[0].id) : null;
+}
+
+/**
+ * Active seats in one company — the number a downgrade is checked against.
+ *
+ * THE SEAT CHECK WAS COUNTING THE WRONG STORE. `updateCompanyPlan` asked
+ * `User.countDocuments({ companyId, status: { $ne: "Inactive" } })` — the
+ * MONGO users collection, which nothing has written since users moved:
+ * `app/mongodb/user-actions.js` has no importer and every screen goes through
+ * `createUserPg`. So the count came back 0 or stale, `activeUsers >
+ * planConfig.maxUsers` was never true, and the guard that exists to stop a
+ * fifty-seat company being downgraded onto a three-seat plan silently passed
+ * everything.
+ *
+ * WHO COUNTS AS A SEAT is the same question /dashboard/users answers, and it is
+ * answered the same way — through the GRANTS, not through `home_company_id`.
+ * `users` has no company column at all: 0036's own comment says "keyed through
+ * the grants, so 'who is in this company' has exactly one answer and it is the
+ * same rows the tenant gate reads". A seat limit that disagreed with the user
+ * list would be indefensible to whoever hit it.
+ *
+ * PLATFORM STAFF ARE NOT SEATS. 0064 established that a SuperAdmin's standing
+ * access is `granted_via = 'superadmin'` and is not membership — "the member
+ * list answers 'who works here', and a platform operator does not". Counting
+ * them would bill a customer for every support visit, and on a deployment
+ * where `grantAllTenants` tops up standing access for every tenant, it would
+ * bill every customer for every operator.
+ *
+ * Cross-tenant by necessity: a SuperAdmin is changing another company's plan,
+ * so this runs on the privileged connection like the rest of this module.
+ */
+export async function countActiveUsersForCompany(idOrSourceId: string) {
+  const companyId = await companyUuidFromEither(idOrSourceId);
+  if (!companyId) return 0;
+
+  const [row] = (await privilegedDb().execute(sql`
+    SELECT COUNT(DISTINCT u.id)::int AS n
+      FROM users u
+      JOIN user_company_access a
+        ON a.user_id = u.id
+       AND a.company_id = ${companyId}::uuid
+       AND a.status = 'active'
+       AND a.granted_via IS DISTINCT FROM 'superadmin'
+     WHERE u.status <> 'inactive'
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return Number(row?.n ?? 0);
+}
+
+export interface SubscriptionAuditEntry {
+  action: string;
+  previous?: Record<string, unknown> | null;
+  updated?: Record<string, unknown> | null;
+  changedBy?: { id?: string | null; name?: string | null } | null;
+  reason?: string | null;
+}
+
+const auditDate = (v: unknown) =>
+  v === undefined || v === null
+    ? null
+    : (v instanceof Date ? v : new Date(String(v))).toISOString();
+
+const auditInt = (v: unknown) =>
+  v === undefined || v === null || v === "" ? null : Number(v);
+
+/**
+ * Record what changed about a company's subscription, one row per change.
+ *
+ * `lib/subscription-helpers.js` wrote this to a MONGO collection while the
+ * state it describes moved to Postgres in 0035, and its own comment said
+ * moving it was its own migration. That is 0099.
+ */
+export async function recordSubscriptionAudit(
+  idOrSourceId: string,
+  entries: SubscriptionAuditEntry[],
+) {
+  if (!entries.length) return { written: 0 };
+  const companyId = await companyUuidFromEither(idOrSourceId);
+  if (!companyId) return { written: 0 };
+
+  let written = 0;
+  for (const e of entries) {
+    const p = e.previous ?? {};
+    const u = e.updated ?? {};
+    await privilegedDb().execute(sql`
+      INSERT INTO subscription_audit_log (
+        company_id, action,
+        previous_plan, previous_status, previous_max_users,
+        previous_trial_ends_at, previous_period_start, previous_period_end,
+        updated_plan, updated_status, updated_max_users,
+        updated_trial_ends_at, updated_period_start, updated_period_end,
+        changed_by_id, changed_by_name, reason
+      ) VALUES (
+        ${companyId}::uuid, ${e.action}::subscription_audit_action,
+        ${(p.plan as string) ?? null}, ${(p.status as string) ?? null},
+        ${auditInt(p.maxUsers)},
+        ${auditDate(p.trialEndsAt)}::timestamptz,
+        ${auditDate(p.currentPeriodStart)}::timestamptz,
+        ${auditDate(p.currentPeriodEnd)}::timestamptz,
+        ${(u.plan as string) ?? null}, ${(u.status as string) ?? null},
+        ${auditInt(u.maxUsers)},
+        ${auditDate(u.trialEndsAt)}::timestamptz,
+        ${auditDate(u.currentPeriodStart)}::timestamptz,
+        ${auditDate(u.currentPeriodEnd)}::timestamptz,
+        ${e.changedBy?.id ?? null}, ${e.changedBy?.name ?? "System"},
+        ${e.reason ?? null}
+      )
+    `);
+    written++;
+  }
+
+  return { written };
+}
+
+/**
+ * A company's subscription history, newest first.
+ *
+ * Shaped to the screen — `_id`, `previous.plan`, `changedBy.name` — so the
+ * admin page moves over by changing an import path.
+ */
+export async function listSubscriptionAudit(
+  idOrSourceId: string,
+  limit = 50,
+) {
+  const companyId = await companyUuidFromEither(idOrSourceId);
+  if (!companyId) return [];
+
+  const rows = (await privilegedDb().execute(sql`
+    SELECT * FROM subscription_audit_log
+     WHERE company_id = ${companyId}::uuid
+     ORDER BY created_at DESC
+     LIMIT ${Math.min(Math.max(limit, 1), 200)}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const side = (r: Record<string, unknown>, prefix: "previous" | "updated") => ({
+    plan: (r[`${prefix}_plan`] as string) ?? null,
+    status: (r[`${prefix}_status`] as string) ?? null,
+    maxUsers:
+      r[`${prefix}_max_users`] == null ? null : Number(r[`${prefix}_max_users`]),
+    trialEndsAt: r[`${prefix}_trial_ends_at`]
+      ? String(r[`${prefix}_trial_ends_at`])
+      : null,
+    currentPeriodStart: r[`${prefix}_period_start`]
+      ? String(r[`${prefix}_period_start`])
+      : null,
+    currentPeriodEnd: r[`${prefix}_period_end`]
+      ? String(r[`${prefix}_period_end`])
+      : null,
+  });
+
+  return rows.map((r) => ({
+    _id: String(r.id),
+    action: String(r.action),
+    previous: side(r, "previous"),
+    updated: side(r, "updated"),
+    changedBy: {
+      id: (r.changed_by_id as string) ?? null,
+      name: (r.changed_by_name as string) ?? "System",
+    },
+    reason: (r.reason as string) ?? null,
+    createdAt: String(r.created_at),
+  }));
+}
