@@ -15,11 +15,36 @@ import { pgArray } from "./pgArray";
  * be reached from inside its own scope, and a reset spans every tenant table.
  */
 
-/** The tenant's Postgres uuid, or null if it was never provisioned. */
+/**
+ * The tenant's Postgres uuid, from either id form.
+ *
+ * IT ONLY READ THE MAP, and that silently broke the caller. `syncCompanyRecord`
+ * returns `{ synced: false }` when this is null — no error, nothing written —
+ * so passing it the TENANT UUID, which is what the session carries since the
+ * auth cutover and what `provisionCompany` returns, dropped the entire company
+ * form on the floor: branding, tax, bank and settings all discarded while the
+ * form said it had saved. Caught by a test asserting a `code` came back.
+ *
+ * A live uuid resolves to itself; anything else is looked up in the map, which
+ * is the same order `resolveCompanyUuid` and `getCompanyRecord` use.
+ */
 async function companyUuidFor(sourceCompanyId: string) {
+  const key = String(sourceCompanyId ?? "").trim();
+  if (!key) return null;
+
+  const looksUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
+
+  if (looksUuid) {
+    const live = (await privilegedDb().execute(sql`
+      SELECT id FROM companies WHERE id = ${key}::uuid
+    `)) as unknown as Array<{ id: string }>;
+    if (live.length) return live[0].id;
+  }
+
   const rows = (await privilegedDb().execute(sql`
     SELECT new_uuid FROM _migration_id_map
-     WHERE collection = 'companies' AND old_object_id = ${String(sourceCompanyId)}
+     WHERE collection = 'companies' AND old_object_id = ${key}
   `)) as unknown as Array<{ new_uuid: string }>;
   return rows.length ? rows[0].new_uuid : null;
 }

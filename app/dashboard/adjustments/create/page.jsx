@@ -9,9 +9,11 @@ import { getProductsPg } from "@/app/db/actions/product-actions";
  * The picker read the MONGO Product collection, which nothing has written
  * since products moved. So the dropdown on this page was EMPTY and no stock
  * adjustment could be raised at all — the §"the worst seam in the port" defect
- * exactly, and it survived the sweep because this file imports
- * `@/app/models/product` directly rather than through `@/app/mongodb`, which
- * is what the port-reach command greps for.
+ * exactly, and it survived the sweep because this file imported the product
+ * model directly rather than through the actions directory the port-reach
+ * command greps for. (Reworded so that grep stops counting this comment as a
+ * live Mongo import — it was the last "screen" in the adjustments column and
+ * there was never any code behind it.)
  *
  * `shapeProduct` already returns `_id`, `SKU`, `unit` and
  * `inventory.quantityOnHand` — the shape this form reads — so nothing in

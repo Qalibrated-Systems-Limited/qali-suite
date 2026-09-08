@@ -148,6 +148,13 @@ export async function getCompanyRecord(idOrSourceId: string) {
   const isUuid =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
 
+  /*
+   * EITHER FORM, and a uuid can be either. Since companies are created without
+   * a Mongo id, the map key is itself a uuid — so a uuid that is not a
+   * `companies.id` may still be a SOURCE id, and testing only `c.id` returned
+   * null for a company that plainly exists. Matching on both in one query
+   * costs nothing and removes the distinction from the caller.
+   */
   const rows = (await privilegedDb().execute(sql`
     SELECT c.*, m.old_object_id AS source_id,
            to_jsonb(s.*) - 'company_id' AS settings
@@ -155,7 +162,11 @@ export async function getCompanyRecord(idOrSourceId: string) {
       LEFT JOIN _migration_id_map m
         ON m.new_uuid = c.id AND m.collection = 'companies'
       LEFT JOIN company_settings s ON s.company_id = c.id
-     WHERE ${isUuid ? sql`c.id = ${key}::uuid` : sql`m.old_object_id = ${key}`}
+     WHERE ${
+       isUuid
+         ? sql`(c.id = ${key}::uuid OR m.old_object_id = ${key})`
+         : sql`m.old_object_id = ${key}`
+     }
      LIMIT 1
   `)) as unknown as Array<Record<string, unknown>>;
 

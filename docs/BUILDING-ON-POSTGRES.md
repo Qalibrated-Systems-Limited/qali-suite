@@ -4212,3 +4212,106 @@ nothing else — noisy but harmless.
 - 101 migrations apply on dev, on test, and on a database built from zero, the
   three agreeing on 28 columns, 9 constraints and 7 indexes.
 - `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+---
+
+## Handoff — 2026-09-08 (5): the last three screens
+
+Confirmed while this was in progress: **Mongo will not run in production.** Pure
+Postgres. That changes one of these three from "should stay" to "must move".
+
+**Mongo screens: 13 → 10.** Everything left is `integrations`.
+
+### `adjustments` was never a screen
+
+A historical comment describing a fix already made, which happened to contain
+the literal string the counting grep matches. Reworded so the count stops
+lying. There was never any code behind it.
+
+### `ResetTransactionsCard` could not stay after all
+
+The previous handoff said it *should* stay, because it deliberately resets BOTH
+stores and needs the Mongo handle to do it. With Mongo out of the deployment
+that stops being a virtue: `resetCompanyData(mongoose.connection.db, …)` cannot
+run at all. The Mongo half is gone and `resetCompanyBooks` is the whole of it.
+
+The typed confirmation stays, and stays SERVER-ENFORCED — the exact company
+name, checked in the action rather than trusted from the dialog.
+
+### `createCompany` was a dual write where Postgres already did the work
+
+```
+Company.create()                      MONGO document          ← gone
+seedChartOfAccounts()                 MONGO chart             ← gone
+initializeFiscalPeriods()             MONGO periods           ← gone
+provisionCompany()                    POSTGRES tenant, chart, periods,
+                                      settings row, owner grant
+syncCompanyRecord()                   POSTGRES branding/tax/bank/settings
+createUserFromInvite() + createInvite POSTGRES admin login and grant
+```
+
+Three steps come out and nothing else changes. What they were FOR was the id:
+`provisionCompany` keys `_migration_id_map` on a source id, and that source id
+was the Mongo `_id`. A minted uuid takes its place, and the tenant uuid
+provisioning returns is what everything downstream uses — because
+`resolveCompanyUuid` short-circuits on a uuid naming a live company: "since the
+auth cutover the session carries the Postgres uuid directly".
+
+Provisioning itself is **not touched**. Its advisory lock, its RLS ordering,
+its settings row and its SuperAdmin fan-out are the parts that make a tenant
+correct, and 16 tests now pin them.
+
+### Two resolvers that could not accept the id that is now primary
+
+Both found by tests, and the first was a silent data-loss bug in this change:
+
+**`companyUuidFor` only read the map.** `syncCompanyRecord` returns
+`{ synced: false }` when it gets null — no error, nothing written — so passing
+it the TENANT UUID dropped the entire company form on the floor: branding, tax,
+bank and settings discarded while the form said it had saved. A test asserting
+a `code` came back caught it. It resolves a live uuid to itself now, then falls
+back to the map, which is the order `resolveCompanyUuid` already used.
+
+**`getCompanyRecord` tested `c.id` OR the map, never both.** Now that a source
+id is itself a uuid, a uuid that is not a `companies.id` may still be a valid
+source id — and the query returned null for a company that plainly exists.
+
+### And two wrong signatures that `as never` was hiding
+
+An earlier draft cast the invite calls with `as never`. Both were wrong —
+`createInvite` takes `token` and `expiresAt`, not a `tokenHash`, and
+`sendInviteEmail` takes `inviterName`, `role` and `rawToken`. **Both compiled,
+and neither would have worked**: a new company's administrator would never have
+received an invitation, and the failure would have surfaced as "admin setup
+failed" long after the company was created. The casts are gone and the record
+is typed as `CompanyRecordChanges` so the compiler checks it.
+
+The form schemas moved to `lib/company-form.js` so the Postgres actions can
+validate the same form without importing a module that pulls in mongoose.
+Nothing in them changed.
+
+### Verified
+
+- 16 tests in `tests/pg-company-onboarding.test.mjs` — a new company's chart,
+  its wired ltree paths, its twelve fiscal periods with one open, its settings
+  row, its owner grant, both id forms, idempotence, a three-way provisioning
+  race, and per-company document numbering.
+- 115 more across provisioning, platform actions, thresholds, the subscription
+  audit, invites, real sessions and tenant id translation — every suite that
+  touches company resolution.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Where the port stands
+
+**10 screens, one module: `integrations`.**
+
+```
+api keys (3)  webhooks (3)  weighbridge (2)  logs (1)  overview (1)
+```
+
+It also holds the last screen-reachable Mongo ledger posting — the weighbridge
+connector at `integration-actions.js:467` — and the `/api/v1` surface that goes
+with it. The user has confirmed those APIs can be written later.
+
+Nothing else in the application reaches Mongo. Auth, the ledger, every money
+path, onboarding and the reset are Postgres.
