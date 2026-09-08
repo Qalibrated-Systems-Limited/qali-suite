@@ -55,7 +55,7 @@ import {
   searchMatchingInvoices,
   searchMatchingBills,
   searchPartiesForAllocation,
-} from "@/app/mongodb/actions/bank-feed-actions";
+} from "@/app/db/actions/bank-feed-actions";
 
 // ============================================
 // HELPERS

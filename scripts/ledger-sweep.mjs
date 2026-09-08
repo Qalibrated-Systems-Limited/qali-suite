@@ -18,6 +18,20 @@
  * Then find which modules call any of them, and which of those a screen can
  * reach.
  *
+ *   3. A POSTING CAN LIVE IN A SERVICE, and for weeks this sweep could not see
+ *      one. It seeded only from `app/models/*.js` and the
+ *      `xSchema.methods/statics` pattern, so `bankFeedService.js` — which
+ *      posts by calling `JournalService.createJournalEntry`, which calls
+ *      `JournalEntry.create` — was invisible. Four hops from a live screen:
+ *
+ *        AllocationDialog.jsx -> bank-feed-actions.js -> bankFeedService
+ *          -> JournalService -> JournalEntry.create
+ *
+ *      The sweep reported "one remaining connector" the whole time. That is
+ *      the fourth way it has been wrong, and the reason section 1b exists:
+ *      any FUNCTION in app/mongodb or lib that posts directly is now a seed
+ *      too, and so is anything that calls one.
+ *
  * FALSE POSITIVES are the cost of a name-based match — `reverse` also matches
  * `Array.prototype.reverse`, `approve` matches every unrelated approval. Each
  * hit prints its line so you can judge it; that is deliberate, because a sweep
@@ -93,6 +107,59 @@ for (let changed = true; changed; ) {
   }
 }
 
+// ── 1b. NON-MODEL functions that post, resolved transitively ────────────────
+//
+// Services, actions and helpers outside app/models. Matched on the function
+// NAME wherever it is declared — `static async foo(`, `export function foo(`,
+// `const foo = async (` — because the call sites this sweep then looks for are
+// all `.foo(` or `foo(` regardless of how it was written.
+const DECL =
+  /(?:static\s+)?(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(|(?:static\s+)(?:async\s+)?(\w+)\s*\(|(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(/g;
+
+const serviceBodies = new Map(); // "file::fn" -> body
+const serviceByFile = new Map();
+
+for (const file of [
+  ...walk("app/mongodb", new Set([".js", ".ts"])),
+  ...walk("lib", new Set([".js", ".ts"])),
+]) {
+  const src = read(file);
+  const marks = [...src.matchAll(DECL)]
+    .map((m) => [m.index, m[1] || m[2] || m[3]])
+    .filter(([, name]) => name);
+  for (let i = 0; i < marks.length; i++) {
+    const [pos, name] = marks[i];
+    const end = i + 1 < marks.length ? marks[i + 1][0] : src.length;
+    const key = `${basename(file)}::${name}`;
+    serviceBodies.set(key, src.slice(pos, end));
+    if (!serviceByFile.has(basename(file))) serviceByFile.set(basename(file), []);
+    serviceByFile.get(basename(file)).push(name);
+  }
+}
+
+const servicePosting = new Set();
+for (const [key, body] of serviceBodies) if (POSTS.test(body)) servicePosting.add(key);
+
+// Closure across the WHOLE set, not per file: a service calls another
+// service's method by importing it, which the per-file closure above cannot
+// see. Name-based, so it over-matches — which is the safe direction here.
+for (let changed = true; changed; ) {
+  changed = false;
+  const postingNames = new Set(
+    [...servicePosting, ...posting].map((k) => k.split("::")[1]),
+  );
+  for (const [key, body] of serviceBodies) {
+    if (servicePosting.has(key)) continue;
+    for (const name of postingNames) {
+      if (new RegExp(`\\.\\s*${name}\\s*\\(|\\b${name}\\s*\\(`).test(body)) {
+        servicePosting.add(key);
+        changed = true;
+        break;
+      }
+    }
+  }
+}
+
 console.log("MODEL METHODS THAT POST TO THE LEDGER (transitively)");
 console.log("=".repeat(72));
 const grouped = new Map();
@@ -106,7 +173,25 @@ for (const [file, names] of grouped) {
 }
 
 // ── 2. Modules that call one, and screens that reach the module ─────────────
-const names = new Set([...posting].map((k) => k.split("::")[1]));
+console.log();
+console.log("SERVICES AND HELPERS THAT POST (transitively) — section 1b");
+console.log("=".repeat(72));
+{
+  const grouped2 = new Map();
+  for (const key of [...servicePosting].sort()) {
+    const [file, name] = key.split("::");
+    if (!grouped2.has(file)) grouped2.set(file, []);
+    grouped2.get(file).push(name);
+  }
+  if (!grouped2.size) console.log("  none");
+  for (const [file, fns] of grouped2) {
+    console.log(`  ${file.padEnd(26)} ${[...new Set(fns)].sort().join(", ")}`);
+  }
+}
+
+const names = new Set(
+  [...posting, ...servicePosting].map((k) => k.split("::")[1]),
+);
 const screenFiles = [
   ...walk("app/dashboard", new Set([".js", ".jsx", ".ts", ".tsx"])),
   ...walk("components", new Set([".js", ".jsx", ".ts", ".tsx"])),

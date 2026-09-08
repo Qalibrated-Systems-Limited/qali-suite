@@ -3887,3 +3887,170 @@ comparison run before and after.
 
 **integrations (10)** is the largest block and holds the last genuine ledger
 seam, the weighbridge connector at `integration-actions.js:467`.
+
+---
+
+## Handoff — 2026-09-08 (3): the bank feed reaches the ledger (0100)
+
+Banking. Carried in every count since 2026-08-31 as **"STAYS ON MONGO BY
+DECISION, not by oversight … a ~3,900-line vertical whose service posts
+payment-received and payment-made entries to the ledger, and it is not
+currently broken — it reads the store it still writes."**
+
+**Mongo screens: 25 → 16.**
+
+### The second half of that sentence was wrong
+
+`bankFeedService.js` imports five models. Two — BankStatement and BankFeedLine
+— are its own and worked. The other three all moved:
+
+| what | reads | consequence |
+|---|---|---|
+| `getBankAccounts()` | Mongo `Account` | the upload screen's only picker was EMPTY — **no statement could be imported at all** |
+| `getExpenseAccounts()` and its four siblings | Mongo `Account` | every account picker in the allocation dialog was empty |
+| `autoMatchLines()` | Mongo `Invoice` / `Bill` | no suggestion was ever produced, for any line |
+| `allocateToInvoice()` | Mongo `Invoice` | "Invoice not found", always |
+
+So the module was not working-but-unported. It was **inert**. The deferral was
+still the right call at the time — a half-port would have been §9L again — but
+the reason recorded for it was not what was actually true, and that mattered:
+"not currently broken" is what kept it off the list for six weeks.
+
+### And the ledger sweep was structurally blind to it
+
+`npm run ledger-sweep` has reported ONE remaining connector for weeks. It
+seeded only from `app/models/*.js` and the `xSchema.methods/statics` pattern,
+then closed transitively over MODEL methods. `bankFeedService` posts by calling
+`JournalService.createJournalEntry` → `JournalEntry.create`, from
+`app/mongodb/services/` — a directory the sweep never scanned for postings.
+Four hops from a live screen:
+
+```
+AllocationDialog.jsx → bank-feed-actions.js → bankFeedService
+  → JournalService → JournalEntry.create      (MONGO)
+```
+
+**The sweep is widened** — a new section 1b seeds from any function in
+`app/mongodb` or `lib` that posts directly, and closes over the whole set
+rather than per file. Proven rather than asserted: stashing the screen rewire
+and re-running it now reports `bank-feed-actions.js` as LIVE across **4 screens
+with 13 posting call sites**, where the old sweep reported nothing.
+
+That is the fourth way this sweep has been wrong, and its own header now says
+so. Section 1b over-matches by design (`kpi-queries.js` appears because it
+calls `Array.prototype.reverse`) — the file's existing note about false
+positives covers it, and a sweep that silently filters is how you get a fifth
+wrong "last one".
+
+### Decision 1 — a matched receipt IS a payment
+
+Mongo's `allocateToInvoice` posted its own journal entry and hand-updated
+`invoice.amountPaid`. The payments module has done exactly that, correctly,
+since 0063 — over-allocation refused by a deferred trigger, `amount_paid`
+owned by the allocation trigger, a documented reversal path.
+
+So a bank line matched to an invoice **creates a real payment**, confirms it
+and posts it. The receipt is then indistinguishable from one typed in by hand:
+on the payments screen, on the customer statement, in AR aging, reversible by
+the path that already exists. `payments.source_line_id` is what lets the line
+find it again.
+
+**Overpayment differs deliberately.** Mongo posted the excess to a Customer
+Advance account. Here the payment is raised for the full bank amount and only
+the document's balance is allocated, so the remainder stays UNAPPLIED against
+the party — allocatable to their next invoice, and needing no second account to
+exist.
+
+**One line settling two parties' documents is refused.** A payment names the
+party it came from. Mongo allowed it, producing an entry that credited two
+parties' receivables against one receipt.
+
+### Decision 2 — the stats are a view
+
+`BankStatement.stats` was six counters refreshed by `updateStatementStats()`
+from nine call sites. `bank_statement_stats` is a VIEW; it cannot drift. Only
+the ready ↔ completed pair is a stored status, maintained by a trigger, because
+'processing' and 'error' describe the import and no count can know them.
+
+### Three defects of mine, all caught by tests
+
+**THE TRIGGER ASSIGNED text TO AN ENUM.** `SET status = CASE … THEN 'completed'
+ELSE 'ready' END` yields `text`; `status` is `bank_statement_status`. Postgres
+raises 42804 — on every line insert, so **nothing could be imported at all**.
+The migration applied perfectly clean, because a trigger body is only parsed
+when it runs. Both arms are cast now.
+
+**THE SERIALISERS READ camelCase OFF snake_case ROWS.** These rows come from
+`tx.execute(sql\`SELECT s.*\`)`, which returns the database's column names.
+`r.fileName` was undefined, silently — and so was `r.journal_entry_id`'s
+camelCase twin, so a line could not point at the posting it had just made. The
+test that found it went looking for the journal lines and found none.
+
+**AND `postPaymentReceipt` RETURNS `{ payment, entry }`,** not the entry.
+Reading `.id` off the wrapper gave null at two call sites.
+
+### Also fixed on the way
+
+- **`parseDate` took a format and ignored it.** It tried a fixed list in a
+  fixed order, DD/MM first — so a US export reading 03/04/2026 was imported as
+  3 April, not 4 March. Not an error; a wrong date on a bank line, reconciling
+  against the wrong month. The declared format is tried first now.
+- **Dates are strings.** `new Date(2026, 3, 3)` is midnight LOCAL against a
+  `date` column — the same seam the KPI port had.
+- **The diagnostics were hung off an array.** `parsedLines.diagnostics = {…}`
+  survives a `return` and does not survive `.map()` or serialisation, so the
+  specific "your date format is wrong" message was one array operation from
+  becoming the generic one. `parseCSV` returns `{ lines, diagnostics }`.
+- **Auto-match no longer allocates by itself.** Mongo fired
+  `autoMatchLines(...).catch(console.error)` from the importer, so a ≥95% match
+  posted a journal entry with nobody watching and a failure went to a log.
+  Matching now runs inside the import transaction and only SUGGESTS; a person
+  presses the button.
+- **The entry type is `bank_entry`,** not `expense`. Mongo typed every one of
+  these 'expense', including the money-in ones.
+- **The direction comes from the LINE.** Mongo took the caller's word, so
+  calling `allocateToIncome` on a debit line posted the entry backwards.
+
+### The parsing is a library now
+
+`lib/bank-feed-parsing.js` — hashing, CSV, dates, numbers, balances, match
+scoring. No database, which is why its 32 tests run in under a second, and why
+they were worth writing at all: none of that needed a Mongo connection to test,
+and inside a 1,904-line service it had none.
+
+### Verified
+
+- 42 tests in `tests/pg-bank-feed.test.mjs`, 32 in
+  `tests/bank-feed-parsing.test.mjs`.
+- 123 more across payments, payment actions, invoices, bills, the accounting
+  core, dashboard actions and bank-feed tenant scope.
+- 100 migrations apply on dev, on test, and on a database built from zero — the
+  three agreeing on 37 constraints, 15 indexes, the trigger body and the view.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+**A note on the suite.** Two runs of the bank-feed file failed with a
+`beforeEach` "Hook timed out in 120000ms" and a following primary-key collision
+on a freshly generated uuid — different tests each time, and ZERO assertion
+failures. `TRUNCATE … CASCADE` measures ~4s against this schema on an idle
+database, because the cost is per TABLE and there are 156 of them. The hook
+timeout is raised to 300s in that file, and the run then passes 42/42 in 122s.
+Read the failure KIND before believing it.
+
+### Where the port stands
+
+**16 screens, 6 modules:**
+
+```
+integrations 10  approvals 2  components 1  company 1  admin 1  adjustments 1
+```
+
+- **adjustments (1)** is a FALSE POSITIVE — a historical comment.
+- **admin (1)** is `ResetTransactionsCard`, which SHOULD stay: it resets both
+  stores and needs the Mongo handle to do it.
+- **components (1)** is `AlertsStrip`, which moves with approvals.
+
+So the real remaining surface is **13 screens**: integrations (10) and
+approvals (2 + AlertsStrip). Nothing in the app is switched off, and after this
+change **nothing a screen can reach posts to the Mongo ledger** except the
+weighbridge connector in `integration-actions.js:467` — which is inside
+integrations, the last block.

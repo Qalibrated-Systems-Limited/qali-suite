@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import {
   getAllUnallocatedLines,
   getBankAccounts,
-} from "@/app/mongodb/queries/bank-feed-queries";
+} from "@/app/db/actions/bank-feed-actions";
 import { format } from "date-fns";
 import UnallocatedLinesClient from "./UnallocatedLinesClient";
 

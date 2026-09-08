@@ -16,7 +16,7 @@ import {
   getBankStatements,
   getUnallocatedCount,
   getBankAccounts,
-} from "@/app/mongodb/queries/bank-feed-queries";
+} from "@/app/db/actions/bank-feed-actions";
 import { auth } from "@/auth";
 import { format } from "date-fns";
 

@@ -98,6 +98,8 @@ export const sourceDocumentTypeEnum = pgEnum("source_document_type", [
   "stock_request",
   /** 0087 — a payment certificate: releasing retention back into receivables. */
   "project_certificate",
+  /** 0100 — an allocated bank line: an expense, income, transfer or split. */
+  "bank_feed",
 ]);
 
 // ── Invoices slice ───────────────────────────────────────────────────────────
@@ -1081,4 +1083,33 @@ export const kpiTargetDirectionEnum = pgEnum("kpi_target_direction", [
 /** How one snapshot was produced — typed by a person, or computed. */
 export const kpiSnapshotSourceEnum = pgEnum("kpi_snapshot_source", [
   "manual", "auto",
+]);
+
+// ── Banking — 0100 ───────────────────────────────────────────────────────────
+
+export const bankStatementStatusEnum = pgEnum("bank_statement_status", [
+  "processing", "ready", "completed", "error",
+]);
+
+/** How the opening/closing balances were obtained — drives the UI pill. */
+export const bankBalanceSourceEnum = pgEnum("bank_balance_source", [
+  "from_file", "manual", "unavailable",
+]);
+
+export const bankLineStatusEnum = pgEnum("bank_line_status", [
+  "unallocated", "allocated", "excluded", "matched",
+]);
+
+export const bankExcludeReasonEnum = pgEnum("bank_exclude_reason", [
+  "duplicate", "opening_balance", "bank_charge", "bank_interest",
+  "reversal", "internal_transfer", "personal", "manual", "other",
+]);
+
+export const bankAllocationTypeEnum = pgEnum("bank_allocation_type", [
+  "invoice_payment", "bill_payment", "expense", "income",
+  "transfer", "split", "manual_journal", "liability",
+]);
+
+export const bankMatchDocumentEnum = pgEnum("bank_match_document", [
+  "invoice", "bill",
 ]);

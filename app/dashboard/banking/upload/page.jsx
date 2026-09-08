@@ -1,4 +1,4 @@
-import { getBankAccounts } from "@/app/mongodb/queries/bank-feed-queries";
+import { getBankAccounts } from "@/app/db/actions/bank-feed-actions";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import UploadWizard from "./UploadWizard";

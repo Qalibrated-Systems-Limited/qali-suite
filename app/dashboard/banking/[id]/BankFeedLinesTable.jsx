@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import Pagination from "@/components/pagination";
 import { format } from "date-fns";
 import AllocationDialog from "./AllocationDialog";
-import { undoAllocation } from "@/app/mongodb/actions/bank-feed-actions";
+import { undoAllocation } from "@/app/db/actions/bank-feed-actions";
 import { serializeBsonType } from "@/lib/utils";
 
 // ============================================
