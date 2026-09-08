@@ -73,7 +73,7 @@ export interface InvoiceLineInput {
 export interface CreateInvoiceInput {
   companyId: string;
   customerId: string;
-  /** Who sold it — 0097. Carried from the quote; null on a direct invoice. */
+  /** Who sold it — 0095. Carried from the quote; null on a direct invoice. */
   salespersonPartyId?: string | null;
   salespersonName?: string | null;
   invoiceDate: string;
@@ -1477,7 +1477,7 @@ export async function createOpeningBalanceInvoice(
   return { invoice, entry };
 }
 
-// ── Sales by rep — 0097 ─────────────────────────────────────────────────────
+// ── Sales by rep — 0095 ─────────────────────────────────────────────────────
 
 /** float8 comes back as a string on some drivers; this file had no helper. */
 const num = (v: unknown) => {

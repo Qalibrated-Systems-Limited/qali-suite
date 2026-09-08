@@ -290,6 +290,37 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
     "That period does not fit the KPI's periodicity — a quarterly figure is filed on the quarter's last month, a yearly one on December.",
   kpis_owner_employee_id_employees_id_fk:
     "That employee is not in this company's register.",
+
+  // ── Sales orders (0098) ───────────────────────────────────────────────────
+  sales_orders_company_number_uq: "An order with that number already exists.",
+  sales_orders_status_valid: "That is not a state a sales order can be in.",
+  sales_orders_confirmation_pair:
+    "A confirmed order carries the moment it was confirmed, and only a confirmed one does.",
+  sales_orders_cancellation_pair:
+    "A cancelled order carries the moment it was cancelled, and only a cancelled one does.",
+  sales_orders_invoiced_pair:
+    "An invoiced order carries the moment it was invoiced, and only an invoiced one does.",
+  sales_orders_salesperson_pair:
+    "A salesperson on an order needs their name recorded beside the reference.",
+  sales_orders_customer_fk: "That customer is not in this company's records.",
+  sales_order_lines_quantity_positive: "An order line needs a quantity above zero.",
+  sales_order_lines_price_not_negative: "A unit price cannot be negative.",
+  sales_order_lines_product_has_product:
+    "A product line names a product; a service line names a category.",
+  sales_order_lines_discount_is_a_percentage:
+    "A discount is a percentage between 0 and 100.",
+  sales_order_lines_tax_is_a_percentage:
+    "A tax rate is a percentage between 0 and 100.",
+  sales_order_lines_number_uq: "That line number is already used on this order.",
+  sales_order_lines_product_fk: "That product is not in this company's catalogue.",
+  /**
+   * The reservation guard. Reached when two orders race for the last units:
+   * both pass the availability pre-check, and the second one's UPDATE is the
+   * one the constraint stops. The pre-check exists to name the product in the
+   * ordinary case; this is what makes overselling impossible in the rare one.
+   */
+  products_commitments_within_on_hand:
+    "There is not enough stock left to reserve — somebody else has committed it since this page loaded.",
 };
 
 interface PgLike {

@@ -65,7 +65,7 @@ export const invoices = pgTable(
     customerId: uuid("customer_id").notNull(),
 
     /**
-     * Who sold it — 0097.
+     * Who sold it — 0095.
      *
      * A PARTY, not a user: a rep who leaves keeps their invoices, and a
      * commission is owed to a person the company has a relationship with

@@ -48,7 +48,6 @@ import {
   Ruler,
 } from "lucide-react";
 import Link from "next/link";
-import { SALES_ORDERS_AVAILABLE } from "@/lib/unported-modules";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
@@ -273,9 +272,7 @@ const getNavigationGroups = (user) => {
         label: "Sales Orders",
         id: "sales-orders",
         href: "/dashboard/sales-orders",
-        // Hidden while the module still reads Mongo for quotes, products and
-        // invoices — all three moved to Postgres. lib/unported-modules.js.
-        hidden: !SALES_ORDERS_AVAILABLE || !canSeeSalesNav(user?.role),
+        hidden: !canSeeSalesNav(user?.role),
       },
       {
         icon: Receipt,

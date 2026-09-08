@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { SALES_ORDERS_AVAILABLE } from "@/lib/unported-modules";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
 import {
@@ -187,11 +186,7 @@ const MORE_GROUPS: NavGroup[] = [
       { label: "Leads", href: "/dashboard/leads", icon: Target },
       { label: "Pipeline", href: "/dashboard/opportunities", icon: Briefcase },
       { label: "Quotes", href: "/dashboard/quotes", icon: FileText },
-      // Conditional spread, not a `hidden` key: nothing here filters on one.
-      // lib/unported-modules.js.
-      ...(SALES_ORDERS_AVAILABLE
-        ? [{ label: "Sales Orders", href: "/dashboard/sales-orders", icon: ClipboardCheck }]
-        : []),
+      { label: "Sales Orders", href: "/dashboard/sales-orders", icon: ClipboardCheck },
       { label: "Invoices", href: "/dashboard/invoices", icon: Receipt },
       { label: "Customers", href: "/dashboard/customers", icon: Users },
     ],

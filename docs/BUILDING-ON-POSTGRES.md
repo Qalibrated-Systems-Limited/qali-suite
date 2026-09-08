@@ -3451,3 +3451,164 @@ surface is about **27 screens**.
 Next: **sales orders (3)** — switched off rather than ported in §9K, and the
 only module in the app that is deliberately dark. Then **employee (4)** and
 **settings (3)**.
+
+---
+
+## Handoff — 2026-09-07: the order between the quote and the bill (0098)
+
+Sales orders — the only feature in the app that was deliberately dark.
+`lib/unported-modules.js` switched the module OFF rather than porting it, and
+listed four failures, one loud and three quiet:
+
+```
+sales-order-actions.js:56   ObjectId.isValid(quoteId) on a Postgres uuid
+sales-order-actions.js:64   read the MONGO Quote collection
+sales-order-actions.js:187  committed stock against MONGO Product counters
+sales-order-actions.js:392  Invoice.create — a MONGO invoice
+```
+
+That note said relaxing the id check alone would move the failure from step
+one to step four, where it is invisible. It was right. All four are gone, and
+`lib/unported-modules.js` is deleted with them — the flag, the two dark-page
+components, the sidebar guard, the mobile-nav guard and the quote button's.
+
+**Mongo screens: 39 → 36.**
+
+### Decision 1 — the lineage is `document_flow`, not two ref columns
+
+The Mongo model embedded `quoteRef` and `invoiceRef`. 0041 built
+`document_flow` for exactly this case and argued it in its own comment: "every
+ERP that models selling properly puts an ORDER between them … and this codebase
+already has a salesOrder model waiting. A column named quote_id on invoices
+encodes 'an invoice comes from a quote', which stops being true the moment the
+order step lands."
+
+`'sales_order'` and `'sales_order_line'` have been sitting in that table's CHECK
+constraints since 0041, unused, waiting for this migration. And
+`quote_line_invoiced` was written RECURSIVE so the chain growing from quote line
+→ invoice line into quote line → ORDER line → invoice line would need no change
+to it. 0098 does not touch that view, and a test asserts it follows the longer
+chain anyway: zero invoiced while the order sits in the middle, ten once the
+invoice lands.
+
+The screens still read `order.quoteRef` and `order.invoiceRef` — the repository
+assembles both from flow rows joined to the real documents, so a deleted quote
+cannot leave a dangling ref and the number shown is the document's own.
+
+That also closed a hole the direct path had covered and this one would not have:
+`convertQuoteToInvoice` marks a quote 'converted' when nothing remains to
+invoice. Without the same step here, a quote that went the long way round would
+sit at 'sent' for ever with a paid invoice against it.
+
+### Decision 2 — the commitment IS the status
+
+Mongo kept `stockCommitted` on each line and flipped it on confirm, on cancel
+and on conversion, with a comment explaining that exactly one document line must
+own a given reservation at any moment. The rule is right; a boolean maintained
+by four code paths is not how to hold it. When the flag and the status disagree
+the stock is either double-held or silently free, and nothing says which.
+
+There is no column. A sales order holds a reservation for each product line
+when, and only when, its status is 'confirmed'; the reads derive it and the
+transitions commit and release inside one transaction.
+
+### Decision 3 — conversion releases BEFORE it commits
+
+This is the one that would have shipped as a latent bug.
+
+On Postgres a draft invoice commits stock for every inventory product line as
+`createInvoice` writes them — unconditionally, with no flag to carry over. So
+converting an order cannot "transfer ownership" by flipping booleans as Mongo
+did: the invoice takes its own commitment. The order therefore has to let go
+first, because `products_commitments_within_on_hand` is a plain CHECK, evaluated
+per statement and not deferred. Holding both at once for one statement raises —
+but only on a product committed to its last unit, which is exactly when it
+matters and exactly when a manual test would not notice.
+
+Both happen in one transaction, so no other session sees the gap, and the row
+lock taken by the release means none can slip into it. The test that pins the
+ordering orders every one of the three units on hand.
+
+### A defect in my own CHECK, caught by a test
+
+`sales_orders_confirmation_pair` was first written as an equivalence —
+`(status IN ('confirmed','invoiced')) = (confirmed_at IS NOT NULL)`. Cancelling
+a CONFIRMED order then failed: the order genuinely was confirmed at a
+particular moment, and erasing that to satisfy the constraint would destroy the
+history the column exists to hold. It is a CASE over the status now: a draft has
+never been confirmed, a confirmed or invoiced order has, and a cancelled one may
+or may not have been — the row says which.
+
+The migration file was amended and the two live databases were altered to
+match. Then a THIRD database was created from zero, every migration applied to
+it, and its 21 sales-order constraints plus `document_prefix`'s body compared
+against dev and test: identical. The fresh-deploy path is the one that has to be
+right here, so it was checked rather than reasoned about.
+
+### Viewer could move inventory, and now cannot
+
+All four Mongo actions gated on `canSeeSalesNav` — a NAV predicate whose list
+includes "Viewer", the read-only role CEO became in 0039. So a Viewer could
+confirm an order and reserve stock, or cancel one and release it. A gate that
+answers "may this person see the menu" was being asked "may this person move
+inventory". The action list is `canSeeSalesNav` minus Viewer; reads stay open.
+
+### Decision 4 — the prefix, and three dead settings columns
+
+`document_prefix()` falls through to `upper(p_kind)`, so 'sales_order' would
+have numbered orders SALES_ORDER-00001. It has a `sales_order_prefix` column
+and an arm now, like invoice / bill / quote / po / grn.
+
+**Found while doing it, NOT fixed:** `claim_prefix`, `ncr_prefix` and
+`asset_prefix` are columns nothing reads. `document_prefix(c,'claim')`,
+`'ncr'` and `'asset'` all fall through to `upper(p_kind)`, so claims and NCRs
+number CLAIM-/NCR- by coincidence — and ASSETS NUMBER `ASSET-00001` WHILE THE
+COLUMN SAYS `AST`. A company that configured any of the three is being ignored.
+Fixing it would renumber existing assets mid-sequence, which is a decision
+rather than a patch, so it is written down here instead of done quietly.
+
+### The order backlog tile is back
+
+The executive overview deleted it rather than ported it — "a tile that reads
+zero because its store is empty is worse than no tile", and the handoff said to
+restore it from Postgres when sales orders were ported. It reads
+`getOrderBacklogPg` now, degrades to zero on its own like the pipeline beside
+it, and links to `?status=confirmed`. With the CRM's pipeline (0096) already
+moved, **every number on that page now comes from one store.**
+
+### A grep that was scoped too narrowly
+
+`lib/unported-modules.js` said `grep -rn SALES_ORDERS_AVAILABLE` would find the
+guards, and it would have — run at the repo root. Scoped to `app lib`, it
+missed two in `components/`, and `eslint . --quiet` did not catch them either:
+the imports are syntactically fine, the module simply stopped existing. Only
+`npm run build` failed. Worth remembering that deleting a module is a build-level
+check, not a lint-level one.
+
+### Still not ported, and now more visible
+
+**The draft-invoice expiry sweep.** Mongo stamps `draftExpiresAt` on any draft
+invoice holding committed stock and sweeps expired ones
+(`invoice-actions.js:1573`). Postgres invoices have no such column and no sweep,
+though `draft_invoice_expiry_days` is still a live editable setting that nothing
+on this side reads. That gap arrived with the invoices port, not this one — but
+sales orders make it easier to reach, since a confirmed order becomes a draft
+invoice holding stock. Flagged, not built.
+
+### Verified
+
+- 98 migrations apply on dev, on test, and on a database created from zero;
+  the three agree constraint-for-constraint.
+- 41 tests in `tests/pg-sales-orders.test.mjs`, green.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Where the port stands
+
+**36 screens, 11 modules.** banking (8) stays on Mongo by decision, and
+`adjustments`'s single hit is still a FALSE POSITIVE — a historical comment in
+an already-ported file that the counting grep matches. So the real remaining
+surface is about **27 screens**, and NOTHING in the app is switched off any more.
+
+Next: **integrations (10)** is now the largest block, though the weighbridge
+connector inside it is the last genuine ledger seam and deserves its own pass.
+Cheaper first: **employee (4)** and **settings (3)**.

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useTransition } from "react";
-import { SALES_ORDERS_AVAILABLE } from "@/lib/unported-modules";
 import { planIncludes } from "@/lib/plans";
 import { useRouter } from "next/navigation";
 import {
@@ -73,12 +72,7 @@ const PAGES = [
 
   // ── Sales ──────────────────────────────────────────
   { label: "Quotes", href: "/dashboard/quotes", icon: FileText, category: "Sales" },
-  // Conditional spread, not a `hidden` key: nothing here filters on one.
-  // Dropped from the list while the module is switched off, and back the
-  // moment the flag flips — lib/unported-modules.js.
-  ...(SALES_ORDERS_AVAILABLE
-    ? [{ label: "Sales Orders", href: "/dashboard/sales-orders", icon: ClipboardList, category: "Sales", aliases: ["so", "orders", "backlog", "order backlog"] }]
-    : []),
+  { label: "Sales Orders", href: "/dashboard/sales-orders", icon: ClipboardList, category: "Sales", aliases: ["so", "orders", "backlog", "order backlog"] },
   { label: "Invoices", href: "/dashboard/invoices", icon: Receipt, category: "Sales" },
   { label: "Credit Notes", href: "/dashboard/credit-notes", icon: Receipt, category: "Sales", aliases: ["refund", "return"] },
   { label: "Customers", href: "/dashboard/customers", icon: Users, category: "Sales" },

@@ -974,7 +974,7 @@ export async function convertQuoteToInvoice(
     companyId: quote.companyId,
     customerId: quote.customerId,
     /**
-     * WHO SOLD IT — 0097. The quote has always known, and this mapping used to
+     * WHO SOLD IT — 0095. The quote has always known, and this mapping used to
      * drop it: customer, lines, discounts and dates crossed over and the rep
      * did not, so Sales by Rep had nothing to group by on this side.
      */

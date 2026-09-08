@@ -41,7 +41,7 @@ export default async function SalesByRepPage({ searchParams }) {
 
   const params = await searchParams;
   const period = params?.period || ""; // "" = all time, else "YYYY-M"
-  // 0097: the drill-down keys on a PARTY now, not a User — a rep who leaves
+  // 0095: the drill-down keys on a PARTY now, not a User — a rep who leaves
   // keeps their invoices, and the quote has always carried a party.
   const owner = params?.owner || "";
   const [year, month] = period ? period.split("-").map(Number) : [null, null];

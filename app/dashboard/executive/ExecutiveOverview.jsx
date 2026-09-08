@@ -7,12 +7,14 @@ import {
   Receipt,
   Landmark,
   Briefcase,
+  ClipboardCheck,
   CreditCard,
   ArrowRight,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { getExecutiveSnapshotPg } from "@/app/db/actions/report-actions";
 import { getPipelineTotalPg as cPipelineTotal } from "@/app/db/actions/crm-actions";
+import { getOrderBacklogPg } from "@/app/db/actions/sales-order-actions";
 
 // Compact for phones, full for desktop — same convention as the reports.
 const compact = (n) =>
@@ -70,13 +72,13 @@ function Kpi({ label, value, sub, icon: Icon, href, children }) {
 // so the CEO gets a normal dashboard home like every other role; the old
 // redirect tripped a Next Router dev bug mid-navigation).
 export default async function ExecutiveOverview() {
-  // TWO STORES, DELIBERATELY. Seven of the eight numbers come from the
-  // Postgres LEDGER, so each tile is the same figure as the report it links
-  // to — the Mongo snapshot this replaces summed documents, which meant the
-  // revenue card and the P&L disagreed by the value of every invoice that had
-  // been sent and not completed. The pipeline is the exception: the CRM has
-  // not been ported, so it is still a Mongo read, and it degrades to zero on
-  // its own rather than taking the page down.
+  // ONE STORE NOW. Every number on this page comes from Postgres, so each
+  // tile is the same figure as the report it links to — the Mongo snapshot
+  // this replaces summed documents, which meant the revenue card and the P&L
+  // disagreed by the value of every invoice that had been sent and not
+  // completed. The pipeline was the last Mongo read here and moved with the
+  // CRM (0096); the backlog came back with sales orders (0098). Both degrade
+  // to zero on their own rather than taking the page down.
   let s;
   try {
     s = await getExecutiveSnapshotPg();
@@ -89,7 +91,10 @@ export default async function ExecutiveOverview() {
     );
   }
 
-  const pipeline = await cPipelineTotal();
+  const [pipeline, backlog] = await Promise.all([
+    cPipelineTotal(),
+    getOrderBacklogPg(),
+  ]);
 
   const net = s.revenue.total - s.expenses.total;
   const netPrev = s.revenue.prev - s.expenses.prev;
@@ -172,13 +177,10 @@ export default async function ExecutiveOverview() {
       </div>
 
       {/* What's coming — the future.
-          ORDER BACKLOG IS GONE, not hidden. It aggregated the Mongo SalesOrder
-          collection, which nothing writes to while the module is switched off
-          (lib/unported-modules.js, §9K), and the tile was already behind the
-          flag — so what the flag guarded was a figure that could only be stale
-          and a zero labelled "confirmed orders awaiting invoice". Restore it
-          from Postgres when sales orders are ported; a tile that reads zero
-          because its store is empty is worse than no tile. */}
+          ORDER BACKLOG IS BACK, from Postgres (0098). It was deleted rather
+          than hidden when sales orders were switched off, because a tile that
+          reads zero because its store is empty is worse than no tile. It reads
+          the store the orders are actually written to now. */}
       <div className="grid grid-cols-2 gap-2 sm:gap-3">
         <Kpi
           label="Sales pipeline"
@@ -186,6 +188,13 @@ export default async function ExecutiveOverview() {
           sub={`${pipeline.count} open deal${pipeline.count === 1 ? "" : "s"}`}
           icon={Briefcase}
           href="/dashboard/opportunities"
+        />
+        <Kpi
+          label="Order backlog"
+          value={backlog.total}
+          sub={`${backlog.count} confirmed order${backlog.count === 1 ? "" : "s"}`}
+          icon={ClipboardCheck}
+          href="/dashboard/sales-orders?status=confirmed"
         />
       </div>
 
