@@ -432,7 +432,7 @@ export async function updateProductPricingPg(
 
       if (verdict.needsApproval) {
         const { submitApproval } = await import(
-          "@/app/mongodb/actions/approval-actions"
+          "@/app/db/actions/approval-actions"
         );
         const product = await productsRepo.getProduct(tx, productId);
 

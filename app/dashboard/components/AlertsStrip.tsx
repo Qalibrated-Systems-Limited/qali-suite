@@ -8,7 +8,7 @@ import {
   CheckSquare,
 } from "lucide-react";
 import { cDashboardAlerts } from "@/app/db/dashboard-cache";
-import { cMyPendingApprovals } from "@/app/mongodb/queries/approval-queries";
+import { countMyPendingApprovalsPg } from "@/app/db/actions/approval-actions";
 
 // ============================================
 // ALERTS STRIP
@@ -55,7 +55,7 @@ export async function AlertsStrip({
 }: AlertsStripProps) {
   const [alerts, pendingApprovals] = await Promise.all([
     cDashboardAlerts(),
-    cMyPendingApprovals(),
+    countMyPendingApprovalsPg(),
   ]);
 
   const tiles: Array<{

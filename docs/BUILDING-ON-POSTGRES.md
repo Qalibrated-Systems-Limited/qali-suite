@@ -4054,3 +4054,161 @@ approvals (2 + AlertsStrip). Nothing in the app is switched off, and after this
 change **nothing a screen can reach posts to the Mongo ledger** except the
 weighbridge connector in `integration-actions.js:467` — which is inside
 integrations, the last block.
+
+---
+
+## Handoff — 2026-09-08 (4): the approval engine (0101), and a deploy audit
+
+The last cross-cutting Mongo module, done because a deploy is now being pushed
+and it was the thing standing in the way.
+
+**Mongo screens: 16 → 13.**
+
+### It was the only module that genuinely WORKED
+
+Every other port in this document was a repair — a module reading a store
+nothing writes. This one was a real hybrid, and both ends knew it:
+
+```
+a Postgres action (expense / payment / product / adjustment)
+  → submitApproval()          writes a MONGO ApprovalRequest
+    → /dashboard/approvals     reads MONGO
+      → approveApproval()      claims the MONGO lease
+        → applyStockAdjustment() applies back into POSTGRES
+```
+
+**What it cost is that Postgres money paths could not run without Mongo.**
+`requestApprovalIfOverThreshold` is AWAITED inside `expense-actions.ts` and
+`payment-actions.ts`. With no Mongo connection, paying an expense over the
+threshold does not skip its approval — it THROWS, and
+`expense_payment_value` defaults to 50,000 for every company. Same for a bill
+payment, a price change below floor, and a large stock adjustment.
+
+That is why this came before integrations despite being smaller.
+
+### The appliers did not move, because they were already here
+
+`applyApprovedStockAdjustmentPg`, `releaseApprovedPaymentPg`,
+`applyApprovedPriceChangePg`, `applyApprovedExpensePaymentPg`,
+`issueCreditNotePg` — every one has been Postgres since its own module ported,
+each with a note recording what it used to post into the Mongo ledger. Only the
+REQUEST DOCUMENT was left. `approval_requests` is that document.
+
+### The lease
+
+Two approvers pressing at once must not both apply the payload — a doubled
+price change, or a supplier paid twice. Mongo needed
+`findOneAndUpdate({status:'submitted'}, …)` and a paragraph explaining it. Here
+it is `UPDATE … WHERE status = 'submitted' RETURNING id`, and zero rows means
+somebody else won.
+
+**The claim commits on its own, deliberately.** That guarantee holds only
+because the winner's transaction ENDS — nest the claim inside the long apply
+transaction and the second approver waits for a ledger posting instead of being
+told immediately, holding a row lock throughout. The action runs claim, apply
+and finalise as three transactions, and a test fires two claims concurrently to
+prove exactly one wins.
+
+If the process dies between claim and finalise the request is stranded in
+`applying` — invisible to a queue that lists `submitted`. `/api/cron/reap-approvals`
+sweeps it, on the same partial index Mongo used.
+
+### Two things the database now refuses
+
+- **A decision is a pair.** Mongo's `decision` was a free-floating sub-document
+  a status change was not obliged to set, so "approved" with nobody's name
+  against it was a reachable row — in the audit record of who authorised money
+  moving.
+- **Only an approved request carries an applied record.** A rejected one
+  applied nothing; that is what rejecting means.
+
+### Three more empty queues found on the approvals page
+
+The same defect the leave, loan, claim and NCR sections each had before their
+modules moved — each one reading a Mongo collection nothing writes:
+
+- **`getPendingBills`** read Mongo `Bill`. The bills section has been empty for
+  every tenant since the bills port.
+- **`getPendingApprovalRequests`** aggregated Mongo `StockRequest`. The stock
+  requests section, likewise.
+- **`r.items?.length`** on that section counted an array the Postgres shape does
+  not carry, so every row would have said "0 items".
+
+And two `await dbConnect()` calls in `pending-approvals.js` that opened a Mongo
+connection before delegating to a Postgres read that never touched it — with no
+Mongo configured they would have thrown on the way to a query that works.
+
+### The approver matrix moved out of the Mongoose model
+
+`APPROVER_MATRIX` lived beside the schema in `app/models/approvalRequest.js`,
+so reading "who may approve a price change" dragged mongoose in. It is in
+`lib/business-rules.js` with the other six matrices, which that file already
+calls "one source of truth for these gates". It is frozen onto each request at
+submission, so widening a list cannot retroactively reopen an existing one.
+
+---
+
+## The deploy audit
+
+Asked for while this was in progress. **Auth does not touch Mongo, and the app
+boots without `MONGODB_URI`** — `dbConnect` throws only when called. So what
+follows is the complete list of what a Postgres-only deployment would still
+hit, after 0101.
+
+### Fixed in this change
+
+**`/api/health` pinged Mongo, and only Mongo.** It would have returned
+`{ ok: false, db: "down" }` with a 503 for ever, on a working app, and every
+load balancer would have pulled the instance out of rotation. Postgres is what
+`ok` means now; Mongo is reported alongside it and only when `MONGODB_URI` is
+set, and its being down is not a 503 — the ledger, auth and every money path
+are Postgres, so taking the instance out over a legacy store would be the
+bigger outage.
+
+### Still needs Mongo — 13 screens, all in three places
+
+```
+integrations 10   — api keys, webhooks, weighbridge, logs
+company       1   — companyForm (createCompany / updateCompany)
+admin         1   — ResetTransactionsCard
+adjustments   1   — FALSE POSITIVE, a historical comment
+```
+
+- **integrations (10)** is the last real module, and it holds the last
+  screen-reachable Mongo ledger posting: the weighbridge connector at
+  `integration-actions.js:467`.
+- **company (1)** is the TENANT ONBOARDING path — `createCompany` is ~300 lines
+  through `CompanyOnboardingService`. Not one screen's work, and it is the
+  from-scratch path everything else depends on.
+- **admin (1)** SHOULD stay: `ResetTransactionsCard` deliberately resets both
+  stores and needs the Mongo handle to do it. Correct until Mongo is gone.
+
+### API routes that would fail
+
+```
+/api/v1/webhooks            /api/v1/weighbridge/tickets
+/api/v1/coffee-coop/intake  /api/accounts/by-type
+/api/cron/notify-alerts
+```
+
+The `/api/v1` surface is the published integration API — if any customer is
+pointed at it, that is a hard blocker and it moves with integrations.
+`/api/accounts/by-type` is worth checking for callers; accounts are Postgres and
+this may be another stranded read.
+
+### One more thing to decide
+
+`lib/subscription-helpers.js` mirrors `subscription.*` back to the Mongo
+`Company` document for the SuperAdmin dashboard's Mongo aggregations, inside a
+try/catch that logs. Without Mongo it will log on every plan change and change
+nothing else — noisy but harmless.
+
+### Verified
+
+- 34 tests in `tests/pg-approvals.test.mjs`, green first run.
+- 125 more across stock adjustments, expenses, payment actions, product
+  actions, credit notes and notifications — every module that raises or
+  applies an approval.
+- 101 migrations apply on dev, on test, and on a database built from zero, the
+  three agreeing on 28 columns, 9 constraints and 7 indexes.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.

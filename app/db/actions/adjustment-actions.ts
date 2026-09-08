@@ -15,12 +15,12 @@ import { products } from "../schema";
  * `routingFor`, and it is the same three rules — full authority, high-risk
  * type, value threshold — plus the zero-cost guard.
  *
- * THE APPROVAL ENGINE IS STILL MONGO. There is no Postgres table for
- * ApprovalRequest — only `stock_request_approvals`, which belongs to fulfilment
- * — so an adjustment that needs routing is written HERE and its approval
- * request is raised THERE, exactly as expense payments have done since 0059.
- * `applyStockAdjustment` in approval-actions.js is the other end of that wire
- * and now calls the Postgres approve.
+ * THE APPROVAL ENGINE IS POSTGRES SINCE 0101. It was the last cross-cutting
+ * Mongo module: an adjustment that needed routing was written HERE and its
+ * request raised THERE, in a store this action had to be able to reach or the
+ * whole submission threw. `approval_requests` is a table now, and the other
+ * end of the wire — `applyApprovedStockAdjustmentPg` — has been Postgres
+ * since 0066.
  */
 
 
@@ -177,7 +177,7 @@ export async function createStockAdjustmentPg(
       // that a failure there no longer leaves a half-written adjustment,
       // because this transaction has not committed until the handler returns.
       const { submitApproval } = await import(
-        "@/app/mongodb/actions/approval-actions"
+        "@/app/db/actions/approval-actions"
       );
       const result = await submitApproval({
         type: routing.isHighRisk ? "stock_writeoff" : "stock_adjustment",

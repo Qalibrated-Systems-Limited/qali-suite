@@ -1113,3 +1113,40 @@ export const bankAllocationTypeEnum = pgEnum("bank_allocation_type", [
 export const bankMatchDocumentEnum = pgEnum("bank_match_document", [
   "invoice", "bill",
 ]);
+
+// ── Approvals — 0101 ─────────────────────────────────────────────────────────
+
+export const approvalTypeEnum = pgEnum("approval_type", [
+  "price_change",
+  "stock_writeoff",
+  "stock_adjustment",
+  "bill_payment",
+  "expense_payment",
+  "credit_note",
+  "discount",
+]);
+
+/**
+ * `applying` is a LEASE, not a state anybody chose. One approver claims a
+ * submitted request by moving it here, applies the payload, then finalises —
+ * so two approvers pressing at once cannot both apply it.
+ */
+export const approvalStatusEnum = pgEnum("approval_status", [
+  "submitted",
+  "applying",
+  "approved",
+  "rejected",
+  "cancelled",
+]);
+
+/** What a request points at. Two stores, so `target_id` carries no key. */
+export const approvalTargetKindEnum = pgEnum("approval_target_kind", [
+  "Product",
+  "InventoryAdjustment",
+  "StockAdjustment",
+  "Bill",
+  "Invoice",
+  "CreditNote",
+  "Payment",
+  "Expense",
+]);

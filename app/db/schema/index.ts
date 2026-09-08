@@ -49,3 +49,4 @@ export * from "./notifications";
 export * from "./kpis";
 export * from "./salesOrders";
 export * from "./bankFeed";
+export * from "./approvals";

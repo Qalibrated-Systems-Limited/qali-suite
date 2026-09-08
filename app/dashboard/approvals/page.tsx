@@ -16,8 +16,11 @@ import {
 } from "lucide-react";
 
 import { canSeeApprovalsNav } from "@/lib/permissions";
-import { cApprovalQueue, cMySubmittedApprovals } from "@/app/mongodb/queries/approval-queries";
-import { getPendingApprovalRequests } from "@/app/mongodb/queries/request-queries";
+import {
+  getApprovalQueuePg,
+  getMySubmittedApprovalsPg,
+} from "@/app/db/actions/approval-actions";
+import { getPendingStockRequestsPg } from "@/app/db/actions/request-actions";
 import {
   getPendingBills,
   getPendingLeaveRequests,
@@ -25,7 +28,7 @@ import {
   getPendingReimbursements,
   getPendingAdvances,
   getPendingNCRs,
-} from "@/app/mongodb/queries/pending-approvals-queries";
+} from "@/app/db/actions/pending-approvals";
 import { Banknote, CalendarDays, Coins, HandCoins, FileWarning } from "lucide-react";
 import ApprovalDecisionForm from "./components/ApprovalDecisionForm";
 
@@ -357,7 +360,7 @@ function ApprovalRow({
 // ASYNC SECTIONS
 // ============================================
 async function PendingQueue({ canDecide }: { canDecide: boolean }) {
-  const rows = await cApprovalQueue("submitted");
+  const rows = await getApprovalQueuePg("submitted");
 
   // Render nothing when this domain has nothing — other domain
   // sections render below independently and may have items. A page-
@@ -395,7 +398,7 @@ async function PendingQueue({ canDecide }: { canDecide: boolean }) {
 async function PendingStockRequests({ role }: { role: string }) {
   if (!STOCK_REQUEST_APPROVER_ROLES.has(role)) return null;
 
-  const rows = await getPendingApprovalRequests(50);
+  const rows = await getPendingStockRequestsPg(50);
   if (rows.length === 0) return null;
 
   return (
@@ -414,7 +417,10 @@ async function PendingStockRequests({ role }: { role: string }) {
           const priority = r.priority || "normal";
           const priorityClass =
             PRIORITY_STYLES[priority] || PRIORITY_STYLES.normal;
-          const itemCount = r.items?.length || 0;
+          /* `itemCount` is summed in SQL. The Mongo shape carried an
+             `items` array and this read its length, so on the Postgres shape
+             every request showed "0 items". */
+          const itemCount = Number(r.itemCount ?? r.items?.length ?? 0);
           const totalValue = Number(r.totalValue) || 0;
           return (
             <li key={r._id}>
@@ -645,7 +651,7 @@ async function PendingNCRsSection({ role }: { role: string }) {
 }
 
 async function MySubmissions() {
-  const rows = await cMySubmittedApprovals(15);
+  const rows = await getMySubmittedApprovalsPg(15);
 
   if (rows.length === 0) {
     return null;

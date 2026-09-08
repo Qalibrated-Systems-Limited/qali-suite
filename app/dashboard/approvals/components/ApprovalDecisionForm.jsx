@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   approveApproval,
   rejectApproval,
-} from "@/app/mongodb/actions/approval-actions";
+} from "@/app/db/actions/approval-actions";
 
 // ============================================
 // APPROVAL DECISION FORM

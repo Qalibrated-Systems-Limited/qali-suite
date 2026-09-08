@@ -500,3 +500,25 @@ export async function getRequestDecisionsToday() {
     fulfilment.getStockRequestDecisionsToday(tx),
   );
 }
+
+/**
+ * Stock requests awaiting a decision — the approvals page's section.
+ *
+ * `getPendingApprovalRequests` in `request-queries.js` aggregated the MONGO
+ * `StockRequest` collection, which has not been written to since the requests
+ * port — so that section of /dashboard/approvals has shown nothing for every
+ * tenant, however many requests were waiting. The same defect the leave, loan,
+ * claim and NCR sections each had before their own modules moved.
+ */
+export async function getPendingStockRequestsPg(limit = 50) {
+  try {
+    const { requests } = await getRequestsPaginated({
+      status: "pending",
+      perPage: limit,
+      page: 1,
+    });
+    return requests;
+  } catch {
+    return [];
+  }
+}

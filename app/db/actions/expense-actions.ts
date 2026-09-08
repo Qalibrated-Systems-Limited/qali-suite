@@ -184,10 +184,11 @@ export async function createExpensePg(
 /**
  * Records payment against an expense that was posted unpaid.
  *
- * The approval threshold still routes through Mongo's ApprovalRequest —
- * approvals are their own unported module (§9K names the general shape). What
- * changed is which store the release writes to: `applyExpensePayment` calls
- * this, not `expense.recordPayment`.
+ * The approval threshold routes through `approval_requests`, which is
+ * Postgres since 0101. It was Mongo until then, and awaited right here — so a
+ * deployment without a Mongo connection did not skip the approval on an
+ * over-threshold payment, it THREW, and `expense_payment_value` defaults to
+ * 50,000 for every company.
  */
 export async function recordExpensePaymentPg(
   expenseId: string,
@@ -421,7 +422,7 @@ async function requestApprovalIfOverThreshold(
   if (!(threshold > 0) || amount <= threshold) return null;
 
   const { submitApproval } = await import(
-    "@/app/mongodb/actions/approval-actions"
+    "@/app/db/actions/approval-actions"
   );
   const result = await submitApproval({
     type: "expense_payment",
