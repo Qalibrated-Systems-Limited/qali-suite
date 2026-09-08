@@ -3,50 +3,54 @@
 import { useState, useEffect, useTransition } from "react";
 import { Wallet, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ensureAdvanceAccountsExist } from "@/app/mongodb/actions/account-actions";
+import {
+  ensureAdvanceAccountsExistPg,
+  getAdvanceAccountStatusPg,
+} from "@/app/db/actions/account-actions";
 
 export default function AccountSetupCard() {
   const [status, setStatus] = useState("loading"); // loading, missing, complete
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState("");
 
-  // Check status on mount
+  // Check status on mount.
+  //
+  // THE CHECK IS A READ NOW. It used to call `ensureAdvanceAccountsExist()`
+  // — an action that CREATES the accounts — so simply opening this page wrote
+  // to the chart of accounts, and the "Checking account setup…" label
+  // described a write. Only the button writes.
   useEffect(() => {
-    checkStatus();
-  }, []);
-
-  const checkStatus = async () => {
-    setStatus("loading");
-    try {
-      // Call the action which checks and returns status
-      const result = await ensureAdvanceAccountsExist();
-      if (result.success) {
-        // Check if any were created or all existed
-        const allExist = result.results?.every((r) => r.action === "exists");
-        setStatus(allExist ? "complete" : "complete");
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await getAdvanceAccountStatusPg();
+        if (cancelled) return;
+        setStatus(result.complete ? "complete" : "missing");
         setMessage(
-          allExist
+          result.complete
             ? "All advance accounts are configured"
-            : `Setup complete: ${result.results?.map((r) => `${r.account} ${r.action}`).join(", ")}`
+            : `Missing: ${result.accounts
+                .filter((a) => !a.exists)
+                .map((a) => a.label)
+                .join(", ")}`
         );
-      } else {
+      } catch (error) {
+        if (cancelled) return;
         setStatus("error");
-        setMessage(result.error || "Failed to check account status");
+        setMessage(error.message || "Error checking accounts");
       }
-    } catch (error) {
-      setStatus("error");
-      setMessage(error.message || "Error checking accounts");
-    }
-  };
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSetup = () => {
     startTransition(async () => {
-      const result = await ensureAdvanceAccountsExist();
+      const result = await ensureAdvanceAccountsExistPg();
       if (result.success) {
         setStatus("complete");
-        setMessage(
-          `Setup complete: ${result.results?.map((r) => `${r.account} ${r.action}`).join(", ")}`
-        );
+        setMessage(result.message);
       } else {
         setStatus("error");
         setMessage(result.error || "Setup failed");

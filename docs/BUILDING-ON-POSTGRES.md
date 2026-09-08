@@ -3472,7 +3472,9 @@ one to step four, where it is invisible. It was right. All four are gone, and
 `lib/unported-modules.js` is deleted with them — the flag, the two dark-page
 components, the sidebar guard, the mobile-nav guard and the quote button's.
 
-**Mongo screens: 39 → 36.**
+**Mongo screens: 39 → 35**, which is four files rather than the three the
+module owns: rewiring the quote detail page's "Create Sales Order" button took
+`quotes` off Mongo as well, and it was that module's last Mongo import.
 
 ### Decision 1 — the lineage is `document_flow`, not two ref columns
 
@@ -3604,11 +3606,141 @@ invoice holding stock. Flagged, not built.
 
 ### Where the port stands
 
-**36 screens, 11 modules.** banking (8) stays on Mongo by decision, and
-`adjustments`'s single hit is still a FALSE POSITIVE — a historical comment in
-an already-ported file that the counting grep matches. So the real remaining
-surface is about **27 screens**, and NOTHING in the app is switched off any more.
+**35 screens, 10 modules** — counted, not inferred:
+
+```
+integrations 10  banking 8  employee 4  settings 3  admin 3
+components 2  approvals 2  parties 1  company 1  adjustments 1
+```
+
+banking (8) stays on Mongo by decision, and `adjustments`'s single hit is still
+a FALSE POSITIVE — a historical comment in an already-ported file that the
+counting grep matches. So the real remaining surface is about **26 screens**,
+and NOTHING in the app is switched off any more.
 
 Next: **integrations (10)** is now the largest block, though the weighbridge
 connector inside it is the last genuine ledger seam and deserves its own pass.
 Cheaper first: **employee (4)** and **settings (3)**.
+
+---
+
+## Handoff — 2026-09-08: the settings that wrote to the wrong store
+
+The last three `settings` screens, and they were three different problems
+wearing the same label. The counting grep reports a screen as "on Mongo" when
+it imports from `@/app/mongodb`, which is a good proxy and was wrong about one
+of these three in each direction.
+
+**Mongo screens: 35 → 32.** No migration: nothing here needed a schema change.
+
+### One was already Postgres, and only the directory was Mongo
+
+`updateApprovalThresholds` has written to Postgres since 0035 —
+`saveCompanyThresholds` is `app/db/companyConfig`. The whole port was
+`git mv app/mongodb/actions/threshold-actions.js app/db/actions/`.
+
+Two things did change on the way, both found by reading it rather than by
+running it:
+
+**THE ROLE GATE READ THE WRONG ROLE.** It checked
+`getTenantContext().user.role`, which is the GLOBAL role. Under the
+standing-access model somebody who is Admin of one company and a Viewer inside
+the one they are currently in passed the gate and changed that company's
+financial controls. `withAuthorizedTenant` re-checks against the role for the
+ACTIVE company. This is the same defect the sales-orders port found in
+`canSeeSalesNav`, from the other direction: there a nav gate was asked a write
+question, here a write gate asked the wrong subject.
+
+**THE SUPERADMIN CROSS-COMPANY BRANCH WAS UNREACHABLE.** It read
+`formData.get("companyId")` and the form has no such field — the page renders
+`<ApprovalThresholdsForm initial={initial} />` with no company prop at all, so
+the value was always null and it always fell through to the tenant's own id.
+Deleted rather than carried, because a branch that has never executed is not a
+feature, and a SuperAdmin sets another company's thresholds by entering that
+company like every other write in the app.
+
+### Two were writing to a store nothing reads
+
+`syncChartOfAccounts` and `ensureAdvanceAccountsExist` created MONGO `Account`
+documents. Every account screen has read Postgres since §9C. So "Sync complete
+— created 12 accounts" was true, and `/dashboard/accounts` showed exactly what
+it had before. The §9E defect, in Settings, on the two buttons whose entire job
+is to repair a chart of accounts.
+
+### The check was a write
+
+`AccountSetupCard` called `ensureAdvanceAccountsExist()` from a `useEffect` on
+mount — an action that CREATES the accounts — to find out whether they existed.
+So opening the settings page wrote to the chart of accounts, every time, and
+the "Checking account setup…" label described a write. It calls
+`getAdvanceAccountStatusPg` now, which is a read, and a test asserts the count
+of accounts is unchanged by asking.
+
+### A sync is mostly a list of things it must not do
+
+`syncStandardChart` runs against a chart somebody has been using, so most of the
+seventeen tests assert restraint rather than effect. The first version of pass 2
+wired EVERY seed code to the seed's parent — tidier, and it would have forced a
+company that deliberately restructured its chart back to the standard shape,
+demoting accounts they post to into headers on the way. It now wires only what
+pass 1 created.
+
+- Creates by `ON CONFLICT (company_id, account_code) DO NOTHING` rather than
+  read-then-diff, so two people pressing Sync together cannot both insert.
+- Never re-parents an existing account; never demotes one somebody decided to
+  post to.
+- Backfills `system_account` only where the seed defines a handle and the row
+  has none — and never where another account already claims it.
+  `accounts_company_system_uq` is a partial UNIQUE, so a blind backfill would
+  abort the WHOLE sync on the first company that had tagged its own account,
+  losing every other repair in the same transaction.
+
+### Found while doing it: every chart has a NULL ltree path
+
+`accounts.path` is an ltree with a GiST index, and `getDescendants()` walks it
+with `<@`. `seedChartOfAccounts` in `provisioning.ts` sets `parent_id` and
+`level` and has NEVER set `path` — so every company provisioned to date has a
+chart whose descendant query matches nothing. `getDescendants` has no caller
+today, which is why nobody noticed; it is a loaded gun rather than a live bug.
+
+Both halves are fixed: `provisioning.ts` materialises the path so new companies
+do not arrive needing repair, and the sync derives `path` and `level` across the
+whole chart from the parent links that ACTUALLY exist — not from the seed's — so
+it is a repair rather than an opinion. The recursive walk carries a depth cap,
+because `accounts.parent_id` is a self-FK with nothing preventing A → B → A and
+a recursive CTE that meets a cycle does not return.
+
+### The `employee` module is not four screens. It is dead code.
+
+`app/dashboard/employee/` contains five components and NO page. Next's App
+Router needs a `page.jsx` for a segment to be routable, git history shows one
+was never there, and nothing anywhere imports any of the five — the only
+references are the components importing each other. The live employee-facing
+dashboard is `app/dashboard/components/EmployeeDashborad.tsx`, which is already
+on Postgres.
+
+So four of the screens in the remaining count are unreachable, and porting
+`tech-dashboard-queries.js` would be porting code no user can arrive at. NOT
+deleted here, because deleting 919 lines is a decision rather than a cleanup —
+but it should be deleted, and the count below excludes nothing on its account.
+
+### Verified
+
+- 17 tests in `tests/pg-chart-sync.test.mjs`, green.
+- 86 more across accounts, provisioning, the account hierarchy, the subtype
+  options, the chart enum, company thresholds and the accounting core — the
+  suites that touch what changed, including the provisioning edit.
+- `tsc --noEmit` and `eslint . --quiet` clean.
+
+### Where the port stands
+
+**32 screens, 8 modules:**
+
+```
+integrations 10  banking 8  employee 4 (DEAD — see above)  admin 3
+components 2  approvals 2  parties 1  company 1  adjustments 1
+```
+
+banking (8) stays on Mongo by decision, `employee` (4) is unreachable, and
+`adjustments`'s single hit is a FALSE POSITIVE. The real remaining surface is
+about **19 screens**, of which integrations is half.

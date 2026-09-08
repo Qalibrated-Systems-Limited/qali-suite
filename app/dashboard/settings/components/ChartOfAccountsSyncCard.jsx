@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { RefreshCw, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { syncChartOfAccounts } from "@/app/mongodb/actions/account-actions";
+import { syncChartOfAccountsPg as syncChartOfAccounts } from "@/app/db/actions/account-actions";
 
 export default function ChartOfAccountsSyncCard() {
   const [status, setStatus] = useState("idle"); // idle, syncing, complete, error

@@ -263,6 +263,12 @@ async function seedChartOfAccounts(tx: Tx, companyId: string) {
     `);
   }
 
+  /* Roots first: a child's path is built from its parent's. */
+  await tx.execute(sql`
+    UPDATE accounts SET path = account_code::ltree
+     WHERE company_id = ${companyId} AND path IS NULL
+  `);
+
   const parents = new Set<string>();
   for (const a of definitions) {
     if (!a.parentCode) continue;
@@ -271,12 +277,23 @@ async function seedChartOfAccounts(tx: Tx, companyId: string) {
     if (!parentId || !childId) continue;
 
     parents.add(a.parentCode);
+    /*
+     * `path` as well as parent and level, which this pass did not set.
+     * `accounts.path` is an ltree with a GiST index and `getDescendants()`
+     * queries it with `<@` — against a NULL path that returns nothing, so
+     * every company provisioned before this line had a chart the descendant
+     * query could not walk. The seed is ordered parent-before-child, so the
+     * parent's path is already materialised when the child reads it; the root
+     * accounts are given theirs in the pass above.
+     */
     await tx.execute(sql`
-      UPDATE accounts
+      UPDATE accounts c
          SET parent_id = ${parentId},
-             level = COALESCE(
-               (SELECT level + 1 FROM accounts WHERE id = ${parentId}), 1)
-       WHERE id = ${childId}
+             level = COALESCE(p.level + 1, 1),
+             path = COALESCE(p.path, ${a.parentCode}::ltree)
+                    || ${a.accountCode}::ltree
+        FROM accounts p
+       WHERE c.id = ${childId} AND p.id = ${parentId}
     `);
   }
 
