@@ -11,8 +11,15 @@ echo "  QaliSuite Build & Deploy"
 echo "  Image: $IMAGE:$TAG"
 echo "========================================="
 
-echo ""cd /opt/qalisuite
-vim .env
+# NOTE: this is the CONTAINER path and it is currently BROKEN — the Dockerfile
+# copies .next/standalone, which is only produced when next.config.js sets
+# `output: "standalone"`, and it does not. docker-compose.yaml also passes
+# MONGODB_URI/DB_LOCAL_URI and no DATABASE_URL, so the container cannot reach
+# the database. Use deploy/deploy.sh (PM2 + Caddy) until those are fixed.
+#
+# Two lines were removed here: a mangled `echo ""cd /opt/qalisuite` and a bare
+# `vim .env`, which opened an editor in the middle of a non-interactive deploy
+# and hung it.
 
 echo "[1/4] Building Docker image..."
 docker build -t $IMAGE:$TAG .
