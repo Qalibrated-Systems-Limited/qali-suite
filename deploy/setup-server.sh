@@ -17,9 +17,29 @@ set -euo pipefail
 echo "==> Updating system..."
 apt update && apt upgrade -y
 
-echo "==> Installing PostgreSQL 16..."
-apt install -y postgresql-16 postgresql-contrib
+echo "==> Installing PostgreSQL 16 (from the PGDG repository)..."
+# NOT `apt install postgresql-16` against the distro repos. Ubuntu 24.04 carries
+# 16, but 22.04 carries 14 and the command fails with "Unable to locate package".
+# 15 is the FLOOR: migration 0062 uses NULLS NOT DISTINCT, which does not exist
+# before it — an older server installs fine and dies 62 migrations in.
+# PGDG carries 16 for every supported release, so this does not depend on which.
+apt install -y curl ca-certificates lsb-release
+install -d /usr/share/postgresql-common/pgdg
+curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+  https://www.postgresql.org/media/keys/ACCC4CF8.asc
+echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+  > /etc/apt/sources.list.d/pgdg.list
+apt update
+apt install -y postgresql-16
 systemctl enable --now postgresql
+
+echo "==> Verifying the server meets the floor..."
+sudo -u postgres psql -tAc "SHOW server_version;" | sed 's/^/    version: /'
+sudo -u postgres psql -tAc \
+  "SELECT count(*) FROM pg_available_extensions WHERE name IN ('btree_gist','ltree');" \
+  | grep -q '^2$' \
+  && echo "    btree_gist and ltree: available" \
+  || echo "    WARNING: btree_gist/ltree missing — install postgresql-contrib-16"
 
 echo "==> Installing Node.js 22..."
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -

@@ -132,10 +132,48 @@ ssh root@YOUR_SERVER_IP 'bash -s' < deploy/setup-server.sh
 
 ### Install
 
+**PostgreSQL 15 is the minimum; 16 is what this is tested on.** Migration
+`0062_categories.sql` uses `NULLS NOT DISTINCT`, which does not exist before 15
+— so an older server installs happily and then fails 62 migrations in, with the
+schema half-built.
+
+Do NOT rely on `apt install postgresql`, which gives whatever the release
+carries: 24.04 (noble) has 16, but 22.04 (jammy) has **14** and would fail.
+`apt install postgresql-16` on jammy gives:
+
+```
+E: Unable to locate package postgresql-16
+```
+
+Add the PostgreSQL project's own repository instead. It carries 16 for every
+supported Ubuntu release, so this step does not depend on which one you are on:
+
 ```bash
-apt install -y postgresql-16 postgresql-contrib
+apt install -y curl ca-certificates
+install -d /usr/share/postgresql-common/pgdg
+curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+  https://www.postgresql.org/media/keys/ACCC4CF8.asc
+echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+  > /etc/apt/sources.list.d/pgdg.list
+apt update
+apt install -y postgresql-16
 systemctl enable --now postgresql
 ```
+
+Check the version and that both extensions the schema needs are available —
+`btree_gist` and `ltree` ship inside the `postgresql-16` package on Debian and
+Ubuntu, but verify rather than assume:
+
+```bash
+sudo -u postgres psql -c "SHOW server_version;"
+sudo -u postgres psql -c \
+  "SELECT name, default_version FROM pg_available_extensions
+    WHERE name IN ('btree_gist','ltree');"
+```
+
+Two rows, and a version of 15 or higher. If either extension is missing, install
+`postgresql-contrib-16`.
 
 ### Create the database and **two** roles
 
@@ -591,6 +629,9 @@ pm2 set pm2-logrotate:compress true
 
 | Problem | Cause / fix |
 |---|---|
+| `E: Unable to locate package postgresql-16` | The distro repo has no 16 — you are probably on 22.04 (`lsb_release -cs` prints `jammy`). Add the PGDG repository, Step 2. Do **not** fall back to `apt install postgresql`: 22.04 gives PG 14, and migration 0062 needs 15+. |
+| Migrations fail around `0062_categories` with a syntax error near `NULLS` | The server is older than PostgreSQL 15. `SHOW server_version;` — the floor is 15, tested on 16. |
+| `extension "btree_gist" is not available` | Install `postgresql-contrib-16`. |
 | `Missing required environment variables: DATABASE_URL — refusing to start` | The boot check. Set `DATABASE_URL` in `/opt/qalisuite/.env`. |
 | `DATABASE_URL is not set — see .env.example` at runtime | PM2 started without the env file loaded. Restart from `/opt/qalisuite` so `.env` is read, or set `--env`. |
 | `/api/health` returns 503 | Postgres is down or unreachable. `systemctl status postgresql`, then `psql "$DATABASE_URL" -c 'select 1'`. |
