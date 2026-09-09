@@ -215,6 +215,71 @@ sudo -u postgres psql -c \
 Two rows, and a version of 15 or higher. If either extension is missing, install
 `postgresql-contrib-16`.
 
+### Alternative — PostgreSQL 16 in a container
+
+If the host cannot install PostgreSQL 16 (Ubuntu 20.04 is the case that forces
+this), run it in Docker instead. The container carries its own server, so the
+host release stops mattering. **This does not fix the host being out of
+support** — it unblocks the deployment while a supported box is arranged.
+
+```bash
+# Docker, from Docker's own repository — focal's docker.io is old but works too
+curl -fsSL https://get.docker.com | sh
+systemctl enable --now docker
+
+cd /opt/qalisuite/deploy/docker
+cp .env.example .env
+chmod 600 .env
+nano .env                        # two passwords: openssl rand -base64 24
+
+docker compose -f docker-compose.postgres.yml up -d
+docker compose -f docker-compose.postgres.yml logs -f postgres   # ctrl-c when ready
+```
+
+The role setup from the section below is **already done** — `initdb/01-app-user.sh`
+creates `app_user` on first start, grants it the schema, sets default privileges
+so the ~139 tables migrations create are reachable, and then refuses to start if
+that role can bypass RLS. Verify anyway:
+
+```bash
+docker exec qalisuite-pg psql -U postgres -d qalisuite -c \
+  "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles
+    WHERE rolname IN ('app_user','postgres');"
+docker exec qalisuite-pg psql -U postgres -c "SHOW server_version;"
+```
+
+`app_user` must read `f | f`.
+
+Then in `/opt/qalisuite/.env`, point both URLs at the published port:
+
+```env
+DATABASE_URL=postgresql://app_user:APP_DB_PASSWORD@127.0.0.1:5432/qalisuite
+DIRECT_DATABASE_URL=postgresql://postgres:POSTGRES_SUPERUSER_PASSWORD@127.0.0.1:5432/qalisuite
+```
+
+**The port is published on `127.0.0.1` deliberately.** `5432:5432` would expose
+the database to every interface — and Docker writes its own DNAT rules *ahead*
+of UFW, so `ufw deny 5432` would not stop it. UFW would report the port closed
+while it was open to the internet. Loopback binding is what actually confines
+it.
+
+Backups change shape — `pg_dump` runs inside the container:
+
+```bash
+docker exec qalisuite-pg pg_dump -U postgres -Fc qalisuite \
+  > /var/backups/qalisuite/qalisuite-$(date -u +%Y%m%dT%H%M%SZ).dump
+```
+
+Substitute that line into `/usr/local/bin/qalisuite-backup` (Step 7) and drop
+the `sudo -u postgres`. The data itself lives in the named volume
+`qalisuite-pgdata`, which survives `docker compose down`; only `down -v`
+destroys it.
+
+Two things this arrangement does not give you, versus a host install: the
+`ALTER SYSTEM` tuning in the next section is instead passed as `command:` flags
+in the compose file, and `systemctl status postgresql` becomes
+`docker compose ps` / `docker logs qalisuite-pg`.
+
 ### Create the database and **two** roles
 
 > **Read this part even if you skim the rest.**
