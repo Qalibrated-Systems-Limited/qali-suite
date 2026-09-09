@@ -42,7 +42,10 @@ const submitApproval = vi.fn(async () => ({
   success: true,
   approval: { _id: "appr1", requestNumber: "APR-0001" },
 }));
-vi.mock("@/app/mongodb/actions/approval-actions", () => ({
+// POSTGRES since 0101. See the note in expense-payment-threshold.test.mjs —
+// this mock named the Mongo module the engine no longer lives in, so the gate
+// under test was never actually isolated. Repointed with the 0102 sweep.
+vi.mock("@/app/db/actions/approval-actions", () => ({
   submitApproval: (...a) => submitApproval(...a),
 }));
 

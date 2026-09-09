@@ -34,7 +34,10 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 // who is held and who pays through — is tests/bill-payment-threshold.test.mjs.
 // Left unmocked it would open its own connection through companyConfig, which
 // is a second database story inside a test about journal lines.
-vi.mock("@/app/mongodb/queries/threshold-queries", () => ({
+// `getCompanyThresholds` moved to @/app/db/companyConfig; the mock still named
+// the Mongo query module, so the threshold was NOT pinned and this file opened
+// the very connection the comment above says it is avoiding.
+vi.mock("@/app/db/companyConfig", () => ({
   getCompanyThresholds: vi.fn(async () => ({ billPaymentValue: 10_000_000 })),
 }));
 

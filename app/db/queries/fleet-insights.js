@@ -6,10 +6,7 @@ import {
   getFleetUsagePg,
   sumAssetBillCostsPg,
 } from "@/app/db/actions/asset-actions";
-import {
-  getTenantContext,
-  withTenantScope,
-} from "@/lib/utils/tenant-utils";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { requirePlanAccess } from "@/lib/plan-gate";
 import { safeErrorMessage } from "@/lib/safe-error";
 import { sumExpensesByAssetPg } from "@/app/db/actions/expense-actions";

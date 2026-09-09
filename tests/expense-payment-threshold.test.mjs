@@ -32,7 +32,11 @@ const submitApproval = vi.fn(async () => ({
   success: true,
   approval: { _id: "appr1", requestNumber: "APR-0001" },
 }));
-vi.mock("@/app/mongodb/actions/approval-actions", () => ({
+// POSTGRES since 0101, and this mock was left pointing at the Mongo module
+// when the engine moved — so the real submitApproval ran against the stubbed
+// `{}` transaction and every routing assertion in this file failed with
+// "tx.execute is not a function". Repointed with the 0102 sweep.
+vi.mock("@/app/db/actions/approval-actions", () => ({
   submitApproval: (...a) => submitApproval(...a),
 }));
 

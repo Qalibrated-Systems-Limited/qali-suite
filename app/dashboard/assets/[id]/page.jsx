@@ -56,7 +56,7 @@ import CancelDepreciationButton from "@/app/dashboard/assets/components/CancelDe
 import TransferAssetDialog from "@/app/dashboard/assets/components/TransferAssetDialog";
 import ImpairAssetDialog from "@/app/dashboard/assets/components/ImpairAssetDialog";
 import LogUsageDialog from "@/app/dashboard/assets/components/LogUsageDialog";
-import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 const VIEW_ROLES = ["SuperAdmin", "Admin", "Viewer", "CFO", "Finance Manager", "Accountant", "Manager"];
 const ADMIN_ROLES = ["SuperAdmin", "Admin"];

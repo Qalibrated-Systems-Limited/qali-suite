@@ -9,7 +9,6 @@ import {
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import { updateSubscription } from "@/lib/subscription-helpers";
 import { PLAN_LIMITS } from "@/lib/plans";
-import { invalidatePlanCache } from "@/lib/plans-server";
 import { addMonths } from "@/lib/dates";
 
 /*
@@ -125,7 +124,6 @@ export async function updateCompanyPlan(_prevState, formData) {
     );
 
     revalidatePath(`/dashboard/admin/companies/${companyId}`);
-    invalidatePlanCache();
     return {
       success: true,
       message:
@@ -184,7 +182,6 @@ export async function renewSubscription(_prevState, formData) {
     );
 
     revalidatePath(`/dashboard/admin/companies/${companyId}`);
-    invalidatePlanCache();
     return {
       success: true,
       message: `Renewed until ${end.toLocaleDateString()}`,
@@ -215,7 +212,6 @@ export async function updateCompanyStatus(_prevState, formData) {
     );
 
     revalidatePath(`/dashboard/admin/companies/${companyId}`);
-    invalidatePlanCache();
     return { success: true, message: `Status updated to ${newStatus}` };
   } catch (error) {
     return { success: false, error: error.message };
@@ -259,7 +255,6 @@ export async function extendTrial(_prevState, formData) {
     );
 
     revalidatePath(`/dashboard/admin/companies/${companyId}`);
-    invalidatePlanCache();
     return { success: true, message: `Trial extended by ${days} days` };
   } catch (error) {
     return { success: false, error: error.message };
@@ -300,7 +295,6 @@ export async function cancelSubscription(_prevState, formData) {
     );
 
     revalidatePath(`/dashboard/admin/companies/${companyId}`);
-    invalidatePlanCache();
     return {
       success: true,
       message: immediate

@@ -59,7 +59,10 @@ export default defineConfig({
     // Boot mongodb-memory-server + connect Mongoose ONCE per worker, then
     // truncate collections between tests. Setup lives in tests/setup.mjs.
     globalSetup: ["./tests/setup.global.mjs"],
-    setupFiles: ["./tests/setup.mjs"],
+    // No setupFiles: tests/setup.mjs connected Mongoose to the in-memory
+    // cluster and truncated its collections between tests. Both the cluster
+    // and the models are gone (0102); each Postgres suite manages its own
+    // truncation, which it always did.
     // Sequential by default — Mongoose connection state is process-wide
     // and parallel Mongo writes against the same in-memory cluster create
     // false-positive uniqueness conflicts.
@@ -83,9 +86,10 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: [
-        "app/models/**",
-        "app/mongodb/actions/**",
-        "app/mongodb/queries/**",
+        // app/models/** and app/mongodb/** are gone with 0102. Coverage is
+        // measured over app/db/**, which is where the logic lives now.
+        "app/db/actions/**",
+        "app/db/repositories/**",
         "lib/business-rules.js",
         "lib/permissions.js",
         "lib/utils/tenant-utils.js",

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { privilegedDb } from "./provisioning";
+import { arrayOf, likeContains } from "./repositories/sqlHelpers";
 
 /**
  * Writing a login that is not your own (0036).
@@ -682,4 +683,73 @@ export async function unlinkUserFromPartyDirect(input: {
   `);
 
   return { cleared: cleared.length, userIds: cleared.map((r) => r.user_id) };
+}
+
+/**
+ * Names for a set of user ids — the people behind a company's grants.
+ *
+ * POSTGRES since 0102. `company-access-actions.ts` looked these up in MONGO
+ * under a comment saying "there is no users table in Postgres yet (0031)".
+ * 0036 added one, and `upsertUser` has been filling it from every sign-in
+ * since, so the note outlived the condition it described: the grants page was
+ * reading names from a collection while the grants themselves came from
+ * Postgres.
+ *
+ * PRIVILEGED, because a SuperAdmin looking at one company's members is asking
+ * about people who may belong to another. `users` carries `own_row` and
+ * `visible_within_company` policies (0036, 0064), and neither answers that
+ * question — the same reason the rest of this module is privileged.
+ *
+ * The ObjectId-shape filter the Mongo version needed is gone with it: ids are
+ * `text` here, so an id from a source that is not a user simply matches
+ * nothing instead of throwing on a cast.
+ */
+export async function getUsersByIds(ids: string[]) {
+  const wanted = [...new Set(ids.map(String).filter(Boolean))];
+  if (!wanted.length) return [];
+
+  const rows = (await privilegedDb().execute(sql`
+    SELECT id, name, email, role
+      FROM users
+     WHERE id = ANY(${arrayOf(wanted, "text[]")})
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    name: (r.name as string) ?? null,
+    email: (r.email as string) ?? null,
+    role: (r.role as string) ?? null,
+  }));
+}
+
+/**
+ * Active users a SuperAdmin may grant company access to.
+ *
+ * Deliberately NOT scoped to one company: moving a person between companies,
+ * or giving an accountant access to two, is the case the grants table exists
+ * for. Capped at 20 and searched in SQL, because the list grows without bound.
+ *
+ * The search term is a bound parameter to ILIKE with its wildcards escaped.
+ * The Mongo version compiled it into a `new RegExp(...)`, which made a caller
+ * typing `.*` a full table scan returning everybody.
+ */
+export async function searchGrantableUsers(term: string, limit = 20) {
+  const q = String(term ?? "").trim();
+  const capped = Math.min(Math.max(Number(limit) || 20, 1), 100);
+
+  const rows = (await privilegedDb().execute(sql`
+    SELECT id, name, email, role
+      FROM users
+     WHERE status = 'active'
+       ${q ? sql`AND (name ILIKE ${likeContains(q)} OR email ILIKE ${likeContains(q)})` : sql``}
+     ORDER BY name
+     LIMIT ${capped}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    name: (r.name as string) ?? "",
+    email: (r.email as string) ?? "",
+    role: (r.role as string) ?? "",
+  }));
 }

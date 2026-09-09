@@ -25,13 +25,13 @@ vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/utils/tenant-utils", () => ({ getTenantContext: vi.fn() }));
 
-// The approval engine is Mongo and is not exercised here; what matters is
-// WHETHER it is called and that the price is left alone when it is.
+// The approval engine is Postgres since 0101 and is not exercised here; what
+// matters is WHETHER it is called and that the price is left alone when it is.
 const submitApproval = vi.fn(async () => ({
   success: true,
   approval: { _id: "a1", requestNumber: "APR-0007" },
 }));
-vi.mock("@/app/mongodb/actions/approval-actions", () => ({ submitApproval }));
+vi.mock("@/app/db/actions/approval-actions", () => ({ submitApproval }));
 
 const { getTenantContext } = await import("@/lib/utils/tenant-utils");
 const products = await import("@/app/db/actions/product-actions");

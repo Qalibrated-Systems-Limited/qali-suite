@@ -470,3 +470,59 @@ export async function ensureAdvanceAccountsExistPg(): Promise<
     };
   }
 }
+
+/**
+ * Accounts grouped by type, for `/api/accounts/by-type`.
+ *
+ * POSTGRES since 0102. The route read the MONGO `Account` collection, which
+ * nothing has written to since the chart of accounts moved — so a picker built
+ * from it offered accounts that no longer exist and omitted every account
+ * created since. The type values are identical in both stores (`lib/utils.js`
+ * `accountTypes` and the `account_type` enum are the same five strings), so
+ * the response shape is unchanged.
+ *
+ * An unknown type is DROPPED rather than passed to the query. It reaches the
+ * enum as a cast otherwise, and `'assets'::account_type` is a 22P02 — a
+ * caller's typo returned as our 500.
+ */
+type AccountType = (typeof ACCOUNT_TYPES)[number];
+
+export async function getAccountsByTypePg(types: string[]) {
+  // ACCOUNT_TYPES is already declared at the top of this file for the create
+  // schema; the predicate narrows to it so `listAccounts` gets the enum member
+  // it expects rather than a bare string cast.
+  const wanted = types
+    .map((t) => t.trim())
+    .filter((t): t is AccountType =>
+      (ACCOUNT_TYPES as readonly string[]).includes(t),
+    );
+
+  return withAuthorizedTenant([], async (tx) => {
+    const grouped: Record<
+      string,
+      Array<{
+        _id: string;
+        accountCode: string;
+        accountName: string;
+        accountType: string;
+      }>
+    > = {};
+
+    for (const accountType of wanted) {
+      const rows = await accountsRepo.listAccounts(tx, {
+        activeOnly: true,
+        accountType,
+      });
+      grouped[accountType] = rows.map((a) => ({
+        // `_id`, because the pickers reading this route were written against
+        // the Mongo shape and this port does not get to change them too.
+        _id: String(a.id),
+        accountCode: a.accountCode,
+        accountName: a.accountName,
+        accountType: a.accountType,
+      }));
+    }
+
+    return grouped;
+  });
+}
