@@ -470,12 +470,52 @@ start without them rather than failing on the first request.
 
 ## Step 5 — Deploy the app
 
+### Give the server read access to the repository
+
+The repository is private, so a bare `git clone` fails with
+`Permission denied (publickey)`. Generate a key **as the deploy user** and
+register it as a **deploy key** on the repository:
+
 ```bash
 ssh deploy@YOUR_SERVER_IP
+ssh-keygen -t ed25519 -C "deploy@$(hostname)" -f ~/.ssh/id_ed25519 -N ""
+cat ~/.ssh/id_ed25519.pub
+```
+
+Copy that line into GitHub: **repo → Settings → Deploy keys → Add deploy key**.
+Give it the server's name, and **leave "Allow write access" unchecked**.
+
+> **A deploy key, not a personal access token.** A deploy key is scoped to one
+> repository and is read-only, so a compromised server can clone this project
+> and nothing else. A PAT in the clone URL is the alternative and is worse in
+> three ways: it lands in `.git/config` in plaintext, it usually carries access
+> to every repository the account can see, and it can push. If a token is
+> already embedded in a remote URL anywhere, replace it with SSH and revoke it.
+
+Then pre-accept GitHub's host key, so the first clone does not sit waiting on a
+`yes/no` prompt — which is what hangs an otherwise-working scripted deploy:
+
+```bash
+ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+ssh -T git@github.com    # "Hi <repo>! You've successfully authenticated" — no shell access is expected
+```
+
+### Clone
+
+```bash
 cd /opt/qalisuite
-git clone --branch main git@github.com:YOUR_USERNAME/YOUR_REPO.git .
+git clone --branch BRANCH git@github.com:ORG/REPO.git .
 npm ci
 ```
+
+**Check which branch you mean.** `main` is the usual answer, but this work is
+currently on `feat/postgres-migration` and `main` is behind it — deploying
+`main` today would ship the Mongo-era application. Either merge to `main` first
+or clone the branch explicitly; do not let the default carry the decision.
+
+**And which remote.** `deploy/deploy.sh` pulls from whatever `origin` points at
+on the server, so clone from the repository that is canonical for the team, not
+whichever one you happen to use locally.
 
 ### Run migrations **before** starting the app
 
@@ -747,6 +787,9 @@ pm2 set pm2-logrotate:compress true
 | Webhooks never retry | The `webhook-retry` cron is not installed or is 401ing. Failed deliveries sit in `sync_logs` with `status='retrying'`. |
 | Build fails, OOM-killed | Add swap: `fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab` |
 | `remaining connection slots are reserved` | `PGPOOL_MAX` × PM2 instances exceeds `max_connections`. Lower `PGPOOL_MAX` or raise `max_connections`. |
+| `Permission denied (publickey)` on clone | The deploy key is not registered, or was generated as the wrong user. It must be `~/.ssh/id_ed25519.pub` **of the deploy user**, added under the repo's Deploy keys. Test with `ssh -T git@github.com`. |
+| Clone hangs with no output | GitHub's host key was never accepted. `ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts`. |
+| Deployed, but the app looks like the old Mongo version | You cloned `main`. The Postgres work is on `feat/postgres-migration` until it is merged. |
 | SSL not issued | DNS A record not resolving yet. `dig +short yourdomain.com`, then `journalctl -u caddy -f`. |
 | Port 3000 in use | `pm2 delete qalisuite` then start again. |
 

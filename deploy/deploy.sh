@@ -20,7 +20,14 @@
 set -euo pipefail
 
 APP_DIR="/opt/qalisuite"
-BRANCH="${1:-main}"
+
+# Defaults to the branch already checked out, NOT to `main`.
+#
+# It used to default to main, and `git reset --hard origin/main` two lines below
+# does not ask. On a server deployed from feat/postgres-migration, running this
+# with no argument would have silently replaced the whole application with the
+# Mongo-era one — and the deploy would have reported success.
+BRANCH="${1:-$(git -C "$APP_DIR" rev-parse --abbrev-ref HEAD)}"
 HEALTH_URL="http://localhost:3000/api/health"
 
 cd "$APP_DIR"
@@ -37,6 +44,7 @@ fi
 # ── 2. Code ─────────────────────────────────────────────────────────────────
 PREVIOUS_SHA=$(git rev-parse HEAD)
 echo "==> Current revision: $PREVIOUS_SHA"
+echo "==> Deploying branch: $BRANCH"
 
 echo "==> Fetching origin/$BRANCH..."
 git fetch origin
