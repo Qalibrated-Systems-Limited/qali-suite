@@ -23,13 +23,13 @@ echo "==> Installing PostgreSQL 16 (from the PGDG repository)..."
 # 15 is the FLOOR: migration 0062 uses NULLS NOT DISTINCT, which does not exist
 # before it — an older server installs fine and dies 62 migrations in.
 # PGDG carries 16 for every supported release, so this does not depend on which.
-apt install -y curl ca-certificates lsb-release
-install -d /usr/share/postgresql-common/pgdg
-curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-  https://www.postgresql.org/media/keys/ACCC4CF8.asc
-echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-  > /etc/apt/sources.list.d/pgdg.list
-apt update
+# PostgreSQL's own installer script works out the release codename itself.
+# Doing it by hand needs lsb_release, which a minimal server image does not
+# have — and when it is missing the codename expands to nothing, the repo line
+# becomes ".../apt -pgdg main", and apt reports "Unable to locate package
+# postgresql-16" exactly as if the repository had never been added.
+apt install -y postgresql-common
+/usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
 apt install -y postgresql-16
 systemctl enable --now postgresql
 

@@ -29,8 +29,18 @@ Production deployment on an Ubuntu VPS (Hetzner, DigitalOcean, AWS EC2, Contabo�
 
 ## Prerequisites
 
-- Ubuntu 24.04 VPS — **minimum 2 vCPU / 4 GB RAM** (the Next build needs ~2 GB;
-  see the swap note in [Troubleshooting](#troubleshooting) for 2 GB boxes)
+- **Ubuntu 24.04 LTS** (22.04 works; **20.04 does not** — see below), minimum
+  2 vCPU / 4 GB RAM (the Next build needs ~2 GB; see the swap note in
+  [Troubleshooting](#troubleshooting) for 2 GB boxes)
+
+  > **Ubuntu 20.04 (focal) cannot run this.** PostgreSQL's own apt repository
+  > carries `jammy`, `noble`, `bookworm` and `trixie` — it **dropped focal**, so
+  > there is no `postgresql-16` for it from any official source, and focal's own
+  > PostgreSQL is 12, three major versions under our floor of 15. 20.04 also
+  > left standard support in May 2025 and is ESM-only, which is the wrong base
+  > for a multi-tenant financial system. Reprovision as 24.04 rather than
+  > working around it; Node and Caddy install fine on focal, so the box looks
+  > healthy right up until `apt install postgresql-16` fails.
 - A domain with a DNS **A record** pointing at the server IP, propagated
   *before* you configure Caddy — Let's Encrypt validates over HTTP
 - SSH root access
@@ -148,18 +158,48 @@ E: Unable to locate package postgresql-16
 Add the PostgreSQL project's own repository instead. It carries 16 for every
 supported Ubuntu release, so this step does not depend on which one you are on:
 
+Use PostgreSQL's own installer script. It works out the release codename
+itself, which is the part that goes wrong by hand:
+
+```bash
+apt install -y postgresql-common
+/usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+apt install -y postgresql-16
+systemctl enable --now postgresql
+```
+
+<details>
+<summary>Adding the repository by hand instead</summary>
+
+Read the codename from `/etc/os-release`, **not** from `lsb_release` — that
+command is not installed on a minimal server image, and when it is missing
+`$(lsb_release -cs)` expands to nothing. The repo line silently becomes
+`… /pub/repos/apt -pgdg main`, `apt update` reports no error worth noticing, and
+`apt install postgresql-16` fails with the same "Unable to locate package" you
+were trying to fix.
+
 ```bash
 apt install -y curl ca-certificates
+. /etc/os-release
 install -d /usr/share/postgresql-common/pgdg
 curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
   https://www.postgresql.org/media/keys/ACCC4CF8.asc
-echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
-https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
   > /etc/apt/sources.list.d/pgdg.list
 apt update
 apt install -y postgresql-16
 systemctl enable --now postgresql
 ```
+
+Check the repo line resolved to a real codename before moving on — it should
+read `… /pub/repos/apt noble-pgdg main`, or `jammy-pgdg`, not `-pgdg`:
+
+```bash
+cat /etc/apt/sources.list.d/pgdg.list
+apt-cache policy postgresql-16 | head -3
+```
+
+</details>
 
 Check the version and that both extensions the schema needs are available —
 `btree_gist` and `ltree` ship inside the `postgresql-16` package on Debian and
@@ -629,6 +669,7 @@ pm2 set pm2-logrotate:compress true
 
 | Problem | Cause / fix |
 |---|---|
+| `E: Unable to locate package postgresql-16` **after** adding PGDG | Check the OS. On **20.04 (focal)** PGDG has no repository at all — `apt.postgresql.org/pub/repos/apt/dists/` has no `focal-pgdg`. Reprovision as 24.04; there is no fix on focal short of Docker or managed Postgres. |
 | `E: Unable to locate package postgresql-16` | The distro repo has no 16 — you are probably on 22.04 (`lsb_release -cs` prints `jammy`). Add the PGDG repository, Step 2. Do **not** fall back to `apt install postgresql`: 22.04 gives PG 14, and migration 0062 needs 15+. |
 | Migrations fail around `0062_categories` with a syntax error near `NULLS` | The server is older than PostgreSQL 15. `SHOW server_version;` — the floor is 15, tested on 16. |
 | `extension "btree_gist" is not available` | Install `postgresql-contrib-16`. |
