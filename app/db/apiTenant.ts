@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { apiKeyAuth } from "@/lib/integrations/middleware/apiKeyAuth";
 import { errorResponse } from "@/lib/integrations/utils/envelope";
 import { withTenant, type Tx } from "./client";
-import { resolveCompanyUuid } from "./tenant";
 
 /**
  * The door into Postgres for a request that carries an API key instead of a
@@ -44,8 +43,6 @@ export interface ApiTenantContext {
    */
   actorId: string | null;
   actorName: string | null;
-  /** The Mongo company id the key is bound to, for logging and joins. */
-  sourceCompanyId: string;
   keyId: string;
   keyName: string;
   scopes: string[];
@@ -69,30 +66,43 @@ export async function withApiKeyTenant(
   const auth = await apiKeyAuth(request, opts);
   if (!auth.ok) return auth.response;
 
-  let companyId: string;
-  try {
-    // No provisioning HINT is passed, deliberately. resolveCompanyUuid falls
-    // back to provisioning an empty tenant for a company that predates
-    // automatic provisioning, and naming it from an API key's metadata would
-    // put a machine's guess in the tenant list. The id is what matters; a
-    // human-facing name is set when someone opens the company.
-    companyId = await resolveCompanyUuid(auth.companyId);
-  } catch (err) {
+  /**
+   * NO ID RESOLUTION STEP ANY MORE.
+   *
+   * Until 0102 the key lived in Mongo and carried a Mongo company id, so this
+   * put it through `resolveCompanyUuid` — a lookup in _migration_id_map that
+   * could also PROVISION an empty tenant, on the request path, for a company
+   * an API key claimed to belong to. `integration_keys.company_id` is a real
+   * foreign key to `companies` now, so the tenant is resolved by the same
+   * query that authenticated the key, and a key for a company that does not
+   * exist cannot be written in the first place.
+   */
+  const companyId = auth.companyId;
+
+  /**
+   * The guard survives the removal of the lookup.
+   *
+   * There is no id map to miss any more, but "the key named no company" is
+   * still reachable — a key row read before its company was set, or a caller
+   * mocking the middleware — and it must stay a 409 that names the problem.
+   * Without this it reaches `withTenant`, which throws a generic error that
+   * the catch below reports as an INTERNAL_ERROR 500: our fault, for the
+   * caller's bad key.
+   */
+  if (!companyId) {
     return errorResponse(
       "TENANT_UNAVAILABLE",
-      err instanceof Error ? err.message : "Could not resolve the company",
+      "The key is not bound to a company",
       409,
     );
   }
 
-  const createdBy = (auth.key as { createdBy?: { id?: string; name?: string } })
-    ?.createdBy;
+  const createdBy = auth.createdBy as { id: string; name: string | null } | null;
 
   const ctx: ApiTenantContext = {
     companyId,
     actorId: createdBy?.id ?? null,
     actorName: createdBy?.name ?? null,
-    sourceCompanyId: auth.companyId,
     keyId: auth.keyId,
     keyName: auth.keyName,
     scopes: auth.scopes ?? [],

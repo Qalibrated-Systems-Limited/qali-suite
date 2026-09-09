@@ -82,8 +82,11 @@ export async function POST(request) {
   }
 
   // No dbConnect: the connector opens its own tenant-scoped Postgres
-  // transaction. Its integration log still lives in Mongo, which is what
-  // BaseConnector.process() reaches for.
+  // transaction, and since 0102 BaseConnector's integration log does too.
+  //
+  // `ctx.companyId` is a Postgres uuid now, not the Mongo id the key used to
+  // carry — which the connector was passing straight to `withTenant()`, where
+  // the policies cast it with `::uuid` and a 24-character ObjectId does not.
   const connector = new CoffeeCoopConnector(ctx.companyId, ctx.keyId);
 
   // Use externalRef as idempotency key when provided

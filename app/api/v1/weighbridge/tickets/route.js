@@ -1,7 +1,7 @@
-import dbConnect from "@/app/config/dbConnect";
-import WeighbridgeTicket from "@/app/models/weighbridgeTicket";
 import { WeighbridgeConnector } from "@/lib/integrations/connectors/weighbridge";
 import { apiKeyAuth } from "@/lib/integrations/middleware/apiKeyAuth";
+import { withApiKeyTenant } from "@/app/db/apiTenant";
+import { searchWeighbridgeTicketsForApi } from "@/app/db/repositories/fulfilment";
 import { okResponse, createdResponse, errorResponse, listResponse } from "@/lib/integrations/utils/envelope";
 
 // ============================================
@@ -100,8 +100,18 @@ export async function POST(request) {
     );
   }
 
-  await dbConnect();
-
+  /**
+   * No dbConnect. The connector opens its own tenant-scoped Postgres
+   * transactions, and since 0102 so does its integration log.
+   *
+   * `ctx.companyId` IS NOW A POSTGRES UUID. It used to be the Mongo id carried
+   * on the key document, and the connector passes it straight to
+   * `withTenant()` — which sets `app.company_id` and lets the policies cast it
+   * with `::uuid`. A 24-character ObjectId does not cast, so this endpoint
+   * raised 22P02 on every call that got as far as touching a ticket. Moving
+   * the keys into Postgres is what fixes it: the column is a real foreign key
+   * to `companies`, so the id that comes out is the id `withTenant` wants.
+   */
   const connector = new WeighbridgeConnector(ctx.companyId, ctx.keyId);
 
   const externalRef = ticketRef
@@ -125,63 +135,63 @@ export async function POST(request) {
 }
 
 export async function GET(request) {
-  const ctx = await apiKeyAuth(request, { requireScope: "inventory:read" });
-  if (!ctx.ok) return ctx.response;
+  return withApiKeyTenant(
+    request,
+    { requireScope: "inventory:read" },
+    async (tx) => {
+      const { searchParams } = new URL(request.url);
 
-  await dbConnect();
+      const { rows, total, limit, offset } =
+        await searchWeighbridgeTicketsForApi(tx, {
+          status: searchParams.get("status") || undefined,
+          transactionType: searchParams.get("transactionType") || undefined,
+          vehicleReg: searchParams.get("vehicleReg") || undefined,
+          limit: parseInt(searchParams.get("limit") || "50"),
+          offset: parseInt(searchParams.get("offset") || "0"),
+        });
 
-  const { searchParams } = new URL(request.url);
-  const status          = searchParams.get("status");
-  const transactionType = searchParams.get("transactionType");
-  const vehicleReg      = searchParams.get("vehicleReg");
-  const limit  = Math.min(parseInt(searchParams.get("limit")  || "50"), 200);
-  const offset =          parseInt(searchParams.get("offset") || "0");
-
-  const query = { companyId: ctx.companyId };
-  if (status)          query.status          = status;
-  if (transactionType) query.transactionType = transactionType;
-  if (vehicleReg)      query.vehicleReg      = new RegExp(vehicleReg, "i");
-
-  const [tickets, total] = await Promise.all([
-    WeighbridgeTicket.find(query)
-      .sort({ createdAt: -1 })
-      .skip(offset)
-      .limit(limit)
-      .lean(),
-    WeighbridgeTicket.countDocuments(query),
-  ]);
-
-  return listResponse(
-    tickets.map(serializeTicket),
-    { total, limit, offset }
+      return listResponse(rows.map(serializeTicket), { total, limit, offset });
+    },
   );
 }
 
+const num = (v) => (v == null ? null : Number(v));
+const iso = (v) => (v == null ? null : new Date(v).toISOString());
+
+/**
+ * Snake_case in, because this reads the raw row rather than a Drizzle select.
+ *
+ * The weights are numeric(19,4) and arrive as STRINGS; unconverted they would
+ * serialize as `"5200.0000"` where the Mongo API returned `5200`, and any
+ * consumer adding them up would concatenate instead. The `*_at_ticket` columns
+ * keep their old API names — they are the product and party as they were when
+ * the truck was weighed.
+ */
 function serializeTicket(t) {
   return {
-    id:              t._id.toString(),
-    ticketNumber:    t.ticketNumber,
-    externalRef:     t.externalRef,
-    transactionType: t.transactionType,
-    direction:       t.direction,
-    status:          t.status,
-    vehicleReg:      t.vehicleReg,
-    driverName:      t.driverName,
-    productName:     t.productName,
-    productCode:     t.productCode,
-    partyName:       t.partyName,
-    firstWeight:     t.firstWeight,
-    secondWeight:    t.secondWeight,
-    netWeight:       t.netWeight,
-    weightUnit:      t.weightUnit,
-    internalRef:     t.internalRef,
-    invoiceRef:      t.invoiceRef,
-    purchaseOrderRef: t.purchaseOrderRef,
-    transferRef:     t.transferRef,
-    transferCleared: t.transferCleared,
-    linkedTicketId:  t.linkedTicketId?.toString() ?? null,
-    warnings:        t.warnings ?? [],
-    completedAt:     t.completedAt?.toISOString() ?? null,
-    createdAt:       t.createdAt.toISOString(),
+    id: String(t.id),
+    ticketNumber: t.ticket_number,
+    externalRef: t.external_ref,
+    transactionType: t.transaction_type,
+    direction: t.direction,
+    status: t.status,
+    vehicleReg: t.vehicle_reg,
+    driverName: t.driver_name,
+    productName: t.product_name_at_ticket,
+    productCode: t.product_code_at_ticket,
+    partyName: t.party_name_at_ticket,
+    firstWeight: num(t.first_weight),
+    secondWeight: num(t.second_weight),
+    netWeight: num(t.net_weight),
+    weightUnit: t.weight_unit,
+    internalRef: t.internal_ref,
+    invoiceRef: t.invoice_ref,
+    purchaseOrderRef: t.purchase_order_ref,
+    transferRef: t.transfer_ref,
+    transferCleared: t.transfer_cleared ?? false,
+    linkedTicketId: t.linked_ticket_id ? String(t.linked_ticket_id) : null,
+    warnings: t.warnings ?? [],
+    completedAt: iso(t.completed_at),
+    createdAt: iso(t.created_at),
   };
 }

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft, Scale, CheckCircle2, Clock, TrendingUp, AlertTriangle } from "lucide-react";
 import { auth } from "@/auth";
-import { getWeighbridgeTickets, getWeighbridgeStats } from "@/app/mongodb/actions/integration-actions";
+import { getWeighbridgeTickets, getWeighbridgeStats } from "@/app/db/actions/integration-actions";
 import { VoidTicketButton } from "./components/VoidTicketButton";
 
 export const metadata = { title: "Weighbridge | Integrations" };

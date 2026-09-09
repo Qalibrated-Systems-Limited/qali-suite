@@ -1150,3 +1150,74 @@ export const approvalTargetKindEnum = pgEnum("approval_target_kind", [
   "Payment",
   "Expense",
 ]);
+
+// ── Integrations: keys, webhooks, sync logs ──────────────────────────────────
+
+/**
+ * Which connector adapter a key routes to, and optionally which connector a
+ * webhook subscription filters on.
+ *
+ * Mongo declares this list three times — on integrationKey, on
+ * webhookSubscription and on syncLog — and two of the three append a literal
+ * `null` to the enum array, which Mongoose reads as "null is a valid value"
+ * rather than "the field is optional". The distinction is kept here where it
+ * belongs: the TYPE has five members, and the COLUMN is nullable on the two
+ * tables where "any connector" is a real answer.
+ */
+export const connectorTypeEnum = pgEnum("connector_type", [
+  "weighbridge",
+  "coffee_coop",
+  "logistics",
+  "miller",
+  "generic",
+]);
+
+/** A sandbox key and a live key are the same shape and must not be confused. */
+export const integrationEnvironmentEnum = pgEnum("integration_environment", [
+  "live",
+  "test",
+]);
+
+/**
+ * What a key is permitted to do.
+ *
+ * Mongo types `scopes` as `[String]` with an `enum` — which Mongoose applies to
+ * the ARRAY, not its members, so every value validates and a typo'd scope is a
+ * scope that silently grants nothing. As a Postgres enum array an unknown scope
+ * fails the write.
+ */
+export const integrationScopeEnum = pgEnum("integration_scope", [
+  "inventory:read",
+  "inventory:write",
+  "contacts:read",
+  "contacts:write",
+  "orders:read",
+  "orders:write",
+  "invoices:read",
+  "invoices:write",
+  "hr:read",
+  "collection:write",
+  "webhooks:manage",
+]);
+
+/** Which way the data moved: external → ERP, or ERP → subscriber. */
+export const syncDirectionEnum = pgEnum("sync_direction", [
+  "inbound",
+  "outbound",
+]);
+
+/**
+ * Where an exchange got to.
+ *
+ * `retrying` is the one that carries state: it means `next_retry_at` is set and
+ * the cron worker owes this row another attempt. `processing` is a CLAIM taken
+ * before an attempt starts, so two workers cannot deliver the same webhook.
+ */
+export const syncStatusEnum = pgEnum("sync_status", [
+  "received",
+  "processing",
+  "processed",
+  "failed",
+  "skipped",
+  "retrying",
+]);

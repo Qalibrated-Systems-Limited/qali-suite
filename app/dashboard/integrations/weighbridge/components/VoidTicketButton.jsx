@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Trash2, Loader2 } from "lucide-react";
-import { voidWeighbridgeTicket } from "@/app/mongodb/actions/integration-actions";
+import { voidWeighbridgeTicket } from "@/app/db/actions/integration-actions";
 
 // ============================================
 // VOID TICKET BUTTON

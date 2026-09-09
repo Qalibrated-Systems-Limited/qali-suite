@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { revokeIntegrationKey } from "@/app/mongodb/actions/integration-actions";
+import { revokeIntegrationKey } from "@/app/db/actions/integration-actions";
 import { Key, Clock, Wifi, WifiOff, AlertTriangle } from "lucide-react";
 
 const CONNECTOR_LABELS = {

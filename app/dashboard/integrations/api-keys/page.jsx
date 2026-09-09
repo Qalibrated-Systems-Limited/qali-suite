@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft, Plus } from "lucide-react";
-import { getIntegrationKeys } from "@/app/mongodb/actions/integration-actions";
+import { getIntegrationKeys } from "@/app/db/actions/integration-actions";
 import CreateKeyForm from "./components/CreateKeyForm";
 import KeyCard from "./components/KeyCard";
 
