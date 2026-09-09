@@ -722,6 +722,13 @@
       "when": 1787049186566,
       "tag": "0102_the_keys_that_let_machines_in",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1787049187566,
+      "tag": "0103_the_prefixes_a_rewrite_dropped",
+      "breakpoints": true
     }
   ]
 }
