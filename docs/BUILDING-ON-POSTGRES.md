@@ -737,6 +737,81 @@ raises if the current connection would bypass RLS — worth a health check.
 
 ---
 
+## Adding a migration — the numbering rule, and why it changed
+
+**New migrations are named `YYYYMMDDHHMM_descriptive_name.sql`.** The existing
+`0000`–`0105` keep their names; nothing is renamed, because drizzle does not
+read filenames at all.
+
+### The one fact everything here follows from
+
+> **Drizzle decides what to run from the journal's `when`, and nothing else.**
+
+`drizzle-orm/pg-core/dialect` selects the newest `created_at` from
+`drizzle.__drizzle_migrations` and applies a migration only when
+`lastDbMigration.created_at < migration.folderMillis`. Filenames and `idx` are
+cosmetic. The recorded hash is written and **never compared**, so editing a
+migration that has already run is silently ignored too.
+
+Two consequences worth holding on to:
+
+- **Renaming a migration is safe.** It changes nothing about what runs. Nobody
+  loses work when a merge renumbers files.
+- **A migration introduced BELOW a database's high-water mark never runs
+  there.** Not an error — `db:migrate` prints `✓ Migrations applied` and the
+  objects are simply absent.
+
+### It has now bitten twice
+
+| | what happened | what would have been missing |
+|---|---|---|
+| 2026-09-01 | Both branches appended `+1000` to the same `when` from 0075, so four timestamps collided exactly | `workflow_reports`, `calibration_jobs`, `inspections`, the sheet-code ALTER |
+| 2026-09-09 | A branch inserted helpdesk/hse at 0089/0090 with `when` **below** our 0103, and git merged it with **no conflict** — the renames were 100% similarity | all twelve help-desk and HSE tables |
+
+Sequential integers picked at authoring time are the common cause: two people
+on two branches inevitably choose the same next number, and the fix each of
+them applies locally is invisible to the other.
+
+### So: timestamps for new migrations
+
+```
+app/db/migrations/
+  0105_hse.sql                    ← legacy, untouched
+  202609091530_helpdesk_sla.sql   ← new form
+```
+
+Two people cannot collide, the filename sorts in apply order, and `when` is the
+same instant the name records. Legacy `NNNN_` names sort before every timestamp
+(`'0' < '2'`), so the directory still reads in order.
+
+Set the journal's `when` to that same timestamp in epoch milliseconds, and make
+sure it is greater than the last entry — which is what `drizzle-kit generate`
+does by itself.
+
+### The guard
+
+`npm run check:migrations` (CI runs it **before** the migrator) fails on:
+
+- `when` going backwards, or two entries sharing one — the two incidents above
+- a `.sql` file the journal does not list, or a journal tag with no file
+- duplicate `idx`, the fingerprint of a merge that took both sides' numbering
+- filename order diverging from journal order
+- a legacy 4-digit name added after the timestamp form
+
+It runs before `db:migrate` deliberately: this is the failure class the migrator
+*cannot* report, and CI's database is always empty — where both incidents would
+have passed.
+
+### Merging a branch that renumbered migrations
+
+Keep this branch's numbering, take theirs on the end, and **re-stamp their
+`when` above the high-water mark**. Discard their renamed copies of migrations
+that already exist here after confirming the content is identical. Check the
+reverse direction too: every migration of ours they lack must sit above *their*
+high-water mark, or it will be skipped on their databases.
+
+---
+
 ## Handoff — 2026-09-01/02 — the merge, the boundary, and the projects module growing up
 
 No module ported until the very end. This was the day the branch stopped being

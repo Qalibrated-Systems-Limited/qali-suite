@@ -156,6 +156,16 @@ jobs:
       # that script is `node --env-file=.env …` and there is no .env in CI.
       # This step failing means a fresh deployment could not be stood up —
       # which nothing else in this pipeline would have caught.
+      # Before the migrator runs, not after: this catches the class of bug the
+      # migrator CANNOT report. Drizzle applies a migration only when its
+      # journal `when` exceeds the database's high-water mark, so a migration
+      # introduced below that mark is skipped for ever and `db:migrate` still
+      # prints success. It has happened twice on merges with parallel branches
+      # (2026-09-01, 2026-09-09). CI runs against an empty database, where both
+      # incidents would have passed.
+      - name: Check the migration journal
+        run: npm run check:migrations
+
       - name: Apply migrations from scratch
         run: node app/db/migrate.mjs
         env:
