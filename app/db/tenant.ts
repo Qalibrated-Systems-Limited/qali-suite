@@ -108,6 +108,35 @@ export async function lookupCompanyUuid(
   return rows[0].id;
 }
 
+/**
+ * Does this company row exist?
+ *
+ * ASKED FROM INSIDE ITS OWN SCOPE, which is the only place it can be answered.
+ * `companies` carries FORCE ROW LEVEL SECURITY with `tenant_isolation` keyed on
+ * `app.company_id` (0024), and this runs on the application pool — so a bare
+ * `SELECT ... FROM companies` outside a transaction that has set the scope
+ * returns NOTHING, for a company that plainly exists.
+ *
+ * Both callers below were that bare select. The live-uuid short-circuit could
+ * therefore never fire, and the aliveness check after a map hit always read
+ * "gone": it forgot the mapping and fell through to PROVISIONING on every
+ * resolve, which only looked correct because `provisionCompany` is idempotent
+ * on the privileged connection and handed back the company it was about to
+ * declare missing. A tenant born in Postgres, whose route id is the minted map
+ * key, had no such rescue — it was refused as a company that no longer exists.
+ *
+ * Setting the scope to the id being tested is exactly what the policy asks:
+ * the row is visible to a connection that has named it.
+ */
+async function companyExists(companyId: string): Promise<boolean> {
+  const rows = await withTenant(companyId, async (tx) => {
+    return (await tx.execute(
+      sql`SELECT 1 AS ok FROM companies WHERE id = ${companyId}::uuid`,
+    )) as unknown as Array<unknown>;
+  });
+  return rows.length > 0;
+}
+
 export async function resolveCompanyUuid(
   mongoCompanyId: string | null | undefined,
   /** What the session knows about the tenant, for the provisioning fallback. */
@@ -138,15 +167,24 @@ export async function resolveCompanyUuid(
    * already exists. Verified against `companies` rather than trusted on shape,
    * so a well-formed uuid naming no company is still refused.
    */
-  if (UUID_RE.test(key)) {
-    const live = (await db.execute(sql`
-      SELECT id FROM companies WHERE id = ${key}::uuid
-    `)) as unknown as Array<{ id: string }>;
-    if (live.length) {
+  const keyIsUuid = UUID_RE.test(key);
+  if (keyIsUuid) {
+    if (await companyExists(key)) {
       companyUuidCache.set(key, key);
       return key;
     }
-    throw new Error("That company no longer exists. Choose another.");
+    /*
+     * A UUID THAT NAMES NO COMPANY MAY STILL NAME ONE THROUGH THE MAP, so this
+     * falls through instead of throwing. A tenant born in Postgres has no Mongo
+     * id: `provisionCompany` mints a uuid for the map key, and the admin
+     * screens link on `sourceId ?? id` — so that minted uuid is a live
+     * company's id in every sense except the column. Refusing it here told a
+     * SuperAdmin that a company they were looking at no longer exists.
+     *
+     * The refusal itself still stands, below the map lookup: a uuid that
+     * resolves neither way must never reach the provisioning branch, which
+     * would create "Company <uuid>" for a typo in a URL.
+     */
   }
 
   const rows = (await db.execute(sql`
@@ -160,17 +198,19 @@ export async function resolveCompanyUuid(
     // shares with the dev server, which is how this was found. Checking here
     // means every caller gets a uuid that resolves to something, instead of
     // each one discovering the hole differently.
-    const alive = (await db.execute(sql`
-      SELECT 1 AS ok FROM companies WHERE id = ${rows[0].new_uuid}
-    `)) as unknown as Array<unknown>;
-
-    if (alive.length) {
+    if (await companyExists(rows[0].new_uuid)) {
       companyUuidCache.set(key, rows[0].new_uuid);
       return rows[0].new_uuid;
     }
 
     companyUuidCache.delete(key);
     await forgetCompanyMapping(key);
+  }
+
+  if (keyIsUuid) {
+    // Neither a company id nor a mapped source id. See the fall-through above:
+    // a uuid is never provisioned from.
+    throw new Error("That company no longer exists. Choose another.");
   }
 
 

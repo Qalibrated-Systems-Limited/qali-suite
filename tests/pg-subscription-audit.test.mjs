@@ -273,6 +273,16 @@ suite("the history of a subscription", () => {
       // 0023 grants full DML on every new table by default, so this only holds
       // because 0099 revokes it back. Without the REVOKE a tenant could forge
       // a row saying they were on enterprise all along.
+      //
+      // EITHER REFUSAL COUNTS, and which one arrives is the harness, not the
+      // database. Locally DATABASE_URL connects as `app_user` and Postgres
+      // stops the statement on the missing privilege. CI connects as
+      // `app_test_role`, which globalSetup hands `GRANT ALL ON ALL TABLES` —
+      // so the privilege check passes there and RLS is what refuses the row.
+      // Demanding the privilege message failed every CI run against a database
+      // that was doing exactly what it should. What the REVOKE itself did is
+      // pinned by the grant assertion above, which reads app_user's own
+      // catalogue entry and is not affected by who the client connects as.
       if (!appUser) return; // single-role local setup: nothing to prove
       const err = await appUser`
         INSERT INTO subscription_audit_log (company_id, action)
@@ -281,7 +291,74 @@ suite("the history of a subscription", () => {
         (e) => e,
       );
       expect(err).toBeTruthy();
-      expect(String(err.message)).toMatch(/permission denied|denied for table/i);
+      expect(String(err.message)).toMatch(
+        /permission denied|denied for table|violates row-level security/i,
+      );
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  describe("a company born in Postgres, whose route id is a minted uuid", () => {
+    /*
+     * THE FIXTURE THAT WAS MISSING, and its absence is why none of this was
+     * caught. Every company above is inserted with no map row, so a uuid is
+     * always `companies.id` and the strict `c.id = $1` lookup finds it. A real
+     * tenant created since the cutover has no Mongo id: `provisionCompany`
+     * MINTS a uuid to key `_migration_id_map` on, and the admin screens link
+     * on `sourceId ?? id`, so that minted uuid is the id every form posts back.
+     * Against it `c.id = $1` matched nothing, and each caller said so in its
+     * own words — "Company not found" from every subscription action.
+     */
+    let sourceId;
+
+    beforeEach(async () => {
+      sourceId = randomUUID();
+      await admin`INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
+                  VALUES ('companies', ${sourceId}, ${companyA})`;
+    });
+
+    it("is the id the admin routes actually carry", async () => {
+      const record = await platform.getCompanyRecord(companyA);
+      expect(record.sourceId).toBe(sourceId);
+      expect(record._id).toBe(sourceId);
+      expect(record._id).not.toBe(companyA);
+    });
+
+    it("reads its subscription by that id", async () => {
+      const sub = await platform.getCompanySubscription(sourceId);
+      expect(sub).toBeTruthy();
+      expect(sub.companyId).toBe(companyA);
+    });
+
+    it("changes its subscription by that id", async () => {
+      const { updated } = await platform.updateCompanySubscription(sourceId, {
+        plan: "professional",
+        status: "active",
+      });
+      expect(updated.subscription.plan).toBe("professional");
+      const [row] = await admin`SELECT plan FROM companies WHERE id = ${companyA}`;
+      expect(row.plan).toBe("professional");
+    });
+
+    it("counts its seats by that id", async () => {
+      await addUser(companyA);
+      expect(await platform.countActiveUsersForCompany(sourceId)).toBe(1);
+    });
+
+    it("sets its conversion date by that id", async () => {
+      const { companyId } = await platform.setConversionDate(sourceId, "2026-01-01", {
+        id: "u1",
+        name: "The Admin",
+      });
+      expect(companyId).toBe(companyA);
+    });
+
+    it("does not collide with itself when its own name is kept", async () => {
+      // The rename check excludes the row being edited. Excluding on `c.id`
+      // alone left it matching itself, so saving a company without touching
+      // its name reported "a company with this name already exists".
+      expect(await platform.findCompanyByNameOrCode("Pilot", null, sourceId)).toBeNull();
+      expect(await platform.findCompanyByNameOrCode("Pilot", null, companyB)).toBeTruthy();
     });
   });
 });

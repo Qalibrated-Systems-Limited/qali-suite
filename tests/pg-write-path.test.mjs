@@ -232,4 +232,52 @@ suite("postgres write path (end to end)", () => {
     expect(result.error).toBe("Validation failed");
     expect(result.fieldErrors).toBeTruthy();
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  describe("the id at the top of that loop, in both forms", () => {
+    /*
+     * The fixture above is a MIGRATED tenant: an ObjectId in the map, pointing
+     * at a company whose uuid is its own. A tenant created since the cutover
+     * has no Mongo id at all — `provisionCompany` mints a uuid for the map key
+     * — so `sourceId ?? id`, which is what the admin screens link on, is a
+     * uuid that is NOT `companies.id`. The resolver refused it as a company
+     * that no longer exists.
+     */
+    let tenant;
+
+    beforeEach(async () => {
+      tenant = await import("@/app/db/tenant");
+    });
+
+    it("takes the uuid the session carries, unchanged", async () => {
+      expect(await tenant.resolveCompanyUuid(companyUuid)).toBe(companyUuid);
+    });
+
+    it("takes the ObjectId a migrated session still carries", async () => {
+      expect(await tenant.resolveCompanyUuid(mongoCompanyId)).toBe(companyUuid);
+    });
+
+    it("takes the minted uuid a Postgres-born tenant is keyed on", async () => {
+      const born = randomUUID();
+      const minted = randomUUID();
+      await admin`INSERT INTO companies (id, name, slug)
+                  VALUES (${born}, 'Born Here', ${"b-" + born.slice(0, 8)})`;
+      await admin`INSERT INTO _migration_id_map (collection, old_object_id, new_uuid)
+                  VALUES ('companies', ${minted}, ${born})`;
+
+      expect(await tenant.resolveCompanyUuid(minted)).toBe(born);
+    });
+
+    it("still refuses a uuid that names nothing, rather than provisioning one", async () => {
+      // The refusal is the reason the uuid case is handled separately at all:
+      // falling through to provisioning would create "Company <uuid>" for a
+      // mistyped URL.
+      const nobody = randomUUID();
+      await expect(tenant.resolveCompanyUuid(nobody)).rejects.toThrow(
+        /no longer exists/i,
+      );
+      const [{ n }] = await admin`SELECT count(*)::int AS n FROM companies`;
+      expect(n).toBe(1);
+    });
+  });
 });

@@ -21,6 +21,31 @@ import { privilegedDb } from "./provisioning";
 
 const PER_PAGE = 20;
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Matches a company by EITHER id form, and the uuid case is the one that bites.
+ *
+ * A UUID IS NOT NECESSARILY `companies.id`. A company born in Postgres has no
+ * Mongo id, so `provisionCompany` mints a uuid to key `_migration_id_map` on —
+ * and `sourceId ?? id` is what the admin routes carry, so that MINTED uuid is
+ * the id the subscription screen, the conversion date and the rename check all
+ * post back. Testing `c.id` alone found nothing for a company that plainly
+ * exists, which each caller reported in its own words: "Company not found" from
+ * every subscription action on a tenant created after the cutover.
+ *
+ * `getCompanyRecord` learned this in 0035 and carried the fix alone; four other
+ * queries in this file kept the strict form. One definition now, so the next
+ * query cannot get it wrong.
+ *
+ * The caller's query must LEFT JOIN `_migration_id_map` as `m`, aliasing
+ * `companies` as `c`.
+ */
+const companyIdMatches = (key: string) =>
+  UUID_RE.test(key)
+    ? sql`(c.id = ${key}::uuid OR m.old_object_id = ${key})`
+    : sql`m.old_object_id = ${key}`;
+
 export interface CompanyListRow {
   /** Postgres tenant id. */
   id: string;
@@ -145,9 +170,6 @@ export async function getCompanyRecord(idOrSourceId: string) {
   const key = String(idOrSourceId ?? "").trim();
   if (!key) return null;
 
-  const isUuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
-
   /*
    * EITHER FORM, and a uuid can be either. Since companies are created without
    * a Mongo id, the map key is itself a uuid — so a uuid that is not a
@@ -162,11 +184,7 @@ export async function getCompanyRecord(idOrSourceId: string) {
       LEFT JOIN _migration_id_map m
         ON m.new_uuid = c.id AND m.collection = 'companies'
       LEFT JOIN company_settings s ON s.company_id = c.id
-     WHERE ${
-       isUuid
-         ? sql`(c.id = ${key}::uuid OR m.old_object_id = ${key})`
-         : sql`m.old_object_id = ${key}`
-     }
+     WHERE ${companyIdMatches(key)}
      LIMIT 1
   `)) as unknown as Array<Record<string, unknown>>;
 
@@ -397,8 +415,6 @@ export async function setConversionDate(
   setBy: { id?: string | null; name?: string | null },
 ) {
   const key = String(sourceCompanyId ?? "").trim();
-  const isUuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
   const d = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(d.getTime())) throw new Error("The conversion date is invalid.");
 
@@ -408,7 +424,7 @@ export async function setConversionDate(
         FROM companies c
         LEFT JOIN _migration_id_map m
           ON m.new_uuid = c.id AND m.collection = 'companies'
-       WHERE ${isUuid ? sql`c.id = ${key}::uuid` : sql`m.old_object_id = ${key}`}
+       WHERE ${companyIdMatches(key)}
        LIMIT 1
     )
     UPDATE companies c
@@ -447,9 +463,6 @@ export async function findCompanyByNameOrCode(
   if (!n && !c) return null;
 
   const exclude = excludeIdOrSourceId ? String(excludeIdOrSourceId) : null;
-  const excludeIsUuid =
-    !!exclude &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(exclude);
 
   const rows = (await privilegedDb().execute(sql`
     SELECT c.id, c.name, c.code, m.old_object_id AS source_id
@@ -461,11 +474,16 @@ export async function findCompanyByNameOrCode(
      LIMIT 5
   `)) as unknown as Array<Record<string, unknown>>;
 
+  /*
+   * EITHER ID EXCLUDES THE ROW, for the reason `companyIdMatches` gives: a uuid
+   * may be the tenant id or the minted source id, and the caller passes back
+   * whichever one it was given. Comparing against `c.id` alone left a company
+   * matching itself, so renaming one and keeping its name reported "a company
+   * with this name already exists" against the very row being edited.
+   */
   const hit = rows.find((r) => {
     if (!exclude) return true;
-    return excludeIsUuid
-      ? String(r.id) !== exclude
-      : String(r.source_id ?? "") !== exclude;
+    return String(r.id) !== exclude && String(r.source_id ?? "") !== exclude;
   });
   if (!hit) return null;
 
@@ -524,9 +542,6 @@ export async function getCompanySubscription(sourceCompanyId: string) {
   const key = String(sourceCompanyId ?? "").trim();
   if (!key) return null;
 
-  const isUuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
-
   const rows = (await privilegedDb().execute(sql`
     SELECT c.id, c.code, c.name, c.status, c.plan, c.subscription_status,
            c.trial_ends_at, c.current_period_start, c.current_period_end,
@@ -534,7 +549,7 @@ export async function getCompanySubscription(sourceCompanyId: string) {
       FROM companies c
       LEFT JOIN _migration_id_map m
         ON m.new_uuid = c.id AND m.collection = 'companies'
-     WHERE ${isUuid ? sql`c.id = ${key}::uuid` : sql`m.old_object_id = ${key}`}
+     WHERE ${companyIdMatches(key)}
      LIMIT 1
   `)) as unknown as Array<Record<string, unknown>>;
 
@@ -591,9 +606,6 @@ export async function updateCompanySubscription(
   const key = String(sourceCompanyId ?? "").trim();
   if (!key) throw new Error("updateCompanySubscription requires a company id");
 
-  const isUuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
-
   // undefined means "leave it"; null is a real value for the date columns, so
   // they carry a separate "did the caller mention this" flag.
   const iso = (v: Date | string | null | undefined) =>
@@ -607,7 +619,7 @@ export async function updateCompanySubscription(
         FROM companies c
         LEFT JOIN _migration_id_map m
           ON m.new_uuid = c.id AND m.collection = 'companies'
-       WHERE ${isUuid ? sql`c.id = ${key}::uuid` : sql`m.old_object_id = ${key}`}
+       WHERE ${companyIdMatches(key)}
        LIMIT 1
     ),
     before AS (
@@ -669,15 +681,13 @@ export async function getCompanyForDocuments(idOrSourceId: string) {
 async function companyUuidFromEither(idOrSourceId: string) {
   const key = String(idOrSourceId ?? "").trim();
   if (!key) return null;
-  const looksUuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
 
   const rows = (await privilegedDb().execute(sql`
     SELECT c.id
       FROM companies c
       LEFT JOIN _migration_id_map m
         ON m.new_uuid = c.id AND m.collection = 'companies'
-     WHERE ${looksUuid ? sql`c.id = ${key}::uuid` : sql`m.old_object_id = ${key}`}
+     WHERE ${companyIdMatches(key)}
      LIMIT 1
   `)) as unknown as Array<Record<string, unknown>>;
 
