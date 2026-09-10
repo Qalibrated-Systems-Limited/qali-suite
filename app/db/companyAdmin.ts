@@ -115,6 +115,49 @@ export interface CompanyRecordChanges {
   baseCurrency?: string | null;
 }
 
+/**
+ * The sentinel that distinguishes "not supplied" from "cleared".
+ *
+ * Every column below is written as COALESCE(new, existing), so a null means
+ * "leave it alone". That is right for a partial update and wrong for a form:
+ * `opt()` maps "" to null, so emptying a field and saving silently kept the old
+ * value — the edit appeared not to save.
+ *
+ * The two cases need different values, and SQL cannot express "write NULL"
+ * through COALESCE. So an explicitly-emptied field becomes this sentinel, and
+ * the column is wrapped in NULLIF(..., sentinel):
+ *
+ *   not supplied  -> null      -> COALESCE picks the column   -> unchanged
+ *   cleared       -> sentinel  -> COALESCE picks the sentinel -> NULLIF -> NULL
+ *   a value       -> the value -> COALESCE picks it           -> the value
+ *
+ * NULL rather than '': `code` carries a unique index (companies_code_uq, 0035),
+ * so a second company clearing its code to '' would collide with the first.
+ * The \u0000 prefix makes it unrepresentable in a form field, so no user input
+ * can impersonate it.
+ */
+const CLEAR = "\u0000__cleared__";
+
+/**
+ * For fields a user is allowed to empty. Pairs with NULLIF in the query.
+ * Use `opt()` for anything structural — name, slug, status, plan — where a
+ * blank submission means "unchanged", never "delete it".
+ */
+function clearable(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const t = String(value).trim();
+  return t === "" ? CLEAR : t;
+}
+
+/** Case-folds a clearable value without mangling the sentinel. */
+function foldClearable(
+  value: string | null,
+  how: "upper" | "lower",
+): string | null {
+  if (value === null || value === CLEAR) return value;
+  return how === "upper" ? value.toUpperCase() : value.toLowerCase();
+}
+
 /** null for anything the caller did not supply, so COALESCE leaves it alone. */
 function opt(value: unknown): string | null {
   if (value === undefined || value === null) return null;
@@ -161,27 +204,27 @@ export async function syncCompanyRecord(
       UPDATE companies
          SET name                 = COALESCE(${opt(changes.name)}, name),
              slug                 = COALESCE(${opt(changes.slug)}, slug),
-             code                 = COALESCE(${opt(changes.code)?.toUpperCase() ?? null}, code),
-             tagline              = COALESCE(${opt(changes.tagline)}, tagline),
-             logo                 = COALESCE(${opt(changes.logo)}, logo),
-             email                = COALESCE(${opt(changes.email)?.toLowerCase() ?? null}, email),
-             phone                = COALESCE(${opt(changes.phone)}, phone),
-             website              = COALESCE(${opt(changes.website)}, website),
-             street               = COALESCE(${opt(addr.street)}, street),
-             city                 = COALESCE(${opt(addr.city)}, city),
-             state                = COALESCE(${opt(addr.state)}, state),
-             postal_code          = COALESCE(${opt(addr.postalCode)}, postal_code),
+             code                 = NULLIF(COALESCE(${foldClearable(clearable(changes.code), "upper")}, code), ${CLEAR}),
+             tagline              = NULLIF(COALESCE(${clearable(changes.tagline)}, tagline), ${CLEAR}),
+             logo                 = NULLIF(COALESCE(${clearable(changes.logo)}, logo), ${CLEAR}),
+             email                = NULLIF(COALESCE(${foldClearable(clearable(changes.email), "lower")}, email), ${CLEAR}),
+             phone                = NULLIF(COALESCE(${clearable(changes.phone)}, phone), ${CLEAR}),
+             website              = NULLIF(COALESCE(${clearable(changes.website)}, website), ${CLEAR}),
+             street               = NULLIF(COALESCE(${clearable(addr.street)}, street), ${CLEAR}),
+             city                 = NULLIF(COALESCE(${clearable(addr.city)}, city), ${CLEAR}),
+             state                = NULLIF(COALESCE(${clearable(addr.state)}, state), ${CLEAR}),
+             postal_code          = NULLIF(COALESCE(${clearable(addr.postalCode)}, postal_code), ${CLEAR}),
              country              = COALESCE(${opt(addr.country)}, country),
-             tax_pin              = COALESCE(${opt(changes.taxPin)?.toUpperCase() ?? null}, tax_pin),
-             vat_number           = COALESCE(${opt(changes.vatNumber)}, vat_number),
-             registration_number  = COALESCE(${opt(changes.registrationNumber)}, registration_number),
-             bank_name            = COALESCE(${opt(changes.bankName)}, bank_name),
-             bank_branch          = COALESCE(${opt(changes.bankBranch)}, bank_branch),
-             account_name         = COALESCE(${opt(changes.accountName)}, account_name),
-             account_number       = COALESCE(${opt(changes.accountNumber)}, account_number),
-             swift_code           = COALESCE(${opt(changes.swiftCode)}, swift_code),
-             mpesa_paybill        = COALESCE(${opt(changes.mpesaPaybill)}, mpesa_paybill),
-             mpesa_till           = COALESCE(${opt(changes.mpesaTill)}, mpesa_till),
+             tax_pin              = NULLIF(COALESCE(${foldClearable(clearable(changes.taxPin), "upper")}, tax_pin), ${CLEAR}),
+             vat_number           = NULLIF(COALESCE(${clearable(changes.vatNumber)}, vat_number), ${CLEAR}),
+             registration_number  = NULLIF(COALESCE(${clearable(changes.registrationNumber)}, registration_number), ${CLEAR}),
+             bank_name            = NULLIF(COALESCE(${clearable(changes.bankName)}, bank_name), ${CLEAR}),
+             bank_branch          = NULLIF(COALESCE(${clearable(changes.bankBranch)}, bank_branch), ${CLEAR}),
+             account_name         = NULLIF(COALESCE(${clearable(changes.accountName)}, account_name), ${CLEAR}),
+             account_number       = NULLIF(COALESCE(${clearable(changes.accountNumber)}, account_number), ${CLEAR}),
+             swift_code           = NULLIF(COALESCE(${clearable(changes.swiftCode)}, swift_code), ${CLEAR}),
+             mpesa_paybill        = NULLIF(COALESCE(${clearable(changes.mpesaPaybill)}, mpesa_paybill), ${CLEAR}),
+             mpesa_till           = NULLIF(COALESCE(${clearable(changes.mpesaTill)}, mpesa_till), ${CLEAR}),
              base_currency        = COALESCE(${currency?.toUpperCase() ?? null}, base_currency),
              status               = COALESCE(${status}, status),
              plan                 = COALESCE(${opt(sub.plan)}, plan),

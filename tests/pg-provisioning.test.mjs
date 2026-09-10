@@ -1390,4 +1390,90 @@ suite("tenant provisioning", () => {
       );
     });
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Clearing a field
+  //
+  // Every column is written as COALESCE(new, existing), so a null means "leave
+  // it alone" — right for a partial update, wrong for a form. `opt()` mapped ""
+  // to null, so emptying a field and saving kept the old value and the edit
+  // appeared not to save. The two cases now use different values, and NULLIF
+  // turns the "cleared" one into NULL.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe("clearing an optional field", () => {
+    const seed = async () => {
+      const source = sourceId();
+      const { companyId } = await provisionCompany({
+        sourceCompanyId: source,
+        name: "Pilot",
+      });
+      await syncCompanyRecord(source, {
+        name: "Pilot",
+        code: "PLT",
+        tagline: "We sell things",
+        phone: "+254700000000",
+        vatNumber: "VAT123",
+        address: { city: "Nairobi" },
+      });
+      return { source, companyId };
+    };
+
+    const read = (companyId) =>
+      admin`SELECT code, tagline, phone, vat_number, city, name
+              FROM companies WHERE id = ${companyId}`.then((r) => r[0]);
+
+    it("a field left out is untouched", async () => {
+      const { source, companyId } = await seed();
+      await syncCompanyRecord(source, { phone: "+254711111111" });
+
+      const row = await read(companyId);
+      expect(row.phone).toBe("+254711111111");
+      // Not mentioned at all — must survive.
+      expect(row.tagline).toBe("We sell things");
+      expect(row.code).toBe("PLT");
+    });
+
+    it("a field submitted EMPTY is cleared to NULL", async () => {
+      const { source, companyId } = await seed();
+      await syncCompanyRecord(source, {
+        tagline: "",
+        vatNumber: "   ",
+        address: { city: "" },
+      });
+
+      const row = await read(companyId);
+      expect(row.tagline).toBeNull();
+      expect(row.vat_number).toBeNull();
+      expect(row.city).toBeNull();
+      // Untouched by the same call.
+      expect(row.phone).toBe("+254700000000");
+    });
+
+    it("clears to NULL, not '' — two companies can both clear a unique column", async () => {
+      /**
+       * THE REASON THE SENTINEL WRITES NULL. `code` carries a unique index
+       * (companies_code_uq, 0035). If clearing wrote '', the SECOND company to
+       * clear its code would collide with the first, and the failure would
+       * arrive on an unrelated company's edit screen.
+       */
+      const a = await seed();
+      const b = await seed();
+      await admin`UPDATE companies SET code = 'BBB' WHERE id = ${b.companyId}`;
+
+      await syncCompanyRecord(a.source, { code: "" });
+      await syncCompanyRecord(b.source, { code: "" });
+
+      expect((await read(a.companyId)).code).toBeNull();
+      expect((await read(b.companyId)).code).toBeNull();
+    });
+
+    it("structural fields still ignore a blank rather than wiping themselves", async () => {
+      // name and slug are NOT clearable: a blank there means "unchanged".
+      const { source, companyId } = await seed();
+      await syncCompanyRecord(source, { name: "", slug: "" });
+
+      const row = await read(companyId);
+      expect(row.name).toBe("Pilot");
+    });
+  });
 });
