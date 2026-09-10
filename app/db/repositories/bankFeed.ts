@@ -217,9 +217,24 @@ export async function listStatements(tx: Tx, page = 1, limit = 20) {
 
   return {
     statements: rows.map(toScreenStatement),
-    total: num(count?.n),
-    page: Math.max(page, 1),
-    totalPages: Math.max(1, Math.ceil(num(count?.n) / take)),
+    /**
+     * NESTED, and every screen in this module reads it that way:
+     * `pagination.total`, `.page`, `.totalPages`. It used to be returned flat
+     * — `{ statements, total, page, totalPages }` — so
+     * `const { pagination } = await ...` gave undefined and the page died on
+     * `pagination.total`. Three screens were broken by it (0102 follow-up).
+     *
+     * `totalPages`, not `pages`, because that is the key the pages and the
+     * shared Pagination component read. expenses.ts and payments.ts spell the
+     * same field `pages`; that inconsistency is real and is NOT resolved here,
+     * because renaming theirs would break their callers the same way.
+     */
+    pagination: {
+      page: Math.max(page, 1),
+      limit: take,
+      total: num(count?.n),
+      totalPages: Math.max(1, Math.ceil(num(count?.n) / take)),
+    },
   };
 }
 
@@ -578,7 +593,19 @@ async function attachChildren(
 export async function listLines(
   tx: Tx,
   statementId: string,
-  opts: { status?: string | null; search?: string | null; page?: number; limit?: number } = {},
+  opts: {
+    status?: string | null;
+    search?: string | null;
+    /**
+     * Derived from the amounts, not a column — the same test
+     * listAllUnallocated applies. The statement detail page has been passing
+     * this since it was written; the action dropped it on the floor, so the
+     * in/out filter silently did nothing.
+     */
+    direction?: "in" | "out" | null;
+    page?: number;
+    limit?: number;
+  } = {},
 ) {
   if (!isUuid(statementId)) {
     return { lines: [], total: 0, page: 1, totalPages: 1 };
@@ -588,6 +615,8 @@ export async function listLines(
 
   const filters = [sql`l.statement_id = ${statementId}::uuid`];
   if (opts.status) filters.push(sql`l.status = ${opts.status}::bank_line_status`);
+  if (opts.direction === "in") filters.push(sql`l.credit_amount > 0`);
+  if (opts.direction === "out") filters.push(sql`l.debit_amount > 0`);
   if (opts.search?.trim()) {
     const like = likeContains(opts.search.trim());
     filters.push(
@@ -609,9 +638,13 @@ export async function listLines(
 
   return {
     lines: await attachChildren(tx, rows),
-    total: num(count?.n),
-    page: Math.max(opts.page ?? 1, 1),
-    totalPages: Math.max(1, Math.ceil(num(count?.n) / take)),
+    // Nested, like every other list in this module — see listStatements.
+    pagination: {
+      page: Math.max(opts.page ?? 1, 1),
+      limit: take,
+      total: num(count?.n),
+      totalPages: Math.max(1, Math.ceil(num(count?.n) / take)),
+    },
   };
 }
 
@@ -677,9 +710,24 @@ export async function listAllUnallocated(
 
   return {
     lines: await attachChildren(tx, rows),
-    total: num(count?.n),
-    page: Math.max(page, 1),
-    totalPages: Math.max(1, Math.ceil(num(count?.n) / take)),
+    /**
+     * NESTED, and every screen in this module reads it that way:
+     * `pagination.total`, `.page`, `.totalPages`. It used to be returned flat
+     * — `{ lines, total, page, totalPages }` — so
+     * `const { pagination } = await ...` gave undefined and the page died on
+     * `pagination.total`. Three screens were broken by it (0102 follow-up).
+     *
+     * `totalPages`, not `pages`, because that is the key the pages and the
+     * shared Pagination component read. expenses.ts and payments.ts spell the
+     * same field `pages`; that inconsistency is real and is NOT resolved here,
+     * because renaming theirs would break their callers the same way.
+     */
+    pagination: {
+      page: Math.max(page, 1),
+      limit: take,
+      total: num(count?.n),
+      totalPages: Math.max(1, Math.ceil(num(count?.n) / take)),
+    },
   };
 }
 

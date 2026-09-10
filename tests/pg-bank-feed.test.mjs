@@ -937,4 +937,70 @@ suite("the bank feed reaches the ledger", () => {
       expect(await inA((tx) => bankFeed.getUnallocatedCount(tx))).toBe(1);
     });
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // The shape the SCREENS read
+  //
+  // Every list here returned `{ rows, total, page, totalPages }` flat while all
+  // three banking pages destructure `{ pagination }` and read
+  // `pagination.total`. Nothing caught it: the queries were right, the tenant
+  // scoping was right, and the tests asserted on `.statements` and `.lines` —
+  // never on the half the page actually renders. The result was
+  // "Cannot read properties of undefined (reading 'total')" on /dashboard/banking.
+  //
+  // A shape test proves the query. It does not prove the caller can read it.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe("the pagination shape the pages destructure", () => {
+    const assertPagination = (p) => {
+      expect(p, "pagination must be an object, not spread flat").toBeDefined();
+      expect(typeof p.total).toBe("number");
+      expect(typeof p.page).toBe("number");
+      // `totalPages`, not `pages` — this is the key <Pagination> is handed.
+      expect(typeof p.totalPages).toBe("number");
+      expect(typeof p.limit).toBe("number");
+    };
+
+    it("listStatements — /dashboard/banking", async () => {
+      await imported([moneyIn()]);
+      const res = await inA((tx) => bankFeed.listStatements(tx, 1, 10));
+      expect(Array.isArray(res.statements)).toBe(true);
+      assertPagination(res.pagination);
+      expect(res.pagination.total).toBeGreaterThan(0);
+    });
+
+    it("listLines — /dashboard/banking/[id]", async () => {
+      const { statement } = await imported([moneyIn(), moneyOut()]);
+      const res = await inA((tx) =>
+        bankFeed.listLines(tx, statement.id, { page: 1, limit: 10 }),
+      );
+      expect(Array.isArray(res.lines)).toBe(true);
+      assertPagination(res.pagination);
+      expect(res.pagination.total).toBe(2);
+    });
+
+    it("listAllUnallocated — /dashboard/banking/unallocated", async () => {
+      await imported([moneyIn(), moneyOut()]);
+      const res = await inA((tx) => bankFeed.listAllUnallocated(tx, {}, 1, 10));
+      expect(Array.isArray(res.lines)).toBe(true);
+      assertPagination(res.pagination);
+    });
+
+    it("listLines applies the direction filter the page has always sent", async () => {
+      // The statement page passes `type`, the action bound it to `status`, and
+      // listLines had no direction option at all — so in/out did nothing.
+      const { statement } = await imported([moneyIn(), moneyOut()]);
+      const all = await inA((tx) => bankFeed.listLines(tx, statement.id, {}));
+      const inbound = await inA((tx) =>
+        bankFeed.listLines(tx, statement.id, { direction: "in" }),
+      );
+      const outbound = await inA((tx) =>
+        bankFeed.listLines(tx, statement.id, { direction: "out" }),
+      );
+
+      expect(all.pagination.total).toBe(2);
+      expect(inbound.pagination.total).toBe(1);
+      expect(outbound.pagination.total).toBe(1);
+      expect(inbound.lines[0].id).not.toBe(outbound.lines[0].id);
+    });
+  });
 });

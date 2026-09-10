@@ -69,7 +69,18 @@ export async function getBankStatements(page = 1, limit = 20) {
       bankFeed.listStatements(tx, page, limit),
     );
   } catch {
-    return { statements: [], total: 0, page: 1, totalPages: 1 };
+    /**
+     * The fallback must be the SAME SHAPE as the success path, or it is not a
+     * fallback. This returned a flat `{ statements, total, page, totalPages }`
+     * while the page destructures `{ pagination }` — so a failure here did not
+     * degrade to an empty list, it crashed the render with "Cannot read
+     * properties of undefined (reading 'total')" and hid the real error behind
+     * the bare `catch`.
+     */
+    return {
+      statements: [],
+      pagination: { page: 1, limit: 20, total: 0, totalPages: 1 },
+    };
   }
 }
 
@@ -85,17 +96,30 @@ export async function getStatementSummary(statementId: string) {
   );
 }
 
+/**
+ * Takes a FILTERS OBJECT, because that is what its only caller has always
+ * passed: `getBankFeedLines(id, { status, type, search }, page, 50)`.
+ *
+ * The signature used to be `(statementId, status, page, limit, search)`, so
+ * that call bound the whole object to `status` and left `search` undefined.
+ * The object is truthy, so it reached `l.status = $1::bank_line_status` — and
+ * the filter was broken rather than ignored.
+ *
+ * `type` is the page's name for the direction; both spellings are accepted so
+ * neither caller has to change.
+ */
 export async function getBankFeedLines(
   statementId: string,
-  status = "",
+  filters: { status?: string; type?: string; direction?: string; search?: string } = {},
   page = 1,
   limit = 50,
-  search = "",
 ) {
+  const direction = filters.direction ?? filters.type ?? null;
   return withAuthorizedTenant([], (tx) =>
     bankFeed.listLines(tx, statementId, {
-      status: status || null,
-      search: search || null,
+      status: filters.status || null,
+      search: filters.search || null,
+      direction: direction === "in" || direction === "out" ? direction : null,
       page,
       limit,
     }),
@@ -133,7 +157,10 @@ export async function getAllUnallocatedLines(
       tx,
       {
         bankAccountId: filters.bankAccountId ?? null,
-        direction: (filters.direction as "in" | "out" | null) ?? null,
+        // `type` is what the unallocated page sends; `direction` is what this
+        // read before. Only the second was ever checked, so the in/out filter
+        // on that screen did nothing at all.
+        direction: ((filters.direction ?? filters.type) as "in" | "out" | null) ?? null,
         search: filters.search ?? null,
         from: filters.from ?? null,
         to: filters.to ?? null,
