@@ -610,6 +610,29 @@ bookkeeping, not tenant data.
 **Zero means RLS is not on and the deployment is not tenant-safe.** Stop and
 find out why before letting anyone sign in.
 
+### Create the first login
+
+**Nothing can sign in yet, and no page will tell you why.** There is no public
+signup route by design: a Google sign-in for an address with no user record and
+no open invitation is refused outright, and invitations can only be raised from
+inside the app by somebody already in it. On an empty database that is a closed
+loop.
+
+Break it once, then never again:
+
+```bash
+node --env-file=.env scripts/create-admin.mjs "Your Name" you@yourdomain.com \
+  --company "Your Company Ltd"
+```
+
+It prints a generated password. Sign in with it, **change it immediately**, and
+invite everyone else from the app — the script refuses to run a second time for
+exactly that reason.
+
+`--company` is optional. A SuperAdmin is platform staff and holds a grant over
+every tenant rather than belonging to one, so you can create the login first and
+the first company from the UI.
+
 ### Build and start
 
 ```bash
@@ -839,6 +862,7 @@ pm2 set pm2-logrotate:compress true
 
 | Problem | Cause / fix |
 |---|---|
+| Deployed fine, but no account can sign in | Expected on a fresh database — there is no signup route. Run `scripts/create-admin.mjs` (Step 5). |
 | `permission denied ... /var/run/docker.sock` | You are running as `deploy`, which has neither docker access nor sudo — by design. Run the container steps as root (`sudo -i`). Do not add `deploy` to the `docker` group; that grants it root over the whole host. |
 | `deploy is not in the sudoers file` | Correct and intended. `deploy` runs the app only. Anything needing root — docker, apt, systemctl, Caddy — is done from your own sudo-capable account. |
 | `E: Unable to locate package postgresql-16` **after** adding PGDG | Check the OS. On **20.04 (focal)** PGDG has no repository at all — `apt.postgresql.org/pub/repos/apt/dists/` has no `focal-pgdg`. Reprovision as 24.04; there is no fix on focal short of Docker or managed Postgres. |
