@@ -253,11 +253,31 @@ systemctl enable --now docker
 cd /opt/qalisuite/deploy/docker
 cp .env.example .env
 chmod 600 .env
-nano .env                        # two passwords: openssl rand -base64 24
+nano .env                        # two passwords — see below
 
 docker compose -f docker-compose.postgres.yml up -d
 docker compose -f docker-compose.postgres.yml logs -f postgres   # ctrl-c when ready
 ```
+
+`.env` needs **two** passwords — the superuser and the application role, which
+are the two roles described below. Generate each separately:
+
+```bash
+openssl rand -hex 24   # -> POSTGRES_SUPERUSER_PASSWORD
+openssl rand -hex 24   # -> APP_DB_PASSWORD
+```
+
+> **Hex, not base64.** Both values end up inside a connection string —
+> `postgresql://app_user:PASSWORD@127.0.0.1:5432/qalisuite` — and base64 emits
+> `+`, `/` and `=`. A `/` or an `@` in the password breaks the URL, and the
+> error you get says authentication failed, which sends you looking at the
+> password rather than at the URL around it. Hex is the same entropy per
+> character length with nothing that needs escaping.
+>
+> Do not reuse one password for both. It does not merge the roles, but it
+> removes the reason they are separate: `app_user` is a non-superuser *so that
+> RLS applies to it*, and anyone holding the app's password would also hold the
+> superuser's, which bypasses every tenant policy.
 
 The role setup from the section below is **already done** — `initdb/01-app-user.sh`
 creates `app_user` on first start, grants it the schema, sets default privileges
@@ -325,6 +345,8 @@ sudo -u postgres psql <<'SQL'
 CREATE DATABASE qalisuite;
 
 -- The role the APPLICATION connects as. No SUPERUSER, no BYPASSRLS, no CREATEDB.
+-- Generate the password with `openssl rand -hex 24` — HEX, because this value
+-- goes straight into DATABASE_URL and base64's `+`, `/` and `=` break a URL.
 CREATE ROLE app_user LOGIN PASSWORD 'CHANGE_ME_STRONG';
 
 -- The role MIGRATIONS and privileged platform reads connect as. It owns the
