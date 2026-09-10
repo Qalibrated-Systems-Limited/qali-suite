@@ -1,7 +1,6 @@
 import { EditUserForm } from "./form";
 import { auth } from "@/auth";
 import { getUserByIdPg } from "@/app/db/actions/user-actions";
-import { listCompaniesForDropdown as getCompaniesForDropdown } from "@/app/db/platform";
 import { notFound } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -58,12 +57,6 @@ async function EditUserPage(props) {
   const user = await getUserByIdPg(userId);
   if (!user) return notFound();
 
-  // Fetch companies for SuperAdmin
-  let companies = [];
-  if (isSuperAdmin) {
-    companies = await getCompaniesForDropdown();
-  }
-
   return (
     <main className="flex flex-col gap-6">
       {/* Breadcrumb */}
@@ -83,7 +76,7 @@ async function EditUserPage(props) {
       </div>
 
       {/* Form */}
-      <EditUserForm user={user} companies={companies} isSuperAdmin={isSuperAdmin} />
+      <EditUserForm user={user} isSuperAdmin={isSuperAdmin} />
     </main>
   );
 }

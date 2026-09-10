@@ -31,14 +31,13 @@ import {
   AlertCircle,
   CheckCircle2,
   Mail,
-  Building2,
   Check,
   ChevronDown,
 } from "lucide-react";
 import { sendInvitePg } from "@/app/db/actions/invite-actions";
 import { userRolesMapping, cn } from "@/lib/utils";
 
-export default function InviteUserDialog({ isSuperAdmin = false, companies = [] }) {
+export default function InviteUserDialog({ isSuperAdmin = false }) {
   const [open, setOpen] = useState(false);
   const [state, dispatch, isPending] = useActionState(sendInvitePg, {});
 
@@ -47,8 +46,6 @@ export default function InviteUserDialog({ isSuperAdmin = false, companies = [] 
   // <input> rather than the Select's native form integration.
   const [role, setRole] = useState("Employee");
   const [rolePopoverOpen, setRolePopoverOpen] = useState(false);
-  const [companyId, setCompanyId] = useState("");
-  const [companyPopoverOpen, setCompanyPopoverOpen] = useState(false);
 
   // Filter roles: Admin can't invite Admin/SuperAdmin
   const availableRoles = isSuperAdmin
@@ -58,7 +55,6 @@ export default function InviteUserDialog({ isSuperAdmin = false, companies = [] 
       );
 
   const selectedRole = availableRoles.find((r) => r.value === role);
-  const selectedCompany = companies.find((c) => c._id === companyId);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -190,82 +186,13 @@ export default function InviteUserDialog({ isSuperAdmin = false, companies = [] 
               </Popover>
             </div>
 
-            {/* Company — SuperAdmin only. Searchable so a SuperAdmin
-                with many tenants can find the right one fast. */}
-            {isSuperAdmin && companies.length > 0 && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  Company
-                </label>
-                <input type="hidden" name="companyId" value={companyId} />
-                <Popover
-                  open={companyPopoverOpen}
-                  onOpenChange={setCompanyPopoverOpen}
-                >
-                  <PopoverTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={companyPopoverOpen}
-                      className={cn(
-                        "w-full justify-between font-normal bg-background border-border text-foreground",
-                        !selectedCompany && "text-muted-foreground",
-                      )}
-                    >
-                      {selectedCompany ? (
-                        <span className="flex items-center gap-2">
-                          <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                          {selectedCompany.name}
-                        </span>
-                      ) : (
-                        "Select a company"
-                      )}
-                      <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    className="w-[--radix-popover-trigger-width] p-0"
-                    align="start"
-                  >
-                    <Command>
-                      <CommandInput placeholder="Search companies..." />
-                      <CommandList>
-                        <CommandEmpty>No company found.</CommandEmpty>
-                        <CommandGroup>
-                          {companies.map((company) => (
-                            <CommandItem
-                              key={company._id}
-                              value={company.name}
-                              onSelect={() => {
-                                setCompanyId(company._id);
-                                setCompanyPopoverOpen(false);
-                              }}
-                            >
-                              <Check
-                                className={cn(
-                                  "mr-2 h-4 w-4",
-                                  companyId === company._id
-                                    ? "opacity-100"
-                                    : "opacity-0",
-                                )}
-                              />
-                              <span className="flex items-center gap-2 text-sm">
-                                <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                {company.name}
-                              </span>
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-                <p className="text-xs text-muted-foreground">
-                  The invited user will be assigned to this company
-                </p>
-              </div>
-            )}
+            {/* A company PICKER was here, for SuperAdmins. It posted a hidden
+                `companyId` that `createInvite` never read — the action parses
+                only email, role and partyId, and takes its company from
+                withAuthorizedTenant, i.e. the switcher. Choosing a tenant here
+                appeared to work and invited into whichever company you happened
+                to be in. Switch company first; the invite follows the switcher,
+                as every other tenant-scoped write does. */}
 
             {/* Info */}
             <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
