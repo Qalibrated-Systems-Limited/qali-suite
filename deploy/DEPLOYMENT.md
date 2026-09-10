@@ -313,12 +313,43 @@ sudo docker exec qalisuite-pg psql -U postgres -c "SHOW server_version;"
 
 `app_user` must read `f | f`.
 
-Then in `/opt/qalisuite/.env`, point both URLs at the published port:
+### Carrying the passwords into the app's own .env
+
+**There are two `.env` files and neither reads the other.** This is the step
+people miss, because nothing links them:
+
+| file | read by | holds |
+|---|---|---|
+| `deploy/docker/.env` | `docker compose` | `POSTGRES_SUPERUSER_PASSWORD`, `APP_DB_PASSWORD` — used ONCE, to create the roles inside the container |
+| `/opt/qalisuite/.env` | the Next.js app | `DATABASE_URL`, `DIRECT_DATABASE_URL` — the same two passwords, inside connection URLs |
+
+Copy the values across by hand. Read them back so you transcribe exactly:
+
+```bash
+sudo grep -E '^(POSTGRES_SUPERUSER_PASSWORD|APP_DB_PASSWORD)=' \
+  /opt/qalisuite/deploy/docker/.env
+```
+
+Then in `/opt/qalisuite/.env`:
 
 ```env
+# APP_DB_PASSWORD goes with app_user — the application's own connection.
 DATABASE_URL=postgresql://app_user:APP_DB_PASSWORD@127.0.0.1:5432/qalisuite
+
+# POSTGRES_SUPERUSER_PASSWORD goes with postgres — migrations and platform reads.
 DIRECT_DATABASE_URL=postgresql://postgres:POSTGRES_SUPERUSER_PASSWORD@127.0.0.1:5432/qalisuite
 ```
+
+**Do not cross them over.** Putting the superuser's password against `app_user`
+fails as `password authentication failed for user "app_user"`, which reads like
+a typo rather than the two being swapped. Putting `app_user`'s against
+`postgres` fails the same way at `db:migrate`, one step later than you would
+expect.
+
+> Changing either password later does NOT change the roles — those were created
+> on first container start and the values are only read then. To rotate one:
+> `sudo docker exec qalisuite-pg psql -U postgres -c "ALTER ROLE app_user PASSWORD 'new';"`
+> then update BOTH files.
 
 **The port is published on `127.0.0.1` deliberately.** `5432:5432` would expose
 the database to every interface — and Docker writes its own DNAT rules *ahead*
@@ -862,6 +893,7 @@ pm2 set pm2-logrotate:compress true
 
 | Problem | Cause / fix |
 |---|---|
+| `password authentication failed for user "app_user"` | The two `.env` files disagree, or the passwords are crossed over. `APP_DB_PASSWORD` belongs with `app_user`; `POSTGRES_SUPERUSER_PASSWORD` with `postgres`. |
 | Deployed fine, but no account can sign in | Expected on a fresh database — there is no signup route. Run `scripts/create-admin.mjs` (Step 5). |
 | `permission denied ... /var/run/docker.sock` | You are running as `deploy`, which has neither docker access nor sudo — by design. Run the container steps as root (`sudo -i`). Do not add `deploy` to the `docker` group; that grants it root over the whole host. |
 | `deploy is not in the sudoers file` | Correct and intended. `deploy` runs the app only. Anything needing root — docker, apt, systemctl, Caddy — is done from your own sudo-capable account. |
