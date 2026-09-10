@@ -76,6 +76,21 @@ function readForm(formData: FormData) {
   return values;
 }
 
+/**
+ * Drops the fields the posted form did not carry.
+ *
+ * `formData.get` returns null for an input that is not on the page, and the
+ * update schema is `.partial()` — which permits `undefined`, not `null`. Any
+ * field the edit screen chooses not to render therefore arrived as null and
+ * failed validation, which the form shows next to an input that isn't there:
+ * the typed values came back and nothing was saved.
+ *
+ * An EMPTY STRING is not absent. It is the signal that clears a field, so only
+ * null is dropped here.
+ */
+const omitAbsent = (values: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(values).filter(([, v]) => v !== null));
+
 const slugify = (name: string) =>
   name
     .toLowerCase()
@@ -381,7 +396,7 @@ export async function updateCompany(
     return { errors: { _form: ["No company to update"] }, values };
   }
 
-  const parsed = UpdateCompanySchema.safeParse(values);
+  const parsed = UpdateCompanySchema.safeParse(omitAbsent(values));
   if (!parsed.success) {
     return { errors: parsed.error.flatten().fieldErrors, values };
   }
