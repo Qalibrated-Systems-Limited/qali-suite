@@ -84,10 +84,33 @@ the PostgreSQL role setup and the Caddyfile.
 ```bash
 adduser deploy --disabled-password --gecos ""
 mkdir -p /home/deploy/.ssh
-cp /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
+
+# Copy the key you are ALREADY logging in with. Which file that is depends on
+# how you reached this prompt:
+#   - ssh root@server        -> /root/.ssh/authorized_keys
+#   - ssh you@server + sudo  -> /home/YOUR_USER/.ssh/authorized_keys
+# On a provider image that disables direct root login, root often has no
+# authorized_keys at all, and copying from it gives you an EMPTY file — which
+# locks you out of the deploy account without saying so.
+SRC=$(ls /root/.ssh/authorized_keys 2>/dev/null || echo "$HOME/.ssh/authorized_keys")
+[ -s "$SRC" ] || SRC=$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)/.ssh/authorized_keys
+echo "copying from: $SRC"
+test -s "$SRC" || { echo "No authorized_keys found — find it before continuing"; }
+
+cp "$SRC" /home/deploy/.ssh/authorized_keys
 chown -R deploy:deploy /home/deploy/.ssh
 chmod 700 /home/deploy/.ssh && chmod 600 /home/deploy/.ssh/authorized_keys
 ```
+
+**Confirm `ssh deploy@YOUR_SERVER_IP` works from a second terminal before
+closing this session** — and certainly before the SSH hardening below, which
+disables password login.
+
+> **You may not need a separate `deploy` user.** Its only job is that the app
+> does not run as root. If you already log in as an ordinary sudo-capable user,
+> that user can own `/opt/qalisuite` and run PM2 instead — substitute it
+> throughout. Keeping them separate is still slightly better, because the
+> account running the app then has no sudo at all.
 
 ### Harden SSH
 

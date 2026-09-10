@@ -60,10 +60,23 @@ apt install -y caddy
 echo "==> Creating deploy user..."
 id deploy &>/dev/null || adduser deploy --disabled-password --gecos ""
 mkdir -p /home/deploy/.ssh
-if [ -f /root/.ssh/authorized_keys ]; then
-  cp /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
+# Where the invoking key actually lives depends on how this was reached. Run as
+# `ssh root@host` it is root's; run via `sudo` from an ordinary account it is
+# that account's, and root's may not exist at all — on such a box copying from
+# /root gives an EMPTY authorized_keys and locks the deploy user out silently.
+KEY_SRC=""
+for candidate in \
+  "/root/.ssh/authorized_keys" \
+  "$(getent passwd "${SUDO_USER:-}" 2>/dev/null | cut -d: -f6)/.ssh/authorized_keys"
+do
+  if [ -s "$candidate" ]; then KEY_SRC="$candidate"; break; fi
+done
+
+if [ -n "$KEY_SRC" ]; then
+  echo "    copying authorized_keys from $KEY_SRC"
+  cp "$KEY_SRC" /home/deploy/.ssh/authorized_keys
 else
-  echo "    WARNING: /root/.ssh/authorized_keys not found — add a key for deploy"
+  echo "    WARNING: no non-empty authorized_keys found — add a key for deploy"
   echo "             yourself before hardening SSH, or you will be locked out."
 fi
 chown -R deploy:deploy /home/deploy/.ssh
