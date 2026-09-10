@@ -1401,21 +1401,26 @@ suite("tenant provisioning", () => {
   // turns the "cleared" one into NULL.
   // ───────────────────────────────────────────────────────────────────────────
   describe("clearing an optional field", () => {
+    // `code` is unique across companies, so each fixture needs its own —
+    // otherwise the SECOND seed collides before a test has run a single
+    // assertion, which is how the first version of this suite failed.
+    let codeSeq = 0;
     const seed = async () => {
       const source = sourceId();
+      const code = `PL${++codeSeq}`;
       const { companyId } = await provisionCompany({
         sourceCompanyId: source,
         name: "Pilot",
       });
       await syncCompanyRecord(source, {
         name: "Pilot",
-        code: "PLT",
+        code,
         tagline: "We sell things",
         phone: "+254700000000",
         vatNumber: "VAT123",
         address: { city: "Nairobi" },
       });
-      return { source, companyId };
+      return { source, companyId, code };
     };
 
     const read = (companyId) =>
@@ -1423,14 +1428,14 @@ suite("tenant provisioning", () => {
               FROM companies WHERE id = ${companyId}`.then((r) => r[0]);
 
     it("a field left out is untouched", async () => {
-      const { source, companyId } = await seed();
+      const { source, companyId, code } = await seed();
       await syncCompanyRecord(source, { phone: "+254711111111" });
 
       const row = await read(companyId);
       expect(row.phone).toBe("+254711111111");
       // Not mentioned at all — must survive.
       expect(row.tagline).toBe("We sell things");
-      expect(row.code).toBe("PLT");
+      expect(row.code).toBe(code);
     });
 
     it("a field submitted EMPTY is cleared to NULL", async () => {
@@ -1458,7 +1463,7 @@ suite("tenant provisioning", () => {
        */
       const a = await seed();
       const b = await seed();
-      await admin`UPDATE companies SET code = 'BBB' WHERE id = ${b.companyId}`;
+      expect(a.code).not.toBe(b.code);
 
       await syncCompanyRecord(a.source, { code: "" });
       await syncCompanyRecord(b.source, { code: "" });

@@ -133,10 +133,14 @@ export interface CompanyRecordChanges {
  *
  * NULL rather than '': `code` carries a unique index (companies_code_uq, 0035),
  * so a second company clearing its code to '' would collide with the first.
- * The \u0000 prefix makes it unrepresentable in a form field, so no user input
- * can impersonate it.
+ *
+ * The \u0001 prefix keeps a form field from impersonating it. NOT \u0000,
+ * which was the first choice and is rejected outright — Postgres text cannot
+ * hold a NUL byte, so every write failed with `invalid byte sequence for
+ * encoding "UTF8": 0x00`. \u0001 is a legal character that no input control
+ * produces.
  */
-const CLEAR = "\u0000__cleared__";
+const CLEAR = "\u0001__cleared__";
 
 /**
  * For fields a user is allowed to empty. Pairs with NULLIF in the query.
