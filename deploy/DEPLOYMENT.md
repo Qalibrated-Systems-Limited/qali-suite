@@ -515,10 +515,13 @@ nano /opt/qalisuite/.env
 chmod 600 /opt/qalisuite/.env      # secrets: owner-read only
 ```
 
+Only two of these are required to start: `DATABASE_URL` and `AUTH_SECRET`.
+Everything else disables a feature rather than the application — the boot log
+names whatever is missing.
+
 ```env
-# ── Auth ────────────────────────────────────────────────────────────────────
+# ── Auth — REQUIRED ─────────────────────────────────────────────────────────
 AUTH_SECRET=          # openssl rand -base64 32
-JWT_KEY=              # openssl rand -base64 32
 
 # ── Database ────────────────────────────────────────────────────────────────
 # The APPLICATION connects as app_user — a non-superuser, so RLS applies.
@@ -536,7 +539,8 @@ PGPOOL_MAX=10
 # REQUIRED. Every /api/cron/* route returns 401 without a matching bearer token.
 CRON_SECRET=          # openssl rand -hex 32
 
-# ── Email ───────────────────────────────────────────────────────────────────
+# ── Email — OPTIONAL ────────────────────────────────────────────────────────
+# Without these, invitations and the daily alert digests silently do not send.
 RESEND_API_KEY=
 FROM_EMAIL=QaliSuite <noreply@yourdomain.com>
 
