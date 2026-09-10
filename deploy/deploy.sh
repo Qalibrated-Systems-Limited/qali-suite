@@ -55,6 +55,31 @@ echo "==> Now at: $(git rev-parse HEAD)"
 echo "==> Installing dependencies (npm ci)..."
 npm ci
 
+# ── 3b. Repair the platform-native bindings npm left out ────────────────────
+#
+# package-lock.json is generated on a macOS arm64 machine, and npm records only
+# the optional platform packages it resolved there (npm/cli#4828). `npm ci`
+# installs exactly the lock, so on linux-x64 the native bindings the BUILD needs
+# are simply absent and `next build` dies with:
+#
+#   Cannot find module '../lightningcss.linux-x64-gnu.node'
+#
+# which reads as a corrupt install rather than a missing optional dependency.
+#
+# Versions are read from what npm ci actually installed, so a dependency bump
+# cannot silently reintroduce a mismatch. --no-save leaves the lockfile alone,
+# so the deploy stays reproducible.
+#
+# The root fix is a platform-complete lockfile. Regenerating it moves other
+# things and is a deliberate dependency pass, not a deploy-time change.
+echo "==> Repairing platform-native bindings (npm/cli#4828)..."
+ARCH_TRIPLE="linux-x64-gnu"
+npm install --no-save --no-audit --no-fund \
+  "lightningcss-${ARCH_TRIPLE}@$(node -p "require('lightningcss/package.json').version")" \
+  "@tailwindcss/oxide-${ARCH_TRIPLE}@$(node -p "require('@tailwindcss/oxide/package.json').version")" \
+  "@next/swc-${ARCH_TRIPLE}@$(node -p "require('next/package.json').version")" \
+  || echo "    WARNING: binding repair failed — the build may fail next."
+
 # ── 4. Schema, before the app that expects it ───────────────────────────────
 echo "==> Applying database migrations..."
 npm run db:migrate

@@ -668,6 +668,32 @@ exactly that reason.
 every tenant rather than belonging to one, so you can create the login first and
 the first company from the UI.
 
+### Repair the platform-native bindings
+
+`npm ci` installs exactly what `package-lock.json` lists — and that lockfile is
+generated on macOS arm64, where npm records only the optional platform packages
+it resolved there (npm/cli#4828). On a linux-x64 server the native bindings the
+build needs are therefore missing, and `next build` fails with:
+
+```
+Cannot find module '../lightningcss.linux-x64-gnu.node'
+```
+
+which reads as a corrupt `node_modules` rather than a missing optional
+dependency. Install the three the build needs, at the versions `npm ci`
+actually installed:
+
+```bash
+npm install --no-save --no-audit --no-fund \
+  "lightningcss-linux-x64-gnu@$(node -p "require('lightningcss/package.json').version")" \
+  "@tailwindcss/oxide-linux-x64-gnu@$(node -p "require('@tailwindcss/oxide/package.json').version")" \
+  "@next/swc-linux-x64-gnu@$(node -p "require('next/package.json').version")"
+```
+
+`--no-save` leaves the lockfile untouched, so the deploy stays reproducible.
+`deploy/deploy.sh` does this automatically on every subsequent deploy; this step
+is only needed for the first, manual one.
+
 ### Build and start
 
 ```bash
@@ -912,6 +938,7 @@ pm2 set pm2-logrotate:compress true
 | **A tenant can see another tenant's data** | `DATABASE_URL` is connecting as a superuser, which bypasses RLS. Check `rolbypassrls` (Step 2). This is the failure that guide section exists to prevent. |
 | Cron jobs do nothing | Missing `Authorization: Bearer $CRON_SECRET`. Test by hand (Step 6) — a bare `curl` returns 401 and cron discards the output. |
 | Webhooks never retry | The `webhook-retry` cron is not installed or is 401ing. Failed deliveries sit in `sync_logs` with `status='retrying'`. |
+| `Cannot find module '../lightningcss.linux-x64-gnu.node'` | The lockfile is macOS-only for optional platform packages (npm/cli#4828). Install the linux bindings — see "Repair the platform-native bindings" in Step 5. |
 | Build fails, OOM-killed | Add swap: `fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab` |
 | `remaining connection slots are reserved` | `PGPOOL_MAX` × PM2 instances exceeds `max_connections`. Lower `PGPOOL_MAX` or raise `max_connections`. |
 | `Permission denied (publickey)` on clone | The deploy key is not registered, or was generated as the wrong user. It must be `~/.ssh/id_ed25519.pub` **of the deploy user**, added under the repo's Deploy keys. Test with `ssh -T git@github.com`. |
