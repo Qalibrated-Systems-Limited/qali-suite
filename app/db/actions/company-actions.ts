@@ -255,7 +255,18 @@ export async function createCompany(
      * Everything else the form collected lands here, so the record is complete
      * from the moment the company exists rather than at its first edit.
      */
-    await syncCompanyRecord(companyId, recordFrom(data, String(data.plan || "free")));
+    // Checked for the same reason as in updateCompany below: an unresolved id
+    // silently discards everything the form collected beyond name and slug.
+    const seeded = await syncCompanyRecord(
+      companyId,
+      recordFrom(data, String(data.plan || "free")),
+    );
+    if (!seeded.synced) {
+      console.error(
+        "[createCompany] provisioned %s but its record did not sync",
+        companyId,
+      );
+    }
 
     newCompanyId = companyId;
 
@@ -399,13 +410,34 @@ export async function updateCompany(
       }
     }
 
-    await syncCompanyRecord(companyId, {
+    /*
+     * THE RETURN VALUE IS CHECKED, and this is not defensive noise.
+     *
+     * syncCompanyRecord resolves the posted id and returns `{ synced: false }`
+     * — without throwing — when it cannot. Ignoring that is how a form reports
+     * a successful save and writes nothing, which is the exact failure
+     * companyAdmin.ts's own header describes ("branding, tax, bank and
+     * settings all discarded while the form said it had saved").
+     */
+    const written = await syncCompanyRecord(companyId, {
       ...recordFrom(data),
       settings: {
         ...(recordFrom(data).settings ?? {}),
         requireGRN: data.requireGRN as boolean,
       },
     });
+
+    if (!written.synced) {
+      return {
+        errors: {
+          _form: [
+            "Could not save: that company id did not resolve to a tenant. " +
+              "Reload the page and try again.",
+          ],
+        },
+        values,
+      };
+    }
 
     revalidatePath("/dashboard/admin/companies");
     revalidatePath(`/dashboard/admin/companies/${companyId}`);
