@@ -250,25 +250,34 @@ support** — it unblocks the deployment while a supported box is arranged.
 curl -fsSL https://get.docker.com | sh
 systemctl enable --now docker
 
+sudo -i                      # this whole section runs as root
 cd /opt/qalisuite/deploy/docker
 cp .env.example .env
 chmod 600 .env
 nano .env                        # two passwords — see below
 
-sudo docker compose -f docker-compose.postgres.yml up -d
-sudo docker compose -f docker-compose.postgres.yml logs -f postgres  # ctrl-c when ready
+docker compose -f docker-compose.postgres.yml up -d
+docker compose -f docker-compose.postgres.yml logs -f postgres   # ctrl-c when ready
 ```
 
-> **`sudo`, deliberately.** Without it you get `permission denied while trying
-> to connect to the Docker daemon socket` — the daemon socket is root-owned.
-> You can avoid the prefix with `sudo usermod -aG docker $USER` (then log out
-> and back in), but be clear about what that grants: membership of the `docker`
-> group is equivalent to root, because anyone in it can `docker run -v /:/host`
-> and read or write the whole filesystem without a password. On a shared server
-> that is a privilege grant, not a convenience setting.
+> **RUN THIS STEP AS ROOT, NOT AS `deploy`.**
 >
-> The container carries `restart: unless-stopped`, so it returns after a reboot
-> on its own. You will not be running docker commands routinely.
+> The daemon socket is root-owned, so as `deploy` you get `permission denied
+> while trying to connect to the Docker daemon socket` — and `sudo` does not
+> rescue you either, because `adduser deploy --disabled-password` grants no
+> sudo at all.
+>
+> **Do not fix that by giving `deploy` sudo or adding it to the `docker`
+> group.** The database container is infrastructure; the `deploy` user runs the
+> application. It reaches Postgres over `127.0.0.1:5432` with a password and
+> never touches the daemon socket. Membership of the `docker` group is
+> equivalent to root — anyone in it can `docker run -v /:/host` and read or
+> write the whole filesystem with no password — which is exactly the privilege
+> a separate `deploy` user exists to avoid handing to the thing serving HTTP.
+>
+> So: `sudo -i` for this section, then back to `deploy` for Step 5 onward. The
+> container carries `restart: unless-stopped` and returns after a reboot on its
+> own, so nobody runs docker commands routinely.
 
 `.env` needs **two** passwords — the superuser and the application role, which
 are the two roles described below. Generate each separately:
@@ -830,7 +839,8 @@ pm2 set pm2-logrotate:compress true
 
 | Problem | Cause / fix |
 |---|---|
-| `permission denied ... /var/run/docker.sock` | You are not in the `docker` group. Prefix with `sudo`, or `sudo usermod -aG docker $USER` and log out and back in — noting that the docker group is equivalent to root. |
+| `permission denied ... /var/run/docker.sock` | You are running as `deploy`, which has neither docker access nor sudo — by design. Run the container steps as root (`sudo -i`). Do not add `deploy` to the `docker` group; that grants it root over the whole host. |
+| `deploy is not in the sudoers file` | Correct and intended. `deploy` runs the app only. Anything needing root — docker, apt, systemctl, Caddy — is done from your own sudo-capable account. |
 | `E: Unable to locate package postgresql-16` **after** adding PGDG | Check the OS. On **20.04 (focal)** PGDG has no repository at all — `apt.postgresql.org/pub/repos/apt/dists/` has no `focal-pgdg`. Reprovision as 24.04; there is no fix on focal short of Docker or managed Postgres. |
 | `E: Unable to locate package postgresql-16` | The distro repo has no 16 — you are probably on 22.04 (`lsb_release -cs` prints `jammy`). Add the PGDG repository, Step 2. Do **not** fall back to `apt install postgresql`: 22.04 gives PG 14, and migration 0062 needs 15+. |
 | Migrations fail around `0062_categories` with a syntax error near `NULLS` | The server is older than PostgreSQL 15. `SHOW server_version;` — the floor is 15, tested on 16. |
