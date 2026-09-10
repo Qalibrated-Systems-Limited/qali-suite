@@ -255,9 +255,20 @@ cp .env.example .env
 chmod 600 .env
 nano .env                        # two passwords — see below
 
-docker compose -f docker-compose.postgres.yml up -d
-docker compose -f docker-compose.postgres.yml logs -f postgres   # ctrl-c when ready
+sudo docker compose -f docker-compose.postgres.yml up -d
+sudo docker compose -f docker-compose.postgres.yml logs -f postgres  # ctrl-c when ready
 ```
+
+> **`sudo`, deliberately.** Without it you get `permission denied while trying
+> to connect to the Docker daemon socket` — the daemon socket is root-owned.
+> You can avoid the prefix with `sudo usermod -aG docker $USER` (then log out
+> and back in), but be clear about what that grants: membership of the `docker`
+> group is equivalent to root, because anyone in it can `docker run -v /:/host`
+> and read or write the whole filesystem without a password. On a shared server
+> that is a privilege grant, not a convenience setting.
+>
+> The container carries `restart: unless-stopped`, so it returns after a reboot
+> on its own. You will not be running docker commands routinely.
 
 `.env` needs **two** passwords — the superuser and the application role, which
 are the two roles described below. Generate each separately:
@@ -285,10 +296,10 @@ so the ~139 tables migrations create are reachable, and then refuses to start if
 that role can bypass RLS. Verify anyway:
 
 ```bash
-docker exec qalisuite-pg psql -U postgres -d qalisuite -c \
+sudo docker exec qalisuite-pg psql -U postgres -d qalisuite -c \
   "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles
     WHERE rolname IN ('app_user','postgres');"
-docker exec qalisuite-pg psql -U postgres -c "SHOW server_version;"
+sudo docker exec qalisuite-pg psql -U postgres -c "SHOW server_version;"
 ```
 
 `app_user` must read `f | f`.
@@ -309,7 +320,7 @@ it.
 Backups change shape — `pg_dump` runs inside the container:
 
 ```bash
-docker exec qalisuite-pg pg_dump -U postgres -Fc qalisuite \
+sudo docker exec qalisuite-pg pg_dump -U postgres -Fc qalisuite \
   > /var/backups/qalisuite/qalisuite-$(date -u +%Y%m%dT%H%M%SZ).dump
 ```
 
@@ -819,6 +830,7 @@ pm2 set pm2-logrotate:compress true
 
 | Problem | Cause / fix |
 |---|---|
+| `permission denied ... /var/run/docker.sock` | You are not in the `docker` group. Prefix with `sudo`, or `sudo usermod -aG docker $USER` and log out and back in — noting that the docker group is equivalent to root. |
 | `E: Unable to locate package postgresql-16` **after** adding PGDG | Check the OS. On **20.04 (focal)** PGDG has no repository at all — `apt.postgresql.org/pub/repos/apt/dists/` has no `focal-pgdg`. Reprovision as 24.04; there is no fix on focal short of Docker or managed Postgres. |
 | `E: Unable to locate package postgresql-16` | The distro repo has no 16 — you are probably on 22.04 (`lsb_release -cs` prints `jammy`). Add the PGDG repository, Step 2. Do **not** fall back to `apt install postgresql`: 22.04 gives PG 14, and migration 0062 needs 15+. |
 | Migrations fail around `0062_categories` with a syntax error near `NULLS` | The server is older than PostgreSQL 15. `SHOW server_version;` — the floor is 15, tested on 16. |
