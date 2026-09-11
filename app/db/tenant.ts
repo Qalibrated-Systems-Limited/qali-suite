@@ -14,6 +14,7 @@ import {
   provisionCompany,
   forgetCompanyMapping,
   listProvisionedTenants,
+  privilegedDb,
 } from "./provisioning";
 
 /**
@@ -111,29 +112,35 @@ export async function lookupCompanyUuid(
 /**
  * Does this company row exist?
  *
- * ASKED FROM INSIDE ITS OWN SCOPE, which is the only place it can be answered.
+ * ON THE PRIVILEGED CONNECTION, AND NOT IN A TRANSACTION. Both halves are the
+ * point, and each one is a bug this function has already been.
+ *
  * `companies` carries FORCE ROW LEVEL SECURITY with `tenant_isolation` keyed on
- * `app.company_id` (0024), and this runs on the application pool — so a bare
- * `SELECT ... FROM companies` outside a transaction that has set the scope
- * returns NOTHING, for a company that plainly exists.
+ * `app.company_id` (0024), and the application pool connects as `app_user` —
+ * `rolsuper false`, `rolbypassrls false`. So the bare `SELECT ... FROM
+ * companies` both callers below used to run returned NOTHING, for a company
+ * that plainly exists. The live-uuid short-circuit could never fire, and the
+ * aliveness check after a map hit always read "gone": it forgot the mapping and
+ * fell through to PROVISIONING on every resolve, which only looked correct
+ * because `provisionCompany` is idempotent and handed back the company it was
+ * about to declare missing — at the cost of an advisory lock, a chart of
+ * accounts and a set of fiscal periods per request.
  *
- * Both callers below were that bare select. The live-uuid short-circuit could
- * therefore never fire, and the aliveness check after a map hit always read
- * "gone": it forgot the mapping and fell through to PROVISIONING on every
- * resolve, which only looked correct because `provisionCompany` is idempotent
- * on the privileged connection and handed back the company it was about to
- * declare missing. A tenant born in Postgres, whose route id is the minted map
- * key, had no such rescue — it was refused as a company that no longer exists.
+ * Asking from inside the company's own scope answers it, and that was the first
+ * fix. It is also wrong here, because a scope needs a TRANSACTION and a
+ * transaction holds ACCESS SHARE on `companies` until it commits. Every
+ * Postgres suite opens with `TRUNCATE companies CASCADE`, which wants ACCESS
+ * EXCLUSIVE: one resolve overlapping one truncate is a lock cycle, and the
+ * suite reported it as sixteen hook timeouts and three deadlocks.
  *
- * Setting the scope to the id being tested is exactly what the policy asks:
- * the row is visible to a connection that has named it.
+ * The privileged connection has neither problem — it is what platform.ts and
+ * companyAdmin.ts already use to reach `companies` from outside a tenant, and a
+ * single autocommit SELECT holds no lock anybody waits on.
  */
 async function companyExists(companyId: string): Promise<boolean> {
-  const rows = await withTenant(companyId, async (tx) => {
-    return (await tx.execute(
-      sql`SELECT 1 AS ok FROM companies WHERE id = ${companyId}::uuid`,
-    )) as unknown as Array<unknown>;
-  });
+  const rows = (await privilegedDb().execute(sql`
+    SELECT 1 AS ok FROM companies WHERE id = ${companyId}::uuid
+  `)) as unknown as Array<unknown>;
   return rows.length > 0;
 }
 
