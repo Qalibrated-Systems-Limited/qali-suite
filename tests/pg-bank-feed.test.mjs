@@ -277,6 +277,62 @@ suite("the bank feed reaches the ledger", () => {
       expect(again.insertedCount).toBe(1);
     });
 
+    /**
+     * THE ONE THAT WAS MISSING. Every duplicate test above re-uploads a file;
+     * none of them put the same transaction twice INSIDE one file, which is
+     * what a statement does whenever a customer pays in two equal instalments
+     * on one day or a till is paid twice. The hash could not tell that from a
+     * re-upload, so the second line was dropped and its money never reached
+     * the ledger — while the closing balance, read from the file, went on
+     * saying it was there.
+     */
+    it("imports both halves of a transaction that happened twice", async () => {
+      const twice = [
+        moneyIn(500, { description: "MPESA PAYBILL 247247", reference: "TCJ4K1L2M3", balance: 10500 }),
+        moneyIn(500, { description: "MPESA PAYBILL 247247", reference: "TCJ5N6P7Q8", balance: 11000 }),
+      ];
+      const { result, statement: s } = await imported(twice);
+
+      expect(result.insertedCount).toBe(2);
+      expect(result.duplicatesSkipped).toBe(0);
+
+      const { lines } = await inA((tx) => bankFeed.listLines(tx, s.id));
+      expect(lines).toHaveLength(2);
+      expect(lines.reduce((n, l) => n + l.creditAmount, 0)).toBe(1000);
+    });
+
+    it("imports both even when the file names neither a reference nor a balance", async () => {
+      const bare = { description: "CASH DEPOSIT", reference: "", balance: null };
+      const { result, statement: s } = await imported([
+        moneyIn(500, bare),
+        moneyIn(500, bare),
+      ]);
+
+      expect(result.insertedCount).toBe(2);
+      expect(result.duplicatesSkipped).toBe(0);
+
+      const { lines } = await inA((tx) => bankFeed.listLines(tx, s.id));
+      expect(lines.reduce((n, l) => n + l.creditAmount, 0)).toBe(1000);
+    });
+
+    it("still calls the SECOND upload of a repeated line a duplicate", async () => {
+      const bare = { description: "CASH DEPOSIT", reference: "", balance: null };
+      const twice = [moneyIn(500, bare), moneyIn(500, bare)];
+      await imported(twice);
+
+      const s2 = await statement({ fileName: "april-again.csv" });
+      await failsWith(
+        () =>
+          inA((tx) =>
+            bankFeed.importLines(tx, s2.id, twice, {
+              companyId: companyA,
+              bankAccountId: bankAcct,
+            }),
+          ),
+        /already exist/i,
+      );
+    });
+
     it("refuses a file whose content was uploaded before", async () => {
       const hash = "identical-content";
       await statement({ contentHash: hash });

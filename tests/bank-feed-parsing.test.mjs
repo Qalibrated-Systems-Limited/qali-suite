@@ -17,6 +17,7 @@ const {
   parseNumber,
   deriveBalances,
   generateLineHash,
+  assignLineHashes,
   generateContentHash,
   calculateMatchConfidence,
   getMatchReason,
@@ -276,6 +277,72 @@ describe("reading a bank statement", () => {
     it("is stable for identical file content", () => {
       expect(generateContentHash("a,b\n1,2")).toBe(generateContentHash("a,b\n1,2"));
       expect(generateContentHash("a,b\n1,2")).not.toBe(generateContentHash("a,b\n1,3"));
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // A statement that repeats a transaction is repeating a transaction. The
+  // per-row hash could not tell that from a re-upload, so the unique index
+  // dropped the second line and the receipt never reached the ledger — while
+  // the closing balance, read from the file, went on saying it was there.
+  describe("hashing a file with repeats in it", () => {
+    /** Two genuine M-Pesa receipts: same day, same payer, same amount. */
+    const twoReceipts = [
+      { date: "2026-04-02", description: "MPESA PAYBILL 247247", reference: "TCJ4K1L2M3", debit: 0, credit: 500, balance: 10500 },
+      { date: "2026-04-02", description: "MPESA PAYBILL 247247", reference: "TCJ5N6P7Q8", debit: 0, credit: 500, balance: 11000 },
+    ];
+
+    it("keeps both when the bank distinguishes them", () => {
+      const [a, b] = assignLineHashes("acct", twoReceipts);
+      expect(a.lineHash).not.toBe(b.lineHash);
+      // They differ on content alone, so neither needs the ordinal — which is
+      // what lets a re-upload with extra days appended still match these rows.
+      expect(a.occurrence).toBe(0);
+      expect(b.occurrence).toBe(0);
+    });
+
+    it("keeps both when the file gives no reference and no balance", () => {
+      const bare = twoReceipts.map(({ date, description, debit, credit }) => ({
+        date,
+        description,
+        debit,
+        credit,
+      }));
+      const [a, b] = assignLineHashes("acct", bare);
+      expect(a.lineHash).not.toBe(b.lineHash);
+      expect(a.occurrence).toBe(0);
+      expect(b.occurrence).toBe(1);
+    });
+
+    it("still calls a re-upload of the same file a duplicate", () => {
+      const first = assignLineHashes("acct", twoReceipts).map((l) => l.lineHash);
+      const again = assignLineHashes("acct", twoReceipts).map((l) => l.lineHash);
+      expect(again).toEqual(first);
+    });
+
+    it("still matches when later days are appended to the same statement", () => {
+      const extended = [
+        ...twoReceipts,
+        { date: "2026-04-03", description: "BANK CHARGES", reference: "", debit: 120, credit: 0, balance: 10880 },
+      ];
+      const first = assignLineHashes("acct", twoReceipts).map((l) => l.lineHash);
+      const second = assignLineHashes("acct", extended).map((l) => l.lineHash);
+      expect(second.slice(0, 2)).toEqual(first);
+      expect(second[2]).not.toBe(first[0]);
+    });
+
+    it("treats a missing balance and an empty one as the same transaction", () => {
+      const missing = { date: "2026-04-02", description: "ACME", debit: 0, credit: 5000 };
+      const empty = { ...missing, balance: null };
+      const [a] = assignLineHashes("acct", [missing]);
+      const [b] = assignLineHashes("acct", [empty]);
+      expect(a.lineHash).toBe(b.lineHash);
+    });
+
+    it("does not mutate the rows it was given", () => {
+      const input = [{ date: "2026-04-02", description: "ACME", debit: 0, credit: 5000 }];
+      assignLineHashes("acct", input);
+      expect(input[0]).not.toHaveProperty("lineHash");
     });
   });
 

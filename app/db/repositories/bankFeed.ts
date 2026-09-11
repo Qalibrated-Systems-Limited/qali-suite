@@ -11,7 +11,7 @@ import * as accountsRepo from "./accounts";
 import * as paymentsRepo from "./payments";
 import { createJournalEntry, reverseJournalEntry } from "./journal";
 import {
-  generateLineHash,
+  assignLineHashes,
   deriveBalances,
   calculateMatchConfidence,
   getMatchReason,
@@ -366,17 +366,21 @@ export async function importLines(
 ) {
   if (parsed.length === 0) throw new Error("No transactions to import.");
 
-  const withHashes = parsed.map((l, i) => ({
-    ...l,
-    rowNumber: i + 1,
-    lineHash: generateLineHash(
-      input.bankAccountId,
-      l.date,
-      l.description,
-      l.debit || 0,
-      l.credit || 0,
-    ),
-  }));
+  /**
+   * HASHED AS A FILE, NOT ROW BY ROW.
+   *
+   * A statement that repeats a transaction is repeating a transaction, not
+   * duplicating one — and the per-row hash could not tell those apart, so the
+   * second of two identical M-Pesa receipts was dropped by the unique index
+   * and never reached the ledger. `assignLineHashes` folds in the reference
+   * and the running balance (which real statements already differ in) and, for
+   * a file that carries neither, the ordinal of the row among its identical
+   * twins. Re-uploading the same file reproduces the same ordinals, so the
+   * de-duplication this index exists for is unchanged.
+   */
+  const withHashes = assignLineHashes(input.bankAccountId, parsed).map(
+    (l, i) => ({ ...l, rowNumber: i + 1 }),
+  );
 
   const inserted: string[] = [];
   for (const l of withHashes) {
