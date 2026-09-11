@@ -15,9 +15,23 @@ export default auth((req) => {
   const { nextUrl } = req;
   const user = req.auth?.user as any;
 
+  /**
+   * THE PATH, FORWARDED TO THE SERVER COMPONENTS.
+   *
+   * `app/dashboard/layout.js` has to know which route it is wrapping — the
+   * unchosen-company gate below it must not fire on the platform pages, which
+   * are deliberately company-less. A layout cannot read its own pathname in
+   * the App Router, and the proxy is the one place that has it on every
+   * request, so it passes it down as a header rather than each page threading
+   * it through props.
+   */
+  const forwarded = new Headers(req.headers);
+  forwarded.set("x-pathname", nextUrl.pathname);
+  const pass = () => NextResponse.next({ request: { headers: forwarded } });
+
   // Not logged in or not on dashboard — NextAuth's authorized callback handles this
   if (!user || !nextUrl.pathname.startsWith("/dashboard")) {
-    return NextResponse.next();
+    return pass();
   }
 
   // ── Subscription expiry enforcement ──
@@ -53,7 +67,7 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/dashboard/subscription-expired", nextUrl));
   }
 
-  return NextResponse.next();
+  return pass();
 });
 
 export const config = {

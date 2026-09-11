@@ -53,10 +53,39 @@ export async function AlertsStrip({
     "overdueCheckouts",
   ],
 }: AlertsStripProps) {
-  const [alerts, pendingApprovals] = await Promise.all([
-    cDashboardAlerts(),
-    countMyPendingApprovalsPg(),
-  ]);
+  /**
+   * NO COMPANY CHOSEN IS NOT A CRASH.
+   *
+   * `cDashboardAlerts` is tenant-scoped, and a user authorised for several
+   * companies has no acting company until they pick one — `withAuthorizedTenant`
+   * throws rather than choosing for them, deliberately. This component is
+   * rendered by most role dashboards, so that throw took the whole page down
+   * and app/dashboard/error.jsx showed "Oops! Something went wrong", which
+   * names neither the cause nor the one thing that fixes it.
+   *
+   * Rendering NOTHING rather than a row of zeros: zeros would read as "nothing
+   * needs attention", which is a different and worse lie than an absent strip.
+   * The company switcher in the chrome is what asks for the missing choice.
+   *
+   * Narrow on purpose — anything that is not the unchosen-company case still
+   * throws, because a database that is down should not look like a quiet day.
+   */
+  let alerts: Awaited<ReturnType<typeof cDashboardAlerts>>;
+  try {
+    alerts = await cDashboardAlerts();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (
+      message.includes("No company selected") ||
+      message.includes("No company has been set up") ||
+      message.includes("do not have access to any company")
+    ) {
+      return null;
+    }
+    throw err;
+  }
+
+  const pendingApprovals = await countMyPendingApprovalsPg();
 
   const tiles: Array<{
     key: AlertKey;
