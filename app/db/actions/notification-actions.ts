@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { withAuthorizedTenant } from "../tenant";
+import { withAuthorizedTenant, isNoActiveCompany } from "../tenant";
 import { getTenantContextSafe } from "@/lib/utils/tenant-utils";
 import * as notifications from "../repositories/notifications";
 
@@ -59,6 +59,18 @@ export async function getMyNotifications(limit = 12) {
       notifications.listForUser(tx, user.id, limit),
     );
   } catch (err) {
+    /**
+     * NO COMPANY CHOSEN IS THE SECOND NORMAL STATE, and it is normal for
+     * exactly as long as the chooser is on screen. The layout renders the bell
+     * beside that chooser, so this threw on every render and logged a stack
+     * trace saying "No company selected. You have access to 3." — which is not
+     * a fault, it is the thing the page is currently asking about.
+     *
+     * A log that fires on a normal state is worse than no log: it is the noise
+     * a real failure hides in.
+     */
+    if (isNoActiveCompany(err)) return { items: [], unread: 0 };
+
     // Anything else IS worth knowing about, but not worth taking the dashboard
     // down for: the layout wraps every page, so a bell that throws is a blank
     // app.

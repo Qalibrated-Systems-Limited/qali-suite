@@ -95,16 +95,35 @@ async function DashboardLayout({ children }) {
     grants = null;
   }
 
+  /**
+   * "HAS AN ACTIVE COMPANY" IS NOT "HAS AN activeCompanyId".
+   *
+   * The session can name a company the user can no longer enter — access
+   * revoked, or the tenant deactivated. `resolveActiveCompany` refuses a
+   * company that is not in the grants rather than quietly substituting one, so
+   * the gate below throws "You do not have access to that company" — and a
+   * check for a non-null id would have waved that session straight past the
+   * chooser into the error page it was built to replace.
+   */
   const choosable = (grants?.companies ?? []).filter((c) => c.isActive);
+  const activeId = grants?.activeCompanyId ?? null;
+  const hasUsableActive = choosable.some((c) => c.id === activeId);
   const mustChooseCompany =
-    !isPlatformPath && !grants?.activeCompanyId && choosable.length > 1;
+    !isPlatformPath && !hasUsableActive && choosable.length > 1;
 
   // Bell data — one query, index-backed, capped. Called once per render here,
   // which is where the deduplication belongs: the Mongo version wrapped itself
   // in React cache(), and caching a transaction-scoped read across a request is
   // how one company's rows get served inside another's after a switch.
   // Degrades to an empty bell rather than throwing; the layout wraps every page.
-  const notifications = await getMyNotifications();
+  //
+  // NOT ASKED AT ALL WHILE THE CHOOSER IS UP. Notifications are tenant-scoped,
+  // and we have just established there is no tenant to scope them to — so the
+  // query can only fail, and asking it is a round trip spent to be told what
+  // the line above already said.
+  const notifications = mustChooseCompany
+    ? { items: [], unread: 0 }
+    : await getMyNotifications();
 
   return (
     <CommandPaletteProvider

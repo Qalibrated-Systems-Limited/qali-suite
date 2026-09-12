@@ -2,8 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_update } from "@/auth";
-import { withUserScope } from "../client";
-import { listAllowedCompanies } from "../repositories/companyAccess";
+import { listGrantedCompanies } from "../tenant";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 
 /**
@@ -14,13 +13,24 @@ import { getTenantContext } from "@/lib/utils/tenant-utils";
  * It is scoped to the user, so it answers before a tenant is chosen without
  * seeing any tenant's data — the only table visible under that scope is the
  * grants themselves, plus the names they point at (0034).
+ *
+ * THROUGH `listGrantedCompanies`, NOT `listAllowedCompanies`. This read used
+ * to be the only path that could not seed, so on a user's first request after
+ * signing in it answered "no companies" while the very next tenant read seeded
+ * three and then refused to choose between them. The layout, believing there
+ * was nothing to choose, rendered the page instead of the chooser — and the
+ * page failed. A reload fixed it, because by then the write had happened.
+ * See the note on `listGrantedCompanies`.
  */
 export async function getSwitchableCompanies() {
-  const { user, activeCompanyId } = await getTenantContext();
+  const { user, companyId, companyCode, activeCompanyId } =
+    await getTenantContext();
   if (!user?.id) return { companies: [], activeCompanyId: null };
 
-  const companies = await withUserScope(String(user.id), (tx) =>
-    listAllowedCompanies(tx, String(user.id)),
+  const companies = await listGrantedCompanies(
+    user as Parameters<typeof listGrantedCompanies>[0],
+    companyId,
+    companyCode,
   );
 
   return { companies, activeCompanyId: activeCompanyId ?? null };
@@ -47,8 +57,10 @@ export async function switchCompany(companyId: string) {
   const requested = String(companyId ?? "").trim();
   if (!requested) return { ok: false as const, error: "No company chosen." };
 
-  const allowed = await withUserScope(String(user.id), (tx) =>
-    listAllowedCompanies(tx, String(user.id)),
+  const allowed = await listGrantedCompanies(
+    user as Parameters<typeof listGrantedCompanies>[0],
+    (user as { companyId?: unknown }).companyId,
+    (user as { companyCode?: unknown }).companyCode,
   );
   const target = allowed.find((c) => c.id === requested);
 

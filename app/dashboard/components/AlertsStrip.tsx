@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { cDashboardAlerts } from "@/app/db/dashboard-cache";
 import { countMyPendingApprovalsPg } from "@/app/db/actions/approval-actions";
+import { isNoActiveCompany } from "@/app/db/tenant";
 
 // ============================================
 // ALERTS STRIP
@@ -74,14 +75,7 @@ export async function AlertsStrip({
   try {
     alerts = await cDashboardAlerts();
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (
-      message.includes("No company selected") ||
-      message.includes("No company has been set up") ||
-      message.includes("do not have access to any company")
-    ) {
-      return null;
-    }
+    if (isNoActiveCompany(err)) return null;
     throw err;
   }
 
