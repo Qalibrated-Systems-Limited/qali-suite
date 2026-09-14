@@ -743,6 +743,13 @@
       "when": 1787049189566,
       "tag": "0105_hse",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1787049190566,
+      "tag": "0106_a_period_opens_when_it_begins",
+      "breakpoints": true
     }
   ]
 }

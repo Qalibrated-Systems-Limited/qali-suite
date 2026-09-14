@@ -338,6 +338,97 @@ export async function updatePeriod(
 }
 
 /**
+ * Opens a period that has not been opened yet.
+ *
+ * THE ONLY TRANSITION THE CALENDAR IS ALLOWED TO MAKE, and the only one a
+ * person can make without a reason attached. `future` -> `open` adds nothing
+ * to the books; it is an admission that a month has started. Every other move
+ * — close, reopen, lock — changes what the ledger will accept, which is why
+ * each of those carries an actor and, for two of them, a reason.
+ *
+ * Refuses anything that is not `future`, so this can never be the back door
+ * that reopens a closed or locked period. `reopenPeriod` is that door and it
+ * is gated more narrowly on purpose.
+ */
+export async function openPeriod(
+  tx: Tx,
+  periodId: string,
+  actor: { id?: string | null } = {},
+) {
+  const period = await getPeriod(tx, periodId);
+  if (!period) throw new Error("Fiscal period not found");
+  if (period.status === "open") {
+    throw new Error("This period is already open.");
+  }
+  if (period.status !== "future") {
+    throw new Error(
+      `This period is ${period.status}. Only a period that has not been opened yet can be opened.`,
+    );
+  }
+
+  const [row] = (await tx.execute(sql`
+    UPDATE fiscal_periods
+       SET status = 'open', updated_at = now()
+     WHERE id = ${periodId}::uuid
+       AND status = 'future'
+    RETURNING *
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  void actor;
+  return shape(row);
+}
+
+/**
+ * Opens every period whose start date has arrived.
+ *
+ * The standing half of 0106 — the migration ran this predicate once as a
+ * back-fill, and /api/cron/open-fiscal-periods runs it nightly. `future` means
+ * "has not begun"; once the calendar reaches a period there is nothing future
+ * about it, and leaving it there is what made every month but the first
+ * unclosable.
+ *
+ * ── TAKES AN EXECUTOR, NOT A `Tx`, AND THAT IS THE POINT ───────────────────
+ *
+ * The cron has no session and must sweep every tenant, so it passes
+ * `privilegedDb()`; a tenant-scoped caller passes its `tx` and sweeps its own
+ * company under RLS. Both reach the SAME STATEMENT. Written the other way —
+ * a tenant version here and a cross-tenant copy in the route — the predicate
+ * would exist twice, and the next person to change one would not know about
+ * the other. There are already two copies of it (this and migration 0106) and
+ * that is one more than is comfortable.
+ *
+ * Idempotent by construction: a second run matches nothing, because the first
+ * moved those rows out of `future`. Periods somebody opened early are already
+ * `open` and are not matched; closed and locked ones are not matched either,
+ * which is what stops this quietly undoing a month-end.
+ */
+export async function openArrivedPeriods(db: Pick<Tx, "execute">) {
+  const rows = (await db.execute(sql`
+    UPDATE fiscal_periods
+       SET status = 'open', updated_at = now()
+     WHERE status = 'future'
+       AND start_date <= CURRENT_DATE
+    RETURNING id, company_id, period_code
+  `)) as unknown as Array<{
+    id: string;
+    company_id: string;
+    period_code: string;
+  }>;
+
+  const byCompany: Record<string, string[]> = {};
+  for (const r of rows) {
+    (byCompany[String(r.company_id)] ||= []).push(String(r.period_code));
+  }
+
+  return {
+    opened: rows.length,
+    companies: Object.keys(byCompany).length,
+    periodCodes: rows.map((r) => String(r.period_code)),
+    byCompany,
+  };
+}
+
+/**
  * Closes a period, and posts the result of the year to retained earnings.
  *
  * TWO THINGS HAVE TO BE TRUE and only one of them is expressible in SQL. The

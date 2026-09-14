@@ -31,6 +31,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  openFiscalPeriod,
   closeFiscalPeriod,
   reopenFiscalPeriod,
   lockFiscalPeriod,
@@ -49,6 +50,28 @@ export default function PeriodActionsMenu({ period }) {
   const clearMessages = () => {
     setError("");
     setSuccess("");
+  };
+
+  /**
+   * Opening a month that has not started yet.
+   *
+   * NO CONFIRMATION DIALOG, unlike close, reopen and lock. Those three change
+   * what the ledger will accept or move the line between settled and open
+   * books. This one admits that a month exists, and the nightly job (0106)
+   * would do it unasked the morning the period begins — so the only thing a
+   * person does here is bring that forward.
+   */
+  const handleOpen = () => {
+    clearMessages();
+    startTransition(async () => {
+      const result = await openFiscalPeriod(period._id);
+
+      if (result.success) {
+        setSuccess(`${period.periodName} is now open.`);
+      } else {
+        setError(result.error);
+      }
+    });
   };
 
   const handleClose = () => {
@@ -159,23 +182,22 @@ export default function PeriodActionsMenu({ period }) {
             disabled item, not an explanation: an empty box. The reader is left
             to guess whether the period has no actions or the page is broken.
 
-            It says why instead. There is no "Open Period" item yet because
-            nothing in the system moves a period out of `future` — no cron, no
-            open-on-arrival, no open-the-next-when-you-close-this-one — and
-            which of those it should be is a product decision 0030 recorded
-            rather than made. Saying so here is honest; inventing the policy in
-            a dropdown would not be.
+            It offers what the state allows. "Open Period" is the deliberate
+            case — posting into next month before next month starts — because
+            the calendar does this on its own now: 0106 opened every period
+            that had already begun, and /api/cron/open-fiscal-periods keeps
+            doing it nightly. A row can only sit at `future` if it genuinely
+            has not started.
           */}
           {period.status === "future" && (
             <>
+              <DropdownMenuItem onClick={handleOpen}>
+                <CalendarClock className="h-4 w-4 mr-2" />
+                Open Period
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={handleCalculateStats}>
                 <BarChart3 className="h-4 w-4 mr-2" />
                 Calculate Statistics
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem disabled>
-                <CalendarClock className="h-4 w-4 mr-2" />
-                Not open yet — cannot be closed
               </DropdownMenuItem>
             </>
           )}

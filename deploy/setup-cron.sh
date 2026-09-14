@@ -64,6 +64,11 @@ cat >> /tmp/qs-cron.$$ <<EOF
 0 15 * * 1-5 $RUNNER mark-absent 120 >> $LOG 2>&1
 # Notification pruning — Sundays 02:00 UTC.
 0 2 * * 0 $RUNNER prune-notifications 300 >> $LOG 2>&1
+# Open fiscal periods whose start date has arrived — daily 00:15 UTC.
+# Early, and before the alert digests, so the first posting of a new month
+# meets a period that is open rather than one still marked `future`. One
+# UPDATE across every tenant, so 60s is generous. See 0106.
+15 0 * * * $RUNNER open-fiscal-periods 60 >> $LOG 2>&1
 EOF
 
 crontab /tmp/qs-cron.$$
