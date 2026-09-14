@@ -405,7 +405,7 @@ function GlMappingForm({ config, accounts }) {
  * one active was a flag somebody had to keep true, and getForPeriod() ignored
  * it anyway — it read the ranges.
  */
-function ConfigCard({ config, canEdit, accounts }) {
+function ConfigCard({ config, canEdit, canMapGl, accounts }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -496,8 +496,18 @@ function ConfigCard({ config, canEdit, accounts }) {
             </div>
           </div>
 
-          {/* GL Mapping — Admin only */}
-          {canEdit && accounts?.length > 0 && (
+          {/*
+            GL mapping is FINANCE only, and it is the one section that does not
+            follow `canEdit`.
+
+            HR may set the statutory rates — that is preparing payroll. Which
+            accounts the payroll journal debits and credits is an accounting
+            decision, and `savePayrollGlMapping` refuses anyone outside
+            CONFIG_ROLES. Rendering the form to somebody whose submit will be
+            refused is exactly the fault this page was written to fix, in the
+            other direction.
+          */}
+          {canMapGl && accounts?.length > 0 && (
             <GlMappingForm config={config} accounts={accounts} />
           )}
         </div>
@@ -507,7 +517,12 @@ function ConfigCard({ config, canEdit, accounts }) {
 }
 
 // ─── Main export ─────────────────────────────────────────────────
-export default function PayrollConfigClient({ initialConfigs, canEdit, accounts = [] }) {
+export default function PayrollConfigClient({
+  initialConfigs,
+  canEdit,
+  canMapGl = false,
+  accounts = [],
+}) {
   const router = useRouter();
   const [showForm, setShowForm] = useState(initialConfigs.length === 0 && canEdit);
 
@@ -521,7 +536,13 @@ export default function PayrollConfigClient({ initialConfigs, canEdit, accounts 
       {initialConfigs.length > 0 ? (
         <div className="space-y-3">
           {initialConfigs.map((c) => (
-            <ConfigCard key={c._id} config={c} canEdit={canEdit} accounts={accounts} />
+            <ConfigCard
+              key={c._id}
+              config={c}
+              canEdit={canEdit}
+              canMapGl={canMapGl}
+              accounts={accounts}
+            />
           ))}
         </div>
       ) : (

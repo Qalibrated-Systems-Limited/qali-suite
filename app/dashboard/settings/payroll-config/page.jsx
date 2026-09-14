@@ -12,7 +12,16 @@ export const metadata = { title: "Payroll Configuration | Settings" };
 // HR prepares payroll and finance approves it, so both set the rates.
 const ALLOWED = ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR Manager"];
 
-async function ConfigLoader({ canEdit }) {
+/**
+ * Finance only: which accounts the payroll journal posts to.
+ *
+ * Mirrors RATES_ROLES / CONFIG_ROLES in hr-payroll-actions.ts. The two lists
+ * have to agree, and this is the half the page can get wrong quietly — an
+ * enabled form whose action refuses it is worse than no form.
+ */
+const GL_ALLOWED = ["SuperAdmin", "Admin", "CFO", "Finance Manager"];
+
+async function ConfigLoader({ canEdit, canMapGl }) {
   const { configs, accounts, active } = await getPayrollSettings();
 
   // The client speaks `_id`, `isActive` and a `glMapping` object. There is no
@@ -35,6 +44,7 @@ async function ConfigLoader({ canEdit }) {
     <PayrollConfigClient
       initialConfigs={shaped}
       canEdit={canEdit}
+      canMapGl={canMapGl}
       accounts={accounts.map((a) => ({
         _id: a.id,
         accountCode: a.code,
@@ -50,9 +60,15 @@ export default async function PayrollConfigPage() {
   if (!session?.user) redirect("/login");
   if (!roleAllowed(session.user.role, ALLOWED)) redirect("/dashboard/settings");
 
-  // Whoever may open this may change it — the source showed the page to HR and
-  // then disabled every control, while the actions accepted them.
+  // Whoever may open this may set the RATES — the source showed the page to HR
+  // and then disabled every control, while the actions accepted them.
   const canEdit = true;
+
+  // The GL mapping is the exception, and it is the one control that has to be
+  // hidden rather than disabled-on-submit: `savePayrollGlMapping` refuses
+  // anyone outside this list, so offering HR the form would be the original
+  // bug wearing the other coat.
+  const canMapGl = roleAllowed(session.user.role, GL_ALLOWED);
 
   return (
     <div className="space-y-6 p-4 sm:p-6 lg:p-8 max-w-4xl">
@@ -89,7 +105,7 @@ export default async function PayrollConfigPage() {
           </div>
         }
       >
-        <ConfigLoader canEdit={canEdit} />
+        <ConfigLoader canEdit={canEdit} canMapGl={canMapGl} />
       </Suspense>
     </div>
   );

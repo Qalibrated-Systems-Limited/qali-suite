@@ -23,6 +23,36 @@ const PREPARE_ROLES = [
 ];
 const APPROVE_ROLES = ["SuperAdmin", "Admin", "CFO", "Finance Manager"];
 const VOID_ROLES = ["SuperAdmin", "Admin", "CFO"];
+/**
+ * WHO OWNS WHICH HALF OF PAYROLL CONFIGURATION.
+ *
+ * The page has said "HR prepares payroll and finance approves it, so both set
+ * the rates" since it was written, and listed HR Manager in the roles allowed
+ * to open it with `canEdit = true` — over a comment noting that the previous
+ * version "showed the page to HR and then disabled every control, while the
+ * actions accepted them".
+ *
+ * It had drifted into the mirror image of that. `CONFIG_ROLES` never gained
+ * HR Manager, and it guards `getPayrollSettings` as well as the writes — so an
+ * HR Manager opening the page threw inside a server component and got the
+ * error boundary. They could not set the rates. They could not even read them.
+ *
+ * Two lists, because the page's sentence names the split precisely: HR sets
+ * THE RATES. PAYE bands, NSSF, SHIF and AHL are the statutory facts of doing
+ * payroll, and preparing payroll is the job. The GL MAPPING decides which
+ * accounts the payroll journal debits and credits, which is an accounting
+ * decision and stays with the people who answer for the ledger — the same
+ * split this file already makes for `reallocatePayrollToProjects`.
+ */
+const RATES_ROLES = [
+  "SuperAdmin",
+  "Admin",
+  "CFO",
+  "Finance Manager",
+  "HR Manager",
+];
+
+/** Finance only: where payroll lands in the ledger. */
 const CONFIG_ROLES = ["SuperAdmin", "Admin", "CFO", "Finance Manager"];
 
 export type ActionResult =
@@ -371,7 +401,7 @@ export async function savePayrollRates(
   }
 
   try {
-    await withAuthorizedTenant(CONFIG_ROLES, (tx, { user, companyId }) =>
+    await withAuthorizedTenant(RATES_ROLES, (tx, { user, companyId }) =>
       payroll.saveRates(tx, {
         companyId,
         id: str(formData, "configId") || undefined,
@@ -626,9 +656,17 @@ export async function getP9ForPage(employeeId: string, year: number) {
   });
 }
 
-/** Settings → Payroll: the rate configurations and the accounts to map to. */
+/**
+ * Settings → Payroll: the rate configurations and the accounts to map to.
+ *
+ * RATES_ROLES, not CONFIG_ROLES. This is the page's only loader, so gating the
+ * READ on the narrower list meant an HR Manager — who the page explicitly
+ * admits — threw before a single control rendered. The accounts come back
+ * either way; what a role may DO with them is decided by the write gates, and
+ * the page stops offering the mapping form to somebody who cannot save it.
+ */
 export async function getPayrollSettings() {
-  return withAuthorizedTenant(CONFIG_ROLES, async (tx) => {
+  return withAuthorizedTenant(RATES_ROLES, async (tx) => {
     const [configs, postable] = await Promise.all([
       payroll.listRateConfigs(tx),
       accounts.listAccounts(tx, { activeOnly: true, postableOnly: true }),
