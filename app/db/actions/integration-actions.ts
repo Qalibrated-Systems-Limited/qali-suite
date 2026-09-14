@@ -8,6 +8,7 @@ import { generateApiKey } from "@/lib/integrations/utils/keyUtils";
 import * as integrations from "../repositories/integrations";
 import * as fulfilment from "../repositories/fulfilment";
 import * as stockMovements from "../repositories/stockMovements";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * Integration administration — the port of app/mongodb/actions/integration-actions.js.
@@ -32,7 +33,7 @@ import * as stockMovements from "../repositories/stockMovements";
  * string, and this port does not get to rewrite them at the same time.
  */
 
-const ADMIN_ROLES = ["SuperAdmin", "Admin"];
+const ADMIN_ROLES = rolesFor("integration.manage");
 
 /**
  * Both gates, in the order that gives the better message: a non-admin is told

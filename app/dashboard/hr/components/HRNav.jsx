@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { can } from "@/lib/capabilities";
 import {
   Users,
   Building2,
@@ -28,7 +29,7 @@ const EMPLOYEE_NAV = [
 
 export default function HRNav({ role }) {
   const pathname = usePathname();
-  const isAdmin = ["SuperAdmin", "Admin", "Manager", "HR Manager"].includes(role);
+  const isAdmin = can(role, "hr.write");
   const navItems = isAdmin ? ADMIN_NAV : EMPLOYEE_NAV;
 
   return (

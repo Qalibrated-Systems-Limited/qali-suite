@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { withAuthorizedTenant } from "../tenant";
 import * as adjustmentsRepo from "../repositories/stockAdjustments";
 import { products } from "../schema";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * Stock adjustments — the action layer.
@@ -24,13 +25,7 @@ import { products } from "../schema";
  */
 
 
-const CREATE_ROLES = [
-  "Admin",
-  "Manager",
-  "Store Manager",
-  "Storekeeper",
-  "Accountant",
-];
+const CREATE_ROLES = rolesFor("adjustment.create");
 
 export interface AdjustmentActionResult {
   success: boolean;

@@ -5,12 +5,11 @@ import Link from "next/link";
 import { getHrOverview } from "@/app/db/actions/hr-employee-actions";
 import { getAttendanceForPage } from "@/app/db/actions/hr-attendance-actions";
 import { listLeaveForPage } from "@/app/db/actions/hr-leave-actions";
-import { roleAllowed } from "@/lib/permissions";
+import { can } from "@/lib/capabilities";
 import { Users, Building2, Calendar, Banknote, Clock, UserCheck, AlertTriangle, Settings } from "lucide-react";
 
 export const metadata = { title: "HR | Dashboard" };
 
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
 
 async function HRStatsCards() {
   const [{ stats }, pending] = await Promise.all([
@@ -194,7 +193,7 @@ function StatsCardsSkeleton() {
 export default async function HRPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!roleAllowed(session.user.role, HR_ROLES)) redirect("/dashboard");
+  if (!can(session.user.role, "hr.write")) redirect("/dashboard");
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

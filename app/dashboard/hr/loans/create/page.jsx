@@ -4,14 +4,13 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { getLoanFormData } from "@/app/db/actions/hr-loan-actions";
-import { roleAllowed } from "@/lib/permissions";
+import { can } from "@/lib/capabilities";
 import LoanRequestForm from "@/app/dashboard/hr/loans/components/LoanRequestForm";
 
 export const metadata = { title: "New loan request | HR" };
 
 // Raising a loan request is an HR act — the employee asks, HR records it, and
 // finance approves. Matches the action's gate.
-const CREATE_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
 
 async function LoanFormLoader() {
   const { employees } = await getLoanFormData();
@@ -21,7 +20,7 @@ async function LoanFormLoader() {
 export default async function CreateLoanPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!roleAllowed(session.user.role, CREATE_ROLES)) redirect("/dashboard/hr/loans");
+  if (!can(session.user.role, "loan.request")) redirect("/dashboard/hr/loans");
 
   return (
     <div className="max-w-2xl space-y-6 p-4 sm:p-6">

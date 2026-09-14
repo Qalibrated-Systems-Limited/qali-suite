@@ -4,14 +4,13 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Banknote, Plus, DollarSign, TrendingUp, Clock } from "lucide-react";
 import { listLoansForPage } from "@/app/db/actions/hr-loan-actions";
-import { roleAllowed } from "@/lib/permissions";
+import { can } from "@/lib/capabilities";
 
 export const metadata = { title: "Loans & Advances | HR" };
 
 // Matches the action's gate. The source let an Accountant or an Employee open
 // this page while the QUERY behind it refused them, so it rendered an error
 // rather than a list. An employee reaches their own loans from their record.
-const HR_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
 
 function StatusBadge({ status }) {
   const map = {
@@ -245,10 +244,10 @@ async function LoanList({ searchParams, canAdmin }) {
 export default async function LoansPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!roleAllowed(session.user.role, HR_ROLES)) redirect("/dashboard");
+  if (!can(session.user.role, "loan.request")) redirect("/dashboard");
 
   const params = await searchParams;
-  const canAdmin = roleAllowed(session.user.role, HR_ROLES);
+  const canAdmin = can(session.user.role, "loan.request");
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

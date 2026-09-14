@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import * as salesOrdersRepo from "../repositories/salesOrders";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * Sales order actions on Postgres — 0098.
@@ -34,15 +35,7 @@ import * as salesOrdersRepo from "../repositories/salesOrders";
  * open to anyone who can see the module, which is what the nav gate is for.
  */
 
-const SALES_ROLES = [
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "Sales Manager",
-  "Manager",
-  "Accountant",
-];
+const SALES_ROLES = rolesFor("salesorder.write");
 
 type ActionResult<T = unknown> =
   | { success: true; data?: T }

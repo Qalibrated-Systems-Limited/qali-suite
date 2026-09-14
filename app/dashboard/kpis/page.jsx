@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Plus, Target } from "lucide-react";
 import { listKpisPg } from "@/app/db/actions/kpi-actions";
 import { roleAllowed } from "@/lib/permissions";
+import { can } from "@/lib/capabilities";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import KpiListCards from "./components/KpiListCards";
@@ -13,8 +14,8 @@ import KpiTemplatesDialog from "./components/KpiTemplatesDialog";
 export const metadata = { title: "KPIs" };
 
 // CEO became Viewer (0039) on READ gates, and is dropped from write gates.
-const VIEW_ROLES = ["SuperAdmin", "Admin", "Viewer", "Manager", "CFO", "HR Manager", "Accountant", "Finance Manager"];
-const MANAGE_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR Manager"];
+// The list lives in lib/capabilities.js; it used to live here, and in
+// three sibling pages, and in kpi-actions.ts — five copies of one rule.
 
 async function KpiListLoader({ canManage }) {
   const kpis = await listKpisPg({ includeInactive: false });
@@ -51,9 +52,9 @@ async function KpiListLoader({ canManage }) {
 export default async function KpisIndex() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!roleAllowed(session.user.role, VIEW_ROLES)) redirect("/dashboard");
+  if (!can(session.user.role, "kpi.view")) redirect("/dashboard");
 
-  const canManage = roleAllowed(session.user.role, MANAGE_ROLES);
+  const canManage = can(session.user.role, "kpi.manage");
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

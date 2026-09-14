@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import { withAuthorizedTenant } from "../tenant";
 import * as reports from "../repositories/reports";
 import * as partiesRepo from "../repositories/parties";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * Customer and supplier statements, off the ledger.
@@ -28,14 +29,7 @@ import * as partiesRepo from "../repositories/parties";
  */
 
 /** Roles that may read another party's account. Mirrors the finance gates. */
-const STATEMENT_ROLES = [
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "Accountant",
-  "Manager",
-  "Sales Manager",
-] as const;
+const STATEMENT_ROLES = rolesFor("statement.send");
 
 const num = (v: unknown) => Number(v ?? 0);
 

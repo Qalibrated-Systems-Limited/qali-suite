@@ -6,6 +6,7 @@ import { userMessage } from "../errors";
 import * as bankFeed from "../repositories/bankFeed";
 import { requirePlanAccess } from "@/lib/plan-gate";
 import { parseCSV } from "@/lib/bank-feed-parsing";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * The bank feed on Postgres — 0100.
@@ -25,13 +26,7 @@ import { parseCSV } from "@/lib/bank-feed-parsing";
  * anyone who can see the module.
  */
 
-const FINANCE_ROLES = [
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "Accountant",
-];
+const FINANCE_ROLES = rolesFor("bank.reconcile");
 
 type ActionResult<T = unknown> =
   | { success: true; data?: T; message?: string }

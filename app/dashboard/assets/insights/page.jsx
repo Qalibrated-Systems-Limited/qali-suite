@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { can } from "@/lib/capabilities";
 import {
   Activity,
   AlertTriangle,
@@ -31,7 +32,6 @@ export const metadata = {
   description: "Running-cost analytics across the fleet",
 };
 
-const VIEW_ROLES = ["SuperAdmin", "Admin", "Viewer", "CFO", "Finance Manager", "Accountant", "Manager"];
 
 const CATEGORY_ICONS = {
   land: MapPin,
@@ -590,7 +590,7 @@ export default async function FleetInsightsPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
   if (
-    !VIEW_ROLES.includes(session.user.role) &&
+    !can(session.user.role, "asset.view") &&
     session.user.role !== "SuperAdmin"
   ) {
     redirect("/dashboard");

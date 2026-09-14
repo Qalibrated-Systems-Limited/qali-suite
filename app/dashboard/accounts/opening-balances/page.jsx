@@ -5,25 +5,19 @@ import { getOpeningBalanceSetupPg } from "@/app/db/actions/opening-balance-actio
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { OpeningBalancesClient } from "./OpeningBalancesClient";
+import { can } from "@/lib/capabilities";
 
 export const metadata = {
   title: "Opening Balances | Accounts",
   description: "Enter your account balances as of your start date",
 };
 
-const ALLOWED_ROLES = [
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "Accountant",
-];
 
 export default async function OpeningBalancesPage() {
   const session = await auth();
   const user = session?.user;
 
-  if (!user || !ALLOWED_ROLES.includes(user.role)) {
+  if (!user || !can(user.role, "finance.write")) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center p-6">
         <Card className="max-w-md w-full">

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { withAuthorizedTenant } from "../tenant";
 import * as periods from "../repositories/fiscalPeriods";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * Fiscal periods, on Postgres.
@@ -18,7 +19,7 @@ import * as periods from "../repositories/fiscalPeriods";
  */
 
 /** Who may create, edit and close. Mirrors the Mongo list. */
-const MANAGE_ROLES = ["Admin", "CFO", "Finance Manager", "Accountant"];
+const MANAGE_ROLES = rolesFor("fiscal.manage");
 
 /**
  * Reopening is deliberately narrower — no Accountant.
@@ -28,8 +29,8 @@ const MANAGE_ROLES = ["Admin", "CFO", "Finance Manager", "Accountant"];
  * already signed it off, so it sits with the people who answer for the
  * accounts. Locking is narrower still, and permanent.
  */
-const REOPEN_ROLES = ["Admin", "CFO", "Finance Manager"];
-const LOCK_ROLES = ["Admin", "CFO"];
+const REOPEN_ROLES = rolesFor("fiscal.reopen");
+const LOCK_ROLES = rolesFor("fiscal.lock");
 
 type Result<T = unknown> = { success: boolean; error?: string } & T;
 

@@ -6,6 +6,7 @@ import { withAuthorizedTenant } from "../tenant";
 import * as countsRepo from "../repositories/stockCounts";
 import * as adjustmentsRepo from "../repositories/stockAdjustments";
 import { products, stockCounts } from "../schema";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * Stocktakes — the action layer.
@@ -23,16 +24,10 @@ import { products, stockCounts } from "../schema";
  * nothing.
  */
 
-const COUNT_ROLES = [
-  "Admin",
-  "Manager",
-  "Store Manager",
-  "Storekeeper",
-  "Accountant",
-];
+const COUNT_ROLES = rolesFor("stockcount.count");
 
 /** Posting moves the books, so it is the finance/management set. */
-const POST_ROLES = ["SuperAdmin", "Admin", "Manager", "Store Manager", "Accountant"];
+const POST_ROLES = rolesFor("stockcount.post");
 
 export interface CountActionResult {
   success: boolean;

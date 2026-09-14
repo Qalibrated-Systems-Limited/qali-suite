@@ -9,6 +9,7 @@ import { userMessage } from "../errors";
 import * as attendance from "../repositories/attendance";
 import * as employees from "../repositories/employees";
 import { getLocalYMD, getTimezone } from "@/lib/hr/time";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * Postgres-backed attendance actions.
@@ -19,7 +20,7 @@ import { getLocalYMD, getTimezone } from "@/lib/hr/time";
  * sending the right string.
  */
 
-const MARK_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
+const MARK_ROLES = rolesFor("attendance.mark");
 
 export type ActionResult =
   | { success: true; message?: string; [key: string]: unknown }

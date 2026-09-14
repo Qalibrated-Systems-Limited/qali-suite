@@ -7,6 +7,7 @@ import { userMessage } from "../errors";
 import * as kpisRepo from "../repositories/kpis";
 import { listEmployeesForOwnerPicker } from "./hr-employee-actions";
 import { KPI_TEMPLATES } from "@/app/dashboard/kpis/lib/kpi-templates";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * KPI actions on Postgres — 0097.
@@ -27,8 +28,8 @@ import { KPI_TEMPLATES } from "@/app/dashboard/kpis/lib/kpi-templates";
  * the form sits there looking like it failed.
  */
 
-const MANAGE_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR Manager"];
-const ENTER_ROLES = [...MANAGE_ROLES, "Accountant"];
+const MANAGE_ROLES = rolesFor("kpi.manage");
+const ENTER_ROLES = rolesFor("kpi.enter");
 
 type ActionResult =
   | { success: true; [k: string]: unknown }

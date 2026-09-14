@@ -5,6 +5,7 @@ import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import * as crm from "../repositories/crm";
 import * as partiesRepo from "../repositories/parties";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * CRM actions on Postgres — 0096.
@@ -20,14 +21,7 @@ import * as partiesRepo from "../repositories/parties";
  * used here. Reads are open to anyone who can see the module.
  */
 
-const SALES_ROLES = [
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Sales Manager",
-  "Manager",
-  "Accountant",
-];
+const SALES_ROLES = rolesFor("crm.write");
 
 type ActionResult =
   | { success: true; id?: string; message?: string; [k: string]: unknown }

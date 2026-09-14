@@ -27,6 +27,7 @@ import {
   getAssetsTotals,
 } from "@/app/db/actions/asset-actions";
 import PostDepreciationDialog from "@/app/dashboard/assets/components/PostDepreciationDialog";
+import { can } from "@/lib/capabilities";
 
 export const metadata = { title: "Fixed Assets" };
 
@@ -35,7 +36,6 @@ export const metadata = { title: "Fixed Assets" };
 // Assets sidebar entry lives under Finance and is gated by that helper,
 // so CFO and Finance Manager (previously bounced) now get through.
 // ADMIN_ROLES still gates capital actions (post depreciation etc).
-const ADMIN_ROLES = ["SuperAdmin", "Admin", "Accountant"];
 
 const CATEGORY_OPTIONS = [
   { value: "", label: "All Categories" },
@@ -500,9 +500,7 @@ export default async function AssetsPage({ searchParams }) {
     redirect("/dashboard");
   }
 
-  const canAdmin =
-    ADMIN_ROLES.includes(session.user.role) ||
-    session.user.role === "SuperAdmin";
+  const canAdmin = can(session.user.role, "asset.manage");
 
   const params = await searchParams;
   const page = parseInt(params.page || "1", 10);

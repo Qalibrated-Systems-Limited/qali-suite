@@ -10,6 +10,7 @@ import { userMessage } from "../errors";
 import * as payroll from "../repositories/payroll";
 import * as employees from "../repositories/employees";
 import * as accounts from "../repositories/accounts";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * Postgres-backed payroll actions.
@@ -18,11 +19,9 @@ import * as accounts from "../repositories/accounts";
  * is right — approving a payroll writes to the ledger.
  */
 
-const PREPARE_ROLES = [
-  "SuperAdmin", "Admin", "CFO", "Finance Manager", "HR Manager",
-];
-const APPROVE_ROLES = ["SuperAdmin", "Admin", "CFO", "Finance Manager"];
-const VOID_ROLES = ["SuperAdmin", "Admin", "CFO"];
+const PREPARE_ROLES = rolesFor("payroll.prepare");
+const APPROVE_ROLES = rolesFor("payroll.approve");
+const VOID_ROLES = rolesFor("payroll.void");
 /**
  * WHO OWNS WHICH HALF OF PAYROLL CONFIGURATION.
  *
@@ -44,16 +43,10 @@ const VOID_ROLES = ["SuperAdmin", "Admin", "CFO"];
  * decision and stays with the people who answer for the ledger — the same
  * split this file already makes for `reallocatePayrollToProjects`.
  */
-const RATES_ROLES = [
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "HR Manager",
-];
+const RATES_ROLES = rolesFor("payroll.rates.write");
 
 /** Finance only: where payroll lands in the ledger. */
-const CONFIG_ROLES = ["SuperAdmin", "Admin", "CFO", "Finance Manager"];
+const CONFIG_ROLES = rolesFor("payroll.gl.write");
 
 export type ActionResult =
   | { success: true; id?: string; message?: string; [key: string]: unknown }

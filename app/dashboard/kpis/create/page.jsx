@@ -2,18 +2,19 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { roleAllowed } from "@/lib/permissions";
+import { can } from "@/lib/capabilities";
 import { getKpiOwnerCandidatesPg } from "@/app/db/actions/kpi-actions";
 import KpiForm from "../components/KpiForm";
 
 export const metadata = { title: "New KPI" };
 
-const MANAGE_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR Manager"];
+// The list lives in lib/capabilities.js; it used to live here, and in
+// three sibling pages, and in kpi-actions.ts — five copies of one rule.
 
 export default async function CreateKpiPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!roleAllowed(session.user.role, MANAGE_ROLES)) redirect("/dashboard/kpis");
+  if (!can(session.user.role, "kpi.manage")) redirect("/dashboard/kpis");
 
   // Empty array if HR isn't set up — the form falls back to free-text name.
   const ownerCandidates = await getKpiOwnerCandidatesPg();

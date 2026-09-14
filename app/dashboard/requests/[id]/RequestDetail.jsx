@@ -23,6 +23,7 @@ import {
   CancelDialog,
 } from "@/app/dashboard/components/requestsActionsDialogs";
 import { RequestDeliveryNotePDFButton } from "@/app/dashboard/components/RequestDeliveryNotePDFButton";
+import { can } from "@/lib/capabilities";
 
 // ============================================
 // CONSTANTS
@@ -74,9 +75,6 @@ const priorityConfig = {
 
 // Canonical role allowlists — mirror the list component so the action
 // visibility logic stays consistent everywhere.
-const APPROVE_ROLES = ["SuperAdmin", "Admin", "Manager", "Store Manager"];
-const FULFILL_ROLES = ["SuperAdmin", "Admin", "Store Manager"];
-const CANCEL_ROLES = ["SuperAdmin", "Admin", "Manager", "Store Manager"];
 
 // ============================================
 // HELPERS
@@ -112,17 +110,17 @@ export function RequestDetail({ request, userRole, userId, company }) {
   const StatusIcon = statusConfig[request.status]?.icon || IconClock;
 
   const canApprove =
-    APPROVE_ROLES.includes(userRole) &&
+    can(userRole, "stockrequest.approve") &&
     request.status === "pending" &&
     request.requester?.id !== userId;
 
   const canFulfill =
-    FULFILL_ROLES.includes(userRole) &&
+    can(userRole, "stockrequest.fulfil") &&
     (request.status === "approved" ||
       request.status === "partially_fulfilled");
 
   const canCancel =
-    (request.requester?.id === userId || CANCEL_ROLES.includes(userRole)) &&
+    (request.requester?.id === userId || can(userRole, "stockrequest.cancel")) &&
     (request.status === "pending" || request.status === "approved");
 
   const hasAnyAction = canApprove || canFulfill || canCancel;
