@@ -5,7 +5,10 @@ import Link from "next/link";
 import {
   ChevronLeft, Edit, User, Briefcase, Calendar, Banknote, FileText, History,
 } from "lucide-react";
-import { getEmployeeForPage } from "@/app/db/actions/hr-employee-actions";
+import {
+  getEmployeeForPage,
+  listUsersWithoutEmployeeRecord,
+} from "@/app/db/actions/hr-employee-actions";
 import { getEmployeeLeaveBalances } from "@/app/db/actions/hr-leave-actions";
 import { getEmployeePayslips as listPayslips } from "@/app/db/actions/hr-payroll-actions";
 import { HR_VIEW_ROLES, HR_COMPENSATION_ROLES, HR_ADMIN_ROLES } from "@/lib/utils/role-gates";
@@ -338,6 +341,22 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
   if (!data) notFound();
 
   const { employee, documents, events, salary } = data;
+
+  /**
+   * Only fetched when there is a decision to make.
+   *
+   * An employee who already has a login cannot be given another, so the list
+   * of candidates is a query asked for nothing. Degrades to empty — a failure
+   * here must hide one button, not the employee's record.
+   */
+  let unlinkedUsers = [];
+  if (!employee.userId && roleAllowed(session.user.role, HR_ADMIN_ROLES)) {
+    try {
+      unlinkedUsers = await listUsersWithoutEmployeeRecord();
+    } catch {
+      unlinkedUsers = [];
+    }
+  }
   const initials = (employee.firstName?.[0] || "") + (employee.lastName?.[0] || "");
   const canSeePay = roleAllowed(session.user.role, HR_COMPENSATION_ROLES);
   const canManageLeave = roleAllowed(session.user.role, HR_ADMIN_ROLES);
@@ -388,6 +407,10 @@ export default async function EmployeeDetailPage({ params, searchParams }) {
             hasLogin={Boolean(employee.userId)}
             userRole={session.user.role}
             email={employee.email}
+            /* Read here, on the server, so the picker cannot offer a login
+               that already belongs to somebody else. Empty when there are
+               none, which is what hides the button. */
+            unlinkedUsers={unlinkedUsers}
           />
           {canSeePay && (
             <Link
