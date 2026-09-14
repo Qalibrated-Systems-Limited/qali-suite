@@ -33,7 +33,21 @@ export const metadata = {
 // STATUS BADGE
 // ============================================
 function StatusBadge({ status }) {
+  /**
+   * `future` HAS BEEN A STATUS SINCE 0030 AND THIS PAGE NEVER LEARNED IT.
+   *
+   * Onboarding creates twelve periods and opens only the first; the other
+   * eleven are `future`. With no entry here they fell through to `config.open`
+   * and rendered a green "Open" badge — so eleven of every twelve rows claimed
+   * to be open, while PeriodActionsMenu (which tests the real status) offered
+   * them no actions at all. The page disagreed with itself about the same row.
+   */
   const config = {
+    future: {
+      label: "Future",
+      className: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+      icon: Calendar,
+    },
     open: {
       label: "Open",
       className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
@@ -109,10 +123,19 @@ async function StatsCards() {
       iconColor: "text-red-500",
       iconBg: "bg-red-500/10",
     },
+    // Without this the four tiles did not add up to the total, because
+    // eleven of every twelve periods a new company gets are `future`.
+    {
+      label: "Future Periods",
+      value: stats.future,
+      icon: Calendar,
+      iconColor: "text-blue-500",
+      iconBg: "bg-blue-500/10",
+    },
   ];
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
       {cards.map((card) => (
         <div key={card.label} className="rounded-lg border bg-card p-4">
           <div className="flex items-center justify-between">
@@ -126,6 +149,14 @@ async function StatsCards() {
       ))}
     </div>
   );
+}
+
+/** "Sep 1 - Sep 30, 2026", or null if either end is unreadable. */
+function formatSpan(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  return `${format(start, "MMM d")} - ${format(end, "MMM d, yyyy")}`;
 }
 
 // ============================================
@@ -154,6 +185,16 @@ async function CurrentPeriodCard() {
 
   const { currentPeriod } = result.stats;
 
+  /**
+   * FORMATTED ONLY IF THERE IS SOMETHING TO FORMAT.
+   *
+   * `format()` throws RangeError on an Invalid Date, and this is a server
+   * component, so one absent field took the entire page to the error boundary.
+   * The missing fields are supplied now (getPeriodStats), but a date that
+   * cannot be read is a line of missing text, never a blank page.
+   */
+  const span = formatSpan(currentPeriod.startDate, currentPeriod.endDate);
+
   return (
     <div className="rounded-lg border bg-card p-4">
       <div className="flex items-center gap-3">
@@ -162,12 +203,12 @@ async function CurrentPeriodCard() {
         </div>
         <div className="flex-1">
           <h3 className="font-medium">Current Period: {currentPeriod.name}</h3>
-          <p className="text-sm text-muted-foreground">
-            {format(new Date(currentPeriod.startDate), "MMM d")} -{" "}
-            {format(new Date(currentPeriod.endDate), "MMM d, yyyy")}
-          </p>
+          {span && <p className="text-sm text-muted-foreground">{span}</p>}
         </div>
-        <StatusBadge status="open" />
+        {/* The period's OWN status. This was hardcoded to "open", so a current
+            period that was future or closed was labelled open on the one card
+            that exists to say what it is. */}
+        <StatusBadge status={currentPeriod.status} />
       </div>
     </div>
   );

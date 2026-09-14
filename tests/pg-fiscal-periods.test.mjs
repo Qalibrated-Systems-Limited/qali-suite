@@ -313,6 +313,29 @@ suite("fiscal periods", () => {
       expect(stats.currentPeriod).not.toBeNull();
       expect(typeof stats.currentPeriod.name).toBe("string");
       expect(stats.currentPeriod.status).toBe("open");
+
+      /**
+       * EVERY FIELD THE CARD READS, not every field the query happens to
+       * return. This test asserted `name` and `status` and passed the whole
+       * time the fiscal periods page was throwing, because the page also reads
+       * `startDate` and `endDate` — which were not in the object.
+       * `new Date(undefined)` is an Invalid Date, date-fns throws RangeError
+       * on one, and the server component took the page to the error boundary.
+       *
+       * So: the dates are asserted, AND asserted to be readable as dates. A
+       * field that is present but unparseable fails here rather than on the
+       * screen.
+       */
+      expect(stats.currentPeriod.startDate).toBeTruthy();
+      expect(stats.currentPeriod.endDate).toBeTruthy();
+      expect(
+        Number.isNaN(new Date(stats.currentPeriod.startDate).getTime()),
+      ).toBe(false);
+      expect(
+        Number.isNaN(new Date(stats.currentPeriod.endDate).getTime()),
+      ).toBe(false);
+      expect(stats.currentPeriod.startDate).toBe(first.toISOString().slice(0, 10));
+      expect(stats.currentPeriod.endDate).toBe(last.toISOString().slice(0, 10));
     });
 
     it("blocks the checklist on unposted entries", async () => {

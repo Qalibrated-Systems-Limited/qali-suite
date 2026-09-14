@@ -111,8 +111,32 @@ export async function getPeriodStats(tx: Tx) {
     future: Number(row.future),
     // Open but past its end date — the month somebody forgot to close.
     overdue: Number(row.overdue),
+    /**
+     * THE DATES ARE HERE BECAUSE A CALLER PRINTS THEM.
+     *
+     * This returned `{ id, name, status }` and the fiscal periods page did
+     * `format(new Date(currentPeriod.startDate), "MMM d")` — on a field that
+     * was never in the object. `new Date(undefined)` is an Invalid Date and
+     * date-fns throws `RangeError: Invalid time value` on one, uncaught, in a
+     * server component. The whole page became "Oops! Something went wrong".
+     *
+     * It only broke for companies that HAVE a period covering today: without
+     * one, `currentPeriod` is null and the page takes its "No Active Period"
+     * branch and renders. So the page worked until a tenant had a current
+     * period, which is to say it worked until it mattered.
+     *
+     * The test asserted `typeof stats.currentPeriod.name === "string"` and the
+     * status, and passed throughout — a shape test proves the query, not that
+     * the caller can read what came back.
+     */
     currentPeriod: current
-      ? { id: current.id, name: current.periodName, status: current.status }
+      ? {
+          id: current.id,
+          name: current.periodName,
+          status: current.status,
+          startDate: current.startDate,
+          endDate: current.endDate,
+        }
       : null,
   };
 }
