@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import {
   MoreHorizontal,
   CalendarX,
+  CalendarClock,
   Lock,
   RefreshCw,
   Loader2,
@@ -149,6 +150,36 @@ export default function PeriodActionsMenu({ period }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {/*
+            A FUTURE PERIOD USED TO OPEN AN EMPTY POPOVER.
+            
+            `future` has been a status since 0030, and the three branches below
+            cover open, closed and locked only — so eleven of every twelve rows
+            a new company gets rendered a menu with nothing in it. Not a
+            disabled item, not an explanation: an empty box. The reader is left
+            to guess whether the period has no actions or the page is broken.
+
+            It says why instead. There is no "Open Period" item yet because
+            nothing in the system moves a period out of `future` — no cron, no
+            open-on-arrival, no open-the-next-when-you-close-this-one — and
+            which of those it should be is a product decision 0030 recorded
+            rather than made. Saying so here is honest; inventing the policy in
+            a dropdown would not be.
+          */}
+          {period.status === "future" && (
+            <>
+              <DropdownMenuItem onClick={handleCalculateStats}>
+                <BarChart3 className="h-4 w-4 mr-2" />
+                Calculate Statistics
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled>
+                <CalendarClock className="h-4 w-4 mr-2" />
+                Not open yet — cannot be closed
+              </DropdownMenuItem>
+            </>
+          )}
+
           {/* Open period actions */}
           {period.status === "open" && (
             <>
@@ -186,6 +217,16 @@ export default function PeriodActionsMenu({ period }) {
             <DropdownMenuItem disabled>
               <Lock className="h-4 w-4 mr-2" />
               Period is permanently locked
+            </DropdownMenuItem>
+          )}
+
+          {/* A status none of the branches above knows. The enum gained
+              `future` once already and this menu did not notice for two
+              migrations; the next addition renders a sentence, not a void. */}
+          {!["future", "open", "closed", "locked"].includes(period.status) && (
+            <DropdownMenuItem disabled>
+              <AlertCircle className="h-4 w-4 mr-2" />
+              No actions for a {period.status} period
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
