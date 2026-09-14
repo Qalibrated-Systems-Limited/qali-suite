@@ -607,9 +607,28 @@ export async function getInvoiceDetailPg(invoiceId: string) {
  * That card read the MONGO Invoice collection, which nothing has written since
  * invoices moved, so it showed "nothing overdue" to a company with a full
  * ledger of it — the worst possible answer from a collections list.
+ *
+ * ── A READ GATE, BECAUSE THIS IS A READ ────────────────────────────────────
+ *
+ * It was gated on `INVOICE_WRITE_ROLES`, which does not contain "Manager" —
+ * and `DASHBOARD_FOR_ROLE` sends a Manager to `AdminDashboard`, whose finance
+ * tab calls this. So `withAuthorizedTenant` threw "You don't have permission
+ * to perform this action.", uncaught, inside a server component: every
+ * Manager got the error page the moment they signed in, on the dashboard they
+ * are routed to by default.
+ *
+ * The gate was the outlier, not the routing. Every other tile on that same
+ * dashboard — the financial overview, the revenue trend, the expense
+ * breakdown, the alerts, the recent transactions, the stock figures, the
+ * requests — takes `[]` and leans on row-level security for the scope. The
+ * overdue COUNT was already on the page through `getDashboardAlerts([])`;
+ * only the list of four was held back, by a list named for who may WRITE an
+ * invoice. Reading a collections list is not writing one.
+ *
+ * Both callers (this tab and the accountant dashboard) are read-only tiles.
  */
 export async function getOverdueInvoicesPg(limit = 4) {
-  return withAuthorizedTenant([...INVOICE_WRITE_ROLES], (tx) =>
+  return withAuthorizedTenant([], (tx) =>
     invoices.listOverdueInvoices(tx, limit),
   );
 }
