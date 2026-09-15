@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { createWebhookSubscription } from "@/app/mongodb/actions/integration-actions";
+import { createWebhookSubscription } from "@/app/db/actions/integration-actions";
 import { Copy, Check, Plus } from "lucide-react";
 
 const EVENT_OPTIONS = [

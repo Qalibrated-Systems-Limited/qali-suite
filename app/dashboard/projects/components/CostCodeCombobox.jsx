@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/command";
 import { ChevronsUpDown, Check, Plus, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState, useActionState, useEffect } from "react";
+import { useState, useActionState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +28,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createCostCode } from "@/app/db/actions/project-actions";
+import ExpenseAccountCombobox from "@/components/expense-account-combobox";
 
 /**
  * The budget line's picker — 0073.
@@ -182,9 +183,33 @@ export default function CostCodeCombobox({
  */
 function NewCostCodeDialog({ open, onOpenChange, accounts, projectId, onCreated }) {
   const [state, formAction, isPending] = useActionState(createCostCode, null);
+  const [accountId, setAccountId] = useState("");
+  const [accountList, setAccountList] = useState(accounts);
+  useEffect(() => setAccountList(accounts), [accounts]);
 
+  /**
+   * AN ACTION SUCCEEDING IS AN EVENT, NOT A DERIVED VALUE — fire it once per
+   * created code.
+   *
+   * This looped. `onCreated` is an inline arrow from the parent, so it gets a
+   * fresh identity on every render, and it is in this effect's deps. The
+   * handler selects the new code on the line, which calls `updateLine`, which
+   * builds `[...lines]` unconditionally — so it never bails, the parent always
+   * re-renders, `onCreated` is new again, and the effect fires again with
+   * `state.success` still true. The dialog stays mounted at `open=false`, so
+   * nothing broke the cycle: "Maximum update depth exceeded".
+   *
+   * The ref keys on the created id, so the handler runs once however many times
+   * the effect re-runs — correct regardless of how the parent declares its
+   * callback, which is the property worth having.
+   */
+  const notifiedFor = useRef(null);
   useEffect(() => {
-    if (state?.success && state.costCode) onCreated(state.costCode);
+    const created = state?.success ? state.costCode : null;
+    if (created && notifiedFor.current !== created._id) {
+      notifiedFor.current = created._id;
+      onCreated(created);
+    }
   }, [state, onCreated]);
 
   const err = (field) =>
@@ -234,21 +259,32 @@ function NewCostCodeDialog({ open, onOpenChange, accounts, projectId, onCreated 
             {err("name")}
 
             <div className="space-y-1.5">
-              <Label htmlFor="cc-account">Charges which account</Label>
-              <select
-                id="cc-account"
-                name="accountId"
-                required
-                defaultValue={state?.values?.accountId ?? ""}
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-              >
-                <option value="">Select an expense account...</option>
-                {accounts.map((a) => (
-                  <option key={a._id} value={a._id}>
-                    {a.accountCode} — {a.accountName}
-                  </option>
-                ))}
-              </select>
+              <Label>Charges which account</Label>
+              {/* Searchable, not a scroll: this list is every postable expense
+                  account, and picking one by eye from 39 ordered by code is
+                  the slowest part of adding a code.
+
+                  THIS DOES NOT UNDO 0073, though it looks like it might. That
+                  decision removed an account-CREATING combobox from the budget
+                  line because a project manager could reach it. This dialog is
+                  only rendered when `canCreate` — FINANCE_WRITE_ROLES — and
+                  `quickCreateExpenseAccountPg` gates on the same list on the
+                  server, so a Manager can neither see it nor call it. The rule
+                  was always about who, not about which control. */}
+              <input type="hidden" name="accountId" value={accountId} />
+              <ExpenseAccountCombobox
+                value={accountId}
+                onValueChange={(id) => setAccountId(id)}
+                accounts={accountList}
+                onAccountCreated={(account) =>
+                  setAccountList((prev) =>
+                    prev.some((a) => a._id === account._id)
+                      ? prev
+                      : [...prev, account],
+                  )
+                }
+                placeholder="Search accounts by code or name..."
+              />
               {err("accountId")}
             </div>
 

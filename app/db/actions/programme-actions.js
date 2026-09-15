@@ -1,11 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { mapProgrammeColumns } from "@/lib/project-import-columns";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import { PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
 import { projectTasks } from "../schema";
 import * as repo from "../repositories/projects";
+import { rowsFromFile } from "@/lib/spreadsheet";
 
 /**
  * Programme import — 0079-adjacent (no schema change).
@@ -53,63 +55,8 @@ function statusFor(pct) {
   return "todo";
 }
 
-/** Minimal CSV row split — handles quoted fields containing commas. */
-function splitCsvLine(line) {
-  const out = [];
-  let cur = "";
-  let inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (inQ) {
-      if (c === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; }
-        else inQ = false;
-      } else cur += c;
-    } else if (c === '"') inQ = true;
-    else if (c === ",") { out.push(cur); cur = ""; }
-    else cur += c;
-  }
-  out.push(cur);
-  return out.map((s) => s.trim());
-}
-
-async function rowsFromFile(file) {
-  const name = (file.name || "").toLowerCase();
-  const buffer = Buffer.from(await file.arrayBuffer());
-
-  if (name.endsWith(".csv") || name.endsWith(".txt")) {
-    const text = buffer.toString("utf8").replace(/\r\n?/g, "\n");
-    return text.split("\n").filter((l) => l.trim() !== "").map(splitCsvLine);
-  }
-
-  // xlsx via the already-installed exceljs (CJS interop-safe)
-  const mod = await import("exceljs");
-  const ExcelJS = mod.default ?? mod;
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer);
-  const ws = wb.worksheets[0];
-  if (!ws) return [];
-  const rows = [];
-  ws.eachRow((row) => {
-    const vals = Array.isArray(row.values) ? row.values.slice(1) : [];
-    rows.push(vals.map((c) => (c && typeof c === "object" && "text" in c ? c.text : c)));
-  });
-  return rows;
-}
-
-function mapColumns(headerRow) {
-  const lower = headerRow.map((c) => String(c ?? "").toLowerCase().trim());
-  const find = (...names) => lower.findIndex((h) => names.some((n) => h === n || h.includes(n)));
-  const idx = {
-    section: find("section", "phase", "group"),
-    activity: find("activity", "task", "description", "item"),
-    start: find("start", "from"),
-    end: find("end", "finish", "to"),
-    percent: find("percent", "%", "progress", "complete"),
-  };
-  const looksLikeHeader = idx.section !== -1 || idx.activity !== -1;
-  return { idx, looksLikeHeader };
-}
+// Column vocabulary: `lib/project-import-columns.js`, shared with the bill
+// importer and asserted against the downloadable templates.
 
 export async function importProgrammeFile(projectId, formData) {
   if (!projectId) return { error: "No project selected" };
@@ -127,7 +74,7 @@ export async function importProgrammeFile(projectId, formData) {
   if (!raw.length) return { error: "The file has no rows" };
   if (raw.length > MAX_ROWS) return { error: `Too many rows (max ${MAX_ROWS})` };
 
-  const { idx, looksLikeHeader } = mapColumns(raw[0]);
+  const { idx, looksLikeHeader } = mapProgrammeColumns(raw[0]);
   const dataRows = looksLikeHeader ? raw.slice(1) : raw;
   const col = {
     section: idx.section !== -1 ? idx.section : 0,
@@ -215,7 +162,7 @@ export async function importProgrammeFile(projectId, formData) {
     );
 
     revalidatePath("/dashboard/projects/programme");
-    revalidatePath("/dashboard/projects/milestones");
+    revalidatePath("/dashboard/projects/programme");
     revalidatePath(`/dashboard/projects/${projectId}`);
     return {
       success: true,

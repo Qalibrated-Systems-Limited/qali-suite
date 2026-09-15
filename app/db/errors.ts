@@ -233,6 +233,25 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   project_assignments_removal_pair:
     "A removed assignment carries the date it was removed.",
 
+  // ── Timesheets (0089) ─────────────────────────────────────────────────────
+  project_timesheets_quantity_positive:
+    "Enter how long was worked.",
+  project_timesheets_quantity_within_a_day:
+    "One line cannot be longer than a day. Split it across the days it was worked.",
+  project_timesheets_cost_is_employee_labour:
+    "Only an employee's time carries a cost here — a supplier's work is invoiced.",
+  project_timesheets_cost_non_negative: "A cost cannot be negative.",
+  project_timesheets_rate_pair:
+    "A rate needs both an amount and a unit, or neither.",
+  project_timesheets_bill_needs_billable:
+    "A line that is not billable cannot carry a bill rate.",
+  project_timesheets_bill_pair:
+    "A bill rate and its amount go together.",
+  project_timesheets_approval_pair:
+    "An approved entry carries the date it was approved.",
+  project_timesheets_cost_code_pair:
+    "A cost code brings its account with it.",
+
   // ── The work breakdown (0071) ─────────────────────────────────────────────
   project_tasks_title_not_blank: "A task needs a title.",
   project_tasks_progress_in_range: "Progress is a percentage between 0 and 100.",
@@ -255,6 +274,53 @@ const CONSTRAINT_MESSAGES: Record<string, string> = {
   project_tasks_parent_same_project_fk:
     "A subtask belongs to the same project as the task above it.",
   project_tasks_id_project_uq: "That task already exists.",
+
+  // ── KPIs (0097) ───────────────────────────────────────────────────────────
+  kpis_name_uq:
+    "A KPI with that name already exists. Two metrics with one name cannot be told apart on the board.",
+  kpis_name_not_blank: "A KPI needs a name.",
+  kpis_thresholds_agree_with_direction:
+    "The on-track band has to be harder to reach than the at-risk one. For a lower-is-better metric that means a smaller ratio, not a bigger one.",
+  kpis_thresholds_positive: "A threshold is a share of the target, so it has to be above zero.",
+  kpi_snapshots_period_uq:
+    "That period already has an actual recorded. Edit it rather than adding a second one.",
+  kpi_snapshots_month_in_range: "The month has to be between 1 and 12.",
+  kpi_snapshots_year_in_range: "That is not a year this system records against.",
+  kpi_snapshots_period_shape:
+    "That period does not fit the KPI's periodicity — a quarterly figure is filed on the quarter's last month, a yearly one on December.",
+  kpis_owner_employee_id_employees_id_fk:
+    "That employee is not in this company's register.",
+
+  // ── Sales orders (0098) ───────────────────────────────────────────────────
+  sales_orders_company_number_uq: "An order with that number already exists.",
+  sales_orders_status_valid: "That is not a state a sales order can be in.",
+  sales_orders_confirmation_pair:
+    "A confirmed order carries the moment it was confirmed, and only a confirmed one does.",
+  sales_orders_cancellation_pair:
+    "A cancelled order carries the moment it was cancelled, and only a cancelled one does.",
+  sales_orders_invoiced_pair:
+    "An invoiced order carries the moment it was invoiced, and only an invoiced one does.",
+  sales_orders_salesperson_pair:
+    "A salesperson on an order needs their name recorded beside the reference.",
+  sales_orders_customer_fk: "That customer is not in this company's records.",
+  sales_order_lines_quantity_positive: "An order line needs a quantity above zero.",
+  sales_order_lines_price_not_negative: "A unit price cannot be negative.",
+  sales_order_lines_product_has_product:
+    "A product line names a product; a service line names a category.",
+  sales_order_lines_discount_is_a_percentage:
+    "A discount is a percentage between 0 and 100.",
+  sales_order_lines_tax_is_a_percentage:
+    "A tax rate is a percentage between 0 and 100.",
+  sales_order_lines_number_uq: "That line number is already used on this order.",
+  sales_order_lines_product_fk: "That product is not in this company's catalogue.",
+  /**
+   * The reservation guard. Reached when two orders race for the last units:
+   * both pass the availability pre-check, and the second one's UPDATE is the
+   * one the constraint stops. The pre-check exists to name the product in the
+   * ordinary case; this is what makes overselling impossible in the rare one.
+   */
+  products_commitments_within_on_hand:
+    "There is not enough stock left to reserve — somebody else has committed it since this page loaded.",
 };
 
 interface PgLike {

@@ -5,7 +5,6 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=production
-      - JWT_KEY=${JWT_KEY}
       - AUTH_SECRET=${AUTH_SECRET}
       - DB_LOCAL_URI=${DB_LOCAL_URI}
       - MONGODB_URI=${MONGODB_URI}

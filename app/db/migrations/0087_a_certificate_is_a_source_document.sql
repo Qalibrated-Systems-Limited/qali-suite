@@ -1,0 +1,22 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 0087 — A payment certificate is a source document.
+--
+-- Releasing retention posts DR Accounts Receivable / CR Retention Receivable,
+-- and that entry comes from a CERTIFICATE. It had nowhere to say so.
+--
+-- The first attempt claimed `source_type = 'invoice'` with the certificate's
+-- `invoice_id` — which is null on a certificate that only RELEASES retention,
+-- because such a certificate certifies no new work and raises no invoice. The
+-- `journal_entries_source_pair` CHECK refused it, correctly: a source type with
+-- no id is a provenance that cannot be followed.
+--
+-- Naming the certificate is also the truthful answer. The release is not the
+-- invoice's doing — the invoice recognised revenue when the work was certified;
+-- this makes part of the resulting receivable collectable, and the document
+-- that decided so is the certificate.
+--
+-- Same reasoning as 0086: `source_document_type` is the PRODUCT'S vocabulary of
+-- documents it posts from, and adding one is a change to how the software works.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TYPE "public"."source_document_type" ADD VALUE IF NOT EXISTS 'project_certificate';

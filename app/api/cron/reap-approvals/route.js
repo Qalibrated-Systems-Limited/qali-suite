@@ -1,5 +1,4 @@
-import dbConnect from "@/app/config/dbConnect";
-import ApprovalRequest from "@/app/models/approvalRequest";
+import { reapStaleApprovalLeases } from "@/app/db/actions/approval-actions";
 
 // ============================================
 // GET /api/cron/reap-approvals
@@ -33,13 +32,10 @@ export async function GET(request) {
   }
 
   try {
-    await dbConnect();
-    const cutoff = new Date(Date.now() - STALE_MINUTES * 60 * 1000);
-    const result = await ApprovalRequest.updateMany(
-      { status: "applying", updatedAt: { $lt: cutoff } },
-      { $set: { status: "submitted" } },
-    );
-    const reaped = result.modifiedCount ?? result.nModified ?? 0;
+    // POSTGRES since 0101. The partial index on `updated_at WHERE status =
+    // 'applying'` is what keeps this from scanning the table, exactly as the
+    // Mongo partial index did.
+    const reaped = await reapStaleApprovalLeases(STALE_MINUTES);
     if (reaped > 0) {
       console.warn(`[cron/reap-approvals] reset ${reaped} stranded lease(s)`);
     }

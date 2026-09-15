@@ -641,15 +641,31 @@ suite("projects", () => {
       expect(actuals.revenue).toBe(85000);
     });
 
-    it("splits bills into cost and commitment, and ignores a cancelled one", async () => {
+    it("counts an approved bill as cost whether or not it is paid", async () => {
+      // 0088: approval is when the bill posts (DR expense / CR AP), so it is
+      // when the project incurred it. Counting at payment instead put cost on
+      // a cash basis while revenue stayed on an accrual one, and margin then
+      // moved with supplier terms rather than with the job.
       const p = await seedProject();
       await seedBill(p.id, 40000, "approved", "paid");
       await seedBill(p.id, 25000, "approved", "unpaid");
       await seedBill(p.id, 90000, "cancelled", "paid");
 
       const actuals = await inA((tx) => repo.computeProjectActuals(tx, p.id));
-      expect(actuals.costs).toBe(40000);
-      expect(actuals.committed).toBe(25000);
+      expect(actuals.costs).toBe(65000);
+      expect(actuals.committed).toBe(0);
+    });
+
+    it("counts a bill still awaiting approval as commitment, not cost", async () => {
+      const p = await seedProject();
+      await seedBill(p.id, 12000, "draft", "unpaid");
+      await seedBill(p.id, 8000, "submitted", "unpaid");
+      // Rejected is neither: it will never be a cost and is not expected to be.
+      await seedBill(p.id, 50000, "rejected", "unpaid");
+
+      const actuals = await inA((tx) => repo.computeProjectActuals(tx, p.id));
+      expect(actuals.costs).toBe(0);
+      expect(actuals.committed).toBe(20000);
     });
 
     it("counts an approved stock request as commitment, which no ledger query could", async () => {
@@ -727,15 +743,17 @@ suite("projects", () => {
       await seedInvoice(p.id, 200000);
       await seedBill(p.id, 50000, "approved", "paid");
       await seedBill(p.id, 30000, "approved", "unpaid");
+      await seedBill(p.id, 20000, "draft", "unpaid");
 
       const summary = await inA((tx) => repo.getProjectFinancialSummary(tx, p.id));
       expect(summary.revenue).toBe(200000);
-      expect(summary.costs).toBe(50000);
-      expect(summary.committed).toBe(30000);
-      expect(summary.margin).toBe(150000);
-      expect(summary.marginPercent).toBe(75);
-      expect(summary.budgetUtilization).toBe(80);
-      expect(summary.available).toBe(20000);
+      // Both approved bills, paid or not.
+      expect(summary.costs).toBe(80000);
+      expect(summary.committed).toBe(20000);
+      expect(summary.margin).toBe(120000);
+      expect(summary.marginPercent).toBe(60);
+      expect(summary.budgetUtilization).toBe(100);
+      expect(summary.available).toBe(0);
     });
 
     it("answers for many projects in one query", async () => {
@@ -843,6 +861,95 @@ suite("projects", () => {
         claimNumber: "CLM-1",
         employeeName: "Jane Site",
       });
+    });
+
+    /**
+     * WHAT THE SCREEN READS, pinned.
+     *
+     * Three lists render these rows — the project detail page's Linked
+     * Transactions card, IPC & Payments, and Cash Requisitions — and all
+     * three were written against the MONGO shapes: `inv.customer.name`,
+     * `bill.vendor.name`, `claim.employee.name`, `req.requester.name`, and
+     * `bill.amounts.netPayable`. Not one of those is a key on these rows.
+     *
+     * Nothing threw. React prints `undefined` as nothing, so every party name
+     * rendered blank, and `formatCurrency(undefined || 0)` is a confident
+     * zero — EVERY SUPPLIER BILL SHOWED KES 0 on all three screens.
+     *
+     * The test above already pinned `employeeName` and so already disagreed
+     * with the screen beside it; nothing compared the two. This pins the
+     * whole set, and the absence of the nested shapes with it.
+     */
+    it("carries every field the linked-transaction lists render", async () => {
+      const p = await seedProject();
+      await seedInvoice(p.id, 5000);
+      await seedBill(p.id, 4000, "approved", "paid");
+      await seedRequest(p.id, { status: "approved", approved: 2, fulfilled: 0 });
+      await admin`
+        INSERT INTO expenses (company_id, expense_number, expense_date, category,
+                              account_id, account_code_at_expense,
+                              account_name_at_expense, amount,
+                              payee_name_at_expense, description, project_id)
+        VALUES (${companyA}, 'EXP-1', CURRENT_DATE, 'other', ${travelAcct},
+                '6100', 'Travel', 2500, 'Jane Site', 'Site visit', ${p.id})`;
+
+      const t = await inA((tx) => repo.getProjectTransactions(tx, p.id));
+
+      expect(t.invoices[0]).toMatchObject({ customerName: "Kerra", total: 5000 });
+      expect(t.bills[0]).toMatchObject({
+        vendorName: "Supplier",
+        total: 4000,
+        netPayable: 4000,
+      });
+      expect(t.requests[0]).toMatchObject({
+        requesterName: "Jane",
+        totalValue: 2400,
+      });
+      expect(t.expenses[0]).toMatchObject({
+        expenseNumber: "EXP-1",
+        accountName: "Travel",
+      });
+
+      // The nested shapes the screens used to read. They have never existed
+      // on a Postgres row, and asserting their absence is what stops one
+      // coming back the next time somebody ports a list from the Mongo app.
+      expect(t.invoices[0].customer).toBeUndefined();
+      expect(t.bills[0].vendor).toBeUndefined();
+      expect(t.bills[0].amounts).toBeUndefined();
+      expect(t.requests[0].requester).toBeUndefined();
+      expect(t.claims.every((c) => c.employee === undefined)).toBe(true);
+    });
+
+    /**
+     * MONEY IS A STRING on the two arms that come from a repository rather
+     * than from hand-written SQL — `numeric(19,4)` in drizzle's string mode,
+     * where the SELECTs above cast to `float8`. Cash Requisitions adds these
+     * two lists up in JS, and `0 + "2500.0000"` CONCATENATES: one claim and
+     * one expense summed to `"02500.00002500.0000"`, which
+     * `Intl.NumberFormat` renders as NaN.
+     *
+     * Pinned as a type rather than fixed here, because the string is correct:
+     * the repository contract is money-as-string, and it is the page that has
+     * to coerce.
+     */
+    it("returns claim and expense money as strings, and the rest as numbers", async () => {
+      const p = await seedProject();
+      await seedInvoice(p.id, 5000);
+      await seedBill(p.id, 4000, "approved", "paid");
+      await admin`
+        INSERT INTO expenses (company_id, expense_number, expense_date, category,
+                              account_id, account_code_at_expense,
+                              account_name_at_expense, amount,
+                              payee_name_at_expense, description, project_id)
+        VALUES (${companyA}, 'EXP-2', CURRENT_DATE, 'other', ${travelAcct},
+                '6100', 'Travel', 2500, 'Jane Site', 'Site visit', ${p.id})`;
+
+      const t = await inA((tx) => repo.getProjectTransactions(tx, p.id));
+
+      expect(typeof t.expenses[0].total).toBe("string");
+      expect(Number(t.expenses[0].total)).toBe(2500);
+      expect(typeof t.invoices[0].total).toBe("number");
+      expect(typeof t.bills[0].netPayable).toBe("number");
     });
 
     it("returns just the one type when asked for it", async () => {
@@ -1125,6 +1232,51 @@ suite("projects", () => {
 
       const active = await inA((tx) => repo.listProjects(tx, { status: "active" }));
       expect(active.projects.map((r) => r.name)).toEqual(["Running"]);
+    });
+
+    /*
+     * LIVE WORK FIRST. The register ordered by created_at alone, so a job
+     * closed two years ago outranked a running one whenever it was created
+     * later — and on a tenant with more finished jobs than live ones, that is
+     * most of page one. `listProjectsForWorkspace` had floated live projects
+     * since it was written; the register did not.
+     *
+     * Seeded oldest-first so recency ALONE would produce the exact reverse of
+     * what is asserted: if the rank is ever dropped, this fails rather than
+     * passing by luck.
+     */
+    it("ranks by status before recency — the newest closed job is not first", async () => {
+      const running = await seedProject({ name: "Running" });
+      const held = await seedProject({ name: "Held" });
+      const done = await seedProject({ name: "Done" });
+      const newest = await seedProject({ name: "Newest, and closed" });
+
+      await inA((tx) => repo.setProjectStatus(tx, running.id, "active", actor));
+      await inA((tx) => repo.setProjectStatus(tx, held.id, "active", actor));
+      await inA((tx) => repo.setProjectStatus(tx, held.id, "on_hold", actor));
+      await inA((tx) => repo.setProjectStatus(tx, done.id, "active", actor));
+      await inA((tx) => repo.setProjectStatus(tx, done.id, "completed", actor));
+      await inA((tx) => repo.setProjectStatus(tx, newest.id, "active", actor));
+      await inA((tx) => repo.setProjectStatus(tx, newest.id, "completed", actor));
+      await inA((tx) => repo.setProjectStatus(tx, newest.id, "closed", actor));
+
+      const { projects } = await inA((tx) => repo.listProjects(tx));
+      expect(projects.map((r) => r.name)).toEqual([
+        "Running",
+        "Held",
+        "Done",
+        "Newest, and closed",
+      ]);
+    });
+
+    it("keeps newest-first WITHIN a status, which is what it always did", async () => {
+      const first = await seedProject({ name: "First" });
+      const second = await seedProject({ name: "Second" });
+      await inA((tx) => repo.setProjectStatus(tx, first.id, "active", actor));
+      await inA((tx) => repo.setProjectStatus(tx, second.id, "active", actor));
+
+      const { projects } = await inA((tx) => repo.listProjects(tx));
+      expect(projects.map((r) => r.name)).toEqual(["Second", "First"]);
     });
   });
 });

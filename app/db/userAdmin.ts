@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { privilegedDb } from "./provisioning";
+import { arrayOf, likeContains } from "./repositories/sqlHelpers";
 
 /**
  * Writing a login that is not your own (0036).
@@ -341,6 +342,37 @@ export async function linkUserToPartyDirect(input: {
 }
 
 /**
+ * How many companies this login may enter, for the session token.
+ *
+ * THE MIDDLEWARE CANNOT ASK POSTGRES, and it is the only place that can stop a
+ * page rendering. The dashboard layout redirects to the chooser when there is
+ * no acting company, but a layout and its page segment render CONCURRENTLY, so
+ * the page has already thrown by then — a redirect ends the response, not the
+ * render that was already under way. Carrying the count on the token lets
+ * proxy.ts decide before anything renders at all.
+ *
+ * Active grants on active companies, which is exactly what
+ * `resolveActiveCompany` counts when it decides whether the choice is open.
+ * A stale count costs one extra hop through /dashboard/select-company, which
+ * re-reads the grants and bounces straight back when there is nothing to
+ * choose — it can never lock anybody out.
+ *
+ * Privileged, like its neighbours here: this runs during sign-in, before a
+ * tenant is scoped.
+ */
+export async function countUsableCompanies(userId: string): Promise<number> {
+  const rows = (await privilegedDb().execute(sql`
+    SELECT count(*)::int AS n
+      FROM user_company_access a
+      JOIN companies c ON c.id = a.company_id
+     WHERE a.user_id = ${String(userId)}
+       AND a.status = 'active'
+       AND c.is_active = true
+  `)) as unknown as Array<{ n: number }>;
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
  * Status and token version, for the session-freshness check.
  *
  * The narrowest possible read on the hottest privileged path: two columns by
@@ -647,4 +679,108 @@ export async function updateOwnProfile(
            updated_at = now()
      WHERE id = ${String(userId)}
   `);
+}
+
+/**
+ * Detach whichever login is on a party, and its employment record with it.
+ *
+ * The mirror of `linkUserToPartyDirect`, and privileged for the same reason it
+ * is: `user_company_access` lets a person write their OWN grant (0033's
+ * `own_grants`) and only READ a colleague's (0037's `visible_within_company`,
+ * which is `FOR SELECT`). An administrator unlinking somebody else is exactly
+ * the case those two policies decline, so the write cannot run on the tenant
+ * connection — it would match zero rows and report success.
+ *
+ * The CALLER is responsible for having checked, inside the tenant scope, that
+ * this party belongs to the company it is acting in. That check is what makes
+ * the privileged write safe; this function does not repeat it.
+ */
+export async function unlinkUserFromPartyDirect(input: {
+  companyId: string;
+  partyId: string;
+}) {
+  const cleared = (await privilegedDb().execute(sql`
+    UPDATE user_company_access
+       SET party_id = NULL, updated_at = now()
+     WHERE party_id = ${input.partyId}::uuid
+       AND company_id = ${input.companyId}::uuid
+    RETURNING user_id
+  `)) as unknown as Array<{ user_id: string }>;
+
+  await privilegedDb().execute(sql`
+    UPDATE employees SET user_id = NULL, updated_at = now()
+     WHERE party_id = ${input.partyId}::uuid
+       AND company_id = ${input.companyId}::uuid
+  `);
+
+  return { cleared: cleared.length, userIds: cleared.map((r) => r.user_id) };
+}
+
+/**
+ * Names for a set of user ids — the people behind a company's grants.
+ *
+ * POSTGRES since 0102. `company-access-actions.ts` looked these up in MONGO
+ * under a comment saying "there is no users table in Postgres yet (0031)".
+ * 0036 added one, and `upsertUser` has been filling it from every sign-in
+ * since, so the note outlived the condition it described: the grants page was
+ * reading names from a collection while the grants themselves came from
+ * Postgres.
+ *
+ * PRIVILEGED, because a SuperAdmin looking at one company's members is asking
+ * about people who may belong to another. `users` carries `own_row` and
+ * `visible_within_company` policies (0036, 0064), and neither answers that
+ * question — the same reason the rest of this module is privileged.
+ *
+ * The ObjectId-shape filter the Mongo version needed is gone with it: ids are
+ * `text` here, so an id from a source that is not a user simply matches
+ * nothing instead of throwing on a cast.
+ */
+export async function getUsersByIds(ids: string[]) {
+  const wanted = [...new Set(ids.map(String).filter(Boolean))];
+  if (!wanted.length) return [];
+
+  const rows = (await privilegedDb().execute(sql`
+    SELECT id, name, email, role
+      FROM users
+     WHERE id = ANY(${arrayOf(wanted, "text[]")})
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    name: (r.name as string) ?? null,
+    email: (r.email as string) ?? null,
+    role: (r.role as string) ?? null,
+  }));
+}
+
+/**
+ * Active users a SuperAdmin may grant company access to.
+ *
+ * Deliberately NOT scoped to one company: moving a person between companies,
+ * or giving an accountant access to two, is the case the grants table exists
+ * for. Capped at 20 and searched in SQL, because the list grows without bound.
+ *
+ * The search term is a bound parameter to ILIKE with its wildcards escaped.
+ * The Mongo version compiled it into a `new RegExp(...)`, which made a caller
+ * typing `.*` a full table scan returning everybody.
+ */
+export async function searchGrantableUsers(term: string, limit = 20) {
+  const q = String(term ?? "").trim();
+  const capped = Math.min(Math.max(Number(limit) || 20, 1), 100);
+
+  const rows = (await privilegedDb().execute(sql`
+    SELECT id, name, email, role
+      FROM users
+     WHERE status = 'active'
+       ${q ? sql`AND (name ILIKE ${likeContains(q)} OR email ILIKE ${likeContains(q)})` : sql``}
+     ORDER BY name
+     LIMIT ${capped}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    name: (r.name as string) ?? "",
+    email: (r.email as string) ?? "",
+    role: (r.role as string) ?? "",
+  }));
 }

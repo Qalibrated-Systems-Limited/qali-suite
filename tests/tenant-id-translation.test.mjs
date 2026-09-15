@@ -62,29 +62,21 @@ describe.skipIf(!ADMIN_URL)("company id translation", () => {
       expect(tenantUtils.translateCompanyId(uuid)).toBe(legacyId);
     });
 
-    it("scopes a query with the legacy id, not the uuid", () => {
-      const scoped = tenantUtils.withTenantScope({ status: "pending" }, uuid, false);
-      expect(scoped.status).toBe("pending");
-      expect(String(scoped.companyId)).toBe(legacyId);
-    });
-
-    it("builds an aggregation $match the planner can use", () => {
-      const [stage] = tenantUtils.withTenantPipeline([{ $count: "n" }], uuid, false);
-      expect(String(stage.$match.companyId)).toBe(legacyId);
-    });
-
-    it("validates a document whose companyId is the legacy id", () => {
-      // This one never threw — it compared a uuid against an ObjectId string
-      // and returned false, denying access to the tenant's own rows.
-      expect(
-        tenantUtils.validateTenantAccess({ companyId: legacyId }, uuid, false),
-      ).toBe(true);
-    });
-
-    it("still lets SuperAdmin past without translating", () => {
-      expect(tenantUtils.withTenantScope({ a: 1 }, uuid, true)).toEqual({ a: 1 });
-      expect(tenantUtils.buildTenantMatch(uuid, true)).toEqual({});
-    });
+    /*
+     * FOUR TESTS WERE REMOVED HERE — 0102.
+     *
+     * They covered `withTenantScope`, `withTenantPipeline`,
+     * `validateTenantAccess` and `buildTenantMatch`: helpers that built a
+     * Mongoose `$match` with an ObjectId companyId. The helpers are gone with
+     * the models, and are not replaced — tenant scope is row-level security
+     * now, so `withTenant()` sets `app.company_id` and the policies filter.
+     * A query cannot forget its filter, which is the failure the whole family
+     * existed to mitigate and could only mitigate by being remembered.
+     *
+     * What they were really testing — that the uuid is translated to the id
+     * documents were written with — is still covered, by the test above and by
+     * the leaf-identity test below.
+     */
 
     it("is the SAME translation the 84 inline call sites use", async () => {
       // tenant-utils re-exports it rather than keeping a copy. Fixing only
@@ -96,9 +88,12 @@ describe.skipIf(!ADMIN_URL)("company id translation", () => {
       expect(leaf.translateCompanyId(uuid)).toBe(legacyId);
     });
 
-    it("imports without pulling in auth, so models can use it", async () => {
-      // The reason it is a separate module: app/models/* must not import
-      // `@/auth` transitively just to cast an id.
+    it("imports without pulling in auth", async () => {
+      // Why it is a separate module. The original reason was that app/models/*
+      // must not pull `@/auth` in transitively just to cast an id; the models
+      // are gone, but the property is still load-bearing — legacy-company-id
+      // is imported by tenant-utils, which every request touches, and an auth
+      // import here would make it unusable from anything outside a session.
       const src = await import("node:fs").then((fs) =>
         fs.readFileSync("lib/utils/legacy-company-id.js", "utf8"),
       );

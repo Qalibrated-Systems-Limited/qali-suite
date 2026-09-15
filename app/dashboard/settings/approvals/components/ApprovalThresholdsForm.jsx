@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { updateApprovalThresholds } from "@/app/mongodb/actions/threshold-actions";
+import { updateApprovalThresholds } from "@/app/db/actions/threshold-actions";
 
 const initialState = { success: false, error: null, fieldErrors: null };
 

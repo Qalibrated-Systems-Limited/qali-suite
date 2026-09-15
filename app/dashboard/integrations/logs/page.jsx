@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft, Activity } from "lucide-react";
-import { getRecentSyncLogs } from "@/app/mongodb/actions/integration-actions";
+import { getRecentSyncLogs } from "@/app/db/actions/integration-actions";
 
 export const metadata = { title: "Sync Logs | Integrations" };
 

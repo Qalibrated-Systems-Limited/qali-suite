@@ -6,9 +6,9 @@ import { toast } from "sonner";
 import { Loader2, Trophy, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  advanceOpportunityStage,
-  closeOpportunity,
-} from "@/app/mongodb/actions/opportunity-actions";
+  advanceOpportunityStagePg as advanceOpportunityStage,
+  closeOpportunityPg as closeOpportunity,
+} from "@/app/db/actions/crm-actions";
 
 const OPEN_STAGES = ["qualification", "needs_analysis", "proposal", "negotiation"];
 const STAGE_LABEL = {

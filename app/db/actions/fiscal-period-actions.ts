@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { withAuthorizedTenant } from "../tenant";
 import * as periods from "../repositories/fiscalPeriods";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * Fiscal periods, on Postgres.
@@ -18,7 +19,7 @@ import * as periods from "../repositories/fiscalPeriods";
  */
 
 /** Who may create, edit and close. Mirrors the Mongo list. */
-const MANAGE_ROLES = ["Admin", "CFO", "Finance Manager", "Accountant"];
+const MANAGE_ROLES = rolesFor("fiscal.manage");
 
 /**
  * Reopening is deliberately narrower — no Accountant.
@@ -28,8 +29,8 @@ const MANAGE_ROLES = ["Admin", "CFO", "Finance Manager", "Accountant"];
  * already signed it off, so it sits with the people who answer for the
  * accounts. Locking is narrower still, and permanent.
  */
-const REOPEN_ROLES = ["Admin", "CFO", "Finance Manager"];
-const LOCK_ROLES = ["Admin", "CFO"];
+const REOPEN_ROLES = rolesFor("fiscal.reopen");
+const LOCK_ROLES = rolesFor("fiscal.lock");
 
 type Result<T = unknown> = { success: boolean; error?: string } & T;
 
@@ -195,6 +196,51 @@ export async function updateFiscalPeriod(
  */
 export async function calculatePeriodStatistics(periodId: string) {
   return fetchPeriodSummary(periodId);
+}
+
+/**
+ * Opens a period early, before its start date has arrived.
+ *
+ * THE CALENDAR DOES THIS ON ITS OWN (0106, and /api/cron/open-fiscal-periods
+ * nightly), so this exists for the deliberate case: somebody needs to post a
+ * document into next month before next month starts.
+ *
+ * MANAGE_ROLES, the same list that closes one. Opening a period that has not
+ * begun admits nothing to the books and cannot be a back door into a closed
+ * one — `openPeriod` refuses any status but `future` — so it does not need
+ * the narrower list reopening carries.
+ */
+export async function openFiscalPeriod(periodId: string) {
+  try {
+    const period = await withAuthorizedTenant(MANAGE_ROLES, (tx, { user }) =>
+      periods.openPeriod(tx, periodId, { id: user.id }),
+    );
+    refresh(periodId);
+    return { success: true, period };
+  } catch (e) {
+    return fail(e, "Could not open the fiscal period.");
+  }
+}
+
+/**
+ * Sweeps this company's periods, opening any whose start date has arrived.
+ *
+ * THE CRON IS THE ONE THAT MATTERS (0106, nightly, across every tenant on the
+ * privileged connection). This is the same sweep scoped to the caller's
+ * company, for the tenant that cannot wait until tomorrow morning — and it is
+ * what the tests drive, so the statement the cron runs is the statement under
+ * test rather than a re-creation of it.
+ */
+export async function openArrivedFiscalPeriods() {
+  try {
+    const result = await withAuthorizedTenant(MANAGE_ROLES, (tx) =>
+      periods.openArrivedPeriods(tx),
+    );
+    refresh();
+    return { success: true, ...result };
+  } catch (e) {
+    return fail(e, "Could not open the fiscal periods that have started.");
+  }
 }
 
 export async function closeFiscalPeriod(periodId: string) {

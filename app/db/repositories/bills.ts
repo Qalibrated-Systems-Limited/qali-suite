@@ -634,6 +634,10 @@ export async function approveBill(
     dueDate: bill.dueDate,
     sourceType: "bill",
     sourceId: bill.id,
+    // The project dimension — 0084. A bill carries both, and the cost code is
+    // the one a budget is actually checked against.
+    projectId: bill.projectId ?? null,
+    costCodeId: bill.costCodeId ?? null,
     createdById: opts.approvedById,
     postImmediately: true,
     lines: jeLines,

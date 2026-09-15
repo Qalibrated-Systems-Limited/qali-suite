@@ -1,4 +1,3 @@
-import dbConnect from "@/app/config/dbConnect";
 import {
   sendOverdueInvoiceDigests,
   sendLowStockDigests,
@@ -30,7 +29,7 @@ export async function GET(request) {
   }
 
   try {
-    await dbConnect();
+    // No Mongo connection: both digests read Postgres since 0102.
     const [overdue, lowStock] = await Promise.all([
       sendOverdueInvoiceDigests(),
       sendLowStockDigests(),

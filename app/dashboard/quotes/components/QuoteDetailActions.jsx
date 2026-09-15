@@ -37,8 +37,7 @@ import {
 } from "@/app/db/actions/quote-actions";
 import { ConvertToInvoiceDialog } from "./ConvertToInvoiceDialog";
 import { QuotePDFDownloadButton } from "./QuotePDFButton";
-import { createSalesOrderFromQuote } from "@/app/mongodb/actions/sales-order-actions";
-import { SALES_ORDERS_AVAILABLE } from "@/lib/unported-modules";
+import { createSalesOrderFromQuote } from "@/app/db/actions/sales-order-actions";
 
 export function QuoteDetailActions({
   quote,
@@ -49,8 +48,6 @@ export function QuoteDetailActions({
   const router = useRouter();
   const [isSoPending, startSoTransition] = useTransition();
 
-  // Unreachable while SALES_ORDERS_AVAILABLE is false — kept, rather than
-  // deleted, because it is what gets restored when the module is ported.
   const onCreateSalesOrder = () =>
     startSoTransition(async () => {
       const res = await createSalesOrderFromQuote(quote._id);
@@ -191,12 +188,9 @@ export function QuoteDetailActions({
       )}
 
       {/* Create Sales Order — the confirmed-commitment path: reserve stock on
-          confirm, then invoice. Switched off: createSalesOrderFromQuote reads
-          the quote from MONGO, and quotes have been Postgres since §9E, so it
-          rejects the id before it can even miss the lookup. See
-          lib/unported-modules.js for the three failures behind that one.
-          Direct conversion to an invoice below is the working path. */}
-      {canConvert && SALES_ORDERS_AVAILABLE && (
+          confirm, then invoice. Direct conversion to an invoice below is the
+          other path, and stays: not every sale needs an order in the middle. */}
+      {canConvert && (
         <Button
           variant="outline"
           onClick={onCreateSalesOrder}

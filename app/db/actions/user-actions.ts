@@ -6,7 +6,13 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { withAuthorizedTenant } from "../tenant";
 import { ADMIN_ROLES } from "@/lib/utils/role-gates";
-import { userRoles } from "@/app/models/user";
+// The canonical role list, from lib/utils.js — which is what
+// lib/utils/role-gates.js already names as the source of truth, and what
+// the user and invite SCREENS already import. This action was the outlier,
+// reaching into the mongoose model for a plain exported array and dragging
+// mongoose into the module graph as a side effect. The two lists are
+// identical, so validation is unchanged.
+import { userRoles } from "@/lib/utils";
 import * as usersRepo from "../repositories/users";
 import {
   adminUpdateUser,

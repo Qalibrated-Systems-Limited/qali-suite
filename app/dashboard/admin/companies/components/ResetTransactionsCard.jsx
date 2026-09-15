@@ -4,7 +4,7 @@ import { useActionState, useState } from "react";
 import { AlertTriangle, Loader2, Eraser } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { resetCompanyTransactions } from "@/app/mongodb/actions/company-actions";
+import { resetCompanyTransactions } from "@/app/db/actions/company-actions";
 
 // SuperAdmin danger zone: wipe a company's transactional data (the
 // "clear the test data, go live" operation). Master data survives;

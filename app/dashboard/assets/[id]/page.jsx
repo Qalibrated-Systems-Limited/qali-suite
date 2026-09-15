@@ -50,17 +50,15 @@ import {
 import {
   getAssetExpenses,
   getAssetRunningCosts,
-} from "@/app/mongodb/queries/asset-cost-queries";
+} from "@/app/db/queries/asset-costs";
 import DisposeAssetDialog from "@/app/dashboard/assets/components/DisposeAssetDialog";
 import CancelDepreciationButton from "@/app/dashboard/assets/components/CancelDepreciationButton";
 import TransferAssetDialog from "@/app/dashboard/assets/components/TransferAssetDialog";
 import ImpairAssetDialog from "@/app/dashboard/assets/components/ImpairAssetDialog";
 import LogUsageDialog from "@/app/dashboard/assets/components/LogUsageDialog";
-import { getTenantContext, withTenantScope } from "@/lib/utils/tenant-utils";
+import { getTenantContext } from "@/lib/utils/tenant-utils";
+import { can } from "@/lib/capabilities";
 
-const VIEW_ROLES = ["SuperAdmin", "Admin", "Viewer", "CFO", "Finance Manager", "Accountant", "Manager"];
-const ADMIN_ROLES = ["SuperAdmin", "Admin"];
-const POST_DEP_ROLES = ["SuperAdmin", "Admin", "Accountant"];
 
 const CATEGORY_ICONS = {
   land: MapPin,
@@ -516,8 +514,7 @@ export default async function AssetDetailPage({ params }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
   if (
-    !VIEW_ROLES.includes(session.user.role) &&
-    session.user.role !== "SuperAdmin"
+    !can(session.user.role, "asset.view")
   ) {
     redirect("/dashboard");
   }
@@ -534,17 +531,11 @@ export default async function AssetDetailPage({ params }) {
   const costs = costsResult.success ? costsResult : null;
 
   const canDispose =
-    ADMIN_ROLES.includes(session.user.role) ||
-    session.user.role === "SuperAdmin";
+can(session.user.role, "asset.admin");
   const canPostDep =
-    POST_DEP_ROLES.includes(session.user.role) ||
-    session.user.role === "SuperAdmin";
-  const canTransfer =
-    ["SuperAdmin", "Admin", "Accountant", "Manager"].includes(session.user.role) ||
-    session.user.role === "SuperAdmin";
-  const canImpair =
-    ["SuperAdmin", "Admin", "Accountant"].includes(session.user.role) ||
-    session.user.role === "SuperAdmin";
+can(session.user.role, "asset.depreciate");
+  const canTransfer = can(session.user.role, "asset.transfer_local");
+  const canImpair = can(session.user.role, "asset.impair");
 
   let accounts = [];
   if (

@@ -49,9 +49,13 @@ export interface CompanyMemberRow {
 /**
  * Who holds a grant for this company, with the names to show for them.
  *
- * The grants carry a user id and nothing else — there is no users table in
- * Postgres yet (0031), so the person behind the id is looked up in Mongo. One
- * query for the whole page, not one per row.
+ * The grants carry a user id and nothing else, so the person behind the id is
+ * looked up separately — one query for the whole page, not one per row.
+ *
+ * POSTGRES since 0102. This read MONGO under a comment saying "there is no
+ * users table in Postgres yet (0031)"; 0036 added one and `upsertUser` has
+ * filled it from every sign-in since, so the grants came from Postgres and the
+ * names beside them came from a different store.
  */
 export async function getCompanyMembers(
   sourceCompanyId: string,
@@ -61,33 +65,16 @@ export async function getCompanyMembers(
   const grants = await listCompanyMembers(String(sourceCompanyId));
   if (!grants.length) return [];
 
-  const [{ default: dbConnect }, { default: User }, mongoose] =
-    await Promise.all([
-      import("@/app/config/dbConnect"),
-      import("@/app/models/user"),
-      import("mongoose"),
-    ]);
-  await dbConnect();
+  const { getUsersByIds } = await import("../userAdmin");
 
-  // Only ids that are ObjectId-shaped: a grant may carry an id from a source
-  // that is not a Mongo user, and casting those throws rather than missing.
-  const ids = grants
-    .map((g) => g.userId)
-    .filter((id) => mongoose.default.Types.ObjectId.isValid(id));
-
-  const users = ids.length
-    ? await (User as any)
-        .find({ _id: { $in: ids } })
-        .select("name email role")
-        .lean()
-    : [];
-
-  const byId = new Map(
-    users.map((u: any) => [String(u._id), u]),
-  );
+  // No ObjectId-shape filter any more: ids are `text` in Postgres, so an id
+  // from a source that is not a user matches nothing instead of throwing on a
+  // cast.
+  const users = await getUsersByIds(grants.map((g) => g.userId));
+  const byId = new Map(users.map((u) => [u.id, u]));
 
   return grants.map((g) => {
-    const u = byId.get(g.userId) as any;
+    const u = byId.get(g.userId);
     return {
       userId: g.userId,
       name: u?.name ?? null,
@@ -114,30 +101,8 @@ export async function getCompanyMembers(
 export async function searchGrantableUsers(term: string) {
   await requireSuperAdmin();
 
-  const { default: dbConnect } = await import("@/app/config/dbConnect");
-  const { default: User } = await import("@/app/models/user");
-  await dbConnect();
-
-  const q = String(term ?? "").trim();
-  const filter: Record<string, unknown> = { status: "Active" };
-  if (q) {
-    const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-    filter.$or = [{ name: rx }, { email: rx }];
-  }
-
-  const users = await (User as any)
-    .find(filter)
-    .select("name email role")
-    .sort({ name: 1 })
-    .limit(20)
-    .lean();
-
-  return users.map((u: any) => ({
-    id: String(u._id),
-    name: u.name ?? "",
-    email: u.email ?? "",
-    role: u.role ?? "",
-  }));
+  const { searchGrantableUsers: search } = await import("../userAdmin");
+  return search(term);
 }
 
 export async function grantCompanyAccessAction(input: {

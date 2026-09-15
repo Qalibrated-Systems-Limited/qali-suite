@@ -55,11 +55,25 @@ export function CompanySwitcherMenu({ companies = [], activeCompanyId, className
   // a tenant that has not been provisioned yet.
   if (usable.length === 0) return null;
 
-  const active = usable.find((c) => c.id === activeId) ?? usable[0] ?? null;
+  /**
+   * ACTIVE MEANS ACTIVE, not "the first one in the list".
+   *
+   * This fell back to `usable[0]` whenever nothing was selected, so a user
+   * holding several companies — every SuperAdmin — read a company name in the
+   * chrome while the server refused to act as any of them. The screen said
+   * "Acme Ltd" and every page it framed said "No company selected", which is
+   * the hardest kind of bug to report.
+   *
+   * The single-company case still shows its name: the gate auto-selects the
+   * only company on offer, so the label is true there without a choice having
+   * been made.
+   */
+  const active = activeId ? usable.find((c) => c.id === activeId) ?? null : null;
 
   // One company is not a choice, so it is not a button. It is still the answer
   // to which company these numbers belong to.
   if (usable.length === 1) {
+    const only = active ?? usable[0];
     return (
       <span
         className={cn(
@@ -67,10 +81,10 @@ export function CompanySwitcherMenu({ companies = [], activeCompanyId, className
           "text-muted-foreground max-w-[10rem] sm:max-w-[16rem]",
           className,
         )}
-        title={`Operating in ${active?.name ?? ""}`}
+        title={`Operating in ${only?.name ?? ""}`}
       >
         <Building2 className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">{active?.name}</span>
+        <span className="truncate">{only?.name}</span>
       </span>
     );
   }

@@ -9,7 +9,7 @@ import {
   confirmSalesOrder,
   cancelSalesOrder,
   convertSalesOrderToInvoice,
-} from "@/app/mongodb/actions/sales-order-actions";
+} from "@/app/db/actions/sales-order-actions";
 
 // Lifecycle buttons for one sales order. Status drives what's offered:
 //   draft     → Confirm (reserves stock) | Cancel

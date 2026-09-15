@@ -14,6 +14,7 @@ import {
   provisionCompany,
   forgetCompanyMapping,
   listProvisionedTenants,
+  privilegedDb,
 } from "./provisioning";
 
 /**
@@ -108,6 +109,41 @@ export async function lookupCompanyUuid(
   return rows[0].id;
 }
 
+/**
+ * Does this company row exist?
+ *
+ * ON THE PRIVILEGED CONNECTION, AND NOT IN A TRANSACTION. Both halves are the
+ * point, and each one is a bug this function has already been.
+ *
+ * `companies` carries FORCE ROW LEVEL SECURITY with `tenant_isolation` keyed on
+ * `app.company_id` (0024), and the application pool connects as `app_user` —
+ * `rolsuper false`, `rolbypassrls false`. So the bare `SELECT ... FROM
+ * companies` both callers below used to run returned NOTHING, for a company
+ * that plainly exists. The live-uuid short-circuit could never fire, and the
+ * aliveness check after a map hit always read "gone": it forgot the mapping and
+ * fell through to PROVISIONING on every resolve, which only looked correct
+ * because `provisionCompany` is idempotent and handed back the company it was
+ * about to declare missing — at the cost of an advisory lock, a chart of
+ * accounts and a set of fiscal periods per request.
+ *
+ * Asking from inside the company's own scope answers it, and that was the first
+ * fix. It is also wrong here, because a scope needs a TRANSACTION and a
+ * transaction holds ACCESS SHARE on `companies` until it commits. Every
+ * Postgres suite opens with `TRUNCATE companies CASCADE`, which wants ACCESS
+ * EXCLUSIVE: one resolve overlapping one truncate is a lock cycle, and the
+ * suite reported it as sixteen hook timeouts and three deadlocks.
+ *
+ * The privileged connection has neither problem — it is what platform.ts and
+ * companyAdmin.ts already use to reach `companies` from outside a tenant, and a
+ * single autocommit SELECT holds no lock anybody waits on.
+ */
+async function companyExists(companyId: string): Promise<boolean> {
+  const rows = (await privilegedDb().execute(sql`
+    SELECT 1 AS ok FROM companies WHERE id = ${companyId}::uuid
+  `)) as unknown as Array<unknown>;
+  return rows.length > 0;
+}
+
 export async function resolveCompanyUuid(
   mongoCompanyId: string | null | undefined,
   /** What the session knows about the tenant, for the provisioning fallback. */
@@ -138,15 +174,24 @@ export async function resolveCompanyUuid(
    * already exists. Verified against `companies` rather than trusted on shape,
    * so a well-formed uuid naming no company is still refused.
    */
-  if (UUID_RE.test(key)) {
-    const live = (await db.execute(sql`
-      SELECT id FROM companies WHERE id = ${key}::uuid
-    `)) as unknown as Array<{ id: string }>;
-    if (live.length) {
+  const keyIsUuid = UUID_RE.test(key);
+  if (keyIsUuid) {
+    if (await companyExists(key)) {
       companyUuidCache.set(key, key);
       return key;
     }
-    throw new Error("That company no longer exists. Choose another.");
+    /*
+     * A UUID THAT NAMES NO COMPANY MAY STILL NAME ONE THROUGH THE MAP, so this
+     * falls through instead of throwing. A tenant born in Postgres has no Mongo
+     * id: `provisionCompany` mints a uuid for the map key, and the admin
+     * screens link on `sourceId ?? id` — so that minted uuid is a live
+     * company's id in every sense except the column. Refusing it here told a
+     * SuperAdmin that a company they were looking at no longer exists.
+     *
+     * The refusal itself still stands, below the map lookup: a uuid that
+     * resolves neither way must never reach the provisioning branch, which
+     * would create "Company <uuid>" for a typo in a URL.
+     */
   }
 
   const rows = (await db.execute(sql`
@@ -160,17 +205,19 @@ export async function resolveCompanyUuid(
     // shares with the dev server, which is how this was found. Checking here
     // means every caller gets a uuid that resolves to something, instead of
     // each one discovering the hole differently.
-    const alive = (await db.execute(sql`
-      SELECT 1 AS ok FROM companies WHERE id = ${rows[0].new_uuid}
-    `)) as unknown as Array<unknown>;
-
-    if (alive.length) {
+    if (await companyExists(rows[0].new_uuid)) {
       companyUuidCache.set(key, rows[0].new_uuid);
       return rows[0].new_uuid;
     }
 
     companyUuidCache.delete(key);
     await forgetCompanyMapping(key);
+  }
+
+  if (keyIsUuid) {
+    // Neither a company id nor a mapped source id. See the fall-through above:
+    // a uuid is never provisioned from.
+    throw new Error("That company no longer exists. Choose another.");
   }
 
 
@@ -228,12 +275,40 @@ export interface ActionUser {
  * revoking access or deactivating a company takes effect immediately instead
  * of at the next refresh.
  */
-async function resolveActingCompany(
+/**
+ * The companies this user may enter, SEEDING THEM IF THIS IS THE FIRST LOOK.
+ *
+ * ── WHY THIS IS EXPORTED, AND WHY THAT MATTERS ─────────────────────────────
+ *
+ * The seeding used to live inside `resolveActingCompany`, which is only
+ * reached through `withAuthorizedTenant` — the WRITE-and-read path. The
+ * company switcher and the layout's chooser asked a different function,
+ * `getSwitchableCompanies`, which called `listAllowedCompanies` directly and
+ * did no seeding at all.
+ *
+ * So on a user's FIRST request after signing in, the two disagreed:
+ *
+ *   1. the layout asks for the grants, gets [] because nothing is seeded yet,
+ *      concludes there is nothing to choose between, and renders the page;
+ *   2. the page's first tenant read calls `withAuthorizedTenant`, which seeds
+ *      three grants and then — holding three — refuses to pick one;
+ *   3. the reader gets "Oops! Something went wrong".
+ *
+ * Then they reload. Now the grants exist, the layout sees three, and the
+ * chooser appears. THAT is why the error came at login and went away on a
+ * refresh or a company switch: not a flake, a read and a write racing to
+ * decide the same thing, with only one of them able to create the rows.
+ *
+ * One function now, so the screen that asks "which company?" and the gate that
+ * enforces the answer are looking at the same list. It writes on a read path,
+ * which is unusual and deliberate: the write is idempotent, happens once per
+ * user in their lifetime, and the alternative is the screen above.
+ */
+export async function listGrantedCompanies(
   user: ActionUser,
   sessionCompanyId: unknown,
   sessionCompanyCode: unknown,
-  activeCompanyId: unknown,
-): Promise<{ companyUuid: string; role: string }> {
+) {
   const { allowed: granted, seeded } = await withUserScope(
     user.id,
     async (tx) => ({
@@ -249,10 +324,21 @@ async function resolveActingCompany(
   // seeded from what the system already believed — lazily, so nobody is locked
   // out by a script that has not been run, and idempotently, so it converges
   // whether it runs once or on every request.
-  const allowed =
-    granted.length || seeded
-      ? granted
-      : await seedGrants(user, sessionCompanyId, sessionCompanyCode);
+  if (granted.length || seeded) return granted;
+  return seedGrants(user, sessionCompanyId, sessionCompanyCode);
+}
+
+async function resolveActingCompany(
+  user: ActionUser,
+  sessionCompanyId: unknown,
+  sessionCompanyCode: unknown,
+  activeCompanyId: unknown,
+): Promise<{ companyUuid: string; role: string }> {
+  const allowed = await listGrantedCompanies(
+    user,
+    sessionCompanyId,
+    sessionCompanyCode,
+  );
 
   const requested = isUsableCompanyId(activeCompanyId)
     ? String(activeCompanyId)
@@ -439,6 +525,35 @@ export async function withAuthorizedTenant<T>(
     acting.companyUuid,
     (tx) => fn(tx, { user: actingUser, companyId: acting.companyUuid }),
     actingUser.id,
+  );
+}
+
+/**
+ * Is this the ordinary "nobody has picked a company yet" state?
+ *
+ * NOT AN ERROR, WHEREVER IT IS ASKED. Row-level security scopes every read to
+ * one company, and `resolveActingCompany` refuses to choose on the user's
+ * behalf when they hold several — so a multi-company user, and every
+ * SuperAdmin, sits in this state until they choose. The dashboard layout asks
+ * the question; everything rendered alongside the chooser has to survive it
+ * quietly.
+ *
+ * A predicate rather than an error class because the throws it recognises come
+ * from three places in this file and are matched by string in seven action
+ * modules already. Those seven match in order to SURFACE the message to the
+ * person — which is right, and the opposite of what this is for. This is for
+ * the callers whose correct response is to render nothing and log nothing: a
+ * stack trace on every render, describing normal behaviour, is how a real
+ * failure gets missed.
+ */
+export function isNoActiveCompany(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return (
+    message.includes("No company selected") ||
+    message.includes("No company has been set up") ||
+    message.includes("do not have access to any company") ||
+    message.includes("do not have access to that company") ||
+    message.includes("This company is not active")
   );
 }
 

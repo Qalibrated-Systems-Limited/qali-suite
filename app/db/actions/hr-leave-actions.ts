@@ -12,6 +12,7 @@ import {
 import { userMessage } from "../errors";
 import * as leave from "../repositories/leave";
 import * as employees from "../repositories/employees";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * Postgres-backed leave actions.
@@ -31,7 +32,7 @@ export type ActionResult =
   | { success: true; id?: string; message?: string }
   | { success: false; error: string; fieldErrors?: Record<string, string> };
 
-const APPROVE_ROLES = ["SuperAdmin", "Admin", "Manager", "HR Manager"];
+const APPROVE_ROLES = rolesFor("leave.approve");
 
 const str = (fd: FormData, key: string) => {
   const v = fd.get(key);

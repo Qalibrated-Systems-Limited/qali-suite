@@ -8,9 +8,14 @@ import {
   Trash2,
   UserPlus,
 } from "lucide-react";
-import { getPartyById } from "@/app/db/actions/party-actions";
-// Users are not ported (§10), so the link-user picker stays on Mongo.
-import { getUsers } from "@/app/mongodb/queries/partyQueries";
+import {
+  getPartyById,
+  getPartyLinkedUser,
+} from "@/app/db/actions/party-actions";
+// `getUsers` here is the POSTGRES one (0070). The Mongo `partyQueries.getUsers`
+// this replaced read a collection that stopped being written when auth ported,
+// so the link-user picker had been empty for every tenant.
+import { getUsers } from "@/app/db/actions/user-actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,10 +39,18 @@ export default async function PartyDetailPage({ id }) {
     notFound();
   }
 
-  // Fetch users for linking (only if employee)
+  // Fetch users for linking (only if employee), and which login is already
+  // attached. The link lives on the GRANT (user_company_access.party_id), not
+  // on `parties.user_id` — that column is uuid and users.id is text, so it
+  // cannot hold one and nothing has ever written it.
   let users = [];
+  let linkedUser = null;
   if (party.type === "employee") {
-    users = await getUsers(); // Get all active users
+    [users, linkedUser] = await Promise.all([
+      getUsers(),
+      getPartyLinkedUser(party._id ?? party.id),
+    ]);
+    party.userId = linkedUser?._id ?? null;
   }
 
   // Format currency

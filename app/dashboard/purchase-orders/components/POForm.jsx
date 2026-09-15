@@ -10,8 +10,10 @@
 // - Server action returns { success, error, fieldErrors }
 // ============================================
 
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Trash2,
@@ -611,6 +613,28 @@ export default function POForm({
 
   // Normalize errors
   const errors = state.fieldErrors || state.errors || {};
+
+  /**
+   * SUCCESS HAD NOWHERE TO GO.
+   *
+   * The action returns { success, purchaseOrderId, message } and the form did
+   * nothing with it: no toast, no navigation. A save that worked looked exactly
+   * like a save that never fired — the page sat there with the form still
+   * filled in, so people pressed the button again and raised a second order.
+   *
+   * The ref guards the double invocation React runs in development, which
+   * would otherwise push twice.
+   */
+  const router = useRouter();
+  const navigatedFor = useRef(null);
+  useEffect(() => {
+    if (!state?.success) return;
+    const id = state.purchaseOrderId ?? purchaseOrder?._id;
+    if (!id || navigatedFor.current === id) return;
+    navigatedFor.current = id;
+    toast.success(state.message ?? "Saved");
+    router.push(`/dashboard/purchase-orders/${id}`);
+  }, [state, router, purchaseOrder]);
 
   // ----------------------------------------
   // Lines State (dynamic array)

@@ -13,7 +13,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { KPI_TEMPLATES } from "../lib/kpi-templates";
-import { seedStarterKpis } from "@/app/mongodb/actions/kpi-actions";
+import { seedStarterKpis } from "@/app/db/actions/kpi-actions";
 
 // ============================================
 // KPI TEMPLATES DIALOG

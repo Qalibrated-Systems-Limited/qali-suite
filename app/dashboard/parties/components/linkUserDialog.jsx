@@ -23,7 +23,7 @@ import { UserPlus, X } from "lucide-react";
 import {
   linkUserToParty,
   unlinkUserFromParty,
-} from "@/app/mongodb/actions/link-user-action";
+} from "@/app/db/actions/party-actions";
 import { toast } from "sonner";
 
 export function LinkUserDialog({ party, users }) {

@@ -136,3 +136,64 @@ export async function withoutTenantScope<T>(
   }
   return db.transaction(async (tx) => fn(tx));
 }
+
+/**
+ * Runs `fn` scoped to a single API KEY, identified by the hash of its
+ * plaintext, with no company scope.
+ *
+ * For the question that precedes choosing a tenant on a machine request: which
+ * company does this bearer token belong to. `withUserScope` is the same idea
+ * for a person; this is its counterpart for a connector, and exists because a
+ * machine caller presents a secret INSTEAD of naming a tenant.
+ *
+ * Only `integration_keys` has a policy that answers under this scope, and it
+ * answers with at most one row — the key whose plaintext the caller already
+ * holds. Every other table returns nothing, which is the correct answer to
+ * asking them before a tenant exists. The scope is transaction-local like the
+ * others, so it cannot survive onto a pooled connection.
+ *
+ * The lookup is ALL this is for. Once the key resolves, apiTenant.ts reopens
+ * under `withTenant` and the request runs under the ordinary company scope, so
+ * an endpoint is not a second, weaker way into the same rows.
+ */
+export async function withApiKeyScope<T>(
+  keyHash: string,
+  fn: (tx: Tx) => Promise<T>,
+): Promise<T> {
+  if (!keyHash) throw new Error("withApiKeyScope called without a keyHash");
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT set_config('app.api_key_hash', ${keyHash}, true)`,
+    );
+    return fn(tx);
+  });
+}
+
+/**
+ * Runs `fn` as the webhook retry worker: across every tenant, but only over
+ * outbound deliveries that are awaiting or mid-attempt.
+ *
+ * The worker genuinely is cross-tenant — it runs on a cron with no session and
+ * no company — and `withoutTenantScope` is the wrong tool for it twice over: it
+ * is blocked in production, and it would hand a request path a connection that
+ * can read every tenant's books to redeliver a webhook.
+ *
+ * So `sync_logs` carries a second policy under `app.worker` instead, scoped to
+ * OUTBOUND deliveries — not inbound logs, and nothing of any tenant's books.
+ *
+ * The status narrowing ('retrying' and due) is in `claimDueRetries`, NOT in
+ * the policy, and 0102 explains at length why moving it into the policy breaks
+ * the worker rather than tightening it: Postgres applies SELECT policies to
+ * the row an UPDATE leaves behind, so a policy that only admits in-flight
+ * statuses forbids the worker from ever marking a delivery processed.
+ */
+export async function withRetryWorkerScope<T>(
+  fn: (tx: Tx) => Promise<T>,
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT set_config('app.worker', 'webhook-retry', true)`,
+    );
+    return fn(tx);
+  });
+}

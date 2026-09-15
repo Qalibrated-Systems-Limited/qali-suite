@@ -193,8 +193,21 @@ async function UnlinkedUsersAlert() {
           <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
             {users.length} user{users.length > 1 ? "s" : ""} without an employee profile
           </p>
+          {/*
+            THE SECOND REMEDY MATTERS AS MUCH AS THE FIRST.
+            
+            This strip used to offer only "create an employee profile", and for
+            somebody who ALREADY has an employment record that is the wrong
+            move: it either trips employees_company_number_uq or quietly
+            produces a second employment record for one person. The right move
+            there is to open their record and link this login to it.
+          */}
           <p className="mt-0.5 text-xs text-muted-foreground">
-            These accounts can log in but can't access leave, payslips, or attendance. Create an employee profile for each one.
+            These accounts can log in but can&apos;t access leave, payslips, or
+            attendance. Create a profile for anyone new — and for anyone who
+            already has one, open their record and use{" "}
+            <span className="font-medium text-foreground">Link Existing Login</span>{" "}
+            instead, so they are not entered twice.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             {users.map((u) => (

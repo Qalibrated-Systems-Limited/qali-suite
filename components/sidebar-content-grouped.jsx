@@ -25,6 +25,7 @@ import {
   Gavel,
   HardHat,
   LayoutDashboard,
+  LifeBuoy,
   Link2,
   List,
   ListChecks,
@@ -45,9 +46,9 @@ import {
   User,
   Users,
   Wallet,
+  Ruler,
 } from "lucide-react";
 import Link from "next/link";
-import { SALES_ORDERS_AVAILABLE } from "@/lib/unported-modules";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
@@ -107,15 +108,6 @@ const getNavigationGroups = (user) => {
     label: "Dashboard",
     id: "dashboard",
     href: "/dashboard",
-  },
-
-  // My Workspace (ungrouped — personal home, from the QSL ERP modules)
-  {
-    type: "single",
-    icon: User,
-    label: "My Workspace",
-    id: "workspace",
-    href: "/dashboard/workspace",
   },
 
   // Approvals (ungrouped — visible only to approver roles)
@@ -272,9 +264,7 @@ const getNavigationGroups = (user) => {
         label: "Sales Orders",
         id: "sales-orders",
         href: "/dashboard/sales-orders",
-        // Hidden while the module still reads Mongo for quotes, products and
-        // invoices — all three moved to Postgres. lib/unported-modules.js.
-        hidden: !SALES_ORDERS_AVAILABLE || !canSeeSalesNav(user?.role),
+        hidden: !canSeeSalesNav(user?.role),
       },
       {
         icon: Receipt,
@@ -402,7 +392,11 @@ const getNavigationGroups = (user) => {
   // ============================================
   // A dropdown group, like Inventory/Finance/HR below — matches the
   // module's own sub-nav (app/dashboard/projects/components/ProjectsNav.jsx)
-  // so the same nine sections are one click away from either place.
+  // so the same eight sections are one click away from either place.
+  // Ten became seven — a nav entry must own records, and five of the ten did
+  // not. See PROJECTS-QALITRACK-PLAN.md §10.3. Timesheets made it eight: it
+  // owns `project_timesheets`, and it was reachable only by opening a project
+  // and scrolling, which is why nobody could find it.
   {
     type: "group",
     label: "Projects",
@@ -413,15 +407,15 @@ const getNavigationGroups = (user) => {
     items: [
       {
         icon: LayoutDashboard,
-        label: "Dashboard",
+        label: "Overview",
         id: "projects-dashboard",
         href: "/dashboard/projects",
       },
       {
-        icon: Target,
-        label: "Milestone Tracker",
-        id: "projects-milestones",
-        href: "/dashboard/projects/milestones",
+        icon: Ruler,
+        label: "Bill of Quantities",
+        id: "projects-boq",
+        href: "/dashboard/projects/boq",
       },
       {
         icon: Calendar,
@@ -442,10 +436,10 @@ const getNavigationGroups = (user) => {
         href: "/dashboard/projects/diary",
       },
       {
-        icon: ClipboardCheck,
-        label: "Forms Register",
-        id: "projects-forms",
-        href: "/dashboard/projects/forms",
+        icon: Clock,
+        label: "Timesheets",
+        id: "projects-timesheets",
+        href: "/dashboard/projects/timesheets",
       },
       {
         icon: Receipt,
@@ -458,12 +452,6 @@ const getNavigationGroups = (user) => {
         label: "Cash Requisitions",
         id: "projects-cash-requisitions",
         href: "/dashboard/projects/cash-requisitions",
-      },
-      {
-        icon: FileSpreadsheet,
-        label: "Monthly Report",
-        id: "projects-monthly-report",
-        href: "/dashboard/projects/monthly-report",
       },
     ],
   },
@@ -699,6 +687,7 @@ const getNavigationGroups = (user) => {
     items: [
       { icon: Truck, label: "Fleet", id: "fleet", href: "/dashboard/fleet" },
       { icon: ListChecks, label: "Tasks", id: "tasks", href: "/dashboard/tasks" },
+      { icon: LifeBuoy, label: "Help Desk", id: "helpdesk", href: "/dashboard/helpdesk" },
       { icon: HardHat, label: "HSE", id: "hse", href: "/dashboard/hse" },
     ],
   },

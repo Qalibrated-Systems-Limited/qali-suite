@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useActionState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
@@ -125,6 +125,7 @@ export default function ProjectForm({
   clients = [],
   users = [],
   parentProjects = [],
+  projectTypes = [],
   project = null,
   /** PARTY_MANAGE_ROLES. A Manager may raise a project but not a customer. */
   canCreateClient = false,
@@ -239,7 +240,7 @@ export default function ProjectForm({
           </div>
 
           {/* Client and PM */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Client</Label>
               <div className="flex items-center gap-2">
@@ -293,7 +294,7 @@ export default function ProjectForm({
           </div>
 
           {/* Dates */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="startDate">Start Date</Label>
               <Input
@@ -326,7 +327,7 @@ export default function ProjectForm({
           </div>
 
           {/* Budget and Priority */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="budgetAmount">Budget Amount (KES)</Label>
               <Input
@@ -366,7 +367,7 @@ export default function ProjectForm({
           </div>
 
           {/* Contract & Billing */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="contractValue">Contract Value (KES)</Label>
               <Input
@@ -384,6 +385,41 @@ export default function ProjectForm({
                 Total contract value agreed with client
               </p>
               <FieldError errors={errors} field="contractValue" />
+            </div>
+
+            {/*
+              WHAT KIND of work this is — 0082, and it is not the same question
+              as the billing model beside it. `billingModel` says how the project
+              is PAID; the type says what the work IS, and that is what decides
+              which sections the project shows. A supply-only job has no site
+              diary and nothing to certify.
+
+              "No type" is offered and is the default, because it shows
+              everything — which is what every project did before the column
+              existed, and the honest state for one nobody has classified.
+            */}
+            <div className="space-y-2">
+              <Label htmlFor="typeId">Project Type</Label>
+              <Select
+                name="typeId"
+                defaultValue={project?.typeId || state?.values?.typeId || "none"}
+              >
+                <SelectTrigger className="h-11">
+                  <SelectValue placeholder="Select a type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No type — show every section</SelectItem>
+                  {projectTypes.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Decides which sections this project shows. You can change it later.
+              </p>
+              <FieldError errors={errors} field="typeId" />
             </div>
 
             <div className="space-y-2">
@@ -408,7 +444,7 @@ export default function ProjectForm({
           </div>
 
           {/* Parent Project & Progress */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Parent Project</Label>
               <PartyCombobox
@@ -533,8 +569,15 @@ export default function ProjectForm({
 function NewClientDialog({ open, onOpenChange, onCreated }) {
   const [state, formAction, isPending] = useActionState(createParty, null);
 
+  /**
+   * Fired once per created party. Same shape as `NewCostCodeDialog`, and it
+   * escaped looping only because both of its setState calls happen to bail on
+   * equal values — which is luck, not a design. See the note there.
+   */
+  const notifiedFor = useRef(null);
   useEffect(() => {
-    if (state?.success && state.partyId) {
+    if (state?.success && state.partyId && notifiedFor.current !== state.partyId) {
+      notifiedFor.current = state.partyId;
       onCreated({
         _id: state.partyId,
         id: state.partyId,

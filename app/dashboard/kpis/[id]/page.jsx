@@ -3,27 +3,26 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Pencil } from "lucide-react";
 import { roleAllowed } from "@/lib/permissions";
-import { getKpiWithSnapshots } from "@/app/mongodb/queries/kpi-queries";
+import { can } from "@/lib/capabilities";
+import { getKpiWithSnapshotsPg } from "@/app/db/actions/kpi-actions";
 import { Button } from "@/components/ui/button";
 import KpiDetailView from "./KpiDetailView";
 
 export const metadata = { title: "KPI Detail" };
 
-const VIEW_ROLES = ["SuperAdmin", "Admin", "Viewer", "Manager", "CFO", "HR Manager", "Accountant", "Finance Manager"];
-const MANAGE_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR Manager"];
-const ENTER_ROLES = ["SuperAdmin", "Admin", "Manager", "CFO", "HR Manager", "Accountant"];
+// Both lists live in lib/capabilities.js now — "kpi.manage" and "kpi.enter".
 
 export default async function KpiDetailPage(props) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!roleAllowed(session.user.role, VIEW_ROLES)) redirect("/dashboard");
+  if (!can(session.user.role, "kpi.view")) redirect("/dashboard");
 
   const params = await props.params;
-  const kpi = await getKpiWithSnapshots(params.id, { limit: 24 });
+  const kpi = await getKpiWithSnapshotsPg(params.id, { limit: 24 });
   if (!kpi) notFound();
 
-  const canManage = roleAllowed(session.user.role, MANAGE_ROLES);
-  const canEnter = roleAllowed(session.user.role, ENTER_ROLES);
+  const canManage = can(session.user.role, "kpi.manage");
+  const canEnter = can(session.user.role, "kpi.enter");
 
   return (
     <div className="space-y-6 p-4 sm:p-6">

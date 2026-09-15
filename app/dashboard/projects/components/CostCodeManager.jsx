@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useActionState, useEffect } from "react";
+import { useState, useTransition, useActionState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import {
   toggleCostCodeActive,
 } from "@/app/db/actions/project-actions";
 import { toast } from "sonner";
+import ExpenseAccountCombobox from "@/components/expense-account-combobox";
 
 /**
  * Cost codes — the vocabulary a project budget is built from (0073).
@@ -154,15 +155,39 @@ export default function CostCodeManager({
 
 function CostCodeForm({ costCode = null, accounts, projects, onDone }) {
   const isEdit = !!costCode;
+  /**
+   * The combobox is controlled, so the value reaches the action through a
+   * hidden input rather than as a native form field.
+   *
+   * `accountList` is state because the combobox can CREATE an account —
+   * `quickCreateExpenseAccountPg` — and the new one has to be selectable
+   * without a page load, exactly as it is on the expense form.
+   */
+  const [accountId, setAccountId] = useState(costCode?.accountId ?? "");
+  const [accountList, setAccountList] = useState(accounts);
+  useEffect(() => setAccountList(accounts), [accounts]);
   const action = isEdit ? updateCostCode.bind(null, costCode._id) : createCostCode;
   const [state, formAction, isPending] = useActionState(action, null);
 
+  /**
+   * Once per outcome. `onDone` is an inline arrow from the parent, so it is a
+   * new identity every render and this effect re-runs on each — and `state`
+   * stays successful, so without the guard the toast fires repeatedly and
+   * `onDone` is called again each time.
+   *
+   * It does not loop TODAY only because `onDone` unmounts this form, which is
+   * luck rather than a design — the same shape in `NewCostCodeDialog`, whose
+   * dialog stays mounted, produced "Maximum update depth exceeded".
+   */
+  const handled = useRef(null);
   useEffect(() => {
-    if (state?.success) {
+    if (!state || handled.current === state) return;
+    handled.current = state;
+    if (state.success) {
       toast.success(state.message);
       onDone?.();
     }
-    if (state?.errors?._form) toast.error(state.errors._form[0]);
+    if (state.errors?._form) toast.error(state.errors._form[0]);
   }, [state, onDone]);
 
   const err = (field) =>
@@ -201,21 +226,23 @@ function CostCodeForm({ costCode = null, accounts, projects, onDone }) {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="accountId">Charges which account</Label>
-          <select
-            id="accountId"
-            name="accountId"
-            required
-            defaultValue={costCode?.accountId ?? state?.values?.accountId ?? ""}
-            className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-          >
-            <option value="">Select an expense account...</option>
-            {accounts.map((a) => (
-              <option key={a._id} value={a._id}>
-                {a.accountCode} — {a.accountName}
-              </option>
-            ))}
-          </select>
+          <Label>Charges which account</Label>
+          {/* A scroll-and-select over 39 accounts ordered by code is a search
+              problem pretending to be a list. Same combobox the expense form
+              uses: type to filter, grouped by sub-type, and it can create the
+              account if the one wanted does not exist. */}
+          <input type="hidden" name="accountId" value={accountId} />
+          <ExpenseAccountCombobox
+            value={accountId}
+            onValueChange={(id) => setAccountId(id)}
+            accounts={accountList}
+            onAccountCreated={(account) =>
+              setAccountList((prev) =>
+                prev.some((a) => a._id === account._id) ? prev : [...prev, account],
+              )
+            }
+            placeholder="Search accounts by code or name..."
+          />
           <p className="text-xs text-muted-foreground">
             Where spend against this code lands in the ledger. Project managers
             never see this — they pick the code.

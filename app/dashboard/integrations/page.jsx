@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Key, ArrowUpRight, CheckCircle2, XCircle, Clock, Activity, Plus, Globe, Scale, Coffee } from "lucide-react";
-import { getIntegrationStats, getRecentSyncLogs } from "@/app/mongodb/actions/integration-actions";
+import { getIntegrationStats, getRecentSyncLogs } from "@/app/db/actions/integration-actions";
 
 export const metadata = { title: "Integrations | Settings" };
 

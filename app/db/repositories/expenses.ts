@@ -304,6 +304,8 @@ export async function createAndPostExpense(tx: Tx, input: CreateExpenseInput) {
     partyId: input.payeePartyId ?? null,
     sourceType: "expense",
     sourceId: row.id,
+    projectId: row.projectId ?? null,
+    costCodeId: row.costCodeId ?? null,
     lines,
     createdById: input.createdById ?? null,
     postImmediately: true,
@@ -381,6 +383,8 @@ export async function recordExpensePayment(
     partyId: expense.payeePartyId,
     sourceType: "expense",
     sourceId: expense.id,
+    projectId: expense.projectId ?? null,
+    costCodeId: expense.costCodeId ?? null,
     lines: [
       {
         accountId: accruedAccount.id,

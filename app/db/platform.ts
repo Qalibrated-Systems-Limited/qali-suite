@@ -21,6 +21,31 @@ import { privilegedDb } from "./provisioning";
 
 const PER_PAGE = 20;
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Matches a company by EITHER id form, and the uuid case is the one that bites.
+ *
+ * A UUID IS NOT NECESSARILY `companies.id`. A company born in Postgres has no
+ * Mongo id, so `provisionCompany` mints a uuid to key `_migration_id_map` on —
+ * and `sourceId ?? id` is what the admin routes carry, so that MINTED uuid is
+ * the id the subscription screen, the conversion date and the rename check all
+ * post back. Testing `c.id` alone found nothing for a company that plainly
+ * exists, which each caller reported in its own words: "Company not found" from
+ * every subscription action on a tenant created after the cutover.
+ *
+ * `getCompanyRecord` learned this in 0035 and carried the fix alone; four other
+ * queries in this file kept the strict form. One definition now, so the next
+ * query cannot get it wrong.
+ *
+ * The caller's query must LEFT JOIN `_migration_id_map` as `m`, aliasing
+ * `companies` as `c`.
+ */
+const companyIdMatches = (key: string) =>
+  UUID_RE.test(key)
+    ? sql`(c.id = ${key}::uuid OR m.old_object_id = ${key})`
+    : sql`m.old_object_id = ${key}`;
+
 export interface CompanyListRow {
   /** Postgres tenant id. */
   id: string;
@@ -145,9 +170,13 @@ export async function getCompanyRecord(idOrSourceId: string) {
   const key = String(idOrSourceId ?? "").trim();
   if (!key) return null;
 
-  const isUuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
-
+  /*
+   * EITHER FORM, and a uuid can be either. Since companies are created without
+   * a Mongo id, the map key is itself a uuid — so a uuid that is not a
+   * `companies.id` may still be a SOURCE id, and testing only `c.id` returned
+   * null for a company that plainly exists. Matching on both in one query
+   * costs nothing and removes the distinction from the caller.
+   */
   const rows = (await privilegedDb().execute(sql`
     SELECT c.*, m.old_object_id AS source_id,
            to_jsonb(s.*) - 'company_id' AS settings
@@ -155,7 +184,7 @@ export async function getCompanyRecord(idOrSourceId: string) {
       LEFT JOIN _migration_id_map m
         ON m.new_uuid = c.id AND m.collection = 'companies'
       LEFT JOIN company_settings s ON s.company_id = c.id
-     WHERE ${isUuid ? sql`c.id = ${key}::uuid` : sql`m.old_object_id = ${key}`}
+     WHERE ${companyIdMatches(key)}
      LIMIT 1
   `)) as unknown as Array<Record<string, unknown>>;
 
@@ -386,8 +415,6 @@ export async function setConversionDate(
   setBy: { id?: string | null; name?: string | null },
 ) {
   const key = String(sourceCompanyId ?? "").trim();
-  const isUuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
   const d = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(d.getTime())) throw new Error("The conversion date is invalid.");
 
@@ -397,7 +424,7 @@ export async function setConversionDate(
         FROM companies c
         LEFT JOIN _migration_id_map m
           ON m.new_uuid = c.id AND m.collection = 'companies'
-       WHERE ${isUuid ? sql`c.id = ${key}::uuid` : sql`m.old_object_id = ${key}`}
+       WHERE ${companyIdMatches(key)}
        LIMIT 1
     )
     UPDATE companies c
@@ -436,9 +463,6 @@ export async function findCompanyByNameOrCode(
   if (!n && !c) return null;
 
   const exclude = excludeIdOrSourceId ? String(excludeIdOrSourceId) : null;
-  const excludeIsUuid =
-    !!exclude &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(exclude);
 
   const rows = (await privilegedDb().execute(sql`
     SELECT c.id, c.name, c.code, m.old_object_id AS source_id
@@ -450,11 +474,16 @@ export async function findCompanyByNameOrCode(
      LIMIT 5
   `)) as unknown as Array<Record<string, unknown>>;
 
+  /*
+   * EITHER ID EXCLUDES THE ROW, for the reason `companyIdMatches` gives: a uuid
+   * may be the tenant id or the minted source id, and the caller passes back
+   * whichever one it was given. Comparing against `c.id` alone left a company
+   * matching itself, so renaming one and keeping its name reported "a company
+   * with this name already exists" against the very row being edited.
+   */
   const hit = rows.find((r) => {
     if (!exclude) return true;
-    return excludeIsUuid
-      ? String(r.id) !== exclude
-      : String(r.source_id ?? "") !== exclude;
+    return String(r.id) !== exclude && String(r.source_id ?? "") !== exclude;
   });
   if (!hit) return null;
 
@@ -513,9 +542,6 @@ export async function getCompanySubscription(sourceCompanyId: string) {
   const key = String(sourceCompanyId ?? "").trim();
   if (!key) return null;
 
-  const isUuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
-
   const rows = (await privilegedDb().execute(sql`
     SELECT c.id, c.code, c.name, c.status, c.plan, c.subscription_status,
            c.trial_ends_at, c.current_period_start, c.current_period_end,
@@ -523,7 +549,7 @@ export async function getCompanySubscription(sourceCompanyId: string) {
       FROM companies c
       LEFT JOIN _migration_id_map m
         ON m.new_uuid = c.id AND m.collection = 'companies'
-     WHERE ${isUuid ? sql`c.id = ${key}::uuid` : sql`m.old_object_id = ${key}`}
+     WHERE ${companyIdMatches(key)}
      LIMIT 1
   `)) as unknown as Array<Record<string, unknown>>;
 
@@ -580,9 +606,6 @@ export async function updateCompanySubscription(
   const key = String(sourceCompanyId ?? "").trim();
   if (!key) throw new Error("updateCompanySubscription requires a company id");
 
-  const isUuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
-
   // undefined means "leave it"; null is a real value for the date columns, so
   // they carry a separate "did the caller mention this" flag.
   const iso = (v: Date | string | null | undefined) =>
@@ -596,7 +619,7 @@ export async function updateCompanySubscription(
         FROM companies c
         LEFT JOIN _migration_id_map m
           ON m.new_uuid = c.id AND m.collection = 'companies'
-       WHERE ${isUuid ? sql`c.id = ${key}::uuid` : sql`m.old_object_id = ${key}`}
+       WHERE ${companyIdMatches(key)}
        LIMIT 1
     ),
     before AS (
@@ -646,4 +669,189 @@ export async function updateCompanySubscription(
  */
 export async function getCompanyForDocuments(idOrSourceId: string) {
   return getCompanyRecord(idOrSourceId);
+}
+
+/**
+ * Resolve a company id that may be a uuid or a pre-migration ObjectId.
+ *
+ * The admin routes still carry the old id — `/dashboard/admin/companies/[id]`
+ * — so every function on this surface has to accept both. Factored out of the
+ * copies that were doing it inline.
+ */
+async function companyUuidFromEither(idOrSourceId: string) {
+  const key = String(idOrSourceId ?? "").trim();
+  if (!key) return null;
+
+  const rows = (await privilegedDb().execute(sql`
+    SELECT c.id
+      FROM companies c
+      LEFT JOIN _migration_id_map m
+        ON m.new_uuid = c.id AND m.collection = 'companies'
+     WHERE ${companyIdMatches(key)}
+     LIMIT 1
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows[0] ? String(rows[0].id) : null;
+}
+
+/**
+ * Active seats in one company — the number a downgrade is checked against.
+ *
+ * THE SEAT CHECK WAS COUNTING THE WRONG STORE. `updateCompanyPlan` asked
+ * `User.countDocuments({ companyId, status: { $ne: "Inactive" } })` — the
+ * MONGO users collection, which nothing has written since users moved:
+ * `app/mongodb/user-actions.js` has no importer and every screen goes through
+ * `createUserPg`. So the count came back 0 or stale, `activeUsers >
+ * planConfig.maxUsers` was never true, and the guard that exists to stop a
+ * fifty-seat company being downgraded onto a three-seat plan silently passed
+ * everything.
+ *
+ * WHO COUNTS AS A SEAT is the same question /dashboard/users answers, and it is
+ * answered the same way — through the GRANTS, not through `home_company_id`.
+ * `users` has no company column at all: 0036's own comment says "keyed through
+ * the grants, so 'who is in this company' has exactly one answer and it is the
+ * same rows the tenant gate reads". A seat limit that disagreed with the user
+ * list would be indefensible to whoever hit it.
+ *
+ * PLATFORM STAFF ARE NOT SEATS. 0064 established that a SuperAdmin's standing
+ * access is `granted_via = 'superadmin'` and is not membership — "the member
+ * list answers 'who works here', and a platform operator does not". Counting
+ * them would bill a customer for every support visit, and on a deployment
+ * where `grantAllTenants` tops up standing access for every tenant, it would
+ * bill every customer for every operator.
+ *
+ * Cross-tenant by necessity: a SuperAdmin is changing another company's plan,
+ * so this runs on the privileged connection like the rest of this module.
+ */
+export async function countActiveUsersForCompany(idOrSourceId: string) {
+  const companyId = await companyUuidFromEither(idOrSourceId);
+  if (!companyId) return 0;
+
+  const [row] = (await privilegedDb().execute(sql`
+    SELECT COUNT(DISTINCT u.id)::int AS n
+      FROM users u
+      JOIN user_company_access a
+        ON a.user_id = u.id
+       AND a.company_id = ${companyId}::uuid
+       AND a.status = 'active'
+       AND a.granted_via IS DISTINCT FROM 'superadmin'
+     WHERE u.status <> 'inactive'
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return Number(row?.n ?? 0);
+}
+
+export interface SubscriptionAuditEntry {
+  action: string;
+  previous?: Record<string, unknown> | null;
+  updated?: Record<string, unknown> | null;
+  changedBy?: { id?: string | null; name?: string | null } | null;
+  reason?: string | null;
+}
+
+const auditDate = (v: unknown) =>
+  v === undefined || v === null
+    ? null
+    : (v instanceof Date ? v : new Date(String(v))).toISOString();
+
+const auditInt = (v: unknown) =>
+  v === undefined || v === null || v === "" ? null : Number(v);
+
+/**
+ * Record what changed about a company's subscription, one row per change.
+ *
+ * `lib/subscription-helpers.js` wrote this to a MONGO collection while the
+ * state it describes moved to Postgres in 0035, and its own comment said
+ * moving it was its own migration. That is 0099.
+ */
+export async function recordSubscriptionAudit(
+  idOrSourceId: string,
+  entries: SubscriptionAuditEntry[],
+) {
+  if (!entries.length) return { written: 0 };
+  const companyId = await companyUuidFromEither(idOrSourceId);
+  if (!companyId) return { written: 0 };
+
+  let written = 0;
+  for (const e of entries) {
+    const p = e.previous ?? {};
+    const u = e.updated ?? {};
+    await privilegedDb().execute(sql`
+      INSERT INTO subscription_audit_log (
+        company_id, action,
+        previous_plan, previous_status, previous_max_users,
+        previous_trial_ends_at, previous_period_start, previous_period_end,
+        updated_plan, updated_status, updated_max_users,
+        updated_trial_ends_at, updated_period_start, updated_period_end,
+        changed_by_id, changed_by_name, reason
+      ) VALUES (
+        ${companyId}::uuid, ${e.action}::subscription_audit_action,
+        ${(p.plan as string) ?? null}, ${(p.status as string) ?? null},
+        ${auditInt(p.maxUsers)},
+        ${auditDate(p.trialEndsAt)}::timestamptz,
+        ${auditDate(p.currentPeriodStart)}::timestamptz,
+        ${auditDate(p.currentPeriodEnd)}::timestamptz,
+        ${(u.plan as string) ?? null}, ${(u.status as string) ?? null},
+        ${auditInt(u.maxUsers)},
+        ${auditDate(u.trialEndsAt)}::timestamptz,
+        ${auditDate(u.currentPeriodStart)}::timestamptz,
+        ${auditDate(u.currentPeriodEnd)}::timestamptz,
+        ${e.changedBy?.id ?? null}, ${e.changedBy?.name ?? "System"},
+        ${e.reason ?? null}
+      )
+    `);
+    written++;
+  }
+
+  return { written };
+}
+
+/**
+ * A company's subscription history, newest first.
+ *
+ * Shaped to the screen — `_id`, `previous.plan`, `changedBy.name` — so the
+ * admin page moves over by changing an import path.
+ */
+export async function listSubscriptionAudit(
+  idOrSourceId: string,
+  limit = 50,
+) {
+  const companyId = await companyUuidFromEither(idOrSourceId);
+  if (!companyId) return [];
+
+  const rows = (await privilegedDb().execute(sql`
+    SELECT * FROM subscription_audit_log
+     WHERE company_id = ${companyId}::uuid
+     ORDER BY created_at DESC
+     LIMIT ${Math.min(Math.max(limit, 1), 200)}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const side = (r: Record<string, unknown>, prefix: "previous" | "updated") => ({
+    plan: (r[`${prefix}_plan`] as string) ?? null,
+    status: (r[`${prefix}_status`] as string) ?? null,
+    maxUsers:
+      r[`${prefix}_max_users`] == null ? null : Number(r[`${prefix}_max_users`]),
+    trialEndsAt: r[`${prefix}_trial_ends_at`]
+      ? String(r[`${prefix}_trial_ends_at`])
+      : null,
+    currentPeriodStart: r[`${prefix}_period_start`]
+      ? String(r[`${prefix}_period_start`])
+      : null,
+    currentPeriodEnd: r[`${prefix}_period_end`]
+      ? String(r[`${prefix}_period_end`])
+      : null,
+  });
+
+  return rows.map((r) => ({
+    _id: String(r.id),
+    action: String(r.action),
+    previous: side(r, "previous"),
+    updated: side(r, "updated"),
+    changedBy: {
+      id: (r.changed_by_id as string) ?? null,
+      name: (r.changed_by_name as string) ?? "System",
+    },
+    reason: (r.reason as string) ?? null,
+    createdAt: String(r.created_at),
+  }));
 }

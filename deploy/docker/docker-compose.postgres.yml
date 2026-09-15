@@ -1,0 +1,99 @@
+# ============================================================================
+# PostgreSQL 16 for QaliSuite, in a container.
+#
+# WHEN TO USE THIS. The host cannot install PostgreSQL 16 — most likely it is
+# Ubuntu 20.04, which apt.postgresql.org no longer builds for, and whose own
+# PostgreSQL is 12 (three majors under the floor of 15 that migration 0062
+# sets). The container carries its own server, so the host release stops
+# mattering.
+#
+# It is a WORKAROUND, not the destination. An out-of-support host still gets no
+# security patches, and this changes nothing about that — see DEPLOYMENT.md.
+#
+# Usage:
+#   cd deploy/docker
+#   cp .env.example .env    # then fill in both passwords
+#   docker compose -f docker-compose.postgres.yml up -d
+#
+# The app itself is NOT containerised here. It runs under PM2 on the host and
+# reaches this over the loopback interface, which is why the port publish below
+# is pinned to 127.0.0.1.
+# ============================================================================
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: qalisuite-pg
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: qalisuite
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set it in .env}
+      # Read by initdb/01-app-user.sh on FIRST START ONLY.
+      APP_DB_USER: app_user
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set it in .env}
+
+    # ── 127.0.0.1, and this is not a detail ──────────────────────────────────
+    # "5432:5432" would publish the database to every interface. Docker inserts
+    # its own DNAT rules ahead of UFW, so `ufw deny 5432` does NOT stop it —
+    # the port would be open to the internet with UFW still reporting it
+    # closed. Binding the host side to loopback is what actually confines it.
+    ports:
+      - "127.0.0.1:5432:5432"
+
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Runs only when the data directory is empty. Creating app_user here
+      # rather than by hand is deliberate: it is the step that, done wrong,
+      # silently disables tenant isolation.
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+
+    # Postgres uses shared memory for parallel query and hash joins. Docker's
+    # 64MB default is far too small and shows up as random "could not resize
+    # shared memory segment" errors under load rather than at startup.
+    shm_size: 256mb
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d qalisuite"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    # Tuning for a 4GB host. Raise shared_buffers/effective_cache_size if the
+    # box is larger; these are the same values DEPLOYMENT.md Step 2 sets.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - effective_cache_size=3GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_connections=100
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - wal_compression=on
+      # Log the slow ones only. Logging every statement is its own outage.
+      - -c
+      - log_min_duration_statement=500ms
+      # NOT synchronous_commit=off. The test harness sets that because every
+      # test begins by deleting its data; here it trades committed
+      # transactions for speed.
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  pgdata:
+    name: qalisuite-pgdata

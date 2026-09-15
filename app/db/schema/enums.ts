@@ -94,6 +94,12 @@ export const sourceDocumentTypeEnum = pgEnum("source_document_type", [
   "petty_cash_return",
   /** 0066 — an approved stock adjustment's inventory entry. */
   "stock_adjustment",
+  /** 0086 — materials issued against a request, consumed on a project. */
+  "stock_request",
+  /** 0087 — a payment certificate: releasing retention back into receivables. */
+  "project_certificate",
+  /** 0100 — an allocated bank line: an expense, income, transfer or split. */
+  "bank_feed",
 ]);
 
 // ── Invoices slice ───────────────────────────────────────────────────────────
@@ -851,14 +857,153 @@ export const projectDiaryStatusEnum = pgEnum("project_diary_status", [
   "countersigned",
 ]);
 
+// ── Bill of quantities (0080) ────────────────────────────────────────────────
+
 /**
- * Technical / Workflow Reports — 0076, revised 0077.
+ * `draft → awarded → superseded`, versioned per project with one awarded at a
+ * time (`project_boqs_one_awarded`).
+ *
+ * `awarded` is what FREEZES the priced facts — quantity, rate, unit, code — so
+ * a variation issues a new item rather than editing a signed one, and a final
+ * account can be argued from what was actually let. It is a status on the bill,
+ * NOT a dependency on `contracts`: when that table lands it supplies the award
+ * date, not the concept.
+ */
+export const projectBoqStatusEnum = pgEnum("project_boq_status", [
+  "draft",
+  "awarded",
+  "superseded",
+]);
+
+// ── Contracts and certificates (0081) ────────────────────────────────────────
+
+/**
+ * `receivable` — we are the contractor, and the employer holds retention on us.
+ * `payable` — we are the employer, holding it on a subcontractor, back to back.
+ *
+ * Every construction system runs retention on both sides. The direction is here
+ * from the start because retrofitting one onto a table that assumed it means
+ * every existing row needs a value and every query needs a filter it did not
+ * have. See PROJECTS-QALITRACK-PLAN.md §9.2.
+ */
+export const projectContractDirectionEnum = pgEnum("project_contract_direction", [
+  "receivable",
+  "payable",
+]);
+
+/**
+ * `draft → certified → cancelled`. Certifying FREEZES the figures: a
+ * certificate is what somebody was asked to pay against, and a payment may
+ * already refer to the invoice it raised. A correction goes on the NEXT
+ * certificate, which works because the arithmetic is cumulative.
+ */
+export const projectCertificateStatusEnum = pgEnum("project_certificate_status", [
+  "draft",
+  "certified",
+  "cancelled",
+]);
+
+/**
+ * Where the value of permanent work came from. `measured` is a remeasure
+ * against an awarded bill (0080) and is the only one that is evidence;
+ * `milestone` is a stage achieved; `manual` is somebody's figure. Recorded for
+ * the same reason `progress.source` is — three numbers that look identical on a
+ * certificate, and only one of them can be defended.
+ */
+export const projectValuationSourceEnum = pgEnum("project_valuation_source", [
+  "measured",
+  "milestone",
+  "manual",
+]);
+
+// ── Project timesheets (0089) ────────────────────────────────────────────────
+
+/**
+ * What a timesheet line is measured in.
+ *
+ * Two units, not four: a timesheet records TIME. The roster's `month` and
+ * `fixed` are how somebody is PAID, which is a different question, and 0089
+ * decision 3 is the conversion between them. Hours become days through
+ * `attendance_config.standard_hours`, so this cannot disagree with attendance
+ * about how long a day is.
+ */
+export const projectTimesheetUnitEnum = pgEnum("project_timesheet_unit", [
+  "hour",
+  "day",
+]);
+
+/**
+ * Approved is cost — the same basis 0088 put bills, claims and expenses on.
+ *
+ * `submitted` is a commitment: the time was worked and the company will owe
+ * it, but nobody has accepted the number yet. `draft` is somebody typing, and
+ * `rejected` is not a claim on the day at all, which is why 0089 decision 5's
+ * overbooking check excludes it.
+ */
+/**
+ * A variation moves the contract only once it is APPROVED — 0091 decision 3.
+ * A `submitted` one is a claim, and the register shows it while the contract
+ * sum does not move. The same "approved is the point it counts" rule 0088 put
+ * bills, claims and expenses on.
+ */
+/**
+ * A stage of the works — 0093. `achieved` means a DATE was recorded, not a box
+ * ticked: a certificate for March must not pick up a stage signed off in May,
+ * and only a date can answer that. `cancelled` is a stage that was dropped,
+ * and its value returns to the unallocated part of the contract.
+ */
+/**
+ * The cash requisition's states — 0107. Approved is the point it counts, and
+ * only an approved one may be funded; the same rule bills, claims, expenses,
+ * timesheets and variations are on.
+ */
+export const projectCashRequisitionStatusEnum = pgEnum(
+  "project_cash_requisition_status",
+  ["draft", "submitted", "approved", "rejected", "funded", "cancelled"],
+);
+
+/**
+ * WHICH EXISTING DOCUMENT RELEASED THE MONEY. A requisition authorises and
+ * posts nothing (0107 decision 1), so this records the path the cash actually
+ * took — an employee advance, the petty cash float, or a stock request.
+ * `other` is honest rather than lax: cash handed over outside all three
+ * happens, and naming it `other` beats inventing a petty cash return.
+ */
+export const projectCashRequisitionSourceEnum = pgEnum(
+  "project_cash_requisition_source",
+  ["employee_advance", "petty_cash", "stock_request", "other"],
+);
+
+export const projectMilestoneStatusEnum = pgEnum("project_milestone_status", [
+  "pending",
+  "achieved",
+  "cancelled",
+]);
+
+export const projectVariationStatusEnum = pgEnum("project_variation_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
+]);
+
+export const projectTimesheetStatusEnum = pgEnum("project_timesheet_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
+]);
+
+// ── Technical / Workflow Reports ─────────────────────────────────────────────
+
+/**
+ * Technical / Workflow Reports — 0076, revised 0078.
  *
  * The report's KIND is the QSL sheet code (WB01–WB06, SI01, TR01), stored as
  * free text on `workflow_reports.type` rather than an enum, so the sheet
  * catalogue in `app/dashboard/technical/lib/meta.js` grows in code without a
  * migration. The `workflow_report_type` enum 0076 first shipped was dropped by
- * 0077; only the status enum below remains.
+ * 0078; only the status enum below remains.
  *
  * draft → submitted → reviewed → approved, and back to draft on reopen.
  *
@@ -875,4 +1020,226 @@ export const workflowReportStatusEnum = pgEnum("workflow_report_status", [
   "submitted",
   "reviewed",
   "approved",
+]);
+
+// ── CRM — 0096 ───────────────────────────────────────────────────────────────
+
+export const leadSourceEnum = pgEnum("lead_source", [
+  "website", "referral", "walk_in", "campaign",
+  "cold_call", "trade_show", "social", "other",
+]);
+
+/**
+ * `converted` and `unqualified` are the two terminal states, and neither is
+ * "open" — a lead that graduated is out of the funnel and one that was walked
+ * away from never enters it.
+ */
+export const leadStatusEnum = pgEnum("lead_status", [
+  "new", "contacted", "qualified", "unqualified", "converted",
+]);
+
+export const leadRatingEnum = pgEnum("lead_rating", ["hot", "warm", "cold"]);
+
+export const opportunityStageEnum = pgEnum("opportunity_stage", [
+  "qualification", "needs_analysis", "proposal",
+  "negotiation", "closed_won", "closed_lost",
+]);
+
+export const opportunityLostReasonEnum = pgEnum("opportunity_lost_reason", [
+  "price", "competitor", "timing", "no_budget", "no_decision", "other",
+]);
+
+export const crmActivityTypeEnum = pgEnum("crm_activity_type", [
+  "note", "call", "email", "meeting", "whatsapp",
+  "sms", "stage_change", "conversion", "system",
+]);
+
+/** Six targets, which is why `crm_activities.target_id` can carry no key. */
+export const crmActivityTargetEnum = pgEnum("crm_activity_target", [
+  "lead", "opportunity", "party", "contact", "invoice", "quote",
+]);
+
+export const crmActivityDirectionEnum = pgEnum("crm_activity_direction", [
+  "inbound", "outbound", "none",
+]);
+
+// ── KPIs — 0097 ──────────────────────────────────────────────────────────────
+
+export const kpiCategoryEnum = pgEnum("kpi_category", [
+  "financial", "operational", "hr", "customer", "compliance",
+]);
+
+/**
+ * Where the actual comes from. `manual` means somebody types it; everything
+ * else is computed from the ledger, payroll or HR by `computeKpiActual`.
+ *
+ * This is an ENUM rather than free text because the source is a dispatch key:
+ * a value with no computer behind it is a KPI that silently never updates.
+ */
+export const kpiSourceEnum = pgEnum("kpi_source", [
+  "manual",
+  "monthly_revenue",
+  "monthly_payroll_cost",
+  "ar_days_outstanding",
+  "cash_position",
+  "active_headcount",
+  "gross_margin_percent",
+  "opex_ratio",
+  "payroll_to_revenue_ratio",
+  "avg_order_value",
+]);
+
+export const kpiUnitEnum = pgEnum("kpi_unit", [
+  "currency", "percentage", "days", "count", "ratio",
+]);
+
+export const kpiPeriodicityEnum = pgEnum("kpi_periodicity", [
+  "monthly", "quarterly", "yearly",
+]);
+
+/** Whether being over the target is green or red. */
+export const kpiTargetDirectionEnum = pgEnum("kpi_target_direction", [
+  "higher_is_better", "lower_is_better",
+]);
+
+/** How one snapshot was produced — typed by a person, or computed. */
+export const kpiSnapshotSourceEnum = pgEnum("kpi_snapshot_source", [
+  "manual", "auto",
+]);
+
+// ── Banking — 0100 ───────────────────────────────────────────────────────────
+
+export const bankStatementStatusEnum = pgEnum("bank_statement_status", [
+  "processing", "ready", "completed", "error",
+]);
+
+/** How the opening/closing balances were obtained — drives the UI pill. */
+export const bankBalanceSourceEnum = pgEnum("bank_balance_source", [
+  "from_file", "manual", "unavailable",
+]);
+
+export const bankLineStatusEnum = pgEnum("bank_line_status", [
+  "unallocated", "allocated", "excluded", "matched",
+]);
+
+export const bankExcludeReasonEnum = pgEnum("bank_exclude_reason", [
+  "duplicate", "opening_balance", "bank_charge", "bank_interest",
+  "reversal", "internal_transfer", "personal", "manual", "other",
+]);
+
+export const bankAllocationTypeEnum = pgEnum("bank_allocation_type", [
+  "invoice_payment", "bill_payment", "expense", "income",
+  "transfer", "split", "manual_journal", "liability",
+]);
+
+export const bankMatchDocumentEnum = pgEnum("bank_match_document", [
+  "invoice", "bill",
+]);
+
+// ── Approvals — 0101 ─────────────────────────────────────────────────────────
+
+export const approvalTypeEnum = pgEnum("approval_type", [
+  "price_change",
+  "stock_writeoff",
+  "stock_adjustment",
+  "bill_payment",
+  "expense_payment",
+  "credit_note",
+  "discount",
+]);
+
+/**
+ * `applying` is a LEASE, not a state anybody chose. One approver claims a
+ * submitted request by moving it here, applies the payload, then finalises —
+ * so two approvers pressing at once cannot both apply it.
+ */
+export const approvalStatusEnum = pgEnum("approval_status", [
+  "submitted",
+  "applying",
+  "approved",
+  "rejected",
+  "cancelled",
+]);
+
+/** What a request points at. Two stores, so `target_id` carries no key. */
+export const approvalTargetKindEnum = pgEnum("approval_target_kind", [
+  "Product",
+  "InventoryAdjustment",
+  "StockAdjustment",
+  "Bill",
+  "Invoice",
+  "CreditNote",
+  "Payment",
+  "Expense",
+]);
+
+// ── Integrations: keys, webhooks, sync logs ──────────────────────────────────
+
+/**
+ * Which connector adapter a key routes to, and optionally which connector a
+ * webhook subscription filters on.
+ *
+ * Mongo declares this list three times — on integrationKey, on
+ * webhookSubscription and on syncLog — and two of the three append a literal
+ * `null` to the enum array, which Mongoose reads as "null is a valid value"
+ * rather than "the field is optional". The distinction is kept here where it
+ * belongs: the TYPE has five members, and the COLUMN is nullable on the two
+ * tables where "any connector" is a real answer.
+ */
+export const connectorTypeEnum = pgEnum("connector_type", [
+  "weighbridge",
+  "coffee_coop",
+  "logistics",
+  "miller",
+  "generic",
+]);
+
+/** A sandbox key and a live key are the same shape and must not be confused. */
+export const integrationEnvironmentEnum = pgEnum("integration_environment", [
+  "live",
+  "test",
+]);
+
+/**
+ * What a key is permitted to do.
+ *
+ * Mongo types `scopes` as `[String]` with an `enum` — which Mongoose applies to
+ * the ARRAY, not its members, so every value validates and a typo'd scope is a
+ * scope that silently grants nothing. As a Postgres enum array an unknown scope
+ * fails the write.
+ */
+export const integrationScopeEnum = pgEnum("integration_scope", [
+  "inventory:read",
+  "inventory:write",
+  "contacts:read",
+  "contacts:write",
+  "orders:read",
+  "orders:write",
+  "invoices:read",
+  "invoices:write",
+  "hr:read",
+  "collection:write",
+  "webhooks:manage",
+]);
+
+/** Which way the data moved: external → ERP, or ERP → subscriber. */
+export const syncDirectionEnum = pgEnum("sync_direction", [
+  "inbound",
+  "outbound",
+]);
+
+/**
+ * Where an exchange got to.
+ *
+ * `retrying` is the one that carries state: it means `next_retry_at` is set and
+ * the cron worker owes this row another attempt. `processing` is a CLAIM taken
+ * before an attempt starts, so two workers cannot deliver the same webhook.
+ */
+export const syncStatusEnum = pgEnum("sync_status", [
+  "received",
+  "processing",
+  "processed",
+  "failed",
+  "skipped",
+  "retrying",
 ]);

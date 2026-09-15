@@ -1,0 +1,70 @@
+-- ============================================================================
+-- 0106 — a fiscal period opens when it begins.
+--
+-- 0030 added `future` to fiscal_period_status, admitted it to the posting
+-- guard, and recorded the hole it was papering over in its own header:
+--
+--     "NOTHING ADVANCES A PERIOD OUT OF `future`. There is no scheduled job,
+--      no open-on-arrival, no open-the-next-one-when-you-close-this-one ... A
+--      company onboarded in January has February through December sitting at
+--      `future` forever."
+--
+-- It called closing that gap a product decision rather than a schema one, and
+-- left it. This is that decision, and the reason it can be made now is that
+-- the cost finally showed up on a real tenant: eleven of twelve periods at
+-- `future`, `closePeriod` refusing every one of them because it requires
+-- `open`, and therefore NO MONTH-END CLOSE POSSIBLE AT ALL except January.
+--
+-- ---------------------------------------------------------------------------
+-- WHAT `future` WAS SUPPOSED TO BUY, AND DID NOT.
+--
+-- `seedFiscalPeriods` opens only the first of twelve, on the stated grounds
+-- that "opening all twelve would let a posting land in a month nobody has
+-- reached yet, which is the control a fiscal period exists to provide".
+--
+-- That control does not exist. The guard in 0001/0030 is a DENY-list: it
+-- refuses `closed` and `locked` and admits everything else, `future`
+-- included, deliberately and for good reason — refusing them would stop the
+-- ledger working in month two. So a `future` period never blocked a posting.
+-- The only thing it ever blocked was CLOSING. The status cost confusion and
+-- an unclosable year, and returned nothing.
+--
+-- ---------------------------------------------------------------------------
+-- WHY "OPEN ON ARRIVAL" AND NOT ONE OF THE ALTERNATIVES.
+--
+-- No major ledger withholds the future. SAP keeps a RANGE of open posting
+-- periods (OB52) and rolls it forward at month end. Dynamics 365 BC generates
+-- a whole year with "Create Year", all usable, and bounds forward posting
+-- with Allowed Posting Dates instead. Dynamics F&O creates the year's ledger
+-- calendar with every period Open and asks you to set "On hold" to block one.
+-- NetSuite's "Set Up Full Year" leaves them unlocked and closes them from a
+-- checklist. Odoo deleted period records entirely in v9 and kept lock dates.
+-- QuickBooks and Xero have a closing date and no period objects.
+--
+-- The pattern is unanimous: control is applied by CLOSING AND LOCKING THE
+-- PAST, not by refusing entry to months ahead — and where a forward limit
+-- exists at all it is a DATE WINDOW, never a per-row status.
+--
+-- So: a period is `future` until it starts and `open` once it has. `future`
+-- keeps a true meaning — October has genuinely not begun — while the current
+-- month is always closable, which is the whole point. A real forward bound,
+-- if one is ever wanted, belongs in the guard as a date window ("nothing more
+-- than N months ahead"), not in a column nothing maintains.
+--
+-- ---------------------------------------------------------------------------
+-- THIS MIGRATION IS THE ONE-OFF PASS. The ongoing one is
+-- /api/cron/open-fiscal-periods, nightly. Both apply the same predicate, so
+-- running either twice changes nothing the first run did not already do.
+--
+-- Deliberately NOT a trigger or a generated column: the status is also moved
+-- by people (close, reopen, lock) and a rule that recomputed it from the
+-- calendar would fight them — reopening January would be undone by the next
+-- write, and a closed period would reopen itself. The calendar decides only
+-- the `future` -> `open` edge, once, in one direction.
+-- ============================================================================
+
+UPDATE "fiscal_periods"
+   SET "status"     = 'open',
+       "updated_at" = now()
+ WHERE "status"     = 'future'
+   AND "start_date" <= CURRENT_DATE;

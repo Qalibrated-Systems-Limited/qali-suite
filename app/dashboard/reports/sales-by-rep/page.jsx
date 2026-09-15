@@ -5,9 +5,9 @@ import { canSeeReportsNav } from "@/lib/permissions";
 import { ChevronLeft, Trophy } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  cSalesByRep,
-  cRepInvoices,
-} from "@/app/mongodb/queries/rep-sales-queries";
+  getSalesByRepPg,
+  getRepInvoicesPg,
+} from "@/app/db/actions/invoice-actions";
 
 export const metadata = {
   title: "Sales by Rep | Reports",
@@ -41,13 +41,15 @@ export default async function SalesByRepPage({ searchParams }) {
 
   const params = await searchParams;
   const period = params?.period || ""; // "" = all time, else "YYYY-M"
-  const owner = params?.owner || ""; // employeeId filter for drill-down
+  // 0095: the drill-down keys on a PARTY now, not a User — a rep who leaves
+  // keeps their invoices, and the quote has always carried a party.
+  const owner = params?.owner || "";
   const [year, month] = period ? period.split("-").map(Number) : [null, null];
 
-  const reps = await cSalesByRep(year, month);
-  const filtered = owner ? reps.filter((r) => r.employeeId === owner) : reps;
-  const ownerRep = owner ? reps.find((r) => r.employeeId === owner) : null;
-  const drillDown = owner ? await cRepInvoices(owner, year, month) : [];
+  const reps = await getSalesByRepPg(year, month);
+  const filtered = owner ? reps.filter((r) => r.partyId === owner) : reps;
+  const ownerRep = owner ? reps.find((r) => r.partyId === owner) : null;
+  const drillDown = owner ? await getRepInvoicesPg(owner, year, month) : [];
 
   const totals = filtered.reduce(
     (a, r) => ({
@@ -139,10 +141,10 @@ export default async function SalesByRepPage({ searchParams }) {
             <div className="divide-y divide-border/60">
               {filtered.map((r, i) => (
                 <Link
-                  key={r.employeeId || "none"}
-                  href={r.employeeId ? qs(period, r.employeeId) : "#"}
+                  key={r.partyId || "none"}
+                  href={r.partyId ? qs(period, r.partyId) : "#"}
                   className={`flex items-center gap-3 px-4 py-3 ${
-                    r.employeeId ? "hover:bg-accent/40" : "cursor-default"
+                    r.partyId ? "hover:bg-accent/40" : "cursor-default"
                   }`}
                 >
                   <span

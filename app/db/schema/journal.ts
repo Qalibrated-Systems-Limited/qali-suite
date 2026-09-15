@@ -189,6 +189,25 @@ export const journalLines = pgTable(
     accountCodeAtPosting: text("account_code_at_posting").notNull().default(""),
     accountNameAtPosting: text("account_name_at_posting").notNull().default(""),
 
+    /**
+     * THE PROJECT DIMENSION — 0084.
+     *
+     * On the LINE, not the entry: one entry can span projects, and a payment
+     * settling two invoices on different jobs is the obvious case. Same place
+     * SAP puts the WBS element and Odoo puts its analytic account.
+     *
+     * Nullable, and nothing backfills. Entries posted before 0084 have no
+     * project and will not acquire one — the information is on the source
+     * DOCUMENT, and inferring it would write a number nobody observed into the
+     * ledger.
+     *
+     * `cost_code_id` is the dimension a BUDGET is checked against, and
+     * `journal_lines_cost_code_needs_project` refuses one without the project
+     * it rolls up to.
+     */
+    projectId: uuid("project_id"),
+    costCodeId: uuid("cost_code_id"),
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -199,6 +218,18 @@ export const journalLines = pgTable(
     // aggregates lines by account within a tenant.
     index("journal_lines_company_account_idx").on(t.companyId, t.accountId),
     index("journal_lines_entry_idx").on(t.entryId),
+    /** Partial: most lines carry no project, and an index over all of them
+     *  would be dead weight on the busiest table in the schema. */
+    index("journal_lines_project_idx")
+      .on(t.companyId, t.projectId, t.accountId)
+      .where(sql`${t.projectId} IS NOT NULL`),
+    index("journal_lines_cost_code_idx")
+      .on(t.companyId, t.costCodeId)
+      .where(sql`${t.costCodeId} IS NOT NULL`),
+    check(
+      "journal_lines_cost_code_needs_project",
+      sql`${t.costCodeId} IS NULL OR ${t.projectId} IS NOT NULL`,
+    ),
     check("journal_lines_debit_non_negative", sql`${t.debit} >= 0`),
     check("journal_lines_credit_non_negative", sql`${t.credit} >= 0`),
     // Exactly one side populated, and not a zero-amount line.

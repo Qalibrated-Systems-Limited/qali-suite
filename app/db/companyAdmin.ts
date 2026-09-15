@@ -15,11 +15,36 @@ import { pgArray } from "./pgArray";
  * be reached from inside its own scope, and a reset spans every tenant table.
  */
 
-/** The tenant's Postgres uuid, or null if it was never provisioned. */
+/**
+ * The tenant's Postgres uuid, from either id form.
+ *
+ * IT ONLY READ THE MAP, and that silently broke the caller. `syncCompanyRecord`
+ * returns `{ synced: false }` when this is null — no error, nothing written —
+ * so passing it the TENANT UUID, which is what the session carries since the
+ * auth cutover and what `provisionCompany` returns, dropped the entire company
+ * form on the floor: branding, tax, bank and settings all discarded while the
+ * form said it had saved. Caught by a test asserting a `code` came back.
+ *
+ * A live uuid resolves to itself; anything else is looked up in the map, which
+ * is the same order `resolveCompanyUuid` and `getCompanyRecord` use.
+ */
 async function companyUuidFor(sourceCompanyId: string) {
+  const key = String(sourceCompanyId ?? "").trim();
+  if (!key) return null;
+
+  const looksUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key);
+
+  if (looksUuid) {
+    const live = (await privilegedDb().execute(sql`
+      SELECT id FROM companies WHERE id = ${key}::uuid
+    `)) as unknown as Array<{ id: string }>;
+    if (live.length) return live[0].id;
+  }
+
   const rows = (await privilegedDb().execute(sql`
     SELECT new_uuid FROM _migration_id_map
-     WHERE collection = 'companies' AND old_object_id = ${String(sourceCompanyId)}
+     WHERE collection = 'companies' AND old_object_id = ${key}
   `)) as unknown as Array<{ new_uuid: string }>;
   return rows.length ? rows[0].new_uuid : null;
 }
@@ -90,6 +115,53 @@ export interface CompanyRecordChanges {
   baseCurrency?: string | null;
 }
 
+/**
+ * The sentinel that distinguishes "not supplied" from "cleared".
+ *
+ * Every column below is written as COALESCE(new, existing), so a null means
+ * "leave it alone". That is right for a partial update and wrong for a form:
+ * `opt()` maps "" to null, so emptying a field and saving silently kept the old
+ * value — the edit appeared not to save.
+ *
+ * The two cases need different values, and SQL cannot express "write NULL"
+ * through COALESCE. So an explicitly-emptied field becomes this sentinel, and
+ * the column is wrapped in NULLIF(..., sentinel):
+ *
+ *   not supplied  -> null      -> COALESCE picks the column   -> unchanged
+ *   cleared       -> sentinel  -> COALESCE picks the sentinel -> NULLIF -> NULL
+ *   a value       -> the value -> COALESCE picks it           -> the value
+ *
+ * NULL rather than '': `code` carries a unique index (companies_code_uq, 0035),
+ * so a second company clearing its code to '' would collide with the first.
+ *
+ * The \u0001 prefix keeps a form field from impersonating it. NOT \u0000,
+ * which was the first choice and is rejected outright — Postgres text cannot
+ * hold a NUL byte, so every write failed with `invalid byte sequence for
+ * encoding "UTF8": 0x00`. \u0001 is a legal character that no input control
+ * produces.
+ */
+const CLEAR = "\u0001__cleared__";
+
+/**
+ * For fields a user is allowed to empty. Pairs with NULLIF in the query.
+ * Use `opt()` for anything structural — name, slug, status, plan — where a
+ * blank submission means "unchanged", never "delete it".
+ */
+function clearable(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const t = String(value).trim();
+  return t === "" ? CLEAR : t;
+}
+
+/** Case-folds a clearable value without mangling the sentinel. */
+function foldClearable(
+  value: string | null,
+  how: "upper" | "lower",
+): string | null {
+  if (value === null || value === CLEAR) return value;
+  return how === "upper" ? value.toUpperCase() : value.toLowerCase();
+}
+
 /** null for anything the caller did not supply, so COALESCE leaves it alone. */
 function opt(value: unknown): string | null {
   if (value === undefined || value === null) return null;
@@ -136,27 +208,27 @@ export async function syncCompanyRecord(
       UPDATE companies
          SET name                 = COALESCE(${opt(changes.name)}, name),
              slug                 = COALESCE(${opt(changes.slug)}, slug),
-             code                 = COALESCE(${opt(changes.code)?.toUpperCase() ?? null}, code),
-             tagline              = COALESCE(${opt(changes.tagline)}, tagline),
-             logo                 = COALESCE(${opt(changes.logo)}, logo),
-             email                = COALESCE(${opt(changes.email)?.toLowerCase() ?? null}, email),
-             phone                = COALESCE(${opt(changes.phone)}, phone),
-             website              = COALESCE(${opt(changes.website)}, website),
-             street               = COALESCE(${opt(addr.street)}, street),
-             city                 = COALESCE(${opt(addr.city)}, city),
-             state                = COALESCE(${opt(addr.state)}, state),
-             postal_code          = COALESCE(${opt(addr.postalCode)}, postal_code),
+             code                 = NULLIF(COALESCE(${foldClearable(clearable(changes.code), "upper")}, code), ${CLEAR}),
+             tagline              = NULLIF(COALESCE(${clearable(changes.tagline)}, tagline), ${CLEAR}),
+             logo                 = NULLIF(COALESCE(${clearable(changes.logo)}, logo), ${CLEAR}),
+             email                = NULLIF(COALESCE(${foldClearable(clearable(changes.email), "lower")}, email), ${CLEAR}),
+             phone                = NULLIF(COALESCE(${clearable(changes.phone)}, phone), ${CLEAR}),
+             website              = NULLIF(COALESCE(${clearable(changes.website)}, website), ${CLEAR}),
+             street               = NULLIF(COALESCE(${clearable(addr.street)}, street), ${CLEAR}),
+             city                 = NULLIF(COALESCE(${clearable(addr.city)}, city), ${CLEAR}),
+             state                = NULLIF(COALESCE(${clearable(addr.state)}, state), ${CLEAR}),
+             postal_code          = NULLIF(COALESCE(${clearable(addr.postalCode)}, postal_code), ${CLEAR}),
              country              = COALESCE(${opt(addr.country)}, country),
-             tax_pin              = COALESCE(${opt(changes.taxPin)?.toUpperCase() ?? null}, tax_pin),
-             vat_number           = COALESCE(${opt(changes.vatNumber)}, vat_number),
-             registration_number  = COALESCE(${opt(changes.registrationNumber)}, registration_number),
-             bank_name            = COALESCE(${opt(changes.bankName)}, bank_name),
-             bank_branch          = COALESCE(${opt(changes.bankBranch)}, bank_branch),
-             account_name         = COALESCE(${opt(changes.accountName)}, account_name),
-             account_number       = COALESCE(${opt(changes.accountNumber)}, account_number),
-             swift_code           = COALESCE(${opt(changes.swiftCode)}, swift_code),
-             mpesa_paybill        = COALESCE(${opt(changes.mpesaPaybill)}, mpesa_paybill),
-             mpesa_till           = COALESCE(${opt(changes.mpesaTill)}, mpesa_till),
+             tax_pin              = NULLIF(COALESCE(${foldClearable(clearable(changes.taxPin), "upper")}, tax_pin), ${CLEAR}),
+             vat_number           = NULLIF(COALESCE(${clearable(changes.vatNumber)}, vat_number), ${CLEAR}),
+             registration_number  = NULLIF(COALESCE(${clearable(changes.registrationNumber)}, registration_number), ${CLEAR}),
+             bank_name            = NULLIF(COALESCE(${clearable(changes.bankName)}, bank_name), ${CLEAR}),
+             bank_branch          = NULLIF(COALESCE(${clearable(changes.bankBranch)}, bank_branch), ${CLEAR}),
+             account_name         = NULLIF(COALESCE(${clearable(changes.accountName)}, account_name), ${CLEAR}),
+             account_number       = NULLIF(COALESCE(${clearable(changes.accountNumber)}, account_number), ${CLEAR}),
+             swift_code           = NULLIF(COALESCE(${clearable(changes.swiftCode)}, swift_code), ${CLEAR}),
+             mpesa_paybill        = NULLIF(COALESCE(${clearable(changes.mpesaPaybill)}, mpesa_paybill), ${CLEAR}),
+             mpesa_till           = NULLIF(COALESCE(${clearable(changes.mpesaTill)}, mpesa_till), ${CLEAR}),
              base_currency        = COALESCE(${currency?.toUpperCase() ?? null}, base_currency),
              status               = COALESCE(${status}, status),
              plan                 = COALESCE(${opt(sub.plan)}, plan),
@@ -278,6 +350,16 @@ const KEEP = new Set([
   "fiscal_periods",
   "parties", // wiped only with wipeParties
   "products", // catalogue kept, quantities zeroed
+  /*
+   * A KPI DEFINITION IS CONFIGURATION; ITS ACTUALS ARE NOT. `kpi_snapshots`
+   * is deliberately absent — the numbers go with the rest of the
+   * transactional data, and the targets, owners and thresholds somebody sat
+   * down and agreed survive, which is what `kpis` in RESET_KEEP_COLLECTIONS
+   * has always meant on the Mongo side. This table is discovery-driven, so
+   * without this line 0097's new tables would have been wiped on one side
+   * and kept on the other from the moment they existed.
+   */
+  "kpis",
 ]);
 
 /**

@@ -32,7 +32,7 @@ import {
 // Banking is genuinely still on Mongo — the only unported read left on this
 // dashboard. It uses withTenantScope rather than translateCompanyId, so for a
 // Postgres-native company it matches nothing instead of throwing.
-import { getUnallocatedCount, getBankStatements } from "@/app/mongodb/queries/bank-feed-queries";
+import { getUnallocatedCount, getBankStatements } from "@/app/db/actions/bank-feed-actions";
 import { fetchFiscalPeriodStats } from "@/app/db/actions/fiscal-period-actions";
 import { getOverdueInvoicesPg } from "@/app/db/actions/invoice-actions";
 import { getBillsStats } from "@/app/db/actions/bill-actions";

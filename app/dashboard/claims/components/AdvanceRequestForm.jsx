@@ -93,17 +93,52 @@ export function AdvanceRequestForm({
   projects = [],
   onBehalfOptions = [],
   currentUserId = "",
+  /** Preselected when the Projects module linked here — see the create page. */
+  defaultProjectId = "",
+  /** Already validated server-side by `safeReturnTo`; never used unchecked. */
+  returnTo = null,
 }) {
   const router = useRouter();
   const isEdit = !!claim;
 
-  // Track selected advance type
+  /**
+   * THE TYPE, AND WHY THE DEFAULT IS NOT ALWAYS "travel".
+   *
+   * Travel is the most CONSTRAINED of the three: `advanceRequestSchema`'s
+   * superRefine makes Destination, Travel start and Travel end mandatory when
+   * the type is travel, and mandatory on no other type. So a form that opens on
+   * travel opens with three required fields nobody has been asked about — fine
+   * when travel is what most people came for, and wrong the moment they did
+   * not.
+   *
+   * They did not the moment a PROJECT sent them here. The Cash Requisitions
+   * page links in with `?projectId=` for site cash on a job; that request has
+   * no destination and no return date, so landing on travel means three
+   * validation errors about a trip nobody is taking. "Operational" is what a
+   * project cash request is, and it requires nothing extra.
+   *
+   * An EDIT always wins over both: the claim says what it already is.
+   */
   const [advanceType, setAdvanceType] = useState(
-    claim?.advanceDetails?.advanceType || "travel"
+    claim?.advanceDetails?.advanceType ||
+      (defaultProjectId ? "operational" : "travel"),
   );
 
-  // Project selection (optional for all advance types)
-  const [projectId, setProjectId] = useState(claim?.projectId || "");
+  /**
+   * Project selection (optional for all advance types).
+   *
+   * `defaultProjectId` IS ONLY HONOURED IF THE PICKER ACTUALLY HAS THAT
+   * PROJECT. The list here is `getActiveProjects()` — planning and active only
+   * — so a link raised from a completed or on-hold job would otherwise seat an
+   * id in the form that the combobox cannot display: the trigger reads
+   * "Select a project...", the hidden input posts a real id, and the claim
+   * lands on a project the person never saw named. Falling back to empty makes
+   * the screen tell the truth about what is selected.
+   */
+  const [projectId, setProjectId] = useState(
+    claim?.projectId ||
+      (projects.some((p) => p._id === defaultProjectId) ? defaultProjectId : ""),
+  );
   const [costCodeId, setCostCodeId] = useState(claim?.costCodeId || "");
 
   /**
@@ -151,7 +186,14 @@ export function AdvanceRequestForm({
       toast.success(state.message || "Advance request submitted successfully", {
         description: `Request ${state.claimNumber} is now pending approval`,
       });
-      router.push(`/dashboard/claims/${state.claimId}`);
+      /**
+       * Back where you came from, when something sent you — the claim's own
+       * page otherwise. Somebody who started this from a project's Cash
+       * Requisitions page wants to see the requisition appear there; being
+       * dropped in the claims module is the navigation complaint that made
+       * this feature necessary in the first place.
+       */
+      router.push(returnTo || `/dashboard/claims/${state.claimId}`);
     } else if (state?.errors) {
       // Show form-level errors
       if (state.errors._form) {
@@ -168,7 +210,7 @@ export function AdvanceRequestForm({
         });
       }
     }
-  }, [state, router]);
+  }, [state, router, returnTo]);
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 sm:space-y-8">
@@ -182,7 +224,9 @@ export function AdvanceRequestForm({
         >
           <Link
             href={
-              isEdit ? `/dashboard/claims/${claim._id}` : "/dashboard/my-claims"
+              isEdit
+                ? `/dashboard/claims/${claim._id}`
+                : returnTo || "/dashboard/my-claims"
             }
           >
             <ArrowLeft className="w-5 h-5" />
@@ -245,14 +289,36 @@ export function AdvanceRequestForm({
             <Label htmlFor="advanceType" className="text-sm sm:text-base font-medium">
               Advance Type <span className="text-red-500">*</span>
             </Label>
+            {/*
+              The Radix trigger carries the id, because the `htmlFor` above
+              pointed at nothing: the hidden input has a `name` and no `id`, and
+              a Label bound to no control neither moves focus when tapped nor
+              announces itself — which on a phone costs you the biggest target
+              on the field.
+            */}
             {/* Hidden input to submit the value with the form */}
             <input type="hidden" name="advanceType" value={advanceType} />
             <Select
               value={advanceType}
               onValueChange={setAdvanceType}
             >
-              <SelectTrigger className="h-12">
-                <SelectValue placeholder="Select advance type" />
+              <SelectTrigger id="advanceType" className="h-12">
+                {/*
+                  EXPLICIT CHILDREN. `SelectValue` otherwise clones the selected
+                  item's children into the trigger — and each item here is an
+                  icon, a label AND its description, so the trigger read
+                  "Travel Advance - Business travel expenses", clamped to one
+                  line. The description belongs in the open list, where there is
+                  room for it; the trigger's job is to name the choice.
+                */}
+                <SelectValue placeholder="Select advance type">
+                  <span className="flex items-center gap-2">
+                    {getAdvanceTypeIcon(advanceType)}
+                    <span className="font-medium">
+                      {ADVANCE_TYPES[advanceType]?.label ?? "Select advance type"}
+                    </span>
+                  </span>
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {Object.entries(ADVANCE_TYPES).map(([value, { label, description }]) => (
@@ -547,7 +613,7 @@ export function AdvanceRequestForm({
               asChild
               className="h-12 text-base font-medium"
             >
-              <Link href="/dashboard/my-claims">Cancel</Link>
+              <Link href={returnTo || "/dashboard/my-claims"}>Cancel</Link>
             </Button>
             <SubmitButton isEdit={isEdit} pending={pending} />
           </div>

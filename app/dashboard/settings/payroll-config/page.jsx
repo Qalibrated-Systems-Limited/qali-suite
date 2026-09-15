@@ -4,15 +4,24 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { ChevronLeft, Settings } from "lucide-react";
 import { getPayrollSettings } from "@/app/db/actions/hr-payroll-actions";
-import { roleAllowed } from "@/lib/permissions";
+import { can } from "@/lib/capabilities";
 import PayrollConfigClient from "./PayrollConfigClient";
 
 export const metadata = { title: "Payroll Configuration | Settings" };
 
-// HR prepares payroll and finance approves it, so both set the rates.
-const ALLOWED = ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR Manager"];
+/*
+ * NO ROLE ARRAYS HERE ANY MORE.
+ *
+ * This page held two, and the first of them disagreed with the action behind
+ * it: it admitted HR Manager while `getPayrollSettings` — the page's only
+ * loader — did not, so HR opened the page straight into the error boundary.
+ * Both halves now ask lib/capabilities.js the same question the actions ask.
+ *
+ *   payroll.rates.write  HR prepares payroll, so HR sets the statutory rates.
+ *   payroll.gl.write     Which accounts the journal posts to is finance's.
+ */
 
-async function ConfigLoader({ canEdit }) {
+async function ConfigLoader({ canEdit, canMapGl }) {
   const { configs, accounts, active } = await getPayrollSettings();
 
   // The client speaks `_id`, `isActive` and a `glMapping` object. There is no
@@ -35,6 +44,7 @@ async function ConfigLoader({ canEdit }) {
     <PayrollConfigClient
       initialConfigs={shaped}
       canEdit={canEdit}
+      canMapGl={canMapGl}
       accounts={accounts.map((a) => ({
         _id: a.id,
         accountCode: a.code,
@@ -48,11 +58,19 @@ async function ConfigLoader({ canEdit }) {
 export default async function PayrollConfigPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!roleAllowed(session.user.role, ALLOWED)) redirect("/dashboard/settings");
+  if (!can(session.user.role, "payroll.rates.write")) {
+    redirect("/dashboard/settings");
+  }
 
-  // Whoever may open this may change it — the source showed the page to HR and
-  // then disabled every control, while the actions accepted them.
+  // Whoever may open this may set the RATES — the source showed the page to HR
+  // and then disabled every control, while the actions accepted them.
   const canEdit = true;
+
+  // The GL mapping is the exception, and it is the one control that has to be
+  // hidden rather than disabled-on-submit: `savePayrollGlMapping` refuses
+  // anyone outside this list, so offering HR the form would be the original
+  // bug wearing the other coat.
+  const canMapGl = can(session.user.role, "payroll.gl.write");
 
   return (
     <div className="space-y-6 p-4 sm:p-6 lg:p-8 max-w-4xl">
@@ -89,7 +107,7 @@ export default async function PayrollConfigPage() {
           </div>
         }
       >
-        <ConfigLoader canEdit={canEdit} />
+        <ConfigLoader canEdit={canEdit} canMapGl={canMapGl} />
       </Suspense>
     </div>
   );

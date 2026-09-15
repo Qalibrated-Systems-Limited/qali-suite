@@ -5,8 +5,10 @@ import { canSeeSalesNav } from "@/lib/permissions";
 import { ArrowLeft } from "lucide-react";
 import AccessDenied from "@/app/dashboard/components/crm/AccessDenied";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { cLead } from "@/app/mongodb/queries/lead-queries";
-import { cTimeline } from "@/app/mongodb/queries/activity-queries";
+import {
+  getLeadPg as cLead,
+  getActivitiesPg as cTimeline,
+} from "@/app/db/actions/crm-actions";
 import ActivityTimeline from "@/app/dashboard/components/crm/ActivityTimeline";
 import ActivityComposer from "@/app/dashboard/components/crm/ActivityComposer";
 import LeadRowActions from "../components/LeadRowActions";

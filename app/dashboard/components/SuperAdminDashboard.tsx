@@ -2,8 +2,6 @@ import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 
-import { AlertsStrip, AlertsStripSkeleton } from "./AlertsStrip";
-
 // Client Component (uses useSearchParams)
 import { SuperAdminTabs } from "./tabs/SuperAdminTabs";
 
@@ -67,12 +65,23 @@ export default async function SuperAdminDashboard() {
         </p>
       </header>
 
-      {/* Cross-tenant alerts strip — SuperAdmin sees the aggregate (tenantMatch
-          is empty in their context, so getDashboardAlerts spans all companies). */}
-      <Suspense fallback={<AlertsStripSkeleton />}>
-        <AlertsStrip />
-      </Suspense>
+      {/*
+        NO AlertsStrip HERE, and the reason is the whole shape of this page.
 
+        It used to render one, on the Mongo-era reasoning that "tenantMatch is
+        empty in their context, so getDashboardAlerts spans all companies".
+        That stopped being true at the Postgres cutover: `getDashboardAlerts`
+        goes through `withAuthorizedTenant`, which resolves ONE acting company
+        and throws "No company selected" when a user holds several — which a
+        SuperAdmin always does, because standing access is a grant row per
+        tenant (tenant.ts). Nothing caught it, so the platform dashboard
+        crashed into app/dashboard/error.jsx until a company was picked.
+
+        And an aggregate was never the right thing anyway: one estate-wide
+        "overdue invoices" count linking to one tenant's AR ageing is a number
+        nobody can act on. Platform-level health lives in the Activity tab
+        (getSystemAlerts), per tenant, on the privileged connection.
+      */}
       {/*
         IMPORTANT: Wrap in Suspense for useSearchParams
         Next.js 16 requires this for client components using useSearchParams

@@ -348,3 +348,181 @@ export async function getAccountFormOptionsPg() {
     };
   });
 }
+
+// ── Settings: keeping an existing chart up to date ──────────────────────────
+
+/**
+ * Which of the two overpayment accounts this company has.
+ *
+ * A read, and it has to be one. `AccountSetupCard` called
+ * `ensureAdvanceAccountsExist()` from a mount effect to find out — an action
+ * that creates the accounts as a side effect — so loading the settings page
+ * wrote to the chart of accounts every time, and the "Checking account setup…"
+ * label described a write.
+ */
+export async function getAdvanceAccountStatusPg() {
+  try {
+    return await withAuthorizedTenant([], (tx) =>
+      accountsRepo.getAdvanceAccountStatus(tx),
+    );
+  } catch {
+    return { complete: false, accounts: [] };
+  }
+}
+
+/**
+ * Create any standard account this company is missing, wire the hierarchy and
+ * backfill the system handles.
+ *
+ * THE MONGO ORIGINAL WROTE TO A STORE NOTHING READS. `syncChartOfAccounts`
+ * created MONGO `Account` documents while every account screen has read
+ * Postgres since §9C: the button reported "Sync complete — created 12
+ * accounts" and the chart of accounts page showed exactly what it had before.
+ */
+export async function syncChartOfAccountsPg(): Promise<
+  ActionResult & { created?: number; tagged?: number; accounts?: unknown[] }
+> {
+  try {
+    const { getStandardChartOfAccounts } = await import("@/lib/chart-of-accounts");
+    const definitions = getStandardChartOfAccounts();
+
+    const result = await withAuthorizedTenant(
+      [...FINANCE_WRITE_ROLES],
+      (tx, { user, companyId }) =>
+        accountsRepo.syncStandardChart(tx, companyId, definitions, {
+          id: user.id,
+        }),
+    );
+
+    revalidatePath("/dashboard/accounts");
+    revalidatePath("/dashboard/settings");
+
+    const parts: string[] = [];
+    if (result.created.length)
+      parts.push(
+        `created ${result.created.length} account${result.created.length === 1 ? "" : "s"}`,
+      );
+    if (result.tagged)
+      parts.push(`tagged ${result.tagged} system account${result.tagged === 1 ? "" : "s"}`);
+    if (result.rewired)
+      parts.push(`repaired ${result.rewired} parent link${result.rewired === 1 ? "" : "s"}`);
+
+    return {
+      success: true,
+      created: result.created.length,
+      tagged: result.tagged,
+      accounts: result.created,
+      message: parts.length
+        ? `Sync complete — ${parts.join(", ")}`
+        : "All accounts are up to date",
+    };
+  } catch (error) {
+    return { success: false, error: userMessage(error, "Failed to sync the chart of accounts") };
+  }
+}
+
+/**
+ * The two overpayment accounts, on their own.
+ *
+ * A strict subset of the sync above — both 1170 and 2190 are in the standard
+ * chart, so syncing creates them along with everything else. It stays a
+ * separate action because the settings card is a separate, narrower promise,
+ * and running the whole sync from it would create accounts the person pressing
+ * "Setup Now" did not ask for.
+ */
+export async function ensureAdvanceAccountsExistPg(): Promise<
+  ActionResult & { results?: unknown[] }
+> {
+  try {
+    const { getStandardChartOfAccounts } = await import("@/lib/chart-of-accounts");
+    const wanted = new Set(["supplier_advance", "customer_advance"]);
+    const definitions = getStandardChartOfAccounts();
+
+    // The two accounts, plus the parents they hang from — without those the
+    // pair would be created as roots and the chart would gain two orphans.
+    const targets = definitions.filter((a) => wanted.has(a.systemAccount ?? ""));
+    const parentCodes = new Set(targets.map((a) => a.parentCode).filter(Boolean));
+    const subset = definitions.filter(
+      (a) => wanted.has(a.systemAccount ?? "") || parentCodes.has(a.accountCode),
+    );
+
+    const result = await withAuthorizedTenant(
+      [...FINANCE_WRITE_ROLES],
+      (tx, { user, companyId }) =>
+        accountsRepo.syncStandardChart(tx, companyId, subset, { id: user.id }),
+    );
+
+    revalidatePath("/dashboard/accounts");
+    revalidatePath("/dashboard/banking");
+    revalidatePath("/dashboard/settings");
+
+    return {
+      success: true,
+      message: result.created.length
+        ? `Created ${result.created.map((c) => c.accountName).join(" and ")}`
+        : "Both advance accounts were already in place",
+      results: result.created,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: userMessage(error, "Failed to set up the advance accounts"),
+    };
+  }
+}
+
+/**
+ * Accounts grouped by type, for `/api/accounts/by-type`.
+ *
+ * POSTGRES since 0102. The route read the MONGO `Account` collection, which
+ * nothing has written to since the chart of accounts moved — so a picker built
+ * from it offered accounts that no longer exist and omitted every account
+ * created since. The type values are identical in both stores (`lib/utils.js`
+ * `accountTypes` and the `account_type` enum are the same five strings), so
+ * the response shape is unchanged.
+ *
+ * An unknown type is DROPPED rather than passed to the query. It reaches the
+ * enum as a cast otherwise, and `'assets'::account_type` is a 22P02 — a
+ * caller's typo returned as our 500.
+ */
+type AccountType = (typeof ACCOUNT_TYPES)[number];
+
+export async function getAccountsByTypePg(types: string[]) {
+  // ACCOUNT_TYPES is already declared at the top of this file for the create
+  // schema; the predicate narrows to it so `listAccounts` gets the enum member
+  // it expects rather than a bare string cast.
+  const wanted = types
+    .map((t) => t.trim())
+    .filter((t): t is AccountType =>
+      (ACCOUNT_TYPES as readonly string[]).includes(t),
+    );
+
+  return withAuthorizedTenant([], async (tx) => {
+    const grouped: Record<
+      string,
+      Array<{
+        _id: string;
+        accountCode: string;
+        accountName: string;
+        accountType: string;
+      }>
+    > = {};
+
+    for (const accountType of wanted) {
+      const rows = await accountsRepo.listAccounts(tx, {
+        activeOnly: true,
+        accountType,
+      });
+      grouped[accountType] = rows.map((a) => ({
+        // `_id`, because the pickers reading this route were written against
+        // the Mongo shape and this port does not get to change them too.
+        _id: String(a.id),
+        accountCode: a.accountCode,
+        accountName: a.accountName,
+        accountType: a.accountType,
+      }));
+    }
+
+    return grouped;
+  });
+}

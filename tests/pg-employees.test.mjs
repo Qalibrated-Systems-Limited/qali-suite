@@ -412,6 +412,139 @@ suite("employees repository", () => {
     });
   });
 
+  /**
+   * LINKING A PERSON TO THEIR LOGIN.
+   *
+   * Two flows already joined them, and between them they left a hole.
+   * "Send Portal Invite" creates a new login and links it on acceptance;
+   * the amber strip on the employees page creates an employee for a login that
+   * has none. Neither helps when BOTH already exist separately — an ordinary
+   * case, since a person may sign up before HR writes their record — and the
+   * consequence is somebody who can log in and never see their own payslip.
+   *
+   * `linkEmployeeUser` sat in this repository with no callers until then.
+   */
+  describe("linking a login to an employment record", () => {
+    /**
+     * A LOGIN IS ONLY VISIBLE INSIDE A COMPANY IT HOLDS A GRANT IN.
+     *
+     * `users` carries `visible_within_company` (0036/0037): you may see a login
+     * if you share an active grant with it. A bare `users` row is invisible to
+     * every tenant, so the grant is part of creating one — and it is what makes
+     * the cross-company test below meaningful rather than vacuous.
+     */
+    const login = async (over = {}) => {
+      const id = over.id ?? randomUUID();
+      await admin`
+        INSERT INTO users (id, name, email, role, status)
+        VALUES (${id}, ${over.name ?? "Jane W"},
+                ${over.email ?? `u${id.slice(0, 8)}@example.com`},
+                ${over.role ?? "Employee"}, 'active')`;
+      await admin`
+        INSERT INTO user_company_access (user_id, company_id, status, granted_via)
+        VALUES (${id}, ${over.companyId ?? companyA}, 'active', 'manual')`;
+      return id;
+    };
+
+    const userIdOf = async (employeeId) => {
+      const [row] = await admin`SELECT user_id FROM employees WHERE id = ${employeeId}`;
+      return row?.user_id ?? null;
+    };
+
+    it("attaches a login, and detaches it again", async () => {
+      const employee = await hire();
+      const userId = await login();
+      expect(await userIdOf(employee.id)).toBeNull();
+
+      await asTenant(companyA, (tx) =>
+        staff.linkEmployeeUser(tx, { id: employee.id, userId }));
+      expect(await userIdOf(employee.id)).toBe(userId);
+
+      // Unlinking leaves BOTH records standing — it is not a termination and
+      // not a deactivation, it is the undo for a link made to the wrong person.
+      await asTenant(companyA, (tx) =>
+        staff.linkEmployeeUser(tx, { id: employee.id, userId: null }));
+      expect(await userIdOf(employee.id)).toBeNull();
+      const [still] = await admin`SELECT id FROM users WHERE id = ${userId}`;
+      expect(still).toBeTruthy();
+    });
+
+    it("refuses one login on two employment records", async () => {
+      // employees_company_user_uq, and 0045 says why: "two employment records
+      // sharing a login would make 'whose leave is this' unanswerable".
+      const first = await hire();
+      const second = await hire({ firstName: "Ann", lastName: "Otieno" });
+      const userId = await login();
+
+      await asTenant(companyA, (tx) =>
+        staff.linkEmployeeUser(tx, { id: first.id, userId }));
+
+      await expectRejection(
+        asTenant(companyA, (tx) =>
+          staff.linkEmployeeUser(tx, { id: second.id, userId })),
+        /employees_company_user_uq|already/i,
+      );
+      expect(await userIdOf(second.id)).toBeNull();
+    });
+
+    it("stops listing a login as unlinked once it is attached", async () => {
+      // The amber strip reads this. A login that has been linked must drop out
+      // of it, or the page goes on offering to create a SECOND employee for
+      // somebody who already has one.
+      const employee = await hire();
+      const userId = await login({ name: "Zawadi K" });
+
+      const before = await asTenant(companyA, (tx) =>
+        staff.listUsersWithoutEmployeeRecord(tx));
+      expect(before.map((u) => u.id)).toContain(userId);
+
+      await asTenant(companyA, (tx) =>
+        staff.linkEmployeeUser(tx, { id: employee.id, userId }));
+
+      const after = await asTenant(companyA, (tx) =>
+        staff.listUsersWithoutEmployeeRecord(tx));
+      expect(after.map((u) => u.id)).not.toContain(userId);
+    });
+
+    it("never offers a login from another company", async () => {
+      /*
+       * The picker's whole safety property. `users` is readable only where a
+       * grant is shared (visible_within_company, 0036/0037), so a login that
+       * belongs to Elsewhere is not a candidate here — and the composite keys
+       * would refuse it afterwards anyway. Asserted from the outside, because
+       * a policy that silently stops applying is the kind of thing nobody
+       * notices until a tenant sees another tenant's staff.
+       */
+      const theirs = await login({ companyId: otherCompany, name: "Not Ours" });
+
+      const here = await asTenant(companyA, (tx) =>
+        staff.listUsersWithoutEmployeeRecord(tx));
+      expect(here.map((u) => u.id)).not.toContain(theirs);
+
+      const there = await asTenant(otherCompany, (tx) =>
+        staff.listUsersWithoutEmployeeRecord(tx));
+      expect(there.map((u) => u.id)).toContain(theirs);
+    });
+
+    it("finds the employee from the login, which is what self-service does", async () => {
+      // getMyPayslips, getMyLeave and getMyAttendanceToday all resolve the
+      // employee this way. Before the link they find nothing, which is exactly
+      // the symptom: signed in, and no payslips.
+      const employee = await hire();
+      const userId = await login();
+
+      expect(await asTenant(companyA, (tx) =>
+        staff.getEmployeeByUser(tx, userId))).toBeNull();
+
+      await asTenant(companyA, (tx) =>
+        staff.linkEmployeeUser(tx, { id: employee.id, userId }));
+
+      const found = await asTenant(companyA, (tx) =>
+        staff.getEmployeeByUser(tx, userId));
+      expect(found?.id).toBe(employee.id);
+    });
+  });
+
   describe("tenant isolation", () => {
     it("shows one company nothing of another's, with no filter in the call", async () => {
       await hire();

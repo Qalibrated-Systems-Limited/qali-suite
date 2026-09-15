@@ -280,6 +280,84 @@ suite("employee claims", () => {
     expect(await lineFor(entry.id, bankAcct)).toMatchObject({ credit: 8000 });
   });
 
+  /**
+   * REPRODUCING "recalled claims cannot be edited".
+   *
+   * The recall dialog promises "This will move the claim back to draft so you
+   * can make changes." `recallClaim` sets status to draft; `updateClaim`
+   * accepts draft and rejected. On paper it works, which is exactly why it is
+   * worth running rather than reading.
+   */
+  it("recalls a submitted claim and then edits it", async () => {
+    const result = await asTenant(companyA, async (tx) => {
+      const created = await claims.createReimbursement(tx, {
+        companyId: companyA,
+        partyId: employeeParty,
+        claimDate: today(),
+        description: "Original description",
+        items: receipts("2000.0000", "500.0000"),
+        submit: true,
+      });
+      expect(created.status).toBe("submitted");
+
+      const recalled = await claims.recallClaim(tx, created.id);
+      expect(recalled.status).toBe("draft");
+      expect(recalled.submittedAt).toBeNull();
+
+      const edited = await claims.updateClaim(tx, created.id, {
+        description: "Edited after recall",
+        items: receipts("2500.0000", "500.0000"),
+        lastModifiedById: "u1",
+        lastModifiedByName: "Owner",
+      });
+
+      /**
+       * AND BACK INTO THE QUEUE, which is the half that was missing.
+       *
+       * `draft` had no exit in the application: the detail page offered Edit
+       * and nothing else, the only action reaching `submitted` was for a
+       * REJECTED claim, and both create paths pass submit: true — so a recall
+       * was one-way and the claim left every approver's list for good.
+       *
+       * The state machine in 0052 has allowed draft -> submitted since it was
+       * written, and `submitClaim` had no caller outside this file. Nothing
+       * was missing below the action layer, which is why this passes the
+       * moment the button exists.
+       */
+      const resubmitted = await claims.submitClaim(tx, created.id, {
+        id: "u1",
+        name: "Owner",
+      });
+      return { created, edited, resubmitted };
+    });
+
+    expect(result.edited.description).toBe("Edited after recall");
+    expect(result.resubmitted.status).toBe("submitted");
+    expect(result.resubmitted.submittedAt).not.toBeNull();
+  });
+
+  it("refuses to push an approved claim back to submitted", async () => {
+    // The backstop under the new action's own draft-only check: the 0052
+    // transition trigger permits draft -> submitted and rejected -> submitted,
+    // and nothing else into that state.
+    await failsWith(
+      () =>
+        asTenant(companyA, async (tx) => {
+          const created = await claims.createReimbursement(tx, {
+            companyId: companyA,
+            partyId: employeeParty,
+            claimDate: today(),
+            description: "Already blessed",
+            items: receipts("1000.0000", "500.0000"),
+            submit: true,
+          });
+          const approved = await claims.approveClaim(tx, created.id, { name: "Manager" });
+          return claims.submitClaim(tx, approved.id, { name: "Chancer" });
+        }),
+      /cannot move from/i,
+    );
+  });
+
   it("payReimbursement posts the expense and the payment as two entries", async () => {
     const { expenseEntry, paymentEntry, claim } = await asTenant(companyA, async (tx) => {
       const created = await claims.createReimbursement(tx, {

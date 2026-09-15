@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
   Edit,
+  FileSpreadsheet,
   Activity,
   PauseCircle,
   CheckCircle2,
@@ -24,13 +25,20 @@ import {
   getProjectTransactions,
   getSubprojects,
   getProjectAssignments,
+  getProjectClosingBlockers,
+  getProjectTimesheets,
+  getProjectLabourSummary,
   getProjectTasks,
   getProjectProgress,
 } from "@/app/db/actions/project-actions";
 import { getEmployees, getSuppliers } from "@/app/db/actions/party-actions";
 import ProjectStatusActions from "../components/ProjectStatusActions";
 import ProjectTeam from "../components/ProjectTeam";
+import ProjectTimesheets from "../components/ProjectTimesheets";
 import ProjectTasks from "../components/ProjectTasks";
+import ProjectSetup from "../components/ProjectSetup";
+import { workspaceProjects } from "../lib/workspace";
+import { sectionsFor } from "../lib/sections";
 import { FormBanner } from "@/components/ui/form-banner";
 
 // Roles allowed to manage the project team — mirrors the server action gate.
@@ -66,7 +74,7 @@ function formatCurrency(amount) {
     style: "decimal",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount || 0);
+  }).format(Number(amount) || 0);
 }
 
 function formatDate(date) {
@@ -100,6 +108,36 @@ async function TeamCard({ projectId, canManage }) {
       members={members}
       parties={parties}
       canManage={canManage}
+    />
+  );
+}
+
+// ============================================
+// TIME (0089)
+// ============================================
+// The card that closes the module's largest cost hole. Labour reached the P&L
+// through payroll and reached no project at all — 45.6% reported margin
+// against a true 18.9% on the 2026-09-03 worked example.
+//
+// The roster is the person list, because the roster carries the rate. The task
+// list is optional: time booked to a job with no WBS is still time.
+async function TimesheetsCard({ projectId, canManage, readOnly }) {
+  const [entries, summary, members, tasks] = await Promise.all([
+    getProjectTimesheets(projectId, { limit: 50 }),
+    getProjectLabourSummary(projectId),
+    getProjectAssignments(projectId),
+    getProjectTasks(projectId),
+  ]);
+
+  return (
+    <ProjectTimesheets
+      projectId={projectId}
+      entries={entries}
+      summary={summary}
+      members={members}
+      tasks={tasks}
+      canManage={canManage}
+      readOnly={readOnly}
     />
   );
 }
@@ -151,15 +189,15 @@ async function FinancialSummaryCard({ projectId, budget }) {
   const utilPct = budgetAmount > 0 ? Math.round(((costs + committed) / budgetAmount) * 100) : 0;
 
   return (
-    <Card className="p-5 sm:p-6">
-      <div className="flex items-center gap-3 mb-4">
+    <Card className="p-4 sm:p-5">
+      <div className="flex items-center gap-3 mb-3">
         <div className="rounded-lg p-2.5 bg-blue-500/10">
           <TrendingUp className="h-5 w-5 text-blue-500" />
         </div>
         <h2 className="font-semibold text-lg">Financial Summary</h2>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {budgetAmount > 0 && (
           <div>
             <p className="text-xs text-muted-foreground">Budget</p>
@@ -258,8 +296,8 @@ async function BudgetVsActualCard({ projectId }) {
   if (!data) return null;
 
   return (
-    <Card className="p-5 sm:p-6">
-      <div className="flex items-center gap-3 mb-4">
+    <Card className="p-4 sm:p-5">
+      <div className="flex items-center gap-3 mb-3">
         <div className="rounded-lg p-2.5 bg-purple-500/10">
           <BarChart3 className="h-5 w-5 text-purple-500" />
         </div>
@@ -462,7 +500,7 @@ async function TransactionsCard({ projectId }) {
 
   if (!hasClaims && !hasInvoices && !hasBills && !hasExpenses && !hasRequests) {
     return (
-      <Card className="p-5 sm:p-6">
+      <Card className="p-4 sm:p-5">
         <h2 className="font-semibold text-lg mb-3">Linked Transactions</h2>
         <p className="text-sm text-muted-foreground text-center py-8">
           No transactions linked to this project yet
@@ -472,7 +510,7 @@ async function TransactionsCard({ projectId }) {
   }
 
   return (
-    <Card className="p-5 sm:p-6">
+    <Card className="p-4 sm:p-5">
       <h2 className="font-semibold text-lg mb-4">Linked Transactions</h2>
 
       {hasClaims && (
@@ -496,7 +534,7 @@ async function TransactionsCard({ projectId }) {
                       {claim.status}
                     </Badge>
                   </div>
-                  <p className="text-sm font-medium mt-0.5 truncate">{claim.employee?.name}</p>
+                  <p className="text-sm font-medium mt-0.5 truncate">{claim.employeeName}</p>
                   {claim.description && (
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">
                       {claim.description}
@@ -533,7 +571,7 @@ async function TransactionsCard({ projectId }) {
                       {inv.status}
                     </Badge>
                   </div>
-                  <p className="text-sm font-medium mt-0.5 truncate">{inv.customer?.name}</p>
+                  <p className="text-sm font-medium mt-0.5 truncate">{inv.customerName || "—"}</p>
                 </div>
                 <p className="text-sm font-semibold shrink-0">
                   KES {formatCurrency(inv.total)}
@@ -565,10 +603,10 @@ async function TransactionsCard({ projectId }) {
                       {bill.status}
                     </Badge>
                   </div>
-                  <p className="text-sm font-medium mt-0.5 truncate">{bill.vendor?.name}</p>
+                  <p className="text-sm font-medium mt-0.5 truncate">{bill.vendorName || "—"}</p>
                 </div>
                 <p className="text-sm font-semibold shrink-0">
-                  KES {formatCurrency(bill.amounts?.netPayable || bill.amounts?.total)}
+                  KES {formatCurrency(bill.netPayable ?? bill.total)}
                 </p>
               </Link>
             ))}
@@ -631,7 +669,7 @@ async function TransactionsCard({ projectId }) {
                       {req.status}
                     </Badge>
                   </div>
-                  <p className="text-sm font-medium mt-0.5 truncate">{req.requester?.name}</p>
+                  <p className="text-sm font-medium mt-0.5 truncate">{req.requesterName || "—"}</p>
                 </div>
                 <p className="text-sm font-semibold shrink-0">
                   KES {formatCurrency(req.totalValue)}
@@ -664,28 +702,57 @@ export default async function ProjectDetailPage({ params, searchParams }) {
     getSubprojects(id),
   ]);
 
+  /**
+   * Which sections this project's TYPE says it has — so the set-up card does
+   * not ask a supply job to price a bill of quantities.
+   *
+   * `workspaceProjects` is React-cached and the module layout has already
+   * called it this request, so this is free.
+   */
+  const sections = sectionsFor(
+    (await workspaceProjects()).find((p) => p.id === id) ?? null,
+  );
+
   const statusCfg = STATUS_CONFIG[project.status] || STATUS_CONFIG.planning;
   const StatusIcon = statusCfg.icon;
   const canManageTeam = PROJECT_TEAM_MANAGE_ROLES.has(session.user.role);
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       <FormBanner searchParams={resolvedSearchParams} />
-      {/* Header */}
+      {/*
+        THE HEADER, and what was wrong with it.
+
+        The back arrow was an icon button nudged down with `mt-1`, and the
+        three actions sat on their OWN row underneath, indented with
+        `pl-11 sm:pl-14` — a hand-measured left padding whose whole job was to
+        line up with the width of the arrow above it. Two magic numbers holding
+        a layout together, and on a phone the row they made was three unlabelled
+        icon squares floating under a wrapped title, because every label was
+        `hidden sm:inline`. Three identical outline boxes is not a toolbar.
+
+        So: the back link goes on its own line as a labelled link — the pattern
+        the edit and IPC screens already use — which removes both offsets, and
+        the actions move to the RIGHT of the identity on desktop, where every
+        other header in the app puts them. On a phone they become a full-width
+        three-up grid WITH their labels, at a size a thumb can hit.
+      */}
       <div className="space-y-3">
-        <div className="flex items-start gap-3 sm:gap-4">
-          <Button variant="ghost" size="icon" asChild className="mt-1 shrink-0">
-            <Link href="/dashboard/projects">
-              <ArrowLeft className="h-5 w-5" />
-            </Link>
-          </Button>
+        <Button variant="ghost" size="sm" asChild className="-ml-2 h-8 px-2">
+          <Link href="/dashboard/projects">
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
+            Projects
+          </Link>
+        </Button>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <span className="font-mono text-xs sm:text-sm text-muted-foreground">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs text-muted-foreground sm:text-sm">
                 {project.projectNumber}
               </span>
               <Badge className={statusCfg.color}>
-                <StatusIcon className="h-3 w-3 mr-1" />
+                <StatusIcon className="mr-1 h-3 w-3" />
                 {statusCfg.label}
               </Badge>
               {project.priority !== "normal" && (
@@ -694,37 +761,58 @@ export default async function ProjectDetailPage({ params, searchParams }) {
                 </Badge>
               )}
             </div>
-            <h1 className="text-xl sm:text-2xl font-semibold text-foreground truncate">
+            {/* `break-words`, not `truncate`: a project name is how somebody
+                recognises the job, and "Constructions of Sori Road — Lot 2"
+                clipped at the viewport is the one string on the page that must
+                not be. */}
+            <h1 className="text-xl font-semibold break-words text-foreground sm:text-2xl">
               {project.name}
             </h1>
             {project.description && (
-              <p className="text-sm text-muted-foreground mt-1 line-clamp-2 sm:line-clamp-none max-w-2xl">
+              <p className="mt-1 line-clamp-2 max-w-2xl text-sm text-muted-foreground sm:line-clamp-none">
                 {project.description}
               </p>
             )}
           </div>
-        </div>
 
-        <div className="flex items-center gap-2 pl-11 sm:pl-14">
-          {project.status !== "closed" && (
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/dashboard/projects/${id}/edit`}>
-                <Edit className="h-4 w-4 sm:mr-1" />
-                <span className="hidden sm:inline">Edit</span>
+          {/* `flex-1` rather than a three-column grid: Edit disappears on a
+              closed project, and a fixed three-up would leave the two that
+              remain stranded across two thirds of the row. */}
+          <div className="flex gap-2 sm:shrink-0">
+            {project.status !== "closed" && (
+              <Button variant="outline" size="sm" asChild className="h-10 flex-1 sm:h-9 sm:flex-none">
+                <Link href={`/dashboard/projects/${id}/edit`}>
+                  <Edit className="mr-1.5 h-4 w-4" />
+                  Edit
+                </Link>
+              </Button>
+            )}
+            <Button variant="outline" size="sm" asChild className="h-10 flex-1 sm:h-9 sm:flex-none">
+              <Link href={`/dashboard/projects/${id}/budget`}>
+                <Wallet className="mr-1.5 h-4 w-4" />
+                Budget
               </Link>
             </Button>
-          )}
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/dashboard/projects/${id}/budget`}>
-              <Wallet className="h-4 w-4 sm:mr-1" />
-              <span className="hidden sm:inline">Budget</span>
-            </Link>
-          </Button>
+            {/*
+              The Monthly Report used to be a nav entry of its own. It is a
+              RENDERING of the progress, financial, diary and instruction
+              figures on this page and elsewhere — which makes it something you
+              produce for a reporting period, not somewhere you go. So it is an
+              action on the project record. §10.3.
+            */}
+            <Button variant="outline" size="sm" asChild className="h-10 flex-1 sm:h-9 sm:flex-none">
+              <Link href={`/dashboard/projects/monthly-report?project=${id}`}>
+                <FileSpreadsheet className="mr-1.5 h-4 w-4" />
+                <span className="sm:hidden">Report</span>
+                <span className="hidden sm:inline">Monthly report</span>
+              </Link>
+            </Button>
+          </div>
         </div>
       </div>
 
       {/* Project Info Card */}
-      <Card className="p-5 sm:p-6 space-y-4">
+      <Card className="p-4 sm:p-5 space-y-4">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
             <p className="text-xs text-muted-foreground">Client</p>
@@ -783,11 +871,13 @@ export default async function ProjectDetailPage({ params, searchParams }) {
           </div>
         )}
 
-        {/* Progress — earned from the WBS where there is one, typed where
-            there is not (0071 decision 1). Saying WHICH matters: a number
-            somebody dragged a slider to and a number rolled up from measured
-            work look identical on a bar, and only one of them is evidence. */}
-        {(project.progressPercent > 0 || project.progress?.source === "tasks") && (
+        {/* Progress — MEASURED against a bill where there is one (0080),
+            earned from the WBS where there is one (0071 decision 1), typed
+            where there is neither. Saying WHICH matters: all three look
+            identical on a bar and only one of them is evidence. */}
+        {(project.progressPercent > 0 ||
+          project.progress?.source === "tasks" ||
+          project.progress?.source === "measured") && (
           <div className="pt-3 border-t space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Progress</span>
@@ -800,11 +890,15 @@ export default async function ProjectDetailPage({ params, searchParams }) {
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              {project.progress?.source === "tasks"
-                ? `Earned across ${project.progress.taskCount} task${
-                    project.progress.taskCount === 1 ? "" : "s"
-                  } — ${project.progress.doneCount} done`
-                : "Entered by hand. Add tasks and this becomes the weighted progress of the work."}
+              {project.progress?.source === "measured"
+                ? `Measured against the bill of quantities — KES ${formatCurrency(
+                    project.progress.measuredValue,
+                  )} of KES ${formatCurrency(project.progress.billedValue)}`
+                : project.progress?.source === "tasks"
+                  ? `Earned across ${project.progress.taskCount} task${
+                      project.progress.taskCount === 1 ? "" : "s"
+                    } — ${project.progress.doneCount} done`
+                  : "Entered by hand. Add tasks, or price a bill of quantities, and this becomes the progress of the work itself."}
             </p>
           </div>
         )}
@@ -825,11 +919,16 @@ export default async function ProjectDetailPage({ params, searchParams }) {
         projectId={id}
         currentStatus={project.status}
         userRole={session.user.role}
+        /* Only asked where Close is actually offered — one query, not on every
+           project page. */
+        closingBlockers={
+          project.status === "completed" ? await getProjectClosingBlockers(id) : []
+        }
       />
 
       {/* Subprojects */}
       {subprojects.length > 0 && (
-        <Card className="p-5 sm:p-6">
+        <Card className="p-4 sm:p-5">
           <h2 className="font-semibold text-lg mb-3">
             Subprojects ({subprojects.length})
           </h2>
@@ -871,6 +970,16 @@ export default async function ProjectDetailPage({ params, searchParams }) {
           </div>
         </Card>
       )}
+
+      {/*
+        WHAT THIS PROJECT STILL NEEDS — above the figures, because a job that is
+        not set up has no figures worth reading, and because this is where
+        somebody lands. It renders nothing once the steps are done, so it does
+        not become furniture on a running project.
+      */}
+      <Suspense fallback={null}>
+        <ProjectSetup projectId={id} sections={sections} />
+      </Suspense>
 
       {/* Financial Summary */}
       <Suspense
@@ -920,6 +1029,22 @@ export default async function ProjectDetailPage({ params, searchParams }) {
         }
       >
         <TeamCard projectId={id} canManage={canManageTeam} />
+      </Suspense>
+
+      {/* Time booked to the job (0089) */}
+      <Suspense
+        fallback={
+          <Card className="p-6 animate-pulse">
+            <div className="h-6 w-40 bg-muted rounded mb-4" />
+            <div className="h-20 w-full bg-muted rounded" />
+          </Card>
+        }
+      >
+        <TimesheetsCard
+          projectId={id}
+          canManage={canManageTeam}
+          readOnly={project.status === "closed"}
+        />
       </Suspense>
 
       {/* Budget vs Actual */}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { deleteWebhookSubscription, resumeWebhookSubscription } from "@/app/mongodb/actions/integration-actions";
+import { deleteWebhookSubscription, resumeWebhookSubscription } from "@/app/db/actions/integration-actions";
 import { Globe, AlertTriangle, AlertCircle, CheckCircle2 } from "lucide-react";
 
 const CONNECTOR_LABELS = {

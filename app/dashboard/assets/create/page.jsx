@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ChevronLeft, AlertTriangle } from "lucide-react";
 import { getTenantContext } from "@/lib/utils/tenant-utils";
 import AssetForm from "@/app/dashboard/assets/components/AssetForm";
+import { can } from "@/lib/capabilities";
 import {
   loadBillLineForCapitalization,
   getAssetGlAccounts,
@@ -12,7 +13,6 @@ import {
 
 export const metadata = { title: "New Asset | Fixed Assets" };
 
-const CREATE_ROLES = ["SuperAdmin", "Admin", "Accountant"];
 
 async function AssetFormLoader({ fromBillLine }) {
   const { companyId, isSuperAdmin } = await getTenantContext();
@@ -116,7 +116,7 @@ export default async function CreateAssetPage({ searchParams }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
   if (
-    !CREATE_ROLES.includes(session.user.role) &&
+    !can(session.user.role, "asset.manage") &&
     session.user.role !== "SuperAdmin"
   ) {
     redirect("/dashboard/assets");

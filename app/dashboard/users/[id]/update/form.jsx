@@ -31,18 +31,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { updateUserPg } from "@/app/db/actions/user-actions";
-import { AlertCircle, Loader2, Save, X, Mail, Building2, Check, ChevronsUpDown } from "lucide-react";
+import { AlertCircle, Loader2, Save, X, Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { userDepartments, userRolesMapping, userRoles, cn } from "@/lib/utils";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
+import { userDepartments, userRolesMapping, userRoles } from "@/lib/utils";
 import { useState } from "react";
 
 const userUpdateSchema = z.object({
@@ -51,7 +42,6 @@ const userUpdateSchema = z.object({
   role: z.enum(userRoles),
   department: z.string().optional(),
   status: z.enum(["active", "inactive"]),
-  companyId: z.string().optional(),
 });
 
 const DEPARTMENTS = userDepartments;
@@ -66,7 +56,7 @@ const getAvailableRoles = (isSuperAdmin) => {
   );
 };
 
-export function EditUserForm({ user, companies = [], isSuperAdmin = false }) {
+export function EditUserForm({ user, isSuperAdmin = false }) {
   const router = useRouter();
   const initialState = { message: "", errors: {} };
   const updateWithId = updateUserPg.bind(null, user.id);
@@ -74,8 +64,6 @@ export function EditUserForm({ user, companies = [], isSuperAdmin = false }) {
     updateWithId,
     initialState
   );
-  const [companyOpen, setCompanyOpen] = useState(false);
-  const [selectedCompanyId, setSelectedCompanyId] = useState(user.homeCompanyId || "");
 
   const availableRoles = getAvailableRoles(isSuperAdmin);
 
@@ -87,15 +75,12 @@ export function EditUserForm({ user, companies = [], isSuperAdmin = false }) {
       role: user.role,
       department: user.department || "",
       status: user.status,
-      companyId: user.homeCompanyId || "",
     },
   });
 
   const handleCancel = () => {
     router.push("/dashboard/users");
   };
-
-  const selectedCompany = companies.find((c) => c._id === selectedCompanyId);
 
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
@@ -325,85 +310,12 @@ export function EditUserForm({ user, companies = [], isSuperAdmin = false }) {
                   </div>
                 </div>
 
-                {/* Company Assignment Section - SuperAdmin only */}
-                {isSuperAdmin && companies.length > 0 && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
-                      <Building2 className="h-5 w-5" />
-                      Company Assignment
-                    </h3>
-                    <FormField
-                      control={form.control}
-                      name="companyId"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-col">
-                          <FormLabel className="text-foreground font-medium">
-                            Assign to Company
-                          </FormLabel>
-                          <input type="hidden" name="companyId" value={selectedCompanyId} />
-                          <Popover open={companyOpen} onOpenChange={setCompanyOpen}>
-                            <PopoverTrigger asChild>
-                              <FormControl>
-                                <Button
-                                  variant="outline"
-                                  role="combobox"
-                                  aria-expanded={companyOpen}
-                                  className={cn(
-                                    "w-full md:w-[400px] justify-between bg-background border-border text-foreground",
-                                    !selectedCompanyId && "text-muted-foreground"
-                                  )}
-                                >
-                                  {selectedCompany?.name || "Select a company..."}
-                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                              </FormControl>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[400px] p-0" align="start">
-                              <Command>
-                                <CommandInput placeholder="Search companies..." />
-                                <CommandList>
-                                  <CommandEmpty>No company found.</CommandEmpty>
-                                  <CommandGroup>
-                                    {companies.map((company) => (
-                                      <CommandItem
-                                        key={company._id}
-                                        value={company.name}
-                                        onSelect={() => {
-                                          const newValue = company._id === selectedCompanyId ? "" : company._id;
-                                          setSelectedCompanyId(newValue);
-                                          field.onChange(newValue);
-                                          setCompanyOpen(false);
-                                        }}
-                                      >
-                                        <Check
-                                          className={cn(
-                                            "mr-2 h-4 w-4",
-                                            selectedCompanyId === company._id
-                                              ? "opacity-100"
-                                              : "opacity-0"
-                                          )}
-                                        />
-                                        {company.name}
-                                      </CommandItem>
-                                    ))}
-                                  </CommandGroup>
-                                </CommandList>
-                              </Command>
-                            </PopoverContent>
-                          </Popover>
-                          <FormDescription className="text-xs text-muted-foreground">
-                            Select which company this user belongs to. Leave empty to unassign.
-                          </FormDescription>
-                          {state.errors?.companyId && (
-                            <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                              {state.errors.companyId[0]}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                )}
+                {/* The company PICKER that was here posted a hidden
+                    `companyId` that `updateUser` never read — it takes its
+                    companyId from withAuthorizedTenant, i.e. the switcher. So
+                    choosing a company here appeared to move the user and did
+                    nothing. Moving somebody between companies is a grant
+                    change, made from the company's access list. */}
 
                 {/* Account Status Section */}
                 <div>

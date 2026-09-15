@@ -69,6 +69,43 @@ suite("fiscal periods", () => {
       ...over,
     });
 
+  /**
+   * A period at `future`, N months either side of today.
+   *
+   * Written through the admin connection rather than an action, because
+   * `createFiscalPeriod` has no way to ask for `future` — provisioning is the
+   * only thing that creates one, and this is exactly the state those eleven
+   * rows per company sit in.
+   */
+  const makeFuturePeriod = async ({ monthsFromNow }) => {
+    const now = new Date();
+    const start = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthsFromNow, 1),
+    );
+    const end = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthsFromNow + 1, 0),
+    );
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const year = start.getUTCFullYear();
+    const month = start.getUTCMonth() + 1;
+    const code = `${year}-${String(month).padStart(2, "0")}`;
+
+    const [row] = await admin`
+      INSERT INTO fiscal_periods
+        (company_id, period_code, period_name, year, month,
+         start_date, end_date, status)
+      VALUES (${companyUuid}, ${code}, ${"Period " + code}, ${year}, ${month},
+              ${iso(start)}, ${iso(end)}, 'future')
+      RETURNING id`;
+    return row.id;
+  };
+
+  const statusOf = async (periodId) => {
+    const [row] =
+      await admin`SELECT status FROM fiscal_periods WHERE id = ${periodId}`;
+    return row?.status ?? null;
+  };
+
   beforeAll(async () => {
     admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
   });
@@ -313,6 +350,90 @@ suite("fiscal periods", () => {
       expect(stats.currentPeriod).not.toBeNull();
       expect(typeof stats.currentPeriod.name).toBe("string");
       expect(stats.currentPeriod.status).toBe("open");
+
+      /**
+       * EVERY FIELD THE CARD READS, not every field the query happens to
+       * return. This test asserted `name` and `status` and passed the whole
+       * time the fiscal periods page was throwing, because the page also reads
+       * `startDate` and `endDate` — which were not in the object.
+       * `new Date(undefined)` is an Invalid Date, date-fns throws RangeError
+       * on one, and the server component took the page to the error boundary.
+       *
+       * So: the dates are asserted, AND asserted to be readable as dates. A
+       * field that is present but unparseable fails here rather than on the
+       * screen.
+       */
+      expect(stats.currentPeriod.startDate).toBeTruthy();
+      expect(stats.currentPeriod.endDate).toBeTruthy();
+      expect(
+        Number.isNaN(new Date(stats.currentPeriod.startDate).getTime()),
+      ).toBe(false);
+      expect(
+        Number.isNaN(new Date(stats.currentPeriod.endDate).getTime()),
+      ).toBe(false);
+      expect(stats.currentPeriod.startDate).toBe(first.toISOString().slice(0, 10));
+      expect(stats.currentPeriod.endDate).toBe(last.toISOString().slice(0, 10));
+    });
+
+    /**
+     * 0106 — a period opens when it begins.
+     *
+     * Until then nothing moved a period out of `future`: provisioning opens
+     * one of twelve, and the only writers of `open` were period creation and
+     * a reopen of a CLOSED period. `closePeriod` requires `open`, so a company
+     * onboarded in January could not close any month but January, ever.
+     */
+    it("opens a future period whose start date has arrived", async () => {
+      asRole("Admin");
+      const started = await makeFuturePeriod({ monthsFromNow: -1 });
+      const notYet = await makeFuturePeriod({ monthsFromNow: 6 });
+
+      const result = await fiscal.openArrivedFiscalPeriods();
+      expect(result.opened).toBeGreaterThanOrEqual(1);
+
+      expect(await statusOf(started)).toBe("open");
+      // A month that genuinely has not started keeps its meaning.
+      expect(await statusOf(notYet)).toBe("future");
+    });
+
+    it("does not reopen a closed period, and is idempotent", async () => {
+      asRole("Admin");
+      const started = await makeFuturePeriod({ monthsFromNow: -2 });
+
+      await fiscal.openArrivedFiscalPeriods();
+      const closed = await fiscal.closeFiscalPeriod(started);
+      expect(closed.success).toBe(true);
+      expect(await statusOf(started)).toBe("closed");
+
+      // The predicate matches `future` only, so a second sweep cannot undo a
+      // month-end — which is the one way this job could do real damage.
+      const again = await fiscal.openArrivedFiscalPeriods();
+      expect(again.opened).toBe(0);
+      expect(await statusOf(started)).toBe("closed");
+    });
+
+    it("lets a manager open next month early, but never a closed one", async () => {
+      asRole("Admin");
+      const ahead = await makeFuturePeriod({ monthsFromNow: 3 });
+
+      const opened = await fiscal.openFiscalPeriod(ahead);
+      expect(opened.success).toBe(true);
+      expect(await statusOf(ahead)).toBe("open");
+
+      // Already open is not an error worth hiding, and it is not a no-op
+      // either — the caller asked for something that cannot happen.
+      const twice = await fiscal.openFiscalPeriod(ahead);
+      expect(twice.success).toBe(false);
+      expect(twice.error).toMatch(/already open/i);
+
+      // The narrow gate on reopening is the whole point: this must not be a
+      // second, wider door into a closed period.
+      const closed = await fiscal.closeFiscalPeriod(ahead);
+      expect(closed.success).toBe(true);
+      const sneak = await fiscal.openFiscalPeriod(ahead);
+      expect(sneak.success).toBe(false);
+      expect(sneak.error).toMatch(/only a period that has not been opened/i);
+      expect(await statusOf(ahead)).toBe("closed");
     });
 
     it("blocks the checklist on unposted entries", async () => {

@@ -324,6 +324,12 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
           );
           if (ok) {
             token.activeCompanyId = String(requested);
+            // Present from the first switch even if this token predates the
+            // claim, so the middleware is never deciding on `undefined`.
+            if (typeof token.companyCount !== "number") {
+              const { countUsableCompanies } = await import("@/app/db/userAdmin");
+              token.companyCount = await countUsableCompanies(String(token.id));
+            }
             // THE ROLE FOLLOWS THE COMPANY. It is per-membership since 0064, so
             // somebody who is an Accountant here and a Store Manager there must
             // not carry the first role into the second company's nav.
@@ -484,8 +490,11 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
       if (token?.id && !user) {
         if (dueForRefresh(String(token.id), token.roleRefreshedAt)) {
           try {
-            const { getUserStatusAndVersion, resolveRoleForCompany } =
-              await import("@/app/db/userAdmin");
+            const {
+              getUserStatusAndVersion,
+              resolveRoleForCompany,
+              countUsableCompanies,
+            } = await import("@/app/db/userAdmin");
 
             const dbUser = await getUserStatusAndVersion(String(token.id));
 
@@ -512,6 +521,16 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
               token.role = scoped;
               if (token.user) token.user = { ...token.user, role: scoped };
             }
+            /**
+             * HOW MANY COMPANIES THIS PERSON MAY ENTER, for proxy.ts.
+             *
+             * The middleware is the only place that can stop a page rendering,
+             * and it cannot ask Postgres. Refreshed here, beside the role, on
+             * the same cadence and in the same try — a grant added or revoked
+             * shows up within one refresh, and a stale value costs a single
+             * hop through /dashboard/select-company, never a lock-out.
+             */
+            token.companyCount = await countUsableCompanies(String(token.id));
             token.roleRefreshedAt = Date.now();
           } catch {
             // Leave the token as it is and try again on the next request.
@@ -538,6 +557,7 @@ export const { auth, signIn, signOut, handlers, unstable_update } = NextAuth({
           companyId: token.companyId,
           /** The company being operated on; distinct from the home company. */
           activeCompanyId: token.activeCompanyId ?? null,
+          companyCount: token.companyCount ?? null,
           companyCode: token.companyCode,
           companyPlan: token.companyPlan || "free",
           subscriptionStatus: token.subscriptionStatus || "active",

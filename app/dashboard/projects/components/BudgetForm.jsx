@@ -102,6 +102,11 @@ export default function BudgetForm({
   };
 
   const updateLine = (index, field, value) => {
+    // Bail when nothing changed. `[...lines]` unconditionally is a new array
+    // every call, so React re-renders even when the value is identical — which
+    // is what turned a repeating effect in the cost-code dialog into an
+    // infinite loop rather than a no-op.
+    if (lines[index]?.[field] === value) return;
     const updated = [...lines];
     updated[index] = { ...updated[index], [field]: value };
     setLines(updated);
@@ -136,8 +141,8 @@ export default function BudgetForm({
   };
 
   return (
-    <Card className="p-5 sm:p-6">
-      <div className="flex items-center justify-between mb-4">
+    <Card className="p-4 sm:p-5">
+      <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold">
           {isEdit ? `Edit Budget (v${budget.version})` : "Create New Budget"}
         </h2>

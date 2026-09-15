@@ -4,6 +4,7 @@ import { getActiveProjects } from "@/app/db/actions/project-actions";
 import { FINANCE_WRITE_ROLES } from "@/lib/utils/role-gates";
 import { getUsers } from "@/app/db/actions/user-actions";
 import { getAllCostCodes } from "@/app/db/actions/project-actions";
+import { safeReturnTo } from "@/lib/utils/return-to";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,19 @@ async function getOnBehalfOptions(role) {
   }));
 }
 
-export default async function AdvanceCreatePage() {
+/**
+ * `?projectId=` and `?returnTo=` — raising an advance FROM a project.
+ *
+ * Somebody working a job who needs cash for it had to leave the module, find
+ * My Claims, start a claim, and then pick the project they had been looking at
+ * thirty seconds earlier out of a combobox — and if they forgot that last step
+ * the money never reached the job's cost at all. The Projects module links
+ * straight here now with both the project and the way back.
+ *
+ * `returnTo` is validated, not trusted: see lib/utils/return-to.js.
+ */
+export default async function AdvanceCreatePage({ searchParams }) {
+  const sp = await searchParams;
   const session = await auth();
   const role = session?.user?.role;
   const [projects, costCodes, onBehalfOptions] = await Promise.all([
@@ -37,6 +50,8 @@ export default async function AdvanceCreatePage() {
       projects={projects}
       onBehalfOptions={onBehalfOptions}
       currentUserId={session?.user?.id || ""} costCodes={costCodes}
+      defaultProjectId={sp?.projectId || ""}
+      returnTo={safeReturnTo(sp?.returnTo)}
     />
   );
 }

@@ -10,6 +10,10 @@ export default async function ProjectListServerComp({ params }) {
   const projects = await searchProjects(query, currentPage, filters);
 
   return (
-    <ProjectListWithFilters projects={projects} currentStatus={status} />
+    <ProjectListWithFilters
+      projects={projects}
+      currentStatus={status}
+      query={query}
+    />
   );
 }

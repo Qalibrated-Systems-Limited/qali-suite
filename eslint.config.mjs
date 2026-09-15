@@ -31,7 +31,11 @@ export default defineConfig([
       // Next's automatic JSX runtime lets files use JSX without importing
       // React, but some reference `React.` directly — declare it as a global
       // so no-undef doesn't false-positive on it.
-      globals: { React: "readonly" },
+      // `FormDataEntryValue` is a TYPE-ONLY DOM lib name — it exists for tsc
+      // and never at runtime, so `no-undef` cannot see it and reports a file
+      // that typechecks clean. Declared here rather than weakening the rule,
+      // which is the one that caught the formatAddress regression.
+      globals: { React: "readonly", FormDataEntryValue: "readonly" },
     },
     rules: {
       // ── ERROR: real bugs ────────────────────────────────────────
@@ -47,6 +51,10 @@ export default defineConfig([
       // false positives on the canonical helpers; keep visible as a warning
       // until the inline gates are migrated to roleAllowed/canSee*Nav.
       "local/no-role-includes": "warn",
+      // The product/vertical boundary. ERROR, not warn: a single core import
+      // into a vertical is how a generic ERP becomes one customer's, and it is
+      // invisible in review because each one looks reasonable on its own.
+      "local/no-core-imports-vertical": "error",
       "no-unused-vars": "warn",
       "react/no-unescaped-entities": "off",
       // React-compiler purity/effect rules — valuable signal but the codebase

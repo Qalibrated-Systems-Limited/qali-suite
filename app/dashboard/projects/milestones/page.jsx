@@ -1,193 +1,132 @@
 import {
-  getProjectTasks,
-  getProjectProgress,
+  getProjectMilestones,
+  getProjectMainContract,
 } from "@/app/db/actions/project-actions";
 import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
 import AccessDenied from "../components/AccessDenied";
-import { Card } from "@/components/ui/card";
+import SectionNotForType from "../components/SectionNotForType";
+import MilestoneRegister from "../components/MilestoneRegister";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import {
-  CheckCircle2,
-  CircleDot,
-  Circle,
-  AlertTriangle,
-  XCircle,
-  ArrowUpRight,
-} from "lucide-react";
+import { Info } from "lucide-react";
+import { hasRole, PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
 
 export const metadata = {
-  title: "Milestone Tracker | Projects",
-  description: "Track a project's work breakdown and milestone progress",
+  title: "Milestones | Projects",
+  description: "The stages this project is valued and paid against",
 };
 
-// Same task-status vocabulary as project_task_status in app/db/schema/enums.ts.
-const STATUS_CONFIG = {
-  todo: { label: "Not started", icon: Circle, color: "text-muted-foreground", bar: "bg-muted-foreground/40" },
-  in_progress: { label: "In progress", icon: CircleDot, color: "text-yellow-600 dark:text-yellow-400", bar: "bg-yellow-500" },
-  blocked: { label: "Blocked", icon: AlertTriangle, color: "text-red-600 dark:text-red-400", bar: "bg-red-500" },
-  done: { label: "Done", icon: CheckCircle2, color: "text-emerald-600 dark:text-emerald-400", bar: "bg-emerald-500" },
-  cancelled: { label: "Cancelled", icon: XCircle, color: "text-muted-foreground", bar: "bg-muted-foreground/30" },
-};
-
-function formatDate(date) {
-  if (!date) return "—";
-  return new Date(date).toLocaleDateString("en-KE", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function StatCard({ label, value, sub, tone }) {
-  return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-      <p className={`text-2xl font-bold mt-1 ${tone || "text-foreground"}`}>{value}</p>
-      {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
-    </div>
-  );
-}
-
+/**
+ * The milestone schedule, with a section of its own again.
+ *
+ * ── Why it was folded away, and why that reason expired ────────────────────
+ *
+ * §10.3 cut "Milestone Tracker" from the navigation on a rule the module still
+ * keeps — a nav entry must own records — and at the time it owned none: the
+ * page was a second view of `project_tasks` and showed no milestones, because
+ * there was no milestone table. **0093 built one.** The cut was right when it
+ * was made and is wrong now, which is the only kind of decision worth
+ * revisiting.
+ *
+ * It is also the MD's own view: `QaliTrack_PMS` lists "Milestone tracker"
+ * second in its sidebar, and on an INSTALLATION contract it is the whole
+ * valuation method — no bill to remeasure, just stages each worth an agreed
+ * part of the sum.
+ *
+ * ── Two doors to one register, on purpose ──────────────────────────────────
+ *
+ * The same `MilestoneRegister` still renders on IPC & Payments, above the
+ * variations, "in the order the money moves" — that is where you CONSULT the
+ * schedule, with the certificate you are about to issue in front of you. This
+ * is where you BUILD and maintain it. Same component, same records, same
+ * revalidation; there is no second copy of anything to drift.
+ *
+ * ── Gated on `certificates`, and no migration for it ───────────────────────
+ *
+ * `project_types` has no `shows_milestones` column and does not need one: a
+ * milestone exists to be valued and to release retention, both of which happen
+ * on a certificate. A project type with nothing to certify has no stages to
+ * bill, so the section follows the flag that already answers that question.
+ */
 export default async function MilestonesPage({ searchParams }) {
   const sp = await searchParams;
-  const ctx = await getWorkspaceContext(sp);
+  const ctx = await getWorkspaceContext(sp, { section: "milestones" });
   if (ctx.denied) return <AccessDenied />;
-
-  const { projects, project } = ctx;
-
-  if (!project) {
+  if (ctx.hidden) {
     return (
-      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
-        <WorkspaceHeader
-          title="Milestone Tracker"
-          description="The work breakdown and progress for a single project."
-          project={null}
-          projects={projects}
+      <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
+        <SectionNotForType
+          section="Milestones"
+          project={ctx.project}
+          typeName={ctx.typeName}
         />
-        <NoProjectsCard />
       </div>
     );
   }
 
-  const [tasks, progress] = await Promise.all([
-    getProjectTasks(project.id),
-    getProjectProgress(project.id),
-  ]);
+  const { projects, project, user } = ctx;
 
-  const counts = tasks.reduce(
-    (acc, t) => {
-      acc[t.status] = (acc[t.status] || 0) + 1;
-      return acc;
-    },
-    { todo: 0, in_progress: 0, blocked: 0, done: 0, cancelled: 0 },
-  );
+  const [milestoneData, contract] = project
+    ? await Promise.all([
+        getProjectMilestones(project.id),
+        getProjectMainContract(project.id),
+      ])
+    : [null, null];
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       <WorkspaceHeader
-        title="Milestone Tracker"
-        description="The work breakdown and progress for a single project."
+        title="Milestones"
+        description="The stages this project is valued and paid against, and what each releases from retention."
         project={project}
         projects={projects}
       />
 
-      {/* Overall progress */}
-      <Card className="p-5 sm:p-6">
-        <div className="flex items-center justify-between text-sm mb-2">
-          <span className="text-muted-foreground">
-            Overall progress
-            {progress?.source === "tasks" && (
-              <span className="ml-1.5">
-                — earned from {progress.taskCount} task{progress.taskCount === 1 ? "" : "s"}
-              </span>
-            )}
-          </span>
-          <span className="font-semibold text-foreground">{progress?.percent ?? 0}%</span>
-        </div>
-        <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden">
-          <div
-            className="h-full rounded-full bg-yellow-500 transition-all"
-            style={{ width: `${Math.min(progress?.percent ?? 0, 100)}%` }}
-          />
-        </div>
-      </Card>
+      {!project && (
+        <NoProjectsCard
+          notFound={ctx.notFound}
+          unselected={ctx.unselected}
+          requestedId={sp?.project}
+        />
+      )}
 
-      {/* Status breakdown */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <StatCard label="Total items" value={tasks.length} />
-        <StatCard label="Not started" value={counts.todo} />
-        <StatCard label="In progress" value={counts.in_progress} tone="text-yellow-600 dark:text-yellow-400" />
-        <StatCard label="Blocked" value={counts.blocked} tone="text-red-600 dark:text-red-400" />
-        <StatCard label="Done" value={counts.done} tone="text-emerald-600 dark:text-emerald-400" />
-      </div>
+      {/*
+        A SCHEDULE NEEDS TERMS TO MEAN ANYTHING, and saying so beats rendering
+        an empty register: a stage's value is checked against the contract sum
+        and its release is a percentage OF the retention held, so without a
+        contract there is nothing for either number to be a proportion of.
+      */}
+      {project && !contract && (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              This project has no contract yet. Milestones are valued against
+              the contract sum and release a share of the retention it holds, so
+              enter the terms first.
+            </span>
+            <Button asChild size="sm" variant="outline" className="shrink-0">
+              <Link href={`/dashboard/projects/ipc?project=${project.id}`}>
+                Enter the terms
+              </Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
-      {/* Work breakdown / milestone list */}
-      <Card className="p-5 sm:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-lg">Work breakdown &amp; milestones</h2>
-          <Link
-            href={`/dashboard/projects/${project.id}`}
-            className="text-sm text-primary hover:underline inline-flex items-center gap-1"
-          >
-            Manage tasks
-            <ArrowUpRight className="h-3.5 w-3.5" />
-          </Link>
-        </div>
-
-        {tasks.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-10">
-            No tasks or milestones logged for this project yet.{" "}
-            <Link href={`/dashboard/projects/${project.id}`} className="text-primary hover:underline">
-              Add the first one
-            </Link>
-            .
-          </p>
-        ) : (
-          <div className="space-y-1">
-            {tasks.map((t) => {
-              const cfg = STATUS_CONFIG[t.status] || STATUS_CONFIG.todo;
-              const StatusIcon = cfg.icon;
-              const isSummary = t.childCount > 0;
-              return (
-                <div
-                  key={t.id}
-                  className="flex items-center gap-3 py-2.5 border-b last:border-0"
-                  style={{ paddingLeft: `${Math.min(t.depth, 4) * 20}px` }}
-                >
-                  <StatusIcon className={`h-4 w-4 shrink-0 ${cfg.color}`} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-sm truncate ${isSummary ? "font-semibold" : "font-medium"}`}>
-                        {t.title}
-                      </span>
-                      {t.assignedName && (
-                        <span className="text-xs text-muted-foreground">— {t.assignedName}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
-                      <span>{cfg.label}</span>
-                      {t.plannedEnd && <span>Target: {formatDate(t.plannedEnd)}</span>}
-                    </div>
-                  </div>
-                  <div className="hidden sm:flex items-center gap-2 shrink-0 w-32">
-                    <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${cfg.bar}`}
-                        style={{ width: `${Math.min(t.rolledUpProgress ?? t.progressPercent ?? 0, 100)}%` }}
-                      />
-                    </div>
-                    <span className="text-xs font-mono text-muted-foreground w-9 text-right">
-                      {Math.round(t.rolledUpProgress ?? t.progressPercent ?? 0)}%
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
+      {project && contract && (
+        <MilestoneRegister
+          projectId={project.id}
+          contract={contract}
+          milestones={milestoneData?.milestones ?? []}
+          summary={milestoneData?.summary ?? null}
+          canManage={hasRole(user, PROJECT_MANAGE_ROLES)}
+          readOnly={project.status === "closed"}
+        />
+      )}
     </div>
   );
 }

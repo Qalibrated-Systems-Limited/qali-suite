@@ -20,8 +20,13 @@ A module is **on Postgres** when no screen in it imports `@/app/mongodb`.
 |---|---|
 | **stocks/products**, **dashboard**, statements, supplier-statements, payments, hr, **claims**, assets, **expenses**, petty-cash, credit-notes, checkout, categories, users, accounts (incl. opening balances), invoices, bills, parties, requests, journal, quotes, purchase-orders, **fiscal periods**, **projects**, **tax**, **the platform/SuperAdmin dashboard** | integrations 10, banking 8, kpis 7, components 5, leads 4, employee 4, settings 3, sales-orders 3, profile 3, opportunities 3, admin 3, assets 2, approvals 2, reports 1, quotes 1, parties 1, executive 1, company 1, adjustments 1 |
 
-Counted 2026-08-29, after tax (§9O):
-**63 screen files, 19 modules** — down from 105 across 27.
+Counted 2026-08-31, after profile:
+**59 screen files, 18 modules** — down from 105 across 27.
+
+**BANKING STAYS ON MONGO BY DECISION**, not by oversight. It is a ~3,900-line
+vertical whose service posts payment-received and payment-made entries to the
+ledger, and it is not currently broken — it reads the store it still writes. A
+half-port of it would be §9L again. See the 2026-08-31 handoff.
 
 **`tax` was a HALF-PORT, not a greenfield one**, and that is the shape to expect
 from here on. `tax_transactions` shipped in 0018/0019 and invoices and bills
@@ -731,6 +736,578 @@ and makes every policy in the schema inert. `SELECT assert_rls_effective()`
 raises if the current connection would bypass RLS — worth a health check.
 
 ---
+
+## Adding a migration — the numbering rule, and why it changed
+
+**New migrations are named `YYYYMMDDHHMM_descriptive_name.sql`.** The existing
+`0000`–`0105` keep their names; nothing is renamed, because drizzle does not
+read filenames at all.
+
+### The one fact everything here follows from
+
+> **Drizzle decides what to run from the journal's `when`, and nothing else.**
+
+`drizzle-orm/pg-core/dialect` selects the newest `created_at` from
+`drizzle.__drizzle_migrations` and applies a migration only when
+`lastDbMigration.created_at < migration.folderMillis`. Filenames and `idx` are
+cosmetic. The recorded hash is written and **never compared**, so editing a
+migration that has already run is silently ignored too.
+
+Two consequences worth holding on to:
+
+- **Renaming a migration is safe.** It changes nothing about what runs. Nobody
+  loses work when a merge renumbers files.
+- **A migration introduced BELOW a database's high-water mark never runs
+  there.** Not an error — `db:migrate` prints `✓ Migrations applied` and the
+  objects are simply absent.
+
+### It has now bitten twice
+
+| | what happened | what would have been missing |
+|---|---|---|
+| 2026-09-01 | Both branches appended `+1000` to the same `when` from 0075, so four timestamps collided exactly | `workflow_reports`, `calibration_jobs`, `inspections`, the sheet-code ALTER |
+| 2026-09-09 | A branch inserted helpdesk/hse at 0089/0090 with `when` **below** our 0103, and git merged it with **no conflict** — the renames were 100% similarity | all twelve help-desk and HSE tables |
+
+Sequential integers picked at authoring time are the common cause: two people
+on two branches inevitably choose the same next number, and the fix each of
+them applies locally is invisible to the other.
+
+### So: timestamps for new migrations
+
+```
+app/db/migrations/
+  0105_hse.sql                    ← legacy, untouched
+  202609091530_helpdesk_sla.sql   ← new form
+```
+
+Two people cannot collide, the filename sorts in apply order, and `when` is the
+same instant the name records. Legacy `NNNN_` names sort before every timestamp
+(`'0' < '2'`), so the directory still reads in order.
+
+Set the journal's `when` to that same timestamp in epoch milliseconds, and make
+sure it is greater than the last entry — which is what `drizzle-kit generate`
+does by itself.
+
+### The guard
+
+`npm run check:migrations` (CI runs it **before** the migrator) fails on:
+
+- `when` going backwards, or two entries sharing one — the two incidents above
+- a `.sql` file the journal does not list, or a journal tag with no file
+- duplicate `idx`, the fingerprint of a merge that took both sides' numbering
+- filename order diverging from journal order
+- a legacy 4-digit name added after the timestamp form
+
+It runs before `db:migrate` deliberately: this is the failure class the migrator
+*cannot* report, and CI's database is always empty — where both incidents would
+have passed.
+
+### Merging a branch that renumbered migrations
+
+Keep this branch's numbering, take theirs on the end, and **re-stamp their
+`when` above the high-water mark**. Discard their renamed copies of migrations
+that already exist here after confirming the content is identical. Check the
+reverse direction too: every migration of ours they lack must sit above *their*
+high-water mark, or it will be skipped on their databases.
+
+---
+
+## Handoff — 2026-09-01/02 — the merge, the boundary, and the projects module growing up
+
+No module ported until the very end. This was the day the branch stopped being
+one person's, and the day the projects module acquired the things a contractor
+actually bills with.
+
+### The merge, and the collision that would have been silent
+
+`qsl/feat/postgres-migration` had moved eight commits — a colleague's Technical
+module: QSL sheet forms, a registry, ISO 17025 calibration and ISO 17020
+inspection, plus `ImportProgramme`. This branch had moved eight of its own.
+
+**The dangerous part was not the filenames.** Both sides numbered migrations
+0076–0079, which git merges happily because the names differ. But both also
+appended `+1000` to the same `when` value from 0075, so the four TIMESTAMPS
+collided exactly — and drizzle applies a migration only when its journal `when`
+exceeds the newest `created_at` in the database. A naive merge would have left
+`workflow_reports`, `calibration_jobs`, `inspections` and the sheet-code ALTER
+silently never applied to any database that had already run ours. Not an error:
+four missing objects and a green "✓ Migrations applied".
+
+Theirs kept 0076–0079; ours renumbered to 0080–0084. 78 stale cross-references
+in 27 files, rewritten in ONE pass — sequentially would have chained
+0076 → 0080 → 0084.
+
+One casualty of that sweep, caught and reverted: `enums.ts` now holds both
+sides, so the blanket rewrite also renumbered THEIR comment about THEIR
+migrations.
+
+### The module boundary
+
+The repo now holds general ERP modules and an industry module side by side.
+`lib/modules.mjs` declares the tiers; `local/no-core-imports-vertical` enforces
+the one rule that matters — **a vertical may import from core, core may never
+import from a vertical**. Wired as an ERROR, because a single crossing import is
+invisible in review.
+
+**The rule was proven, not assumed.** The first version matched nothing: the
+manifest lists paths with extensions and an import names a module without one.
+It linted clean and would have shipped as a guard that guards nothing.
+
+A build with the industry modules stripped is derivable from the manifest at any
+time, which is the point of declaring them: it is regenerated rather than
+maintained as a second line. `merge -s ours` records it as an ancestor so a
+future merge never replays its deletions.
+
+### What the projects module gained
+
+- **0080 bill of quantities** — measured progress; `progress.source` gains
+  `measured`, above `tasks` and `typed`.
+- **0081 contracts and certificates** — cumulative arithmetic, so a correction
+  to certificate 2 flows into 3 by itself. Certifying raises a draft invoice.
+- **0082/0083 project types** — a LOOKUP TABLE, not an enum, gating which
+  sections a project shows. Nav AND page, because hiding a link is a sign on an
+  unlocked door.
+- **0084 the project as a ledger dimension** — `journal_lines.project_id`,
+  stamped by six posting paths and, for the first time, by a manual journal.
+- **0085/0086 project cost reaches the ledger** — see below.
+
+### Two ledger holes closed, and the reasoning both times
+
+**Stock issued to a job posted NOTHING**, while a bill for an inventory purchase
+DEBITS Inventory. Inventory was overstated by every item ever issued to a
+project. Now `DR 5410 Project Materials / CR 1130 Inventory`, one entry per
+fulfilment. Returnable issues — demo, repair, loan — are deliberately excluded:
+that stock is coming back.
+
+`5410` already existed and simply had no `system_account` handle. `1125
+Retention Receivable` is new — NOT 1250, which the plan claimed was free and is
+Computer Equipment.
+
+**A certificate invoiced the NET.** Wrong twice: revenue understated by the
+retention every month, and — the one that matters — **VAT charged on the net**,
+when tax is due on the value of the SUPPLY. Every certificate on every retaining
+job under-declared output VAT. Now the invoice is the gross and completing it
+posts `DR Retention Receivable / CR Accounts Receivable`.
+
+### The navigation, which was wrong in four ways
+
+Reported as "I always see the first project", and it was worse than that:
+
+1. `selectProject` returned `projects[0]` when nothing was chosen — so arriving
+   from the dashboard put you on a job you never picked, under the right title.
+   It now ASKS, unless there is exactly one project.
+2. The switcher set `?project=` and nothing carried it — not the nav links, not
+   the sidebar. A choice survived one click. The switcher now also writes a
+   cookie, which the server reads when the URL is silent.
+3. A project URL is a project context: the nav reads the id out of
+   `/dashboard/projects/<id>`.
+4. Sections now appear only once there is a project.
+
+### And a React loop worth remembering
+
+Creating a cost code from the budget form: "Maximum update depth exceeded".
+Three links, none wrong alone — an effect keyed on `[state, onCreated]`, an
+inline arrow so `onCreated` is new every render, and `updateLine` building
+`[...lines]` unconditionally so it never bails.
+
+**An action succeeding is an EVENT, not a derived value.** It now fires once per
+created id, held in a ref — correct however the caller declares its callback,
+which is the property worth having. Two more of the same shape were guarded;
+two outside this module were left alone and noted.
+
+### And then three things that made the module usable rather than correct
+
+Written after the section above, which is why they read as an afterthought and
+are not one — the module was CORRECT before them and still took a day of typing
+to start a job.
+
+**A bill of quantities imports from a spreadsheet.** The largest friction left,
+and not a convenience problem: a priced bill arrives as a spreadsheet and a
+three-hundred-line one was going to be typed by hand, so it would not be, and a
+project with no bill has no measured progress, no earned value and nothing for a
+certificate to value against. The whole measured half sat behind a day of
+typing. Same control and wording as the colleague's programme import, so the two
+read as one feature. It handles what a REAL bill contains — narrative lines with
+no quantity land as unpriced headings rather than being dropped, thousands
+separators and currency symbols survive, and a blank section carries forward the
+way a printed bill writes its heading once. It refuses an awarded bill, because
+frozen rates are what make a final account answerable.
+
+The two spreadsheet readers moved to `lib/spreadsheet.js`, extracted UNCHANGED —
+a `"use server"` file can only export async functions, so the helpers could not
+be shared from where they were.
+
+**The project record says what is still to set up.** Six unguided screens was the
+loudest complaint about running a job. The card lists what is outstanding, why
+each matters, and where to do it, offering the first outstanding step as one
+obvious action. It disappears when done — a checklist that stays forever becomes
+furniture — and asks only for what the project's TYPE says exists, so a supply
+job is never asked to price a bill.
+
+**Retention releases.** Holding was built and releasing was not, so the balance
+accrued and nothing gave it back. Certifying a release now posts
+`DR Accounts Receivable / CR Retention Receivable`.
+
+It posts at CERTIFICATION while the hold posts at INVOICE COMPLETION, and the
+asymmetry is the point: the hold needs the receivable the invoice creates, the
+release moves one that already exists — and a certificate that only releases
+retention certifies no new work, raises no invoice, and would otherwise be
+stranded. A release is not a supply; the revenue was recognised and the VAT
+charged when the work was certified.
+
+0087 makes a certificate a SOURCE DOCUMENT. The first attempt claimed
+`source_type = 'invoice'` with an `invoice_id` that is null on a release-only
+certificate, and `journal_entries_source_pair` refused it — a source type with
+no id is a provenance nobody can follow. Naming the certificate is also the
+truthful answer.
+
+**What is still not there: the release SCHEDULE.** Half at taking-over and the
+rest at the end of the defects period needs milestones, which are not a table.
+The mechanism is complete; the calendar is not.
+
+### Still open, and none of it is the porter's to settle
+
+- **When retention releases** — the balance accrues; the schedule is a contract
+  term tied to taking-over and the defects period.
+- **Labour on a project** — timesheets remain the missing join to payroll.
+  `project_assignments` holds a rate nothing multiplies by anything, and
+  attendance cannot be trusted for field staff who never clock in.
+
+  The SHAPE is decided: an entry records a quantity and a unit (hour or day),
+  and cost is DERIVED through the assignment's own `rate_unit`. Conversion is
+  configuration, not code — `attendance_config.standard_hours` exists already
+  and a `working_days_per_month` does not. A `fixed` assignment yields no
+  timesheet cost at all: it is a lump sum, closer to a milestone. And the
+  timesheet does NOT post — labour reaches the ledger through payroll once,
+  where the statutory deductions are. Entry belongs on the project record,
+  beside the roster whose rate gives it meaning.
+- **Nothing.** Both remotes are current as of this handoff.
+
+### Where the count is
+
+**57 screen files, 17 modules**, from 59 across 18. Only `assets` came off — and
+it came off without a line of logic changing, because both its files already
+read Postgres exclusively and one still opened a Mongo connection it never used,
+four lines above a comment saying "POSTGRES".
+
+That is the global search's lesson pointing the other way: **a module count
+measures which path a file imports, not which store it reads, and it is wrong in
+both directions.** Worth checking the remaining 57 for the same thing before
+assuming any of them is real work. `executive` and `reports` are one file each
+and read query modules whose collections have already moved.
+
+## Handoff — 2026-08-31 — sessions, the bell, profile, cost codes, and a colleague's module
+
+Twelve commits and one merge. No single module port — this was the day the
+things that had been written down but never wired got connected, plus the first
+merge of somebody else's work into this branch.
+
+### The three that were silently broken, in order of how much they mattered
+
+**A ROLE CHANGE REACHED NOTHING.** `token.role` was written at sign-in and never
+again, and the session lives eight hours — so a demotion never reached
+`session.user.role`, which is what every nav gate and page guard reads.
+`adminUpdateUser` bumps `token_version` precisely to kill those sessions, but
+the only thing that compares it, `requireFreshSession`, is called from two
+legacy Mongo action files and from nothing on the Postgres path, no page and no
+layout. **The revocation was being written and never read.**
+
+The note in auth.ts said periodic refresh was removed because "edge runtime
+can't reliably connect to MongoDB". That reason expired with 0036.
+
+Scope of the exposure, stated precisely because it is narrower than it sounds:
+server ACTIONS were never affected — `withAuthorizedTenant` re-checks the
+allow-list against the GRANT's role, so a demoted user could not mutate
+anything. Page and nav access trusted the stale claim.
+
+The jwt callback now re-reads status, token_version and the per-company role;
+returning null clears the cookie (`@auth/core` session.js:
+`if (token !== null) … else sessionStore.clean()`). It FAILS OPEN on a database
+error — a transient outage must not sign out the whole company.
+
+The throttle is an in-process map, not a token field. **A Server Component
+cannot set cookies**, so a stamp written during an RSC render is never persisted
+and "once a minute" becomes once per `auth()` call, several times a page.
+
+**NOBODY COULD CHANGE THEIR OWN PASSWORD.** `profile-actions.js` read
+`user.password` from Mongo and saved the new one there; sign-in compares against
+the Postgres `password_hash` (auth.ts:133). So a password change either failed
+with "User not found" or appeared to work and left the person signing in with
+the old one for ever — on a form that said it had worked. `updateProfile` was
+the same shape: `findByIdAndUpdate` against a collection nothing reads.
+
+**EVERY APPROVAL NOTIFIED NOBODY.** `lib/notifications/approval-notify.js` read
+the Mongo `User` collection to decide who to tell. Users moved in 0036, so
+`User.find({ companyId, role: { $in: roles } })` had matched nothing since —
+silently, because that file swallows its own errors by design so a mail failure
+cannot fail an approval.
+
+### 0074 — the bell, and a TTL that Postgres does not have
+
+Reported from the running app, logging on every dashboard render: "No legacy
+Mongo id for company 4d6ab761-…". The bell scoped itself by translating the
+active company's uuid BACK to an ObjectId, and a company created after the
+migration has none. `cMyNotifications` swallows its own errors, so it was a log
+line and an always-empty bell rather than a crash.
+
+Three things the schema does that Mongo did not:
+
+- **the recipient is in the WHERE of markRead**, not just the company. RLS
+  scopes to the tenant, which is not the same as scoping to the reader — without
+  it any colleague could clear another's bell by id.
+- **href must be app-relative, by CHECK.** It becomes a link the recipient
+  clicks; this stops a future writer turning the bell into an open redirect.
+- **the 90-day TTL index has no Postgres equivalent**, so the sweep is
+  `/api/cron/prune-notifications` on the existing per-tenant cron pattern.
+  Porting the table alone would have dropped self-cleaning silently.
+
+And one that is not the schema: **no session is not an error.** The layout's
+`user && …` guard short-circuits, so a signed-out render reaches the bell.
+
+### The UI pass, and a bug I shipped in it
+
+The users stats cards showed nothing: `getUserStats` returns
+`{ total, active, inactive, admins }` and the page read `stats.totalUsers`,
+`activeUsers`, `inactiveUsers`, `adminCount` — names that have never existed on
+it. The same class as the KRA tiles: four figures rendering `undefined`, which
+React prints as nothing.
+
+The layout answer was already in the codebase. The stock page's
+`StockMetricsBar` is one inline line where every figure that names a subset is a
+clickable filter, with a note arguing that four 140px cards put 300px between
+the heading and the first row. That became `components/metric-bar.jsx` and the
+competing component this session had introduced was deleted. **One pattern, and
+it is the one the codebase had already reasoned its way to.**
+
+**THEN THE HEADER SWEEP SHIPPED A BUG.** 41 page titles were resized by
+replacing a list of class variants — and the list put `text-3xl font-bold`
+FIRST, which is a substring of `text-2xl sm:text-3xl font-bold`. It matched
+inside the longer variants and left `text-2xl sm:text-xl sm:text-2xl` in 18
+files, which Tailwind resolves to text-2xl at every width: the titles came out
+BIGGER on mobile than before the sweep. Ordering longest-first would have
+avoided it; asserting the result would have caught it. Neither lint nor tsc can
+see a class name. Found by chance while reading a projects file, after it was
+already pushed.
+
+### Cost codes got their other half
+
+0073 put cost codes in front of the budget and named the hole in its own
+handoff: "matching by cost code is where this goes when the claims, bills and
+expense forms actually SET one — nothing does today". Nothing did.
+
+Most of it already existed, which is this port's recurring lesson: all four
+tables had `cost_code_id`, three repositories already accepted it, and the
+EXPENSE validation already parsed and mapped it. **The gap was the action layer
+and the field.** The picker only appears once a project is chosen, because a
+cost code with no project has nothing to roll up to.
+
+The create affordance 0073 removed came back GATED rather than absent. That
+decision was about WHO may define a code, not about where: an accountant
+part-way through a budget had to abandon the form — losing every line typed — to
+add one. `canCreate` is the same FINANCE_WRITE_ROLES check the cost codes page
+uses, so a Manager still sees no button.
+
+### The merge — and reviewing before, not after
+
+`feat/projects-module-dropdown` (Zawadi): two new tables, a project-scoped
+workspace, eight sections, 3,787 lines. It branched directly off this branch's
+tip, so no divergence.
+
+Reviewed in an isolated worktree BEFORE merging: tsc and eslint clean, and
+migration 0075 verified to apply — both tables landing with RLS enabled AND
+forced, tenant_isolation, and correct app_user grants. It follows the house
+conventions: RLS-only scoping, drizzle query builder, none of the traps this
+port has been bitten by.
+
+Four findings, three fixed here and one left deliberately:
+
+1. **No tests** for a migration, two tables and 14 repository functions. Written
+   — 17 of them — and they pin the CONSTRAINTS directly, with an UPDATE fired
+   at the table rather than through the repository, so what is proven is the
+   database's refusal and not the repository's care. **All 17 passed first
+   time: the module was sound, it was untested, and those are different
+   things.**
+2. **`getInstructionById` / `getDiaryEntryById` took a bare id to a uuid
+   column** — the pattern guarded in 22 other detail getters the same day.
+   `isUuid` was on their own base commit.
+3. **Two byte-identical admin scripts** differing by one comment.
+4. **IPC and Cash Requisitions are two nav entries running the identical pair
+   of queries**, each with a banner admitting it is not the document its name
+   implies. NOT fixed: that is a product decision, not a review finding.
+
+### Two defects found in the merged workspace afterwards
+
+`getWorkspaceContext` resolves the project for all eight pages, and had both.
+
+**Finished jobs were unreachable.** The switcher listed `getActiveProjects()` —
+`status IN ('planning','active')`. Right for a picker on a new invoice; wrong
+here, and wrong in the direction that matters. A site diary and an instruction
+register are read MOST after completion — the final account, a dispute. FIDIC
+claims are argued from the diary years later.
+
+**And a bookmark showed a different project.** `?project=` was honoured only
+when the id appeared in that filtered list; otherwise it fell through to
+`projects[0]` SILENTLY. A saved link to a completed job's diary opened another
+project's diary, with the right page title and the wrong records. **A wrong
+answer that looks right is worse than an empty one.**
+
+Writing the tests for that found a third thing: 0070 enforces the project status
+machine in the database, so a fixture cannot jump planning → completed. The
+trigger refused the shortcut, which is the guard working.
+
+### What this day says about the sweeps
+
+Three separate scripted sweeps landed this session — 47 ILIKE patterns, 22 uuid
+guards, 41 page headers — and **the one that had no assertion is the one that
+shipped a bug**. The other two asserted their target existed before replacing
+it and were clean. `feedback_assert_before_replace` exists for this and was
+followed twice out of three times.
+
+### Where the count is
+
+**59 screen files, 18 modules.** `profile` went to zero. Banking stays on Mongo
+by an explicit decision — it is a ~3,900-line vertical that posts to the ledger,
+and a half-port would be the credit-note failure again.
+
+### Later the same day — the projects module read a shape it does not return
+
+No migration. A correctness pass over the whole Projects module, and every
+finding is the same class as the users stats cards above: **a key that has
+never existed, rendered as nothing.**
+
+**THE LINKED-TRANSACTION LISTS WERE WRITTEN AGAINST MONGO.** Three screens
+render the rows `getProjectTransactions` returns — the project detail page's
+Linked Transactions card, IPC & Payments and Cash Requisitions — and all three
+read a nested party off a flat row:
+
+| the screen read | the repository returns |
+|---|---|
+| `inv.customer.name` | `customerName` |
+| `bill.vendor.name` | `vendorName` |
+| `claim.employee.name` | `employeeName` |
+| `req.requester.name` | `requesterName` |
+| `bill.amounts.netPayable ?? bill.amounts.total` | `netPayable`, `total` |
+
+Nothing threw. Every party name rendered blank, and
+`formatCurrency(undefined || 0)` is a confident zero — **every supplier bill on
+all three screens showed KES 0.** A project with 4m of bills against it read as
+having none, on the page a project manager checks the spend on.
+
+The part worth carrying forward: **the test suite already disagreed with the
+screen and nothing compared them.** `tests/pg-projects.test.mjs` pinned
+`employeeName` on the claims arm, three lines from a screen reading
+`claim.employee.name`, and both were green. A test that pins the repository's
+answer proves the query; it says nothing about whether the caller can read it.
+The shape is now pinned with the nested forms asserted ABSENT, which is what
+stops the next port of a Mongo list bringing one back.
+
+**AND CASH REQUISITIONS RENDERED NaN.** It is the one page that sums two of
+these lists in JavaScript, and `employee_claims.total_amount` and
+`expenses.total` are `numeric(19,4)` read in drizzle's string mode — so
+`0 + "1500.0000"` CONCATENATES. One claim and one expense came out as
+`"01500.00002000.0000"`, which `Intl.NumberFormat` renders as NaN. The
+repository contract is money-as-string and it is right; the page has to coerce,
+and now does. Pinned as a type in the suite rather than "fixed" in the
+repository.
+
+**A FLAG WRITTEN AND NEVER READ — again.** `getWorkspaceContext` computed
+`notFound` for a `?project=` naming a project the tenant does not have, and
+left the silent `?? projects[0]` fallback in place beside it. No page read the
+flag. So the defect the earlier commit describes — a bookmarked link to a
+completed job's diary opening a DIFFERENT project's diary under the right page
+title — was still live, now with a correct diagnosis sitting unread next to it.
+Same shape as `token_version` this morning. The fallback is gone, the eight
+pages render the flag, and `getWorkspaceContext` has its own test file.
+
+**The id is now checked against the tenant's own list**, not with a second
+`getProjectById` round trip. `listProjectsForWorkspace` is unfiltered — RLS
+scopes it and nothing else does — so membership in it IS the question, answered
+by a list the page has already paid for.
+
+**And the Forms Register was paying for a financial aggregation.**
+`getWorkspaceContext` called `getProjectById` for all eight pages, which runs
+the live actuals, the effective budget and the WBS roll-up. Six of the eight
+read nothing that is not already on the switcher row; the Forms Register is a
+static reference table. `detail` is now opt-in, and only IPC & Payments
+(`contractValue`) and Programme (`startDate`/`endDate`) ask for it.
+
+**The programme clipped its own overruns.** The timeline range took
+`project.startDate`/`endDate` whenever they existed, so a task planned outside
+the contract dates was pinned to an edge by the width clamp: a task running
+three months late drew the same bar as one finishing on time — on the page an
+EOT is argued from. The range now spans the contract dates AND the programme.
+
+None of this touches the two pages' open product question. **IPC and Cash
+Requisitions still run the identical query under two names** and that is still
+§7's blocking decision 1, for the author to settle. What changed is that both
+now show the right numbers while it is settled.
+
+### 0080 — the bill of quantities, and progress that is a measurement
+
+The same day again, and the first migration since the merge. §8 of
+`PROJECTS-QALITRACK-PLAN.md` answered §6.4 — there IS a bill of quantities — and
+this builds it: `project_boqs`, `project_boq_items`, `project_boq_measurements`,
+the repository, the actions, a page, and 35 tests.
+
+**What it finishes.** 0071 replaced a typed percentage with a weighted roll-up
+of tasks and was honest about it: `progress.source` returned `tasks` or `typed`.
+But every leaf percentage in that tree was still typed by a person, so a roll-up
+of tasks is a careful OPINION. `source` now has a third value, `measured`, and
+it outranks the other two: 8 of 20 km of subbase laid is 40% because 8 km was
+measured against a rate.
+
+It also supplies the one figure §7's certificate arithmetic did not have — work
+done to date, for a measured valuation.
+
+**Three tables, where the plan said two.** The bill-level facts — the method of
+measurement, which version is awarded, what freezing means — have nowhere to
+live in the items. The precedent was already in the module:
+`project_budgets` / `project_budget_lines`, versioned, one live at a time, lines
+frozen once signed. A bill of quantities is that shape with quantities, so it
+follows it, including the partial unique index that stops two racing awards
+rather than a check-then-write.
+
+**The decisions that are not obvious, and why:**
+
+- **Only a LEAF is priced.** A section takes its amount from what is under it. A
+  priced parent with priced children is double-counted in the bill total and the
+  row cannot say which was meant. That is 0071 decision 2 applied to money.
+- **…and where 0071 DEMOTED a parent to 0% silently, this REFUSES.** A
+  percentage is a working number; a rate is a contractual figure, and discarding
+  one without saying so is worse than declining. The message names the fix.
+- **A measurement may be NEGATIVE and may exceed the bill.** A correction to a
+  certified over-measure is a negative remeasure — that is how the trade fixes
+  last month's certificate without editing it, and both rows stay in the log.
+  Measuring more than was billed is usually the first evidence of a variation,
+  so nothing caps it; the page warns, the same rule as the budget at 90%.
+- **The unit and the method of measurement are TEXT.** CESMM4, SMM7, POMI and
+  the national standards are not interchangeable, and whichever one our own
+  bills happen to use would look like the obvious enum. The screen offers a
+  list; the column takes what the contract says.
+- **No `certificate_id` on a measurement yet.** It belongs there and
+  certificates are two steps away — but a column with no writer is the cached
+  `financials` that 0070 spent a migration undoing.
+
+**And the enum lesson landed on the screens, not the schema.** Adding a third
+value to `progress.source` meant four render sites that compared
+`=== "tasks"` and fell through to "entered by hand" for everything else — which
+would have described a remeasured bill as a typed percentage. All four were
+found by grep before shipping, which is the same sweep the `_id` findings this
+morning needed and did not get.
+
+**A test that ran for 22 minutes, and did not need to.** The first run of the
+BOQ suite took 1,325s with two hook timeouts in `TRUNCATE`; the second took 61s
+with no changes but one test fixture. `pg_stat_activity` was empty by the time
+it was sampled, so it was contention that had already cleared — worth recording
+because the instinct on a 22-minute run is to look for a slow query, and the
+duration alone does not distinguish the two. `feedback_caffeinate_pg_suite`
+already says a huge duration is not proof of sleep; it is not proof of a slow
+query either.
+
+The one real failure that run found was a test asserting the wrong guard:
+awarding a second bill with no priced item hit `project_boq_has_priced_items`
+before it could ever reach `project_boqs_one_awarded`, so the test proved a
+constraint it was not written for.
 
 ## Handoff — 2026-08-29 — global search (§9P), and the count that could not see it
 
@@ -1906,3 +2483,1910 @@ applies cleanly has proved nothing about its triggers.
 - **Restart `next dev` after touching `app/db/schema/`.** Turbopack caches the
   module scope, so adding an import produces `ReferenceError: x is not defined`
   against source that plainly imports it.
+
+---
+
+## Handoff — 2026-09-03: two corrections to project money (0088)
+
+Walking the certificate chain through with real figures found two numbers that
+looked right and were not. Both are now fixed; the third and largest is not.
+
+**1. Advance recovery was computed and never posted.** The certificate showed
+it and correctly reduced what the employer paid, but no journal moved it, so
+Accounts Receivable was overstated by every shilling recovered and the advance
+sat as a liability at full value for the life of the contract. It now posts
+`DR Customer Advance (2190) / CR Accounts Receivable` at invoice completion, as
+its own entry beside the retention split.
+
+The period figure, `advanceThisCertificate`, is **derived** from
+`previouslyGross` rather than carried in — the cumulative recovery is a pure
+function of the cumulative gross, so deriving the delta means it cannot drift
+from the figure it is a delta of. Capping both sides is what stops the delta
+going negative once the advance is repaid.
+
+**2. Project cost was cash-basis while revenue was accrual.** Bills counted at
+payment, claims at payment, expenses by `payment_status` — against revenue
+counted at invoice completion. A job on 60-day supplier terms showed two months
+of revenue against none of its cost. All three now recognise cost where the
+ledger does: a bill at `approved`, a claim from `approved` onward, an expense at
+`posted`. `committed` now means ordered-not-yet-accepted, which is what the
+budget should be checked against.
+
+The CTE columns were renamed `paid` → `incurred` to match.
+
+### The one that is still wrong, and it is the big one
+
+**Payroll posts a correct accrual journal and no line carries a `project_id`.**
+A contractor's own labour — often the largest cost on a job — is in the P&L and
+absent from every project. On a worked example the reported margin was 45.6%
+against a true 18.9%.
+
+The plumbing exists: 0084 put `project_id` and `cost_code_id` on
+`journal_lines` and `getProjectLedgerActuals` reads them, so anything posted
+with a project appears automatically. This is what the timesheet work is
+actually for — attributing labour to a project and a cost code, not recording
+hours. Until then, do not trust project margin on a labour-heavy job.
+
+### A chart-of-accounts trap, found in passing
+
+**An account code is a label a company chooses, not a structure to rely on.**
+0085 picked a parent by matching `account_code = '1100'`. The dev database has a
+company whose `2100` is *WHT Payable*, not Current Liabilities — so the first
+cut of 0088 filed Customer Advance underneath it. 0088 now requires the parent
+to be a non-postable liability header, and repairs any `customer_advance` or
+`retention_receivable` already parented to a postable account.
+
+Match on `system_account`, or on structure. Never on the code alone.
+
+### Verified this session
+
+- All 88 migrations apply in order to a `stockvault_test` dropped and recreated
+  from scratch.
+- The ledger split is asserted end to end in `tests/pg-invoice-actions.test.mjs`
+  — revenue and VAT on the gross, AR net of both the retention and the advance.
+- `tsc --noEmit` and `eslint --quiet` clean.
+
+---
+
+## Handoff — 2026-09-07: labour reaches the project (0089)
+
+The 2026-09-03 handoff ended with "the one that is still wrong, and it is the
+big one": payroll posts a correct accrual and no line carries a `project_id`,
+so a contractor's own labour — usually the largest cost on a job — was in the
+P&L and absent from every project. On the worked example, 45.6% reported margin
+against a true 18.9%.
+
+`project_timesheets` is step 4 of the execution layer and the record that
+closes it: whose time, on which job, for how long.
+
+### It does not post, and it never will
+
+Execution-layer decision 4, restated in the migration because that is the file
+somebody will have open when they are tempted. Labour reaches the general
+ledger through PAYROLL, once, where the PAYE and the NSSF are; posting the
+timesheet as well books the same wage twice. Odoo, NetSuite OpenAir and Procore
+all treat a timesheet as an analytic record for exactly this reason.
+
+**So §12's accounting question is still open and this did not answer it.**
+Project labour is now visible in project reporting and still absent from the
+ledger. If it is ever to reconcile to the trial balance it is by ONE
+period-end allocation journal over these rows — never a posting per timesheet,
+which is how a ledger acquires fifty thousand lines a month and no clean way to
+reverse a correction. The rows that allocation would run over now exist.
+
+### The four decisions
+
+**1. Only an EMPLOYEE'S time produces cost.** The roster holds employees,
+suppliers and both. A subcontractor's cost already arrives on a bill carrying
+the project, and `computeActualsFor` counts it at `approved` — so charging
+their timesheet too would bill the job twice for the same work. Their line
+records QUANTITY and carries no money, which is the line Odoo and Procore both
+draw between internal labour cost and subcontract cost.
+
+`both` is costed like a supplier: a party you also buy from will invoice you,
+and the invoice is the authoritative number.
+
+It is a CHECK, not a rule the write path is trusted to remember —
+`project_timesheets_cost_is_employee_labour`. The column is nullable rather
+than zero because NULL is "no cost" and 0 is "this was free", and the screen
+shows a dash accordingly.
+
+**2. A monthly salary is apportioned by `working_days()`** — the same function
+0045 gave payroll and leave, and the same convention `payroll_entries` already
+stores as `working_days_total`. Not a flat 22 and not an annualised 260:
+dividing by the month's OWN working days is what makes a month split across two
+jobs sum back to the salary. February 2026 divides by 20 and September by 22,
+and a fixed divisor would have made those two days cost the same and both of
+them wrong. Holidays come out of the divisor, from the company's own calendar.
+
+`hour` and `day` multiply straight, through
+`attendance_config.standard_hours` so this cannot disagree with attendance
+about how long a day is. `fixed` cannot be costed at all — a lump sum is a
+milestone, so the days are recorded and the money comes from the contract.
+
+**3. The cost is written by the database.** Same shape as
+`project_budget_lines_derive_account` (0073): a trigger reads the assignment,
+snapshots the party and the rate onto the row, and computes the money. There is
+no write path — including the import somebody will want — that can produce a
+timesheet whose cost disagrees with the rate it was charged at. The rate is a
+SNAPSHOT: a raise in March must not restate January.
+
+**4. A person's day cannot be sold twice.** Decision 2's apportionment only
+holds if the days charged across every job sum to the days worked, and nothing
+else in the schema stopped eight hours going to three projects — which inflates
+labour cost above the salary actually paid, the same failure this migration
+exists to remove, pointing the other way. An AFTER trigger sums day-equivalents
+for a party on a date across ALL of that company's projects and refuses more
+than one. It is best-effort, not serialisable: two concurrent inserts can each
+pass, the same guarantee every other cross-row rule here gives.
+
+### Where it shows
+
+`computeActualsFor` gained one arm: approved is INCURRED, submitted is
+COMMITTED, on the basis 0088 put bills, claims and expenses on. Nothing else in
+that function moved, and `ProjectActuals` is the same three keys, so no caller
+changed.
+
+The Time card sits under the roster on the project detail page — log, submit,
+approve (singly or a week at once), reject, delete. An approved line is
+rejected rather than deleted: it has been counted, and a hole in a week proves
+nothing.
+
+`project_tasks` also stopped being short a column. 0071 deliberately stored no
+`actual_hours` because "actual hours are the sum of a task's timesheets, and
+timesheets are step 4" — `getTaskActualHours` is that sum, still computed
+rather than stored.
+
+### Two things found doing it
+
+**The roster's rate was documented as inert and is not any more.** Both the
+schema comment and `ProjectTeam.jsx` said assigning somebody posts no cost and
+the rate is "planning metadata with no ledger meaning". The ledger half is
+still true. The rest is not: `rate_unit` now decides how a day is costed, and
+`fixed` versus `day` is the difference between a costable line and one that
+records quantity only. Both comments are corrected — a rate somebody types
+casually now moves a project's reported margin.
+
+**The error mapper genericises an unnamed CHECK.** Three of the new
+constraints came back as "That combination of values is not allowed", which is
+useless in front of somebody who typed 25 hours. They are named in
+`CONSTRAINT_MESSAGES` now. Worth the habit: a CHECK without an entry there is a
+constraint whose message the user cannot act on.
+
+### Deliberately unwired
+
+`updateProjectTimesheet` has no caller. Correcting a line today is delete and
+re-log for a draft, reject and re-log for an approved one, and both leave a
+better record than a silent edit of a number somebody already approved. The
+action and its repository function exist and are tested, because an edit dialog
+is the obvious next screen; `find-unwired-actions.mjs` will keep flagging it
+until there is one. Everything else in the module's action file is wired.
+
+### Verified this session
+
+- All 89 migrations apply in order, on both the dev and the test database.
+- 31 new tests in `tests/pg-project-timesheets.test.mjs`, including the
+  February-versus-September divisor, the holiday coming out of it, the
+  subcontractor charged nothing, and the day refused to a second job.
+- The project suite re-run whole — 204 tests across nine files, no regression
+  from the new arm in `computeActualsFor`.
+- `tsc --noEmit` and `eslint . --quiet` clean.
+
+### Next, in order
+
+1. **§12's (a)/(b)/(c) accounting decision** — analytic, allocated, or expensed
+   at purchase. Materials post today (0085) and labour does not, so the two
+   halves of "project cost in the ledger" now answer differently, which is the
+   strongest argument yet for settling it. It is the tenant's accounting
+   policy, not a porting decision.
+2. **Variations** (execution-layer step 3, plan step 4) —
+   `project_instructions.estimated_cost` still feeds nothing, and `contract_sum`
+   with `original_sum` beside it now exist for it to move.
+3. **Notice deadlines with a NOTIFICATION** — the bell has existed since 0074
+   and nothing in this module writes to it.
+4. **The remaining Mongo screens** — 57 files across 17 modules, of which
+   banking (8) stays by decision and sales-orders (3) is switched off. kpis or
+   leads/opportunities is the cheapest real port from here.
+
+---
+
+## Handoff — 2026-09-07: payroll labour reaches the project (0090)
+
+0089 built the timesheet and left the sentence unfinished: it said John spent 12
+of his 22 days on Otho Road and stopped at project reporting. This is the other
+half — payroll's own expense lines now carry `project_id`, so the largest cost
+on a labour-heavy job is in the ledger against the job that consumed it.
+
+### The audit that came first, and what it corrected
+
+Asked to confirm the accounts exist and are posted, three things came back that
+change how this had to be built:
+
+**The payment run posts no expense at all.** `markRunPaid` is DR Salaries
+Payable / CR Bank, full stop. Every expense is on the ACCRUAL, at approve. So
+the project dimension belongs on the accrual and nowhere near the payment — a
+split built on the payment side would have been tagging a liability clearing.
+
+**Payroll does not address its accounts by `system_account`.** It reads a
+per-company GL MAPPING — `salary_expense_account_id`,
+`employer_nssf_expense_account_id`, `employer_ahl_expense_account_id`, and the
+rest — configured under Settings → Payroll. A company can map salary expense
+anywhere it likes, so the allocation follows `rates.glMapping` and never looks
+up `salaries_expense`. This is the same class of trap as 0088's account-code
+lesson, one level further out: not the code, and not the system account either.
+
+**And the gap was one line.** Every accrual line was built from `run.totals` —
+one aggregate amount per account — and `projectId` was never set, though
+`createJournalEntry` has accepted it per line since 0084.
+
+### No new account, and why that was the right call
+
+The first design here had a `5415 Project Labour` account and a contra. It was
+wrong, and the argument against it is short: **0084 already made the project a
+dimension.** A second expense account holds the same money under a different
+name and gives the reader two places to look.
+
+So Jane's 100,000 is debited to the same salary expense account it always was:
+
+```
+DR Salary expense  60,000   project = Otho Road
+DR Salary expense  30,000   project = Bridge
+DR Salary expense  10,000   (no project — office time, leave)
+   CR PAYE / NSSF / SHIF / AHL payable, staff loans, Salaries payable  100,000
+```
+
+Total expense is exactly what it was. This is what Odoo's analytic
+distribution, SAP's WBS on a primary cost element, and Xero's tracking
+categories all do. **A second account, or any entry crediting cash or a
+payable, would have made 160,000 of expense out of a 100,000 salary** — which
+is the failure the whole design exists to avoid, and the one thing every test
+in `pg-payroll-project-allocation.test.mjs` is really checking.
+
+**The statutory lines carry no project, deliberately.** PAYE, NSSF, SHIF and
+AHL are owed to the state, not to a job. Tagging them would file a statutory
+liability inside a contract's cost.
+
+### The four decisions
+
+**1. The money is payroll's; the days are the timesheet's.** 0089 costs a day
+at the ROSTER rate — a number somebody typed on the team card. That is the
+right number for the project report as time is entered and the wrong one for
+the ledger, which has to agree with what was actually paid. So this apportions
+the actual payslip by timesheet days, and the two figures differ on purpose —
+the same estimate-versus-actual split `reconcileProjectActuals` already reports.
+A roster row with no rate at all still allocates payroll, which is asserted.
+
+**2. It is burdened.** Gross, employer NSSF and employer AHL split on the same
+day-shares. John costs a project more than his salary line, and a contractor
+pricing the next job off a report that omits the employer contributions will
+underbid.
+
+**3. `GREATEST(booked, working_days())` is the divisor.** Normally an
+employee's share is days-on-project over the period's working days — the same
+`working_days()` 0089 apportions a monthly salary by. But the overbooking
+trigger caps a person at one day PER DAY and nothing stops a Saturday, so 24
+booked days in a 20-day month would otherwise allocate 120% of a fixed salary
+and invent expense out of a rounding rule. Dividing by what was actually worked
+in that case means the shares can never sum above 1.
+
+**4. The residual is computed, not apportioned.** `total - Σ(project lines)`.
+It has to be: fourth-decimal rounding across twenty projects otherwise breaks
+the balanced-lines check and payroll stops posting at all. Deriving the
+remainder means the split sums to the total by construction, and the remainder
+is the honest thing anyway — office time, leave, and anybody with no timesheet.
+
+### The timesheet that arrives late
+
+The accrual splits at the moment it posts, which is right when the week closes
+before payroll runs and wrong the rest of the time. `reallocateProjectLabour`
+handles the difference:
+
+- **It does not reopen the payroll journal.** That entry carries the PAYE and
+  the NSSF a P10 reconciles to, and amending a posted statutory return because
+  somebody fixed a timesheet is not a trade anybody would take.
+- **Every line debits and credits the SAME account** — the project changes, the
+  account does not — so each account nets to zero and the trial balance by
+  account is untouched. It moves a dimension; it is not an expense.
+- **It is idempotent.** It compares what the ledger already carries for the run
+  against what the timesheets now say and posts only the delta. Running it
+  twice posts one journal and then nothing.
+- **It takes labour back off** a project whose time was later rejected — that
+  project is absent from the new shares, so it has to be found from what was
+  posted or its old figure stands for ever.
+
+Button on the payroll run: "Re-allocate to projects", on an approved or paid
+run, under APPROVE_ROLES because it writes to the ledger.
+
+### The one thing I got wrong
+
+I said no migration was needed, having read `payrollRunJournals` in
+`app/db/schema/hrPayroll.ts` — where `kind` is declared as plain `text()`. The
+CHECK restricting it to `accrual | payment | reversal` is in 0048's DDL and was
+never declared in the schema file, so three tests failed on a constraint
+invisible from the file I checked. 0090 extends it to include `reallocation`,
+**and declares the check in the Drizzle schema too**, so the next reader sees
+it. Worth the habit: for a constraint question, grep the migrations, not the
+schema — they do not agree everywhere.
+
+### This closes §12, for both halves
+
+Materials post at issue since 0085 (`DR 5410 Project Materials / CR Inventory`)
+and labour is now a dimension on the payroll accrual. The plan's (a)/(b)/(c)
+question is answered as **(b) allocated** — reached by dimension for labour
+rather than by an account transfer, which is the same answer in a cheaper form.
+A project P&L can now reconcile to the trial balance for the two largest cost
+lines on a construction job, which is the thing neither could do before.
+
+Still analytic-only, and correctly so: `committed` (approved and unpaid) has no
+journal entry by definition, and the `estimate` figures 0089 produces from the
+roster rate are a management view rather than a ledger one.
+
+### Verified this session
+
+- All 90 migrations apply in order, on both dev and test.
+- 12 new tests in `tests/pg-payroll-project-allocation.test.mjs`, built on the
+  worked example: 100,000 gross, February 2026's 20 working days, 12 days on A
+  and 6 on B → 60,000 / 30,000 / 10,000 unallocated, with the account total
+  still exactly 100,000.
+- 154 tests across payroll, payroll config, payroll tax, timesheets, the ledger
+  dimension, projects and project financials — no regression.
+- `tsc --noEmit`, `eslint . --quiet` and `npm run build` clean.
+
+---
+
+## Handoff — 2026-09-07: variations, import templates, and three screen bugs
+
+Three separate pieces of work, from one question — "is the projects module
+ready to deploy" — and the honest answer had been no, for one reason.
+
+## 1. Variations (0091) — the deployment blocker, closed
+
+`project_contracts.contract_sum` was typed once and had nothing that could ever
+change it. From the FIRST variation: the sum on the IPC page was wrong, "% of
+contract certified" — the figure in front of whoever certifies — was wrong with
+it, `project_instructions.estimated_cost` had been collected since 0075 and fed
+nothing, and there was no register to answer "what were we instructed to do,
+what did it cost, what did it do to the completion date". That is the whole of
+an EOT argument and the whole of a final account.
+
+**The originals are kept and the current figures derive.** `original_sum`
+already existed and was already immutable; 0091 makes the other half true too:
+
+```
+contract_sum    = original_sum + Σ(approved cost effects)
+completion_date = original_completion_date + Σ(approved time effects)
+```
+
+both by trigger, in ONE function, so no arrangement of writes can make them
+disagree. `original_completion_date` is new and backfilled from the current one
+— before 0091 nothing could move it, so what was there IS the original.
+
+**Only an approved variation moves anything.** A submitted one is a claim: the
+register shows it and the contract does not move. The register shows four
+figures rather than one, and the fourth is the one no system shows by default —
+**claimed, not agreed**, which is the exposure a contracts manager actually
+wants.
+
+**A negative cost effect is ordinary.** An omission reduces the sum; an
+acceleration pulls the date back. What is refused is a variation with neither a
+cost nor a time effect, which is a note.
+
+**Nothing here posts.** A variation changes what the contract is WORTH; the
+ledger records what has been EARNED, and varied work reaches the books through
+a certificate that values it. A variation that posted would book revenue on an
+instruction nobody has carried out.
+
+### Two things this changed that were already tested
+
+**`updateContract` now edits the ORIGINALS.** It used to write `contract_sum`
+directly, which on a job with three approved variations overwrote their effect
+silently. The terms form is relabelled "Contract sum (as let)" / "Completion
+(as let)". An existing test asserted the old behaviour — it typed a new sum to
+SIMULATE a variation, because variations did not exist — and it is rewritten to
+say what the rule now is: a retyped sum CORRECTS the base, and growth comes only
+from an approved variation.
+
+**`createContract` never set `original_completion_date`.** Found by writing the
+tests, not by reading the code: a contract created after 0091 would have had
+NULL there, and every approved extension of time would have moved nothing at
+all. Both originals are now written at creation.
+
+## 2. Import templates — and the parser bug the template was hiding
+
+The BOQ importer's "Download template" served the **PROGRAMME** template. The
+dialog described the bill's columns correctly — Section, Item code, Description,
+Unit, Quantity, Rate — and the file that came down was
+`Section,Activity,Start,End,%`, named `programme-template.csv`. Anybody who took
+the offered template at its word imported a file with no units, no quantities
+and no rates.
+
+Both templates now come from `app/dashboard/projects/lib/import-templates.js`,
+written to demonstrate the things the parser does that nobody would guess: a
+blank section carrying forward, and a narrative line surviving as an unpriced
+heading. Each dialog also states the parser's rules on screen.
+
+**And asserting the template against the parser found a live bug in the parser.**
+The matcher could not be tested at all — both importers are `"use server"`
+modules, and Next requires every export from one to be an async function — so it
+moved to `lib/project-import-columns.js`. The first assertion failed:
+
+> With the canonical header the dialog itself tells people to use,
+> **`Description` resolved to the `Item code` column** — `description`'s aliases
+> include `"item"`, matching is by `includes()`, and "item code" comes first.
+
+Every row imported with its code as its description, and a row with a blank code
+was dropped for having no description. Matching is now two passes — an exact
+header name wins its column outright, then the forgiving substring pass fills
+what is left from columns nobody claimed — which fixes it without narrowing what
+a real export may be called. A Candy header (`Bill, Item No., Particulars, Unit,
+Qty, Unit Rate`) and an MS Project one (`Phase, Task Name, Start, Finish,
+% Complete`) are both asserted.
+
+## 3. Three screen bugs on the IPC and Cash Requisitions pages
+
+**A blank page for a Manager.** `showTerms` initialised to `!contract`, opening
+the contract-terms form — which renders only for `FINANCE_WRITE_ROLES`. A
+`Manager` is in `PROJECT_MANAGE_ROLES` and NOT in finance, so on a project with
+no contract they got no terms form, no "New certificate" button (it requires a
+contract), and no empty state (only reached when `showTerms` is false). Nothing
+at all, on the section they were sent to.
+
+**A stale reassurance about somebody's own books.** The register said retention
+"does not yet post to the ledger — a retention receivable account and its
+release schedule are the next step". That stopped being true with 0085.
+
+**The amount field nobody could find.** It exists and is called "Value of
+permanent work to date", which is the correct FIDIC term and not what somebody
+hunting for "amount" reads. Every money field on the certificate form now
+carries a hint; the main one says so in as many words.
+
+## 4. Cash Requisitions — the claim that "did not show"
+
+Reported as: an employee tagged a claim to a project, it reached the budget, and
+the requisitions tab showed nothing.
+
+**The data layer is correct, and this was verified rather than reasoned about.**
+The claim exists, carries its `project_id`, survives all four joins in
+`CLAIM_FROM`, passes the tenant policy as `app_user` with RLS live, and the
+section flag on that project's type is on. `listClaims({ projectId })` returns
+it.
+
+**Two things worth recording from the probing itself.** A first pass reported
+"zero claims in the entire database" — that was `app_user` under FORCE ROW LEVEL
+SECURITY with no `app.company_id` set, which reads empty rather than erroring. A
+second pass as the superuser showed the same claim under three different
+companies, because a superuser BYPASSES RLS and `set_config` did nothing. Both
+are easy ways to draw a confident wrong conclusion from this schema.
+
+**The mechanism is `selectProject`.** Which project a workspace section shows
+comes from `?project=` and ONLY the URL — the cookie fallback was removed
+deliberately, because it silently opened whichever job was picked last. So
+reaching Cash Requisitions from the global sidebar shows "choose a project",
+and the budget figure that DID show was on the project detail page, which
+carries the project in its own URL.
+
+Working as designed, and the design is right. What was wrong is that the empty
+state said only "nothing linked to this project yet" — true, and
+indistinguishable from "the claim you tagged did not save". It now says how many
+claims and expenses are tagged to other projects and names them.
+
+Also on that page: "Total project costs (paid)" has been the wrong label since
+0088, when cost moved to an accrual basis. It says "(incurred)".
+
+### Still not built, and this is the honest list
+
+- **Milestones.** `billing_model = 'milestone'` has nothing behind it, and the
+  retention release schedule needs milestones that are still not a table.
+- **Cash requisitions as a RECORD** — raise, approve, disburse. The page is a
+  read-only view over claims and expenses and says so.
+- **Notice deadlines with a notification.** The bell has existed since 0074 and
+  nothing in this module writes to it. Under a FIDIC form a missed notice
+  deadline is a lost claim.
+- **Earned value (CPI/SPI).**
+- **No guard on closing a project.** It can be closed with retention
+  outstanding, an open draft certificate, or unapproved timesheets.
+- **Variations have no UI for amending a draft** — `updateProjectVariation` is
+  wired to nothing, the same deliberate gap `updateProjectTimesheet` has.
+
+### Verified this session
+
+- All 91 migrations apply in order, on both dev and test.
+- 19 new tests for variations, 17 for the import templates (no database — a
+  parser contract), and the certificate suite rewritten where 0091 changed the
+  rule: 56 across those two files.
+- `tsc --noEmit`, `eslint . --quiet` and `npm run build` clean.
+
+---
+
+## Handoff — 2026-09-07: a certificate keeps the terms it was signed under (0092)
+
+Found by answering "why do we fill the contract terms before the IPC", and the
+honest answer turned out to be worse than "because the arithmetic needs them".
+
+`listCertificates` recomputed EVERY certificate — certified ones included —
+from the contract as it stands today. `project_certificates_frozen` freezes the
+four figures somebody TYPED and says nothing about the retention percentage
+they are multiplied by, because that lives on the contract. And
+`saveProjectContract` has no guard against editing terms once certificates
+exist.
+
+So: certify IPC 1 for 5,000,000 with retention at 0%, raise the invoice, then
+correct retention to 10% next week — an entirely reasonable thing to do — and
+IPC 1 now reads retention 500,000, net 4,500,000. A document that was issued,
+signed and paid against had silently changed, and the invoice behind it had
+not. Everything downstream moved with it: the chain's `previouslyCertified`,
+"% of contract certified", retention outstanding, the advance position.
+
+Same class as a re-priced bill restating a final account, which 0076 froze for
+the same reason.
+
+### The fix is the idiom this schema already has
+
+The five commercial terms are SNAPSHOT onto the certificate when it is
+certified — `contract_sum`, `retention_percent`, `retention_cap_percent`,
+`advance_amount`, `advance_recovery_percent` — and an issued certificate is
+computed from its own snapshot. `account_code_at_budget` (0073),
+`supplier_name_at_bill`, the rate snapshot on `project_timesheets` (0089): the
+figure a document was computed with belongs to the document.
+
+**A DRAFT STILL FOLLOWS THE LIVE CONTRACT**, deliberately — that is what a draft
+is for. Enter the terms, look at what the certificate would be, correct the
+terms, look again. Only certifying fixes them.
+
+**The snapshot is frozen with everything else.** Without adding the five columns
+to `project_certificates_frozen` the hole reopens one level down: the terms
+could no longer drift from the contract, and could still be edited directly.
+
+### Two details worth keeping
+
+**The cap is nullable INSIDE the snapshot.** `retention_cap_percent` NULL means
+uncapped, which is a value — so it cannot answer "is there a snapshot".
+`project_certificates_snapshot_pair` asks that of the percentage instead, and
+the other three are tied to the same condition. A pair CHECK needs both columns
+or neither; the cap is neither.
+
+**Backfilling stamps today's terms** on every already-issued certificate. It is
+the only knowable answer — the contract carries no history of what its
+retention used to be, which is exactly the hole — and it changes no figure on
+the day it runs, because today's terms are what those certificates are being
+computed with right now. What it buys is that they cannot drift from here.
+
+### Verified
+
+- 92 migrations apply in order on dev and test.
+- 44 tests on the certificate suite, four of them new: an issued certificate
+  holding its figures through a terms change, a draft correctly following the
+  contract, two certificates each computed on the terms in force when IT was
+  signed, and the snapshot refused on an issued certificate.
+- 76 across variations, projects and project financials — no regression.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Still open on this module
+
+- **No guard on editing terms after certification**, and now it matters less —
+  a terms change no longer rewrites history, it only affects drafts and future
+  certificates, which is correct behaviour. A warning on the terms form when
+  certificates exist would still be kind.
+- Milestones, cash requisitions as a record, notice deadlines with a
+  notification, earned value, and any guard on closing a project with retention
+  outstanding. Unchanged from the previous handoff.
+
+---
+
+## Handoff — 2026-09-07: milestones, and a project that cannot be closed over money
+
+Two pieces, and the full suite is green end to end for the first time this
+session: **94 files, 1538 tests, no failures.**
+
+## 1. Milestones (0093) — the last table the execution layer was missing
+
+"Milestone" meant nothing here. Three references and every one a placeholder:
+`/dashboard/projects/milestones` was a second view of `project_tasks` that
+showed no milestones because there were none (a redirect now);
+`billing_model = 'milestone'` was declared with NOTHING acting on it, so a
+milestone-billed job billed exactly as `fixed`; and
+`valuation_source = 'milestone'` was a column no code had ever set.
+
+**Why it matters most on an installation contract.** A road job values by
+REMEASURING a priced bill — 0080 built that, and a certificate takes the
+measured total. An installation job has no bill to remeasure: it has stages,
+each worth an agreed part of the sum, and without this table the only way to
+certify one was to type the figure and mark it `manual`. 0082 already
+distinguishes the two kinds of job; this is the other half of that.
+
+### The three decisions
+
+**The sum may fall short and may not exceed.** Over-allocating certifies more
+than the job is worth — a hard refusal, with both numbers in the message.
+Falling short is a schedule being built, and enforcing the total both ways
+would make the table unusable, because the first stage entered is never the
+whole contract. The register shows what is unallocated instead. Same shape as a
+budget whose lines have not yet reached the budget amount.
+
+**Achieving is a DATE, not a flag.** `achieved_on` is what a certificate reads
+— the cumulative value of stages achieved ON OR BEFORE its valuation date. A
+boolean cannot answer that, and a stage signed off in May must not land on a
+March certificate. `setMilestoneStatus` refuses to achieve without a date and
+deliberately does not default to today, because most sign-offs are recorded
+after the fact and a default would quietly put them on the wrong month.
+
+**It offers a figure; it does not certify one.** Achieving posts nothing and
+raises nothing. It makes a number available to the next certificate, offered
+with a button exactly as the measured bill is — a stage being achieved and the
+employer being asked to pay for it are two decisions, which is how 0081 treats
+every other pair like it.
+
+### And it carries the retention release
+
+The reason the plan called milestones a blocker rather than a feature:
+"retention release schedule — still needs milestones, which are still not a
+table". `retention_release_percent` is what proportion of the retention HELD
+falls due when a stage is achieved; they may not add up to more than 100%.
+
+The release is a percentage of what is held, and what is held is the certificate
+chain's arithmetic — so the repository returns the PERCENTAGE and the screen
+applies it to this contract's own retention. The certificate remains the only
+place a release is recorded and posted.
+
+## 2. A project that cannot be closed over outstanding money
+
+**Closing is terminal.** `ProjectStatusActions` offers no transition out of
+`closed`, and a closed project then refuses edits, roster changes, time and
+variations. It is the one status change nobody can walk back, and nothing stood
+in its way.
+
+`getProjectClosingBlockers` returns a LIST, because "you cannot close this" is
+not an answer anybody can act on. Five things hold a project open:
+
+- **retention outstanding** — the reason this exists. It falls due at practical
+  completion and again after the defects period, both AFTER the point somebody
+  wants to close the job. The figure comes from `getContractPosition`, which
+  owns that arithmetic, rather than a second count.
+- **a certified certificate with no invoice** — work the employer agreed to pay
+  for and was never asked to pay. Certifying and invoicing are two steps on
+  purpose; this is the gap that separation opens.
+- **an open draft certificate**.
+- **submitted timesheets** — labour the job consumed that nobody approved, and
+  after closing it could never BE approved, so it would sit outside the job's
+  cost and outside the ledger for good.
+- **submitted variations** — claims with no decision.
+
+No migration. The guard is in `updateProjectStatus`, and the Close button is
+disabled with the blockers listed under it, so the answer arrives before the
+press rather than as a toast after it.
+
+A CANCELLED certificate blocks nothing: withdrawn is settled.
+
+## Verified
+
+- 93 migrations apply in order on dev and test.
+- **The full suite: 94 files, 1538 tests, zero failures.** The two
+  `pg-payment-actions` failures the last handoff left open are confirmed fixed
+  — they were the suite's own missing `company_settings` seed.
+- 16 new milestone tests and 9 closing-guard tests, both green first run.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+## Still not built
+
+- **Cash requisitions as a RECORD** — raise, approve, disburse. The page is a
+  read-only view over claims and expenses and says so.
+- **Notice deadlines with a notification.** The bell has existed since 0074 and
+  nothing in this module writes to it. Under a FIDIC form a missed notice
+  deadline is a lost claim, and this is the next thing worth building.
+- **Earned value (CPI/SPI)**, which is blocked on something real: `progress_percent`
+  is a single current number with no history, so there is no "progress as at 30
+  June" and no S-curve. A `project_progress_snapshots` row written when a
+  certificate is certified would come nearly free, since certifying already
+  establishes a cumulative position at a date.
+- **Materials on site drawn from stock**, blocked on the stock model: "issued to
+  a job" currently means CONSUMED, not delivered-and-unfixed, and certifying
+  issued stock would double-count it against the work it was built into.
+
+---
+
+## Handoff — 2026-09-07: a variation is priced by its lines (0094)
+
+Working down the revised roadmap, which puts variations first and milestones
+last. 0093 was built out of that order; this closes the one item still open on
+variations: **link variations to BOQ items.**
+
+### A variation is one of three things, and only one is a reference
+
+0091 let the contract sum move and left the movement as ONE TYPED FIGURE. That
+keeps the sum honest and cannot defend it: at a final account "the contract grew
+by 2.4m" is not an answer, and neither is a register of eleven such sentences.
+
+  * an OMISSION of billed work — a negative quantity at the bill's own rate
+  * a REMEASURE of billed work — more or less of an item
+  * NEW WORK never in the bill — its own description, unit and rate
+
+A single `boq_item_id` on the variation covers the first two and cannot express
+the third, which is the commonest. So the link is a LINE, and `boq_item_id` on
+the line is nullable: **null means new work.**
+
+### The four decisions
+
+**The line is self-contained; the link is provenance.** It carries its own
+description, unit, quantity and rate. Raising one against a bill item copies
+that item's figures as the starting point — an omission is priced at the bill's
+own rate, which is the contractual position, and making somebody retype it is
+how a variation comes to be priced at a rate nobody agreed. COPIED, not read
+through: a bill can be superseded, and an agreed variation must not be repriced
+by a document raised after it was agreed. Same rule as `account_code_at_budget`
+and the certificate snapshot in 0092, and it is asserted.
+
+**The amount is the database's** — `quantity × rate`, by trigger. A line whose
+amount disagrees with its own quantity and rate is the commonest defect in a
+hand-built variation account. A negative QUANTITY is ordinary; a negative RATE
+is a typing error and the CHECK says so.
+
+**Where there are lines, they ARE the cost effect.**
+`project_variations.cost_effect` becomes their sum by trigger, and the contract
+sum follows through 0091's existing chain with nothing new — lines →
+cost_effect → `project_variations_touch_contract` →
+`project_contracts_derive_current`. Two places holding one figure is two places
+that will disagree.
+
+Removing the LAST line leaves the figure where it stands rather than zeroing
+it: zeroing would trip `project_variations_has_an_effect` on a variation whose
+effect is entirely a time one, and the sum its lines came to is the only
+defensible lump sum to fall back to.
+
+**An approved variation's lines are frozen.** Its figures are in the contract
+sum and in every certificate's percentage since. 0091 refuses to amend the
+variation; a line is the same figure one level down, and refusing there too is
+what stops that guard being decorative. DELETE needs its own trigger arm — a
+delete has no NEW row — and that arm returns OLD when the parent is already
+gone, so it does not fight the cascade.
+
+### On the screen
+
+The register's rows open onto their lines. The line form leads with a picker of
+the awarded bill's PRICED items — headings and narrative lines excluded, since
+there is nothing to omit or remeasure on a line carrying no quantity — and
+choosing one fills the description, unit and rate rather than hiding them, so
+the rate stays visible and correctable before it is agreed. A variation with no
+lines says "lump sum" and offers the reason to add them.
+
+### Verified
+
+- 94 migrations apply in order on dev and test.
+- 13 new tests inside the variations suite, including the omission priced at the
+  bill's rate, the copy that survives the bill being repriced afterwards, the
+  approved-variation refusal on both insert and delete, and the cost effect
+  recomputing rather than accumulating.
+- 138 across variations, BOQ, certificates, milestones and closing.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Where the roadmap now stands
+
+Done: variations (0091 + 0094), BOQ import with templates, programme import,
+milestones (0093).
+
+Next, in the revised order:
+
+1. **Import framework** — column mapping, validation, PREVIEW and import
+   history. Today an import commits blind and silently drops rows it cannot
+   read, which is where adoption dies.
+2. **Programme** — duration, DEPENDENCIES, and baseline versus current. Planned
+   dates are overwritten on a re-plan, so the original programme is lost, which
+   is the same class of hole `original_sum` filled for money.
+3. **BOQ ↔ Programme** — activities linked to bill items, planned value, earned
+   value. This is what makes EVM possible, and it also needs the progress
+   history that does not exist yet.
+4. **Notice / Claims / EOT** — the register with a contractual deadline, a
+   responsible person, status, documents, and a notification. The bell has
+   existed since 0074 with nothing in this module writing to it.
+
+---
+
+## Handoff — 2026-09-07: the funnel before the quote (0096)
+
+`docs/CURRENT-STATE.md` has listed this as a whole missing module since the
+snapshot: "CRM / Lead pipeline ⬜ — First touch is the Quote — nothing tracks
+the funnel before that." Three Mongo models, ~1,166 lines of queries and
+actions, and nine screens that could not move until the tables existed.
+
+**Mongo screens: 56 → 47.** Leads (4), opportunities (3), the executive
+overview's last read (1) and the CRM activity composer (1). The executive one
+has been carried in these handoffs as "NOT WORK — the CRM genuinely is still on
+Mongo, so that read is correct until opportunities port". This is that port.
+
+### Two things that are NOT transcriptions
+
+**PROBABILITY WAS FROZEN, AND IS NOW A FIX.** Mongo seeded it from the stage in
+a pre-save hook that fired only when it was null — so once seeded it never moved
+again. A deal created at qualification (10%) and advanced to negotiation still
+forecast at 10%, which means the weighted pipeline on the board has been wrong
+for every deal anybody ever advanced. That is most of them.
+
+The column is now NULL unless somebody overrides it, and the effective value is
+`COALESCE(probability, the stage's default)` computed in ONE place —
+`effectiveProbability` — so the board, the detail page and the forecast cannot
+disagree. A deal with no override tracks its stage; an override sticks through a
+stage change. Both are asserted.
+
+**THE STAGE TRAIL IS THE DATABASE'S.** Mongo kept it as an embedded array
+appended by the same pre-save hook, so any update that did not go through
+`save()` left the trail short. `opportunities_record_stage` fires on insert and
+on `UPDATE OF stage`, which cannot be skipped — and does not fire on an update
+that leaves the stage alone, or velocity would be nonsense. It is a table rather
+than folded into `crm_activities`: velocity is the most actionable pipeline
+metric there is and should not depend on a log people delete rows from.
+
+### Three decisions carried over deliberately
+
+**A LEAD IS NOT A PARTY.** The Mongo model's own reasoning and it is right: a
+lead has no credit terms and no balance, and putting tyre-kickers in `parties`
+would corrupt AR aging and every customer count. `company_name` is free text
+until conversion.
+
+**CONVERSION IS A TRANSACTION, NOT A STATUS FLIP.** Party, opportunity and the
+lead's stamp in one `withTenant` callback. `setLeadStatus` REFUSES `converted`
+on purpose, and the database backs it: `leads_conversion_pair` needs the date
+and `leads_conversion_made_a_party` needs the party, so all three land together
+or the row is rejected. A lead marked converted with nothing to show for it is
+the state this prevents, and there is a test for it.
+
+**THE ACTIVITY TARGET HAS NO FOREIGN KEY**, and the migration says so rather
+than papering over it. Six target types make one key impossible; nothing stops
+an activity pointing at a deleted row, and a test asserts the reader survives it.
+
+### Two constraints Mongo did not have
+
+`lost_reason` only on a lost deal, `won_at` only on a won one. Both were free
+before, so a deal could carry a lost reason into negotiation.
+
+### The numbering trap, and it nearly bit
+
+The qsl merge pushed this machine's migration high-water mark to
+`1787049170566`. A naive 0096 numbered from the branch's own last entry would
+have landed at `…169566` — BELOW the mark — and drizzle would have skipped it in
+silence and reported success, leaving four tables uncreated. It is numbered at
+`…180566` instead, and the tables were checked in `information_schema` rather
+than trusted to the `✓`.
+
+### Deliberately unwired
+
+`updateLeadPg` and `createOpportunityPg` have no caller — and neither did their
+Mongo originals, which was confirmed rather than assumed: no screen has ever
+called `updateLead` or `createOpportunity`. Deals arrive by lead conversion,
+and there is no lead edit form. Ported anyway because they are the obvious next
+two screens; `find-unwired-actions.mjs` will keep flagging them until those
+exist.
+
+### Verified
+
+- 96 migrations apply on dev and test, and the four tables exist.
+- 19 tests in `tests/pg-crm.test.mjs`, green first run.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Where the port stands
+
+**47 screens, 15 modules.** Of those, banking (8) stays on Mongo by decision,
+sales-orders (3) is switched off behind `lib/unported-modules.js`, and
+`adjustments`'s single hit is a FALSE POSITIVE — a historical comment in an
+already-ported file that the counting grep matches. So the real remaining
+surface is about **35 screens**.
+
+The ledger sweep is down to one genuine connector: the weighbridge, in
+`integration-actions.js:467`. The kpi hits are `Array.prototype.reverse`.
+
+Next cheapest: **kpis (7)**, one self-contained module with no Postgres
+destination yet, or **employee (4)** and **settings (3)**.
+
+---
+
+## Handoff — 2026-09-07: the number somebody is accountable for (0097)
+
+KPIs. Two Mongo models, ~1,193 lines of queries and actions, seven screens and
+nine auto-compute formulas. `docs/CURRENT-STATE.md` lists this module as ✅
+shipped, and on this branch it was shipped and WRONG — which is the reason it
+is written up as a fix rather than a move.
+
+**Mongo screens: 46 → 39.** Measured, not assumed: `git stash` the change and
+re-run the counting grep. The whole `kpis` module goes, and nothing else was
+touching it.
+
+### The module was not stranded. It was answering.
+
+All nine formulas read the Mongo `JournalEntry`, `Account`, `PayrollRun` and
+`Invoice` collections. Every one of those moved to Postgres long ago, so a KPI
+on `monthly_revenue` has been aggregating a ledger that stopped receiving
+entries — returning 0, and the board painting it red against target. Nothing
+errored. It is the executive-snapshot defect again, one module along: a page
+that reports the business at a standstill, confidently.
+
+`active_headcount` was the exception, already reaching into Postgres through
+`getActiveHeadcount`, and it is the only formula whose answer was right.
+
+### Three formulas now give a DIFFERENT number, deliberately
+
+Each is marked DEVIATION at the formula in `repositories/kpis.ts` and has a
+test naming the old behaviour.
+
+**GROSS MARGIN SUBTRACTS DIRECT COSTS.** Mongo matched `systemAccount IN
+('cogs','cost_of_sales')` — account 5100 alone, plus a name the Postgres
+seeder never wrote. The standard chart puts project materials, subcontractors,
+equipment hire, project transport and site expenses at 5410–5490 under
+`sub_type = 'direct_cost'`, and for a contractor that IS the cost of sales.
+Excluding them made gross margin ≈ 100% on a job that lost money, and
+simultaneously inflated the Operating Expense Ratio, which the template library
+sells as "the defensive twin of Revenue" and defines as everything that is NOT
+cost of sales. One predicate now serves both, so the two ratios partition the
+expenses instead of double-counting them. There is a test that asserts exactly
+that: margin − opex = net, and the shillings add up.
+
+**PAYROLL IS COSTED TO THE MONTH IT WAS EARNED IN.** Mongo matched `status IN
+('paid','approved','posted')` AND `paidAt` inside the window. `paid_at` is only
+stamped on payment, so an approved run's null fell out of the range test
+regardless — the `approved` in that list never selected anything, and `posted`
+is not a status a run can reach at all (0048 dropped it). The filter named
+three states and meant one. It matches on `period_year` / `period_month` now:
+March's payroll is March's cost even when it is paid on 4 April, and it puts
+this on the same accrual basis as `monthly_revenue`, which matters because
+`payroll_to_revenue_ratio` divides one by the other.
+
+**CASH POSITION SEES EVERY BANK ACCOUNT.** Mongo matched five `systemAccount`
+values of which the chart seeds three. Worse, `system_account` is UNIQUE per
+company — so the SECOND bank a business opens can never carry one, and half its
+cash was invisible. `sub_type IN ('cash','bank','mpesa')` is the same predicate
+the executive overview's cash tile uses, so the two pages now agree, which they
+did not.
+
+### Four rules the database enforces that the action layer only asked for
+
+- `kpi_snapshots_period_shape` — the quarterly-on-the-quarter-end convention
+  lived in `normalisePeriod()` and nowhere else. A writer that skipped it could
+  file a quarterly row on month 5 with quarter 4, and the unique index would
+  then accept a SECOND row for that quarter on month 6.
+- `kpis_name_uq`, on `lower(btrim(name))` — the seeder deduped by reading the
+  names and diffing in JS. Two people pressing "Use starter templates" together
+  both read an empty list and both insert. `ON CONFLICT DO NOTHING` now.
+- `kpis_thresholds_agree_with_direction` — `parseKpiFormData` was the only
+  thing checking that the on-track band was stricter than the at-risk one, with
+  the sense flipped for lower-is-better.
+- `kpi_snapshots` cascades from `kpis`; the KPI restricts against `companies`.
+
+### The owner is an employee again
+
+Mongo's `owner.partyId / profileId / userId` were all ObjectId. Once employees
+became Postgres uuids, `buildOwnerSubdoc` was cut back to a name and a typed-in
+number, with a fair comment saying an id that cannot resolve is worse than
+none. It was still a dead link: rename an employee and every KPI they own keeps
+the old name for ever. `owner_employee_id` is a real FK now, ON DELETE SET
+NULL, and the read resolves the CURRENT name through it, falling back to the
+stored snapshot when the employee record goes. `KpiForm` changed accordingly —
+the picker's value is the id, not the name, which also stops two people who
+share a name collapsing into one option.
+
+Found on the way: `listEmployeesForPicker` capped at 50 however much was asked
+for, so `listEmployeesForOwnerPicker(200)` silently returned 50 and a company
+with more than fifty staff could not select anyone past the fiftieth name. The
+picker loads once and filters in the browser, so there was no second chance.
+Cap raised to 500; every other caller passes 50 or less explicitly.
+
+### A three-valued-logic bug, caught by a test rather than by reading
+
+`a.system_account IN ('cogs','cost_of_sales')` is NULL — not false — for the
+accounts carrying no system handle, which is most of them. NULL is falsy in a
+WHERE, so the POSITIVE use (gross margin) looked fine; the NEGATED one in the
+opex ratio is `NOT NULL`, which is NULL, which drops the row. Rent has no
+system account, so the opex ratio came out at ZERO with expenses posted against
+it. `COALESCE(..., '')` on both classification columns.
+
+Swept for the same trap: every other negated predicate in the repositories
+(`assets.status`, `invoices.status`, `bills.status`, `project_budgets.status`,
+and the two `id NOT IN (subquery)` forms) is over a NOT NULL column, checked
+against `information_schema` rather than by eye. `sub_type` and
+`system_account` are the two nullable classification columns in the schema,
+which is why this was the only instance.
+
+### Also
+
+`resetCompanyBooks` in `app/db/companyAdmin.ts` is discovery-driven from
+`information_schema`, so 0097's tables joined it the moment they existed — and
+would have WIPED KPI definitions that `RESET_KEEP_COLLECTIONS` deliberately
+keeps on the Mongo side, which is the disagreement that file's own comment
+warns about. `kpis` is added to `KEEP`; `kpi_snapshots` is deliberately not,
+because a definition is configuration and its actuals are transactional.
+
+`npm run ledger-sweep` no longer lists the kpi hits — they were
+`Array.prototype.reverse` and they are gone with the Mongo file. One genuine
+connector remains: the weighbridge, `integration-actions.js:467`.
+
+### Deliberately unwired
+
+`getKpiSummaryForDashboardPg`, and its Mongo original had no caller either —
+confirmed by grep, not assumed. `find-unwired-actions.mjs` flags it and will
+until a role dashboard grows a KPI strip.
+
+### The numbering, checked rather than trusted
+
+The high-water mark on this machine was `1787049180566` (0096). 0097 is at
+`…181566`, and both tables were confirmed present in `information_schema` on
+dev AND test, along with their ten constraints, six indexes and RLS
+enabled+forced — rather than trusting the migrator's ✓.
+
+### Verified
+
+- 97 migrations apply on dev and test; tables, constraints, indexes and RLS
+  checked in `information_schema` / `pg_constraint` / `pg_class`.
+- 52 tests in `tests/pg-kpis.test.mjs`, green.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` all clean.
+
+### Where the port stands
+
+**39 screens, 12 modules.** Of those, banking (8) stays on Mongo by decision,
+sales-orders (3) is switched off behind `lib/unported-modules.js`, and
+`adjustments`'s single hit remains a FALSE POSITIVE — a historical comment in
+an already-ported file that the counting grep matches. So the real remaining
+surface is about **27 screens**.
+
+Next: **sales orders (3)** — switched off rather than ported in §9K, and the
+only module in the app that is deliberately dark. Then **employee (4)** and
+**settings (3)**.
+
+---
+
+## Handoff — 2026-09-07: the order between the quote and the bill (0098)
+
+Sales orders — the only feature in the app that was deliberately dark.
+`lib/unported-modules.js` switched the module OFF rather than porting it, and
+listed four failures, one loud and three quiet:
+
+```
+sales-order-actions.js:56   ObjectId.isValid(quoteId) on a Postgres uuid
+sales-order-actions.js:64   read the MONGO Quote collection
+sales-order-actions.js:187  committed stock against MONGO Product counters
+sales-order-actions.js:392  Invoice.create — a MONGO invoice
+```
+
+That note said relaxing the id check alone would move the failure from step
+one to step four, where it is invisible. It was right. All four are gone, and
+`lib/unported-modules.js` is deleted with them — the flag, the two dark-page
+components, the sidebar guard, the mobile-nav guard and the quote button's.
+
+**Mongo screens: 39 → 35**, which is four files rather than the three the
+module owns: rewiring the quote detail page's "Create Sales Order" button took
+`quotes` off Mongo as well, and it was that module's last Mongo import.
+
+### Decision 1 — the lineage is `document_flow`, not two ref columns
+
+The Mongo model embedded `quoteRef` and `invoiceRef`. 0041 built
+`document_flow` for exactly this case and argued it in its own comment: "every
+ERP that models selling properly puts an ORDER between them … and this codebase
+already has a salesOrder model waiting. A column named quote_id on invoices
+encodes 'an invoice comes from a quote', which stops being true the moment the
+order step lands."
+
+`'sales_order'` and `'sales_order_line'` have been sitting in that table's CHECK
+constraints since 0041, unused, waiting for this migration. And
+`quote_line_invoiced` was written RECURSIVE so the chain growing from quote line
+→ invoice line into quote line → ORDER line → invoice line would need no change
+to it. 0098 does not touch that view, and a test asserts it follows the longer
+chain anyway: zero invoiced while the order sits in the middle, ten once the
+invoice lands.
+
+The screens still read `order.quoteRef` and `order.invoiceRef` — the repository
+assembles both from flow rows joined to the real documents, so a deleted quote
+cannot leave a dangling ref and the number shown is the document's own.
+
+That also closed a hole the direct path had covered and this one would not have:
+`convertQuoteToInvoice` marks a quote 'converted' when nothing remains to
+invoice. Without the same step here, a quote that went the long way round would
+sit at 'sent' for ever with a paid invoice against it.
+
+### Decision 2 — the commitment IS the status
+
+Mongo kept `stockCommitted` on each line and flipped it on confirm, on cancel
+and on conversion, with a comment explaining that exactly one document line must
+own a given reservation at any moment. The rule is right; a boolean maintained
+by four code paths is not how to hold it. When the flag and the status disagree
+the stock is either double-held or silently free, and nothing says which.
+
+There is no column. A sales order holds a reservation for each product line
+when, and only when, its status is 'confirmed'; the reads derive it and the
+transitions commit and release inside one transaction.
+
+### Decision 3 — conversion releases BEFORE it commits
+
+This is the one that would have shipped as a latent bug.
+
+On Postgres a draft invoice commits stock for every inventory product line as
+`createInvoice` writes them — unconditionally, with no flag to carry over. So
+converting an order cannot "transfer ownership" by flipping booleans as Mongo
+did: the invoice takes its own commitment. The order therefore has to let go
+first, because `products_commitments_within_on_hand` is a plain CHECK, evaluated
+per statement and not deferred. Holding both at once for one statement raises —
+but only on a product committed to its last unit, which is exactly when it
+matters and exactly when a manual test would not notice.
+
+Both happen in one transaction, so no other session sees the gap, and the row
+lock taken by the release means none can slip into it. The test that pins the
+ordering orders every one of the three units on hand.
+
+### A defect in my own CHECK, caught by a test
+
+`sales_orders_confirmation_pair` was first written as an equivalence —
+`(status IN ('confirmed','invoiced')) = (confirmed_at IS NOT NULL)`. Cancelling
+a CONFIRMED order then failed: the order genuinely was confirmed at a
+particular moment, and erasing that to satisfy the constraint would destroy the
+history the column exists to hold. It is a CASE over the status now: a draft has
+never been confirmed, a confirmed or invoiced order has, and a cancelled one may
+or may not have been — the row says which.
+
+The migration file was amended and the two live databases were altered to
+match. Then a THIRD database was created from zero, every migration applied to
+it, and its 21 sales-order constraints plus `document_prefix`'s body compared
+against dev and test: identical. The fresh-deploy path is the one that has to be
+right here, so it was checked rather than reasoned about.
+
+### Viewer could move inventory, and now cannot
+
+All four Mongo actions gated on `canSeeSalesNav` — a NAV predicate whose list
+includes "Viewer", the read-only role CEO became in 0039. So a Viewer could
+confirm an order and reserve stock, or cancel one and release it. A gate that
+answers "may this person see the menu" was being asked "may this person move
+inventory". The action list is `canSeeSalesNav` minus Viewer; reads stay open.
+
+### Decision 4 — the prefix, and three dead settings columns
+
+`document_prefix()` falls through to `upper(p_kind)`, so 'sales_order' would
+have numbered orders SALES_ORDER-00001. It has a `sales_order_prefix` column
+and an arm now, like invoice / bill / quote / po / grn.
+
+**Found while doing it, NOT fixed:** `claim_prefix`, `ncr_prefix` and
+`asset_prefix` are columns nothing reads. `document_prefix(c,'claim')`,
+`'ncr'` and `'asset'` all fall through to `upper(p_kind)`, so claims and NCRs
+number CLAIM-/NCR- by coincidence — and ASSETS NUMBER `ASSET-00001` WHILE THE
+COLUMN SAYS `AST`. A company that configured any of the three is being ignored.
+Fixing it would renumber existing assets mid-sequence, which is a decision
+rather than a patch, so it is written down here instead of done quietly.
+
+### The order backlog tile is back
+
+The executive overview deleted it rather than ported it — "a tile that reads
+zero because its store is empty is worse than no tile", and the handoff said to
+restore it from Postgres when sales orders were ported. It reads
+`getOrderBacklogPg` now, degrades to zero on its own like the pipeline beside
+it, and links to `?status=confirmed`. With the CRM's pipeline (0096) already
+moved, **every number on that page now comes from one store.**
+
+### A grep that was scoped too narrowly
+
+`lib/unported-modules.js` said `grep -rn SALES_ORDERS_AVAILABLE` would find the
+guards, and it would have — run at the repo root. Scoped to `app lib`, it
+missed two in `components/`, and `eslint . --quiet` did not catch them either:
+the imports are syntactically fine, the module simply stopped existing. Only
+`npm run build` failed. Worth remembering that deleting a module is a build-level
+check, not a lint-level one.
+
+### Still not ported, and now more visible
+
+**The draft-invoice expiry sweep.** Mongo stamps `draftExpiresAt` on any draft
+invoice holding committed stock and sweeps expired ones
+(`invoice-actions.js:1573`). Postgres invoices have no such column and no sweep,
+though `draft_invoice_expiry_days` is still a live editable setting that nothing
+on this side reads. That gap arrived with the invoices port, not this one — but
+sales orders make it easier to reach, since a confirmed order becomes a draft
+invoice holding stock. Flagged, not built.
+
+### Verified
+
+- 98 migrations apply on dev, on test, and on a database created from zero;
+  the three agree constraint-for-constraint.
+- 41 tests in `tests/pg-sales-orders.test.mjs`, green.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Where the port stands
+
+**35 screens, 10 modules** — counted, not inferred:
+
+```
+integrations 10  banking 8  employee 4  settings 3  admin 3
+components 2  approvals 2  parties 1  company 1  adjustments 1
+```
+
+banking (8) stays on Mongo by decision, and `adjustments`'s single hit is still
+a FALSE POSITIVE — a historical comment in an already-ported file that the
+counting grep matches. So the real remaining surface is about **26 screens**,
+and NOTHING in the app is switched off any more.
+
+Next: **integrations (10)** is now the largest block, though the weighbridge
+connector inside it is the last genuine ledger seam and deserves its own pass.
+Cheaper first: **employee (4)** and **settings (3)**.
+
+---
+
+## Handoff — 2026-09-08: the settings that wrote to the wrong store
+
+The last three `settings` screens, and they were three different problems
+wearing the same label. The counting grep reports a screen as "on Mongo" when
+it imports from `@/app/mongodb`, which is a good proxy and was wrong about one
+of these three in each direction.
+
+**Mongo screens: 35 → 32.** No migration: nothing here needed a schema change.
+
+### One was already Postgres, and only the directory was Mongo
+
+`updateApprovalThresholds` has written to Postgres since 0035 —
+`saveCompanyThresholds` is `app/db/companyConfig`. The whole port was
+`git mv app/mongodb/actions/threshold-actions.js app/db/actions/`.
+
+Two things did change on the way, both found by reading it rather than by
+running it:
+
+**THE ROLE GATE READ THE WRONG ROLE.** It checked
+`getTenantContext().user.role`, which is the GLOBAL role. Under the
+standing-access model somebody who is Admin of one company and a Viewer inside
+the one they are currently in passed the gate and changed that company's
+financial controls. `withAuthorizedTenant` re-checks against the role for the
+ACTIVE company. This is the same defect the sales-orders port found in
+`canSeeSalesNav`, from the other direction: there a nav gate was asked a write
+question, here a write gate asked the wrong subject.
+
+**THE SUPERADMIN CROSS-COMPANY BRANCH WAS UNREACHABLE.** It read
+`formData.get("companyId")` and the form has no such field — the page renders
+`<ApprovalThresholdsForm initial={initial} />` with no company prop at all, so
+the value was always null and it always fell through to the tenant's own id.
+Deleted rather than carried, because a branch that has never executed is not a
+feature, and a SuperAdmin sets another company's thresholds by entering that
+company like every other write in the app.
+
+### Two were writing to a store nothing reads
+
+`syncChartOfAccounts` and `ensureAdvanceAccountsExist` created MONGO `Account`
+documents. Every account screen has read Postgres since §9C. So "Sync complete
+— created 12 accounts" was true, and `/dashboard/accounts` showed exactly what
+it had before. The §9E defect, in Settings, on the two buttons whose entire job
+is to repair a chart of accounts.
+
+### The check was a write
+
+`AccountSetupCard` called `ensureAdvanceAccountsExist()` from a `useEffect` on
+mount — an action that CREATES the accounts — to find out whether they existed.
+So opening the settings page wrote to the chart of accounts, every time, and
+the "Checking account setup…" label described a write. It calls
+`getAdvanceAccountStatusPg` now, which is a read, and a test asserts the count
+of accounts is unchanged by asking.
+
+### A sync is mostly a list of things it must not do
+
+`syncStandardChart` runs against a chart somebody has been using, so most of the
+seventeen tests assert restraint rather than effect. The first version of pass 2
+wired EVERY seed code to the seed's parent — tidier, and it would have forced a
+company that deliberately restructured its chart back to the standard shape,
+demoting accounts they post to into headers on the way. It now wires only what
+pass 1 created.
+
+- Creates by `ON CONFLICT (company_id, account_code) DO NOTHING` rather than
+  read-then-diff, so two people pressing Sync together cannot both insert.
+- Never re-parents an existing account; never demotes one somebody decided to
+  post to.
+- Backfills `system_account` only where the seed defines a handle and the row
+  has none — and never where another account already claims it.
+  `accounts_company_system_uq` is a partial UNIQUE, so a blind backfill would
+  abort the WHOLE sync on the first company that had tagged its own account,
+  losing every other repair in the same transaction.
+
+### Found while doing it: every chart has a NULL ltree path
+
+`accounts.path` is an ltree with a GiST index, and `getDescendants()` walks it
+with `<@`. `seedChartOfAccounts` in `provisioning.ts` sets `parent_id` and
+`level` and has NEVER set `path` — so every company provisioned to date has a
+chart whose descendant query matches nothing. `getDescendants` has no caller
+today, which is why nobody noticed; it is a loaded gun rather than a live bug.
+
+Both halves are fixed: `provisioning.ts` materialises the path so new companies
+do not arrive needing repair, and the sync derives `path` and `level` across the
+whole chart from the parent links that ACTUALLY exist — not from the seed's — so
+it is a repair rather than an opinion. The recursive walk carries a depth cap,
+because `accounts.parent_id` is a self-FK with nothing preventing A → B → A and
+a recursive CTE that meets a cycle does not return.
+
+### The `employee` module is not four screens. It is dead code.
+
+`app/dashboard/employee/` contains five components and NO page. Next's App
+Router needs a `page.jsx` for a segment to be routable, git history shows one
+was never there, and nothing anywhere imports any of the five — the only
+references are the components importing each other. The live employee-facing
+dashboard is `app/dashboard/components/EmployeeDashborad.tsx`, which is already
+on Postgres.
+
+So four of the screens in the remaining count are unreachable, and porting
+`tech-dashboard-queries.js` would be porting code no user can arrive at. NOT
+deleted here, because deleting 919 lines is a decision rather than a cleanup —
+but it should be deleted, and the count below excludes nothing on its account.
+
+### Verified
+
+- 17 tests in `tests/pg-chart-sync.test.mjs`, green.
+- 86 more across accounts, provisioning, the account hierarchy, the subtype
+  options, the chart enum, company thresholds and the accounting core — the
+  suites that touch what changed, including the provisioning edit.
+- `tsc --noEmit` and `eslint . --quiet` clean.
+
+### Where the port stands
+
+**32 screens, 8 modules:**
+
+```
+integrations 10  banking 8  employee 4 (DEAD — see above)  admin 3
+components 2  approvals 2  parties 1  company 1  adjustments 1
+```
+
+banking (8) stays on Mongo by decision, `employee` (4) is unreachable, and
+`adjustments`'s single hit is a FALSE POSITIVE. The real remaining surface is
+about **19 screens**, of which integrations is half.
+
+---
+
+## Handoff — 2026-09-08 (2): the small modules, and what the count was hiding
+
+Four pieces: the dead technician dashboard deleted, the subscription history
+moved (0099), the seat check pointed at the right store, and the link-user
+screens ported. **Mongo screens: 32 → 25.**
+
+### The counting grep has been missing a file
+
+`grep -rln "@/app/mongodb" app/dashboard --include="*.jsx" --include="*.tsx"`
+does not look at `.js`, and `app/dashboard/parties/components/PartyDetails.js`
+is one. So the count has been ONE LOW throughout — 33, not 32, before this
+session's second half. The count below includes `--include="*.js"` and
+`--include="*.ts"`; there is exactly one `.js` hit and no `.ts` ones, so this
+is the whole of the correction.
+
+### The dead technician dashboard is gone
+
+Five components under `app/dashboard/employee/`, no page, no importer, and a
+243-line `tech-dashboard-queries.js` behind them — 1,166 lines that no user
+could reach. Every export was checked individually for references before
+deleting. The live employee dashboard is
+`app/dashboard/components/EmployeeDashborad.tsx` and was already on Postgres.
+
+### 0099 — the history of a subscription
+
+`lib/subscription-helpers.js` had carried a note since 0035: "The subscription
+state lives in Postgres since 0035. The audit LOG is still a Mongo
+collection … Moving SubscriptionAuditLog is its own migration." This is it.
+
+- A PLATFORM table, read on `privilegedDb` alongside the rest of
+  `app/db/platform.ts`, because a SuperAdmin looking at one company's billing
+  history is a cross-tenant read by definition.
+- `previous` and `updated` are twelve COLUMNS rather than two `jsonb` blobs:
+  the screen reads six of them by name, and "every company downgraded off
+  enterprise last quarter" is a WHERE clause on a column.
+- One row per change, which Mongo already did and which is what makes "when
+  did the plan change" answerable.
+
+**And a grant discovery worth carrying:** 0023 set `ALTER DEFAULT PRIVILEGES …
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user`, so **every table
+created since arrives fully writable** and the explicit `GRANT … TO app_user`
+line at the bottom of each later migration — 0096's, 0097's, 0098's — is a
+no-op restating what already happened. 0099 wanted SELECT only, so it REVOKEs
+first; without that the grant line would have read as a restriction and been
+none. Verified on a database built from zero: 19 columns, 3 constraints, RLS
+forced, `app_user=[SELECT]`, identical to dev and test.
+
+### The seat check was counting a store nothing writes
+
+`updateCompanyPlan` asked `User.countDocuments({ companyId, status: { $ne:
+"Inactive" } })` — the MONGO users collection. `app/mongodb/user-actions.js`
+has no importer and every screen creates users through `createUserPg`, so the
+count came back 0 or stale, `activeUsers > planConfig.maxUsers` was never true,
+and **the guard against downgrading a fifty-seat company onto a three-seat plan
+passed everything.**
+
+Two decisions in the replacement:
+
+- **A seat is a GRANT, not a `home_company_id`.** `users` has no company
+  column; 0036's own comment says "keyed through the grants, so 'who is in this
+  company' has exactly one answer and it is the same rows the tenant gate
+  reads". A seat limit that disagreed with `/dashboard/users` would be
+  indefensible to whoever hit it, and a test asserts the two numbers match.
+- **Platform staff are not seats.** 0064 established `granted_via =
+  'superadmin'` as standing access rather than membership. Counting it would
+  bill a customer for every support visit — and where `grantAllTenants` tops up
+  standing access for every tenant, bill every customer for every operator.
+
+### Linking a login to an employee, and the column that cannot hold one
+
+The Mongo action set `party.userId` on a MONGO party while every party screen
+reads Postgres, and the picker it chose from read the Mongo `users` collection,
+which stopped being written when auth ported — so it had been **empty for every
+tenant**. A Postgres `getUsers` written for exactly this problem in 0070 was
+already sitting unused two files away.
+
+**`parties.user_id` is `uuid` and `users.id` is `text`.** 0036 made the id text
+deliberately. So that column CANNOT hold a user id, nothing in the Postgres
+layer has ever written it, and the one place that reads it carries a stale
+comment saying "users are not ported". The real link is
+`user_company_access.party_id`, which sign-in and the invite flow already use.
+`parties.user_id` is now dead weight and could be dropped in a later migration.
+
+**RLS caught the first implementation.** The write ran on the tenant
+connection, where `user_company_access` lets a person write their OWN grant
+(0033's `own_grants`) and only READ a colleague's (0037's
+`visible_within_company`, `FOR SELECT`). An administrator linking somebody else
+is exactly what those decline, so the UPDATE matched zero rows and returned
+success. The checks stay inside the tenant scope, under RLS, and only the write
+goes through `linkUserToPartyDirect` / the new `unlinkUserFromPartyDirect` —
+which also set `employees.user_id`, something the Mongo original never did.
+Without it the person signs in and is told they have no employee record.
+
+### Verified
+
+- 18 tests in `tests/pg-subscription-audit.test.mjs`, 14 in
+  `tests/pg-link-user-party.test.mjs`.
+- 190 more across platform, provisioning, user admin, real-session, api-key
+  tenancy, parties, employees, invites, picker ids and global search.
+- 99 migrations apply on dev, on test, and on a database built from zero, the
+  three agreeing constraint-for-constraint.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Where the port stands
+
+**25 screens, 7 modules** — counted with `.js` and `.ts` included this time:
+
+```
+integrations 10  banking 8  components 2  approvals 2
+company 1  admin 1  adjustments 1
+```
+
+- **banking (8)** stays on Mongo by decision.
+- **adjustments (1)** is a FALSE POSITIVE — a historical comment.
+- **components (2)** is `AccountantDashboard` (reads bank-feed-queries, so it
+  moves with banking) and `AlertsStrip` (reads approval-queries, so it moves
+  with approvals).
+- **admin (1)** is `ResetTransactionsCard`, and it should STAY: it deliberately
+  resets BOTH stores and reads the Mongo db handle to do it. It is correct
+  until Mongo is gone entirely.
+
+So the real remaining surface is about **14 screens**: integrations (10) and
+approvals (2 + AlertsStrip).
+
+### Next, and one warning about each
+
+**approvals** is not the small job the count suggests: 1,282 lines across
+`approval-actions.js`, `approval-queries.js`, `pending-approvals-queries.js`
+and the model, with NO Postgres table — it needs a migration and is CRM-sized.
+`docs/APPROVALS-PLAN.md` also records that only 3 of 6 enum types are wired, so
+the port is a chance to close that or a chance to carry it over deliberately.
+
+**company (1)** is `companyForm`, and it is not one screen's worth of work
+either: `createCompany` is ~300 lines calling `CompanyOnboardingService`, and
+it is the TENANT ONBOARDING path — the from-scratch path that everything else
+depends on being right. Worth its own session with the scratch-database
+comparison run before and after.
+
+**integrations (10)** is the largest block and holds the last genuine ledger
+seam, the weighbridge connector at `integration-actions.js:467`.
+
+---
+
+## Handoff — 2026-09-08 (3): the bank feed reaches the ledger (0100)
+
+Banking. Carried in every count since 2026-08-31 as **"STAYS ON MONGO BY
+DECISION, not by oversight … a ~3,900-line vertical whose service posts
+payment-received and payment-made entries to the ledger, and it is not
+currently broken — it reads the store it still writes."**
+
+**Mongo screens: 25 → 16.**
+
+### The second half of that sentence was wrong
+
+`bankFeedService.js` imports five models. Two — BankStatement and BankFeedLine
+— are its own and worked. The other three all moved:
+
+| what | reads | consequence |
+|---|---|---|
+| `getBankAccounts()` | Mongo `Account` | the upload screen's only picker was EMPTY — **no statement could be imported at all** |
+| `getExpenseAccounts()` and its four siblings | Mongo `Account` | every account picker in the allocation dialog was empty |
+| `autoMatchLines()` | Mongo `Invoice` / `Bill` | no suggestion was ever produced, for any line |
+| `allocateToInvoice()` | Mongo `Invoice` | "Invoice not found", always |
+
+So the module was not working-but-unported. It was **inert**. The deferral was
+still the right call at the time — a half-port would have been §9L again — but
+the reason recorded for it was not what was actually true, and that mattered:
+"not currently broken" is what kept it off the list for six weeks.
+
+### And the ledger sweep was structurally blind to it
+
+`npm run ledger-sweep` has reported ONE remaining connector for weeks. It
+seeded only from `app/models/*.js` and the `xSchema.methods/statics` pattern,
+then closed transitively over MODEL methods. `bankFeedService` posts by calling
+`JournalService.createJournalEntry` → `JournalEntry.create`, from
+`app/mongodb/services/` — a directory the sweep never scanned for postings.
+Four hops from a live screen:
+
+```
+AllocationDialog.jsx → bank-feed-actions.js → bankFeedService
+  → JournalService → JournalEntry.create      (MONGO)
+```
+
+**The sweep is widened** — a new section 1b seeds from any function in
+`app/mongodb` or `lib` that posts directly, and closes over the whole set
+rather than per file. Proven rather than asserted: stashing the screen rewire
+and re-running it now reports `bank-feed-actions.js` as LIVE across **4 screens
+with 13 posting call sites**, where the old sweep reported nothing.
+
+That is the fourth way this sweep has been wrong, and its own header now says
+so. Section 1b over-matches by design (`kpi-queries.js` appears because it
+calls `Array.prototype.reverse`) — the file's existing note about false
+positives covers it, and a sweep that silently filters is how you get a fifth
+wrong "last one".
+
+### Decision 1 — a matched receipt IS a payment
+
+Mongo's `allocateToInvoice` posted its own journal entry and hand-updated
+`invoice.amountPaid`. The payments module has done exactly that, correctly,
+since 0063 — over-allocation refused by a deferred trigger, `amount_paid`
+owned by the allocation trigger, a documented reversal path.
+
+So a bank line matched to an invoice **creates a real payment**, confirms it
+and posts it. The receipt is then indistinguishable from one typed in by hand:
+on the payments screen, on the customer statement, in AR aging, reversible by
+the path that already exists. `payments.source_line_id` is what lets the line
+find it again.
+
+**Overpayment differs deliberately.** Mongo posted the excess to a Customer
+Advance account. Here the payment is raised for the full bank amount and only
+the document's balance is allocated, so the remainder stays UNAPPLIED against
+the party — allocatable to their next invoice, and needing no second account to
+exist.
+
+**One line settling two parties' documents is refused.** A payment names the
+party it came from. Mongo allowed it, producing an entry that credited two
+parties' receivables against one receipt.
+
+### Decision 2 — the stats are a view
+
+`BankStatement.stats` was six counters refreshed by `updateStatementStats()`
+from nine call sites. `bank_statement_stats` is a VIEW; it cannot drift. Only
+the ready ↔ completed pair is a stored status, maintained by a trigger, because
+'processing' and 'error' describe the import and no count can know them.
+
+### Three defects of mine, all caught by tests
+
+**THE TRIGGER ASSIGNED text TO AN ENUM.** `SET status = CASE … THEN 'completed'
+ELSE 'ready' END` yields `text`; `status` is `bank_statement_status`. Postgres
+raises 42804 — on every line insert, so **nothing could be imported at all**.
+The migration applied perfectly clean, because a trigger body is only parsed
+when it runs. Both arms are cast now.
+
+**THE SERIALISERS READ camelCase OFF snake_case ROWS.** These rows come from
+`tx.execute(sql\`SELECT s.*\`)`, which returns the database's column names.
+`r.fileName` was undefined, silently — and so was `r.journal_entry_id`'s
+camelCase twin, so a line could not point at the posting it had just made. The
+test that found it went looking for the journal lines and found none.
+
+**AND `postPaymentReceipt` RETURNS `{ payment, entry }`,** not the entry.
+Reading `.id` off the wrapper gave null at two call sites.
+
+### Also fixed on the way
+
+- **`parseDate` took a format and ignored it.** It tried a fixed list in a
+  fixed order, DD/MM first — so a US export reading 03/04/2026 was imported as
+  3 April, not 4 March. Not an error; a wrong date on a bank line, reconciling
+  against the wrong month. The declared format is tried first now.
+- **Dates are strings.** `new Date(2026, 3, 3)` is midnight LOCAL against a
+  `date` column — the same seam the KPI port had.
+- **The diagnostics were hung off an array.** `parsedLines.diagnostics = {…}`
+  survives a `return` and does not survive `.map()` or serialisation, so the
+  specific "your date format is wrong" message was one array operation from
+  becoming the generic one. `parseCSV` returns `{ lines, diagnostics }`.
+- **Auto-match no longer allocates by itself.** Mongo fired
+  `autoMatchLines(...).catch(console.error)` from the importer, so a ≥95% match
+  posted a journal entry with nobody watching and a failure went to a log.
+  Matching now runs inside the import transaction and only SUGGESTS; a person
+  presses the button.
+- **The entry type is `bank_entry`,** not `expense`. Mongo typed every one of
+  these 'expense', including the money-in ones.
+- **The direction comes from the LINE.** Mongo took the caller's word, so
+  calling `allocateToIncome` on a debit line posted the entry backwards.
+
+### The parsing is a library now
+
+`lib/bank-feed-parsing.js` — hashing, CSV, dates, numbers, balances, match
+scoring. No database, which is why its 32 tests run in under a second, and why
+they were worth writing at all: none of that needed a Mongo connection to test,
+and inside a 1,904-line service it had none.
+
+### Verified
+
+- 42 tests in `tests/pg-bank-feed.test.mjs`, 32 in
+  `tests/bank-feed-parsing.test.mjs`.
+- 123 more across payments, payment actions, invoices, bills, the accounting
+  core, dashboard actions and bank-feed tenant scope.
+- 100 migrations apply on dev, on test, and on a database built from zero — the
+  three agreeing on 37 constraints, 15 indexes, the trigger body and the view.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+**A note on the suite.** Two runs of the bank-feed file failed with a
+`beforeEach` "Hook timed out in 120000ms" and a following primary-key collision
+on a freshly generated uuid — different tests each time, and ZERO assertion
+failures. `TRUNCATE … CASCADE` measures ~4s against this schema on an idle
+database, because the cost is per TABLE and there are 156 of them. The hook
+timeout is raised to 300s in that file, and the run then passes 42/42 in 122s.
+Read the failure KIND before believing it.
+
+### Where the port stands
+
+**16 screens, 6 modules:**
+
+```
+integrations 10  approvals 2  components 1  company 1  admin 1  adjustments 1
+```
+
+- **adjustments (1)** is a FALSE POSITIVE — a historical comment.
+- **admin (1)** is `ResetTransactionsCard`, which SHOULD stay: it resets both
+  stores and needs the Mongo handle to do it.
+- **components (1)** is `AlertsStrip`, which moves with approvals.
+
+So the real remaining surface is **13 screens**: integrations (10) and
+approvals (2 + AlertsStrip). Nothing in the app is switched off, and after this
+change **nothing a screen can reach posts to the Mongo ledger** except the
+weighbridge connector in `integration-actions.js:467` — which is inside
+integrations, the last block.
+
+---
+
+## Handoff — 2026-09-08 (4): the approval engine (0101), and a deploy audit
+
+The last cross-cutting Mongo module, done because a deploy is now being pushed
+and it was the thing standing in the way.
+
+**Mongo screens: 16 → 13.**
+
+### It was the only module that genuinely WORKED
+
+Every other port in this document was a repair — a module reading a store
+nothing writes. This one was a real hybrid, and both ends knew it:
+
+```
+a Postgres action (expense / payment / product / adjustment)
+  → submitApproval()          writes a MONGO ApprovalRequest
+    → /dashboard/approvals     reads MONGO
+      → approveApproval()      claims the MONGO lease
+        → applyStockAdjustment() applies back into POSTGRES
+```
+
+**What it cost is that Postgres money paths could not run without Mongo.**
+`requestApprovalIfOverThreshold` is AWAITED inside `expense-actions.ts` and
+`payment-actions.ts`. With no Mongo connection, paying an expense over the
+threshold does not skip its approval — it THROWS, and
+`expense_payment_value` defaults to 50,000 for every company. Same for a bill
+payment, a price change below floor, and a large stock adjustment.
+
+That is why this came before integrations despite being smaller.
+
+### The appliers did not move, because they were already here
+
+`applyApprovedStockAdjustmentPg`, `releaseApprovedPaymentPg`,
+`applyApprovedPriceChangePg`, `applyApprovedExpensePaymentPg`,
+`issueCreditNotePg` — every one has been Postgres since its own module ported,
+each with a note recording what it used to post into the Mongo ledger. Only the
+REQUEST DOCUMENT was left. `approval_requests` is that document.
+
+### The lease
+
+Two approvers pressing at once must not both apply the payload — a doubled
+price change, or a supplier paid twice. Mongo needed
+`findOneAndUpdate({status:'submitted'}, …)` and a paragraph explaining it. Here
+it is `UPDATE … WHERE status = 'submitted' RETURNING id`, and zero rows means
+somebody else won.
+
+**The claim commits on its own, deliberately.** That guarantee holds only
+because the winner's transaction ENDS — nest the claim inside the long apply
+transaction and the second approver waits for a ledger posting instead of being
+told immediately, holding a row lock throughout. The action runs claim, apply
+and finalise as three transactions, and a test fires two claims concurrently to
+prove exactly one wins.
+
+If the process dies between claim and finalise the request is stranded in
+`applying` — invisible to a queue that lists `submitted`. `/api/cron/reap-approvals`
+sweeps it, on the same partial index Mongo used.
+
+### Two things the database now refuses
+
+- **A decision is a pair.** Mongo's `decision` was a free-floating sub-document
+  a status change was not obliged to set, so "approved" with nobody's name
+  against it was a reachable row — in the audit record of who authorised money
+  moving.
+- **Only an approved request carries an applied record.** A rejected one
+  applied nothing; that is what rejecting means.
+
+### Three more empty queues found on the approvals page
+
+The same defect the leave, loan, claim and NCR sections each had before their
+modules moved — each one reading a Mongo collection nothing writes:
+
+- **`getPendingBills`** read Mongo `Bill`. The bills section has been empty for
+  every tenant since the bills port.
+- **`getPendingApprovalRequests`** aggregated Mongo `StockRequest`. The stock
+  requests section, likewise.
+- **`r.items?.length`** on that section counted an array the Postgres shape does
+  not carry, so every row would have said "0 items".
+
+And two `await dbConnect()` calls in `pending-approvals.js` that opened a Mongo
+connection before delegating to a Postgres read that never touched it — with no
+Mongo configured they would have thrown on the way to a query that works.
+
+### The approver matrix moved out of the Mongoose model
+
+`APPROVER_MATRIX` lived beside the schema in `app/models/approvalRequest.js`,
+so reading "who may approve a price change" dragged mongoose in. It is in
+`lib/business-rules.js` with the other six matrices, which that file already
+calls "one source of truth for these gates". It is frozen onto each request at
+submission, so widening a list cannot retroactively reopen an existing one.
+
+---
+
+## The deploy audit
+
+Asked for while this was in progress. **Auth does not touch Mongo, and the app
+boots without `MONGODB_URI`** — `dbConnect` throws only when called. So what
+follows is the complete list of what a Postgres-only deployment would still
+hit, after 0101.
+
+### Fixed in this change
+
+**`/api/health` pinged Mongo, and only Mongo.** It would have returned
+`{ ok: false, db: "down" }` with a 503 for ever, on a working app, and every
+load balancer would have pulled the instance out of rotation. Postgres is what
+`ok` means now; Mongo is reported alongside it and only when `MONGODB_URI` is
+set, and its being down is not a 503 — the ledger, auth and every money path
+are Postgres, so taking the instance out over a legacy store would be the
+bigger outage.
+
+### Still needs Mongo — 13 screens, all in three places
+
+```
+integrations 10   — api keys, webhooks, weighbridge, logs
+company       1   — companyForm (createCompany / updateCompany)
+admin         1   — ResetTransactionsCard
+adjustments   1   — FALSE POSITIVE, a historical comment
+```
+
+- **integrations (10)** is the last real module, and it holds the last
+  screen-reachable Mongo ledger posting: the weighbridge connector at
+  `integration-actions.js:467`.
+- **company (1)** is the TENANT ONBOARDING path — `createCompany` is ~300 lines
+  through `CompanyOnboardingService`. Not one screen's work, and it is the
+  from-scratch path everything else depends on.
+- **admin (1)** SHOULD stay: `ResetTransactionsCard` deliberately resets both
+  stores and needs the Mongo handle to do it. Correct until Mongo is gone.
+
+### API routes that would fail
+
+```
+/api/v1/webhooks            /api/v1/weighbridge/tickets
+/api/v1/coffee-coop/intake  /api/accounts/by-type
+/api/cron/notify-alerts
+```
+
+The `/api/v1` surface is the published integration API — if any customer is
+pointed at it, that is a hard blocker and it moves with integrations.
+`/api/accounts/by-type` is worth checking for callers; accounts are Postgres and
+this may be another stranded read.
+
+### One more thing to decide
+
+`lib/subscription-helpers.js` mirrors `subscription.*` back to the Mongo
+`Company` document for the SuperAdmin dashboard's Mongo aggregations, inside a
+try/catch that logs. Without Mongo it will log on every plan change and change
+nothing else — noisy but harmless.
+
+### Verified
+
+- 34 tests in `tests/pg-approvals.test.mjs`, green first run.
+- 125 more across stock adjustments, expenses, payment actions, product
+  actions, credit notes and notifications — every module that raises or
+  applies an approval.
+- 101 migrations apply on dev, on test, and on a database built from zero, the
+  three agreeing on 28 columns, 9 constraints and 7 indexes.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+---
+
+## Handoff — 2026-09-08 (5): the last three screens
+
+Confirmed while this was in progress: **Mongo will not run in production.** Pure
+Postgres. That changes one of these three from "should stay" to "must move".
+
+**Mongo screens: 13 → 10.** Everything left is `integrations`.
+
+### `adjustments` was never a screen
+
+A historical comment describing a fix already made, which happened to contain
+the literal string the counting grep matches. Reworded so the count stops
+lying. There was never any code behind it.
+
+### `ResetTransactionsCard` could not stay after all
+
+The previous handoff said it *should* stay, because it deliberately resets BOTH
+stores and needs the Mongo handle to do it. With Mongo out of the deployment
+that stops being a virtue: `resetCompanyData(mongoose.connection.db, …)` cannot
+run at all. The Mongo half is gone and `resetCompanyBooks` is the whole of it.
+
+The typed confirmation stays, and stays SERVER-ENFORCED — the exact company
+name, checked in the action rather than trusted from the dialog.
+
+### `createCompany` was a dual write where Postgres already did the work
+
+```
+Company.create()                      MONGO document          ← gone
+seedChartOfAccounts()                 MONGO chart             ← gone
+initializeFiscalPeriods()             MONGO periods           ← gone
+provisionCompany()                    POSTGRES tenant, chart, periods,
+                                      settings row, owner grant
+syncCompanyRecord()                   POSTGRES branding/tax/bank/settings
+createUserFromInvite() + createInvite POSTGRES admin login and grant
+```
+
+Three steps come out and nothing else changes. What they were FOR was the id:
+`provisionCompany` keys `_migration_id_map` on a source id, and that source id
+was the Mongo `_id`. A minted uuid takes its place, and the tenant uuid
+provisioning returns is what everything downstream uses — because
+`resolveCompanyUuid` short-circuits on a uuid naming a live company: "since the
+auth cutover the session carries the Postgres uuid directly".
+
+Provisioning itself is **not touched**. Its advisory lock, its RLS ordering,
+its settings row and its SuperAdmin fan-out are the parts that make a tenant
+correct, and 16 tests now pin them.
+
+### Two resolvers that could not accept the id that is now primary
+
+Both found by tests, and the first was a silent data-loss bug in this change:
+
+**`companyUuidFor` only read the map.** `syncCompanyRecord` returns
+`{ synced: false }` when it gets null — no error, nothing written — so passing
+it the TENANT UUID dropped the entire company form on the floor: branding, tax,
+bank and settings discarded while the form said it had saved. A test asserting
+a `code` came back caught it. It resolves a live uuid to itself now, then falls
+back to the map, which is the order `resolveCompanyUuid` already used.
+
+**`getCompanyRecord` tested `c.id` OR the map, never both.** Now that a source
+id is itself a uuid, a uuid that is not a `companies.id` may still be a valid
+source id — and the query returned null for a company that plainly exists.
+
+### And two wrong signatures that `as never` was hiding
+
+An earlier draft cast the invite calls with `as never`. Both were wrong —
+`createInvite` takes `token` and `expiresAt`, not a `tokenHash`, and
+`sendInviteEmail` takes `inviterName`, `role` and `rawToken`. **Both compiled,
+and neither would have worked**: a new company's administrator would never have
+received an invitation, and the failure would have surfaced as "admin setup
+failed" long after the company was created. The casts are gone and the record
+is typed as `CompanyRecordChanges` so the compiler checks it.
+
+The form schemas moved to `lib/company-form.js` so the Postgres actions can
+validate the same form without importing a module that pulls in mongoose.
+Nothing in them changed.
+
+### Verified
+
+- 16 tests in `tests/pg-company-onboarding.test.mjs` — a new company's chart,
+  its wired ltree paths, its twelve fiscal periods with one open, its settings
+  row, its owner grant, both id forms, idempotence, a three-way provisioning
+  race, and per-company document numbering.
+- 115 more across provisioning, platform actions, thresholds, the subscription
+  audit, invites, real sessions and tenant id translation — every suite that
+  touches company resolution.
+- `tsc --noEmit`, `eslint . --quiet`, `npm run build` clean.
+
+### Where the port stands
+
+**10 screens, one module: `integrations`.**
+
+```
+api keys (3)  webhooks (3)  weighbridge (2)  logs (1)  overview (1)
+```
+
+It also holds the last screen-reachable Mongo ledger posting — the weighbridge
+connector at `integration-actions.js:467` — and the `/api/v1` surface that goes
+with it. The user has confirmed those APIs can be written later.
+
+Nothing else in the application reaches Mongo. Auth, the ledger, every money
+path, onboarding and the reset are Postgres.

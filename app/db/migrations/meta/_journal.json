@@ -561,6 +561,202 @@
       "when": 1787049152566,
       "tag": "0079_technical_calibration_inspection",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1787049153566,
+      "tag": "0080_bill_of_quantities",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1787049154566,
+      "tag": "0081_contracts_and_certificates",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1787049155566,
+      "tag": "0082_project_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1787049156566,
+      "tag": "0083_reseedable_project_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1787049157566,
+      "tag": "0084_project_dimension_on_the_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1787049158566,
+      "tag": "0085_project_cost_reaches_the_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1787049159566,
+      "tag": "0086_stock_request_is_a_source_document",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1787049160566,
+      "tag": "0087_a_certificate_is_a_source_document",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1787049161566,
+      "tag": "0088_advance_recovery_reaches_the_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1787049162566,
+      "tag": "0089_timesheets_are_the_join_to_labour",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1787049163566,
+      "tag": "0090_payroll_labour_reaches_the_project",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1787049164566,
+      "tag": "0091_variations_move_the_contract",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1787049165566,
+      "tag": "0092_a_certificate_keeps_the_terms_it_was_signed_under",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1787049166566,
+      "tag": "0093_milestones_are_a_stage_with_a_value",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1787049167566,
+      "tag": "0094_a_variation_is_priced_by_its_lines",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1787049168566,
+      "tag": "0095_an_invoice_remembers_who_sold_it",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1787049180566,
+      "tag": "0096_the_funnel_before_the_quote",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1787049181566,
+      "tag": "0097_the_number_somebody_is_accountable_for",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1787049182566,
+      "tag": "0098_the_order_between_the_quote_and_the_bill",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1787049183566,
+      "tag": "0099_the_history_of_a_subscription",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1787049184566,
+      "tag": "0100_the_bank_feed_reaches_the_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1787049185566,
+      "tag": "0101_the_approval_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1787049186566,
+      "tag": "0102_the_keys_that_let_machines_in",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1787049187566,
+      "tag": "0103_the_prefixes_a_rewrite_dropped",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1787049188566,
+      "tag": "0104_helpdesk",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1787049189566,
+      "tag": "0105_hse",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1787049190566,
+      "tag": "0106_a_period_opens_when_it_begins",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1787049250566,
+      "tag": "0107_a_cash_requisition_is_an_authorisation",
+      "breakpoints": true
     }
   ]
 }

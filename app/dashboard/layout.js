@@ -1,6 +1,9 @@
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { AlertCircle, LogOut } from "lucide-react";
 import { auth } from "../../auth";
 import { logout } from "../db/actions/auth-actions";
+import { getSwitchableCompanies } from "@/app/db/actions/company-switch-actions";
 
 import { AppSidebar } from "./components/app-sidebar";
 import { CommandPaletteProvider } from "@/components/command-palette-provider";
@@ -51,11 +54,85 @@ async function DashboardLayout({ children }) {
     );
   }
 
+  /**
+   * THE UNCHOSEN-COMPANY GATE.
+   *
+   * Row-level security scopes every read to ONE company, so a user authorised
+   * for several has no acting company until they pick one — `withAuthorizedTenant`
+   * throws rather than choosing for them (app/db/tenant.ts), and that throw
+   * reached the reader as app/dashboard/error.jsx's "Oops! Something went
+   * wrong", which names neither the cause nor the fix. Asking the question
+   * HERE, once, is the difference between fifty pages that crash and one that
+   * asks.
+   *
+   * The condition is "more than one to choose from", not "is a SuperAdmin":
+   * the gate auto-selects when there is exactly one company on offer, so a
+   * single-company user never sees this, and an Admin of two hits the same
+   * wall a SuperAdmin does.
+   *
+   * IT REDIRECTS. IT DOES NOT RENDER THE CHOOSER IN PLACE OF `children`.
+   *
+   * That is what it used to do, and the reader saw the right screen while the
+   * page underneath ran regardless — the App Router renders a layout and its
+   * page segment concurrently, so leaving `children` out of the returned tree
+   * does not stop the page being evaluated. Every such request logged
+   * "No company selected. You have access to 3." from whichever page it was,
+   * thrown before this layout had decided anything. A redirect is the only
+   * thing that ends a request.
+   *
+   * EXEMPT: the platform pages, which are company-less by design. Admin →
+   * Companies reads across tenants on the privileged connection (app/db/platform.ts),
+   * and /dashboard renders the platform dashboard FOR A SuperAdmin — for
+   * everyone else /dashboard is that company's books and belongs behind the
+   * gate. Sending platform staff to a chooser before they can reach the screen
+   * that lists the companies would be a loop with no way out. /select-company
+   * is exempt for the plainest reason of all: it is where this sends people.
+   *
+   * Degrades to letting the request through: a Postgres that cannot be reached
+   * must fail where the failure can be described, not behind a chooser with
+   * nothing in it.
+   */
+  const pathname = (await headers()).get("x-pathname") || "";
+  const isPlatformPath =
+    pathname.startsWith("/dashboard/admin") ||
+    pathname.startsWith("/dashboard/subscription-expired") ||
+    pathname.startsWith("/dashboard/select-company") ||
+    (user?.role === "SuperAdmin" &&
+      (pathname === "/dashboard" || pathname === "/dashboard/"));
+
+  let grants = null;
+  try {
+    grants = await getSwitchableCompanies();
+  } catch {
+    grants = null;
+  }
+
+  /**
+   * "HAS AN ACTIVE COMPANY" IS NOT "HAS AN activeCompanyId".
+   *
+   * The session can name a company the user can no longer enter — access
+   * revoked, or the tenant deactivated. `resolveActiveCompany` refuses a
+   * company that is not in the grants rather than quietly substituting one, so
+   * the gate below throws "You do not have access to that company" — and a
+   * check for a non-null id would have waved that session straight past the
+   * chooser into the error page it was built to replace.
+   */
+  const choosable = (grants?.companies ?? []).filter((c) => c.isActive);
+  const activeId = grants?.activeCompanyId ?? null;
+  const hasUsableActive = choosable.some((c) => c.id === activeId);
+  // `!== 1` rather than `> 1`: one company is auto-selected by the gate, so
+  // it is the only count that needs nothing asked. Zero is a question too —
+  // and for somebody who may create a tenant it is an answerable one.
+  if (!isPlatformPath && !hasUsableActive && choosable.length !== 1) {
+    redirect("/dashboard/select-company");
+  }
+
   // Bell data — one query, index-backed, capped. Called once per render here,
   // which is where the deduplication belongs: the Mongo version wrapped itself
   // in React cache(), and caching a transaction-scoped read across a request is
   // how one company's rows get served inside another's after a switch.
   // Degrades to an empty bell rather than throwing; the layout wraps every page.
+  //
   const notifications = await getMyNotifications();
 
   return (
@@ -69,7 +146,7 @@ async function DashboardLayout({ children }) {
         /* Rendered on the server and passed down: the grants are a Postgres
            read scoped to the user, and the active company lives in the session
            cookie — neither is reachable from the client sidebar. */
-        companySwitcher={<CompanySwitcher />}
+        companySwitcher={<CompanySwitcher grants={grants} />}
         children={
           <div className="p-4 pb-20 md:p-6 md:pb-6">
             {children}

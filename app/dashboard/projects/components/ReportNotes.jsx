@@ -19,7 +19,7 @@ export default function ReportNotes() {
   const [next, setNext] = useState("");
 
   return (
-    <Card className="p-5 sm:p-6 space-y-4 print:hidden">
+    <Card className="p-4 sm:p-5 space-y-4 print:hidden">
       <div className="flex items-center gap-2">
         <FileCheck className="h-5 w-5 text-muted-foreground" />
         <h2 className="font-semibold text-lg">Narrative for this report</h2>

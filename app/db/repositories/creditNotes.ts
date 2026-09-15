@@ -282,6 +282,21 @@ export async function issueCreditNote(
     description: `Credit to ${note.customerNameAtIssue}`,
   });
 
+  /**
+   * THE PROJECT COMES FROM THE INVOICE — 0084.
+   *
+   * A credit note has no project of its own and should not: it reverses part
+   * of an invoice, so it belongs to whatever job that invoice was raised
+   * against. Reading it here rather than copying it onto `credit_notes` keeps
+   * one answer to "which project", which is the same reason the note carries
+   * `invoice_id` and not a second copy of the customer.
+   */
+  const [creditedInvoice] = await tx
+    .select({ projectId: invoices.projectId })
+    .from(invoices)
+    .where(eq(invoices.id, note.invoiceId));
+  const creditedProjectId = creditedInvoice?.projectId ?? null;
+
   const entry = await createJournalEntry(tx, {
     companyId: note.companyId,
     entryDate: note.creditNoteDate,
@@ -292,6 +307,7 @@ export async function issueCreditNote(
     partyId: note.customerId,
     sourceType: "invoice",
     sourceId: note.invoiceId,
+    projectId: creditedProjectId,
     createdById: opts.issuedById,
     postImmediately: true,
     lines: jeLines,
@@ -355,6 +371,7 @@ export async function issueCreditNote(
       reference: note.creditNoteNumber,
       sourceType: "invoice",
       sourceId: note.invoiceId,
+      projectId: creditedProjectId,
       createdById: opts.issuedById,
       postImmediately: true,
       lines: [

@@ -1,6 +1,10 @@
 import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
-import { getProjectById, getProjectsForParentPicker } from "@/app/db/actions/project-actions";
+import {
+  getProjectById,
+  getProjectsForParentPicker,
+  getProjectTypes,
+} from "@/app/db/actions/project-actions";
 import { searchParties } from "@/app/db/actions/party-actions";
 import { getUsers } from "@/app/db/actions/user-actions";
 import { PARTY_MANAGE_ROLES, PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
@@ -20,11 +24,12 @@ export default async function EditProjectPage({ params }) {
     redirect("/dashboard/projects");
   }
 
-  const [project, clients, users, parentProjects] = await Promise.all([
+  const [project, clients, users, parentProjects, projectTypes] = await Promise.all([
     getProjectById(id),
     searchParties("", "customer"),
     getUsers(),
     getProjectsForParentPicker(id),
+    getProjectTypes(),
   ]);
 
   if (!project) notFound();
@@ -34,8 +39,8 @@ export default async function EditProjectPage({ params }) {
   }
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
-      <ProjectForm canCreateClient={PARTY_MANAGE_ROLES.includes(session?.user?.role)} clients={clients} users={users} parentProjects={parentProjects} project={project} />
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6 max-w-4xl mx-auto">
+      <ProjectForm canCreateClient={PARTY_MANAGE_ROLES.includes(session?.user?.role)} clients={clients} users={users} parentProjects={parentProjects} projectTypes={projectTypes} project={project} />
     </div>
   );
 }

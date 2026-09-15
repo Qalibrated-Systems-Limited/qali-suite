@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ChevronLeft, Users, TrendingUp, BookOpen } from "lucide-react";
 import { getPayrollRunForPage } from "@/app/db/actions/hr-payroll-actions";
 import { PayrollActions, EntryEditButton, PayrollExportButtons, PayslipButton } from "@/app/dashboard/hr/components/PayrollActions";
-import { roleAllowed } from "@/lib/permissions";
+import { can } from "@/lib/capabilities";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
@@ -13,13 +13,6 @@ export async function generateMetadata({ params }) {
 }
 
 // HR prepares, finance approves — both must be able to open the run.
-const HR_ROLES = [
-  "SuperAdmin",
-  "Admin",
-  "CFO",
-  "Finance Manager",
-  "HR Manager",
-];
 
 function StatusBadge({ status }) {
   const map = {
@@ -57,7 +50,7 @@ export default async function PayrollRunDetailPage({ params }) {
   const { id } = await params;
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!roleAllowed(session.user.role, HR_ROLES)) redirect("/dashboard/hr");
+  if (!can(session.user.role, "payroll.prepare")) redirect("/dashboard/hr");
 
   const data = await getPayrollRunForPage(id);
   if (!data) notFound();

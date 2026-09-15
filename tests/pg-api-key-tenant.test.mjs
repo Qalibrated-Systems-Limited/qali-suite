@@ -8,6 +8,13 @@
  * force inside the callback, and the actor written to the row is a person
  * rather than the key.
  *
+ * UPDATED FOR 0102. All three of those still hold; what changed underneath is
+ * that `integration_keys` is a Postgres table, so a key carries its company's
+ * uuid and there is no longer a hop through _migration_id_map to resolve it.
+ * The fixture therefore hands the middleware a uuid, and `createdBy` comes
+ * back at the top of the auth context rather than nested inside the raw key
+ * document that no longer exists.
+ *
  * Skipped unless DATABASE_URL is set.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
@@ -46,13 +53,14 @@ suite("api key tenant bridge", () => {
   function keyContext(overrides = {}) {
     return {
       ok: true,
-      companyId: mongoCompanyId,
+      // The company's uuid, straight off the key row — 0102.
+      companyId: companyUuid,
       keyId: "key-1",
       keyName: "Coffee Coop Connector",
       connectorType: "custom",
       scopes: ["invoices:read", "invoices:write"],
       environment: "test",
-      key: { createdBy: { id: KEY_OWNER, name: "Key Owner" } },
+      createdBy: { id: KEY_OWNER, name: "Key Owner" },
       ...overrides,
     };
   }
@@ -115,7 +123,6 @@ suite("api key tenant bridge", () => {
     });
 
     expect(seen.companyId).toBe(companyUuid);
-    expect(seen.sourceCompanyId).toBe(mongoCompanyId);
     // The other tenant's customer is not visible, and nothing in the callback
     // filtered it out — the policy did.
     const body = await res.json();
@@ -169,7 +176,7 @@ suite("api key tenant bridge", () => {
   });
 
   it("records no actor rather than inventing one, for a key with no creator", async () => {
-    apiKeyAuth.mockResolvedValue(keyContext({ key: {} }));
+    apiKeyAuth.mockResolvedValue(keyContext({ createdBy: null }));
 
     let seen;
     await withApiKeyTenant(request, {}, async (tx, ctx) => {
@@ -197,7 +204,7 @@ suite("api key tenant bridge", () => {
     expect(body.error.code).toBe("CONSTRAINT_VIOLATION");
   });
 
-  it("refuses a company id that maps to no tenant, without inventing one", async () => {
+  it("refuses a key bound to no company, without inventing one", async () => {
     apiKeyAuth.mockResolvedValue(keyContext({ companyId: "" }));
 
     const res = await withApiKeyTenant(request, {}, async () => Response.json({}));

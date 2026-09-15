@@ -8,9 +8,21 @@ import {
   projectCostCodes,
   projectAssignments,
   projectTasks,
+  projectBoqs,
+  projectBoqItems,
+  projectBoqMeasurements,
+  projectContracts,
+  projectCertificates,
+  projectTypes,
+  projectTimesheets,
+  projectVariations,
+  projectVariationItems,
+  projectMilestones,
+  projectCashRequisitions,
   accounts,
 } from "../schema";
 import { getProjectClaimsByAccount, listClaims } from "./claims";
+import { createJournalEntry } from "./journal";
 import { getProjectExpensesByAccount, listProjectExpenses } from "./expenses";
 
 /**
@@ -85,6 +97,36 @@ function filterConditions(opts: ProjectFilters) {
   return conditions;
 }
 
+/**
+ * LIVE WORK FIRST, and this is the register's own rule rather than a new one.
+ *
+ * `listProjectsForWorkspace` has floated planning and active above everything
+ * else since it was written, because a switcher offering last year's closed
+ * jobs first is a switcher nobody uses. The register — the page whose whole
+ * job is the list — ordered by `created_at DESC` alone, so a job CLOSED two
+ * years ago outranked a live one whenever it happened to be created later. On
+ * a tenant with more completed jobs than running ones, page 1 of 20 was mostly
+ * dead work.
+ *
+ * Five ranks rather than the switcher's two: a register is read in groups, and
+ * "on hold" is a different question from "finished" — one needs somebody to
+ * unblock it, the other needs nothing. A dropdown does not need that
+ * distinction and still does not have it.
+ *
+ * Recency stays as the tiebreak, so within a group the page behaves exactly as
+ * it always has. The sort is over one page's worth of a tenant's projects, so
+ * the CASE costs nothing an index would have saved.
+ */
+const STATUS_RANK = sql`
+  CASE ${projects.status}
+    WHEN 'active'    THEN 0
+    WHEN 'planning'  THEN 1
+    WHEN 'on_hold'   THEN 2
+    WHEN 'completed' THEN 3
+    WHEN 'closed'    THEN 4
+    ELSE 5
+  END`;
+
 /** The list page. Same four search fields Mongo regexed, as one ILIKE each. */
 export async function listProjects(tx: Tx, opts: ProjectFilters = {}) {
   const page = Math.max(1, opts.page ?? 1);
@@ -96,7 +138,7 @@ export async function listProjects(tx: Tx, opts: ProjectFilters = {}) {
     .select()
     .from(projects)
     .where(where)
-    .orderBy(desc(projects.createdAt))
+    .orderBy(STATUS_RANK, desc(projects.createdAt))
     .limit(limit)
     .offset((page - 1) * limit);
 
@@ -125,6 +167,8 @@ export async function listProjects(tx: Tx, opts: ProjectFilters = {}) {
         source: "typed" as const,
         taskCount: 0,
         doneCount: 0,
+        billedValue: 0,
+        measuredValue: 0,
       },
     })),
     total: Number(total ?? 0),
@@ -208,6 +252,87 @@ export async function getProjectById(tx: Tx, projectId: string) {
 }
 
 /** The picker every other module renders: planning and active only. */
+/**
+ * Every project, for the workspace switcher — not just the live ones.
+ *
+ * `getActiveProjects` is `status IN ('planning','active')`, which is right for
+ * a PICKER on a new invoice: you do not book fresh work to a finished job. It
+ * is wrong for the workspace, and wrong in the direction that matters.
+ *
+ * A site diary and an instruction register are read most AFTER completion —
+ * the final account, a defects dispute, an arbitration. FIDIC claims are
+ * argued from the diary years later. Filtering the switcher to live jobs makes
+ * the records of every finished one unreachable, which is the opposite of what
+ * they exist for.
+ *
+ * Ordered live-first so the common case is still the top of the list, then by
+ * name. Deliberately light — no budget, no actuals, no progress: this fills a
+ * dropdown, and `listProjects` runs four more queries per page to build a card.
+ */
+export async function listProjectsForWorkspace(tx: Tx) {
+  /**
+   * The section flags come with the row — 0082.
+   *
+   * The module's sub-navigation is rendered in the LAYOUT, above pages that
+   * each resolve their own project from `?project=`, and a layout does not
+   * receive searchParams. So the nav is handed every project's flags and picks
+   * by the same rule the pages use (`selectProject`), rather than the layout
+   * trying to know which project is selected.
+   *
+   * A LEFT JOIN and COALESCE, not an inner join: a project with no type shows
+   * every section, which is what every project did before the column existed.
+   */
+  return tx
+    .select({
+      id: projects.id,
+      projectNumber: projects.projectNumber,
+      name: projects.name,
+      status: projects.status,
+      typeId: projects.typeId,
+      typeName: projectTypes.name,
+      showsBoq: sql<boolean>`COALESCE(${projectTypes.showsBoq}, true)`,
+      showsProgramme: sql<boolean>`COALESCE(${projectTypes.showsProgramme}, true)`,
+      showsInstructions: sql<boolean>`COALESCE(${projectTypes.showsInstructions}, true)`,
+      showsDiary: sql<boolean>`COALESCE(${projectTypes.showsDiary}, true)`,
+      showsCertificates: sql<boolean>`COALESCE(${projectTypes.showsCertificates}, true)`,
+      showsCashRequisitions: sql<boolean>`COALESCE(${projectTypes.showsCashRequisitions}, true)`,
+    })
+    .from(projects)
+    .leftJoin(projectTypes, eq(projectTypes.id, projects.typeId))
+    .orderBy(
+      sql`CASE WHEN ${projects.status} IN ('planning','active') THEN 0 ELSE 1 END`,
+      asc(projects.name),
+    );
+}
+
+/**
+ * The types a tenant may pick from: the built-ins, plus its own.
+ *
+ * RLS does the filtering — the policy reads `company_id IS NULL OR company_id =
+ * current` — so this query says nothing about tenancy and cannot get it wrong.
+ * Built-ins first, then the tenant\'s, each in its own sort order.
+ */
+export async function listProjectTypes(tx: Tx) {
+  return tx
+    .select()
+    .from(projectTypes)
+    .where(eq(projectTypes.isActive, true))
+    .orderBy(
+      sql`CASE WHEN ${projectTypes.companyId} IS NULL THEN 0 ELSE 1 END`,
+      asc(projectTypes.sortOrder),
+      asc(projectTypes.name),
+    );
+}
+
+export async function getProjectTypeById(tx: Tx, typeId: string) {
+  if (!isUuid(typeId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectTypes)
+    .where(eq(projectTypes.id, typeId));
+  return row ?? null;
+}
+
 export async function getActiveProjects(tx: Tx) {
   return tx
     .select({
@@ -364,28 +489,49 @@ export async function computeActualsFor(
        GROUP BY i.project_id
     ),
 
-    -- Bills: paid is cost, approved-and-unpaid is commitment. A bill
-    -- cancelled after payment is neither.
+    -- Bills: APPROVED is cost, whether or not it has been paid. Approval is
+    -- the point the bill posts (DR expense / CR Accounts Payable), so that is
+    -- the point the project incurred it. Paying it later moves cash and
+    -- changes nothing about the cost.
+    --
+    -- Counting cost at payment instead — which this did until 0088 — put the
+    -- cost side on a cash basis while revenue stayed on an accrual one, and a
+    -- job on 60-day supplier terms then showed two months of revenue against
+    -- none of its cost. Margin peaked early and sagged later, from payment
+    -- timing rather than anything about the job.
+    --
+    -- A bill still in draft or submitted is a commitment: received, not yet
+    -- accepted. Rejected and cancelled are neither.
     bill_totals AS (
       SELECT b.project_id,
              SUM(b.net_payable) FILTER (
-               WHERE b.payment_status = 'paid' AND b.status <> 'cancelled'
-             )::float8                                              AS paid,
+               WHERE b.status = 'approved'
+                  OR (b.payment_status <> 'unpaid'
+                      AND b.status NOT IN ('cancelled', 'rejected'))
+             )::float8                                              AS incurred,
              SUM(b.net_payable) FILTER (
-               WHERE b.status = 'approved' AND b.payment_status <> 'paid'
+               WHERE b.status IN ('draft', 'submitted')
+                 AND b.payment_status = 'unpaid'
              )::float8                                              AS committed
         FROM bills b
        WHERE b.project_id IN (SELECT project_id FROM ids)
        GROUP BY b.project_id
     ),
 
+    -- Claims, on the same basis: APPROVED is the point the company owes the
+    -- employee, so it is the point the project incurred the cost. Everything
+    -- downstream of approval — awaiting payment, paid, closed — is likewise
+    -- incurred. Only a submitted claim is still a commitment; draft and
+    -- rejected are neither.
     claim_totals AS (
       SELECT c.project_id,
              SUM(s.total_amount) FILTER (
-               WHERE c.status IN ('paid', 'closed')
+               WHERE c.status IN (
+                 'approved', 'pending_payment', 'pending_return', 'paid', 'closed'
+               )
              )::float8                                              AS actual,
              SUM(s.total_amount) FILTER (
-               WHERE c.status IN ('submitted', 'approved')
+               WHERE c.status = 'submitted'
              )::float8                                              AS committed
         FROM employee_claims c
         JOIN employee_claim_state s ON s.claim_id = c.id
@@ -394,10 +540,15 @@ export async function computeActualsFor(
        GROUP BY c.project_id
     ),
 
+    -- Expenses, likewise. POSTED is the point it reaches the ledger — an
+    -- unpaid posted expense already credits Accrued Expenses, so it is in the
+    -- company's P&L and belongs in the project's. Splitting on payment_status
+    -- kept a cost the accounts had already recognised out of the project that
+    -- caused it. Only a draft is still a commitment.
     expense_totals AS (
       SELECT e.project_id,
-             SUM(e.total) FILTER (WHERE e.payment_status = 'paid')::float8   AS paid,
-             SUM(e.total) FILTER (WHERE e.payment_status = 'unpaid')::float8 AS committed
+             SUM(e.total) FILTER (WHERE e.status IN ('posted', 'paid'))::float8 AS incurred,
+             SUM(e.total) FILTER (WHERE e.status = 'draft')::float8             AS committed
         FROM expenses e
        WHERE e.project_id IN (SELECT project_id FROM ids)
          AND e.status <> 'void'
@@ -474,21 +625,47 @@ export async function computeActualsFor(
        WHERE i.project_id IN (SELECT project_id FROM ids)
          AND cn.status IN ('issued', 'applied')
        GROUP BY i.project_id
+    ),
+
+    -- Own labour — 0089, and the largest thing this function used to miss.
+    -- A contractor's wages reached the P&L through payroll and reached no
+    -- project at all: on the 2026-09-03 worked example, 45.6% reported margin
+    -- against a true 18.9%.
+    --
+    -- APPROVED is cost, on the same basis as bills, claims and expenses since
+    -- 0088. Submitted is a commitment: the time was worked and will be owed,
+    -- and nobody has accepted the number yet.
+    --
+    -- cost_amount IS NULL FOR A SUBCONTRACTOR, by CHECK — 0089 decision 2 —
+    -- so this arm cannot double-count somebody whose cost also arrives on a
+    -- bill carrying the project. That is the whole reason the column is
+    -- nullable rather than zero, and SUM ignores the NULLs.
+    timesheet_labour AS (
+      SELECT t.project_id,
+             SUM(t.cost_amount) FILTER (
+               WHERE t.status = 'approved')::float8                     AS incurred,
+             SUM(t.cost_amount) FILTER (
+               WHERE t.status = 'submitted')::float8                    AS committed
+        FROM project_timesheets t
+       WHERE t.project_id IN (SELECT project_id FROM ids)
+       GROUP BY t.project_id
     )
 
     SELECT ids.project_id::text                        AS project_id,
            COALESCE(ir.amount, 0)                      AS invoice_revenue,
            COALESCE(cr.amount, 0)                      AS credited,
-           COALESCE(bt.paid, 0)                        AS bill_paid,
+           COALESCE(bt.incurred, 0)                    AS bill_incurred,
            COALESCE(bt.committed, 0)                   AS bill_committed,
            COALESCE(ct.actual, 0)                      AS claim_actual,
            COALESCE(ct.committed, 0)                   AS claim_committed,
-           COALESCE(et.paid, 0)                        AS expense_paid,
+           COALESCE(et.incurred, 0)                    AS expense_incurred,
            COALESCE(et.committed, 0)                   AS expense_committed,
            COALESCE(ri.amount, 0)                      AS request_issued,
            COALESCE(ro.amount, 0)                      AS request_committed,
            COALESCE(ic.amount, 0)                      AS invoice_cogs,
-           COALESCE(rc.amount, 0)                      AS returned_cogs
+           COALESCE(rc.amount, 0)                      AS returned_cogs,
+           COALESCE(tl.incurred, 0)                    AS labour_incurred,
+           COALESCE(tl.committed, 0)                   AS labour_committed
       FROM ids
       LEFT JOIN invoice_revenue ir ON ir.project_id = ids.project_id
       LEFT JOIN credited       cr ON cr.project_id = ids.project_id
@@ -499,6 +676,7 @@ export async function computeActualsFor(
       LEFT JOIN request_outstanding ro ON ro.project_id = ids.project_id
       LEFT JOIN invoice_cogs   ic ON ic.project_id = ids.project_id
       LEFT JOIN returned_cogs  rc ON rc.project_id = ids.project_id
+      LEFT JOIN timesheet_labour tl ON tl.project_id = ids.project_id
   `)) as unknown as Array<Record<string, unknown>>;
 
   for (const r of rows) {
@@ -509,17 +687,19 @@ export async function computeActualsFor(
       costs: Math.max(
         0,
         num(r.claim_actual) +
-          num(r.expense_paid) +
-          num(r.bill_paid) +
+          num(r.expense_incurred) +
+          num(r.bill_incurred) +
           num(r.request_issued) +
-          num(r.invoice_cogs) -
+          num(r.invoice_cogs) +
+          num(r.labour_incurred) -
           num(r.returned_cogs),
       ),
       committed:
         num(r.claim_committed) +
         num(r.expense_committed) +
         num(r.bill_committed) +
-        num(r.request_committed),
+        num(r.request_committed) +
+        num(r.labour_committed),
     });
   }
 
@@ -1165,6 +1345,8 @@ export interface CreateProjectInput {
   projectManagerUserId?: string | null;
   projectManagerName?: string | null;
   parentProjectId?: string | null;
+  /** What KIND of work — a `project_types` row (0082). NULL shows every section. */
+  typeId?: string | null;
   billingModel?: "fixed" | "milestone" | "time_material" | null;
   contractValue?: string | null;
   progressPercent?: number;
@@ -1194,6 +1376,7 @@ export async function createProject(tx: Tx, input: CreateProjectInput) {
       projectManagerUserId: input.projectManagerUserId || null,
       projectManagerName: input.projectManagerName?.trim() || null,
       parentProjectId: input.parentProjectId || null,
+      typeId: input.typeId || null,
       billingModel: input.billingModel ?? null,
       contractValue: input.contractValue ?? null,
       progressPercent: input.progressPercent ?? 0,
@@ -1244,6 +1427,7 @@ export async function updateProject(
     patch.projectManagerName = input.projectManagerName?.trim() || null;
   }
   set("parentProjectId", "parentProjectId");
+  set("typeId", "typeId");
   set("billingModel", "billingModel");
   set("contractValue", "contractValue");
   set("progressPercent", "progressPercent");
@@ -1535,13 +1719,56 @@ const LEAVES = sql`
             WHERE c.parent_task_id = t.id AND c.status <> 'cancelled')
 `;
 
+/**
+ * The measured value of an awarded bill — 0080.
+ *
+ * `billed` is the bill total, `earned` is what has been measured against it at
+ * the same rates. Both are money, which is what a quantity surveyor means by
+ * "percent complete": a 40% figure is 40% OF THE VALUE, not 40% of the rows.
+ *
+ * Only priced items count, and by construction those are the leaves —
+ * `project_boq_items_leaf_owns_quantity` refuses a rate on a row with
+ * sub-items, so no NOT EXISTS is needed here the way `LEAVES` needs one.
+ *
+ * `earned` may exceed `billed`. Over-measurement is usually the first evidence
+ * of a variation, and this module warns rather than blocking — so the figure
+ * is reported as it is and the screen says so.
+ */
+const MEASURED = sql`
+  SELECT b.project_id,
+         SUM(i.quantity * i.rate)                    AS billed,
+         SUM(COALESCE(m.measured, 0) * i.rate)       AS earned,
+         COUNT(*)::int                               AS item_count
+    FROM project_boqs b
+    JOIN project_boq_items i ON i.boq_id = b.id
+    LEFT JOIN LATERAL (
+      SELECT SUM(x.quantity) AS measured
+        FROM project_boq_measurements x
+       WHERE x.boq_item_id = i.id
+    ) m ON TRUE
+   WHERE b.status = 'awarded'
+     AND i.quantity IS NOT NULL
+     AND i.rate IS NOT NULL
+   GROUP BY b.project_id
+`;
+
 export interface ProjectProgress {
-  /** 0–100. */
+  /** 0–100 — EXCEPT where more has been measured than was billed. */
   percent: number;
-  /** Where the number came from — `tasks` is earned, `typed` is asserted. */
-  source: "tasks" | "typed";
+  /**
+   * Where the number came from, best first.
+   *
+   * `measured` is remeasured work against an awarded bill — the only one of
+   * the three that is a measurement rather than an opinion. `tasks` is the
+   * weighted roll-up of a WBS whose leaf percentages were still typed by
+   * somebody. `typed` is the project-level slider.
+   */
+  source: "measured" | "tasks" | "typed";
   taskCount: number;
   doneCount: number;
+  /** Money, and 0 where there is no awarded bill. */
+  billedValue: number;
+  measuredValue: number;
 }
 
 /**
@@ -1562,30 +1789,52 @@ export async function computeProgressFor(
   const ids = anyOf([...new Set(projectIds)], "uuid[]");
 
   const rows = (await tx.execute(sql`
-    WITH leaves AS (${LEAVES})
+    WITH leaves AS (${LEAVES}), measured AS (${MEASURED})
     SELECT p.id::text                                          AS project_id,
            p.progress_percent                                  AS typed,
            (SUM(l.w * l.p) / NULLIF(SUM(l.w), 0))::float8      AS rolled_up,
            COUNT(l.id)::int                                     AS leaf_count,
+           mm.billed::float8                                    AS billed,
+           mm.earned::float8                                    AS earned,
            (SELECT COUNT(*) FROM project_tasks t
              WHERE t.project_id = p.id AND t.status <> 'cancelled')::int AS task_count,
            (SELECT COUNT(*) FROM project_tasks t
              WHERE t.project_id = p.id AND t.status = 'done')::int       AS done_count
       FROM projects p
-      LEFT JOIN leaves l ON l.project_id = p.id
+      LEFT JOIN leaves l   ON l.project_id = p.id
+      LEFT JOIN measured mm ON mm.project_id = p.id
      WHERE p.id = ${ids}
-     GROUP BY p.id
+     GROUP BY p.id, mm.billed, mm.earned
   `)) as unknown as Array<Record<string, unknown>>;
 
   for (const r of rows) {
     const rolled = r.rolled_up === null || r.rolled_up === undefined
       ? null
       : num(r.rolled_up);
+
+    /**
+     * MEASURED BEATS TASKS BEATS TYPED — 0080.
+     *
+     * A remeasure against a signed bill is evidence; a weighted roll-up of
+     * tasks is a careful opinion; the slider is an assertion. Where more than
+     * one is available the strongest wins, and `source` says which so no
+     * screen can imply somebody measured something they did not.
+     *
+     * A bill whose items are all priced at zero has `billed = 0` and no
+     * percentage — dividing by it would be a fabricated 0% or a crash — so it
+     * falls through to the next source, which is the honest answer.
+     */
+    const billed = num(r.billed);
+    const earnedPct = billed > 0 ? (num(r.earned) / billed) * 100 : null;
+
     result.set(String(r.project_id), {
-      percent: Math.round(rolled ?? num(r.typed)),
-      source: rolled === null ? "typed" : "tasks",
+      percent: Math.round(earnedPct ?? rolled ?? num(r.typed)),
+      source:
+        earnedPct !== null ? "measured" : rolled === null ? "typed" : "tasks",
       taskCount: Number(r.task_count ?? 0),
       doneCount: Number(r.done_count ?? 0),
+      billedValue: billed,
+      measuredValue: num(r.earned),
     });
   }
   return result;
@@ -1599,6 +1848,8 @@ export async function getProjectProgress(tx: Tx, projectId: string) {
       source: "typed" as const,
       taskCount: 0,
       doneCount: 0,
+      billedValue: 0,
+      measuredValue: 0,
     }
   );
 }
@@ -1875,4 +2126,2976 @@ export async function countTasks(tx: Tx, projectId: string) {
     .from(projectTasks)
     .where(eq(projectTasks.projectId, projectId));
   return Number(row?.total ?? 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The bill of quantities — 0080
+//
+// The measured half of the module. Everything above this line values a project
+// by what was spent or asserted; this values it by what was measured against a
+// bill somebody signed, which is the only one of the three a final account can
+// be argued from.
+//
+// MONEY IS A NUMBER in this section, not a string — the same exception the
+// financial summary takes, and for the same reason: every screen that renders a
+// bill does arithmetic on it (a section total, a percentage of the bill, an
+// over-measure) and a string that silently concatenates is how Cash
+// Requisitions came to render NaN.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Every version of the bill for a project, newest first. */
+export async function listBoqsForProject(tx: Tx, projectId: string) {
+  return tx
+    .select()
+    .from(projectBoqs)
+    .where(eq(projectBoqs.projectId, projectId))
+    .orderBy(desc(projectBoqs.version));
+}
+
+/**
+ * THE bill for a project: the awarded one, and the latest draft where nothing
+ * has been awarded yet.
+ *
+ * One rule, stated once, so no screen has to decide which version it is looking
+ * at — the same shape as `getEffectiveBudget` (0070 decision 5).
+ */
+export async function getEffectiveBoq(tx: Tx, projectId: string) {
+  const [row] = await tx
+    .select()
+    .from(projectBoqs)
+    .where(eq(projectBoqs.projectId, projectId))
+    .orderBy(
+      // `awarded` first, then the highest version among the rest.
+      sql`CASE WHEN ${projectBoqs.status} = 'awarded' THEN 0 ELSE 1 END`,
+      desc(projectBoqs.version),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export async function getBoqById(tx: Tx, boqId: string) {
+  if (!isUuid(boqId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectBoqs)
+    .where(eq(projectBoqs.id, boqId));
+  return row ?? null;
+}
+
+/**
+ * A new version of the bill.
+ *
+ * The version is `max + 1` INSIDE the caller's transaction, and
+ * `project_boqs_version_uq` is what actually guarantees it: two people starting
+ * v2 at once both read v1 and one of them loses the insert, which is the
+ * correct outcome and a clearer error than a silently duplicated version.
+ */
+export async function createBoq(
+  tx: Tx,
+  input: {
+    companyId: string;
+    projectId: string;
+    methodOfMeasurement?: string | null;
+    currency?: string | null;
+    notes?: string | null;
+    createdById?: string | null;
+    createdByName: string;
+  },
+) {
+  const [prev] = await tx
+    .select({ version: projectBoqs.version })
+    .from(projectBoqs)
+    .where(eq(projectBoqs.projectId, input.projectId))
+    .orderBy(desc(projectBoqs.version))
+    .limit(1);
+
+  const [row] = await tx
+    .insert(projectBoqs)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      version: (prev?.version ?? 0) + 1,
+      methodOfMeasurement: input.methodOfMeasurement?.trim() || null,
+      currency: input.currency?.trim() || "KES",
+      notes: input.notes?.trim() ?? "",
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+/** The bill's own facts. Refused on anything that is not a draft. */
+export async function updateBoq(
+  tx: Tx,
+  boqId: string,
+  input: {
+    methodOfMeasurement?: string | null;
+    currency?: string | null;
+    notes?: string | null;
+    lastModifiedById?: string | null;
+    lastModifiedByName?: string | null;
+  },
+) {
+  const current = await getBoqById(tx, boqId);
+  if (!current) return null;
+  if (current.status !== "draft") {
+    throw new Error(
+      `Bill v${current.version} is ${current.status} and cannot be edited. Create a new version.`,
+    );
+  }
+
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.methodOfMeasurement !== undefined) {
+    patch.methodOfMeasurement = input.methodOfMeasurement?.trim() || null;
+  }
+  if (input.currency !== undefined) patch.currency = input.currency?.trim() || "KES";
+  if (input.notes !== undefined) patch.notes = input.notes?.trim() ?? "";
+  if (input.lastModifiedById !== undefined) patch.lastModifiedById = input.lastModifiedById;
+  if (input.lastModifiedByName !== undefined) {
+    patch.lastModifiedByName = input.lastModifiedByName;
+  }
+
+  const [row] = await tx
+    .update(projectBoqs)
+    .set(patch)
+    .where(eq(projectBoqs.id, boqId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Award the bill, and supersede whichever one was awarded before it.
+ *
+ * Supersede-then-award, in this order, inside one transaction — the same
+ * sequence `approveProjectBudget` uses, and for the same reason: the reverse
+ * order leaves two rows matching `project_boqs_one_awarded` for the length of a
+ * statement, and that index is the only thing standing between two racing
+ * awards and a project with two contract sums.
+ *
+ * Awarding is what FREEZES the priced items. After this, a variation issues a
+ * new item; nothing edits a signed one.
+ */
+export async function awardBoq(
+  tx: Tx,
+  boqId: string,
+  actor: { id?: string | null; name: string },
+) {
+  const boq = await getBoqById(tx, boqId);
+  if (!boq) return null;
+  if (boq.status === "awarded") return boq;
+  if (boq.status === "superseded") {
+    throw new Error(
+      `Bill v${boq.version} has been superseded and cannot be awarded again.`,
+    );
+  }
+
+  await tx
+    .update(projectBoqs)
+    .set({ status: "superseded", updatedAt: new Date() })
+    .where(
+      and(
+        eq(projectBoqs.projectId, boq.projectId),
+        eq(projectBoqs.status, "awarded"),
+      ),
+    );
+
+  const [row] = await tx
+    .update(projectBoqs)
+    .set({
+      status: "awarded",
+      awardedById: actor.id ?? null,
+      awardedByName: actor.name,
+      awardedAt: new Date(),
+      lastModifiedById: actor.id ?? null,
+      lastModifiedByName: actor.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectBoqs.id, boqId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * The bill, depth-first, siblings in `sort_order`, every row carrying what has
+ * been measured against it.
+ *
+ * `path` alone orders the tree depth-first but by id, which is arbitrary, so
+ * the recursive CTE builds a sort key from each row's ancestors — exactly as
+ * `listProjectTasks` does.
+ *
+ * `billedAmount` and `measuredAmount` are SUBTREE totals: a leaf's own figures,
+ * and the roll-up of everything beneath a section. That is the whole point of
+ * the tree — a section's amount is what is under it, and
+ * `project_boq_items_leaf_owns_quantity` guarantees the two can never be
+ * double-counted.
+ */
+export async function listBoqItems(tx: Tx, boqId: string) {
+  const rows = (await tx.execute(sql`
+    WITH RECURSIVE priced AS (
+      SELECT i.path,
+             i.quantity,
+             i.rate,
+             COALESCE((
+               SELECT SUM(m.quantity) FROM project_boq_measurements m
+                WHERE m.boq_item_id = i.id
+             ), 0) AS measured
+        FROM project_boq_items i
+       WHERE i.boq_id = ${boqId}
+         AND i.quantity IS NOT NULL
+         AND i.rate IS NOT NULL
+    ),
+    tree AS (
+      SELECT i.id,
+             ARRAY[lpad((i.sort_order + 1000000)::text, 12, '0') || '|' || i.description] AS ord
+        FROM project_boq_items i
+       WHERE i.boq_id = ${boqId} AND i.parent_item_id IS NULL
+      UNION ALL
+      SELECT c.id,
+             p.ord || (lpad((c.sort_order + 1000000)::text, 12, '0') || '|' || c.description)
+        FROM project_boq_items c
+        JOIN tree p ON c.parent_item_id = p.id
+       WHERE c.boq_id = ${boqId}
+    )
+    SELECT i.id::text                                   AS id,
+           i.parent_item_id::text                       AS "parentItemId",
+           i.depth,
+           i.item_code                                  AS "itemCode",
+           i.description,
+           i.is_heading                                 AS "isHeading",
+           i.unit,
+           i.quantity::float8                           AS quantity,
+           i.rate::float8                               AS rate,
+           i.amount::float8                             AS amount,
+           i.cost_code_id::text                         AS "costCodeId",
+           cc.code                                      AS "costCode",
+           i.task_id::text                              AS "taskId",
+           t.title                                      AS "taskTitle",
+           i.sort_order                                 AS "sortOrder",
+           (SELECT COUNT(*) FROM project_boq_items c
+             WHERE c.parent_item_id = i.id)::int        AS "childCount",
+           COALESCE((
+             SELECT SUM(m.quantity) FROM project_boq_measurements m
+              WHERE m.boq_item_id = i.id
+           ), 0)::float8                                AS "measuredQuantity",
+           COALESCE((
+             SELECT SUM(p.quantity * p.rate) FROM priced p WHERE p.path <@ i.path
+           ), 0)::float8                                AS "billedAmount",
+           COALESCE((
+             SELECT SUM(p.measured * p.rate) FROM priced p WHERE p.path <@ i.path
+           ), 0)::float8                                AS "measuredAmount"
+      FROM project_boq_items i
+      JOIN tree ON tree.id = i.id
+      LEFT JOIN project_cost_codes cc ON cc.id = i.cost_code_id
+      LEFT JOIN project_tasks t       ON t.id  = i.task_id
+     WHERE i.boq_id = ${boqId}
+     ORDER BY tree.ord
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({ ...r, id: String(r.id) })) as Array<
+    Record<string, unknown> & { id: string }
+  >;
+}
+
+export async function getBoqItemById(tx: Tx, itemId: string) {
+  if (!isUuid(itemId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectBoqItems)
+    .where(eq(projectBoqItems.id, itemId));
+  return row ?? null;
+}
+
+/**
+ * The bill's totals in one pass.
+ *
+ * `overMeasured` is the count of items measured beyond what was billed. It is
+ * not an error — it is usually the first evidence of a variation — and the
+ * module warns rather than blocking, so it is a figure the page shows and not a
+ * constraint the database enforces.
+ */
+export async function getBoqSummary(tx: Tx, boqId: string) {
+  const [row] = (await tx.execute(sql`
+    WITH priced AS (
+      SELECT i.id, i.quantity, i.rate,
+             COALESCE((
+               SELECT SUM(m.quantity) FROM project_boq_measurements m
+                WHERE m.boq_item_id = i.id
+             ), 0) AS measured
+        FROM project_boq_items i
+       WHERE i.boq_id = ${boqId}
+         AND i.quantity IS NOT NULL
+         AND i.rate IS NOT NULL
+    )
+    SELECT (SELECT COUNT(*) FROM project_boq_items WHERE boq_id = ${boqId})::int AS item_count,
+           COUNT(*)::int                                                AS priced_count,
+           COALESCE(SUM(quantity * rate), 0)::float8                    AS billed,
+           COALESCE(SUM(measured * rate), 0)::float8                    AS measured,
+           COUNT(*) FILTER (WHERE measured > 0)::int                    AS measured_count,
+           COUNT(*) FILTER (WHERE measured > quantity)::int             AS over_measured
+      FROM priced
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const billed = num(row?.billed);
+  const measured = num(row?.measured);
+  return {
+    itemCount: Number(row?.item_count ?? 0),
+    pricedCount: Number(row?.priced_count ?? 0),
+    measuredCount: Number(row?.measured_count ?? 0),
+    overMeasured: Number(row?.over_measured ?? 0),
+    billed,
+    measured,
+    /** Of the VALUE, which is what a quantity surveyor means by per cent. */
+    percent: billed > 0 ? Math.round((measured / billed) * 100) : 0,
+  };
+}
+
+export interface CreateBoqItemInput {
+  companyId: string;
+  boqId: string;
+  projectId: string;
+  parentItemId?: string | null;
+  itemCode?: string | null;
+  description: string;
+  isHeading?: boolean;
+  unit?: string | null;
+  quantity?: string | null;
+  rate?: string | null;
+  costCodeId?: string | null;
+  taskId?: string | null;
+  sortOrder?: number;
+  createdById?: string | null;
+  createdByName: string;
+}
+
+/**
+ * A new line in the bill. `path` is not supplied — the trigger owns it — and
+ * the frozen check, the leaf-pricing rule and the same-bill parent rule are all
+ * the database's, so this stays a plain insert.
+ */
+export async function createBoqItem(tx: Tx, input: CreateBoqItemInput) {
+  const [row] = await tx
+    .insert(projectBoqItems)
+    .values({
+      companyId: input.companyId,
+      boqId: input.boqId,
+      projectId: input.projectId,
+      parentItemId: input.parentItemId || null,
+      itemCode: input.itemCode?.trim() || null,
+      description: input.description.trim(),
+      isHeading: input.isHeading ?? false,
+      unit: input.unit?.trim() || null,
+      quantity: input.quantity ?? null,
+      rate: input.rate ?? null,
+      costCodeId: input.costCodeId || null,
+      taskId: input.taskId || null,
+      sortOrder: input.sortOrder ?? 0,
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+export type UpdateBoqItemInput = Partial<
+  Omit<CreateBoqItemInput, "companyId" | "boqId" | "projectId" | "createdById" | "createdByName">
+> & {
+  lastModifiedById?: string | null;
+  lastModifiedByName?: string | null;
+};
+
+/**
+ * An edit to a line. `project_boq_items_frozen` decides what is allowed once
+ * the bill is awarded — the cost code, the task link and the sort order still
+ * move, because none of them is a contractual figure and needing a new version
+ * of the bill to cross-reference an item to a programme activity would mean
+ * nobody ever does it.
+ */
+export async function updateBoqItem(
+  tx: Tx,
+  itemId: string,
+  input: UpdateBoqItemInput,
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.parentItemId !== undefined) patch.parentItemId = input.parentItemId || null;
+  if (input.itemCode !== undefined) patch.itemCode = input.itemCode?.trim() || null;
+  if (input.description !== undefined) patch.description = input.description.trim();
+  if (input.isHeading !== undefined) patch.isHeading = input.isHeading;
+  if (input.unit !== undefined) patch.unit = input.unit?.trim() || null;
+  if (input.quantity !== undefined) patch.quantity = input.quantity ?? null;
+  if (input.rate !== undefined) patch.rate = input.rate ?? null;
+  if (input.costCodeId !== undefined) patch.costCodeId = input.costCodeId || null;
+  if (input.taskId !== undefined) patch.taskId = input.taskId || null;
+  if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder;
+  if (input.lastModifiedById !== undefined) patch.lastModifiedById = input.lastModifiedById;
+  if (input.lastModifiedByName !== undefined) {
+    patch.lastModifiedByName = input.lastModifiedByName;
+  }
+
+  const [row] = await tx
+    .update(projectBoqItems)
+    .set(patch)
+    .where(eq(projectBoqItems.id, itemId))
+    .returning();
+  return row ?? null;
+}
+
+/** Refused by the foreign key while the item still has sub-items. */
+export async function deleteBoqItem(tx: Tx, itemId: string) {
+  const [row] = await tx
+    .delete(projectBoqItems)
+    .where(eq(projectBoqItems.id, itemId))
+    .returning();
+  return row ?? null;
+}
+
+/** The measurement log for one item, newest first — the audit of a remeasure. */
+export async function listBoqMeasurements(tx: Tx, itemId: string) {
+  return tx
+    .select()
+    .from(projectBoqMeasurements)
+    .where(eq(projectBoqMeasurements.boqItemId, itemId))
+    .orderBy(desc(projectBoqMeasurements.measuredOn), desc(projectBoqMeasurements.createdAt));
+}
+
+/**
+ * Record a measurement. Signed, and never zero.
+ *
+ * `project_boq_measurement_is_measurable` refuses a heading, an unpriced item
+ * and anything on a bill that has not been awarded. Nothing here caps the
+ * total against the billed quantity: measuring more than was billed is how a
+ * variation first shows up, and this module warns rather than blocking.
+ */
+export async function recordBoqMeasurement(
+  tx: Tx,
+  input: {
+    companyId: string;
+    boqItemId: string;
+    measuredOn?: string | null;
+    quantity: string;
+    reference?: string | null;
+    notes?: string | null;
+    measuredById?: string | null;
+    measuredByName: string;
+  },
+) {
+  const [row] = await tx
+    .insert(projectBoqMeasurements)
+    .values({
+      companyId: input.companyId,
+      boqItemId: input.boqItemId,
+      ...(input.measuredOn ? { measuredOn: input.measuredOn } : {}),
+      quantity: input.quantity,
+      reference: input.reference?.trim() ?? "",
+      notes: input.notes?.trim() ?? "",
+      measuredById: input.measuredById ?? null,
+      measuredByName: input.measuredByName,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Remove a measurement.
+ *
+ * Kept for a mis-keyed entry, and it is NOT how an over-measure is corrected:
+ * once a quantity has been certified the correction is a negative measurement,
+ * so the certificate and the remeasure that adjusted it both survive. The
+ * screen says so; the database cannot know which case it is looking at.
+ */
+export async function deleteBoqMeasurement(tx: Tx, measurementId: string) {
+  if (!isUuid(measurementId)) return null;
+  const [row] = await tx
+    .delete(projectBoqMeasurements)
+    .where(eq(projectBoqMeasurements.id, measurementId))
+    .returning();
+  return row ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The contract, and the interim payment certificate — 0081
+//
+// MONEY IS A STRING on the stored rows and a NUMBER on the computed
+// certificate, for the reason the header gives: the screens do arithmetic on a
+// certificate — a percentage of the contract, a comparison with the bill — and
+// a numeric read in string mode concatenates under `+`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Every contract on a project — the main one and any subcontracts. */
+export async function listProjectContracts(tx: Tx, projectId: string) {
+  return tx
+    .select()
+    .from(projectContracts)
+    .where(eq(projectContracts.projectId, projectId))
+    .orderBy(asc(projectContracts.direction), asc(projectContracts.createdAt));
+}
+
+/**
+ * THE contract for a project — the single `receivable` one.
+ *
+ * `project_contracts_one_receivable` is what guarantees there is at most one,
+ * so this cannot quietly pick between two contract sums.
+ */
+export async function getMainContract(tx: Tx, projectId: string) {
+  const [row] = await tx
+    .select()
+    .from(projectContracts)
+    .where(
+      and(
+        eq(projectContracts.projectId, projectId),
+        eq(projectContracts.direction, "receivable"),
+      ),
+    );
+  return row ?? null;
+}
+
+export async function getContractById(tx: Tx, contractId: string) {
+  if (!isUuid(contractId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectContracts)
+    .where(eq(projectContracts.id, contractId));
+  return row ?? null;
+}
+
+export interface ContractTermsInput {
+  direction?: "receivable" | "payable";
+  reference?: string | null;
+  title?: string | null;
+  counterpartyPartyId?: string | null;
+  counterpartyName?: string | null;
+  contractSum?: string | null;
+  originalSum?: string | null;
+  currency?: string | null;
+  retentionPercent?: string | null;
+  retentionCapPercent?: string | null;
+  advanceAmount?: string | null;
+  advanceRecoveryPercent?: string | null;
+  defectsLiabilityMonths?: number | null;
+  commencementDate?: string | null;
+  completionDate?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * A contract, with its terms.
+ *
+ * `originalSum` defaults to the sum on creation — they are the same figure
+ * until a variation moves one of them, and defaulting it means a project that
+ * never has a variation still answers "how much has this contract grown" with
+ * zero rather than with a null.
+ */
+export async function createContract(
+  tx: Tx,
+  input: ContractTermsInput & {
+    companyId: string;
+    projectId: string;
+    createdById?: string | null;
+    createdByName: string;
+  },
+) {
+  const sum = input.contractSum ?? "0";
+  const [row] = await tx
+    .insert(projectContracts)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      direction: input.direction ?? "receivable",
+      reference: input.reference?.trim() || null,
+      title: input.title?.trim() || null,
+      counterpartyPartyId: input.counterpartyPartyId || null,
+      counterpartyName: input.counterpartyName?.trim() || null,
+      /**
+       * DERIVED since 0091 — the trigger recomputes it from `originalSum`
+       * before the row lands. Passed anyway so the column is never momentarily
+       * out of step with what the caller asked for.
+       */
+      contractSum: sum,
+      originalSum: input.originalSum ?? sum,
+      currency: input.currency?.trim() || "KES",
+      retentionPercent: input.retentionPercent ?? "0",
+      retentionCapPercent: input.retentionCapPercent ?? null,
+      advanceAmount: input.advanceAmount ?? "0",
+      advanceRecoveryPercent: input.advanceRecoveryPercent ?? "0",
+      defectsLiabilityMonths: input.defectsLiabilityMonths ?? null,
+      commencementDate: input.commencementDate || null,
+      /**
+       * Both are written; `project_contracts_derive_current` immediately
+       * overwrites `completion_date` from the original plus the approved
+       * variations, which on a new contract is the original itself.
+       *
+       * Setting ONLY `completionDate` was a live hole: 0091 derives the
+       * current date from `original_completion_date`, so a contract created
+       * without one had NULL there, and every approved extension of time
+       * moved nothing at all.
+       */
+      completionDate: input.completionDate || null,
+      originalCompletionDate: input.completionDate || null,
+      notes: input.notes?.trim() ?? "",
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * The terms, changed.
+ *
+ * SINCE 0091 THIS EDITS THE ORIGINALS. `contract_sum` and `completion_date`
+ * are derived from `original_sum` / `original_completion_date` plus the
+ * approved variations, so a terms form collects the figures the contract was
+ * LET at and the trigger produces the current ones.
+ *
+ * It used to write `contract_sum` directly, which on a job with approved
+ * variations overwrote their effect without saying so — the reason a contract
+ * sum could not be trusted once anything had been instructed.
+ */
+export async function updateContract(
+  tx: Tx,
+  contractId: string,
+  input: ContractTermsInput & {
+    lastModifiedById?: string | null;
+    lastModifiedByName?: string | null;
+  },
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  const text_ = (v?: string | null) => (v?.trim() ? v.trim() : null);
+
+  if (input.reference !== undefined) patch.reference = text_(input.reference);
+  if (input.title !== undefined) patch.title = text_(input.title);
+  if (input.counterpartyPartyId !== undefined) {
+    patch.counterpartyPartyId = input.counterpartyPartyId || null;
+  }
+  if (input.counterpartyName !== undefined) {
+    patch.counterpartyName = text_(input.counterpartyName);
+  }
+  /**
+   * THE FORM EDITS THE ORIGINAL — 0091.
+   *
+   * `contract_sum` is derived (`original_sum` + approved variations), so
+   * writing it here would be undone by the trigger on the very same
+   * statement. The figure a terms form collects is what the contract was LET
+   * at, which is `original_sum`.
+   *
+   * Before 0091 this wrote `contract_sum` directly, which on a job with three
+   * approved variations silently overwrote their effect. That was the whole
+   * reason the sum could not be trusted.
+   */
+  if (input.contractSum !== undefined) patch.originalSum = input.contractSum ?? "0";
+  if (input.currency !== undefined) patch.currency = text_(input.currency) ?? "KES";
+  if (input.retentionPercent !== undefined) {
+    patch.retentionPercent = input.retentionPercent ?? "0";
+  }
+  if (input.retentionCapPercent !== undefined) {
+    patch.retentionCapPercent = input.retentionCapPercent ?? null;
+  }
+  if (input.advanceAmount !== undefined) patch.advanceAmount = input.advanceAmount ?? "0";
+  if (input.advanceRecoveryPercent !== undefined) {
+    patch.advanceRecoveryPercent = input.advanceRecoveryPercent ?? "0";
+  }
+  if (input.defectsLiabilityMonths !== undefined) {
+    patch.defectsLiabilityMonths = input.defectsLiabilityMonths ?? null;
+  }
+  if (input.commencementDate !== undefined) {
+    patch.commencementDate = input.commencementDate || null;
+  }
+  /** Same rule for the date: the original is typed, the current derives. */
+  if (input.completionDate !== undefined) {
+    patch.originalCompletionDate = input.completionDate || null;
+  }
+  if (input.notes !== undefined) patch.notes = input.notes?.trim() ?? "";
+  if (input.lastModifiedById !== undefined) patch.lastModifiedById = input.lastModifiedById;
+  if (input.lastModifiedByName !== undefined) {
+    patch.lastModifiedByName = input.lastModifiedByName;
+  }
+
+  const [row] = await tx
+    .update(projectContracts)
+    .set(patch)
+    .where(eq(projectContracts.id, contractId))
+    .returning();
+  return row ?? null;
+}
+
+/** Refused while certificates have been raised against it. */
+export async function deleteContract(tx: Tx, contractId: string) {
+  const [{ n }] = (await tx.execute(sql`
+    SELECT COUNT(*)::int AS n FROM project_certificates WHERE contract_id = ${contractId}
+  `)) as unknown as Array<{ n: number }>;
+  if (Number(n) > 0) {
+    throw new Error(
+      `This contract has ${n} certificate${Number(n) === 1 ? "" : "s"} against it and cannot be deleted.`,
+    );
+  }
+  const [row] = await tx
+    .delete(projectContracts)
+    .where(eq(projectContracts.id, contractId))
+    .returning();
+  return row ?? null;
+}
+
+export interface CertificateFigures {
+  grossValuation: number;
+  workDoneToDate: number;
+  materialsOnSite: number;
+  dayworksToDate: number;
+  /** Cumulative, before anything released. */
+  retentionHeld: number;
+  retentionReleased: number;
+  /** What THIS certificate releases, as opposed to the running total — the
+   *  amount that becomes collectable now. */
+  releasedThisCertificate: number;
+  /** What the employer is actually still holding. */
+  retentionOutstanding: number;
+  /** True where the cap bit — worth showing, because it is why the retention
+   *  stopped growing and it looks like an error otherwise. */
+  retentionCapped: boolean;
+  /** What this certificate holds back, as opposed to what is held in total —
+   *  the cumulative figure less what the previous certificate already held. */
+  retentionThisCertificate: number;
+  advanceRecovered: number;
+  /** What THIS certificate recovers, as opposed to what has been recovered in
+   *  total. Derived from `previouslyGross` rather than carried in, because the
+   *  cumulative recovery is a pure function of the cumulative gross — deriving
+   *  it cannot drift from the figure it is supposed to be the delta of. */
+  advanceThisCertificate: number;
+  advanceOutstanding: number;
+  netToDate: number;
+  previouslyCertified: number;
+  netThisCertificate: number;
+  /** The GROSS valuation the last certificate stood at — what this period's
+   *  gross is measured from, and what the tax invoice is raised for. */
+  previouslyGross: number;
+  grossThisPeriod: number;
+}
+
+type ContractRow = typeof projectContracts.$inferSelect;
+type CertificateRow = typeof projectCertificates.$inferSelect;
+
+/**
+ * The certificate arithmetic — 0081 decision 1, in one place.
+ *
+ *     value of permanent work to date
+ *   + materials on site
+ *   + dayworks to date
+ *   = gross valuation
+ *   − retention held        min(pct × gross, cap% × contract sum)
+ *   + retention released
+ *   − advance recovered     min(pct × gross, advance paid)
+ *   = net to date
+ *   − previously certified  the last CERTIFIED certificate's net to date
+ *   = net this certificate
+ *
+ * EVERY LINE IS CUMULATIVE, which is what makes a correction to certificate 2
+ * flow into 3 without rewriting it. `previouslyCertified` is passed in rather
+ * than looked up, because the caller listing a whole contract already has the
+ * chain in hand and doing it per row would be a query per certificate.
+ *
+ * NO TAX. VAT, VAT withholding and WHT are the invoice's and the payment's —
+ * decision 2.
+ */
+export function computeCertificate(
+  contract: Pick<
+    ContractRow,
+    "contractSum" | "retentionPercent" | "retentionCapPercent" | "advanceAmount" | "advanceRecoveryPercent"
+  >,
+  certificate: Pick<
+    CertificateRow,
+    "workDoneToDate" | "materialsOnSite" | "dayworksToDate" | "retentionReleasedToDate"
+  >,
+  previouslyCertified = 0,
+  previouslyRetained = 0,
+  previouslyGross = 0,
+  previouslyReleased = 0,
+): CertificateFigures {
+  const workDoneToDate = num(certificate.workDoneToDate);
+  const materialsOnSite = num(certificate.materialsOnSite);
+  const dayworksToDate = num(certificate.dayworksToDate);
+  const grossValuation = workDoneToDate + materialsOnSite + dayworksToDate;
+
+  const contractSum = num(contract.contractSum);
+  const retentionPct = num(contract.retentionPercent) / 100;
+  const capPct =
+    contract.retentionCapPercent === null ? null : num(contract.retentionCapPercent) / 100;
+
+  const uncapped = grossValuation * retentionPct;
+  const cap = capPct === null ? null : contractSum * capPct;
+  /**
+   * The cap bites only where there IS a contract sum. A contract entered with
+   * a cap and a sum of zero would otherwise retain nothing at all, which looks
+   * like the retention term was ignored.
+   */
+  const retentionHeld = cap !== null && contractSum > 0 ? Math.min(uncapped, cap) : uncapped;
+  const retentionCapped = cap !== null && contractSum > 0 && uncapped > cap;
+
+  const retentionReleased = Math.min(
+    num(certificate.retentionReleasedToDate),
+    retentionHeld,
+  );
+
+  const advanceAmount = num(contract.advanceAmount);
+  const recoveryPct = num(contract.advanceRecoveryPercent) / 100;
+  // Never more than was advanced: the recovery stops when the advance is repaid,
+  // which is the whole point of tracking it against the contract rather than
+  // deducting a percentage for ever.
+  const advanceRecovered = Math.min(grossValuation * recoveryPct, advanceAmount);
+  // What the PREVIOUS certificate had recovered, by the same rule applied to
+  // the gross it stood at. The difference is what this certificate recovers,
+  // and it is what reaches the ledger.
+  const previouslyRecovered = Math.min(
+    previouslyGross * recoveryPct,
+    advanceAmount,
+  );
+
+  const netToDate =
+    grossValuation - retentionHeld + retentionReleased - advanceRecovered;
+
+  return {
+    grossValuation: round2(grossValuation),
+    workDoneToDate: round2(workDoneToDate),
+    materialsOnSite: round2(materialsOnSite),
+    dayworksToDate: round2(dayworksToDate),
+    retentionHeld: round2(retentionHeld),
+    retentionThisCertificate: round2(retentionHeld - previouslyRetained),
+    retentionReleased: round2(retentionReleased),
+    releasedThisCertificate: round2(retentionReleased - previouslyReleased),
+    retentionOutstanding: round2(retentionHeld - retentionReleased),
+    retentionCapped,
+    advanceRecovered: round2(advanceRecovered),
+    advanceThisCertificate: round2(advanceRecovered - previouslyRecovered),
+    advanceOutstanding: round2(advanceAmount - advanceRecovered),
+    netToDate: round2(netToDate),
+    previouslyCertified: round2(previouslyCertified),
+    netThisCertificate: round2(netToDate - previouslyCertified),
+    previouslyGross: round2(previouslyGross),
+    grossThisPeriod: round2(grossValuation - previouslyGross),
+  };
+}
+
+/** Money to the cent. Float arithmetic on money needs a stated rounding point. */
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * A contract's certificates, oldest first, each with its figures computed and
+ * its `previouslyCertified` taken from the last CERTIFIED one before it.
+ *
+ * A CANCELLED certificate does not advance the chain — it was withdrawn, so the
+ * next certificate carries on from the last one that stands. A DRAFT does not
+ * either, because nothing has been certified yet.
+ */
+export async function listCertificates(tx: Tx, contractId: string) {
+  const contract = await getContractById(tx, contractId);
+  if (!contract) return [];
+
+  const rows = await tx
+    .select()
+    .from(projectCertificates)
+    .where(eq(projectCertificates.contractId, contractId))
+    .orderBy(asc(projectCertificates.sequence));
+
+  /**
+   * AN ISSUED CERTIFICATE IS COMPUTED FROM ITS OWN TERMS — 0092.
+   *
+   * This used to pass `contract` for every row, so a certificate signed months
+   * ago recomputed against whatever the contract says today: correcting a
+   * retention percentage restated documents that had already been issued,
+   * signed and invoiced, and the invoices behind them did not move.
+   *
+   * A DRAFT still follows the live contract, which is the point of a draft.
+   */
+  const termsFor = (row: typeof rows[number]) =>
+    row.retentionPercentAtCertificate === null
+      ? contract
+      : {
+          contractSum: row.contractSumAtCertificate ?? "0",
+          retentionPercent: row.retentionPercentAtCertificate,
+          retentionCapPercent: row.retentionCapPercentAtCertificate,
+          advanceAmount: row.advanceAmountAtCertificate ?? "0",
+          advanceRecoveryPercent: row.advanceRecoveryPercentAtCertificate ?? "0",
+        };
+
+  let previous = 0;
+  let previousRetention = 0;
+  let previousGross = 0;
+  let previousReleased = 0;
+  return rows.map((row) => {
+    const figures = computeCertificate(
+      termsFor(row), row, previous, previousRetention, previousGross, previousReleased,
+    );
+    if (row.status === "certified") {
+      previous = figures.netToDate;
+      previousRetention = figures.retentionHeld;
+      previousGross = figures.grossValuation;
+      previousReleased = figures.retentionReleased;
+    }
+    return { ...row, _id: row.id, figures };
+  });
+}
+
+export async function getCertificateById(tx: Tx, certificateId: string) {
+  if (!isUuid(certificateId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectCertificates)
+    .where(eq(projectCertificates.id, certificateId));
+  return row ?? null;
+}
+
+/**
+ * What the NEXT certificate on this contract starts from: its sequence, and the
+ * net certified to date that it must exceed to be worth anything.
+ */
+export async function nextCertificateBasis(tx: Tx, contractId: string) {
+  const certificates = await listCertificates(tx, contractId);
+  const certified = certificates.filter((c) => c.status === "certified");
+  const last = certified[certified.length - 1] ?? null;
+  return {
+    sequence: certificates.length + 1,
+    previouslyCertified: last ? last.figures.netToDate : 0,
+
+    /**
+     * EVERY CUMULATIVE FIGURE THE LAST CERTIFICATE STOOD AT.
+     *
+     * The form must OPEN on these rather than on blanks. Every box on a
+     * certificate is cumulative, so a blank is not "nothing entered yet" — it
+     * is a claim that the figure has fallen to zero, and the arithmetic
+     * believes it:
+     *
+     *   IPC 2 carries 200,000 of materials on site. On IPC 3 the QS types the
+     *   new work-done figure and leaves materials blank, because it is blank.
+     *   The gross silently drops 200,000 and the certificate under-claims by
+     *   that much, with nothing on screen saying so.
+     *
+     * `lastRetentionReleased` is the dangerous one: leaving it blank after a
+     * release CLAWS THE RELEASE BACK, so the certificate pays out 250,000 less
+     * than it should on money the employer has already agreed to return.
+     *
+     * Two of these were already computed here and the form ignored both.
+     */
+    lastWorkDoneToDate: last ? num(last.workDoneToDate) : 0,
+    lastMaterialsOnSite: last ? num(last.materialsOnSite) : 0,
+    lastDayworksToDate: last ? num(last.dayworksToDate) : 0,
+    lastRetentionReleased: last ? num(last.retentionReleasedToDate) : 0,
+
+    /** So the next period starts the day after the last one ended. */
+    lastPeriodTo: last?.periodTo ?? null,
+    lastCertificateNumber: last?.certificateNumber ?? null,
+  };
+}
+
+/**
+ * A new certificate, always a draft.
+ *
+ * The number comes from `next_entry_number`, the same race-free counter every
+ * other document uses. The SEQUENCE is per contract and
+ * `project_certificates_sequence_uq` is what actually guarantees it: two people
+ * starting IPC 4 at once both read 3, and one of them loses the insert — which
+ * is the correct outcome. `project_certificates_one_draft` stops the other
+ * shape of the same problem.
+ */
+export async function createCertificate(
+  tx: Tx,
+  input: {
+    companyId: string;
+    projectId: string;
+    contractId: string;
+    periodFrom?: string | null;
+    periodTo?: string | null;
+    valuationDate?: string | null;
+    valuationSource?: "measured" | "milestone" | "manual";
+    workDoneToDate?: string | null;
+    materialsOnSite?: string | null;
+    dayworksToDate?: string | null;
+    retentionReleasedToDate?: string | null;
+    notes?: string | null;
+    createdById?: string | null;
+    createdByName: string;
+  },
+) {
+  const [{ certificate_number }] = (await tx.execute(
+    sql`SELECT next_entry_number(${input.companyId}::uuid, 'IPC') AS certificate_number`,
+  )) as unknown as Array<{ certificate_number: string }>;
+
+  const { sequence } = await nextCertificateBasis(tx, input.contractId);
+
+  const [row] = await tx
+    .insert(projectCertificates)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      contractId: input.contractId,
+      certificateNumber: certificate_number,
+      sequence,
+      periodFrom: input.periodFrom || null,
+      periodTo: input.periodTo || null,
+      ...(input.valuationDate ? { valuationDate: input.valuationDate } : {}),
+      valuationSource: input.valuationSource ?? "manual",
+      workDoneToDate: input.workDoneToDate ?? "0",
+      materialsOnSite: input.materialsOnSite ?? "0",
+      dayworksToDate: input.dayworksToDate ?? "0",
+      retentionReleasedToDate: input.retentionReleasedToDate ?? "0",
+      notes: input.notes?.trim() ?? "",
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+/** The figures on a DRAFT. `project_certificates_frozen` refuses the rest. */
+export async function updateCertificate(
+  tx: Tx,
+  certificateId: string,
+  input: {
+    periodFrom?: string | null;
+    periodTo?: string | null;
+    valuationDate?: string | null;
+    valuationSource?: "measured" | "milestone" | "manual";
+    workDoneToDate?: string | null;
+    materialsOnSite?: string | null;
+    dayworksToDate?: string | null;
+    retentionReleasedToDate?: string | null;
+    notes?: string | null;
+    lastModifiedById?: string | null;
+    lastModifiedByName?: string | null;
+  },
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.periodFrom !== undefined) patch.periodFrom = input.periodFrom || null;
+  if (input.periodTo !== undefined) patch.periodTo = input.periodTo || null;
+  if (input.valuationDate) patch.valuationDate = input.valuationDate;
+  if (input.valuationSource !== undefined) patch.valuationSource = input.valuationSource;
+  if (input.workDoneToDate !== undefined) patch.workDoneToDate = input.workDoneToDate ?? "0";
+  if (input.materialsOnSite !== undefined) patch.materialsOnSite = input.materialsOnSite ?? "0";
+  if (input.dayworksToDate !== undefined) patch.dayworksToDate = input.dayworksToDate ?? "0";
+  if (input.retentionReleasedToDate !== undefined) {
+    patch.retentionReleasedToDate = input.retentionReleasedToDate ?? "0";
+  }
+  if (input.notes !== undefined) patch.notes = input.notes?.trim() ?? "";
+  if (input.lastModifiedById !== undefined) patch.lastModifiedById = input.lastModifiedById;
+  if (input.lastModifiedByName !== undefined) {
+    patch.lastModifiedByName = input.lastModifiedByName;
+  }
+
+  const [row] = await tx
+    .update(projectCertificates)
+    .set(patch)
+    .where(eq(projectCertificates.id, certificateId))
+    .returning();
+  return row ?? null;
+}
+
+/** Certify — the stamp, and the freeze. */
+export async function certifyCertificate(
+  tx: Tx,
+  certificateId: string,
+  actor: { id?: string | null; name: string },
+  /**
+   * The two accounts a RELEASE moves money between — 0085's receivable, and
+   * ordinary receivables.
+   *
+   * Required only when this certificate actually releases something. Supplied
+   * by the action, which is where the chart is read.
+   */
+  release?: { retentionAccountId: string; arAccountId: string } | null,
+) {
+  const current = await getCertificateById(tx, certificateId);
+  if (!current) return null;
+  if (current.status === "certified") return current;
+  if (current.status === "cancelled") {
+    throw new Error(
+      `Certificate ${current.certificateNumber} was cancelled and cannot be certified.`,
+    );
+  }
+
+  /**
+   * The terms this certificate is being signed under — 0092.
+   *
+   * Stamped in the SAME statement that issues it, so there is no instant at
+   * which a certified certificate has no snapshot and
+   * `project_certificates_snapshot_pair` would refuse the row.
+   */
+  const contract = await getContractById(tx, current.contractId);
+  if (!contract) {
+    throw new Error("That certificate's contract no longer exists.");
+  }
+
+  const [row] = await tx
+    .update(projectCertificates)
+    .set({
+      status: "certified",
+      certifiedById: actor.id ?? null,
+      certifiedByName: actor.name,
+      certifiedAt: new Date(),
+      contractSumAtCertificate: contract.contractSum,
+      retentionPercentAtCertificate: contract.retentionPercent,
+      retentionCapPercentAtCertificate: contract.retentionCapPercent,
+      advanceAmountAtCertificate: contract.advanceAmount,
+      advanceRecoveryPercentAtCertificate: contract.advanceRecoveryPercent,
+      lastModifiedById: actor.id ?? null,
+      lastModifiedByName: actor.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectCertificates.id, certificateId))
+    .returning();
+  if (!row) return null;
+
+  /**
+   * RELEASING RETENTION, and why it posts HERE rather than with the invoice.
+   *
+   * A release is not revenue and not a supply. The work was certified and the
+   * income recognised when it was done, and VAT was charged then on the gross —
+   * this only makes an existing receivable collectable:
+   *
+   *     DR Accounts Receivable / CR Retention Receivable
+   *
+   * Which is why it needs no tax invoice, and why it cannot wait for one: a
+   * certificate that only releases retention certifies no new work, so there is
+   * nothing to invoice and `raiseCertificateInvoice` would rightly refuse it.
+   *
+   * The HOLD posts at invoice completion because it needs the receivable that
+   * the invoice creates. The RELEASE posts at certification because the
+   * receivable it moves already exists. Asymmetric, and each at the only moment
+   * its counterpart is there.
+   */
+  const chain = await listCertificates(tx, row.contractId);
+  const figures = chain.find((c) => c.id === certificateId)?.figures;
+  const released = figures?.releasedThisCertificate ?? 0;
+
+  if (released > 0) {
+    if (!release?.retentionAccountId || !release?.arAccountId) {
+      throw new Error(
+        "Retention Receivable (1125) or Accounts Receivable is not configured, so this release cannot be recorded.",
+      );
+    }
+    const amount = released.toFixed(4);
+    await createJournalEntry(tx, {
+      companyId: row.companyId,
+      entryDate: row.valuationDate,
+      entryType: "adjustment",
+      description: `Retention released — ${row.certificateNumber}`,
+      reference: row.certificateNumber,
+      // The certificate, not its invoice — a release-only certificate has no
+      // invoice, and the document that decided the release is this one.
+      sourceType: "project_certificate",
+      sourceId: row.id,
+      projectId: row.projectId,
+      createdById: actor.id ?? null,
+      postImmediately: true,
+      lines: [
+        {
+          accountId: release.arAccountId,
+          debit: amount,
+          description: "Now collectable",
+        },
+        {
+          accountId: release.retentionAccountId,
+          credit: amount,
+          description: "Released from retention",
+        },
+      ],
+    });
+  }
+
+  return row;
+}
+
+/**
+ * Withdraw an issued certificate.
+ *
+ * Cancelling rather than deleting, and the chain skips it: the next
+ * certificate's `previouslyCertified` comes from the last one that STANDS, so a
+ * withdrawn valuation does not silently remain in the running total.
+ */
+export async function cancelCertificate(
+  tx: Tx,
+  certificateId: string,
+  actor: { id?: string | null; name: string },
+) {
+  /**
+   * CANCELLING IS FOR ISSUED CERTIFICATES. A draft has not been put to anybody,
+   * so there is nothing to withdraw — it is deleted.
+   *
+   * The database says the same thing and said it first:
+   * `project_certificates_draft_is_uncertified` is a biconditional against
+   * `draft`, so a draft moved to `cancelled` would still have a NULL
+   * `certified_at` and the CHECK would refuse it. That refusal is correct and
+   * the constraint stays as it is — but a raw check violation tells the user
+   * nothing, so the answer is given here, where the two states can be named.
+   */
+  const current = await getCertificateById(tx, certificateId);
+  if (!current) return null;
+  if (current.status === "draft") {
+    throw new Error(
+      `${current.certificateNumber} has not been issued, so there is nothing to withdraw. Delete the draft instead.`,
+    );
+  }
+  if (current.status === "cancelled") return current;
+
+  const [row] = await tx
+    .update(projectCertificates)
+    .set({
+      status: "cancelled",
+      lastModifiedById: actor.id ?? null,
+      lastModifiedByName: actor.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectCertificates.id, certificateId))
+    .returning();
+  return row ?? null;
+}
+
+/** Refused by `project_certificates_no_delete_issued` on anything issued. */
+export async function deleteCertificate(tx: Tx, certificateId: string) {
+  const [row] = await tx
+    .delete(projectCertificates)
+    .where(eq(projectCertificates.id, certificateId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * The certificate an invoice was raised from, with its figures.
+ *
+ * Used when the invoice is COMPLETED, to reclassify the retention it holds out
+ * of receivables. Returns null for the overwhelming majority of invoices, which
+ * have no certificate behind them.
+ */
+export async function getCertificateForInvoice(tx: Tx, invoiceId: string) {
+  if (!isUuid(invoiceId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectCertificates)
+    .where(eq(projectCertificates.invoiceId, invoiceId));
+  if (!row) return null;
+  const chain = await listCertificates(tx, row.contractId);
+  return chain.find((c) => c.id === row.id) ?? null;
+}
+
+/** Record the draft invoice a certificate raised. */
+export async function attachCertificateInvoice(
+  tx: Tx,
+  certificateId: string,
+  invoiceId: string,
+) {
+  const [row] = await tx
+    .update(projectCertificates)
+    .set({ invoiceId, updatedAt: new Date() })
+    .where(eq(projectCertificates.id, certificateId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * The contract's position: certified to date, retention outstanding, advance
+ * outstanding, and how far through the contract sum the certificates have got.
+ *
+ * RETENTION REACHES THE LEDGER since 0085. This is the balance, computed from
+ * the certificates that stand; the account behind it is `1125 Retention
+ * Receivable` — NOT 1250, which 0081 named and which turns out to be Computer
+ * Equipment. Certifying holds it, and releasing it clears the account.
+ */
+export async function getContractPosition(tx: Tx, contractId: string) {
+  const contract = await getContractById(tx, contractId);
+  if (!contract) return null;
+
+  const certificates = await listCertificates(tx, contractId);
+  const certified = certificates.filter((c) => c.status === "certified");
+  const last = certified[certified.length - 1] ?? null;
+
+  const contractSum = num(contract.contractSum);
+  const grossCertified = last ? last.figures.grossValuation : 0;
+
+  return {
+    contractSum,
+    originalSum: num(contract.originalSum),
+    currency: contract.currency,
+    certificateCount: certified.length,
+    draftCount: certificates.filter((c) => c.status === "draft").length,
+    grossCertified,
+    netCertified: last ? last.figures.netToDate : 0,
+    retentionHeld: last ? last.figures.retentionHeld : 0,
+    retentionReleased: last ? last.figures.retentionReleased : 0,
+    retentionOutstanding: last ? last.figures.retentionOutstanding : 0,
+    advanceAmount: num(contract.advanceAmount),
+    advanceRecovered: last ? last.figures.advanceRecovered : 0,
+    advanceOutstanding: last
+      ? last.figures.advanceOutstanding
+      : num(contract.advanceAmount),
+    /** Of the contract sum, and it may exceed 100 — that is a variation the
+     *  register has not caught up with, and it is worth seeing. */
+    percentCertified:
+      contractSum > 0 ? Math.round((grossCertified / contractSum) * 100) : 0,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The project as a ledger dimension — 0084
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ProjectLedgerActuals {
+  /** Revenue: credits less debits on revenue accounts. */
+  revenue: number;
+  /** Cost: debits less credits on expense accounts. */
+  costs: number;
+  /** How many posted lines carry this project. Zero is the honest answer for a
+   *  project whose documents all pre-date 0084. */
+  lineCount: number;
+}
+
+/**
+ * A project's position FROM THE LEDGER — 0084, and the other half of §10.4.
+ *
+ * `computeProjectActuals` answers the same question by scanning five document
+ * tables. This one asks the general ledger, which is the only version that can
+ * reconcile to a trial balance, because it is reading the same rows the trial
+ * balance reads.
+ *
+ * POSTED ONLY. A draft entry is not in anybody's accounts and must not be in a
+ * project's either; a REVERSED entry stays in, together with its reversal, so
+ * the two net to nothing exactly as they do everywhere else.
+ *
+ * ── The two figures will NOT agree yet, and it is worth knowing why ─────────
+ *
+ * Read this beside `reconcileProjectActuals` before treating a difference as a
+ * bug. Three known reasons, none of them a defect in either query:
+ *
+ *  1. **Nothing is backfilled.** Every entry posted before 0084 has no project
+ *     on it, so a project that has been running for months reads near zero here
+ *     and correctly in the document scan.
+ *  2. **Stock issued to a project posts NOTHING.** `recordMovement`,
+ *     `issueStock` and `createCheckout` insert rows and none of them creates a
+ *     journal entry — while a bill for an inventory purchase DEBITS Inventory.
+ *     So materials are relieved from stock in quantity and never in the ledger.
+ *     The document scan counts them; the ledger cannot. On a construction job
+ *     that is usually the largest cost line. See the plan §12.
+ *  3. **Commitment is not an accounting concept.** The scan's `committed` —
+ *     approved and unpaid — has no journal entry by definition, which is
+ *     exactly why 0070 decision 2 computed it from documents in the first
+ *     place.
+ *
+ * So this is NOT a replacement for `computeProjectActuals` and nothing has been
+ * switched over to it. It is the figure that becomes correct as the reasons
+ * above are closed, and the instrument for finding out which of them bites.
+ */
+export async function getProjectLedgerActuals(
+  tx: Tx,
+  projectIds: readonly string[],
+): Promise<Map<string, ProjectLedgerActuals>> {
+  const result = new Map<string, ProjectLedgerActuals>();
+  if (!projectIds.length) return result;
+
+  const ids = anyOf([...new Set(projectIds)], "uuid[]");
+
+  const rows = (await tx.execute(sql`
+    SELECT l.project_id::text                                        AS project_id,
+           COALESCE(SUM(l.credit - l.debit) FILTER (
+             WHERE a.account_type = 'revenue'
+           ), 0)::float8                                             AS revenue,
+           COALESCE(SUM(l.debit - l.credit) FILTER (
+             WHERE a.account_type = 'expense'
+           ), 0)::float8                                             AS costs,
+           COUNT(*)::int                                             AS line_count
+      FROM journal_lines l
+      JOIN journal_entries e ON e.id = l.entry_id
+      JOIN accounts a        ON a.id = l.account_id
+     WHERE l.project_id = ${ids}
+       AND e.status = 'posted'
+     GROUP BY l.project_id
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  for (const r of rows) {
+    result.set(String(r.project_id), {
+      revenue: num(r.revenue),
+      costs: num(r.costs),
+      lineCount: Number(r.line_count ?? 0),
+    });
+  }
+  for (const id of projectIds) {
+    if (!result.has(id)) result.set(id, { revenue: 0, costs: 0, lineCount: 0 });
+  }
+  return result;
+}
+
+/**
+ * The two answers, side by side, with their difference.
+ *
+ * §10.4 argued the project should be a ledger dimension and this is how anybody
+ * finds out whether it worked — and, just as usefully, whether the DOCUMENT
+ * SCAN was ever right. Two independent derivations of one number that agree are
+ * worth more than either alone; where they disagree, one of them is wrong and
+ * until now there was no way to tell.
+ *
+ * Nothing consumes this yet. It is a read for a test and for whoever wires the
+ * reconciliation onto a page.
+ */
+export async function reconcileProjectActuals(tx: Tx, projectId: string) {
+  const [fromDocuments, fromLedger] = await Promise.all([
+    computeProjectActuals(tx, projectId),
+    getProjectLedgerActuals(tx, [projectId]),
+  ]);
+  const ledger = fromLedger.get(projectId) ?? {
+    revenue: 0,
+    costs: 0,
+    lineCount: 0,
+  };
+
+  return {
+    documents: {
+      revenue: fromDocuments.revenue,
+      costs: fromDocuments.costs,
+      committed: fromDocuments.committed,
+    },
+    ledger,
+    difference: {
+      revenue: round2(fromDocuments.revenue - ledger.revenue),
+      costs: round2(fromDocuments.costs - ledger.costs),
+    },
+    /** True where the ledger has never been told about this project at all —
+     *  which is a different statement from "the figures disagree". */
+    ledgerSilent: ledger.lineCount === 0,
+  };
+}
+
+/**
+ * A project's ledger cost broken down by COST CODE — the dimension a budget is
+ * actually checked against.
+ *
+ * `getProjectBudgetVsActual` answers this from bills, claims and expenses. This
+ * answers it from the postings, and the same three caveats above apply.
+ */
+export async function getProjectLedgerByCostCode(tx: Tx, projectId: string) {
+  const rows = (await tx.execute(sql`
+    SELECT l.cost_code_id::text                        AS cost_code_id,
+           cc.code                                     AS code,
+           cc.name                                     AS name,
+           COALESCE(SUM(l.debit - l.credit), 0)::float8 AS actual
+      FROM journal_lines l
+      JOIN journal_entries e   ON e.id = l.entry_id
+      JOIN accounts a          ON a.id = l.account_id
+      LEFT JOIN project_cost_codes cc ON cc.id = l.cost_code_id
+     WHERE l.project_id = ${projectId}
+       AND e.status = 'posted'
+       AND a.account_type = 'expense'
+     GROUP BY l.cost_code_id, cc.code, cc.name
+     ORDER BY cc.code NULLS LAST
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    costCodeId: r.cost_code_id === null ? null : String(r.cost_code_id),
+    code: (r.code as string) ?? null,
+    name: (r.name as string) ?? null,
+    actual: num(r.actual),
+  }));
+}
+
+/**
+ * What this project still needs before it can be run — one pass.
+ *
+ * A new project needs a type, contract terms, cost codes, a budget, and a
+ * priced bill before anything can be certified against it, and today nothing
+ * says so: you find out by opening six screens and inferring it from what is
+ * empty. This is the query behind the card that tells you instead.
+ *
+ * Subselects rather than joins, because every answer is an EXISTS and a join
+ * would multiply rows for no reason. Nothing here is expensive enough to want
+ * caching.
+ */
+export async function getProjectSetupState(tx: Tx, projectId: string) {
+  const [row] = (await tx.execute(sql`
+    SELECT
+      (p.type_id IS NOT NULL)                                       AS has_type,
+      (p.client_party_id IS NOT NULL)                               AS has_client,
+      EXISTS (SELECT 1 FROM project_contracts c
+               WHERE c.project_id = p.id AND c.direction = 'receivable')
+                                                                    AS has_contract,
+      -- A cost code scoped to this project OR company-wide: a budget can be
+      -- built from either, so either counts as "there is a vocabulary".
+      EXISTS (SELECT 1 FROM project_cost_codes cc
+               WHERE cc.is_active
+                 AND (cc.project_id = p.id OR cc.project_id IS NULL))
+                                                                    AS has_cost_codes,
+      EXISTS (SELECT 1 FROM project_budgets b WHERE b.project_id = p.id)
+                                                                    AS has_budget,
+      EXISTS (SELECT 1 FROM project_budgets b
+               WHERE b.project_id = p.id AND b.status = 'approved')  AS has_approved_budget,
+      EXISTS (SELECT 1 FROM project_boqs q WHERE q.project_id = p.id)
+                                                                    AS has_boq,
+      EXISTS (SELECT 1 FROM project_boqs q
+               WHERE q.project_id = p.id AND q.status = 'awarded')   AS has_awarded_boq,
+      EXISTS (SELECT 1 FROM project_tasks t WHERE t.project_id = p.id)
+                                                                    AS has_tasks
+      FROM projects p
+     WHERE p.id = ${projectId}
+  `)) as unknown as Array<Record<string, boolean>>;
+
+  if (!row) return null;
+  const b = (k: string) => Boolean(row[k]);
+  return {
+    hasType: b("has_type"),
+    hasClient: b("has_client"),
+    hasContract: b("has_contract"),
+    hasCostCodes: b("has_cost_codes"),
+    hasBudget: b("has_budget"),
+    hasApprovedBudget: b("has_approved_budget"),
+    hasBoq: b("has_boq"),
+    hasAwardedBoq: b("has_awarded_boq"),
+    hasTasks: b("has_tasks"),
+  };
+}
+
+// ── Timesheets — 0089 ────────────────────────────────────────────────────────
+//
+// Step 4 of the execution layer, and the join between a project and labour.
+//
+// ALMOST NOTHING IS WRITTEN HERE. The party, the rate snapshot, the cost, the
+// account and the bill amount are all produced by `project_timesheets_derive`
+// — see 0089 decision 4. These functions pass the caller's intent and read
+// back what the database decided, which is why every one of them `.returning()`
+// rather than echoing its input.
+
+export interface TimesheetInput {
+  companyId: string;
+  projectId: string;
+  assignmentId: string;
+  workDate: string;
+  quantity: number | string;
+  unit: "hour" | "day";
+  taskId?: string | null;
+  costCodeId?: string | null;
+  billable?: boolean;
+  billRate?: number | string | null;
+  notes?: string | null;
+  enteredById?: string | null;
+  enteredByName?: string | null;
+}
+
+/** Blank, "", and a non-numeric string all mean "no rate", not zero. */
+const optionalMoney = (v: number | string | null | undefined) =>
+  v === null || v === undefined || String(v).trim() === ""
+    ? null
+    : Number(v).toFixed(4);
+
+const optionalId = (v: string | null | undefined) =>
+  v && isUuid(v) ? v : null;
+
+/**
+ * Log time.
+ *
+ * The party, the rate and the cost are NOT arguments: they come from the
+ * roster row, which is the whole point of `assignment_id` being the join. A
+ * caller that wants to charge a different rate changes the roster.
+ */
+export async function createTimesheet(tx: Tx, input: TimesheetInput) {
+  const [row] = await tx
+    .insert(projectTimesheets)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      assignmentId: input.assignmentId,
+      // Placeholders. `project_timesheets_derive` overwrites all three from
+      // the assignment before the row lands; they are here because the
+      // columns are NOT NULL and Drizzle types them as required.
+      partyId: input.companyId,
+      partyName: "",
+      partyType: "employee",
+      taskId: optionalId(input.taskId),
+      costCodeId: optionalId(input.costCodeId),
+      workDate: input.workDate,
+      quantity: Number(input.quantity).toFixed(4),
+      unit: input.unit,
+      billable: input.billable ?? true,
+      billRate: optionalMoney(input.billRate),
+      notes: input.notes?.trim().slice(0, 2000) ?? "",
+      enteredById: input.enteredById ?? null,
+      enteredByName: input.enteredByName ?? null,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Correct a line.
+ *
+ * Only what somebody typed: the derived half re-derives itself, because the
+ * trigger fires on UPDATE OF the same columns. Changing the quantity of an
+ * approved line therefore restates its cost, which is correct — an approval
+ * is of the day's work, not of a number that is now wrong.
+ */
+export async function updateTimesheet(
+  tx: Tx,
+  timesheetId: string,
+  input: {
+    workDate?: string;
+    quantity?: number | string;
+    unit?: "hour" | "day";
+    taskId?: string | null;
+    costCodeId?: string | null;
+    billable?: boolean;
+    billRate?: number | string | null;
+    notes?: string;
+  },
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.workDate !== undefined) patch.workDate = input.workDate;
+  if (input.quantity !== undefined)
+    patch.quantity = Number(input.quantity).toFixed(4);
+  if (input.unit !== undefined) patch.unit = input.unit;
+  if (input.taskId !== undefined) patch.taskId = optionalId(input.taskId);
+  if (input.costCodeId !== undefined)
+    patch.costCodeId = optionalId(input.costCodeId);
+  if (input.billable !== undefined) patch.billable = input.billable;
+  if (input.billRate !== undefined)
+    patch.billRate = optionalMoney(input.billRate);
+  if (input.notes !== undefined) patch.notes = input.notes.trim().slice(0, 2000);
+
+  const [row] = await tx
+    .update(projectTimesheets)
+    .set(patch)
+    .where(eq(projectTimesheets.id, timesheetId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Submit, approve, reject, or send back.
+ *
+ * `project_timesheets_approval_pair` is a biconditional, so approving stamps
+ * the approver and every other status clears them — a line sent back to draft
+ * that kept its approval stamp is how an unapproved day reads as approved.
+ */
+export async function setTimesheetStatus(
+  tx: Tx,
+  timesheetId: string,
+  status: "draft" | "submitted" | "approved" | "rejected",
+  actor?: { id?: string | null; name?: string | null },
+) {
+  const approving = status === "approved";
+  const [row] = await tx
+    .update(projectTimesheets)
+    .set({
+      status,
+      approvedAt: approving ? new Date() : null,
+      approvedById: approving ? (actor?.id ?? null) : null,
+      approvedByName: approving ? (actor?.name ?? null) : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectTimesheets.id, timesheetId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Approve a whole week in one statement.
+ *
+ * The reason this exists rather than a loop in the action: approving twenty
+ * lines one at a time is twenty round trips and twenty overbooking triggers,
+ * and a partial failure halfway leaves a week half-approved.
+ */
+export async function approveTimesheets(
+  tx: Tx,
+  timesheetIds: readonly string[],
+  actor?: { id?: string | null; name?: string | null },
+) {
+  const ids = timesheetIds.filter(isUuid);
+  if (!ids.length) return [];
+  return tx
+    .update(projectTimesheets)
+    .set({
+      status: "approved",
+      approvedAt: new Date(),
+      approvedById: actor?.id ?? null,
+      approvedByName: actor?.name ?? null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        inArray(projectTimesheets.id, ids),
+        eq(projectTimesheets.status, "submitted"),
+      ),
+    )
+    .returning();
+}
+
+/**
+ * Delete a line.
+ *
+ * An APPROVED line is not deleted, it is rejected: it has been counted in a
+ * project's cost and may have been reported on, and a hole in a week is not
+ * evidence of anything. Same rule the rest of the module applies to a
+ * certified certificate.
+ */
+export async function deleteTimesheet(tx: Tx, timesheetId: string) {
+  const [row] = await tx
+    .delete(projectTimesheets)
+    .where(
+      and(
+        eq(projectTimesheets.id, timesheetId),
+        inArray(projectTimesheets.status, ["draft", "rejected", "submitted"]),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+export async function getTimesheet(tx: Tx, timesheetId: string) {
+  if (!isUuid(timesheetId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectTimesheets)
+    .where(eq(projectTimesheets.id, timesheetId))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * A project's time, newest day first.
+ *
+ * Capped like every other list in this repository — a year of a twenty-person
+ * crew is five thousand rows and the page renders twenty of them.
+ */
+export async function listProjectTimesheets(
+  tx: Tx,
+  projectId: string,
+  filters: {
+    partyId?: string | null;
+    taskId?: string | null;
+    status?: "draft" | "submitted" | "approved" | "rejected" | null;
+    from?: string | null;
+    to?: string | null;
+    limit?: number;
+  } = {},
+) {
+  if (!isUuid(projectId)) return [];
+
+  const where = [eq(projectTimesheets.projectId, projectId)];
+  if (filters.partyId && isUuid(filters.partyId))
+    where.push(eq(projectTimesheets.partyId, filters.partyId));
+  if (filters.taskId && isUuid(filters.taskId))
+    where.push(eq(projectTimesheets.taskId, filters.taskId));
+  if (filters.status) where.push(eq(projectTimesheets.status, filters.status));
+  if (filters.from) where.push(sql`${projectTimesheets.workDate} >= ${filters.from}`);
+  if (filters.to) where.push(sql`${projectTimesheets.workDate} <= ${filters.to}`);
+
+  return tx
+    .select()
+    .from(projectTimesheets)
+    .where(and(...where))
+    .orderBy(desc(projectTimesheets.workDate), asc(projectTimesheets.partyName))
+    .limit(Math.min(filters.limit ?? 200, 500));
+}
+
+/**
+ * What a project's labour has cost, and what is still waiting on approval.
+ *
+ * Days and hours are both returned because both are asked for: a day rate
+ * argument is had in days, and `project_tasks.estimated_hours` is in hours.
+ * They are the same number through `attendance_config.standard_hours`, which
+ * is why the conversion is the database's and not a constant in a screen.
+ */
+export interface ProjectLabourSummary {
+  costIncurred: number;
+  costCommitted: number;
+  days: number;
+  hours: number;
+  billable: number;
+  entries: number;
+}
+
+export async function getProjectLabourSummary(
+  tx: Tx,
+  projectIds: readonly string[],
+): Promise<Map<string, ProjectLabourSummary>> {
+  const result = new Map<string, ProjectLabourSummary>();
+  const ids = [...new Set(projectIds.filter(isUuid))];
+  if (!ids.length) return result;
+
+  const rows = (await tx.execute(sql`
+    SELECT t.project_id::text                                          AS project_id,
+           COALESCE(SUM(t.cost_amount) FILTER (
+             WHERE t.status = 'approved'), 0)::float8                  AS cost_incurred,
+           COALESCE(SUM(t.cost_amount) FILTER (
+             WHERE t.status = 'submitted'), 0)::float8                 AS cost_committed,
+           COALESCE(SUM(project_timesheet_days(t.company_id, t.quantity, t.unit)) FILTER (
+             WHERE t.status <> 'rejected'), 0)::float8                 AS days,
+           COALESCE(SUM(project_timesheet_days(t.company_id, t.quantity, t.unit)
+                        * project_timesheet_hours_per_day(t.company_id)) FILTER (
+             WHERE t.status <> 'rejected'), 0)::float8                 AS hours,
+           COALESCE(SUM(t.bill_amount) FILTER (
+             WHERE t.status = 'approved' AND t.billable), 0)::float8   AS billable,
+           COUNT(*) FILTER (WHERE t.status <> 'rejected')::int         AS entries
+      FROM project_timesheets t
+     WHERE t.project_id = ${anyOf(ids, "uuid[]")}
+     GROUP BY t.project_id
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  for (const r of rows) {
+    result.set(String(r.project_id), {
+      costIncurred: num(r.cost_incurred),
+      costCommitted: num(r.cost_committed),
+      days: num(r.days),
+      hours: num(r.hours),
+      billable: num(r.billable),
+      entries: Number(r.entries ?? 0),
+    });
+  }
+  return result;
+}
+
+/**
+ * A task's ACTUAL hours — 0071's deliberately missing column.
+ *
+ * `project_tasks` stores `estimated_hours` and no actual, because "actual
+ * hours are the sum of a task's timesheets, and timesheets are step 4".
+ * This is step 4, and this is that sum. Still not stored: a rolled-up number
+ * with a second copy is a number that will disagree with what it rolls up.
+ */
+export async function getTaskActualHours(
+  tx: Tx,
+  taskIds: readonly string[],
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  const ids = [...new Set(taskIds.filter(isUuid))];
+  if (!ids.length) return result;
+
+  const rows = (await tx.execute(sql`
+    SELECT t.task_id::text AS task_id,
+           COALESCE(SUM(project_timesheet_days(t.company_id, t.quantity, t.unit)
+                        * project_timesheet_hours_per_day(t.company_id)), 0)::float8 AS hours
+      FROM project_timesheets t
+     WHERE t.task_id = ${anyOf(ids, "uuid[]")}
+       AND t.status <> 'rejected'
+     GROUP BY t.task_id
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  for (const r of rows) result.set(String(r.task_id), num(r.hours));
+  return result;
+}
+
+// ── Variations — 0091 ───────────────────────────────────────────────────────
+//
+// The register that lets a contract sum move. Nothing here writes
+// `contract_sum` or `completion_date`: `project_contracts_derive_current`
+// computes both from `original_sum` / `original_completion_date` plus the
+// APPROVED variations, and `project_variations_touch_contract` nudges the
+// contract whenever one changes. Two copies of that arithmetic is two copies
+// that will disagree, which is the mistake `financials` made in 0070.
+
+export interface VariationInput {
+  companyId: string;
+  projectId: string;
+  contractId: string;
+  title: string;
+  description?: string | null;
+  costEffect?: number | string | null;
+  timeEffectDays?: number | string | null;
+  issuedDate: string;
+  reference?: string | null;
+  instructionId?: string | null;
+  notes?: string | null;
+  createdById?: string | null;
+  createdByName: string;
+}
+
+export async function createVariation(tx: Tx, input: VariationInput) {
+  const [{ variation_number: variationNumber }] = (await tx.execute(
+    sql`SELECT next_entry_number(${input.companyId}::uuid, 'VO') AS variation_number`,
+  )) as unknown as Array<{ variation_number: string }>;
+
+  const [row] = await tx
+    .insert(projectVariations)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      contractId: input.contractId,
+      variationNumber,
+      instructionId: optionalId(input.instructionId),
+      title: input.title.trim(),
+      description: input.description?.trim() ?? "",
+      costEffect: Number(input.costEffect ?? 0).toFixed(4),
+      timeEffectDays: Math.trunc(Number(input.timeEffectDays ?? 0)) || 0,
+      issuedDate: input.issuedDate,
+      reference: input.reference?.trim() || null,
+      notes: input.notes?.trim() ?? "",
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Amend a variation.
+ *
+ * An APPROVED one is not amended here — its figures are in the contract sum
+ * and in every certificate's percentage since. Reject it and raise another,
+ * so the register says what happened. `updateVariation` filters on status for
+ * that reason rather than trusting the screen to hide the button.
+ */
+export async function updateVariation(
+  tx: Tx,
+  variationId: string,
+  input: {
+    title?: string;
+    description?: string;
+    costEffect?: number | string;
+    timeEffectDays?: number | string;
+    issuedDate?: string;
+    reference?: string | null;
+    instructionId?: string | null;
+    notes?: string;
+    lastModifiedById?: string | null;
+    lastModifiedByName?: string | null;
+  },
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.title !== undefined) patch.title = input.title.trim();
+  if (input.description !== undefined) patch.description = input.description.trim();
+  if (input.costEffect !== undefined)
+    patch.costEffect = Number(input.costEffect).toFixed(4);
+  if (input.timeEffectDays !== undefined)
+    patch.timeEffectDays = Math.trunc(Number(input.timeEffectDays)) || 0;
+  if (input.issuedDate !== undefined) patch.issuedDate = input.issuedDate;
+  if (input.reference !== undefined) patch.reference = input.reference?.trim() || null;
+  if (input.instructionId !== undefined)
+    patch.instructionId = optionalId(input.instructionId);
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.lastModifiedById !== undefined)
+    patch.lastModifiedById = input.lastModifiedById;
+  if (input.lastModifiedByName !== undefined)
+    patch.lastModifiedByName = input.lastModifiedByName;
+
+  const [row] = await tx
+    .update(projectVariations)
+    .set(patch)
+    .where(
+      and(
+        eq(projectVariations.id, variationId),
+        inArray(projectVariations.status, ["draft", "submitted"]),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Move a variation through the register.
+ *
+ * The three timestamp columns are a biconditional each — `decision_pair` and
+ * `submission_pair` — so every transition sets ALL of them rather than the one
+ * it cares about. A variation sent back to draft that kept its approval stamp
+ * is an approved variation as far as any reader is concerned, and its money is
+ * in the contract sum.
+ */
+export async function setVariationStatus(
+  tx: Tx,
+  variationId: string,
+  status: "draft" | "submitted" | "approved" | "rejected",
+  actor: { id?: string | null; name?: string | null },
+  decisionNotes?: string | null,
+) {
+  const decided = status === "approved" || status === "rejected";
+  const [row] = await tx
+    .update(projectVariations)
+    .set({
+      status,
+      submittedAt: status === "draft" ? null : new Date(),
+      decidedAt: decided ? new Date() : null,
+      decidedById: decided ? (actor.id ?? null) : null,
+      decidedByName: decided ? (actor.name || "Unknown User") : null,
+      decisionNotes: decided ? (decisionNotes?.trim() || null) : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectVariations.id, variationId))
+    .returning();
+  return row ?? null;
+}
+
+/** Only a variation that has moved nothing may be deleted. */
+export async function deleteVariation(tx: Tx, variationId: string) {
+  const [row] = await tx
+    .delete(projectVariations)
+    .where(
+      and(
+        eq(projectVariations.id, variationId),
+        inArray(projectVariations.status, ["draft", "rejected"]),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+export async function listVariations(tx: Tx, projectId: string) {
+  if (!isUuid(projectId)) return [];
+  return tx
+    .select()
+    .from(projectVariations)
+    .where(eq(projectVariations.projectId, projectId))
+    .orderBy(desc(projectVariations.issuedDate), desc(projectVariations.createdAt))
+    .limit(500);
+}
+
+/**
+ * What the register adds up to.
+ *
+ * `approved` is what has moved the contract; `pending` is what is claimed and
+ * not yet agreed — the figure a contracts manager actually wants, because it
+ * is the exposure. They are deliberately not summed together anywhere.
+ */
+export interface VariationSummary {
+  approvedCost: number;
+  approvedDays: number;
+  pendingCost: number;
+  pendingDays: number;
+  approvedCount: number;
+  pendingCount: number;
+}
+
+export async function getVariationSummary(
+  tx: Tx,
+  projectId: string,
+): Promise<VariationSummary> {
+  const empty: VariationSummary = {
+    approvedCost: 0,
+    approvedDays: 0,
+    pendingCost: 0,
+    pendingDays: 0,
+    approvedCount: 0,
+    pendingCount: 0,
+  };
+  if (!isUuid(projectId)) return empty;
+
+  const [row] = (await tx.execute(sql`
+    SELECT
+      COALESCE(SUM(v.cost_effect) FILTER (WHERE v.status = 'approved'), 0)::float8       AS approved_cost,
+      COALESCE(SUM(v.time_effect_days) FILTER (WHERE v.status = 'approved'), 0)::int     AS approved_days,
+      COALESCE(SUM(v.cost_effect) FILTER (WHERE v.status = 'submitted'), 0)::float8      AS pending_cost,
+      COALESCE(SUM(v.time_effect_days) FILTER (WHERE v.status = 'submitted'), 0)::int    AS pending_days,
+      COUNT(*) FILTER (WHERE v.status = 'approved')::int                                 AS approved_count,
+      COUNT(*) FILTER (WHERE v.status = 'submitted')::int                                AS pending_count
+      FROM project_variations v
+     WHERE v.project_id = ${projectId}::uuid
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  if (!row) return empty;
+  return {
+    approvedCost: num(row.approved_cost),
+    approvedDays: Number(row.approved_days ?? 0),
+    pendingCost: num(row.pending_cost),
+    pendingDays: Number(row.pending_days ?? 0),
+    approvedCount: Number(row.approved_count ?? 0),
+    pendingCount: Number(row.pending_count ?? 0),
+  };
+}
+
+/**
+ * Claims and expenses tagged to OTHER projects in this tenant.
+ *
+ * For the empty state on a project's own list. Somebody who tags a claim to a
+ * job and then opens Cash Requisitions from the global sidebar arrives with no
+ * `?project=` — the module ASKS rather than guessing, deliberately (see
+ * `selectProject`) — or arrives on a different job. Either way the page said
+ * "nothing linked to this project yet", which is true and reads as "the claim
+ * did not save".
+ *
+ * So the empty state can say where the money actually is instead.
+ */
+export async function countProjectSpendElsewhere(tx: Tx, projectId: string) {
+  if (!isUuid(projectId)) return { claims: 0, expenses: 0, projects: [] as string[] };
+
+  const rows = (await tx.execute(sql`
+    SELECT p.name,
+           COUNT(*) FILTER (WHERE t.kind = 'claim')::int   AS claims,
+           COUNT(*) FILTER (WHERE t.kind = 'expense')::int AS expenses
+      FROM (
+        SELECT project_id, 'claim' AS kind FROM employee_claims WHERE project_id IS NOT NULL
+        UNION ALL
+        SELECT project_id, 'expense' AS kind FROM expenses
+         WHERE project_id IS NOT NULL AND status <> 'void'
+      ) t
+      JOIN projects p ON p.id = t.project_id
+     WHERE t.project_id <> ${projectId}::uuid
+     GROUP BY p.name
+     ORDER BY (COUNT(*)) DESC
+     LIMIT 5
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return {
+    claims: rows.reduce((s, r) => s + Number(r.claims ?? 0), 0),
+    expenses: rows.reduce((s, r) => s + Number(r.expenses ?? 0), 0),
+    projects: rows.map((r) => String(r.name)),
+  };
+}
+
+/**
+ * Billable time approved against this project, cumulative to a date.
+ *
+ * OFFERED TO THE CERTIFICATE, NOT AUTOMATIC. On a `time_material` job this IS
+ * the dayworks figure and typing it by hand from a timesheet report is how a
+ * certificate comes to disagree with the time it was built from. On a lump-sum
+ * road contract it is NOT: dayworks there are work instructed onto daywork
+ * rates and recorded on signed daywork sheets, which may or may not be what
+ * somebody has been logging here.
+ *
+ * So this returns the number and the screen offers it beside the box, exactly
+ * as the measured bill is offered for the permanent work. The QS decides
+ * whether it is the same thing.
+ *
+ * `bill_amount` and not `cost_amount`: what a certificate claims is the SELL,
+ * and the cost is the project's own margin question.
+ */
+export async function getProjectBillableTimeToDate(
+  tx: Tx,
+  projectId: string,
+  upTo?: string | null,
+) {
+  if (!isUuid(projectId)) return null;
+
+  const [row] = (await tx.execute(sql`
+    SELECT COALESCE(SUM(t.bill_amount), 0)::float8 AS amount,
+           COUNT(*)::int                           AS entries,
+           MAX(t.work_date)                        AS latest
+      FROM project_timesheets t
+     WHERE t.project_id = ${projectId}::uuid
+       AND t.status = 'approved'
+       AND t.billable
+       AND t.bill_amount IS NOT NULL
+       ${upTo ? sql`AND t.work_date <= ${upTo}::date` : sql``}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const amount = num(row?.amount);
+  if (!amount) return null;
+  return {
+    amount,
+    entries: Number(row?.entries ?? 0),
+    latest: row?.latest ? String(row.latest) : null,
+  };
+}
+
+/**
+ * What stands in the way of closing this project.
+ *
+ * CLOSING IS TERMINAL. `ProjectStatusActions` offers no transition out of
+ * `closed`, and a closed project refuses edits, roster changes, time and
+ * variations. So it is the one status change that cannot be walked back by the
+ * person who made it, and the only one worth stopping.
+ *
+ * Each of these is money or work that a closed project would strand:
+ *
+ *   RETENTION OUTSTANDING is the big one. It is a receivable — 1125 since 0085
+ *   — falling due at practical completion and again at the end of the defects
+ *   period, which are both AFTER the point somebody wants to close the job.
+ *   Closing over it is how a contractor forgets to collect the last 5%.
+ *
+ *   A CERTIFIED CERTIFICATE WITH NO INVOICE is work the employer has agreed to
+ *   pay for and has never been asked to pay. Certifying and invoicing are two
+ *   steps on purpose (0081), and this is the gap that separation opens.
+ *
+ *   AN OPEN DRAFT is a valuation somebody was part way through.
+ *
+ *   SUBMITTED TIMESHEETS are labour the job has consumed and nobody has
+ *   approved, so it is absent from the project's cost and from the ledger —
+ *   and after closing it can never be approved, because a closed project
+ *   refuses the status change.
+ *
+ *   SUBMITTED VARIATIONS are claims against the contract that have had no
+ *   decision. Closing leaves them neither agreed nor rejected.
+ *
+ * Returned as a LIST rather than a boolean because "you cannot close this" is
+ * not an answer anybody can act on.
+ */
+export interface ProjectClosingBlocker {
+  kind:
+    | "retention"
+    | "uninvoiced_certificate"
+    | "draft_certificate"
+    | "unapproved_timesheets"
+    | "undecided_variations";
+  detail: string;
+}
+
+export async function getProjectClosingBlockers(
+  tx: Tx,
+  projectId: string,
+): Promise<ProjectClosingBlocker[]> {
+  if (!isUuid(projectId)) return [];
+  const blockers: ProjectClosingBlocker[] = [];
+
+  const [counts] = (await tx.execute(sql`
+    SELECT
+      (SELECT COUNT(*) FROM project_certificates c
+        WHERE c.project_id = ${projectId}::uuid AND c.status = 'draft')::int
+                                                              AS draft_certificates,
+      (SELECT COUNT(*) FROM project_certificates c
+        WHERE c.project_id = ${projectId}::uuid
+          AND c.status = 'certified' AND c.invoice_id IS NULL)::int
+                                                              AS uninvoiced,
+      (SELECT COUNT(*) FROM project_timesheets t
+        WHERE t.project_id = ${projectId}::uuid AND t.status = 'submitted')::int
+                                                              AS timesheets,
+      (SELECT COUNT(*) FROM project_variations v
+        WHERE v.project_id = ${projectId}::uuid AND v.status = 'submitted')::int
+                                                              AS variations
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const n = (k: string) => Number(counts?.[k] ?? 0);
+  const plural = (count: number, one: string, many: string) =>
+    `${count} ${count === 1 ? one : many}`;
+
+  /**
+   * Retention comes from the contract position rather than a count, because it
+   * is the arithmetic of the whole certificate chain and there is exactly one
+   * function that owns it.
+   */
+  const contract = await getMainContract(tx, projectId);
+  if (contract) {
+    const position = await getContractPosition(tx, contract.id);
+    if (position && position.retentionOutstanding > 0) {
+      blockers.push({
+        kind: "retention",
+        detail: `${position.retentionOutstanding.toLocaleString()} of retention is still held and has not been released`,
+      });
+    }
+  }
+
+  if (n("uninvoiced")) {
+    blockers.push({
+      kind: "uninvoiced_certificate",
+      detail: `${plural(n("uninvoiced"), "certificate has", "certificates have")} been certified without an invoice raised`,
+    });
+  }
+  if (n("draft_certificates")) {
+    blockers.push({
+      kind: "draft_certificate",
+      detail: "a certificate is still in draft",
+    });
+  }
+  if (n("timesheets")) {
+    blockers.push({
+      kind: "unapproved_timesheets",
+      detail: `${plural(n("timesheets"), "timesheet is", "timesheets are")} awaiting approval`,
+    });
+  }
+  if (n("variations")) {
+    blockers.push({
+      kind: "undecided_variations",
+      detail: `${plural(n("variations"), "variation has", "variations have")} been submitted and not decided`,
+    });
+  }
+
+  return blockers;
+}
+
+// ── Milestones — 0093 ───────────────────────────────────────────────────────
+//
+// The valuation method for a job with no bill to remeasure. Nothing here
+// posts: achieving a stage makes a figure AVAILABLE to the next certificate,
+// and the certificate is still the thing that certifies it.
+
+export interface MilestoneInput {
+  companyId: string;
+  projectId: string;
+  contractId: string;
+  name: string;
+  description?: string | null;
+  value?: number | string | null;
+  sequence?: number | null;
+  dueDate?: string | null;
+  retentionReleasePercent?: number | string | null;
+  notes?: string | null;
+  createdById?: string | null;
+  createdByName: string;
+}
+
+const optionalPercent = (v: number | string | null | undefined) =>
+  v === null || v === undefined || String(v).trim() === ""
+    ? null
+    : Number(v).toFixed(2);
+
+export async function createMilestone(tx: Tx, input: MilestoneInput) {
+  const [row] = await tx
+    .insert(projectMilestones)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      contractId: input.contractId,
+      name: input.name.trim(),
+      description: input.description?.trim() ?? "",
+      sequence: Math.trunc(Number(input.sequence ?? 0)) || 0,
+      value: Number(input.value ?? 0).toFixed(4),
+      dueDate: input.dueDate || null,
+      retentionReleasePercent: optionalPercent(input.retentionReleasePercent),
+      notes: input.notes?.trim() ?? "",
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Amend a stage.
+ *
+ * An ACHIEVED one is not amended: its value is in a certificate's valuation
+ * and in every net since. Un-achieve it first, which is a decision somebody
+ * makes rather than a side effect of editing a number.
+ */
+export async function updateMilestone(
+  tx: Tx,
+  milestoneId: string,
+  input: {
+    name?: string;
+    description?: string;
+    value?: number | string;
+    sequence?: number;
+    dueDate?: string | null;
+    retentionReleasePercent?: number | string | null;
+    notes?: string;
+    lastModifiedById?: string | null;
+    lastModifiedByName?: string | null;
+  },
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.description !== undefined) patch.description = input.description.trim();
+  if (input.value !== undefined) patch.value = Number(input.value).toFixed(4);
+  if (input.sequence !== undefined)
+    patch.sequence = Math.trunc(Number(input.sequence)) || 0;
+  if (input.dueDate !== undefined) patch.dueDate = input.dueDate || null;
+  if (input.retentionReleasePercent !== undefined)
+    patch.retentionReleasePercent = optionalPercent(input.retentionReleasePercent);
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.lastModifiedById !== undefined)
+    patch.lastModifiedById = input.lastModifiedById;
+  if (input.lastModifiedByName !== undefined)
+    patch.lastModifiedByName = input.lastModifiedByName;
+
+  const [row] = await tx
+    .update(projectMilestones)
+    .set(patch)
+    .where(
+      and(
+        eq(projectMilestones.id, milestoneId),
+        inArray(projectMilestones.status, ["pending", "cancelled"]),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Achieve a stage, or take the achievement back.
+ *
+ * THE DATE IS THE POINT. `achieved_on` is what a certificate reads — the
+ * cumulative value of stages achieved on or before its valuation date — so a
+ * stage signed off in May must not appear on a March certificate. Defaulting
+ * it to today would quietly do exactly that whenever somebody records a
+ * sign-off late, which is most of the time.
+ */
+export async function setMilestoneStatus(
+  tx: Tx,
+  milestoneId: string,
+  status: "pending" | "achieved" | "cancelled",
+  actor: { id?: string | null; name?: string | null },
+  achievedOn?: string | null,
+) {
+  const achieving = status === "achieved";
+  if (achieving && !achievedOn) {
+    throw new Error(
+      "A stage is achieved on a DATE — a certificate values what was achieved by its valuation date, so the date decides which certificate picks it up.",
+    );
+  }
+
+  const [row] = await tx
+    .update(projectMilestones)
+    .set({
+      status,
+      achievedOn: achieving ? achievedOn! : null,
+      achievedById: achieving ? (actor.id ?? null) : null,
+      achievedByName: achieving ? (actor.name || "Unknown User") : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectMilestones.id, milestoneId))
+    .returning();
+  return row ?? null;
+}
+
+export async function deleteMilestone(tx: Tx, milestoneId: string) {
+  const [row] = await tx
+    .delete(projectMilestones)
+    .where(
+      and(
+        eq(projectMilestones.id, milestoneId),
+        inArray(projectMilestones.status, ["pending", "cancelled"]),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+export async function listMilestones(tx: Tx, projectId: string) {
+  if (!isUuid(projectId)) return [];
+  return tx
+    .select()
+    .from(projectMilestones)
+    .where(eq(projectMilestones.projectId, projectId))
+    .orderBy(asc(projectMilestones.sequence), asc(projectMilestones.createdAt))
+    .limit(500);
+}
+
+/**
+ * The schedule against the contract.
+ *
+ * `unallocated` is the figure that matters while a schedule is being built:
+ * the contract sum less what the stages come to. It is legitimately positive —
+ * the database refuses only the other direction.
+ */
+export interface MilestoneSummary {
+  total: number;
+  achieved: number;
+  pending: number;
+  unallocated: number;
+  releaseScheduled: number;
+  count: number;
+  achievedCount: number;
+}
+
+export async function getMilestoneSummary(
+  tx: Tx,
+  projectId: string,
+): Promise<MilestoneSummary> {
+  const empty: MilestoneSummary = {
+    total: 0, achieved: 0, pending: 0, unallocated: 0,
+    releaseScheduled: 0, count: 0, achievedCount: 0,
+  };
+  if (!isUuid(projectId)) return empty;
+
+  const [row] = (await tx.execute(sql`
+    SELECT
+      COALESCE(SUM(m.value) FILTER (WHERE m.status <> 'cancelled'), 0)::float8   AS total,
+      COALESCE(SUM(m.value) FILTER (WHERE m.status = 'achieved'), 0)::float8     AS achieved,
+      COALESCE(SUM(m.value) FILTER (WHERE m.status = 'pending'), 0)::float8      AS pending,
+      COALESCE(SUM(COALESCE(m.retention_release_percent, 0))
+               FILTER (WHERE m.status <> 'cancelled'), 0)::float8                AS release_scheduled,
+      COUNT(*) FILTER (WHERE m.status <> 'cancelled')::int                       AS count,
+      COUNT(*) FILTER (WHERE m.status = 'achieved')::int                         AS achieved_count
+      FROM project_milestones m
+     WHERE m.project_id = ${projectId}::uuid
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  if (!row) return empty;
+  const contract = await getMainContract(tx, projectId);
+  const contractSum = contract ? num(contract.contractSum) : 0;
+  const total = num(row.total);
+
+  return {
+    total,
+    achieved: num(row.achieved),
+    pending: num(row.pending),
+    unallocated: round2(Math.max(0, contractSum - total)),
+    releaseScheduled: num(row.release_scheduled),
+    count: Number(row.count ?? 0),
+    achievedCount: Number(row.achieved_count ?? 0),
+  };
+}
+
+/**
+ * What the certificate may claim from the schedule, at a date.
+ *
+ * TWO FIGURES, and they are the two boxes on the certificate form that a
+ * milestone job would otherwise have to type by hand: the cumulative value of
+ * stages achieved by the valuation date, and the cumulative retention those
+ * stages have released.
+ *
+ * Both are OFFERED, never written — 0093 decision 3. The certificate stays the
+ * thing that certifies, and `valuation_source = 'milestone'` is how it records
+ * that the figure was earned by a stage rather than typed.
+ *
+ * The retention figure is a PERCENTAGE OF WHAT IS HELD, and what is held is
+ * the chain's business, so this returns the percentage and the caller applies
+ * it to the certificate's own retention.
+ */
+export async function getMilestoneValueToDate(
+  tx: Tx,
+  projectId: string,
+  upTo?: string | null,
+) {
+  if (!isUuid(projectId)) return null;
+
+  const [row] = (await tx.execute(sql`
+    SELECT COALESCE(SUM(m.value), 0)::float8                              AS value,
+           COALESCE(SUM(COALESCE(m.retention_release_percent, 0)), 0)::float8
+                                                                          AS release_percent,
+           COUNT(*)::int                                                  AS stages,
+           MAX(m.achieved_on)                                             AS latest
+      FROM project_milestones m
+     WHERE m.project_id = ${projectId}::uuid
+       AND m.status = 'achieved'
+       ${upTo ? sql`AND m.achieved_on <= ${upTo}::date` : sql``}
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const stages = Number(row?.stages ?? 0);
+  if (!stages) return null;
+  return {
+    value: num(row?.value),
+    releasePercent: num(row?.release_percent),
+    stages,
+    latest: row?.latest ? String(row.latest) : null,
+  };
+}
+
+// ── Variation lines — 0094 ──────────────────────────────────────────────────
+//
+// Nothing here writes `amount` or `cost_effect`: the first is
+// `quantity × rate` by trigger and the second is the sum of the lines, which
+// then moves the contract sum through 0091's own chain. These functions carry
+// intent and read back what the database decided.
+
+export interface VariationItemInput {
+  companyId: string;
+  variationId: string;
+  description?: string | null;
+  itemCode?: string | null;
+  unit?: string | null;
+  quantity?: number | string | null;
+  rate?: number | string | null;
+  sequence?: number | null;
+  notes?: string | null;
+  /** Where it came from, when it came from the bill. */
+  boqItemId?: string | null;
+}
+
+/**
+ * Add a line.
+ *
+ * WHEN IT IS RAISED AGAINST A BILL ITEM the item's description, unit and rate
+ * are copied as the starting point — an omission is priced at the bill's own
+ * rate, which is the contractual position, and making somebody retype it is
+ * how a variation comes to be priced at a rate nobody agreed.
+ *
+ * They are COPIED, not read through. The bill can be superseded by a new
+ * version and an agreed variation must not be repriced by a document raised
+ * after it was agreed.
+ */
+export async function addVariationItem(tx: Tx, input: VariationItemInput) {
+  let { description, itemCode, unit, rate } = input;
+
+  if (input.boqItemId && isUuid(input.boqItemId)) {
+    const [item] = await tx
+      .select()
+      .from(projectBoqItems)
+      .where(eq(projectBoqItems.id, input.boqItemId))
+      .limit(1);
+    if (!item) throw new Error("That bill item no longer exists.");
+    description = description?.trim() || item.description;
+    itemCode = itemCode?.trim() || item.itemCode;
+    unit = unit?.trim() || item.unit;
+    rate = rate === undefined || rate === null || String(rate).trim() === ""
+      ? (item.rate ?? "0")
+      : rate;
+  }
+
+  if (!description?.trim()) throw new Error("A variation line needs a description.");
+
+  const [row] = await tx
+    .insert(projectVariationItems)
+    .values({
+      companyId: input.companyId,
+      variationId: input.variationId,
+      boqItemId: optionalId(input.boqItemId),
+      itemCode: itemCode?.trim() || null,
+      description: description.trim(),
+      unit: unit?.trim() || null,
+      quantity: Number(input.quantity ?? 0).toFixed(4),
+      rate: Number(rate ?? 0).toFixed(4),
+      sequence: Math.trunc(Number(input.sequence ?? 0)) || 0,
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning();
+  return row;
+}
+
+export async function updateVariationItem(
+  tx: Tx,
+  itemId: string,
+  input: {
+    description?: string;
+    itemCode?: string | null;
+    unit?: string | null;
+    quantity?: number | string;
+    rate?: number | string;
+    sequence?: number;
+    notes?: string;
+  },
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.description !== undefined) patch.description = input.description.trim();
+  if (input.itemCode !== undefined) patch.itemCode = input.itemCode?.trim() || null;
+  if (input.unit !== undefined) patch.unit = input.unit?.trim() || null;
+  if (input.quantity !== undefined)
+    patch.quantity = Number(input.quantity).toFixed(4);
+  if (input.rate !== undefined) patch.rate = Number(input.rate).toFixed(4);
+  if (input.sequence !== undefined)
+    patch.sequence = Math.trunc(Number(input.sequence)) || 0;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+
+  const [row] = await tx
+    .update(projectVariationItems)
+    .set(patch)
+    .where(eq(projectVariationItems.id, itemId))
+    .returning();
+  return row ?? null;
+}
+
+/** An approved variation's lines are refused by the database, not by this. */
+export async function deleteVariationItem(tx: Tx, itemId: string) {
+  const [row] = await tx
+    .delete(projectVariationItems)
+    .where(eq(projectVariationItems.id, itemId))
+    .returning();
+  return row ?? null;
+}
+
+export async function listVariationItems(tx: Tx, variationId: string) {
+  if (!isUuid(variationId)) return [];
+  return tx
+    .select()
+    .from(projectVariationItems)
+    .where(eq(projectVariationItems.variationId, variationId))
+    .orderBy(asc(projectVariationItems.sequence), asc(projectVariationItems.createdAt))
+    .limit(500);
+}
+
+/**
+ * Every line on a project's variations, by variation.
+ *
+ * One query for the whole register rather than one per variation — a job with
+ * forty variations is forty round trips otherwise, which is the mistake
+ * `computeActualsFor` was written to avoid.
+ */
+export async function listVariationItemsForProject(tx: Tx, projectId: string) {
+  const result = new Map<string, Array<Record<string, unknown>>>();
+  if (!isUuid(projectId)) return result;
+
+  const rows = await tx
+    .select({
+      id: projectVariationItems.id,
+      variationId: projectVariationItems.variationId,
+      boqItemId: projectVariationItems.boqItemId,
+      itemCode: projectVariationItems.itemCode,
+      description: projectVariationItems.description,
+      unit: projectVariationItems.unit,
+      quantity: projectVariationItems.quantity,
+      rate: projectVariationItems.rate,
+      amount: projectVariationItems.amount,
+      sequence: projectVariationItems.sequence,
+    })
+    .from(projectVariationItems)
+    .innerJoin(
+      projectVariations,
+      eq(projectVariations.id, projectVariationItems.variationId),
+    )
+    .where(eq(projectVariations.projectId, projectId))
+    .orderBy(asc(projectVariationItems.sequence));
+
+  for (const r of rows) {
+    const key = String(r.variationId);
+    if (!result.has(key)) result.set(key, []);
+    result.get(key)!.push(r as Record<string, unknown>);
+  }
+  return result;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cash requisitions — 0107.
+//
+// AN AUTHORISATION, NOT A MOVEMENT. Nothing in this section writes a journal
+// entry, and that is the design rather than an omission: the money leaves on a
+// path that already posts — an employee advance, the petty cash float, a stock
+// request — and `fundedSource`/`fundedSourceId` record which one. A second
+// posting here would put the same figure in the ledger twice.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CashRequisitionInput {
+  companyId: string;
+  projectId: string;
+  purpose: string;
+  amount: number | string;
+  requestDate?: string | null;
+  neededBy?: string | null;
+  costCodeId?: string | null;
+  notes?: string;
+  requestedById?: string | null;
+  requestedByName: string;
+  createdById?: string | null;
+  createdByName: string;
+  /** Raise it already submitted — the ordinary case from the site. */
+  submit?: boolean;
+}
+
+/** The cost code's own code, frozen onto the request. */
+async function costCodeLabel(tx: Tx, costCodeId: string | null | undefined) {
+  if (!costCodeId || !isUuid(costCodeId)) return null;
+  const [row] = await tx
+    .select({ code: projectCostCodes.code, name: projectCostCodes.name })
+    .from(projectCostCodes)
+    .where(eq(projectCostCodes.id, costCodeId))
+    .limit(1);
+  if (!row) return null;
+  return row.name ? `${row.code} — ${row.name}` : row.code;
+}
+
+export async function createCashRequisition(
+  tx: Tx,
+  input: CashRequisitionInput,
+) {
+  const [{ requisition_number }] = (await tx.execute(
+    sql`SELECT next_entry_number(${input.companyId}::uuid, 'CRQ') AS requisition_number`,
+  )) as unknown as Array<{ requisition_number: string }>;
+
+  const [row] = await tx
+    .insert(projectCashRequisitions)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      requisitionNumber: requisition_number,
+      requestDate: input.requestDate || undefined,
+      neededBy: input.neededBy || null,
+      costCodeId: input.costCodeId || null,
+      costCodeAtRequest: await costCodeLabel(tx, input.costCodeId),
+      purpose: input.purpose.trim(),
+      amount: Number(input.amount).toFixed(4),
+      /**
+       * SUBMITTED BY DEFAULT IS WRONG HERE, and it is the mistake the claims
+       * module made: both of its create paths passed `submit: true`, so the
+       * only way into `draft` was a recall and `draft` had no exit. A site
+       * agent typing a request on a phone wants it gone; somebody preparing
+       * next month's wants to keep it. Both are reachable, and the caller says
+       * which.
+       */
+      status: input.submit ? "submitted" : "draft",
+      notes: input.notes?.trim() ?? "",
+      requestedById: input.requestedById ?? null,
+      requestedByName: input.requestedByName,
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Amend a request.
+ *
+ * The trigger refuses an amendment once it is approved — what was authorised
+ * is what was authorised — so this does not repeat the check. It reports it in
+ * words, though, because a raw check violation tells a site agent nothing.
+ */
+export async function updateCashRequisition(
+  tx: Tx,
+  requisitionId: string,
+  input: {
+    purpose?: string;
+    amount?: number | string;
+    requestDate?: string | null;
+    neededBy?: string | null;
+    costCodeId?: string | null;
+    notes?: string;
+    lastModifiedById?: string | null;
+    lastModifiedByName?: string | null;
+  },
+) {
+  if (!isUuid(requisitionId)) return null;
+  const existing = await getCashRequisitionById(tx, requisitionId);
+  if (!existing) return null;
+
+  if (existing.status === "approved" || existing.status === "funded") {
+    throw new Error(
+      `Requisition ${existing.requisitionNumber} was approved for ${existing.amount} and can no longer be changed. Cancel it and raise another.`,
+    );
+  }
+
+  const patch: Record<string, unknown> = {
+    updatedAt: new Date(),
+    lastModifiedById: input.lastModifiedById ?? null,
+    lastModifiedByName: input.lastModifiedByName ?? null,
+  };
+  if (input.purpose !== undefined) patch.purpose = input.purpose.trim();
+  if (input.amount !== undefined) patch.amount = Number(input.amount).toFixed(4);
+  if (input.requestDate !== undefined) patch.requestDate = input.requestDate || existing.requestDate;
+  if (input.neededBy !== undefined) patch.neededBy = input.neededBy || null;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.costCodeId !== undefined) {
+    patch.costCodeId = input.costCodeId || null;
+    patch.costCodeAtRequest = await costCodeLabel(tx, input.costCodeId);
+  }
+
+  const [row] = await tx
+    .update(projectCashRequisitions)
+    .set(patch)
+    .where(eq(projectCashRequisitions.id, requisitionId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Move it along the state machine.
+ *
+ * The transitions themselves are the trigger's (0107 decision 3) — this is
+ * where the NAMES go on, which the `decision_signed` constraint requires of
+ * every state that is somebody's decision.
+ */
+export async function setCashRequisitionStatus(
+  tx: Tx,
+  requisitionId: string,
+  status: "draft" | "submitted" | "approved" | "rejected" | "cancelled",
+  actor: { id?: string | null; name: string },
+  notes?: string | null,
+) {
+  if (!isUuid(requisitionId)) return null;
+
+  const decided = status === "approved" || status === "rejected";
+  const [row] = await tx
+    .update(projectCashRequisitions)
+    .set({
+      status,
+      decidedById: decided ? actor.id ?? null : null,
+      decidedByName: decided ? actor.name : null,
+      decidedAt: decided ? new Date() : null,
+      decisionNotes: decided ? notes?.trim() || null : null,
+      lastModifiedById: actor.id ?? null,
+      lastModifiedByName: actor.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectCashRequisitions.id, requisitionId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Record that the money went out, and on which existing document.
+ *
+ * THIS POSTS NOTHING. The advance, the petty cash top-up or the stock request
+ * named here is what posted; this only closes the loop so the register can say
+ * "funded, by CLM-0042" instead of leaving an approved request looking
+ * outstanding for ever.
+ */
+export async function fundCashRequisition(
+  tx: Tx,
+  requisitionId: string,
+  funding: {
+    source: "employee_advance" | "petty_cash" | "stock_request" | "other";
+    sourceId?: string | null;
+  },
+  actor: { id?: string | null; name: string },
+) {
+  if (!isUuid(requisitionId)) return null;
+  const existing = await getCashRequisitionById(tx, requisitionId);
+  if (!existing) return null;
+
+  if (existing.status !== "approved") {
+    throw new Error(
+      `Requisition ${existing.requisitionNumber} is ${existing.status}. Only an approved requisition can be funded.`,
+    );
+  }
+
+  const [row] = await tx
+    .update(projectCashRequisitions)
+    .set({
+      status: "funded",
+      fundedSource: funding.source,
+      fundedSourceId:
+        funding.sourceId && isUuid(funding.sourceId) ? funding.sourceId : null,
+      fundedAt: new Date(),
+      /** The decision columns stay as the approver left them — funding is not
+       *  a second approval, and overwriting them would erase who allowed it. */
+      lastModifiedById: actor.id ?? null,
+      lastModifiedByName: actor.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectCashRequisitions.id, requisitionId))
+    .returning();
+  return row ?? null;
+}
+
+export async function getCashRequisitionById(tx: Tx, requisitionId: string) {
+  if (!isUuid(requisitionId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectCashRequisitions)
+    .where(eq(projectCashRequisitions.id, requisitionId))
+    .limit(1);
+  return row ?? null;
+}
+
+/** The register: newest first, which is how a cash book is read. */
+export async function listCashRequisitions(tx: Tx, projectId: string) {
+  if (!isUuid(projectId)) return [];
+  return tx
+    .select()
+    .from(projectCashRequisitions)
+    .where(eq(projectCashRequisitions.projectId, projectId))
+    .orderBy(desc(projectCashRequisitions.requestDate), desc(projectCashRequisitions.createdAt));
+}
+
+export interface CashRequisitionSummary {
+  requested: number;
+  approved: number;
+  funded: number;
+  awaiting: number;
+  awaitingCount: number;
+  count: number;
+}
+
+/**
+ * The four figures the MD's own screen shows, plus the two that make them
+ * actionable.
+ *
+ * A CANCELLED OR REJECTED REQUEST COUNTS FOR NOTHING. `requested` is what is
+ * live — everything anybody is still expected to answer or pay — because a
+ * total that includes six refused requests is a number nobody can act on.
+ */
+export async function getCashRequisitionSummary(
+  tx: Tx,
+  projectId: string,
+): Promise<CashRequisitionSummary> {
+  const empty: CashRequisitionSummary = {
+    requested: 0, approved: 0, funded: 0, awaiting: 0, awaitingCount: 0, count: 0,
+  };
+  if (!isUuid(projectId)) return empty;
+
+  const [row] = (await tx.execute(sql`
+    SELECT
+      COALESCE(SUM(r.amount) FILTER (
+        WHERE r.status IN ('draft','submitted','approved','funded')), 0)::float8 AS requested,
+      COALESCE(SUM(r.amount) FILTER (WHERE r.status = 'approved'), 0)::float8    AS approved,
+      COALESCE(SUM(r.amount) FILTER (WHERE r.status = 'funded'), 0)::float8      AS funded,
+      COALESCE(SUM(r.amount) FILTER (WHERE r.status = 'submitted'), 0)::float8   AS awaiting,
+      COUNT(*) FILTER (WHERE r.status = 'submitted')::int                        AS awaiting_count,
+      COUNT(*) FILTER (WHERE r.status <> 'cancelled')::int                       AS count
+      FROM project_cash_requisitions r
+     WHERE r.project_id = ${projectId}::uuid
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  if (!row) return empty;
+  return {
+    requested: num(row.requested),
+    approved: num(row.approved),
+    funded: num(row.funded),
+    awaiting: num(row.awaiting),
+    awaitingCount: Number(row.awaiting_count ?? 0),
+    count: Number(row.count ?? 0),
+  };
+}
+
+/** A draft and nothing else — the trigger refuses the rest, in words. */
+export async function deleteCashRequisition(tx: Tx, requisitionId: string) {
+  if (!isUuid(requisitionId)) return false;
+  const rows = await tx
+    .delete(projectCashRequisitions)
+    .where(eq(projectCashRequisitions.id, requisitionId))
+    .returning({ id: projectCashRequisitions.id });
+  return rows.length > 0;
 }

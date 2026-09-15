@@ -34,7 +34,10 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 // who is held and who pays through — is tests/bill-payment-threshold.test.mjs.
 // Left unmocked it would open its own connection through companyConfig, which
 // is a second database story inside a test about journal lines.
-vi.mock("@/app/mongodb/queries/threshold-queries", () => ({
+// `getCompanyThresholds` moved to @/app/db/companyConfig; the mock still named
+// the Mongo query module, so the threshold was NOT pinned and this file opened
+// the very connection the comment above says it is avoiding.
+vi.mock("@/app/db/companyConfig", () => ({
   getCompanyThresholds: vi.fn(async () => ({ billPaymentValue: 10_000_000 })),
 }));
 
@@ -126,6 +129,18 @@ suite("payment actions", () => {
     // would look like only for a user whose access had been revoked.
     await admin`INSERT INTO user_company_access (user_id, company_id, role, status)
       VALUES (${userId}, ${companyId}, 'Accountant', 'active')`;
+    /**
+     * A company created by a bare INSERT has no settings row, and provisioning
+     * is what normally makes one. `recordPayment` reads the approval threshold
+     * — `requestApprovalIfOverThreshold` -> `getCompanyThresholds` ->
+     * `getCompanySettings` — which throws "This company has no settings" for
+     * such a company, and two tests here died on it rather than on anything
+     * about payments.
+     *
+     * Five other suites already seed this. This one did not.
+     */
+    await admin`INSERT INTO company_settings (company_id)
+      VALUES (${companyId}) ON CONFLICT (company_id) DO NOTHING`;
 
     await asTenant(async (tx) => {
       await tx.execute(sql`

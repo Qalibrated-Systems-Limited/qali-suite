@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Plus, Loader2, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { createLead } from "@/app/mongodb/actions/lead-actions";
+import { createLeadPg as createLead } from "@/app/db/actions/crm-actions";
 
 const SOURCES = [
   "website",

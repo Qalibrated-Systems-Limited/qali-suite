@@ -2,16 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { UserCheck, UserX, Mail, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { UserCheck, UserX, Mail, Loader2, AlertCircle, CheckCircle2, Link2, Unlink } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   confirmEmployee,
   terminateEmployee,
   inviteEmployeeToPortal,
+  linkEmployeeLogin,
+  unlinkEmployeeLogin,
 } from "@/app/db/actions/hr-employee-actions";
-import { HR_WRITE_ROLES, HR_ADMIN_ROLES } from "@/lib/utils/role-gates";
-import { roleAllowed } from "@/lib/permissions";
+import { can } from "@/lib/capabilities";
 
 /** Today, on the LOCAL calendar — `toISOString()` is UTC and shifts the day. */
 function today() {
@@ -162,18 +163,149 @@ function TerminateDialog({ open, onClose, onConfirm, isPending, error }) {
   );
 }
 
-export function EmployeeActions({ employeeId, status, hasLogin, userRole, email }) {
+/**
+ * Picks which existing login belongs to this person.
+ *
+ * ONLY LOGINS WITH NO EMPLOYMENT RECORD are offered. The alternative — every
+ * user in the company — invites exactly the mistake `employees_company_user_uq`
+ * exists to refuse ("two employment records sharing a login would make 'whose
+ * leave is this' unanswerable"), and it would do so after the click rather
+ * than before it.
+ */
+function LinkLoginDialog({ open, onClose, onConfirm, users, isPending, error }) {
+  const [selected, setSelected] = useState("");
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl">
+        <h3 className="text-base font-semibold text-foreground">
+          Link an existing login
+        </h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          For somebody who already has an account. Once linked they can see
+          their own payslips, leave and attendance.
+        </p>
+
+        {error && (
+          <div className="mt-3 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            {error}
+          </div>
+        )}
+
+        <div className="mt-4 max-h-64 space-y-1 overflow-y-auto">
+          {users.map((u) => (
+            <label
+              key={u.id}
+              className={`flex cursor-pointer items-center gap-3 rounded-md border p-3 text-sm transition-colors ${
+                selected === u.id
+                  ? "border-primary bg-accent"
+                  : "border-border hover:bg-accent/50"
+              }`}
+            >
+              <input
+                type="radio"
+                name="linkUser"
+                value={u.id}
+                checked={selected === u.id}
+                onChange={() => setSelected(u.id)}
+                className="shrink-0"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-foreground">
+                  {u.name}
+                </span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {u.email} &middot; {u.role}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => onConfirm(selected)}
+            disabled={isPending || !selected}
+          >
+            {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+            Link login
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function EmployeeActions({
+  employeeId,
+  status,
+  hasLogin,
+  userRole,
+  email,
+  /** Active logins with no employment record — the only valid link targets. */
+  unlinkedUsers = [],
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [dialog, setDialog] = useState(null);
   const [dialogError, setDialogError] = useState(null);
 
-  const canConfirm = status === "probation" && roleAllowed(userRole, HR_WRITE_ROLES);
-  // HR_ADMIN_ROLES, not `userRole === "Admin"`. The action has always allowed
+  const canConfirm = status === "probation" && can(userRole, "hr.write");
+  // hr.admin, not `userRole === "Admin"`. The action has always allowed
   // SuperAdmin and HR Manager to terminate; the button did not offer it to
   // them, so the only way HR could end an employment was to ask an Admin.
-  const canTerminate = status !== "terminated" && roleAllowed(userRole, HR_ADMIN_ROLES);
-  const canInvite = !hasLogin && roleAllowed(userRole, HR_ADMIN_ROLES);
+  const canTerminate = status !== "terminated" && can(userRole, "hr.admin");
+  const canInvite = !hasLogin && can(userRole, "hr.admin");
+
+  /**
+   * LINKING AN ACCOUNT THAT ALREADY EXISTS.
+   *
+   * "Send Portal Invite" creates a NEW login and links it on acceptance. It is
+   * no use to somebody who already has one — invite acceptance refuses with
+   * "That email already has a login. Sign in instead." — and that is an
+   * ordinary situation: the person signed up before HR wrote their record, or
+   * the two sides came from different imports.
+   *
+   * Offered beside the invite, not instead of it, because they answer
+   * different questions: invite means "this person has no account", link means
+   * "this person's account is that one".
+   */
+  const canLink = !hasLogin && unlinkedUsers.length > 0 && can(userRole, "hr.admin");
+  const canUnlink = hasLogin && can(userRole, "hr.admin");
+
+  function handleLink(userId) {
+    setDialogError(null);
+    startTransition(async () => {
+      const result = await linkEmployeeLogin(employeeId, userId);
+      if (result?.success === false) {
+        setDialogError(result.error);
+      } else {
+        setDialog(null);
+        toast.success("Login linked — they can now see their own payslips and leave");
+        router.refresh();
+      }
+    });
+  }
+
+  function handleUnlink() {
+    setDialogError(null);
+    startTransition(async () => {
+      const result = await unlinkEmployeeLogin(employeeId);
+      if (result?.success === false) {
+        setDialogError(result.error);
+      } else {
+        setDialog(null);
+        toast.success("Login unlinked");
+        router.refresh();
+      }
+    });
+  }
 
   function handleConfirm() {
     setDialogError(null);
@@ -236,10 +368,33 @@ export function EmployeeActions({ employeeId, status, hasLogin, userRole, email 
             <span className="hidden sm:inline">Send Portal Invite</span>
           </Button>
         )}
+        {canLink && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { setDialogError(null); setDialog("link"); }}
+            disabled={isPending}
+          >
+            <Link2 className="h-4 w-4" />
+            <span className="hidden sm:inline">Link Existing Login</span>
+          </Button>
+        )}
         {hasLogin && (
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
             <CheckCircle2 className="h-3 w-3" /> Portal Access Active
           </span>
+        )}
+        {canUnlink && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { setDialogError(null); setDialog("unlink"); }}
+            disabled={isPending}
+            className="text-muted-foreground"
+          >
+            <Unlink className="h-4 w-4" />
+            <span className="hidden sm:inline">Unlink</span>
+          </Button>
         )}
         {canConfirm && (
           <Button
@@ -283,6 +438,26 @@ export function EmployeeActions({ employeeId, status, hasLogin, userRole, email 
         description="This will move the employee from probation to active status. A confirmation date will be recorded."
         confirmLabel="Confirm"
         onConfirm={handleConfirm}
+        isPending={isPending}
+        error={dialogError}
+      />
+
+      <LinkLoginDialog
+        open={dialog === "link"}
+        onClose={() => setDialog(null)}
+        onConfirm={handleLink}
+        users={unlinkedUsers}
+        isPending={isPending}
+        error={dialogError}
+      />
+
+      <ConfirmDialog
+        open={dialog === "unlink"}
+        onClose={() => setDialog(null)}
+        title="Unlink this login"
+        description="The account and the employment record both stay. They will stop seeing their own payslips, leave and attendance until a login is linked again."
+        confirmLabel="Unlink"
+        onConfirm={handleUnlink}
         isPending={isPending}
         error={dialogError}
       />

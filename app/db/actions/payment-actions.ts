@@ -316,7 +316,11 @@ export async function confirmPaymentPg(paymentId: string): Promise<ActionResult>
 }
 
 /**
- * The bill-payment approval threshold — this module's one reach into Mongo.
+ * The bill-payment approval threshold.
+ *
+ * This was this module's one reach into Mongo, and the reason a Postgres-only
+ * deployment could not release a supplier payment over the threshold at all.
+ * `approval_requests` is Postgres since 0101.
  *
  * PORTED FROM `payment-actions.js:606`, where it guarded `payment.confirm()`.
  * Without it, moving payments to Postgres would have quietly deleted a
@@ -369,9 +373,7 @@ async function requestApprovalIfOverThreshold(
   );
   if (user.role && PAYMENT_APPROVAL_BYPASS.has(user.role)) return null;
 
-  const { getCompanyThresholds } = await import(
-    "@/app/mongodb/queries/threshold-queries"
-  );
+  const { getCompanyThresholds } = await import("@/app/db/companyConfig");
   const thresholds = await getCompanyThresholds(companyId);
   const threshold = Number(thresholds?.billPaymentValue) || 0;
   if (!(threshold > 0) || meta.amount <= threshold) return null;
@@ -385,7 +387,7 @@ async function requestApprovalIfOverThreshold(
   }
 
   const { submitApproval } = await import(
-    "@/app/mongodb/actions/approval-actions"
+    "@/app/db/actions/approval-actions"
   );
   const result = await submitApproval({
     type: "bill_payment",

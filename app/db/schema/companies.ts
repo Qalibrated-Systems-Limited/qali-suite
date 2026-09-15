@@ -162,6 +162,8 @@ export const companySettings = pgTable(
     ncrPrefix: text("ncr_prefix").notNull().default("NCR"),
     claimPrefix: text("claim_prefix").notNull().default("CLAIM"),
     assetPrefix: text("asset_prefix").notNull().default("AST"),
+    /** 0098 — read by document_prefix(), unlike the three above it. */
+    salesOrderPrefix: text("sales_order_prefix").notNull().default("SO"),
 
     defaultCostingMethod: text("default_costing_method").notNull().default("average"),
     lowStockThreshold: numeric("low_stock_threshold", { precision: 18, scale: 4 })

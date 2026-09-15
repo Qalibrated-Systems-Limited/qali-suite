@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { createCompany, updateCompany } from "@/app/mongodb/actions/company-actions";
+import { createCompany, updateCompany } from "@/app/db/actions/company-actions";
 import { toast } from "sonner";
 import { useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { createKpi, updateKpi } from "@/app/mongodb/actions/kpi-actions";
+import { createKpi, updateKpi } from "@/app/db/actions/kpi-actions";
 import { KpiCombobox } from "./KpiCombobox";
 
 // ============================================
@@ -115,13 +115,18 @@ export default function KpiForm({ mode = "create", kpi = null, ownerCandidates =
   const action = mode === "create" ? createKpi : updateKpi.bind(null, kpi?._id);
   const [state, formAction, isPending] = useActionState(action, { success: false, error: null });
 
-  // Owner selection: track partyId + name together
+  // Owner selection: the picker's value is the EMPLOYEE ID, and the name and
+  // number ride along as hidden fields for the list view to render without a
+  // join. It used to be the name — the only thing Mongo could store once
+  // employees became uuids — which collapsed two people who share one.
   const [ownerMode, setOwnerMode] = useState(() => {
-    if (kpi?.owner?.partyId) return "employee";
+    if (kpi?.owner?.employeeId) return "employee";
     if (kpi?.owner?.name) return "freetext";
     return ownerCandidates.length > 0 ? "employee" : "freetext";
   });
-  const [selectedPartyId, setSelectedPartyId] = useState(kpi?.owner?.name || "");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState(
+    kpi?.owner?.employeeId || ""
+  );
   const [freetextName, setFreetextName] = useState(kpi?.owner?.name || "");
 
   // Controlled source so the combobox can drive form state cleanly.
@@ -146,14 +151,10 @@ export default function KpiForm({ mode = "create", kpi = null, ownerCandidates =
   // Shape employee candidates for the combobox. Department becomes the group
   // heading so the picker is naturally bucketed (Finance, Operations, …);
   // employee number folded into the description so search hits on it too.
-  // The owner is stored as a name and an employee number, which is all these
-  // screens display — so the picker's value IS the name. It used to be the
-  // employee's Party id, which no longer fits: employees moved to Postgres and
-  // their ids are uuids, not ObjectIds.
   const ownerComboItems = useMemo(
     () =>
       ownerCandidates.map((c) => ({
-        value: c.name,
+        value: c.employeeId,
         label: c.name,
         description:
           [c.employeeNumber, c.designation].filter(Boolean).join(" · ") || undefined,
@@ -162,7 +163,9 @@ export default function KpiForm({ mode = "create", kpi = null, ownerCandidates =
     [ownerCandidates],
   );
 
-  const selectedEmployee = ownerCandidates.find((c) => c.name === selectedPartyId);
+  const selectedEmployee = ownerCandidates.find(
+    (c) => c.employeeId === selectedEmployeeId
+  );
 
   // No useEffect / toast — createKpi and updateKpi server-actions call
   // `redirect()` on success, so a successful submit navigates away rather
@@ -307,13 +310,18 @@ export default function KpiForm({ mode = "create", kpi = null, ownerCandidates =
             {ownerMode === "employee" && ownerCandidates.length > 0 ? (
               <>
                 <KpiCombobox
-                  name="ownerName"
-                  value={selectedPartyId}
-                  onChange={setSelectedPartyId}
+                  name="ownerEmployeeId"
+                  value={selectedEmployeeId}
+                  onChange={setSelectedEmployeeId}
                   items={ownerComboItems}
                   placeholder="Select an employee…"
                   searchPlaceholder="Search by name, number, or department…"
                   emptyText="No employees match."
+                />
+                <input
+                  type="hidden"
+                  name="ownerName"
+                  value={selectedEmployee?.name || ""}
                 />
                 <input
                   type="hidden"

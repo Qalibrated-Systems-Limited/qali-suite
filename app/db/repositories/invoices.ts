@@ -73,6 +73,9 @@ export interface InvoiceLineInput {
 export interface CreateInvoiceInput {
   companyId: string;
   customerId: string;
+  /** Who sold it — 0095. Carried from the quote; null on a direct invoice. */
+  salespersonPartyId?: string | null;
+  salespersonName?: string | null;
   invoiceDate: string;
   dueDate?: string | null;
   title?: string | null;
@@ -278,6 +281,13 @@ export async function createInvoice(tx: Tx, input: CreateInvoiceInput) {
       invoiceDate: input.invoiceDate,
       dueDate: input.dueDate ?? null,
       customerId: input.customerId,
+      /**
+       * `invoices_salesperson_pair` refuses an id with no name — a row the
+       * report can group and cannot label — so they travel together or not
+       * at all.
+       */
+      salespersonPartyId: input.salespersonName ? (input.salespersonPartyId ?? null) : null,
+      salespersonName: input.salespersonPartyId ? (input.salespersonName ?? null) : null,
       title: input.title ?? null,
       notes: input.notes ?? null,
       projectId: input.projectId ?? null,
@@ -458,6 +468,41 @@ export async function completeInvoice(
      * Without them the stock leaves and its value never comes off the balance
      * sheet — see migration 0027.
      */
+    /**
+     * RETENTION HELD ON THIS INVOICE — the contract's, not the invoice's.
+     *
+     * The invoice is raised for the GROSS value certified, because VAT is due
+     * on the value of the supply and not on what is paid after deductions.
+     * What the employer holds back is then reclassified out of receivables:
+     *
+     *     DR Retention Receivable / CR Accounts Receivable
+     *
+     * Revenue stays at the gross, VAT stays on the gross, and the receivable
+     * splits into the part due now and the part held. Invoicing the NET
+     * instead would understate both revenue and output VAT for the life of
+     * every job that retains.
+     *
+     * Passed IN rather than looked up, so this file need not know that
+     * certificates exist. The caller knows.
+     */
+    retention?: { amount: string; accountId: string } | null;
+    /**
+     * The advance recovered by this certificate, if any — the mirror of the
+     * retention split, on the other side of the balance sheet:
+     *
+     *     DR Customer Advance / CR Accounts Receivable
+     *
+     * The employer paid this money before any work was done, and it sits as a
+     * liability until the works earn it. Recovering it is not revenue and not
+     * a discount: the certificate is still worth its gross, the client simply
+     * pays less cash because they have already paid this part. Without the
+     * entry the receivable is overstated by every shilling recovered and the
+     * advance sits on the balance sheet at its full value for ever.
+     *
+     * No VAT adjustment: output VAT was accounted on the gross valuation, and
+     * how the client settles it does not change the value of the supply.
+     */
+    advanceRecovery?: { amount: string; accountId: string } | null;
     cogsAccountId?: string | null;
     inventoryAccountId?: string | null;
     technicianStockAccountId?: string | null;
@@ -492,6 +537,9 @@ export async function completeInvoice(
     dueDate: invoice.dueDate,
     sourceType: "invoice",
     sourceId: invoice.id,
+    // The project dimension — 0084. Every line of a sale belongs to the job it
+    // was raised against, receivable and revenue alike.
+    projectId: invoice.projectId ?? null,
     createdById: opts.completedById,
     postImmediately: true,
     // Three lines, not two. Crediting revenue with the gross overstates income
@@ -527,6 +575,79 @@ export async function completeInvoice(
           ]),
     ],
   });
+
+  /**
+   * The retention split, as its own entry rather than a line on the sale.
+   *
+   * A separate document because it is a different event: the sale recognised
+   * the revenue, and this records that part of the resulting receivable will
+   * not be collected until the works are taken over. Keeping them apart means
+   * the sale entry still reads as a sale, and the retention can be released
+   * later by reversing this and nothing else.
+   */
+  if (opts.retention && Number(opts.retention.amount) > 0) {
+    await createJournalEntry(tx, {
+      companyId: invoice.companyId,
+      entryDate: invoice.invoiceDate,
+      entryType: "adjustment",
+      description: `Retention held — invoice ${invoice.invoiceNumber}`,
+      reference: invoice.invoiceNumber,
+      partyType: "customer",
+      partyId: invoice.customerId,
+      sourceType: "invoice",
+      sourceId: invoice.id,
+      projectId: invoice.projectId ?? null,
+      createdById: opts.completedById,
+      postImmediately: true,
+      lines: [
+        {
+          accountId: opts.retention.accountId,
+          debit: opts.retention.amount,
+          description: "Held by the employer until taking-over",
+        },
+        {
+          accountId: opts.arAccountId,
+          credit: opts.retention.amount,
+          description: "Not collectable this certificate",
+        },
+      ],
+    });
+  }
+
+  /**
+   * The advance recovery, likewise its own entry. Separate from the retention
+   * so that either can be reversed without disturbing the other, and so a
+   * reader of the ledger sees two distinct reasons the client pays less than
+   * the invoice says.
+   */
+  if (opts.advanceRecovery && Number(opts.advanceRecovery.amount) > 0) {
+    await createJournalEntry(tx, {
+      companyId: invoice.companyId,
+      entryDate: invoice.invoiceDate,
+      entryType: "adjustment",
+      description: `Advance recovered — invoice ${invoice.invoiceNumber}`,
+      reference: invoice.invoiceNumber,
+      partyType: "customer",
+      partyId: invoice.customerId,
+      sourceType: "invoice",
+      sourceId: invoice.id,
+      projectId: invoice.projectId ?? null,
+      createdById: opts.completedById,
+      postImmediately: true,
+      lines: [
+        {
+          accountId: opts.advanceRecovery.accountId,
+          debit: opts.advanceRecovery.amount,
+          description: "Advance earned by the work certified",
+        },
+        {
+          accountId: opts.arAccountId,
+          credit: opts.advanceRecovery.amount,
+          description: "Already paid by the employer in advance",
+        },
+      ],
+    });
+  }
 
   // ── Stock issue + COGS, per line ───────────────────────────────────────
   const cogsSkipped: string[] = [];
@@ -640,6 +761,7 @@ export async function completeInvoice(
         reference: invoice.invoiceNumber,
         sourceType: "invoice",
         sourceId: invoice.id,
+        projectId: invoice.projectId ?? null,
         createdById: opts.completedById,
         postImmediately: true,
         lines: [
@@ -1353,4 +1475,123 @@ export async function createOpeningBalanceInvoice(
   });
 
   return { invoice, entry };
+}
+
+// ── Sales by rep — 0095 ─────────────────────────────────────────────────────
+
+/** float8 comes back as a string on some drivers; this file had no helper. */
+const num = (v: unknown) => {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+};
+
+//
+// The last `reports` screen reading Mongo. It could not be transcribed: the
+// Mongo query groups by `salesPerson.employeeId` and the Postgres invoice had
+// no salesperson at all, so a faithful port would have returned one row —
+// "Unattributed" — for every invoice ever raised, and looked like it worked.
+
+export interface SalesByRepRow {
+  partyId: string | null;
+  name: string;
+  invoices: number;
+  revenue: number;
+  collected: number;
+  outstanding: number;
+}
+
+/**
+ * Billed revenue per salesperson, for a month or for all time.
+ *
+ * SENT AND COMPLETED, the Mongo query's own filter: a draft is not billed and
+ * a cancelled invoice is not revenue.
+ *
+ * UNATTRIBUTED IS AN EXPLICIT BUCKET, not a dropped row. Invoices raised
+ * directly carry no rep, and silently omitting them would make the report's
+ * total disagree with the sales figure on every other screen — which is worse
+ * than a bucket somebody has to explain.
+ *
+ * OUTSTANDING IS DERIVED. Mongo stored `amountDue` beside `amountPaid` and the
+ * two could drift; here it is `total - amount_paid`, never below zero, because
+ * an over-payment is a credit and not a negative debt.
+ */
+export async function getSalesByRep(
+  tx: Tx,
+  opts: { year?: number | null; month?: number | null } = {},
+): Promise<SalesByRepRow[]> {
+  const { year, month } = opts;
+  const period =
+    year && month
+      ? sql`AND i.invoice_date >= make_date(${year}, ${month}, 1)
+            AND i.invoice_date <  (make_date(${year}, ${month}, 1) + interval '1 month')`
+      : sql``;
+
+  const rows = (await tx.execute(sql`
+    SELECT i.salesperson_party_id::text                       AS party_id,
+           MAX(i.salesperson_name)                            AS name,
+           COUNT(*)::int                                      AS invoices,
+           COALESCE(SUM(i.total), 0)::float8                  AS revenue,
+           COALESCE(SUM(i.amount_paid), 0)::float8            AS collected,
+           COALESCE(SUM(GREATEST(i.total - i.amount_paid, 0)), 0)::float8
+                                                              AS outstanding
+      FROM invoices i
+     WHERE i.status IN ('sent', 'completed')
+       ${period}
+     GROUP BY i.salesperson_party_id
+     ORDER BY revenue DESC
+     LIMIT 100
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    partyId: r.party_id ? String(r.party_id) : null,
+    name: r.party_id ? (r.name ? String(r.name) : "Unknown rep") : "Unattributed",
+    invoices: Number(r.invoices ?? 0),
+    revenue: num(r.revenue),
+    collected: num(r.collected),
+    outstanding: num(r.outstanding),
+  }));
+}
+
+/** One rep's invoices — the drill-down, capped the way the Mongo one was. */
+export async function getRepInvoices(
+  tx: Tx,
+  partyId: string,
+  opts: { year?: number | null; month?: number | null } = {},
+) {
+  if (!isUuid(partyId)) return [];
+  const { year, month } = opts;
+  const period =
+    year && month
+      ? sql`AND i.invoice_date >= make_date(${year}, ${month}, 1)
+            AND i.invoice_date <  (make_date(${year}, ${month}, 1) + interval '1 month')`
+      : sql``;
+
+  const rows = (await tx.execute(sql`
+    SELECT i.id::text                                    AS id,
+           i.invoice_number                              AS invoice_number,
+           p.name                                        AS customer,
+           i.invoice_date                                AS invoice_date,
+           i.total::float8                               AS total,
+           i.amount_paid::float8                         AS amount_paid,
+           GREATEST(i.total - i.amount_paid, 0)::float8  AS amount_due,
+           i.payment_status                              AS payment_status
+      FROM invoices i
+      LEFT JOIN parties p ON p.id = i.customer_id
+     WHERE i.salesperson_party_id = ${partyId}::uuid
+       AND i.status IN ('sent', 'completed')
+       ${period}
+     ORDER BY i.invoice_date DESC
+     LIMIT 100
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    _id: String(r.id),
+    invoiceNumber: String(r.invoice_number),
+    customer: r.customer ? String(r.customer) : "",
+    invoiceDate: r.invoice_date ? String(r.invoice_date) : null,
+    total: num(r.total),
+    amountPaid: num(r.amount_paid),
+    amountDue: num(r.amount_due),
+    paymentStatus: r.payment_status ? String(r.payment_status) : null,
+  }));
 }

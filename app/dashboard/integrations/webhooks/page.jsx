@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft, Globe } from "lucide-react";
-import { getWebhookSubscriptions } from "@/app/mongodb/actions/integration-actions";
+import { getWebhookSubscriptions } from "@/app/db/actions/integration-actions";
 import CreateWebhookForm from "./components/CreateWebhookForm";
 import WebhookCard from "./components/WebhookCard";
 

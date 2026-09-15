@@ -623,3 +623,219 @@ export async function listAccountDebits(
     amount: String(r.debit ?? "0"),
   }));
 }
+
+// ── Keeping an existing chart up to date — the settings port ────────────────
+
+/**
+ * The two accounts the overpayment flows need, by their system handle.
+ *
+ * A READ. `AccountSetupCard` used to answer this by calling
+ * `ensureAdvanceAccountsExist()` from a `useEffect` on mount — an action that
+ * CREATES the accounts as a side effect. Opening the settings page therefore
+ * wrote to the chart of accounts, every time, and the card's "Checking account
+ * setup…" label described something that was not a check.
+ */
+export async function getAdvanceAccountStatus(tx: Tx) {
+  const rows = (await tx.execute(sql`
+    SELECT system_account, account_code, account_name
+      FROM accounts
+     WHERE system_account IN ('supplier_advance', 'customer_advance')
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  const byHandle = new Map(rows.map((r) => [String(r.system_account), r]));
+  const describe = (handle: string, label: string) => {
+    const row = byHandle.get(handle);
+    return {
+      handle,
+      label,
+      exists: Boolean(row),
+      accountCode: row ? String(row.account_code) : null,
+      accountName: row ? String(row.account_name) : null,
+    };
+  };
+
+  const accountsFound = [
+    describe("supplier_advance", "Supplier Advance"),
+    describe("customer_advance", "Customer Advance"),
+  ];
+
+  return {
+    complete: accountsFound.every((a) => a.exists),
+    accounts: accountsFound,
+  };
+}
+
+interface SyncActor {
+  id?: string | null;
+}
+
+/**
+ * Bring a company's chart up to the standard one, without touching what is
+ * already there.
+ *
+ * THE MONGO VERSION WROTE TO A STORE NOTHING READS. `syncChartOfAccounts` and
+ * `ensureAdvanceAccountsExist` created MONGO `Account` documents, while every
+ * account screen has read Postgres since §9C. Both buttons reported success
+ * and changed nothing anybody could see — the §9E defect, in Settings.
+ *
+ * Three passes, and each is idempotent on its own so a partial previous run
+ * cannot confuse the next one:
+ *
+ *   1. INSERT the codes this company does not have. `ON CONFLICT DO NOTHING`
+ *      against `accounts_company_code_uq` rather than a read-then-diff, so two
+ *      people pressing Sync together cannot both insert the same code.
+ *   2. Wire the parent of what pass 1 CREATED, and demote that parent to
+ *      `can_post = false`. An account that was already there keeps the parent
+ *      it has — a sync fills gaps, it does not restructure a chart somebody
+ *      arranged deliberately. Then repair `path` and `level` across the chart
+ *      from the parent links that actually exist, which changes no structure
+ *      and writes down the one that is there.
+ *   3. Backfill `system_account` where the seed defines a handle and the
+ *      existing row has none. NEVER clobber a handle somebody set, and never
+ *      when another account already claims it — `accounts_company_system_uq`
+ *      is a partial UNIQUE, so a blind backfill aborts the whole sync on the
+ *      first company that had tagged its own account.
+ */
+export async function syncStandardChart(
+  tx: Tx,
+  companyId: string,
+  definitions: Array<{
+    accountCode: string;
+    accountName: string;
+    accountType: string;
+    subType?: string | null;
+    parentCode?: string | null;
+    canPost?: boolean;
+    systemAccount?: string | null;
+    description?: string | null;
+  }>,
+  actor: SyncActor = {},
+) {
+  // ── Pass 1: the codes that are missing ───────────────────────────────────
+  const created: Array<{ accountCode: string; accountName: string }> = [];
+
+  for (const a of definitions) {
+    const [row] = (await tx.execute(sql`
+      INSERT INTO accounts (
+        company_id, account_code, account_name, account_type, sub_type,
+        can_post, system_account, description, is_active, level, created_by_id
+      ) VALUES (
+        ${companyId}::uuid, ${a.accountCode}, ${a.accountName},
+        ${a.accountType}::account_type, ${a.subType ?? null},
+        ${a.canPost !== false}, ${a.systemAccount ?? null},
+        ${a.description ?? null}, true, 0, ${actor.id ?? null}
+      )
+      ON CONFLICT (company_id, account_code) DO NOTHING
+      RETURNING account_code, account_name
+    `)) as unknown as Array<Record<string, unknown>>;
+
+    if (row) {
+      created.push({
+        accountCode: String(row.account_code),
+        accountName: String(row.account_name),
+      });
+    }
+  }
+
+  // ── Pass 2: the hierarchy ────────────────────────────────────────────────
+  //
+  // ONLY FOR WHAT THIS RUN CREATED. An account that was already there keeps
+  // the parent it has, and this was NOT the first version of this function:
+  // wiring every seed code to the seed's parent looks tidier and would force
+  // a company that deliberately restructured its chart back to the standard
+  // shape, demoting accounts they post to into headers on the way. A sync
+  // fills gaps; it does not have opinions about what is already there.
+  const createdCodes = new Set(created.map((c) => c.accountCode));
+
+  const idByCode = new Map<string, string>();
+  const existing = (await tx.execute(sql`
+    SELECT id, account_code FROM accounts WHERE company_id = ${companyId}::uuid
+  `)) as unknown as Array<Record<string, unknown>>;
+  for (const r of existing) idByCode.set(String(r.account_code), String(r.id));
+
+  let demoted = 0;
+  for (const a of definitions) {
+    if (!a.parentCode || !createdCodes.has(a.accountCode)) continue;
+    const childId = idByCode.get(a.accountCode);
+    const parentId = idByCode.get(a.parentCode);
+    if (!childId || !parentId) continue;
+
+    await tx.execute(sql`
+      UPDATE accounts SET parent_id = ${parentId}::uuid, updated_at = now()
+       WHERE id = ${childId}::uuid
+    `);
+
+    // A parent with a child is structural. Posting to "Current Assets"
+    // rather than to an account under it is how a chart stops meaning
+    // anything, and it is the rule the provisioning seeder applies too.
+    const [row] = (await tx.execute(sql`
+      UPDATE accounts SET can_post = false, updated_at = now()
+       WHERE id = ${parentId}::uuid AND can_post = true
+      RETURNING id
+    `)) as unknown as Array<Record<string, unknown>>;
+    if (row) demoted++;
+  }
+
+  /*
+   * The ltree path and the level, derived from the parent links the company
+   * ACTUALLY has — not from the seed's. Pure repair: it changes no structure,
+   * it writes down the structure that is there.
+   *
+   * It has to run over the whole chart rather than the new rows alone, because
+   * `seedChartOfAccounts` in provisioning.ts set `parent_id` and `level` and
+   * never set `path` — so every company provisioned to date has a chart of
+   * NULL ltree paths, and `getDescendants()` walks `path <@ path`, which
+   * matches nothing against a NULL. (provisioning.ts is fixed in the same
+   * change, so new companies do not arrive needing this.)
+   *
+   * The depth cap is a cycle guard. `accounts.parent_id` is a self-referencing
+   * foreign key with nothing preventing A → B → A, and a recursive CTE meeting
+   * one does not return.
+   */
+  const repaired = (await tx.execute(sql`
+    WITH RECURSIVE tree AS (
+      SELECT id, account_code, account_code::ltree AS new_path, 0 AS new_level
+        FROM accounts
+       WHERE company_id = ${companyId}::uuid AND parent_id IS NULL
+
+      UNION ALL
+
+      SELECT c.id, c.account_code,
+             t.new_path || c.account_code::ltree, t.new_level + 1
+        FROM accounts c
+        JOIN tree t ON c.parent_id = t.id
+       WHERE c.company_id = ${companyId}::uuid
+         AND t.new_level < 20
+    )
+    UPDATE accounts a
+       SET path = t.new_path, level = t.new_level, updated_at = now()
+      FROM tree t
+     WHERE a.id = t.id
+       AND (a.path IS DISTINCT FROM t.new_path
+            OR a.level IS DISTINCT FROM t.new_level)
+    RETURNING a.id
+  `)) as unknown as Array<Record<string, unknown>>;
+  const rewired = repaired.length;
+
+  // ── Pass 3: the missing system handles ───────────────────────────────────
+  let tagged = 0;
+  for (const a of definitions) {
+    if (!a.systemAccount) continue;
+    const [row] = (await tx.execute(sql`
+      UPDATE accounts
+         SET system_account = ${a.systemAccount}, updated_at = now()
+       WHERE company_id = ${companyId}::uuid
+         AND account_code = ${a.accountCode}
+         AND COALESCE(system_account, '') = ''
+         AND NOT EXISTS (
+           SELECT 1 FROM accounts other
+            WHERE other.company_id = ${companyId}::uuid
+              AND other.system_account = ${a.systemAccount}
+         )
+      RETURNING account_code
+    `)) as unknown as Array<Record<string, unknown>>;
+    if (row) tagged++;
+  }
+
+  return { created, tagged, rewired, demoted };
+}

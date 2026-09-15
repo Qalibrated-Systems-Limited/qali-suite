@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { createIntegrationKey } from "@/app/mongodb/actions/integration-actions";
+import { createIntegrationKey } from "@/app/db/actions/integration-actions";
 import { Copy, Check, Eye, EyeOff, Plus, ChevronDown } from "lucide-react";
 
 const CONNECTOR_OPTIONS = [

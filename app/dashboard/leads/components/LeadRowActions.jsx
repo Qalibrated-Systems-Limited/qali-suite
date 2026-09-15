@@ -6,9 +6,9 @@ import { toast } from "sonner";
 import { Loader2, ArrowRightCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  convertLead,
-  setLeadStatus,
-} from "@/app/mongodb/actions/lead-actions";
+  convertLeadPg as convertLead,
+  setLeadStatusPg as setLeadStatus,
+} from "@/app/db/actions/crm-actions";
 
 // Inline per-row controls: advance the lead's status, or convert it into a
 // customer + opportunity. Converted/unqualified leads are terminal — no

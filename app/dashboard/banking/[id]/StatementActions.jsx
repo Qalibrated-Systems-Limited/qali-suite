@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import {
   rerunAutoMatch,
   deleteBankStatement,
-} from "@/app/mongodb/actions/bank-feed-actions";
+} from "@/app/db/actions/bank-feed-actions";
 
 // ============================================
 // DELETE CONFIRMATION DIALOG

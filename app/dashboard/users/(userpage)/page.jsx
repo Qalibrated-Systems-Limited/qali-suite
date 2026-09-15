@@ -118,7 +118,7 @@ async function UsersPage(props) {
             Manage user accounts and permissions
           </p>
         </div>
-        <InviteUserDialog isSuperAdmin={isSuperAdmin} companies={companies} />
+        <InviteUserDialog isSuperAdmin={isSuperAdmin} />
       </div>
 
       {/* Four figures the page never showed: `getUserStats` returns

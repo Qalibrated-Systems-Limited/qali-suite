@@ -87,6 +87,79 @@ suite("payroll configuration", () => {
     });
   });
 
+  /**
+   * THE PAGE AND THE ACTIONS HAVE TO AGREE ABOUT WHO MAY DO WHAT.
+   *
+   * app/dashboard/settings/payroll-config/page.jsx admits HR Manager and sets
+   * `canEdit = true`, over a comment saying the previous version "showed the
+   * page to HR and then disabled every control, while the actions accepted
+   * them". It had drifted into the mirror image: the action list never gained
+   * HR Manager, and it guarded the page's only LOADER too — so an HR Manager
+   * opening the page threw inside a server component and got the error
+   * boundary before a control rendered.
+   *
+   * The roles are the variable here, not the payload. Each list below is a
+   * gate the page depends on, asserted from the outside.
+   */
+  describe("who may configure payroll", () => {
+    const asRole = (role) =>
+      getTenantContext.mockResolvedValue({
+        user: { id: randomUUID(), name: `${role} User`, role },
+        companyId: mongoCompanyId,
+      });
+
+    // Exactly the list in the page's ALLOWED.
+    const MAY_OPEN = ["SuperAdmin", "Admin", "CFO", "Finance Manager", "HR Manager"];
+
+    for (const role of MAY_OPEN) {
+      it(`lets ${role} read the settings the page loads`, async () => {
+        asRole(role);
+        const settings = await payrollActions.getPayrollSettings();
+        expect(settings).toBeTruthy();
+        expect(Array.isArray(settings.configs)).toBe(true);
+      });
+
+      it(`lets ${role} save the rates`, async () => {
+        asRole(role);
+        const result = await payrollActions.savePayrollRates(
+          null,
+          ratesForm(KRA_BANDS, { name: `Rates by ${role}` }),
+        );
+        expect(result.error).toBeUndefined();
+        expect(result.success).toBe(true);
+      });
+    }
+
+    it("does not let a Storekeeper anywhere near it", async () => {
+      asRole("Storekeeper");
+      const result = await payrollActions.savePayrollRates(null, ratesForm());
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/permission/i);
+    });
+
+    /**
+     * The GL mapping is the half HR does NOT get: which accounts the payroll
+     * journal debits and credits is an accounting decision. The page hides
+     * that form from HR rather than letting them fill it in and be refused —
+     * this asserts the gate the hiding is based on.
+     */
+    it("keeps the GL mapping with finance, HR Manager included in the refusal", async () => {
+      asRole("Admin");
+      await payrollActions.savePayrollRates(null, ratesForm());
+      const [config] = await admin`
+        SELECT id FROM payroll_configs WHERE company_id = ${companyUuid} LIMIT 1`;
+
+      asRole("HR Manager");
+      const mapping = new FormData();
+      mapping.set("configId", config.id);
+      mapping.set("salaryExpense", "");
+      const result = await payrollActions.savePayrollGlMapping(null, mapping);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/permission/i);
+    });
+  });
+
   it("saves the KRA bands as printed, which previously failed outright", async () => {
     const result = await payrollActions.savePayrollRates(null, ratesForm());
     // The whole bug: this returned "PAYE bands leave a gap".

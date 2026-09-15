@@ -19,7 +19,7 @@ import {
   getBankStatementById,
   getBankFeedLines,
   getStatementSummary,
-} from "@/app/mongodb/queries/bank-feed-queries";
+} from "@/app/db/actions/bank-feed-actions";
 import { format } from "date-fns";
 import BankFeedLinesTable from "./BankFeedLinesTable";
 import StatementActions from "./StatementActions";

@@ -1315,6 +1315,13 @@ export async function fulfilStockRequest(
     fulfilledByName: string;
     expectedReturnDate?: string | null;
     notes?: string | null;
+    /**
+     * The two accounts a project's consumed stock moves between — 0085.
+     * Required only when the request names a project AND the stock is
+     * consumed; the action resolves them and throws if the chart lacks them.
+     */
+    projectMaterialsAccountId?: string | null;
+    inventoryAccountId?: string | null;
   },
 ) {
   const [request] = await tx
@@ -1335,6 +1342,7 @@ export async function fulfilStockRequest(
   const byId = new Map(items.map((i) => [i.id, i]));
 
   const results = [];
+  let consumedCost = 0;
 
   for (const issue of issues) {
     if (/^-?0(\.0*)?$/.test(issue.quantity)) continue;
@@ -1396,10 +1404,75 @@ export async function fulfilStockRequest(
     });
 
     results.push({ item, movement, checkout, fulfilment });
+
+    /**
+     * Only CONSUMED stock is a cost. A returnable issue — demo, repair,
+     * installation, employee_borrow — is still the company's asset sitting
+     * somewhere else, and `createCheckout` above is what tracks it; expensing
+     * it here would write off inventory that is coming back.
+     */
+    if (!RETURNABLE_TYPES.has(request.requestType)) {
+      consumedCost += Number(movement.totalCost ?? 0);
+    }
   }
 
   if (!results.length) {
     throw new Error("Nothing to issue — every quantity was zero");
+  }
+
+  /**
+   * MATERIAL ISSUED TO A JOB REACHES THE LEDGER — 0085.
+   *
+   * This posted nothing at all before: `recordMovement` and `issueStock` insert
+   * rows and neither creates a journal entry, while a bill for an inventory
+   * purchase DEBITS Inventory. So material bought for a job and issued to it was
+   * relieved from stock in QUANTITY and never in the LEDGER — Inventory
+   * overstated by every item ever issued to a project, and a construction job's
+   * largest cost line invisible to the accounts.
+   *
+   * SAP issues goods to a WBS element against a consumption account and Odoo's
+   * stock moves hit the valuation accounts in real time. There is no reading of
+   * standard practice where this stays unposted.
+   *
+   * ONE ENTRY PER FULFILMENT, not per line — a goods issue is one document, and
+   * a line-by-line posting is how a ledger acquires thousands of rows a month
+   * with no clean way to reverse a correction.
+   *
+   * At the movement's own cost, which is the cost the stock actually left at.
+   */
+  let entry = null;
+  if (request.projectId && consumedCost > 0) {
+    if (!opts.projectMaterialsAccountId || !opts.inventoryAccountId) {
+      throw new Error(
+        "Project Materials (5410) or Inventory is not configured in the chart of accounts, so stock issued to a project cannot be costed.",
+      );
+    }
+    const amount = consumedCost.toFixed(4);
+    entry = await createJournalEntry(tx, {
+      companyId: request.companyId,
+      entryDate: new Date().toISOString().slice(0, 10),
+      entryType: "inventory_adjustment",
+      description: `Materials issued to project — ${request.requestNumber}`,
+      reference: request.requestNumber,
+      sourceType: "stock_request",
+      sourceId: request.id,
+      projectId: request.projectId,
+      costCodeId: request.costCodeId ?? null,
+      createdById: opts.fulfilledById ?? null,
+      postImmediately: true,
+      lines: [
+        {
+          accountId: opts.projectMaterialsAccountId,
+          debit: amount,
+          description: `Issued against ${request.requestNumber}`,
+        },
+        {
+          accountId: opts.inventoryAccountId,
+          credit: amount,
+          description: "Out of stock",
+        },
+      ],
+    });
   }
 
   // Re-read: status and the item totals are the triggers' output, not this
@@ -1410,7 +1483,7 @@ export async function fulfilStockRequest(
     .from(stockRequests)
     .where(eq(stockRequests.id, requestId));
 
-  return { request: updated, issued: results.length };
+  return { request: updated, issued: results.length, journalEntryId: entry?.id ?? null };
 }
 
 /**
@@ -1835,4 +1908,113 @@ export async function getCheckoutStats(tx: Tx) {
   `)) as unknown as Array<Record<string, number>>;
   // `due_soon` → `dueSoon`: the stat tiles read camelCase.
   return { ...row, dueSoon: row.due_soon };
+}
+
+/**
+ * One ticket by id, for the void path.
+ *
+ * `listWeighbridgeTickets` cannot serve this: it caps at 200 and orders by
+ * date, so a ticket older than the cap is invisible to it — and "the ticket
+ * you asked to void does not exist" is the wrong answer to give about a ticket
+ * that does. RLS is what confines it to the tenant; there is no company
+ * predicate here for the same reason there is none in the rest of this file.
+ */
+export async function getWeighbridgeTicketById(tx: Tx, ticketId: string) {
+  if (!isUuid(ticketId)) return null;
+  const [ticket] = await tx
+    .select()
+    .from(weighbridgeTickets)
+    .where(eq(weighbridgeTickets.id, ticketId));
+  return ticket ?? null;
+}
+
+/**
+ * The integrations dashboard's weighbridge tiles.
+ *
+ * Counted in SQL rather than by grouping and reducing in JavaScript, which is
+ * what the Mongo aggregation did. `net_weight` is numeric(19,4) and crosses
+ * this boundary as a STRING, so `stats.reduce((a, s) => a + s.totalNet, 0)`
+ * concatenates — the same failure documented at REQUEST_TOTALS above, and the
+ * reason `total_net_kg` is summed and cast here.
+ *
+ * `pending` folds `first_recorded` in with `pending`: both mean a truck that
+ * has been weighed once and is still on site, which is the thing the tile is
+ * telling someone about.
+ */
+export async function getWeighbridgeStats(tx: Tx) {
+  const rows = (await tx.execute(sql`
+    SELECT
+      count(*)::int                                                  AS total,
+      count(*) FILTER (WHERE status = 'completed')::int              AS completed,
+      count(*) FILTER (WHERE status IN ('pending', 'first_recorded'))::int
+                                                                     AS pending,
+      count(*) FILTER (WHERE status = 'voided')::int                 AS voided,
+      COALESCE(SUM(net_weight) FILTER (WHERE status = 'completed'), 0)::float8
+                                                                     AS total_net_kg
+    FROM weighbridge_tickets
+  `)) as unknown as Array<Record<string, number>>;
+  const r = rows[0] ?? {};
+  return {
+    total: Number(r.total ?? 0),
+    completed: Number(r.completed ?? 0),
+    pending: Number(r.pending ?? 0),
+    voided: Number(r.voided ?? 0),
+    totalNetKg: Number(r.total_net_kg ?? 0),
+  };
+}
+
+/**
+ * The API's ticket list: filtered, paged, and counted in one pass.
+ *
+ * `COUNT(*) OVER ()` rather than a second `countDocuments` query, which is
+ * what the Mongo route ran alongside the find. Two queries against a moving
+ * table can disagree — a ticket created between them makes `total` inconsistent
+ * with the page — and it doubles the work for a number that is a by-product of
+ * the scan the first query already did.
+ *
+ * `vehicle_reg` matches case-insensitively on a substring, as the Mongo route's
+ * `new RegExp(vehicleReg, "i")` did. Note what that means and did not say: an
+ * operator searching "KBZ 123A" gets it, but so does a caller passing `.*`,
+ * because Mongo compiled the parameter AS A REGULAR EXPRESSION. Here it is a
+ * bound parameter to ILIKE with its wildcards escaped, so it is a search
+ * string and nothing else.
+ */
+export async function searchWeighbridgeTicketsForApi(
+  tx: Tx,
+  opts: {
+    status?: string;
+    transactionType?: string;
+    vehicleReg?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+) {
+  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
+  const offset = Math.max(Number(opts.offset) || 0, 0);
+
+  const rows = (await tx.execute(sql`
+    SELECT *, COUNT(*) OVER ()::int AS full_count
+      FROM weighbridge_tickets
+     WHERE TRUE
+       ${opts.status ? sql`AND status = ${opts.status}::wb_status` : sql``}
+       ${
+         opts.transactionType
+           ? sql`AND transaction_type = ${opts.transactionType}::wb_transaction_type`
+           : sql``
+       }
+       ${
+         opts.vehicleReg
+           ? sql`AND vehicle_reg ILIKE ${likeContains(opts.vehicleReg)}`
+           : sql``
+       }
+     ORDER BY created_at DESC
+     LIMIT ${limit} OFFSET ${offset}
+  `)) as unknown as Record<string, unknown>[];
+
+  return {
+    rows,
+    total: rows.length ? Number(rows[0].full_count) : 0,
+    limit,
+    offset,
+  };
 }

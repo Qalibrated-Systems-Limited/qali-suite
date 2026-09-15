@@ -24,6 +24,7 @@ vi.mock("@/lib/utils/tenant-utils", () => ({ getTenantContext: vi.fn() }));
 const { getTenantContext } = await import("@/lib/utils/tenant-utils");
 const dash = await import("@/app/db/actions/dashboard-actions");
 const inv = await import("@/app/db/actions/inventory-dashboard-actions");
+const invoiceActions = await import("@/app/db/actions/invoice-actions");
 
 suite("dashboard actions", () => {
   let admin;
@@ -79,6 +80,54 @@ suite("dashboard actions", () => {
       VALUES (${id}, ${companyUuid}, ${sku}, ${name}, ${onHand}, ${reorder}, ${cost}, ${category})
     `.then(() => id);
   };
+
+  /**
+   * EVERY TILE ON A DASHBOARD MUST OPEN FOR EVERY ROLE THAT LANDS ON IT.
+   *
+   * `DASHBOARD_FOR_ROLE` sends a Manager to `AdminDashboard`, whose finance
+   * tab calls `getOverdueInvoicesPg`. That action was gated on
+   * `INVOICE_WRITE_ROLES`, which has no "Manager" in it, so
+   * `withAuthorizedTenant` threw inside a server component and every Manager
+   * got the error page the instant they signed in.
+   *
+   * The role is the variable here, not the data: each of these is a role the
+   * router can put in front of that tab.
+   */
+  describe("the finance tab's overdue list, for the roles routed to it", () => {
+    const asRole = (role) =>
+      getTenantContext.mockResolvedValue({
+        user: { id: randomUUID(), name: `${role} User`, role },
+        companyId: mongoCompanyId,
+      });
+
+    const anOverdueInvoice = (number) => admin`
+      INSERT INTO invoices (company_id, invoice_number, invoice_date, due_date,
+                            customer_id, subtotal, total, amount_paid, status, payment_status)
+      VALUES (${companyUuid}, ${number}, CURRENT_DATE - 60, CURRENT_DATE - 30,
+              ${customerId}, 1000, 1000, 0, 'completed', 'unpaid')`;
+
+    // The AdminDashboard's own guard admits these five; the tab must too.
+    for (const role of ["Admin", "Manager", "Store Manager", "Accountant", "SuperAdmin"]) {
+      it(`opens for ${role}`, async () => {
+        await anOverdueInvoice(`INV-${role.replace(/\s/g, "")}`);
+        asRole(role);
+
+        const rows = await invoiceActions.getOverdueInvoicesPg(4);
+        expect(Array.isArray(rows)).toBe(true);
+        expect(rows).toHaveLength(1);
+      });
+    }
+
+    it("still shows only this company's invoices", async () => {
+      await anOverdueInvoice("INV-SCOPE");
+      asRole("Manager");
+
+      const rows = await invoiceActions.getOverdueInvoicesPg(4);
+      // Row-level security is the scope, which is the whole reason the role
+      // list was not doing that job.
+      expect(rows.every((r) => r.invoiceNumber === "INV-SCOPE")).toBe(true);
+    });
+  });
 
   describe("the alert counts", () => {
     it("counts an overdue invoice from its due date, not a stored status", async () => {

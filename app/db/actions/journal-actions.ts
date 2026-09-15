@@ -51,6 +51,20 @@ const createSchema = z.object({
   reference: z.string().optional(),
   notes: z.string().optional(),
   lines: z.array(lineSchema).min(2, "At least 2 lines required"),
+  /**
+   * THE PROJECT THIS ENTRY IS FOR — 0084, and the thing that could not be done
+   * at all before it.
+   *
+   * A manual journal has no source document, so nothing could infer its
+   * project from anywhere: `computeProjectActuals` scans invoices, bills,
+   * claims, expenses and stock requests, and a journal is none of those. An
+   * accrual, a reallocation or a correction against a job was invisible to the
+   * project however carefully it was written.
+   *
+   * Optional, and empty means what it says — a general entry belonging to no
+   * job, which is most of them.
+   */
+  projectId: z.string().uuid("Invalid project").optional(),
   postImmediately: z.boolean().default(false),
 });
 
@@ -122,6 +136,7 @@ export async function createManualJournalEntry(
     reference: formData.get("reference") || undefined,
     notes: formData.get("notes") || undefined,
     lines: parseLines(formData),
+    projectId: formData.get("projectId") || undefined,
     postImmediately: formData.get("postImmediately") === "true",
   });
 

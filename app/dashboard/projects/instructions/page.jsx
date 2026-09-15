@@ -2,7 +2,9 @@ import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
 import AccessDenied from "../components/AccessDenied";
+import SectionNotForType from "../components/SectionNotForType";
 import InstructionsLog from "../components/InstructionsLog";
+import FormsReference from "../components/FormsReference";
 import {
   getProjectInstructions,
   getInstructionsSummary,
@@ -16,8 +18,19 @@ export const metadata = {
 
 export default async function InstructionsPage({ searchParams }) {
   const sp = await searchParams;
-  const ctx = await getWorkspaceContext(sp);
+  const ctx = await getWorkspaceContext(sp, { section: "instructions" });
   if (ctx.denied) return <AccessDenied />;
+  if (ctx.hidden) {
+    return (
+      <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
+        <SectionNotForType
+          section="Engineer's Instructions"
+          project={ctx.project}
+          typeName={ctx.typeName}
+        />
+      </div>
+    );
+  }
 
   const { projects, project, user } = ctx;
 
@@ -29,7 +42,7 @@ export default async function InstructionsPage({ searchParams }) {
     : [[], null];
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       <WorkspaceHeader
         title="Engineer's Instructions"
         description="Instructions and non-conformances issued by the supervising engineer or client representative, and the contractor's compliance status."
@@ -37,7 +50,11 @@ export default async function InstructionsPage({ searchParams }) {
         projects={projects}
       />
 
-      {!project && <NoProjectsCard />}
+      {!project && <NoProjectsCard
+          notFound={ctx.notFound}
+          unselected={ctx.unselected}
+          requestedId={sp?.project}
+        />}
 
       {project && (
         <InstructionsLog
@@ -48,6 +65,11 @@ export default async function InstructionsPage({ searchParams }) {
           canSignOff={hasRole(user, PROJECT_LOG_SIGNOFF_ROLES)}
         />
       )}
+
+      {/* The Forms Register, which used to be its own nav entry. It reads
+          beside the register rather than instead of it — four of the sixteen
+          forms below are what `project_instructions` holds. §10.3. */}
+      <FormsReference />
     </div>
   );
 }

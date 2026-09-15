@@ -8,6 +8,7 @@ import { userMessage } from "../errors";
 import * as loans from "../repositories/loans";
 import * as employees from "../repositories/employees";
 import * as accounts from "../repositories/accounts";
+import { rolesFor } from "@/lib/capabilities";
 
 /**
  * Postgres-backed staff loan actions.
@@ -17,9 +18,9 @@ import * as accounts from "../repositories/accounts";
  * person who approves it, and neither is the person who releases the money.
  */
 
-const REQUEST_ROLES = ["SuperAdmin", "Admin", "HR Manager", "Manager"];
-const APPROVE_ROLES = ["SuperAdmin", "Admin", "CFO", "Finance Manager"];
-const DISBURSE_ROLES = ["SuperAdmin", "Admin", "CFO", "Finance Manager", "Accountant"];
+const REQUEST_ROLES = rolesFor("loan.request");
+const APPROVE_ROLES = rolesFor("loan.approve");
+const DISBURSE_ROLES = rolesFor("loan.disburse");
 
 export type ActionResult =
   | { success: true; id?: string; message?: string }

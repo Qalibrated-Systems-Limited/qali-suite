@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { canSeeProjectsNav } from "@/lib/permissions";
 import { fetchProjectPages } from "@/app/db/actions/project-actions";
 import Pagination from "@/components/pagination";
+import Search from "@/components/search";
 import { Suspense } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -69,7 +70,7 @@ export default async function ProjectsPage({ searchParams }) {
   const filters = { status };
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="space-y-1 sm:space-y-2 min-w-0">
@@ -102,6 +103,24 @@ export default async function ProjectsPage({ searchParams }) {
       <Suspense fallback={<ProjectStatsSkeleton />}>
         <ProjectStats />
       </Suspense>
+
+      {/*
+        SEARCH — the box that was never rendered.
+
+        `searchProjects` has matched project number, name, client and manager
+        since the port (app/db/repositories/projects.ts `filterConditions`), and
+        this page has read `?query=` and passed it down the whole time. There
+        was simply nothing on screen to type into, so on a tenant with more
+        projects than one page the only way to reach the twenty-first was the
+        pager.
+
+        Full width and first in the reading order on a phone, where it is the
+        primary way through a list: no `md:min-w-[500px]` fighting the column.
+      */}
+      <Search
+        placeholder="Search by number, name, client or manager..."
+        className="w-full min-w-0 md:min-w-0 md:max-w-xl"
+      />
 
       {/* Project List */}
       <Suspense fallback={<ProjectListSkeleton />}>

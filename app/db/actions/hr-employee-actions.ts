@@ -792,6 +792,99 @@ export async function searchEmployees(search: string, excludeId?: string) {
   );
 }
 
+/**
+ * Attaches a login that ALREADY EXISTS to an employment record.
+ *
+ * ── THE HOLE THIS FILLS ────────────────────────────────────────────────────
+ *
+ * Two flows joined a person to their login, and between them they left a gap
+ * that nothing could close.
+ *
+ *   * Employee first, no login: "Send Portal Invite" carries the employee's
+ *     party id, and `linkUserToPartyDirect` sets `employees.user_id` when the
+ *     invite is accepted (userAdmin.ts). Works.
+ *
+ *   * Login first, no employee: the amber strip on the employees page offers
+ *     "create an employee profile", which carries ?userId= and sets the link
+ *     at creation. Works.
+ *
+ *   * BOTH ALREADY EXIST, SEPARATELY: nothing. Invite acceptance refuses with
+ *     "That email already has a login. Sign in instead.", and the amber strip's
+ *     only remedy is to CREATE an employee — which for somebody who already
+ *     has one either trips employees_company_number_uq or quietly produces a
+ *     second employment record for one person.
+ *
+ * That third case is ordinary: a person signed up or was invited as a plain
+ * user before HR wrote their record, or the two sides came from different
+ * imports. Until this existed they could log in and never see their own
+ * payslip, leave balance or attendance, and the two buttons on offer both
+ * made it worse.
+ *
+ * `linkEmployeeUser` has been sitting in the repository with NO CALLERS since
+ * it was written. This is its caller.
+ *
+ * HR_ADMIN_ROLES, matching invite and terminate: deciding which login is which
+ * person is an identity decision, not an edit to their details.
+ */
+export async function linkEmployeeLogin(
+  employeeId: string,
+  userId: string,
+): Promise<ActionResult> {
+  if (!employeeId) return { success: false, error: "Employee ID is required" };
+  if (!userId) return { success: false, error: "Choose a login to link." };
+
+  try {
+    await withAuthorizedTenant([...HR_ADMIN_ROLES], async (tx) => {
+      const employee = await employees.getEmployee(tx, employeeId);
+      if (!employee) throw new Error("Employee not found");
+      if (employee.userId) {
+        throw new Error("This employee already has a portal login.");
+      }
+      return employees.linkEmployeeUser(tx, { id: employeeId, userId });
+    });
+  } catch (err) {
+    /*
+     * employees_company_user_uq is what refuses a login already attached to
+     * somebody else — "two employment records sharing a login would make
+     * 'whose leave is this' unanswerable" (0045). `userMessage` turns that
+     * constraint into the sentence written for it rather than a page of SQL.
+     */
+    return { success: false, error: userMessage(err, "Could not link that login.") };
+  }
+
+  revalidatePath(`/dashboard/hr/employees/${employeeId}`);
+  revalidatePath("/dashboard/hr/employees");
+  return { success: true, id: employeeId, message: "Login linked." };
+}
+
+/**
+ * Detaches the login, leaving both records in place.
+ *
+ * NOT a deactivation and not a termination — the person keeps their account
+ * and the employment record keeps its history. It is the undo for a link made
+ * to the wrong person, which is the only way a wrong link can be fixed:
+ * `linkEmployeeLogin` refuses an employee who already has one, deliberately,
+ * so that correcting a mistake is two explicit steps rather than a silent
+ * overwrite of who somebody is.
+ */
+export async function unlinkEmployeeLogin(
+  employeeId: string,
+): Promise<ActionResult> {
+  if (!employeeId) return { success: false, error: "Employee ID is required" };
+
+  try {
+    await withAuthorizedTenant([...HR_ADMIN_ROLES], (tx) =>
+      employees.linkEmployeeUser(tx, { id: employeeId, userId: null }),
+    );
+  } catch (err) {
+    return { success: false, error: userMessage(err, "Could not unlink that login.") };
+  }
+
+  revalidatePath(`/dashboard/hr/employees/${employeeId}`);
+  revalidatePath("/dashboard/hr/employees");
+  return { success: true, id: employeeId, message: "Login unlinked." };
+}
+
 export async function listUsersWithoutEmployeeRecord() {
   return withAuthorizedTenant([...HR_WRITE_ROLES], (tx) =>
     employees.listUsersWithoutEmployeeRecord(tx),

@@ -10,6 +10,7 @@ import {
 import * as fulfilment from "../repositories/fulfilment";
 import * as partiesRepo from "../repositories/parties";
 import * as productsRepo from "../repositories/products";
+import { getSystemAccount } from "../repositories/accounts";
 
 /**
  * Postgres-backed stock request actions.
@@ -352,12 +353,42 @@ export async function fulfillRequest(
           })
           .filter((i) => !/^-?0(\.0*)?$/.test(i.quantity));
 
+        /**
+         * The accounts consumed stock moves between when the request names a
+         * project — 0085. Resolved here because the action layer is where the
+         * chart is read, and passed as ids so the repository stays a repository.
+         *
+         * Looked up ONLY for a project request: a company with a partial chart
+         * should not be blocked from issuing stock on work that never needed
+         * these accounts.
+         */
+        let projectMaterialsAccountId = null;
+        let inventoryAccountId = null;
+        if (existing.projectId) {
+          const [materials, inventory] = await Promise.all([
+            getSystemAccount(tx, "project_materials"),
+            getSystemAccount(tx, "inventory"),
+          ]);
+          if (!materials) {
+            throw new Error(
+              "Project Materials (5410) is not configured in the chart of accounts. Add it before issuing stock to a project.",
+            );
+          }
+          if (!inventory) {
+            throw new Error("Inventory system account is not configured.");
+          }
+          projectMaterialsAccountId = materials.id;
+          inventoryAccountId = inventory.id;
+        }
+
         return fulfilment.fulfilStockRequest(tx, requestId, issues, {
           fulfilledById: user.id,
           fulfilledByName: user.name,
           expectedReturnDate:
             String(formData.get("expectedReturnDate") ?? "").slice(0, 10) || null,
           notes: blank(formData.get("notes")),
+          projectMaterialsAccountId,
+          inventoryAccountId,
         });
       },
     );
@@ -468,4 +499,26 @@ export async function getRequestDecisionsToday() {
   return withAuthorizedTenant([], (tx) =>
     fulfilment.getStockRequestDecisionsToday(tx),
   );
+}
+
+/**
+ * Stock requests awaiting a decision — the approvals page's section.
+ *
+ * `getPendingApprovalRequests` in `request-queries.js` aggregated the MONGO
+ * `StockRequest` collection, which has not been written to since the requests
+ * port — so that section of /dashboard/approvals has shown nothing for every
+ * tenant, however many requests were waiting. The same defect the leave, loan,
+ * claim and NCR sections each had before their own modules moved.
+ */
+export async function getPendingStockRequestsPg(limit = 50) {
+  try {
+    const { requests } = await getRequestsPaginated({
+      status: "pending",
+      perPage: limit,
+      page: 1,
+    });
+    return requests;
+  } catch {
+    return [];
+  }
 }

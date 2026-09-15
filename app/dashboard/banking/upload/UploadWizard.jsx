@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import BankAccountCombobox from "@/components/bank-account-combobox";
-import { importBankStatement } from "@/app/mongodb/actions/bank-feed-actions";
+import { importBankStatement } from "@/app/db/actions/bank-feed-actions";
 
 // Supported file types
 // Legacy .xls is intentionally excluded — ExcelJS can't read the old binary

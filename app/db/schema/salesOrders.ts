@@ -1,0 +1,181 @@
+import {
+  pgTable,
+  uuid,
+  text,
+  integer,
+  numeric,
+  date,
+  timestamp,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+import { companies } from "./companies";
+import { parties } from "./parties";
+
+const money = (name: string) =>
+  numeric(name, { precision: 19, scale: 4, mode: "string" });
+const percent = (name: string) =>
+  numeric(name, { precision: 9, scale: 4, mode: "string" });
+
+/**
+ * Sales orders (0098) — the order between the quote and the bill.
+ *
+ * `lib/unported-modules.js` had this module switched OFF: four failures, of
+ * which one was loud and three were quiet, all of them "the store beneath this
+ * moved and this did not". This is the port that note asked for.
+ *
+ * WHY THE DOCUMENT EXISTS. A quote is an offer and an invoice is a bill;
+ * between them is the moment the customer says yes. Two things start at that
+ * moment and nothing else in the system records either: the stock is RESERVED,
+ * so a confirmed order cannot be sold out from under itself, and the sum of
+ * confirmed-not-yet-invoiced orders is the ORDER BACKLOG.
+ *
+ * ── NO quote_id, NO invoice_id ────────────────────────────────────────────
+ *
+ * The Mongo model embedded `quoteRef` and `invoiceRef`. 0041 built
+ * `document_flow` for precisely this case and named 'sales_order' in its CHECK
+ * constraints two years before there was one, because "a column named quote_id
+ * on invoices encodes 'an invoice comes from a quote', which stops being true
+ * the moment the order step lands". The lineage is a relationship here. The
+ * repository assembles `quoteRef` / `invoiceRef` from it for the screens.
+ *
+ * ── NO stock_committed ────────────────────────────────────────────────────
+ *
+ * An order holds a reservation for each of its product lines when, and only
+ * when, its status is 'confirmed'. Mongo kept a boolean per line maintained by
+ * four code paths, which can disagree with the status — and when it does the
+ * stock is either double-held or silently free with nothing to say which.
+ *
+ * The totals are here so queries can select them; they are NOT for writing.
+ * `recalc_sales_order()` owns them, as `recalc_quote()` owns the quote's.
+ */
+export const salesOrders = pgTable(
+  "sales_orders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    orderNumber: text("order_number").notNull(),
+
+    customerId: uuid("customer_id").notNull(),
+    /** What the customer was told, at the time. See §9.4 on snapshots. */
+    customerName: text("customer_name").notNull(),
+    customerEmail: text("customer_email"),
+    customerPhone: text("customer_phone"),
+    customerAddress: text("customer_address"),
+    customerTaxPin: text("customer_tax_pin"),
+
+    orderDate: date("order_date").notNull(),
+    expectedDeliveryDate: date("expected_delivery_date"),
+    status: text("status").notNull().default("draft"),
+
+    title: text("title"),
+    notes: text("notes"),
+    currency: text("currency").notNull().default("KES"),
+
+    /** Derived by trigger. Read these; never write them. */
+    subtotal: money("subtotal").notNull().default("0"),
+    discountTotal: money("discount_total").notNull().default("0"),
+    taxTotal: money("tax_total").notNull().default("0"),
+    total: money("total").notNull().default("0"),
+
+    /**
+     * Who sold it — carried quote → order → invoice. Without it here the chain
+     * drops the rep in the middle, and Sales by Rep (0095) loses every deal
+     * that went through an order.
+     */
+    salespersonPartyId: uuid("salesperson_party_id").references(
+      () => parties.id,
+      { onDelete: "set null" },
+    ),
+    salespersonName: text("salesperson_name"),
+
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    confirmedById: text("confirmed_by_id"),
+    confirmedByName: text("confirmed_by_name"),
+    invoicedAt: timestamp("invoiced_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledById: text("cancelled_by_id"),
+    cancelledByName: text("cancelled_by_name"),
+    cancellationReason: text("cancellation_reason"),
+
+    createdById: text("created_by_id"),
+    createdByName: text("created_by_name").notNull().default("System"),
+    lastModifiedById: text("last_modified_by_id"),
+    lastModifiedByName: text("last_modified_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("sales_orders_company_number_uq").on(t.companyId, t.orderNumber),
+    index("sales_orders_company_status_date_idx").on(
+      t.companyId,
+      t.status,
+      t.orderDate.desc(),
+    ),
+    index("sales_orders_customer_idx").on(t.companyId, t.customerId),
+  ],
+);
+
+/**
+ * Sales order lines (0098).
+ *
+ * Every amount is GENERATED by the database — discount then tax, in that
+ * order, because tax is charged on what is payable. Identical arithmetic to
+ * `quote_lines`, so a quote becoming an order cannot change a figure by being
+ * re-rounded in JavaScript on the way across.
+ *
+ * No `invoiced_quantity`: how much of a line has been invoiced is what the
+ * invoice lines say, and `document_flow` answers it at any chain depth. That
+ * is why `quote_lines` does not carry one either.
+ */
+export const salesOrderLines = pgTable(
+  "sales_order_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    salesOrderId: uuid("sales_order_id")
+      .notNull()
+      .references(() => salesOrders.id, { onDelete: "cascade" }),
+    lineNumber: integer("line_number").notNull(),
+
+    itemType: text("item_type").notNull(),
+    serviceCategory: text("service_category"),
+
+    productId: uuid("product_id"),
+    productName: text("product_name"),
+    productSku: text("product_sku"),
+
+    description: text("description"),
+    unit: text("unit"),
+    quantity: money("quantity").notNull(),
+    unitPrice: money("unit_price").notNull(),
+    discountPercentage: percent("discount_percentage").notNull().default("0"),
+    taxRate: percent("tax_rate").notNull().default("0"),
+
+    /** All five GENERATED ALWAYS — selectable, never insertable. */
+    grossAmount: money("gross_amount"),
+    discountAmount: money("discount_amount"),
+    netAmount: money("net_amount"),
+    taxAmount: money("tax_amount"),
+    lineTotal: money("line_total"),
+
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("sales_order_lines_number_uq").on(t.salesOrderId, t.lineNumber),
+    index("sales_order_lines_order_idx").on(t.salesOrderId),
+  ],
+);
