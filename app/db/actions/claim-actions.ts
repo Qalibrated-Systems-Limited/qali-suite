@@ -291,6 +291,18 @@ export async function updateClaimPg(
               ),
             }),
         projectId: (data.projectId as string) ?? null,
+        /**
+         * THE COST CODE WAS PARSED AND THEN DROPPED.
+         *
+         * `advanceRequestSchema` and `reimbursementSchema` both read
+         * `costCodeId`, the form posts it, `createAdvanceRequestPg` writes it
+         * and `UpdateClaimInput` accepts it — this call simply never passed it
+         * on. So a cost code could be chosen when the claim was raised and
+         * never corrected afterwards: editing a draft to fix a miscoded claim
+         * silently kept the wrong code, and the screen showed the new one until
+         * it reloaded.
+         */
+        costCodeId: (data.costCodeId as string) ?? null,
         notes: (data.notes as string) ?? null,
         lastModifiedById: user.id,
         lastModifiedByName: user.name ?? null,

@@ -1,7 +1,10 @@
 import {
   getProjectTasks,
   getProjectProgress,
+  getProjectAssignments,
 } from "@/app/db/actions/project-actions";
+import ProjectTasks from "../components/ProjectTasks";
+import { hasRole, PROJECT_MANAGE_ROLES } from "@/lib/utils/role-gates";
 import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
@@ -196,10 +199,28 @@ export default async function ProgrammePage({ searchParams }) {
     );
   }
 
-  const [tasks, progress] = await Promise.all([
+  const [tasks, progress, members] = await Promise.all([
     getProjectTasks(project.id),
     getProjectProgress(project.id),
+    getProjectAssignments(project.id),
   ]);
+
+  /**
+   * THE ASSIGNEE LIST IS THE ROSTER, not every party in the company — the same
+   * rule `TasksCard` applies on the project detail page, because a task should
+   * go to somebody who is actually on the job. `project_assignments` already
+   * says who that is, and it carries the rate the timesheet needs, so the two
+   * screens name the same people.
+   *
+   * A PARTY, NOT A USER (see `project_tasks.assigned_party_id`): a
+   * subcontractor doing the work has no login, and a task list that can only
+   * name employees cannot describe who is on most sites.
+   */
+  const assignees = (members || [])
+    .filter((m) => m.status === "active")
+    .map((m) => ({ _id: m.party?.partyId, name: m.party?.name }))
+    .filter((a) => a._id && a.name);
+  const canManage = hasRole(ctx.user, PROJECT_MANAGE_ROLES);
 
   const counts = tasks.reduce(
     (acc, t) => {
@@ -359,61 +380,29 @@ export default async function ProgrammePage({ searchParams }) {
             <StatCard label="Done" value={counts.done} tone="text-emerald-600 dark:text-emerald-400" />
           </div>
 
-          <Card className="p-4 sm:p-5">
-            <h2 className="font-semibold text-lg mb-4">Work breakdown</h2>
+          {/*
+            THE EDITABLE WORK BREAKDOWN — the same component the project detail
+            page renders, not a second read-only rendering of the same table.
 
-            {tasks.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-10">
-                No tasks logged for this project yet.{" "}
-                <Link href={`/dashboard/projects/${project.id}`} className="text-primary hover:underline">
-                  Add the first one
-                </Link>
-                , or import a programme.
-              </p>
-            ) : (
-              <div className="space-y-1">
-                {tasks.map((t) => {
-                  const cfg = STATUS_CONFIG[t.status] || STATUS_CONFIG.todo;
-                  const StatusIcon = cfg.icon;
-                  const isSummary = t.childCount > 0;
-                  return (
-                    <div
-                      key={t.id}
-                      className="flex items-center gap-3 py-2.5 border-b last:border-0"
-                      style={{ paddingLeft: `${Math.min(t.depth, 4) * 20}px` }}
-                    >
-                      <StatusIcon className={`h-4 w-4 shrink-0 ${cfg.color}`} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className={`text-sm truncate ${isSummary ? "font-semibold" : "font-medium"}`}>
-                            {t.title}
-                          </span>
-                          {t.assignedName && (
-                            <span className="text-xs text-muted-foreground">— {t.assignedName}</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
-                          <span>{cfg.label}</span>
-                          {t.plannedEnd && <span>Target: {formatDate(t.plannedEnd)}</span>}
-                        </div>
-                      </div>
-                      <div className="hidden sm:flex items-center gap-2 shrink-0 w-32">
-                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${cfg.bar}`}
-                            style={{ width: `${Math.min(t.rolledUpProgress ?? t.progressPercent ?? 0, 100)}%` }}
-                          />
-                        </div>
-                        <span className="text-xs font-mono text-muted-foreground w-9 text-right">
-                          {Math.round(t.rolledUpProgress ?? t.progressPercent ?? 0)}%
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
+            What stood here listed the tasks and could not touch them: to give
+            one to somebody you left the module, opened the project record and
+            scrolled to the Work breakdown card. The empty state admitted it,
+            linking to `/dashboard/projects/{id}` to "Add the first one" — a
+            page telling you the thing it is about happens somewhere else.
+
+            §10.3's rule was that a nav entry must OWN records, and the reason
+            Milestone Tracker was folded in was that one table had three doors.
+            This keeps it at one table and one door: Programme owns the WBS,
+            and the Gantt beside it is the other view of it.
+          */}
+          <ProjectTasks
+            projectId={project.id}
+            tasks={tasks}
+            progress={progress}
+            assignees={assignees}
+            canManage={canManage}
+            readOnly={project.status === "closed"}
+          />
         </>
       ) : (
         <>

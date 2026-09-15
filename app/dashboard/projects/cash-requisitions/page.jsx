@@ -12,7 +12,8 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import Link from "next/link";
-import { Info, Wallet } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Info, Wallet, DollarSign, Receipt } from "lucide-react";
 
 export const metadata = {
   title: "Cash Requisitions | Projects",
@@ -71,6 +72,20 @@ export default async function CashRequisitionsPage({ searchParams }) {
 
   const claims = transactions?.claims || [];
   const expenses = transactions?.expenses || [];
+
+  /**
+   * The two links out, built once.
+   *
+   * `returnTo` points back at THIS page WITH `?project=`, because the module
+   * resolves the selected project from the URL and nothing else — a bare
+   * `/dashboard/projects/cash-requisitions` would come back asking which job,
+   * having just been told.
+   */
+  const back = `/dashboard/projects/cash-requisitions?project=${project.id}`;
+  const claimParams = `projectId=${encodeURIComponent(project.id)}&returnTo=${encodeURIComponent(back)}`;
+  const advanceHref = `/dashboard/claims/create/advance?${claimParams}`;
+  const reimbursementHref = `/dashboard/claims/create/reimbursement?${claimParams}`;
+
   /**
    * MONEY IS A STRING on both of these. `employee_claims.total_amount` and
    * `expenses.total` are numeric(19,4) read in string mode, so `s + c.totalAmount`
@@ -94,6 +109,36 @@ export default async function CashRequisitionsPage({ searchParams }) {
         project={project}
         projects={projects}
       />
+
+      {/*
+        RAISE IT FROM HERE.
+
+        This page told you what had been claimed against the job and gave you
+        no way to claim anything — so the act it is about happened in another
+        module, three navigations away, with the project chosen again from a
+        combobox or, more often, not chosen at all. An untagged claim is money
+        the job never sees.
+
+        Both links carry the project AND the way back, so the request lands on
+        this job and returns to this page. See lib/utils/return-to.js.
+
+        Full-width stacked buttons on a phone: this is the page's primary
+        action, and a site agent is raising it one-handed in a yard.
+      */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Button asChild className="h-11 flex-1 sm:flex-none bg-yellow-500 hover:bg-yellow-600 text-black font-semibold">
+          <Link href={advanceHref}>
+            <DollarSign className="h-4 w-4 mr-2" />
+            Request Advance
+          </Link>
+        </Button>
+        <Button asChild variant="outline" className="h-11 flex-1 sm:flex-none">
+          <Link href={reimbursementHref}>
+            <Receipt className="h-4 w-4 mr-2" />
+            Claim Expense
+          </Link>
+        </Button>
+      </div>
 
       <Alert className="border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-200">
         <Info className="h-4 w-4" />

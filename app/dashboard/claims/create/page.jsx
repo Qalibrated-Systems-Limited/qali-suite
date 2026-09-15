@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { safeReturnTo } from "@/lib/utils/return-to";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -18,12 +19,26 @@ export const metadata = {
   description: "Choose claim type to get started",
 };
 
-export default async function CreateClaimPage() {
+/**
+ * The type chooser sits BETWEEN the Projects module and the two forms, so it
+ * has to carry `?projectId=` and `?returnTo=` across rather than swallow them.
+ * A link that preselects the job and then loses it at the first fork preselects
+ * nothing.
+ */
+export default async function CreateClaimPage({ searchParams }) {
+  const sp = await searchParams;
   const session = await auth();
 
   if (!session?.user) {
     redirect("/login");
   }
+
+  const carried = new URLSearchParams();
+  if (sp?.projectId) carried.set("projectId", sp.projectId);
+  const back = safeReturnTo(sp?.returnTo);
+  if (back) carried.set("returnTo", back);
+  const carriedQs = carried.toString();
+  const suffix = carriedQs ? `?${carriedQs}` : "";
 
   return (
     <div className="flex flex-col gap-6 sm:gap-8 p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto">
@@ -35,7 +50,7 @@ export default async function CreateClaimPage() {
           asChild
           className="hover:bg-accent flex-shrink-0"
         >
-          <Link href="/dashboard/my-claims">
+          <Link href={back || "/dashboard/my-claims"}>
             <ArrowLeft className="w-5 h-5" />
           </Link>
         </Button>
@@ -52,7 +67,7 @@ export default async function CreateClaimPage() {
       {/* Claim Type Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Advance Request Card */}
-        <Link href="/dashboard/claims/create/advance">
+        <Link href={`/dashboard/claims/create/advance${suffix}`}>
           <Card className="p-6 sm:p-8 hover:shadow-lg hover:border-yellow-500/50 transition-all duration-200 cursor-pointer group h-full">
             <div className="flex flex-col h-full">
               {/* Icon */}
@@ -102,7 +117,7 @@ export default async function CreateClaimPage() {
         </Link>
 
         {/* Reimbursement Card */}
-        <Link href="/dashboard/claims/create/reimbursement">
+        <Link href={`/dashboard/claims/create/reimbursement${suffix}`}>
           <Card className="p-6 sm:p-8 hover:shadow-lg hover:border-yellow-500/50 transition-all duration-200 cursor-pointer group h-full">
             <div className="flex flex-col h-full">
               {/* Icon */}

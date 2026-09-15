@@ -374,16 +374,40 @@ export async function getPartyById(partyId: string) {
 }
 
 /** Type-filtered lists for pickers that want everything, not a page. */
+/**
+ * `_id` ALONGSIDE `id`, the same as `getEmployees` and `searchParties`.
+ *
+ * `listParties` returns raw rows, which carry `id` only — and these two did not
+ * add the alias while their employee twin did. Every picker in this codebase
+ * keys on `_id` (the Mongo shape the screens were written against), so a
+ * supplier reached a `<option value={p._id}>` as `value={undefined}`. A React
+ * option with no value submits its TEXT, so the project Team card posted the
+ * supplier's NAME where a uuid was expected and `assignPartyToProject` answered
+ * "Party not found" — which is to say a subcontractor could not be put on a
+ * project roster at all, and the error blamed the data.
+ *
+ * `PaymentForm` reads `.id` and is unaffected; this only adds a field.
+ */
 export async function getCustomers(activeOnly = true) {
-  return withAuthorizedTenant([], (tx) =>
-    partiesRepo.listParties(tx, { role: "customer", activeOnly, limit: 200 }),
-  );
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = await partiesRepo.listParties(tx, {
+      role: "customer",
+      activeOnly,
+      limit: 200,
+    });
+    return rows.map((r) => ({ ...r, _id: r.id }));
+  });
 }
 
 export async function getSuppliers(activeOnly = true) {
-  return withAuthorizedTenant([], (tx) =>
-    partiesRepo.listParties(tx, { role: "supplier", activeOnly, limit: 200 }),
-  );
+  return withAuthorizedTenant([], async (tx) => {
+    const rows = await partiesRepo.listParties(tx, {
+      role: "supplier",
+      activeOnly,
+      limit: 200,
+    });
+    return rows.map((r) => ({ ...r, _id: r.id }));
+  });
 }
 
 export async function getEmployees(activeOnly = true) {

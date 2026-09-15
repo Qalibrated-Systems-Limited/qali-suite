@@ -34,6 +34,7 @@ export const SECTIONS = [
   { key: "programme", href: "/dashboard/projects/programme", label: "Programme" },
   { key: "instructions", href: "/dashboard/projects/instructions", label: "Engineer's Instructions" },
   { key: "diary", href: "/dashboard/projects/diary", label: "Site Diary" },
+  { key: "timesheets", href: "/dashboard/projects/timesheets", label: "Timesheets" },
   { key: "certificates", href: "/dashboard/projects/ipc", label: "IPC & Payments" },
   { key: "cashRequisitions", href: "/dashboard/projects/cash-requisitions", label: "Cash Requisitions" },
 ];
@@ -59,6 +60,16 @@ export function sectionsFor(project) {
     programme: project.showsProgramme !== false,
     instructions: project.showsInstructions !== false,
     diary: project.showsDiary !== false,
+    /**
+     * NOT TYPE-GATED, deliberately — there is no `shows_timesheets` column.
+     *
+     * Every one of the other five is a construction document a supply-only job
+     * genuinely does not produce. Labour is not: whoever does the work is on
+     * somebody's clock, and a job whose hours reach no project reports a margin
+     * it does not have — the hole 0089 exists to close. A flag here would let a
+     * tenant switch off the one section that makes their cost true.
+     */
+    timesheets: true,
     certificates: project.showsCertificates !== false,
     cashRequisitions: project.showsCashRequisitions !== false,
   };

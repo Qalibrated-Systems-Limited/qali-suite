@@ -31,6 +31,7 @@ const SEARCH_CONFIG = {
   "/dashboard/journal": "Search journal entries...",
   "/dashboard/users": "Search users by name or email...",
   "/dashboard/quotes": "Search quotes...",
+  "/dashboard/projects": "Search projects by number, name, client or PM...",
 };
 
 // ============================================

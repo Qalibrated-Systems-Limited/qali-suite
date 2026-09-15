@@ -10,6 +10,7 @@ import {
   Receipt,
   Wallet,
   Ruler,
+  Clock,
 } from "lucide-react";
 import {
   SECTIONS,
@@ -23,7 +24,7 @@ import {
  * (app/dashboard/hr/components/HRNav.jsx): a sticky strip rendered once in the
  * module layout, above every page under /dashboard/projects/*.
  *
- * SEVEN ENTRIES, DOWN FROM TEN, AND FEWER THAN SEVEN ON MOST PROJECTS.
+ * EIGHT ENTRIES, DOWN FROM TEN, AND FEWER THAN EIGHT ON MOST PROJECTS.
  *
  * Two rules got it there and they are different rules. **A nav entry must own
  * records**: of the original ten, Milestone Tracker and Programme were two
@@ -45,6 +46,14 @@ import {
  * flags and let this component apply `selectProject`, which is the same rule the
  * pages use, from the same module. See PROJECTS-QALITRACK-PLAN.md §10.3 and §7.
  *
+ * TIMESHEETS TOOK IT BACK TO EIGHT, and it passes both rules. It owns
+ * `project_timesheets` — its own table, not a second view of somebody else's —
+ * and it is the one section no project type may switch off, because every job
+ * has labour and a job whose hours reach no project reports a margin it does
+ * not have. It existed before this as a card ninth down the project detail
+ * page: built, working, and findable only by somebody who already knew it was
+ * there.
+ *
  * IPC & Payments and Cash Requisitions still run the identical pair of queries.
  * Whether they are one section or two is a product decision for their author,
  * not a review finding — §7 open question 1.
@@ -54,12 +63,21 @@ const ICONS = {
   programme: CalendarDays,
   instructions: FileEdit,
   diary: BookOpen,
+  timesheets: Clock,
   certificates: Receipt,
   cashRequisitions: Wallet,
 };
 
+/**
+ * "Overview", not "Dashboard".
+ *
+ * Every module in this app hangs off /dashboard, so a tab called Dashboard
+ * inside one of them names the thing it is already inside. What the page
+ * actually is is the project REGISTER plus its totals — the overview of the
+ * portfolio, not a dashboard of anything.
+ */
 const DASHBOARD = {
-  label: "Dashboard",
+  label: "Overview",
   href: "/dashboard/projects",
   icon: LayoutDashboard,
   exact: true,

@@ -401,9 +401,11 @@ const getNavigationGroups = (user) => {
   // ============================================
   // A dropdown group, like Inventory/Finance/HR below — matches the
   // module's own sub-nav (app/dashboard/projects/components/ProjectsNav.jsx)
-  // so the same seven sections are one click away from either place.
+  // so the same eight sections are one click away from either place.
   // Ten became seven — a nav entry must own records, and five of the ten did
-  // not. See PROJECTS-QALITRACK-PLAN.md §10.3.
+  // not. See PROJECTS-QALITRACK-PLAN.md §10.3. Timesheets made it eight: it
+  // owns `project_timesheets`, and it was reachable only by opening a project
+  // and scrolling, which is why nobody could find it.
   {
     type: "group",
     label: "Projects",
@@ -414,7 +416,7 @@ const getNavigationGroups = (user) => {
     items: [
       {
         icon: LayoutDashboard,
-        label: "Dashboard",
+        label: "Overview",
         id: "projects-dashboard",
         href: "/dashboard/projects",
       },
@@ -441,6 +443,12 @@ const getNavigationGroups = (user) => {
         label: "Site Diary",
         id: "projects-diary",
         href: "/dashboard/projects/diary",
+      },
+      {
+        icon: Clock,
+        label: "Timesheets",
+        id: "projects-timesheets",
+        href: "/dashboard/projects/timesheets",
       },
       {
         icon: Receipt,

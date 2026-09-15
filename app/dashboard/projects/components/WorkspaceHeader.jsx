@@ -32,21 +32,35 @@ export default function WorkspaceHeader({ title, description, project, projects 
         {description && (
           <p className="text-sm text-muted-foreground max-w-2xl">{description}</p>
         )}
-        {project && (
-          <div className="flex items-center gap-2 flex-wrap pt-1">
-            <span className="font-mono text-xs text-muted-foreground">
-              {project.projectNumber}
-            </span>
-            <span className="text-sm font-medium text-foreground">{project.name}</span>
-            {statusCfg && <Badge className={statusCfg.color}>{statusCfg.label}</Badge>}
-          </div>
-        )}
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
+      {/*
+        THE PROJECT IS NAMED ONCE.
+
+        A block here used to print the number, the name and the status — and
+        the switcher to its right prints the number and the name too, because
+        a combobox has to show its own selection. On a phone the header stacks,
+        so you got:
+
+            PRJ-00003
+            KTDA Unmanned Weighbridge Installation
+            Planning
+            PRJ-00003
+            KTDA Unmanned Weighbridge Installation
+            Full project
+
+        — six lines to say one job, above every section in the module. The
+        switcher already names it, so what was missing beside it was the one
+        thing the switcher does not show: the status. That moves here and the
+        duplicate goes.
+      */}
+      <div className="flex items-center gap-2 shrink-0 flex-wrap">
         <Suspense fallback={<div className="h-10 w-full sm:w-72 rounded-md border bg-muted/40 animate-pulse" />}>
           <ProjectSwitcher projects={projects} selectedId={project?.id} />
         </Suspense>
+        {statusCfg && (
+          <Badge className={`${statusCfg.color} shrink-0`}>{statusCfg.label}</Badge>
+        )}
         {project && (
           <Button asChild variant="outline" size="sm" className="shrink-0">
             <Link href={`/dashboard/projects/${project.id}`}>

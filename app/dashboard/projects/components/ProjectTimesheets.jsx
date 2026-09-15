@@ -166,6 +166,29 @@ export default function ProjectTimesheets({
         </div>
       </div>
 
+      {/*
+        NOBODY ON THE ROSTER — say so, instead of hiding the button.
+
+        `roster.length > 0` already gated "Log time", so a project with an
+        empty roster showed a card headed "Time / Labour booked to this job"
+        with no control and no explanation. The reason is real — a timesheet
+        line needs an assignment, because the assignment carries the rate that
+        decides the cost — but an unexplained missing button is a dead end, and
+        the way out was to leave for the project record and scroll to Team.
+
+        The roster now sits directly below this card on the Timesheets page, so
+        the way out is a scroll rather than a journey.
+      */}
+      {canManage && !readOnly && roster.length === 0 && (
+        <div className="mb-4 rounded-lg border border-dashed p-4 text-center">
+          <p className="text-sm font-medium">Nobody is on this project yet</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Time is booked against a team member, because their rate is what
+            decides the cost. Add people to the team below, then log time here.
+          </p>
+        </div>
+      )}
+
       {summary && summary.entries > 0 && (
         <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-lg border p-3">

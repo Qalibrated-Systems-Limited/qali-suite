@@ -56,13 +56,24 @@ export function ReimbursementForm({
   expenseAccounts = [],
   projects = [],
   costCodes = [],
+  /** Preselected when the Projects module linked here — see the create page. */
+  defaultProjectId = "",
+  /** Already validated server-side by `safeReturnTo`; never used unchecked. */
+  returnTo = null,
 }) {
   const router = useRouter();
   const isEdit = !!claim;
   const [allAccounts, setAllAccounts] = useState(expenseAccounts);
 
-  // Project selection (optional)
-  const [projectId, setProjectId] = useState(claim?.projectId || "");
+  /**
+   * Project selection (optional). `defaultProjectId` is honoured only if the
+   * picker actually holds that project — see AdvanceRequestForm for why an id
+   * the combobox cannot display is worse than no selection at all.
+   */
+  const [projectId, setProjectId] = useState(
+    claim?.projectId ||
+      (projects.some((p) => p._id === defaultProjectId) ? defaultProjectId : ""),
+  );
   const [costCodeId, setCostCodeId] = useState(claim?.costCodeId || "");
 
   /**
@@ -174,12 +185,14 @@ export function ReimbursementForm({
       if (isEdit) {
         router.push(`/dashboard/claims/${claim._id}`);
       } else {
-        router.push(`/dashboard/claims/${state.claimId}`);
+        // Back where you came from when something sent you here — see the
+        // same branch in AdvanceRequestForm.
+        router.push(returnTo || `/dashboard/claims/${state.claimId}`);
       }
     } else if (state?.errors?._form) {
       toast.error(state.errors._form[0]);
     }
-  }, [state, router, isEdit, claim]);
+  }, [state, router, isEdit, claim, returnTo]);
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-KE", {
@@ -201,7 +214,9 @@ export function ReimbursementForm({
         >
           <Link
             href={
-              isEdit ? `/dashboard/claims/${claim._id}` : "/dashboard/my-claims"
+              isEdit
+                ? `/dashboard/claims/${claim._id}`
+                : returnTo || "/dashboard/my-claims"
             }
           >
             <ArrowLeft className="w-5 h-5" />
@@ -514,7 +529,7 @@ export function ReimbursementForm({
               asChild
               className="h-12 text-base font-medium"
             >
-              <Link href="/dashboard/my-claims">Cancel</Link>
+              <Link href={returnTo || "/dashboard/my-claims"}>Cancel</Link>
             </Button>
             <SubmitButton isEdit={isEdit} pending={pending} />
           </div>
