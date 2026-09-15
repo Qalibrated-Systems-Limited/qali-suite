@@ -54,6 +54,8 @@ import {
   projectTimesheetStatusEnum,
   projectVariationStatusEnum,
   projectMilestoneStatusEnum,
+  projectCashRequisitionStatusEnum,
+  projectCashRequisitionSourceEnum,
 } from "./enums";
 
 /** `ltree` has no Drizzle builder. Declared as `categories` declares it. */
@@ -1662,5 +1664,124 @@ export const projectVariationItems = pgTable(
     ),
     /** The quantity carries the sign; a negative rate is a typing error. */
     check("project_variation_items_rate_non_negative", sql`${t.rate} >= 0`),
+  ],
+);
+
+
+/**
+ * The cash requisition — 0107, and it is an AUTHORISATION, not a movement.
+ *
+ * A requisition says "release this"; the release happens on a path that
+ * already exists — an employee advance, the petty cash float, a stock request
+ * — and `fundedSource` / `fundedSourceId` record which one, exactly as
+ * `projectCertificates.invoiceId` records the invoice a certificate raised.
+ * NOTHING HERE POSTS. A fourth money path would put the same figure in the
+ * ledger twice: once as the requisition, again as the advance it becomes.
+ *
+ * ONE AMOUNT, ONE PURPOSE, ONE COST CODE — the MD's own form, with `category`
+ * raised from free text to a real `costCodeId` so the request can be read
+ * against the budget it draws on. `costCodeAtRequest` is the snapshot beside
+ * it, the same idiom `stockRequests` and `employeeClaims` carry.
+ *
+ * The figures freeze at APPROVAL rather than at submission: before that it is
+ * a request under discussion, after it the amount is what somebody authorised.
+ */
+export const projectCashRequisitions = pgTable(
+  "project_cash_requisitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+
+    /** 'CRQ' through the shared counter; no registration needed. */
+    requisitionNumber: text("requisition_number").notNull(),
+
+    requestDate: date("request_date").notNull().defaultNow(),
+    /** Nullable: "as soon as you can" is a real answer, and a made-up date is
+     *  worse than none. */
+    neededBy: date("needed_by"),
+
+    costCodeId: uuid("cost_code_id").references(() => projectCostCodes.id, {
+      onDelete: "set null",
+    }),
+    costCodeAtRequest: text("cost_code_at_request"),
+
+    purpose: text("purpose").notNull(),
+    amount: money("amount").notNull(),
+
+    status: projectCashRequisitionStatusEnum("status").notNull().default("draft"),
+
+    requestedById: text("requested_by_id"),
+    requestedByName: text("requested_by_name").notNull(),
+
+    decidedById: text("decided_by_id"),
+    decidedByName: text("decided_by_name"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNotes: text("decision_notes"),
+
+    fundedSource: projectCashRequisitionSourceEnum("funded_source"),
+    fundedSourceId: uuid("funded_source_id"),
+    fundedAt: timestamp("funded_at", { withTimezone: true }),
+
+    notes: text("notes").notNull().default(""),
+
+    createdById: text("created_by_id"),
+    createdByName: text("created_by_name").notNull().default("System"),
+    lastModifiedById: text("last_modified_by_id"),
+    lastModifiedByName: text("last_modified_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_cash_requisitions_number_uq").on(
+      t.companyId,
+      t.requisitionNumber,
+    ),
+    index("project_cash_requisitions_register_idx").on(
+      t.projectId,
+      t.status,
+      t.requestDate,
+    ),
+    index("project_cash_requisitions_company_idx").on(t.companyId, t.status),
+
+    check(
+      "project_cash_requisitions_purpose_not_blank",
+      sql`length(btrim(${t.purpose})) > 0`,
+    ),
+    check(
+      "project_cash_requisitions_requester_named",
+      sql`length(btrim(${t.requestedByName})) > 0`,
+    ),
+    /** Zero is not a request; a negative one is a refund by another name. */
+    check("project_cash_requisitions_amount_positive", sql`${t.amount} > 0`),
+
+    /** A decision carries a name and a time, or it is a checkbox. */
+    check(
+      "project_cash_requisitions_decision_signed",
+      sql`${t.status} NOT IN ('approved', 'rejected', 'funded') OR (${t.decidedByName} IS NOT NULL AND ${t.decidedAt} IS NOT NULL)`,
+    ),
+    /** "No" with no grounds is not an answer a site can act on. */
+    check(
+      "project_cash_requisitions_rejection_reasoned",
+      sql`${t.status} <> 'rejected' OR (${t.decisionNotes} IS NOT NULL AND length(btrim(${t.decisionNotes})) >= 10)`,
+    ),
+    /** The SOURCE may stand alone — money released outside the three paths is
+     *  `other` with no id. An id without a source is the nonsense case. */
+    check(
+      "project_cash_requisitions_source_pair",
+      sql`${t.fundedSourceId} IS NULL OR ${t.fundedSource} IS NOT NULL`,
+    ),
+    check(
+      "project_cash_requisitions_funded_dated",
+      sql`(${t.status} = 'funded') = (${t.fundedAt} IS NOT NULL)`,
+    ),
+    check(
+      "project_cash_requisitions_cost_code_pair",
+      sql`${t.costCodeId} IS NULL OR ${t.costCodeAtRequest} IS NOT NULL`,
+    ),
   ],
 );

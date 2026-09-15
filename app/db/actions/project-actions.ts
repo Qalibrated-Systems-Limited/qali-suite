@@ -8,6 +8,7 @@ import { userMessage } from "../errors";
 import { requirePlanAccess } from "@/lib/plan-gate";
 import {
   PROJECT_MANAGE_ROLES,
+  PROJECT_LOG_SIGNOFF_ROLES,
   FINANCE_WRITE_ROLES,
   ADMIN_ROLES,
 } from "@/lib/utils/role-gates";
@@ -3203,6 +3204,265 @@ export async function deleteProjectVariationItem(
     if (!row) return { success: false, error: "Line not found" };
     revalidateCertificates(projectId);
     return { success: true, message: "Line removed" };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cash requisitions — 0107.
+//
+// WHO MAY DO WHAT, and it is the split the module already draws twice.
+//
+//   RAISE     PROJECT_MANAGE_ROLES — anyone who runs the job asks for cash.
+//   DECIDE    PROJECT_LOG_SIGNOFF_ROLES — the supervisory group, which is the
+//             same one that countersigns a diary and rules on an instruction.
+//             It includes the Manager, as the MD's own prototype does
+//             (`role==='admin'||role==='pm'`), and drops the Accountant.
+//   FUND      FINANCE_WRITE_ROLES — recording that money actually left is
+//             finance's act, not the site's, even though this posts nothing.
+//
+// Approving and funding are deliberately different gates: the first says the
+// job may have the money, the second says the cash went out. On a small team
+// the same person holds both, and that is their arrangement to make rather
+// than one this collapses for them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function revalidateCash(projectId?: string | null) {
+  revalidatePath("/dashboard/projects/cash-requisitions");
+  revalidatePath("/dashboard/projects");
+  if (projectId) revalidatePath(`/dashboard/projects/${projectId}`);
+}
+
+export async function getProjectCashRequisitions(projectId: string) {
+  if (!projectId) return { requisitions: [], summary: null };
+  return withAuthorizedTenant([], async (tx) => {
+    const [rows, summary] = await Promise.all([
+      repo.listCashRequisitions(tx, projectId),
+      repo.getCashRequisitionSummary(tx, projectId),
+    ]);
+    return {
+      requisitions: rows.map((r) => ({
+        _id: String(r.id),
+        id: String(r.id),
+        requisitionNumber: r.requisitionNumber,
+        requestDate: r.requestDate,
+        neededBy: r.neededBy,
+        costCodeId: r.costCodeId,
+        costCode: r.costCodeAtRequest,
+        purpose: r.purpose,
+        amount: Number(r.amount),
+        status: r.status,
+        requestedByName: r.requestedByName,
+        decidedByName: r.decidedByName,
+        decidedAt: r.decidedAt,
+        decisionNotes: r.decisionNotes,
+        fundedSource: r.fundedSource,
+        fundedSourceId: r.fundedSourceId,
+        fundedAt: r.fundedAt,
+        notes: r.notes,
+      })),
+      summary,
+    };
+  });
+}
+
+export async function createCashRequisition(
+  _prevState: unknown,
+  formData: FormData,
+) {
+  const values = valuesOf(formData);
+  const projectId = String(formData.get("projectId") ?? "");
+  const purpose = String(formData.get("purpose") ?? "").trim();
+  const amount = Number(formData.get("amount") ?? 0) || 0;
+
+  const errors: FieldErrors = {};
+  if (!projectId) errors.projectId = ["A project is required"];
+  if (!purpose) errors.purpose = ["Say what the cash is for"];
+  if (amount <= 0) errors.amount = ["Enter how much is needed"];
+  if (Object.keys(errors).length) return { errors, values };
+
+  try {
+    const row = await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user, companyId }) => {
+        const project = await repo.getProjectById(tx, projectId);
+        if (!project) throw new Error("Project not found");
+        if (project.status === "closed") {
+          throw new Error("This project is closed, so it cannot request cash.");
+        }
+        const actor = actorFrom(user);
+        return repo.createCashRequisition(tx, {
+          companyId,
+          projectId,
+          purpose,
+          amount,
+          requestDate: String(formData.get("requestDate") ?? "") || null,
+          neededBy: String(formData.get("neededBy") ?? "") || null,
+          costCodeId: String(formData.get("costCodeId") ?? "") || null,
+          notes: String(formData.get("notes") ?? ""),
+          requestedById: actor.id,
+          requestedByName: actor.name,
+          createdById: actor.id,
+          createdByName: actor.name,
+          /** The site's request goes out asking; only an explicit "save as
+           *  draft" keeps it back. */
+          submit: String(formData.get("submit") ?? "true") !== "false",
+        });
+      },
+    );
+    revalidateCash(projectId);
+    return {
+      success: true,
+      message: `${row.requisitionNumber} raised for ${Number(row.amount).toLocaleString("en-KE")}`,
+      id: row.id,
+    };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+export async function updateCashRequisition(
+  requisitionId: string,
+  _prevState: unknown,
+  formData: FormData,
+) {
+  const values = valuesOf(formData);
+  const projectId = String(formData.get("projectId") ?? "");
+  const purpose = String(formData.get("purpose") ?? "").trim();
+  const amount = Number(formData.get("amount") ?? 0) || 0;
+
+  const errors: FieldErrors = {};
+  if (!purpose) errors.purpose = ["Say what the cash is for"];
+  if (amount <= 0) errors.amount = ["Enter how much is needed"];
+  if (Object.keys(errors).length) return { errors, values };
+
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx, { user }) => {
+        const actor = actorFrom(user);
+        const row = await repo.updateCashRequisition(tx, requisitionId, {
+          purpose,
+          amount,
+          requestDate: String(formData.get("requestDate") ?? "") || null,
+          neededBy: String(formData.get("neededBy") ?? "") || null,
+          costCodeId: String(formData.get("costCodeId") ?? "") || null,
+          notes: String(formData.get("notes") ?? ""),
+          lastModifiedById: actor.id,
+          lastModifiedByName: actor.name,
+        });
+        if (!row) throw new Error("That requisition no longer exists.");
+        return row;
+      },
+    );
+    revalidateCash(projectId);
+    return { success: true, message: "Requisition updated" };
+  } catch (error) {
+    return { errors: { _form: [userMessage(error)] }, values };
+  }
+}
+
+/**
+ * Submit, recall, approve, reject or cancel.
+ *
+ * One action for five transitions because the trigger is what decides which
+ * are legal — duplicating that list here would be a second copy to drift. What
+ * this owns is the GATE: asking is the site's, deciding is the supervisor's.
+ */
+export async function setCashRequisitionStatus(
+  requisitionId: string,
+  projectId: string,
+  input: {
+    status: "draft" | "submitted" | "approved" | "rejected" | "cancelled";
+    notes?: string;
+  },
+) {
+  const deciding = input.status === "approved" || input.status === "rejected";
+
+  if (input.status === "rejected" && (input.notes ?? "").trim().length < 10) {
+    return {
+      success: false,
+      error: "Say why it was refused — a site cannot act on \"no\" alone.",
+    };
+  }
+
+  try {
+    const row = await withAuthorizedTenant(
+      (deciding
+        ? PROJECT_LOG_SIGNOFF_ROLES
+        : PROJECT_MANAGE_ROLES) as unknown as string[],
+      async (tx, { user }) => {
+        const updated = await repo.setCashRequisitionStatus(
+          tx,
+          requisitionId,
+          input.status,
+          actorFrom(user),
+          input.notes ?? null,
+        );
+        if (!updated) throw new Error("That requisition no longer exists.");
+        return updated;
+      },
+    );
+    revalidateCash(projectId);
+    return { success: true, message: `${row.requisitionNumber} ${row.status}` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+/**
+ * Record that the cash went out, and on which existing document.
+ *
+ * POSTS NOTHING — the advance, the petty cash top-up or the stock request named
+ * here is what posted. This closes the loop so an approved request stops
+ * looking outstanding.
+ */
+export async function fundCashRequisition(
+  requisitionId: string,
+  projectId: string,
+  funding: {
+    source: "employee_advance" | "petty_cash" | "stock_request" | "other";
+    sourceId?: string | null;
+  },
+) {
+  try {
+    const row = await withAuthorizedTenant(
+      FINANCE_WRITE_ROLES as unknown as string[],
+      async (tx, { user }) => {
+        const updated = await repo.fundCashRequisition(
+          tx,
+          requisitionId,
+          funding,
+          actorFrom(user),
+        );
+        if (!updated) throw new Error("That requisition no longer exists.");
+        return updated;
+      },
+    );
+    revalidateCash(projectId);
+    return { success: true, message: `${row.requisitionNumber} marked funded` };
+  } catch (error) {
+    return { success: false, error: userMessage(error) };
+  }
+}
+
+export async function deleteCashRequisition(
+  requisitionId: string,
+  projectId: string,
+) {
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      async (tx) => {
+        const gone = await repo.deleteCashRequisition(tx, requisitionId);
+        if (!gone) throw new Error("That requisition no longer exists.");
+        return gone;
+      },
+    );
+    revalidateCash(projectId);
+    return { success: true, message: "Draft deleted" };
   } catch (error) {
     return { success: false, error: userMessage(error) };
   }

@@ -2,7 +2,16 @@ import {
   getProjectTransactions,
   getProjectFinancialSummary,
   getProjectSpendElsewhere,
+  getProjectCashRequisitions,
+  getAllCostCodes,
 } from "@/app/db/actions/project-actions";
+import CashRequisitionRegister from "../components/CashRequisitionRegister";
+import {
+  hasRole,
+  PROJECT_MANAGE_ROLES,
+  PROJECT_LOG_SIGNOFF_ROLES,
+  FINANCE_WRITE_ROLES,
+} from "@/lib/utils/role-gates";
 import { getWorkspaceContext } from "../lib/workspace";
 import WorkspaceHeader from "../components/WorkspaceHeader";
 import NoProjectsCard from "../components/NoProjectsCard";
@@ -10,10 +19,9 @@ import AccessDenied from "../components/AccessDenied";
 import SectionNotForType from "../components/SectionNotForType";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Info, Wallet, DollarSign, Receipt } from "lucide-react";
+import { Wallet, DollarSign, Receipt } from "lucide-react";
 
 export const metadata = {
   title: "Cash Requisitions | Projects",
@@ -44,7 +52,7 @@ export default async function CashRequisitionsPage({ searchParams }) {
     );
   }
 
-  const { projects, project } = ctx;
+  const { projects, project, user } = ctx;
 
   if (!project) {
     return (
@@ -64,10 +72,13 @@ export default async function CashRequisitionsPage({ searchParams }) {
     );
   }
 
-  const [transactions, financials, elsewhere] = await Promise.all([
+  const [transactions, financials, elsewhere, cashData, costCodes] =
+    await Promise.all([
     getProjectTransactions(project.id),
     getProjectFinancialSummary(project.id),
     getProjectSpendElsewhere(project.id),
+    getProjectCashRequisitions(project.id),
+    getAllCostCodes(),
   ]);
 
   const claims = transactions?.claims || [];
@@ -140,15 +151,30 @@ export default async function CashRequisitionsPage({ searchParams }) {
         </Button>
       </div>
 
-      <Alert className="border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-200">
-        <Info className="h-4 w-4" />
-        <AlertDescription className="text-sm">
-          A dedicated site cash requisition workflow (raise, approve,
-          disburse) isn&apos;t built yet — this shows employee expense claims
-          and operating expenses already tagged to this project from the
-          Expenses module.
-        </AlertDescription>
-      </Alert>
+      {/*
+        THE REGISTER, and the banner it replaces.
+
+        This page opened with an alert admitting "a dedicated site cash
+        requisition workflow (raise, approve, disburse) isn't built yet". 0107
+        built it — as an AUTHORISATION that posts nothing, because the money
+        leaves on a path that already posts and a second one would count the
+        same shilling twice.
+
+        It sits ABOVE the claims and expenses below, in the order the money
+        moves: what the site asked for, then what actually reached the job.
+      */}
+      <CashRequisitionRegister
+        projectId={project.id}
+        requisitions={cashData?.requisitions ?? []}
+        summary={cashData?.summary ?? null}
+        costCodes={(costCodes ?? []).filter(
+          (c) => c.isActive !== false && (!c.projectId || c.projectId === project.id),
+        )}
+        canManage={hasRole(user, PROJECT_MANAGE_ROLES)}
+        canDecide={hasRole(user, PROJECT_LOG_SIGNOFF_ROLES)}
+        canFund={hasRole(user, FINANCE_WRITE_ROLES)}
+        readOnly={project.status === "closed"}
+      />
 
       <Card className="p-4 sm:p-5">
         <div className="flex items-center gap-3 mb-3">

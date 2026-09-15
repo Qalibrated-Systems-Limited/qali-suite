@@ -18,6 +18,7 @@ import {
   projectVariations,
   projectVariationItems,
   projectMilestones,
+  projectCashRequisitions,
   accounts,
 } from "../schema";
 import { getProjectClaimsByAccount, listClaims } from "./claims";
@@ -4804,4 +4805,297 @@ export async function listVariationItemsForProject(tx: Tx, projectId: string) {
     result.get(key)!.push(r as Record<string, unknown>);
   }
   return result;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cash requisitions — 0107.
+//
+// AN AUTHORISATION, NOT A MOVEMENT. Nothing in this section writes a journal
+// entry, and that is the design rather than an omission: the money leaves on a
+// path that already posts — an employee advance, the petty cash float, a stock
+// request — and `fundedSource`/`fundedSourceId` record which one. A second
+// posting here would put the same figure in the ledger twice.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CashRequisitionInput {
+  companyId: string;
+  projectId: string;
+  purpose: string;
+  amount: number | string;
+  requestDate?: string | null;
+  neededBy?: string | null;
+  costCodeId?: string | null;
+  notes?: string;
+  requestedById?: string | null;
+  requestedByName: string;
+  createdById?: string | null;
+  createdByName: string;
+  /** Raise it already submitted — the ordinary case from the site. */
+  submit?: boolean;
+}
+
+/** The cost code's own code, frozen onto the request. */
+async function costCodeLabel(tx: Tx, costCodeId: string | null | undefined) {
+  if (!costCodeId || !isUuid(costCodeId)) return null;
+  const [row] = await tx
+    .select({ code: projectCostCodes.code, name: projectCostCodes.name })
+    .from(projectCostCodes)
+    .where(eq(projectCostCodes.id, costCodeId))
+    .limit(1);
+  if (!row) return null;
+  return row.name ? `${row.code} — ${row.name}` : row.code;
+}
+
+export async function createCashRequisition(
+  tx: Tx,
+  input: CashRequisitionInput,
+) {
+  const [{ requisition_number }] = (await tx.execute(
+    sql`SELECT next_entry_number(${input.companyId}::uuid, 'CRQ') AS requisition_number`,
+  )) as unknown as Array<{ requisition_number: string }>;
+
+  const [row] = await tx
+    .insert(projectCashRequisitions)
+    .values({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      requisitionNumber: requisition_number,
+      requestDate: input.requestDate || undefined,
+      neededBy: input.neededBy || null,
+      costCodeId: input.costCodeId || null,
+      costCodeAtRequest: await costCodeLabel(tx, input.costCodeId),
+      purpose: input.purpose.trim(),
+      amount: Number(input.amount).toFixed(4),
+      /**
+       * SUBMITTED BY DEFAULT IS WRONG HERE, and it is the mistake the claims
+       * module made: both of its create paths passed `submit: true`, so the
+       * only way into `draft` was a recall and `draft` had no exit. A site
+       * agent typing a request on a phone wants it gone; somebody preparing
+       * next month's wants to keep it. Both are reachable, and the caller says
+       * which.
+       */
+      status: input.submit ? "submitted" : "draft",
+      notes: input.notes?.trim() ?? "",
+      requestedById: input.requestedById ?? null,
+      requestedByName: input.requestedByName,
+      createdById: input.createdById ?? null,
+      createdByName: input.createdByName,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Amend a request.
+ *
+ * The trigger refuses an amendment once it is approved — what was authorised
+ * is what was authorised — so this does not repeat the check. It reports it in
+ * words, though, because a raw check violation tells a site agent nothing.
+ */
+export async function updateCashRequisition(
+  tx: Tx,
+  requisitionId: string,
+  input: {
+    purpose?: string;
+    amount?: number | string;
+    requestDate?: string | null;
+    neededBy?: string | null;
+    costCodeId?: string | null;
+    notes?: string;
+    lastModifiedById?: string | null;
+    lastModifiedByName?: string | null;
+  },
+) {
+  if (!isUuid(requisitionId)) return null;
+  const existing = await getCashRequisitionById(tx, requisitionId);
+  if (!existing) return null;
+
+  if (existing.status === "approved" || existing.status === "funded") {
+    throw new Error(
+      `Requisition ${existing.requisitionNumber} was approved for ${existing.amount} and can no longer be changed. Cancel it and raise another.`,
+    );
+  }
+
+  const patch: Record<string, unknown> = {
+    updatedAt: new Date(),
+    lastModifiedById: input.lastModifiedById ?? null,
+    lastModifiedByName: input.lastModifiedByName ?? null,
+  };
+  if (input.purpose !== undefined) patch.purpose = input.purpose.trim();
+  if (input.amount !== undefined) patch.amount = Number(input.amount).toFixed(4);
+  if (input.requestDate !== undefined) patch.requestDate = input.requestDate || existing.requestDate;
+  if (input.neededBy !== undefined) patch.neededBy = input.neededBy || null;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.costCodeId !== undefined) {
+    patch.costCodeId = input.costCodeId || null;
+    patch.costCodeAtRequest = await costCodeLabel(tx, input.costCodeId);
+  }
+
+  const [row] = await tx
+    .update(projectCashRequisitions)
+    .set(patch)
+    .where(eq(projectCashRequisitions.id, requisitionId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Move it along the state machine.
+ *
+ * The transitions themselves are the trigger's (0107 decision 3) — this is
+ * where the NAMES go on, which the `decision_signed` constraint requires of
+ * every state that is somebody's decision.
+ */
+export async function setCashRequisitionStatus(
+  tx: Tx,
+  requisitionId: string,
+  status: "draft" | "submitted" | "approved" | "rejected" | "cancelled",
+  actor: { id?: string | null; name: string },
+  notes?: string | null,
+) {
+  if (!isUuid(requisitionId)) return null;
+
+  const decided = status === "approved" || status === "rejected";
+  const [row] = await tx
+    .update(projectCashRequisitions)
+    .set({
+      status,
+      decidedById: decided ? actor.id ?? null : null,
+      decidedByName: decided ? actor.name : null,
+      decidedAt: decided ? new Date() : null,
+      decisionNotes: decided ? notes?.trim() || null : null,
+      lastModifiedById: actor.id ?? null,
+      lastModifiedByName: actor.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectCashRequisitions.id, requisitionId))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Record that the money went out, and on which existing document.
+ *
+ * THIS POSTS NOTHING. The advance, the petty cash top-up or the stock request
+ * named here is what posted; this only closes the loop so the register can say
+ * "funded, by CLM-0042" instead of leaving an approved request looking
+ * outstanding for ever.
+ */
+export async function fundCashRequisition(
+  tx: Tx,
+  requisitionId: string,
+  funding: {
+    source: "employee_advance" | "petty_cash" | "stock_request" | "other";
+    sourceId?: string | null;
+  },
+  actor: { id?: string | null; name: string },
+) {
+  if (!isUuid(requisitionId)) return null;
+  const existing = await getCashRequisitionById(tx, requisitionId);
+  if (!existing) return null;
+
+  if (existing.status !== "approved") {
+    throw new Error(
+      `Requisition ${existing.requisitionNumber} is ${existing.status}. Only an approved requisition can be funded.`,
+    );
+  }
+
+  const [row] = await tx
+    .update(projectCashRequisitions)
+    .set({
+      status: "funded",
+      fundedSource: funding.source,
+      fundedSourceId:
+        funding.sourceId && isUuid(funding.sourceId) ? funding.sourceId : null,
+      fundedAt: new Date(),
+      /** The decision columns stay as the approver left them — funding is not
+       *  a second approval, and overwriting them would erase who allowed it. */
+      lastModifiedById: actor.id ?? null,
+      lastModifiedByName: actor.name,
+      updatedAt: new Date(),
+    })
+    .where(eq(projectCashRequisitions.id, requisitionId))
+    .returning();
+  return row ?? null;
+}
+
+export async function getCashRequisitionById(tx: Tx, requisitionId: string) {
+  if (!isUuid(requisitionId)) return null;
+  const [row] = await tx
+    .select()
+    .from(projectCashRequisitions)
+    .where(eq(projectCashRequisitions.id, requisitionId))
+    .limit(1);
+  return row ?? null;
+}
+
+/** The register: newest first, which is how a cash book is read. */
+export async function listCashRequisitions(tx: Tx, projectId: string) {
+  if (!isUuid(projectId)) return [];
+  return tx
+    .select()
+    .from(projectCashRequisitions)
+    .where(eq(projectCashRequisitions.projectId, projectId))
+    .orderBy(desc(projectCashRequisitions.requestDate), desc(projectCashRequisitions.createdAt));
+}
+
+export interface CashRequisitionSummary {
+  requested: number;
+  approved: number;
+  funded: number;
+  awaiting: number;
+  awaitingCount: number;
+  count: number;
+}
+
+/**
+ * The four figures the MD's own screen shows, plus the two that make them
+ * actionable.
+ *
+ * A CANCELLED OR REJECTED REQUEST COUNTS FOR NOTHING. `requested` is what is
+ * live — everything anybody is still expected to answer or pay — because a
+ * total that includes six refused requests is a number nobody can act on.
+ */
+export async function getCashRequisitionSummary(
+  tx: Tx,
+  projectId: string,
+): Promise<CashRequisitionSummary> {
+  const empty: CashRequisitionSummary = {
+    requested: 0, approved: 0, funded: 0, awaiting: 0, awaitingCount: 0, count: 0,
+  };
+  if (!isUuid(projectId)) return empty;
+
+  const [row] = (await tx.execute(sql`
+    SELECT
+      COALESCE(SUM(r.amount) FILTER (
+        WHERE r.status IN ('draft','submitted','approved','funded')), 0)::float8 AS requested,
+      COALESCE(SUM(r.amount) FILTER (WHERE r.status = 'approved'), 0)::float8    AS approved,
+      COALESCE(SUM(r.amount) FILTER (WHERE r.status = 'funded'), 0)::float8      AS funded,
+      COALESCE(SUM(r.amount) FILTER (WHERE r.status = 'submitted'), 0)::float8   AS awaiting,
+      COUNT(*) FILTER (WHERE r.status = 'submitted')::int                        AS awaiting_count,
+      COUNT(*) FILTER (WHERE r.status <> 'cancelled')::int                       AS count
+      FROM project_cash_requisitions r
+     WHERE r.project_id = ${projectId}::uuid
+  `)) as unknown as Array<Record<string, unknown>>;
+
+  if (!row) return empty;
+  return {
+    requested: num(row.requested),
+    approved: num(row.approved),
+    funded: num(row.funded),
+    awaiting: num(row.awaiting),
+    awaitingCount: Number(row.awaiting_count ?? 0),
+    count: Number(row.count ?? 0),
+  };
+}
+
+/** A draft and nothing else — the trigger refuses the rest, in words. */
+export async function deleteCashRequisition(tx: Tx, requisitionId: string) {
+  if (!isUuid(requisitionId)) return false;
+  const rows = await tx
+    .delete(projectCashRequisitions)
+    .where(eq(projectCashRequisitions.id, requisitionId))
+    .returning({ id: projectCashRequisitions.id });
+  return rows.length > 0;
 }

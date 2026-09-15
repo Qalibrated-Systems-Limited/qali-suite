@@ -750,6 +750,13 @@
       "when": 1787049190566,
       "tag": "0106_a_period_opens_when_it_begins",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1787049250566,
+      "tag": "0107_a_cash_requisition_is_an_authorisation",
+      "breakpoints": true
     }
   ]
 }

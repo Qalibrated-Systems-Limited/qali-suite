@@ -952,6 +952,28 @@ export const projectTimesheetUnitEnum = pgEnum("project_timesheet_unit", [
  * and only a date can answer that. `cancelled` is a stage that was dropped,
  * and its value returns to the unallocated part of the contract.
  */
+/**
+ * The cash requisition's states — 0107. Approved is the point it counts, and
+ * only an approved one may be funded; the same rule bills, claims, expenses,
+ * timesheets and variations are on.
+ */
+export const projectCashRequisitionStatusEnum = pgEnum(
+  "project_cash_requisition_status",
+  ["draft", "submitted", "approved", "rejected", "funded", "cancelled"],
+);
+
+/**
+ * WHICH EXISTING DOCUMENT RELEASED THE MONEY. A requisition authorises and
+ * posts nothing (0107 decision 1), so this records the path the cash actually
+ * took — an employee advance, the petty cash float, or a stock request.
+ * `other` is honest rather than lax: cash handed over outside all three
+ * happens, and naming it `other` beats inventing a petty cash return.
+ */
+export const projectCashRequisitionSourceEnum = pgEnum(
+  "project_cash_requisition_source",
+  ["employee_advance", "petty_cash", "stock_request", "other"],
+);
+
 export const projectMilestoneStatusEnum = pgEnum("project_milestone_status", [
   "pending",
   "achieved",
