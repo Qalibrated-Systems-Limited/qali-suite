@@ -1,12 +1,41 @@
 import { Card } from "@/components/ui/card";
-import {
-  FolderKanban,
-  Activity,
-  PauseCircle,
-  CheckCircle2,
-  TrendingUp,
-} from "lucide-react";
 import { getProjectStats } from "@/app/db/actions/project-actions";
+
+/**
+ * The counts and the money, in ONE strip above the list.
+ *
+ * It was two blocks: four cards at `p-5`, each with a 40px icon tile and a
+ * `text-2xl` figure, and beneath them a gradient "Active Projects Summary"
+ * card with its own icon tile, its own heading and four more figures. Together
+ * they took roughly 260px on a laptop before a single project appeared, and on
+ * a phone they were four rows — two of counts, two of money — so the list
+ * started below the fold on the page whose whole job is the list.
+ *
+ * WHAT WENT, and none of it was information:
+ *
+ *   * The icon tiles. A coloured square beside the word "Active" tells the
+ *     reader nothing the word does not, and it set the height of the row.
+ *   * The "Active Projects Summary" heading and its gradient — a heading over
+ *     four figures that are already labelled.
+ *   * The second Card. Counts and money are one glance; two surfaces made them
+ *     two.
+ *
+ * WHAT STAYED: every figure, its label, and the colours that carry meaning —
+ * revenue green, cost red, committed amber, because those three are read
+ * against each other and the colour is the reading.
+ *
+ * ── Two layout details worth keeping ───────────────────────────────────────
+ *
+ * `py-0 gap-0` rather than `p-0`: the Card component's own class list ends in
+ * `gap-6 … py-6`, and `py-6` is generated AFTER `p-0` in Tailwind's padding
+ * order, so `p-0` loses the cascade at equal specificity and the strip keeps
+ * 48px of vertical padding it appears to have been told to drop.
+ *
+ * The hairlines are `gap-px` over `bg-border`, not `divide-x`. On a two-column
+ * grid `divide-x` gives every child but the first a left border — including
+ * the first cell of the second row, which draws a stray vertical line down the
+ * container's left edge.
+ */
 
 function formatCurrency(amount) {
   return new Intl.NumberFormat("en-KE", {
@@ -16,118 +45,76 @@ function formatCurrency(amount) {
   }).format(amount || 0);
 }
 
-export default async function ProjectStats() {
-  const stats = await getProjectStats();
-
-  const cards = [
-    {
-      label: "Total Projects",
-      value: stats.total,
-      icon: FolderKanban,
-      iconColor: "text-blue-500",
-      iconBg: "bg-blue-500/10",
-    },
-    {
-      label: "Active",
-      value: stats.active,
-      icon: Activity,
-      iconColor: "text-emerald-500",
-      iconBg: "bg-emerald-500/10",
-    },
-    {
-      label: "On Hold",
-      value: stats.onHold,
-      icon: PauseCircle,
-      iconColor: "text-amber-500",
-      iconBg: "bg-amber-500/10",
-    },
-    {
-      label: "Completed",
-      value: stats.completed + stats.closed,
-      icon: CheckCircle2,
-      iconColor: "text-purple-500",
-      iconBg: "bg-purple-500/10",
-    },
-  ];
-
+/** One cell. `tone` is the meaning, not decoration. */
+function Figure({ label, value, tone }) {
   return (
-    <div className="space-y-4">
-      {/* Stat Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {cards.map((card) => (
-          <Card key={card.label} className="p-4 sm:p-5">
-            <div className="flex items-center gap-3">
-              <div className={`rounded-lg p-2.5 ${card.iconBg}`}>
-                <card.icon className={`h-5 w-5 ${card.iconColor}`} />
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm text-muted-foreground">
-                  {card.label}
-                </p>
-                <p className="text-xl sm:text-2xl font-bold">{card.value}</p>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
-
-      {/* Budget Summary */}
-      {stats.totalBudget > 0 && (
-        <Card className="p-4 sm:p-5 bg-gradient-to-r from-blue-500/5 to-purple-500/5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="rounded-lg p-2.5 bg-blue-500/10">
-              <TrendingUp className="h-5 w-5 text-blue-500" />
-            </div>
-            <h3 className="font-semibold">Active Projects Summary</h3>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div>
-              <p className="text-xs text-muted-foreground">Total Budget</p>
-              <p className="text-lg font-bold">
-                KES {formatCurrency(stats.totalBudget)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Revenue</p>
-              <p className="text-lg font-bold text-emerald-600">
-                KES {formatCurrency(stats.totalRevenue)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Costs</p>
-              <p className="text-lg font-bold text-red-600">
-                KES {formatCurrency(stats.totalCosts)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Committed</p>
-              <p className="text-lg font-bold text-amber-600">
-                KES {formatCurrency(stats.totalCommitted)}
-              </p>
-            </div>
-          </div>
-        </Card>
-      )}
+    <div className="min-w-0 bg-card px-3 py-2.5 sm:px-4">
+      <p className="truncate text-[11px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className={`truncate text-base font-semibold sm:text-lg ${tone ?? ""}`}>
+        {value}
+      </p>
     </div>
   );
 }
 
-export function ProjectStatsSkeleton() {
+const ROW = "grid grid-cols-2 gap-px bg-border sm:grid-cols-4";
+
+export default async function ProjectStats() {
+  const stats = await getProjectStats();
+
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <Card key={i} className="p-4 sm:p-5 animate-pulse">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-lg bg-muted" />
-              <div className="space-y-2">
-                <div className="h-3 w-16 bg-muted rounded" />
-                <div className="h-6 w-10 bg-muted rounded" />
-              </div>
-            </div>
-          </Card>
-        ))}
+    <Card className="gap-0 overflow-hidden py-0">
+      <div className={ROW}>
+        <Figure label="Projects" value={stats.total} />
+        <Figure label="Active" value={stats.active} />
+        <Figure label="On hold" value={stats.onHold} />
+        <Figure label="Completed" value={stats.completed + stats.closed} />
       </div>
+
+      {stats.totalBudget > 0 && (
+        <div className={`mt-px ${ROW}`}>
+          <Figure label="Budget" value={`KES ${formatCurrency(stats.totalBudget)}`} />
+          <Figure
+            label="Revenue"
+            value={`KES ${formatCurrency(stats.totalRevenue)}`}
+            tone="text-emerald-600 dark:text-emerald-500"
+          />
+          <Figure
+            label="Costs"
+            value={`KES ${formatCurrency(stats.totalCosts)}`}
+            tone="text-red-600 dark:text-red-500"
+          />
+          <Figure
+            label="Committed"
+            value={`KES ${formatCurrency(stats.totalCommitted)}`}
+            tone="text-amber-600 dark:text-amber-500"
+          />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * The same shape, so the list does not jump when the figures arrive.
+ *
+ * Two rows, because a tenant that has budgeted anything gets two — a skeleton
+ * one row shorter than its content is the layout shift it exists to prevent.
+ */
+export function ProjectStatsSkeleton() {
+  const cell = (key) => (
+    <div key={key} className="space-y-2 bg-card px-3 py-2.5 sm:px-4">
+      <div className="h-3 w-14 rounded bg-muted" />
+      <div className="h-5 w-16 rounded bg-muted" />
     </div>
+  );
+
+  return (
+    <Card className="animate-pulse gap-0 overflow-hidden py-0">
+      <div className={ROW}>{[1, 2, 3, 4].map(cell)}</div>
+      <div className={`mt-px ${ROW}`}>{[5, 6, 7, 8].map(cell)}</div>
+    </Card>
   );
 }
