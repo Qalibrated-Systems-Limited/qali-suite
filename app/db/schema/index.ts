@@ -53,3 +53,4 @@ export * from "./salesOrders";
 export * from "./bankFeed";
 export * from "./approvals";
 export * from "./integrations";
+export * from "./licensing";
