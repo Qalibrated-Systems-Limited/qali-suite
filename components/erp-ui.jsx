@@ -99,14 +99,18 @@ export function Btn({ children, variant = "primary", onClick, size = "md", disab
 }
 
 export function Alert({ type = "info", children }) {
+  // Translucent brand tints over the page background rather than fixed pastel
+  // fills, so the banner reads the same in light and dark mode instead of
+  // punching a light patch into a dark page. Text is --foreground (always
+  // legible); the colour lives in the accent border and icon.
   const t = {
-    info: { bg: "#EFF6FF", border: "#BFDBFE", color: "#1E40AF", icon: "ℹ️" },
-    warning: { bg: T.amberL, border: "#FCD34D", color: T.amber, icon: "⚠️" },
-    error: { bg: T.redL, border: "#FCA5A5", color: T.red, icon: "🔴" },
-    success: { bg: T.greenL, border: "#86EFAC", color: T.green, icon: "✅" },
-  }[type];
+    info: { rgb: "0,112,192", icon: "ℹ️" },
+    warning: { rgb: "184,96,11", icon: "⚠️" },
+    error: { rgb: "192,0,0", icon: "🔴" },
+    success: { rgb: "30,107,60", icon: "✅" },
+  }[type] || { rgb: "0,112,192", icon: "ℹ️" };
   return (
-    <div style={{ background: t.bg, border: `1px solid ${t.border}`, color: t.color, padding: "10px 14px", borderRadius: 8, display: "flex", gap: 8, fontSize: 13, marginBottom: 14 }}>
+    <div style={{ background: `rgba(${t.rgb},0.10)`, border: `1px solid rgba(${t.rgb},0.32)`, borderLeft: `3px solid rgba(${t.rgb},0.8)`, color: "var(--foreground)", padding: "10px 14px", borderRadius: 8, display: "flex", gap: 8, fontSize: 13, marginBottom: 14 }}>
       <span>{t.icon}</span>
       <span style={{ flex: 1 }}>{children}</span>
     </div>
