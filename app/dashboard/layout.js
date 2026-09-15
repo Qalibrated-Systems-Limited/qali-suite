@@ -1,9 +1,9 @@
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { AlertCircle, LogOut } from "lucide-react";
 import { auth } from "../../auth";
 import { logout } from "../db/actions/auth-actions";
 import { getSwitchableCompanies } from "@/app/db/actions/company-switch-actions";
-import { ChooseCompany } from "@/components/choose-company";
 
 import { AppSidebar } from "./components/app-sidebar";
 import { CommandPaletteProvider } from "@/components/command-palette-provider";
@@ -70,12 +70,23 @@ async function DashboardLayout({ children }) {
    * single-company user never sees this, and an Admin of two hits the same
    * wall a SuperAdmin does.
    *
+   * IT REDIRECTS. IT DOES NOT RENDER THE CHOOSER IN PLACE OF `children`.
+   *
+   * That is what it used to do, and the reader saw the right screen while the
+   * page underneath ran regardless — the App Router renders a layout and its
+   * page segment concurrently, so leaving `children` out of the returned tree
+   * does not stop the page being evaluated. Every such request logged
+   * "No company selected. You have access to 3." from whichever page it was,
+   * thrown before this layout had decided anything. A redirect is the only
+   * thing that ends a request.
+   *
    * EXEMPT: the platform pages, which are company-less by design. Admin →
    * Companies reads across tenants on the privileged connection (app/db/platform.ts),
    * and /dashboard renders the platform dashboard FOR A SuperAdmin — for
    * everyone else /dashboard is that company's books and belongs behind the
    * gate. Sending platform staff to a chooser before they can reach the screen
-   * that lists the companies would be a loop with no way out.
+   * that lists the companies would be a loop with no way out. /select-company
+   * is exempt for the plainest reason of all: it is where this sends people.
    *
    * Degrades to letting the request through: a Postgres that cannot be reached
    * must fail where the failure can be described, not behind a chooser with
@@ -85,6 +96,7 @@ async function DashboardLayout({ children }) {
   const isPlatformPath =
     pathname.startsWith("/dashboard/admin") ||
     pathname.startsWith("/dashboard/subscription-expired") ||
+    pathname.startsWith("/dashboard/select-company") ||
     (user?.role === "SuperAdmin" &&
       (pathname === "/dashboard" || pathname === "/dashboard/"));
 
@@ -108,8 +120,9 @@ async function DashboardLayout({ children }) {
   const choosable = (grants?.companies ?? []).filter((c) => c.isActive);
   const activeId = grants?.activeCompanyId ?? null;
   const hasUsableActive = choosable.some((c) => c.id === activeId);
-  const mustChooseCompany =
-    !isPlatformPath && !hasUsableActive && choosable.length > 1;
+  if (!isPlatformPath && !hasUsableActive && choosable.length > 1) {
+    redirect("/dashboard/select-company");
+  }
 
   // Bell data — one query, index-backed, capped. Called once per render here,
   // which is where the deduplication belongs: the Mongo version wrapped itself
@@ -117,13 +130,7 @@ async function DashboardLayout({ children }) {
   // how one company's rows get served inside another's after a switch.
   // Degrades to an empty bell rather than throwing; the layout wraps every page.
   //
-  // NOT ASKED AT ALL WHILE THE CHOOSER IS UP. Notifications are tenant-scoped,
-  // and we have just established there is no tenant to scope them to — so the
-  // query can only fail, and asking it is a round trip spent to be told what
-  // the line above already said.
-  const notifications = mustChooseCompany
-    ? { items: [], unread: 0 }
-    : await getMyNotifications();
+  const notifications = await getMyNotifications();
 
   return (
     <CommandPaletteProvider
@@ -139,11 +146,7 @@ async function DashboardLayout({ children }) {
         companySwitcher={<CompanySwitcher grants={grants} />}
         children={
           <div className="p-4 pb-20 md:p-6 md:pb-6">
-            {mustChooseCompany ? (
-              <ChooseCompany companies={choosable} />
-            ) : (
-              children
-            )}
+            {children}
             {/* Mobile bottom nav — fixed, sm:hidden. Extra pb-20 above
                 so content isn't hidden behind it on small screens. */}
             <MobileBottomNav role={user?.role} />

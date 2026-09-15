@@ -342,6 +342,37 @@ export async function linkUserToPartyDirect(input: {
 }
 
 /**
+ * How many companies this login may enter, for the session token.
+ *
+ * THE MIDDLEWARE CANNOT ASK POSTGRES, and it is the only place that can stop a
+ * page rendering. The dashboard layout redirects to the chooser when there is
+ * no acting company, but a layout and its page segment render CONCURRENTLY, so
+ * the page has already thrown by then — a redirect ends the response, not the
+ * render that was already under way. Carrying the count on the token lets
+ * proxy.ts decide before anything renders at all.
+ *
+ * Active grants on active companies, which is exactly what
+ * `resolveActiveCompany` counts when it decides whether the choice is open.
+ * A stale count costs one extra hop through /dashboard/select-company, which
+ * re-reads the grants and bounces straight back when there is nothing to
+ * choose — it can never lock anybody out.
+ *
+ * Privileged, like its neighbours here: this runs during sign-in, before a
+ * tenant is scoped.
+ */
+export async function countUsableCompanies(userId: string): Promise<number> {
+  const rows = (await privilegedDb().execute(sql`
+    SELECT count(*)::int AS n
+      FROM user_company_access a
+      JOIN companies c ON c.id = a.company_id
+     WHERE a.user_id = ${String(userId)}
+       AND a.status = 'active'
+       AND c.is_active = true
+  `)) as unknown as Array<{ n: number }>;
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
  * Status and token version, for the session-freshness check.
  *
  * The narrowest possible read on the hottest privileged path: two columns by

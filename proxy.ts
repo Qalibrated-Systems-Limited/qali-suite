@@ -67,6 +67,48 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/dashboard/subscription-expired", nextUrl));
   }
 
+  /**
+   * ── No acting company: stop BEFORE anything renders ─────────────────────
+   *
+   * Row-level security scopes every read to one company, and
+   * `resolveActingCompany` refuses to choose for somebody holding several. The
+   * dashboard layout redirects to the chooser when that happens, and that is
+   * not early enough: the App Router renders a layout and its page segment
+   * CONCURRENTLY, so the page has already run and thrown
+   *
+   *     Error: No company selected. You have access to 3.
+   *       at EditUserPage (app/dashboard/users/[id]/update/page.jsx)
+   *
+   * before the layout's redirect ends the response. The reader saw the right
+   * screen; the server logged a failure on every request, which is how a real
+   * failure gets lost. A redirect ends a response — only the middleware runs
+   * early enough to end it before the render.
+   *
+   * DECIDED FROM THE TOKEN, because this runs on the edge and cannot ask
+   * Postgres. `companyCount` is refreshed beside the role in auth.ts. A stale
+   * count costs one hop: /dashboard/select-company re-reads the grants and
+   * bounces straight back when there is nothing to choose. It cannot lock
+   * anybody out, which is why a claim is safe to trust for this and not for
+   * authorisation — the gate still refuses on every request regardless.
+   *
+   * The same exemptions the layout keeps: the platform pages are company-less
+   * by design, and the chooser cannot redirect to itself.
+   */
+  const needsCompany =
+    !user.activeCompanyId &&
+    typeof user.companyCount === "number" &&
+    user.companyCount > 1;
+
+  const isCompanyLessPath =
+    nextUrl.pathname.startsWith("/dashboard/admin") ||
+    nextUrl.pathname.startsWith("/dashboard/select-company") ||
+    nextUrl.pathname.startsWith("/dashboard/subscription-expired") ||
+    (role === "SuperAdmin" && nextUrl.pathname === "/dashboard");
+
+  if (needsCompany && !isCompanyLessPath) {
+    return NextResponse.redirect(new URL("/dashboard/select-company", nextUrl));
+  }
+
   return pass();
 });
 

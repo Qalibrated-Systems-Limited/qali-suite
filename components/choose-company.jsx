@@ -51,10 +51,22 @@ export function ChooseCompany({ companies = [] }) {
         <h1 className="text-xl font-semibold tracking-tight">
           Choose a company
         </h1>
+        {/* Singular reads badly as "You have access to 1", and the
+            one-company case is real: it is how a token that still claims
+            several heals itself. */}
         <p className="text-sm text-muted-foreground">
-          You have access to {companies.length}. Every page shows one company&apos;s
-          records at a time — pick the one you want to work in. You can switch
-          again from the menu at the top.
+          {companies.length === 1 ? (
+            <>
+              Open {companies[0].name} to continue. Every page shows one
+              company&apos;s records at a time.
+            </>
+          ) : (
+            <>
+              You have access to {companies.length}. Every page shows one
+              company&apos;s records at a time — pick the one you want to work
+              in. You can switch again from the menu at the top.
+            </>
+          )}
         </p>
       </header>
 
