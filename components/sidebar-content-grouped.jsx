@@ -4,6 +4,7 @@ import {
   Activity,
   ArrowLeftRight,
   Award,
+  KeyRound,
   BarChart3,
   BookOpen,
   Boxes,
@@ -843,6 +844,18 @@ const getNavigationGroups = (user) => {
     id: "integration",
     href: "/dashboard/integrations",
     hidden: user?.role !== "Admin" || !hasMod("integration"),
+  },
+
+  // ============================================
+  // LICENSING (ungrouped, platform/Admin only)
+  // ============================================
+  {
+    type: "single",
+    icon: KeyRound,
+    label: "Licensing",
+    id: "licensing",
+    href: "/dashboard/licensing",
+    hidden: !["Admin", "SuperAdmin"].includes(user?.role),
   },
 
   // ============================================
