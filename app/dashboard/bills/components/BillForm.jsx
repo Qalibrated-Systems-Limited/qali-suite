@@ -15,6 +15,8 @@
 
 import { useActionState, useRef, useState, useEffect } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Trash2,
@@ -1017,6 +1019,29 @@ export default function BillForm({
 
   // Normalize errors - handle both 'errors' and 'fieldErrors' from server
   const errors = state.fieldErrors || state.errors || {};
+
+  /**
+   * SUCCESS HAD NOWHERE TO GO.
+   *
+   * The action returns { success, billId, message } and the form did nothing
+   * with it: no toast, no navigation. A save that works looked identical to a
+   * save that never fired — the page sat there with the form still filled in,
+   * so people pressed the button again and raised a second bill.
+   *
+   * The ref guards the double invocation React runs in development, which
+   * would otherwise push twice.
+   */
+  const router = useRouter();
+  const navigatedFor = useRef(null);
+  useEffect(() => {
+    if (!state?.success) return;
+    const id = state.billId ?? bill?._id;
+    if (!id || navigatedFor.current === id) return;
+    navigatedFor.current = id;
+    toast.success(state.message ?? "Saved");
+    router.push(`/dashboard/bills/${id}`);
+  }, [state, router]);
+
 
   // ----------------------------------------
   // Lines State (dynamic array)

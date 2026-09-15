@@ -24,17 +24,11 @@ import { getProjectStats } from "@/app/db/actions/project-actions";
  * revenue green, cost red, committed amber, because those three are read
  * against each other and the colour is the reading.
  *
- * ── Two layout details worth keeping ───────────────────────────────────────
- *
- * `py-0 gap-0` rather than `p-0`: the Card component's own class list ends in
- * `gap-6 … py-6`, and `py-6` is generated AFTER `p-0` in Tailwind's padding
- * order, so `p-0` loses the cascade at equal specificity and the strip keeps
- * 48px of vertical padding it appears to have been told to drop.
- *
  * The hairlines are `gap-px` over `bg-border`, not `divide-x`. On a two-column
  * grid `divide-x` gives every child but the first a left border — including
  * the first cell of the second row, which draws a stray vertical line down the
- * container's left edge.
+ * container's left edge. (`p-0` is safe against the Card's own `py-6`: `cn`
+ * runs tailwind-merge, so the later class wins the conflict outright.)
  */
 
 function formatCurrency(amount) {
@@ -65,7 +59,7 @@ export default async function ProjectStats() {
   const stats = await getProjectStats();
 
   return (
-    <Card className="gap-0 overflow-hidden py-0">
+    <Card className="gap-0 overflow-hidden p-0">
       <div className={ROW}>
         <Figure label="Projects" value={stats.total} />
         <Figure label="Active" value={stats.active} />
@@ -112,7 +106,7 @@ export function ProjectStatsSkeleton() {
   );
 
   return (
-    <Card className="animate-pulse gap-0 overflow-hidden py-0">
+    <Card className="animate-pulse gap-0 overflow-hidden p-0">
       <div className={ROW}>{[1, 2, 3, 4].map(cell)}</div>
       <div className={`mt-px ${ROW}`}>{[5, 6, 7, 8].map(cell)}</div>
     </Card>

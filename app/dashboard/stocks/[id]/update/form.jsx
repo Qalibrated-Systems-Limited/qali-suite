@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useActionState } from "react";
+import { useState, useActionState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
   Package,
   DollarSign,
@@ -287,6 +289,27 @@ export default function UpdateProductForm({
 
   // Get errors from server state
   const errors = state?.error || {};
+
+  /**
+   * SUCCESS HAD NOWHERE TO GO, and the comment above said so: "NO useEffect
+   * needed!" Nothing read `state` except the error map, so a product that
+   * saved cleanly left the person on the edit form with the fields still
+   * filled and no sign anything had happened. `updateProductPg` returns
+   * { success, productId, message } and revalidates both paths — all that was
+   * missing was going there.
+   *
+   * The ref guards React's development double-invoke, which would push twice.
+   */
+  const router = useRouter();
+  const navigatedFor = useRef(null);
+  useEffect(() => {
+    if (!state?.success) return;
+    const id = state.productId ?? product._id?.toString();
+    if (!id || navigatedFor.current === id) return;
+    navigatedFor.current = id;
+    toast.success(state.message ?? "Product updated.");
+    router.push(`/dashboard/stocks/${id}`);
+  }, [state, router, product]);
 
   return (
     // Match the Add wizard's width/centering so Add and Edit align consistently.

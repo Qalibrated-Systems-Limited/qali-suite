@@ -128,7 +128,7 @@ function ProjectRow({ project }) {
 
   return (
     <TableRow
-      className="cursor-pointer"
+      className="cursor-pointer transition-colors hover:bg-muted/50"
       onClick={() => router.push(href)}
     >
       <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">
@@ -335,11 +335,11 @@ export default function ProjectListWithFilters({
       </p>
 
       {empty ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center px-4">
-          <div className="w-20 h-20 mb-6 rounded-full bg-muted flex items-center justify-center">
-            <FolderKanban className="h-10 w-10 text-muted-foreground" />
+        <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <FolderKanban className="h-6 w-6 text-muted-foreground" />
           </div>
-          <h3 className="text-lg font-semibold text-foreground mb-2">
+          <h3 className="text-base font-semibold text-foreground mb-1.5">
             No projects found
           </h3>
           <p className="text-sm text-muted-foreground max-w-md">
@@ -393,45 +393,110 @@ export default function ProjectListWithFilters({
   );
 }
 
+/**
+ * The loading state, built from the SAME markup as the list above it.
+ *
+ * It used to be a guess at the shape: a full-width grey bar where the five
+ * filter pills go, and a stack of flex rows with five bars at arbitrary widths
+ * where the table goes — no header, no column alignment, and nothing that
+ * moved with the breakpoint. So every load ended in a jump, and the widest
+ * jump was on the desktop table, which gains a header row and three
+ * conditionally-visible columns the placeholder never had.
+ *
+ * This renders the real `Table`, the real `TableHeader` with its real column
+ * labels, and cells carrying the SAME `hidden xl:table-cell` / `2xl` /
+ * `lg:table-cell` classes as `ProjectRow`. The header is real text rather than
+ * a grey bar, because it is known before the data is and a column you can
+ * already read is worth more than a shimmer. Widths of the bars inside each
+ * cell echo what lands there: a short mono number, a long name, a badge.
+ *
+ * EIGHT ROWS, not the page's twenty. Twenty rows of shimmer is a wall, and the
+ * only honest claim a skeleton makes is "a list is coming, and this is its
+ * shape" — not "there are exactly this many".
+ */
 export function ProjectListSkeleton() {
+  const Bar = ({ className }) => (
+    <div className={`h-3.5 rounded bg-muted ${className}`} />
+  );
+
   return (
     <div className="space-y-3">
-      <div className="h-11 w-full bg-muted rounded animate-pulse" />
-      <div className="h-4 w-32 bg-muted rounded animate-pulse" />
+      {/* The filter strip, pill for pill. */}
+      <div className="flex w-full justify-start gap-1.5 rounded-md bg-muted p-1 sm:grid sm:grid-cols-5 sm:gap-2">
+        {["All", "Planning", "Active", "On Hold", "Completed"].map((label) => (
+          <div
+            key={label}
+            className="h-9 shrink-0 animate-pulse rounded-sm bg-muted-foreground/10 px-3.5"
+            style={{ minWidth: `${label.length * 8 + 28}px` }}
+          />
+        ))}
+      </div>
+
+      <Bar className="h-4 w-36 animate-pulse" />
 
       {/* Phone: the same stack of cards the real list renders. */}
-      <div className="flex md:hidden flex-col gap-2">
+      <div className="flex flex-col gap-2 md:hidden">
         {[1, 2, 3, 4, 5].map((i) => (
-          <Card key={i} className="p-3.5 min-h-[76px] animate-pulse space-y-2.5">
+          <Card key={i} className="min-h-[76px] animate-pulse space-y-2.5 p-3.5">
             <div className="flex items-start justify-between gap-2">
-              <div className="space-y-1.5 flex-1">
-                <div className="h-4 w-3/4 bg-muted rounded" />
-                <div className="h-3 w-1/2 bg-muted rounded" />
+              <div className="flex-1 space-y-1.5">
+                <div className="h-4 w-3/4 rounded bg-muted" />
+                <div className="h-3 w-1/2 rounded bg-muted" />
               </div>
-              <div className="h-5 w-16 bg-muted rounded shrink-0" />
+              <div className="h-5 w-16 shrink-0 rounded bg-muted" />
             </div>
             <div className="flex items-center justify-between">
-              <div className="h-3 w-16 bg-muted rounded" />
-              <div className="h-3 w-28 bg-muted rounded" />
+              <div className="h-3 w-16 rounded bg-muted" />
+              <div className="h-3 w-28 rounded bg-muted" />
             </div>
           </Card>
         ))}
       </div>
 
-      {/* md+: the register. */}
-      <Card className="hidden md:block p-0 overflow-hidden">
-        {[1, 2, 3, 4, 5, 6].map((i) => (
-          <div
-            key={i}
-            className="flex items-center gap-4 px-4 py-3 border-b last:border-b-0 animate-pulse"
-          >
-            <div className="h-3 w-20 bg-muted rounded" />
-            <div className="h-4 flex-1 bg-muted rounded" />
-            <div className="h-5 w-16 bg-muted rounded" />
-            <div className="h-3 w-24 bg-muted rounded hidden lg:block" />
-            <div className="h-3 w-16 bg-muted rounded" />
-          </div>
-        ))}
+      {/* md+: the register, column for column. */}
+      <Card className="hidden overflow-x-auto p-0 md:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="whitespace-nowrap">Number</TableHead>
+              <TableHead>Project</TableHead>
+              <TableHead className="hidden xl:table-cell">Client</TableHead>
+              <TableHead className="hidden 2xl:table-cell">Manager</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="hidden lg:table-cell">Progress</TableHead>
+              <TableHead className="text-right whitespace-nowrap">
+                Budget (KES)
+              </TableHead>
+              <TableHead className="text-right whitespace-nowrap">Used</TableHead>
+              <TableHead className="w-8" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+              <TableRow key={i} className="animate-pulse">
+                <TableCell><Bar className="h-3 w-20" /></TableCell>
+                <TableCell className="max-w-[22rem]"><Bar className="w-48" /></TableCell>
+                <TableCell className="hidden xl:table-cell"><Bar className="h-3 w-24" /></TableCell>
+                <TableCell className="hidden 2xl:table-cell"><Bar className="h-3 w-20" /></TableCell>
+                <TableCell><div className="h-5 w-20 rounded-full bg-muted" /></TableCell>
+                <TableCell className="hidden lg:table-cell">
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 w-14 rounded-full bg-muted" />
+                    <Bar className="h-3 w-8" />
+                  </div>
+                </TableCell>
+                <TableCell><Bar className="ml-auto h-3 w-20" /></TableCell>
+                <TableCell>
+                  <div className="flex items-center justify-end gap-2">
+                    <div className="hidden h-1.5 w-16 rounded-full bg-muted lg:block" />
+                    <Bar className="h-3 w-8" />
+                  </div>
+                </TableCell>
+                <TableCell className="w-8" />
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </Card>
     </div>
   );
