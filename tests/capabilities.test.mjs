@@ -147,6 +147,19 @@ describe("pages and the actions behind them", () => {
     expect(can("Accountant", "kpi.manage")).toBe(false);
   });
 
+  it("offers the create button only to somebody who can actually create", () => {
+    /*
+     * /dashboard/select-company shows "Create a company" to whoever holds
+     * `company.create`, and the create page itself refuses anyone but a
+     * SuperAdmin. A button that leads to a refusal is the same fault as a page
+     * that admits a role its action rejects, so the two are one capability.
+     */
+    expect(can("SuperAdmin", "company.create")).toBe(true);
+    for (const role of ["Admin", "CFO", "Finance Manager", "HR Manager", "Manager"]) {
+      expect(can(role, "company.create")).toBe(false);
+    }
+  });
+
   it("keeps closing a period apart from reopening and locking one", () => {
     // Closing is routine month-end. Reopening moves the line between settled
     // and unsettled books after somebody signed them off; locking is final.

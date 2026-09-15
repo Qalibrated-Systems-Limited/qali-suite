@@ -120,7 +120,10 @@ async function DashboardLayout({ children }) {
   const choosable = (grants?.companies ?? []).filter((c) => c.isActive);
   const activeId = grants?.activeCompanyId ?? null;
   const hasUsableActive = choosable.some((c) => c.id === activeId);
-  if (!isPlatformPath && !hasUsableActive && choosable.length > 1) {
+  // `!== 1` rather than `> 1`: one company is auto-selected by the gate, so
+  // it is the only count that needs nothing asked. Zero is a question too —
+  // and for somebody who may create a tenant it is an answerable one.
+  if (!isPlatformPath && !hasUsableActive && choosable.length !== 1) {
     redirect("/dashboard/select-company");
   }
 

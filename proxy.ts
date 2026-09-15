@@ -94,10 +94,19 @@ export default auth((req) => {
    * The same exemptions the layout keeps: the platform pages are company-less
    * by design, and the chooser cannot redirect to itself.
    */
+  /**
+   * NONE is as much a reason to come here as SEVERAL.
+   *
+   * The gate auto-selects when there is exactly one company, so one is the
+   * only count that resolves itself. Zero used to fall through to the page and
+   * throw "You do not have access to any company" — an error screen for a
+   * state the chooser can explain, and for platform staff a state they can fix
+   * in one click.
+   */
   const needsCompany =
     !user.activeCompanyId &&
     typeof user.companyCount === "number" &&
-    user.companyCount > 1;
+    user.companyCount !== 1;
 
   const isCompanyLessPath =
     nextUrl.pathname.startsWith("/dashboard/admin") ||

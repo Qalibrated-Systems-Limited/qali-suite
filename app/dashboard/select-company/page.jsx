@@ -1,8 +1,11 @@
 import Link from "next/link";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Building2, Plus } from "lucide-react";
 
+import { auth } from "@/auth";
+import { can } from "@/lib/capabilities";
 import { getSwitchableCompanies } from "@/app/db/actions/company-switch-actions";
 import { ChooseCompany } from "@/components/choose-company";
+import { Button } from "@/components/ui/button";
 
 export const metadata = { title: "Choose a company" };
 
@@ -34,6 +37,19 @@ export const metadata = { title: "Choose a company" };
  * so there is nothing here to ask and this bounces straight back.
  */
 export default async function SelectCompanyPage() {
+  const session = await auth();
+  const role = session?.user?.role;
+
+  /**
+   * Can this person FIX the empty case, rather than only be told about it?
+   *
+   * A SuperAdmin arriving here with nothing to open is usually looking at a
+   * platform with no tenants yet — a first install, or one whose companies
+   * were all deactivated. Telling them to "contact your administrator" is
+   * telling them to contact themselves.
+   */
+  const mayCreate = can(role, "company.create");
+
   let grants = null;
   try {
     grants = await getSwitchableCompanies();
@@ -57,6 +73,49 @@ export default async function SelectCompanyPage() {
    * the loop cannot form and the stale token heals itself.
    */
   if (choosable.length === 0) {
+    /**
+     * THE PERSON WHO CAN FIX IT GETS THE BUTTON, not the apology.
+     *
+     * This used to be one message for everybody — "contact your
+     * administrator" — which for platform staff is advice to contact
+     * themselves. `resolveActingCompany` already knew the difference and said
+     * so in its own error text ("No company has been set up yet. Create one
+     * under Admin → Companies"); it just said it inside a thrown Error, on an
+     * error page, with no link.
+     */
+    if (mayCreate) {
+      return (
+        <div className="mx-auto w-full max-w-md py-10">
+          <div className="rounded-md border border-border bg-card p-6">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-muted">
+              <Building2 className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <h1 className="mt-4 text-base font-semibold text-foreground">
+              No companies yet
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Nothing has been set up on this platform, or every company has
+              been deactivated. Create one and it becomes yours to open.
+            </p>
+            <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3">
+              <Button asChild size="sm">
+                <Link href="/dashboard/admin/companies/create">
+                  <Plus className="h-4 w-4" />
+                  Create a company
+                </Link>
+              </Button>
+              <Link
+                href="/dashboard/admin/companies"
+                className="text-sm text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+              >
+                All companies
+              </Link>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="mx-auto w-full max-w-md py-10">
         <div className="flex items-start gap-3 rounded-md border border-border bg-card p-5">
@@ -84,6 +143,27 @@ export default async function SelectCompanyPage() {
   return (
     <div className="mx-auto w-full max-w-xl">
       <ChooseCompany companies={choosable} />
+
+      {/* Somebody who may create a tenant is usually here to enter one, but
+          not always — a SuperAdmin standing up a new client should not have
+          to go looking for Admin → Companies. */}
+      {mayCreate && (
+        <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-5">
+          <Link
+            href="/dashboard/admin/companies/create"
+            className="inline-flex items-center gap-1.5 text-sm text-foreground underline underline-offset-4"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Create a company
+          </Link>
+          <Link
+            href="/dashboard/admin/companies"
+            className="text-sm text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+          >
+            Manage all companies
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
