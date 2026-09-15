@@ -720,21 +720,39 @@ export default async function ProjectDetailPage({ params, searchParams }) {
   return (
     <div className="flex flex-col gap-4 p-4 sm:p-5 lg:p-6">
       <FormBanner searchParams={resolvedSearchParams} />
-      {/* Header */}
+      {/*
+        THE HEADER, and what was wrong with it.
+
+        The back arrow was an icon button nudged down with `mt-1`, and the
+        three actions sat on their OWN row underneath, indented with
+        `pl-11 sm:pl-14` — a hand-measured left padding whose whole job was to
+        line up with the width of the arrow above it. Two magic numbers holding
+        a layout together, and on a phone the row they made was three unlabelled
+        icon squares floating under a wrapped title, because every label was
+        `hidden sm:inline`. Three identical outline boxes is not a toolbar.
+
+        So: the back link goes on its own line as a labelled link — the pattern
+        the edit and IPC screens already use — which removes both offsets, and
+        the actions move to the RIGHT of the identity on desktop, where every
+        other header in the app puts them. On a phone they become a full-width
+        three-up grid WITH their labels, at a size a thumb can hit.
+      */}
       <div className="space-y-3">
-        <div className="flex items-start gap-3 sm:gap-4">
-          <Button variant="ghost" size="icon" asChild className="mt-1 shrink-0">
-            <Link href="/dashboard/projects">
-              <ArrowLeft className="h-5 w-5" />
-            </Link>
-          </Button>
+        <Button variant="ghost" size="sm" asChild className="-ml-2 h-8 px-2">
+          <Link href="/dashboard/projects">
+            <ArrowLeft className="mr-1.5 h-4 w-4" />
+            Projects
+          </Link>
+        </Button>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <span className="font-mono text-xs sm:text-sm text-muted-foreground">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs text-muted-foreground sm:text-sm">
                 {project.projectNumber}
               </span>
               <Badge className={statusCfg.color}>
-                <StatusIcon className="h-3 w-3 mr-1" />
+                <StatusIcon className="mr-1 h-3 w-3" />
                 {statusCfg.label}
               </Badge>
               {project.priority !== "normal" && (
@@ -743,45 +761,53 @@ export default async function ProjectDetailPage({ params, searchParams }) {
                 </Badge>
               )}
             </div>
-            <h1 className="text-xl sm:text-2xl font-semibold text-foreground truncate">
+            {/* `break-words`, not `truncate`: a project name is how somebody
+                recognises the job, and "Constructions of Sori Road — Lot 2"
+                clipped at the viewport is the one string on the page that must
+                not be. */}
+            <h1 className="text-xl font-semibold break-words text-foreground sm:text-2xl">
               {project.name}
             </h1>
             {project.description && (
-              <p className="text-sm text-muted-foreground mt-1 line-clamp-2 sm:line-clamp-none max-w-2xl">
+              <p className="mt-1 line-clamp-2 max-w-2xl text-sm text-muted-foreground sm:line-clamp-none">
                 {project.description}
               </p>
             )}
           </div>
-        </div>
 
-        <div className="flex items-center gap-2 pl-11 sm:pl-14">
-          {project.status !== "closed" && (
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/dashboard/projects/${id}/edit`}>
-                <Edit className="h-4 w-4 sm:mr-1" />
-                <span className="hidden sm:inline">Edit</span>
+          {/* `flex-1` rather than a three-column grid: Edit disappears on a
+              closed project, and a fixed three-up would leave the two that
+              remain stranded across two thirds of the row. */}
+          <div className="flex gap-2 sm:shrink-0">
+            {project.status !== "closed" && (
+              <Button variant="outline" size="sm" asChild className="h-10 flex-1 sm:h-9 sm:flex-none">
+                <Link href={`/dashboard/projects/${id}/edit`}>
+                  <Edit className="mr-1.5 h-4 w-4" />
+                  Edit
+                </Link>
+              </Button>
+            )}
+            <Button variant="outline" size="sm" asChild className="h-10 flex-1 sm:h-9 sm:flex-none">
+              <Link href={`/dashboard/projects/${id}/budget`}>
+                <Wallet className="mr-1.5 h-4 w-4" />
+                Budget
               </Link>
             </Button>
-          )}
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/dashboard/projects/${id}/budget`}>
-              <Wallet className="h-4 w-4 sm:mr-1" />
-              <span className="hidden sm:inline">Budget</span>
-            </Link>
-          </Button>
-          {/*
-            The Monthly Report used to be a nav entry of its own. It is a
-            RENDERING of the progress, financial, diary and instruction figures
-            on this page and elsewhere — which makes it something you produce
-            for a reporting period, not somewhere you go. So it is an action on
-            the project record. §10.3.
-          */}
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/dashboard/projects/monthly-report?project=${id}`}>
-              <FileSpreadsheet className="h-4 w-4 sm:mr-1" />
-              <span className="hidden sm:inline">Monthly report</span>
-            </Link>
-          </Button>
+            {/*
+              The Monthly Report used to be a nav entry of its own. It is a
+              RENDERING of the progress, financial, diary and instruction
+              figures on this page and elsewhere — which makes it something you
+              produce for a reporting period, not somewhere you go. So it is an
+              action on the project record. §10.3.
+            */}
+            <Button variant="outline" size="sm" asChild className="h-10 flex-1 sm:h-9 sm:flex-none">
+              <Link href={`/dashboard/projects/monthly-report?project=${id}`}>
+                <FileSpreadsheet className="mr-1.5 h-4 w-4" />
+                <span className="sm:hidden">Report</span>
+                <span className="hidden sm:inline">Monthly report</span>
+              </Link>
+            </Button>
+          </div>
         </div>
       </div>
 
