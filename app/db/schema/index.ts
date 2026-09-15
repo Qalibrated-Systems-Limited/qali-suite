@@ -58,3 +58,4 @@ export * from "./tasks";
 export * from "./fleet";
 export * from "./bids";
 export * from "./shop";
+export * from "./intercompany";
