@@ -34,6 +34,11 @@ import { CloseSettlementDialog } from "../../components/CloseSettlementDialog";
 import { RecordReturnDialog } from "../../components/RecordReturnDialog";
 import { PayBalanceDialog } from "../../components/PayBalanceDialog";
 import { SubmitClaimButton } from "../../components/SubmitClaimButton";
+import {
+  hasRole,
+  CLAIM_APPROVE_ROLES,
+  CLAIM_PAY_ROLES,
+} from "@/lib/utils/role-gates";
 import { RecallClaimButton } from "../../components/RecallClaimButton";
 import { ResubmitClaimButton } from "../../components/ResubmitClaimButton";
 import ProjectContextCard from "../../components/ProjectContextCard";
@@ -59,7 +64,6 @@ export default async function ClaimDetailPage({ params }) {
   }
 
   const { user } = session;
-  const userRole = user.role?.toLowerCase();
 
   // Fetch claim and payment accounts in parallel
   const [claim, paymentAccounts] = await Promise.all([
@@ -71,13 +75,25 @@ export default async function ClaimDetailPage({ params }) {
     notFound();
   }
 
-  // Check permissions
+  /*
+   * THE ROLE STRINGS WERE MATCHED INLINE, AND THEY LOCKED OUT THE APPROVERS.
+   *
+   * `userRole === "manager" || userRole === "admin"` is not "SuperAdmin", not
+   * "CFO" and not "Finance Manager" — every one of which is in
+   * CLAIM_APPROVE_ROLES and is supposed to approve these. They were redirected
+   * off the page before they could read the claim, let alone act on it, so a
+   * claim sitting in front of the person who should move it looked dead.
+   *
+   * Exactly the bug the comment on INVOICE_WRITE_ROLES already describes: an
+   * inline list on a page, drifting from the gate the actions enforce. The
+   * gates are the source of truth; `hasRole` is how the rest of the app asks.
+   */
   const isOwner = claim.employee.userId === user.id;
-  const isManager = userRole === "manager" || userRole === "admin";
-  const isAccountant = userRole === "accountant" || userRole === "admin";
+  const canApprove = hasRole(user, CLAIM_APPROVE_ROLES);
+  const canPay = hasRole(user, CLAIM_PAY_ROLES);
 
-  // Only owner, managers, and accountants can view
-  if (!isOwner && !isManager && !isAccountant) {
+  // Owner, approvers and the people who pay may read a claim.
+  if (!isOwner && !canApprove && !canPay) {
     redirect("/dashboard/my-claims");
   }
 
@@ -224,7 +240,7 @@ export default async function ClaimDetailPage({ params }) {
           )}
 
           {/* Manager Actions - Approve/Reject submitted claims */}
-          {isManager && claim.status === "submitted" && (
+          {canApprove && claim.status === "submitted" && (
             <>
               <ApproveClaimDialog
                 claimId={claim._id}
@@ -238,7 +254,7 @@ export default async function ClaimDetailPage({ params }) {
           )}
 
           {/* Accountant Actions - Pay approved claims */}
-          {isAccountant &&
+          {canPay &&
             claim.status === "approved" &&
             (claim.claimType === "advance_request" ||
               claim.claimType === "reimbursement") && (
@@ -253,7 +269,7 @@ export default async function ClaimDetailPage({ params }) {
             )}
 
           {/* Process Settlement - for approved advance_return claims */}
-          {isAccountant &&
+          {canPay &&
             claim.claimType === "advance_return" &&
             claim.status === "approved" && (
               <CloseSettlementDialog
@@ -267,7 +283,7 @@ export default async function ClaimDetailPage({ params }) {
             )}
 
           {/* Record Return - when employee owes company */}
-          {isAccountant &&
+          {canPay &&
             claim.claimType === "advance_return" &&
             claim.status === "pending_return" && (
               <RecordReturnDialog
@@ -280,7 +296,7 @@ export default async function ClaimDetailPage({ params }) {
             )}
 
           {/* Pay Balance - when company owes employee */}
-          {isAccountant &&
+          {canPay &&
             claim.claimType === "advance_return" &&
             claim.status === "pending_payment" && (
               <PayBalanceDialog

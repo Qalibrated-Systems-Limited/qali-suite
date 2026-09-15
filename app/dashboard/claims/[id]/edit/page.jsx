@@ -8,6 +8,7 @@ import { getActiveProjects } from "@/app/db/actions/project-actions";
 import { AdvanceRequestForm } from "../../components/AdvanceRequestForm";
 import { ReimbursementForm } from "../../components/ReimbursementForm";
 import { getAllCostCodes } from "@/app/db/actions/project-actions";
+import { hasRole, CLAIM_APPROVE_ROLES } from "@/lib/utils/role-gates";
 
 export const metadata = {
   title: "Edit Claim | ERP System",
@@ -23,7 +24,6 @@ export default async function EditClaimPage({ params }) {
   }
 
   const { user } = session;
-  const userRole = user.role?.toLowerCase();
 
   // Fetch claim
   const claim = await getClaimById(id);
@@ -32,12 +32,15 @@ export default async function EditClaimPage({ params }) {
     notFound();
   }
 
-  // Check permissions
+  /*
+   * The same inline role strings the detail page carried, with the same hole:
+   * "superadmin", "cfo" and "finance manager" are none of them, so the people
+   * CLAIM_APPROVE_ROLES names were bounced to /dashboard/my-claims.
+   */
   const isOwner = claim.employee.userId === user.id;
-  const isManager = userRole === "manager" || userRole === "admin";
+  const canActForOthers = hasRole(user, CLAIM_APPROVE_ROLES);
 
-  // Only owner and managers can edit
-  if (!isOwner && !isManager) {
+  if (!isOwner && !canActForOthers) {
     redirect("/dashboard/my-claims");
   }
 
