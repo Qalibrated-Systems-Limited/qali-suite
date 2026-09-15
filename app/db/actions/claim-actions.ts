@@ -370,6 +370,57 @@ export async function recallEmployeeClaimPg(claimId: string) {
   }
 }
 
+/**
+ * draft → submitted, and only by the person whose claim it is.
+ *
+ * ── THE DEAD END THIS ENDS ─────────────────────────────────────────────────
+ *
+ * Recall moves a submitted claim back to draft, and its dialog promises "This
+ * will move the claim back to draft so you can make changes." You could make
+ * the changes. You could not send it back.
+ *
+ * `draft` had NO EXIT. The detail page offered Edit for a draft and nothing
+ * else; the only action that returned a claim to `submitted` was
+ * `resubmitEmployeeClaimPg`, which is for a REJECTED claim. And the UI never
+ * creates a draft — both create paths pass `submit: true` — so the only way
+ * into `draft` is a recall, which meant every recalled claim left the approval
+ * queue permanently.
+ *
+ * NOTHING ELSE WAS MISSING. The state-machine trigger in 0052 has allowed
+ * `draft -> submitted` since it was written, and `claims.submitClaim` has been
+ * in the repository the whole time with no caller outside the tests. The
+ * schema and the data layer were built for this; the action and the button
+ * were never written.
+ *
+ * Refuses anything but a draft. The trigger is the backstop — it would reject
+ * an approved claim being pushed back to submitted — but a person deserves the
+ * sentence rather than a constraint violation.
+ */
+export async function submitEmployeeClaimPg(claimId: string) {
+  try {
+    await withAuthorizedTenant([], async (tx, { user }) => {
+      const claim = await claims.getClaim(tx, claimId);
+      if (!claim) throw new Error("Claim not found");
+      if (claim.employeeUserId !== user.id) {
+        throw new Error("You can only submit your own claims");
+      }
+      if (claim.status !== "draft") {
+        throw new Error(
+          `Claim ${claim.claimNumber} is ${claim.status}, not a draft, so there is nothing to submit.`,
+        );
+      }
+      return claims.submitClaim(tx, claimId, { id: user.id, name: user.name });
+    });
+    revalidateClaim(claimId);
+    return { success: true, message: "Claim submitted for approval" };
+  } catch (error) {
+    return {
+      success: false,
+      message: userMessage(error, "Failed to submit claim"),
+    };
+  }
+}
+
 /** rejected → submitted, and only by the person whose claim it is. */
 export async function resubmitEmployeeClaimPg(claimId: string) {
   try {

@@ -33,6 +33,7 @@ import { format } from "date-fns";
 import { CloseSettlementDialog } from "../../components/CloseSettlementDialog";
 import { RecordReturnDialog } from "../../components/RecordReturnDialog";
 import { PayBalanceDialog } from "../../components/PayBalanceDialog";
+import { SubmitClaimButton } from "../../components/SubmitClaimButton";
 import { RecallClaimButton } from "../../components/RecallClaimButton";
 import { ResubmitClaimButton } from "../../components/ResubmitClaimButton";
 import ProjectContextCard from "../../components/ProjectContextCard";
@@ -158,6 +159,21 @@ export default async function ClaimDetailPage({ params }) {
                 </Link>
               </Button>
             )}
+
+          {/*
+            Owner can send a draft for approval.
+
+            `draft` is reachable only by recalling a submitted claim — both
+            create paths pass submit: true — so without this button every
+            recall was one-way, and the dialog that offered it said the
+            opposite.
+          */}
+          {isOwner && claim.status === "draft" && (
+            <SubmitClaimButton
+              claimId={claim._id}
+              claimNumber={claim.claimNumber}
+            />
+          )}
 
           {/* Owner can recall submitted claims back to draft */}
           {isOwner && claim.status === "submitted" && (
