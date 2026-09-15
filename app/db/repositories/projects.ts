@@ -96,6 +96,36 @@ function filterConditions(opts: ProjectFilters) {
   return conditions;
 }
 
+/**
+ * LIVE WORK FIRST, and this is the register's own rule rather than a new one.
+ *
+ * `listProjectsForWorkspace` has floated planning and active above everything
+ * else since it was written, because a switcher offering last year's closed
+ * jobs first is a switcher nobody uses. The register — the page whose whole
+ * job is the list — ordered by `created_at DESC` alone, so a job CLOSED two
+ * years ago outranked a live one whenever it happened to be created later. On
+ * a tenant with more completed jobs than running ones, page 1 of 20 was mostly
+ * dead work.
+ *
+ * Five ranks rather than the switcher's two: a register is read in groups, and
+ * "on hold" is a different question from "finished" — one needs somebody to
+ * unblock it, the other needs nothing. A dropdown does not need that
+ * distinction and still does not have it.
+ *
+ * Recency stays as the tiebreak, so within a group the page behaves exactly as
+ * it always has. The sort is over one page's worth of a tenant's projects, so
+ * the CASE costs nothing an index would have saved.
+ */
+const STATUS_RANK = sql`
+  CASE ${projects.status}
+    WHEN 'active'    THEN 0
+    WHEN 'planning'  THEN 1
+    WHEN 'on_hold'   THEN 2
+    WHEN 'completed' THEN 3
+    WHEN 'closed'    THEN 4
+    ELSE 5
+  END`;
+
 /** The list page. Same four search fields Mongo regexed, as one ILIKE each. */
 export async function listProjects(tx: Tx, opts: ProjectFilters = {}) {
   const page = Math.max(1, opts.page ?? 1);
@@ -107,7 +137,7 @@ export async function listProjects(tx: Tx, opts: ProjectFilters = {}) {
     .select()
     .from(projects)
     .where(where)
-    .orderBy(desc(projects.createdAt))
+    .orderBy(STATUS_RANK, desc(projects.createdAt))
     .limit(limit)
     .offset((page - 1) * limit);
 

@@ -1233,5 +1233,50 @@ suite("projects", () => {
       const active = await inA((tx) => repo.listProjects(tx, { status: "active" }));
       expect(active.projects.map((r) => r.name)).toEqual(["Running"]);
     });
+
+    /*
+     * LIVE WORK FIRST. The register ordered by created_at alone, so a job
+     * closed two years ago outranked a running one whenever it was created
+     * later — and on a tenant with more finished jobs than live ones, that is
+     * most of page one. `listProjectsForWorkspace` had floated live projects
+     * since it was written; the register did not.
+     *
+     * Seeded oldest-first so recency ALONE would produce the exact reverse of
+     * what is asserted: if the rank is ever dropped, this fails rather than
+     * passing by luck.
+     */
+    it("ranks by status before recency — the newest closed job is not first", async () => {
+      const running = await seedProject({ name: "Running" });
+      const held = await seedProject({ name: "Held" });
+      const done = await seedProject({ name: "Done" });
+      const newest = await seedProject({ name: "Newest, and closed" });
+
+      await inA((tx) => repo.setProjectStatus(tx, running.id, "active", actor));
+      await inA((tx) => repo.setProjectStatus(tx, held.id, "active", actor));
+      await inA((tx) => repo.setProjectStatus(tx, held.id, "on_hold", actor));
+      await inA((tx) => repo.setProjectStatus(tx, done.id, "active", actor));
+      await inA((tx) => repo.setProjectStatus(tx, done.id, "completed", actor));
+      await inA((tx) => repo.setProjectStatus(tx, newest.id, "active", actor));
+      await inA((tx) => repo.setProjectStatus(tx, newest.id, "completed", actor));
+      await inA((tx) => repo.setProjectStatus(tx, newest.id, "closed", actor));
+
+      const { projects } = await inA((tx) => repo.listProjects(tx));
+      expect(projects.map((r) => r.name)).toEqual([
+        "Running",
+        "Held",
+        "Done",
+        "Newest, and closed",
+      ]);
+    });
+
+    it("keeps newest-first WITHIN a status, which is what it always did", async () => {
+      const first = await seedProject({ name: "First" });
+      const second = await seedProject({ name: "Second" });
+      await inA((tx) => repo.setProjectStatus(tx, first.id, "active", actor));
+      await inA((tx) => repo.setProjectStatus(tx, second.id, "active", actor));
+
+      const { projects } = await inA((tx) => repo.listProjects(tx));
+      expect(projects.map((r) => r.name)).toEqual(["Second", "First"]);
+    });
   });
 });
