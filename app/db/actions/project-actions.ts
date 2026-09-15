@@ -2870,6 +2870,25 @@ export async function deleteProjectVariation(
 const MILESTONE_STATUSES = ["pending", "achieved", "cancelled"] as const;
 type MilestoneStatus = (typeof MILESTONE_STATUSES)[number];
 
+/**
+ * The main contract alone, for a screen that needs its TERMS and not its
+ * certificates.
+ *
+ * `getProjectCertificates` is the only way this surface could reach a contract,
+ * and it runs six queries — the chain, the position, the next certificate's
+ * basis, the bill, billable time and the milestones — because the IPC page
+ * draws all six. The milestone schedule needs the retention percentage and the
+ * contract sum and nothing else, so asking through that door would run five
+ * queries to throw away.
+ */
+export async function getProjectMainContract(projectId: string) {
+  if (!projectId) return null;
+  return withAuthorizedTenant([], async (tx) => {
+    const contract = await repo.getMainContract(tx, projectId);
+    return contract ? { ...contract, _id: String(contract.id) } : null;
+  });
+}
+
 export async function getProjectMilestones(projectId: string) {
   if (!projectId) return { milestones: [], summary: null };
   return withAuthorizedTenant([], async (tx) => {

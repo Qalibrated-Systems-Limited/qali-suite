@@ -11,6 +11,7 @@ import {
   Wallet,
   Ruler,
   Clock,
+  Flag,
 } from "lucide-react";
 import {
   SECTIONS,
@@ -46,6 +47,14 @@ import {
  * flags and let this component apply `selectProject`, which is the same rule the
  * pages use, from the same module. See PROJECTS-QALITRACK-PLAN.md §10.3 and §7.
  *
+ * MILESTONES TOOK IT TO NINE, and on the same rule that removed it. The cut
+ * above says the Milestone Tracker went because it "did not show milestones,
+ * because there is no milestone table" — 0093 built the table, so it owns
+ * records now and the rule that excluded it admits it. It is also second in
+ * the MD's own sidebar, and on an installation contract the schedule IS the
+ * valuation method. The register still renders on IPC & Payments as well:
+ * there to consult while certifying, here to build and maintain.
+ *
  * TIMESHEETS TOOK IT BACK TO EIGHT, and it passes both rules. It owns
  * `project_timesheets` — its own table, not a second view of somebody else's —
  * and it is the one section no project type may switch off, because every job
@@ -60,6 +69,7 @@ import {
  */
 const ICONS = {
   boq: Ruler,
+  milestones: Flag,
   programme: CalendarDays,
   instructions: FileEdit,
   diary: BookOpen,

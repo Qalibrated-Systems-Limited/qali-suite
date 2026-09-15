@@ -31,6 +31,7 @@
  */
 export const SECTIONS = [
   { key: "boq", href: "/dashboard/projects/boq", label: "Bill of Quantities" },
+  { key: "milestones", href: "/dashboard/projects/milestones", label: "Milestones" },
   { key: "programme", href: "/dashboard/projects/programme", label: "Programme" },
   { key: "instructions", href: "/dashboard/projects/instructions", label: "Engineer's Instructions" },
   { key: "diary", href: "/dashboard/projects/diary", label: "Site Diary" },
@@ -57,6 +58,15 @@ export function sectionsFor(project) {
   if (!project) return ALL_SECTIONS;
   return {
     boq: project.showsBoq !== false,
+    /**
+     * NO `shows_milestones` COLUMN, and none is needed. A milestone exists to
+     * be valued and to release retention, and both happen on a certificate —
+     * so a type with nothing to certify has no stages to bill, and the section
+     * follows the flag that already answers that question. 0093 gave
+     * milestones a table; §10.3's reason for folding the tracker away ("it did
+     * not show milestones, because there is no milestone table") went with it.
+     */
+    milestones: project.showsCertificates !== false,
     programme: project.showsProgramme !== false,
     instructions: project.showsInstructions !== false,
     diary: project.showsDiary !== false,
