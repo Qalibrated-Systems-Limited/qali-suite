@@ -55,3 +55,4 @@ export * from "./approvals";
 export * from "./integrations";
 export * from "./licensing";
 export * from "./tasks";
+export * from "./fleet";
