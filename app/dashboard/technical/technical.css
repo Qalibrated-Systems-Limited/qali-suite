@@ -244,6 +244,23 @@
 }
 
 /* ── sheet chooser (CHOOSE THE SHEET) ─────────────────────────────────────── */
+.tech-sheet-group { margin-top: 22px; }
+.tech-sheet-group:first-of-type { margin-top: 10px; }
+.tech-sheet-group-title {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 12px;
+  font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--muted-foreground, #6b7280);
+}
+.tech-sheet-group-title::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+.tech-sheet-group-count {
+  flex: none;
+  font: 800 10px/1 ui-monospace, monospace;
+  background: var(--tech-coal); color: var(--tech-gold);
+  padding: 4px 7px; border-radius: 999px;
+}
 .tech-sheets {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
