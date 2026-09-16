@@ -80,7 +80,7 @@ export function Stat({ label, value, sub, icon, variant }) {
   );
 }
 
-export function Btn({ children, variant = "primary", onClick, size = "md", disabled = false, style = {} }) {
+export function Btn({ children, variant = "primary", onClick, size = "md", disabled = false, style = {}, type = "button" }) {
   const styles = {
     primary: { bg: T.navy, color: T.white },
     gold: { bg: T.gold, color: T.white },
@@ -91,8 +91,11 @@ export function Btn({ children, variant = "primary", onClick, size = "md", disab
   };
   const s = styles[variant] || styles.primary;
   const pads = { sm: "5px 12px", md: "8px 18px", lg: "11px 24px" };
+  // Defaults to type="button" so a Btn placed inside a <form> never triggers an
+  // accidental submit — every Btn is onClick-driven. Pass type="submit" for the
+  // rare form-submitting button.
   return (
-    <button onClick={onClick} disabled={disabled} style={{ background: disabled ? "var(--muted)" : s.bg, color: disabled ? "var(--muted-foreground)" : s.color, border: s.border || "none", padding: pads[size], borderRadius: 7, fontSize: size === "sm" ? 12 : 13, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", ...style }}>
+    <button type={type} onClick={onClick} disabled={disabled} style={{ background: disabled ? "var(--muted)" : s.bg, color: disabled ? "var(--muted-foreground)" : s.color, border: s.border || "none", padding: pads[size], borderRadius: 7, fontSize: size === "sm" ? 12 : 13, fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", ...style }}>
       {children}
     </button>
   );
@@ -125,21 +128,38 @@ export function Progress({ value, height = 6 }) {
   );
 }
 
-export function Input({ label, value, onChange, type = "text", placeholder = "", required, note, readOnly }) {
+export function Input({ label, value, onChange, name, defaultValue, type = "text", placeholder = "", required, note, readOnly, min, max, step }) {
+  // Two modes, decided by whether the caller drives the value:
+  //  - CONTROLLED  (value/onChange given, e.g. a modal with useState): the input
+  //    mirrors that state.
+  //  - UNCONTROLLED (only `name` given, e.g. a <form> read via FormData): the
+  //    input keeps its own value and posts under `name`. Without this branch the
+  //    field was pinned to "" with no onChange — so it looked frozen and you
+  //    could not type (the Help Desk "New Ticket" form hit exactly this).
+  const controlled = onChange !== undefined || value !== undefined;
+  const modeProps = controlled
+    ? { value: value ?? "", onChange: (e) => onChange && onChange(e.target.value) }
+    : { defaultValue: defaultValue ?? "" };
   return (
     <div style={{ marginBottom: 14 }}>
       <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", marginBottom: 5 }}>{label}{required && <span style={{ color: T.red }}> *</span>}</label>
-      <input type={type} value={value || ""} onChange={(e) => onChange && onChange(e.target.value)} placeholder={placeholder} readOnly={readOnly} style={{ width: "100%", padding: "9px 12px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, color: "var(--foreground)", background: readOnly ? "var(--muted)" : "var(--background)", outline: "none", boxSizing: "border-box" }} />
+      <input name={name} type={type} required={required} placeholder={placeholder} readOnly={readOnly} min={min} max={max} step={step} {...modeProps} style={{ width: "100%", padding: "9px 12px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, color: "var(--foreground)", background: readOnly ? "var(--muted)" : "var(--background)", outline: "none", boxSizing: "border-box" }} />
       {note && <p style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 3 }}>{note}</p>}
     </div>
   );
 }
 
-export function Select({ label, value, onChange, options, required }) {
+export function Select({ label, value, onChange, options, required, name, defaultValue }) {
+  // Same controlled/uncontrolled split as Input, so <Select name=…> inside a
+  // plain <form> posts its value via FormData without needing local state.
+  const controlled = onChange !== undefined || value !== undefined;
+  const modeProps = controlled
+    ? { value: value ?? "", onChange: (e) => onChange && onChange(e.target.value) }
+    : { defaultValue: defaultValue ?? "" };
   return (
     <div style={{ marginBottom: 14 }}>
       <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground)", marginBottom: 5 }}>{label}{required && <span style={{ color: T.red }}> *</span>}</label>
-      <select value={value || ""} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "9px 12px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, color: "var(--foreground)", background: "var(--background)", outline: "none", boxSizing: "border-box" }}>
+      <select name={name} required={required} {...modeProps} style={{ width: "100%", padding: "9px 12px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, color: "var(--foreground)", background: "var(--background)", outline: "none", boxSizing: "border-box" }}>
         {options.map((o) => <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>)}
       </select>
     </div>

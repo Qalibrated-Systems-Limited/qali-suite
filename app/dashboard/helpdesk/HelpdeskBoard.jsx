@@ -27,6 +27,7 @@ import {
   addTicketComment,
   deleteTicket,
   getTicketDetail,
+  createCategory,
 } from "@/app/db/actions/helpdesk-actions";
 
 // ── vocab ─────────────────────────────────────────────────────────────────────
@@ -174,6 +175,7 @@ export default function HelpdeskBoard({ tickets = [], categories = [], stats, us
           categories={categories}
           users={users}
           isPending={isPending}
+          act={act}
           onClose={() => setShowNew(false)}
           onCreated={async (fd) => {
             const res = await act(createTicket, null, fd);
@@ -260,10 +262,16 @@ function Overview({ stats, tickets, onOpen }) {
 }
 
 // ── New ticket modal ─────────────────────────────────────────────────────────
-function NewTicketModal({ categories, users, isPending, onClose, onCreated }) {
+function NewTicketModal({ categories, users, isPending, act, onClose, onCreated }) {
   const [categoryId, setCategoryId] = useState("");
   const [priority, setPriority] = useState("medium");
   const [assignee, setAssignee] = useState("");
+
+  // Inline category creation, so triage isn't blocked by a missing category.
+  const [addingCat, setAddingCat] = useState(false);
+  const [catName, setCatName] = useState("");
+  const [catDept, setCatDept] = useState("");
+  const [catBusy, setCatBusy] = useState(false);
 
   // Default the priority to the chosen category's default.
   useEffect(() => {
@@ -271,8 +279,26 @@ function NewTicketModal({ categories, users, isPending, onClose, onCreated }) {
     if (c) setPriority(c.defaultPriority);
   }, [categoryId, categories]);
 
+  async function saveCategory() {
+    if (!catName.trim()) return toast.error("Give the category a name");
+    setCatBusy(true);
+    const fd = new FormData();
+    fd.set("name", catName.trim());
+    fd.set("department", catDept.trim());
+    fd.set("defaultPriority", priority);
+    const res = await act(createCategory, null, fd);
+    setCatBusy(false);
+    if (res?.success) {
+      toast.success("Category added");
+      setCatName(""); setCatDept(""); setAddingCat(false);
+      // router.refresh() (via act) re-fetches categories; the new one appears
+      // in the dropdown on the next render.
+    }
+  }
+
   function submit(e) {
     e.preventDefault();
+    if (!categoryId) return toast.error("Choose a category");
     const fd = new FormData(e.currentTarget);
     fd.set("categoryId", categoryId);
     fd.set("priority", priority);
@@ -290,12 +316,25 @@ function NewTicketModal({ categories, users, isPending, onClose, onCreated }) {
           <textarea name="description" rows={3} placeholder="What happened, where, and any detail that helps." style={{ width: "100%", padding: "9px 12px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, color: "var(--foreground)", background: "var(--background)", boxSizing: "border-box", resize: "vertical" }} />
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <Select label="Category" value={categoryId} onChange={setCategoryId} options={[{ value: "", label: "— Select —" }, ...categories.map((c) => ({ value: c.id, label: c.name }))]} />
+          <div>
+            <Select label="Category" value={categoryId} onChange={setCategoryId} options={[{ value: "", label: "— Select —" }, ...categories.map((c) => ({ value: c.id, label: c.name }))]} />
+            <button type="button" onClick={() => setAddingCat((v) => !v)} style={{ background: "none", border: "none", color: T.blue, fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0, marginTop: -8 }}>
+              {addingCat ? "− Cancel new category" : "+ New category"}
+            </button>
+          </div>
           <Select label="Priority" value={priority} onChange={setPriority} options={Object.keys(PRIORITY).map((p) => ({ value: p, label: PRIORITY[p].label }))} />
           {/* Source is a native select so its value posts with the form. */}
           <SourceField />
           <Select label="Assign to" value={assignee} onChange={setAssignee} options={[{ value: "", label: "Unassigned" }, ...users.map((u) => ({ value: u.id, label: u.name }))]} />
         </div>
+
+        {addingCat && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, alignItems: "end", background: "var(--muted)", border: "1px solid var(--border)", borderRadius: 8, padding: 12, marginBottom: 14 }}>
+            <Input label="New category name" value={catName} onChange={setCatName} placeholder="e.g. Calibration Support" />
+            <Input label="Department" value={catDept} onChange={setCatDept} placeholder="e.g. Technical" />
+            <Btn variant="primary" size="sm" disabled={catBusy} onClick={saveCategory} style={{ marginBottom: 14 }}>{catBusy ? "Adding…" : "Add"}</Btn>
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <Input label="Client / company" name="customerName" placeholder="Who is this for" />
           <Input label="Requester" name="requesterName" placeholder="Person who raised it" />
