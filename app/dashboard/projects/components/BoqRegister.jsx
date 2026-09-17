@@ -90,8 +90,8 @@ function qty(n) {
   );
 }
 
-/** Today as the site sees it. `toISOString()` is UTC, so after 21:00 in
- *  Nairobi it would default the measurement to yesterday. */
+/** Today as the site sees it. `toISOString()` is UTC, and Nairobi is UTC+3,
+ *  so between midnight and 03:00 local time it defaults to yesterday. */
 function localToday() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
