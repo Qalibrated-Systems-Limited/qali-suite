@@ -51,6 +51,48 @@ export function sheetsByCategory() {
   }));
 }
 
+/**
+ * Presentation for each discipline / "type of work" card: an icon and a
+ * one-line blurb. Anything without an entry falls back to a generic icon.
+ */
+export const CATEGORY_META = {
+  "Weighing & Metrology": { icon: "⚖️", blurb: "Weighbridges, scales & instrument calibration" },
+  "Construction": { icon: "🏗️", blurb: "Concrete, rebar, formwork & site records" },
+  "Civil Engineering": { icon: "🛣️", blurb: "Earthworks, roads, survey & drainage" },
+  "Mechanical Maintenance": { icon: "🔧", blurb: "Plant service, breakdowns & PPM" },
+  "Electrical": { icon: "⚡", blurb: "Installations, testing & solar PV" },
+  "Inspection & QA/QC": { icon: "🔍", blurb: "Incoming, final, welding & NDT" },
+  "HSE & Safety": { icon: "🦺", blurb: "Inspections, permits & incidents" },
+  "Field Service & General": { icon: "📋", blurb: "Site visits, handover & sign-off" },
+};
+
+/**
+ * The "type of work" cards for the first step of the new-report picker: one per
+ * discipline, with its sheet count, icon and blurb. Clicking a card opens the
+ * sheets in that discipline.
+ */
+export function workCategories() {
+  return sheetsByCategory().map(({ category, sheets }) => ({
+    category,
+    count: sheets.length,
+    icon: CATEGORY_META[category]?.icon || "📄",
+    blurb: CATEGORY_META[category]?.blurb || "",
+  }));
+}
+
+/** Resolve a raw ?work= value to a real category name (or null). */
+export function resolveCategory(value) {
+  if (!value) return null;
+  const want = String(value).trim().toLowerCase();
+  const all = [...new Set(SHEETS.map((s) => s.category))];
+  return all.find((c) => c.toLowerCase() === want) || null;
+}
+
+/** The sheets for one category, in catalogue order. */
+export function sheetsInCategory(category) {
+  return SHEETS.filter((s) => s.category === category);
+}
+
 /** Display serial: QSL-WB01-00001 from the stored "WB01-00001". */
 export function displaySerial(reportNumber) {
   if (!reportNumber) return "";
