@@ -8,24 +8,47 @@
  * serial number is issued per-sheet, so a report reads QSL-WB01-00001.
  */
 
-import { TEMPLATES } from "./templates";
+import { TEMPLATES, CATEGORY_ORDER } from "./templates";
 
 /**
- * The sheet catalogue for the pickers and cards, derived from the ported QSL
- * template definitions so there is one source of truth for both the fields a
- * sheet renders (templates.js) and how it is listed here.
+ * The sheet catalogue for the pickers and cards, derived from the template
+ * definitions so there is one source of truth for both the fields a sheet
+ * renders (templates.js) and how it is listed here. Each sheet keeps its
+ * `category` (the kind of project it belongs to) so the picker can group them.
  */
 export const SHEETS = TEMPLATES.filter((t) => !t.hidden).map((t) => ({
   code: t.code,
   name: t.name,
   blurb: t.desc,
   filledBy: t.who,
+  category: t.category || "Other",
 }));
 
 export const SHEET_BY_CODE = Object.fromEntries(SHEETS.map((s) => [s.code, s]));
 
 export function sheetName(code) {
   return SHEET_BY_CODE[code]?.name || code || "Report";
+}
+
+export function sheetCategory(code) {
+  return SHEET_BY_CODE[code]?.category || "Other";
+}
+
+/**
+ * Sheets grouped by category, in the declared CATEGORY_ORDER, with any
+ * categories not in that list appended at the end. Drives the grouped
+ * "choose a sheet" picker.
+ */
+export function sheetsByCategory() {
+  const present = [...new Set(SHEETS.map((s) => s.category))];
+  const ordered = [
+    ...CATEGORY_ORDER.filter((c) => present.includes(c)),
+    ...present.filter((c) => !CATEGORY_ORDER.includes(c)),
+  ];
+  return ordered.map((category) => ({
+    category,
+    sheets: SHEETS.filter((s) => s.category === category),
+  }));
 }
 
 /** Display serial: QSL-WB01-00001 from the stored "WB01-00001". */

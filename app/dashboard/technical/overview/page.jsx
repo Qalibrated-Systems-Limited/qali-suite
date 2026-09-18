@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import AccessDenied from "../../projects/components/AccessDenied";
 import { getTechnicalDashboard } from "@/app/db/actions/workflow-report-actions";
 import { canSeeProjectsNav } from "@/lib/permissions";
-import { sheetName } from "../lib/meta";
+import { sheetName, sheetCategory } from "../lib/meta";
 import { Plus } from "lucide-react";
 
 export const metadata = {
@@ -64,6 +64,17 @@ export default async function TechnicalDashboardPage() {
 
   const byType = (stats.byType || []).map((r) => ({ name: sheetName(r.type), count: r.count }));
   const maxType = Math.max(1, ...byType.map((r) => r.count));
+
+  // Roll the per-sheet counts up to the project discipline (category).
+  const catMap = {};
+  for (const r of stats.byType || []) {
+    const cat = sheetCategory(r.type);
+    catMap[cat] = (catMap[cat] || 0) + (r.count || 0);
+  }
+  const byCategory = Object.entries(catMap)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+  const maxCat = Math.max(1, ...byCategory.map((r) => r.count));
 
   const firstName = (session.user.name || "there").split(" ")[0];
 
@@ -139,6 +150,28 @@ export default async function TechnicalDashboardPage() {
                     </div>
                     <div className="tech-hbar">
                       <div className="fill" style={{ width: `${Math.round((r.count / maxType) * 100)}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* By discipline (project category) */}
+          <div className="tech-panel">
+            <div className="tech-sectionbar" style={{ marginTop: 0 }}>By discipline</div>
+            {byCategory.length === 0 ? (
+              <p className="tech-muted" style={{ fontSize: 13 }}>No reports yet.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {byCategory.map((r) => (
+                  <div key={r.name}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
+                      <span>{r.name}</span>
+                      <span style={{ fontWeight: 800 }}>{r.count}</span>
+                    </div>
+                    <div className="tech-hbar">
+                      <div className="fill" style={{ width: `${Math.round((r.count / maxCat) * 100)}%` }} />
                     </div>
                   </div>
                 ))}
