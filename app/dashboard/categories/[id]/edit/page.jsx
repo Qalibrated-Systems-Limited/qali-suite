@@ -56,24 +56,26 @@ export default async function EditCategoryPage({ params }) {
   }
 
   // Fetch category and parent options
-  const [categoryResult, categoriesResult] = await Promise.all([
+  // Both reads return the value itself, not `{ category }` / `{ categories }`.
+  // Reading `.category` off the row was always undefined, so every edit 404'd.
+  const [category, categories] = await Promise.all([
     getCategory(id),
     getCategories(true),
   ]);
 
-  if (!categoryResult.category) {
+  if (!category) {
     notFound();
   }
 
-  const category = categoryResult.category;
-  const categories = categoriesResult.categories || [];
-
-  // Filter out current category and its descendants from parent options
+  // A category cannot sit beneath itself or its own descendants. `path` is the
+  // ancestor NAMES joined with " > ", not ids, so a descendant is a row whose
+  // path extends this one's. The server refuses a cycle regardless; this only
+  // keeps the list from offering one.
   const filterDescendants = (cats, excludeId) => {
+    const own = category.path;
     return cats.filter((cat) => {
       if (cat._id === excludeId) return false;
-      // Also filter if path includes excludeId
-      if (cat.path && cat.path.includes(excludeId)) return false;
+      if (own && cat.path?.startsWith(`${own} > `)) return false;
       return true;
     });
   };
