@@ -5,7 +5,7 @@ import AccessDenied from "../../projects/components/AccessDenied";
 import NoProjectsCard from "../../projects/components/NoProjectsCard";
 import ProjectSwitcher from "../../projects/components/ProjectSwitcher";
 import { hasRole, WORKFLOW_REPORT_WRITE_ROLES } from "@/lib/utils/role-gates";
-import { SHEETS } from "../lib/meta";
+import { sheetsByCategory } from "../lib/meta";
 
 export const metadata = {
   title: "Choose the sheet | Technical",
@@ -42,23 +42,31 @@ export default async function ChooseSheetPage({ searchParams }) {
         {project && canManage && (
           <>
             <p className="tech-section-label">Choose the sheet</p>
-            <p className="tech-lead">Pick what you are doing today.</p>
-            <div className="tech-sheets">
-              {SHEETS.map((s) => (
-                <Link
-                  key={s.code}
-                  href={`/dashboard/technical/create?sheet=${s.code}${projectQ}`}
-                  className="tech-sheet"
-                >
-                  <div className="tech-sheet-head">
-                    <span className="tech-sheet-name">{s.name}</span>
-                    <span className="tech-sheet-code">{s.code}</span>
-                  </div>
-                  <p className="tech-sheet-blurb">{s.blurb}</p>
-                  <span className="tech-sheet-by">Filled by: {s.filledBy}</span>
-                </Link>
-              ))}
-            </div>
+            <p className="tech-lead">Pick the report that matches the work you are doing today.</p>
+            {sheetsByCategory().map(({ category, sheets }) => (
+              <section key={category} className="tech-sheet-group">
+                <h3 className="tech-sheet-group-title">
+                  {category}
+                  <span className="tech-sheet-group-count">{sheets.length}</span>
+                </h3>
+                <div className="tech-sheets">
+                  {sheets.map((s) => (
+                    <Link
+                      key={s.code}
+                      href={`/dashboard/technical/create?sheet=${s.code}${projectQ}`}
+                      className="tech-sheet"
+                    >
+                      <div className="tech-sheet-head">
+                        <span className="tech-sheet-name">{s.name}</span>
+                        <span className="tech-sheet-code">{s.code}</span>
+                      </div>
+                      <p className="tech-sheet-blurb">{s.blurb}</p>
+                      <span className="tech-sheet-by">Filled by: {s.filledBy}</span>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            ))}
           </>
         )}
       </div>
