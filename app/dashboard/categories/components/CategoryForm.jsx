@@ -39,9 +39,12 @@ export default function CategoryForm({ category, parentOptions = [] }) {
     null
   );
 
-  // Read errors directly from state (no useEffect needed)
-  const errors = state?.error || {};
-  const formError = errors._form?.[0];
+  // The actions return `error` as a single string. This used to read it as a
+  // field map (`errors._form[0]`, `errors.name[0]`), which a string never
+  // matches — so every failure left the button spinning back to idle with
+  // nothing on screen.
+  const formError = state?.success === false ? state.error : null;
+  const errors = {};
 
   return (
     <form action={formAction} className="space-y-6">
