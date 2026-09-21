@@ -40,3 +40,5 @@ next-env.d.ts
 
 # browser-automation debug artifacts
 .playwright-mcp/
+
+license-ec-*.pem
