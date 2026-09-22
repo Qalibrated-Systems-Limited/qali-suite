@@ -26,6 +26,7 @@ import { rolesFor } from "@/lib/capabilities";
 
 
 const CREATE_ROLES = rolesFor("adjustment.create");
+const APPROVE_ROLES = rolesFor("adjustment.approve");
 
 export interface AdjustmentActionResult {
   success: boolean;
@@ -238,7 +239,7 @@ export async function applyApprovedStockAdjustmentPg(
 ): Promise<AdjustmentActionResult> {
   try {
     return await withAuthorizedTenant(
-      ["SuperAdmin", "Admin", "Manager", "Store Manager", "CFO", "Finance Manager"],
+      APPROVE_ROLES,
       async (tx, { user }) => {
         const adjustment = await adjustmentsRepo.approveAdjustment(
           tx,
@@ -289,7 +290,7 @@ export async function voidDraftStockAdjustmentPg(
 ): Promise<AdjustmentActionResult> {
   try {
     return await withAuthorizedTenant(
-      ["SuperAdmin", "Admin", "Manager", "Store Manager", "CFO", "Finance Manager"],
+      APPROVE_ROLES,
       async (tx, { user }) => {
         const adjustment = await adjustmentsRepo.cancelAdjustment(
           tx,

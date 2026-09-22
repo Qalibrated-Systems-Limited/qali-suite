@@ -7,6 +7,8 @@ import { getAdjustmentById } from "@/app/db/actions/adjustment-actions";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { can } from "@/lib/capabilities";
+import AdjustmentApprovalActions from "../components/AdjustmentApprovalActions";
 
 /**
  * One stock adjustment, in full.
@@ -124,6 +126,20 @@ export default async function AdjustmentDetailPage({ params }) {
             </p>
           )}
         </div>
+
+        {/*
+          THE DRAFT'S WAY OUT. An approver could see a draft and do nothing
+          with it: both actions existed and no screen called either, so drafts
+          accumulated and the stock they correct stayed wrong. Only a draft
+          offers them — an approved adjustment has already posted, and a
+          cancelled one is finished.
+        */}
+        {adjustment.status === "draft" && (
+          <AdjustmentApprovalActions
+            adjustmentId={adjustment._id}
+            canApprove={can(session.user.role, "adjustment.approve")}
+          />
+        )}
       </div>
 
       {/* The register's own three figures, so the number clicked is the number
