@@ -742,7 +742,9 @@ export async function getProductActivityPg(productId: string) {
           requestNumber: String(r.request_number),
           status: String(r.status),
           requestType: String(r.priority ?? ""),
-          requestedBy: { name: (r.requested_by_name as string) ?? "Unknown" },
+          requestedBy: {
+            name: (r.requester_name_at_request as string) ?? "Unknown",
+          },
           // The row sums `items`; this panel is scoped to ONE product, so the
           // only line that matters is the one for it.
           items: [{ quantity: num(r.quantity_requested) }],
