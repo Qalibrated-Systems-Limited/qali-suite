@@ -660,12 +660,25 @@ function shapeProduct(r: Record<string, unknown>) {
 export async function getStockPdfDataPg() {
   try {
     const perPage = 200;
-    const data: Array<{
-      SKU: string;
-      name: string;
-      unit: string;
-      quantity: number;
-    }> = [];
+    /**
+     * GROUPED BY CATEGORY, because that is what the PDF renders.
+     *
+     * This returned a flat ARRAY while `StockPDF` does
+     * `Object.entries(stockData).map(([dept, items]) => … items.map(…))`.
+     * Object.entries over an array yields ["0", product], so `items` was a
+     * single product object and `items.map` was not a function: every download
+     * threw, was caught, and showed "PDF export failed" under the button. It
+     * only looked fine with no products at all, where the array is empty and
+     * the loop never runs.
+     *
+     * The shape the renderer wants is { [category]: rows[] }, which is also
+     * what a stock report is read as — a section per category, not one long
+     * list.
+     */
+    const data: Record<
+      string,
+      Array<{ SKU: string; name: string; unit: string; quantity: number }>
+    > = {};
 
     for (let page = 1; ; page += 1) {
       const { rows, pages } = await getProductsPg({
@@ -674,7 +687,10 @@ export async function getStockPdfDataPg() {
         status: "active",
       });
       for (const p of rows) {
-        data.push({
+        // A product with no category still has to appear: an item missing from
+        // a stock report reads as stock that is not there.
+        const key = p.category || "Uncategorised";
+        (data[key] ??= []).push({
           SKU: p.SKU,
           name: p.name,
           unit: p.unit,
