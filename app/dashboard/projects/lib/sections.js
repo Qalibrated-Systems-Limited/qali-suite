@@ -31,6 +31,7 @@
  */
 export const SECTIONS = [
   { key: "boq", href: "/dashboard/projects/boq", label: "Bill of Quantities" },
+  { key: "methodology", href: "/dashboard/projects/methodology", label: "Methodology" },
   { key: "milestones", href: "/dashboard/projects/milestones", label: "Milestones" },
   { key: "programme", href: "/dashboard/projects/programme", label: "Programme" },
   { key: "instructions", href: "/dashboard/projects/instructions", label: "Engineer's Instructions" },
@@ -58,6 +59,12 @@ export function sectionsFor(project) {
   if (!project) return ALL_SECTIONS;
   return {
     boq: project.showsBoq !== false,
+    /**
+     * The implementation method statement follows the same jobs the bill does —
+     * a project that has a priced bill has works to plan a method for. No
+     * `shows_methodology` column; it rides the BOQ flag rather than a migration.
+     */
+    methodology: project.showsBoq !== false,
     /**
      * NO `shows_milestones` COLUMN, and none is needed. A milestone exists to
      * be valued and to release retention, and both happen on a certificate —

@@ -62,3 +62,4 @@ export * from "./intercompany";
 export * from "./qms";
 export * from "./sops";
 export * from "./compliance";
+export * from "./projectMethodology";
