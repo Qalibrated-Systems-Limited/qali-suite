@@ -11,7 +11,7 @@ import {
   WORKFLOW_REPORT_WRITE_ROLES,
   WORKFLOW_REPORT_SIGNOFF_ROLES,
 } from "@/lib/utils/role-gates";
-import { ArrowLeft, ArrowUpRight, Check, Clock } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Check, Clock, Download } from "lucide-react";
 import { STATUS_CONFIG, sheetName, displaySerial, fmtDate, fmtMoney } from "../lib/meta";
 import { templateByCode } from "../lib/templates";
 import SheetDataView from "../components/SheetDataView";
@@ -77,6 +77,15 @@ export default async function ReportDetailPage({ params }) {
           {st.label}
         </span>
         <span className="tech-bar-spacer" />
+        <a
+          href={`/api/technical/${report._id}/pdf`}
+          className="tech-btn-gold"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <Download size={14} />
+          Download PDF
+        </a>
         {project && (
           <Link href={`/dashboard/projects/${project.id}`} className="tech-btn-ghost">
             Full project
