@@ -452,15 +452,23 @@ const projectSchema = z.object({
   progressPercent: optionalText,
 });
 
-const budgetLineSchema = z.object({
-  /**
-   * A cost code, not an account — 0073. The budget-holder works in their own
-   * vocabulary and the account is finance's mapping, resolved by the database.
-   */
-  costCodeId: z.string().min(1, "Cost code is required"),
-  description: optionalTextMax(500, "Description too long"),
-  amount: z.coerce.number().min(0, "Amount must be positive"),
-});
+const budgetLineSchema = z
+  .object({
+    /**
+     * A cost code, not an account — 0073. EITHER an existing cost code (the
+     * manual fallback), OR a set of BOQ item ids plus the account they charge —
+     * from which a cost code is created at save time (0118). One of the two.
+     */
+    costCodeId: optionalText,
+    boqItemIds: z.array(z.string()).optional().default([]),
+    accountId: optionalText,
+    description: optionalTextMax(500, "Description too long"),
+    amount: z.coerce.number().min(0, "Amount must be positive"),
+  })
+  .refine(
+    (l) => Boolean(l.costCodeId) || ((l.boqItemIds?.length ?? 0) > 0 && Boolean(l.accountId)),
+    { message: "Pick a cost code, or select BOQ items and the account they charge." },
+  );
 
 const budgetSchema = z.object({
   projectId: z.string().min(1, "Project is required"),
@@ -802,6 +810,42 @@ function parseBudgetForm(formData: FormData) {
   return { ok: true as const, data: parsed.data };
 }
 
+/**
+ * Turn parsed budget lines into `{ costCodeId, description, amount }` the repo
+ * takes. A line that names a cost code passes through; a line that names BOQ
+ * items has its cost code ensured (created if new) against the account it
+ * charges — "cost codes come with the budget".
+ */
+async function resolveBudgetLines(
+  tx: Parameters<typeof repo.createBudget>[0],
+  companyId: string,
+  projectId: string,
+  lines: Array<{ costCodeId?: string; boqItemIds?: string[]; accountId?: string; description?: string; amount: number }>,
+  actor: { id: string | null; name: string },
+) {
+  const out: Array<{ costCodeId: string; description: string; amount: string }> = [];
+  for (const l of lines) {
+    let costCodeId = l.costCodeId || "";
+    if (!costCodeId) {
+      costCodeId = await repo.ensureCostCodeForBoqItems(tx, {
+        companyId,
+        projectId,
+        boqItemIds: l.boqItemIds ?? [],
+        accountId: l.accountId ?? "",
+        actor,
+      });
+    }
+    out.push({ costCodeId, description: l.description || "", amount: l.amount.toFixed(4) });
+  }
+  return out;
+}
+
+/** The priced BOQ items the budget can be built against, cost-code aware. */
+export async function getBudgetableBoqItems(projectId: string) {
+  if (!projectId) return [];
+  return withAuthorizedTenant([], (tx) => repo.listBudgetableBoqItems(tx, projectId));
+}
+
 export async function createProjectBudget(prevState: unknown, formData: FormData) {
   const parsed = parseBudgetForm(formData);
   if (!parsed.ok) return { errors: parsed.errors };
@@ -813,15 +857,12 @@ export async function createProjectBudget(prevState: unknown, formData: FormData
         const project = await repo.getProjectById(tx, parsed.data.projectId);
         if (!project) throw new Error("Project not found");
         const actor = actorFrom(user);
+        const lines = await resolveBudgetLines(tx, companyId, parsed.data.projectId, parsed.data.lines, actor);
         return repo.createBudget(tx, {
           companyId,
           projectId: parsed.data.projectId,
           revisionNotes: parsed.data.revisionNotes,
-          lines: parsed.data.lines.map((l) => ({
-            costCodeId: l.costCodeId,
-            description: l.description || "",
-            amount: l.amount.toFixed(4),
-          })),
+          lines,
           createdById: actor.id,
           createdByName: actor.name,
         });
@@ -849,22 +890,20 @@ export async function updateProjectBudget(prevState: unknown, formData: FormData
   try {
     await withAuthorizedTenant(
       PROJECT_MANAGE_ROLES as unknown as string[],
-      async (tx, { companyId }) => {
+      async (tx, { user, companyId }) => {
         const budget = await repo.getBudgetWithLines(tx, budgetId);
         if (!budget) throw new Error("Budget not found");
         if (budget.status !== "draft") {
           throw new Error("Only a draft budget can be edited. Create a new version.");
         }
-        return repo.replaceBudgetLines(
+        const lines = await resolveBudgetLines(
           tx,
-          budgetId,
           companyId,
-          parsed.data.lines.map((l) => ({
-            costCodeId: l.costCodeId,
-            description: l.description || "",
-            amount: l.amount.toFixed(4),
-          })),
+          parsed.data.projectId,
+          parsed.data.lines,
+          actorFrom(user),
         );
+        return repo.replaceBudgetLines(tx, budgetId, companyId, lines);
       },
     );
     revalidatePath(`/dashboard/projects/${parsed.data.projectId}`);

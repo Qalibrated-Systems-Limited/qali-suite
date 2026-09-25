@@ -6,6 +6,7 @@ import {
   projectBudgets,
   projectBudgetLines,
   projectCostCodes,
+  projectCostCodeBoqItems,
   projectAssignments,
   projectTasks,
   projectBoqs,
@@ -1541,6 +1542,137 @@ export async function createCostCode(
     })
     .returning();
   return row;
+}
+
+/**
+ * The priced BOQ items of a project's effective bill, each with the cost code
+ * that already covers it (if any). This is the list the budget builds against —
+ * cost codes come from the bill.
+ */
+export async function listBudgetableBoqItems(tx: Tx, projectId: string) {
+  const boq = await getEffectiveBoq(tx, projectId);
+  if (!boq) return [];
+  const rows = (await tx.execute(sql`
+    SELECT i.id, i.item_code, i.description, i.unit,
+           i.quantity, i.rate, (i.quantity * i.rate)::numeric(19,4) AS amount,
+           (SELECT l.cost_code_id FROM project_cost_code_boq_items l
+             WHERE l.boq_item_id = i.id LIMIT 1) AS cost_code_id
+      FROM project_boq_items i
+     WHERE i.boq_id = ${boq.id}
+       AND i.quantity IS NOT NULL AND i.rate IS NOT NULL
+     ORDER BY i.sort_order
+  `)) as unknown as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    id: String(r.id),
+    itemCode: r.item_code == null ? null : String(r.item_code),
+    description: String(r.description),
+    unit: r.unit == null ? null : String(r.unit),
+    quantity: r.quantity == null ? null : String(r.quantity),
+    rate: r.rate == null ? null : String(r.rate),
+    amount: num(r.amount),
+    costCodeId: r.cost_code_id == null ? null : String(r.cost_code_id),
+  }));
+}
+
+/** A project cost code whose covered-item set is EXACTLY these ids, or null. */
+async function findCostCodeCoveringExactly(tx: Tx, projectId: string, itemIds: string[]) {
+  const [row] = (await tx.execute(sql`
+    SELECT cc.id, cc.account_id
+      FROM project_cost_codes cc
+      JOIN project_cost_code_boq_items l ON l.cost_code_id = cc.id
+     WHERE cc.project_id = ${projectId}::uuid
+     GROUP BY cc.id, cc.account_id
+    HAVING array_agg(l.boq_item_id ORDER BY l.boq_item_id)
+         = ${sql`ARRAY[${sql.join(itemIds.map((id) => sql`${id}::uuid`), sql`, `)}]::uuid[]`}
+     LIMIT 1
+  `)) as unknown as Array<{ id: string; account_id: string }>;
+  return row ? { id: String(row.id), accountId: String(row.account_id) } : null;
+}
+
+/**
+ * Ensure a cost code exists covering exactly these BOQ items, charging the given
+ * account, and return its id. Reuses one if the same item set is already coded;
+ * otherwise creates a code named after the item(s). This is how "cost codes come
+ * with the budget" — they are born when the manager budgets the items.
+ */
+export async function ensureCostCodeForBoqItems(
+  tx: Tx,
+  input: {
+    companyId: string;
+    projectId: string;
+    boqItemIds: string[];
+    accountId: string;
+    actor: { id?: string | null; name?: string | null };
+  },
+) {
+  const ids = [...new Set(input.boqItemIds.filter(Boolean))].sort();
+  if (!ids.length) throw new Error("Select at least one BOQ item to budget.");
+  if (!input.accountId) throw new Error("Say which account these items charge.");
+
+  const existing = await findCostCodeCoveringExactly(tx, input.projectId, ids);
+  if (existing) {
+    if (existing.accountId !== input.accountId) {
+      await tx
+        .update(projectCostCodes)
+        .set({ accountId: input.accountId, updatedAt: new Date() })
+        .where(eq(projectCostCodes.id, existing.id));
+    }
+    return existing.id;
+  }
+
+  const items = await tx
+    .select({ id: projectBoqItems.id, itemCode: projectBoqItems.itemCode, description: projectBoqItems.description })
+    .from(projectBoqItems)
+    .where(inArray(projectBoqItems.id, ids));
+  const byId = Object.fromEntries(items.map((i) => [i.id, i]));
+  const ordered = ids.map((id) => byId[id]).filter(Boolean);
+  const codes = ordered.map((i) => (i.itemCode || "").trim()).filter(Boolean);
+
+  // A readable base code from the item numbers, unique per project, ≤ 20 chars.
+  let base =
+    ordered.length === 1
+      ? (codes[0] || `ITM-${ids[0].slice(0, 4)}`)
+      : (codes.length ? `${codes[0]}+${codes.length - 1}` : `GRP-${ids[0].slice(0, 4)}`);
+  base = base.toUpperCase().slice(0, 20);
+
+  const taken = new Set(
+    (
+      (await tx.execute(sql`
+        SELECT upper(code) AS code FROM project_cost_codes WHERE project_id = ${input.projectId}::uuid
+      `)) as unknown as Array<{ code: string }>
+    ).map((r) => r.code),
+  );
+  let code = base;
+  let n = 2;
+  while (taken.has(code)) {
+    const suffix = `-${n++}`;
+    code = `${base.slice(0, 20 - suffix.length)}${suffix}`;
+  }
+
+  const name =
+    ordered.length === 1
+      ? ordered[0].description
+      : `BOQ items ${codes.length ? codes.join(", ") : ids.length} (grouped)`;
+
+  const cc = await createCostCode(tx, {
+    companyId: input.companyId,
+    code,
+    name: (name || code).slice(0, 100),
+    accountId: input.accountId,
+    projectId: input.projectId,
+    description: "",
+    createdById: input.actor?.id ?? null,
+    createdByName: input.actor?.name || "System",
+  });
+
+  for (const boqItemId of ids) {
+    await tx.insert(projectCostCodeBoqItems).values({
+      companyId: input.companyId,
+      costCodeId: cc.id,
+      boqItemId,
+    });
+  }
+  return cc.id;
 }
 
 export async function updateCostCode(

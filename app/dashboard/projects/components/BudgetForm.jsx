@@ -37,9 +37,12 @@ function formatCurrency(amount) {
  * one of them finance owns the mapping to the ledger. Here the mapping lives
  * on the cost code, and the database derives the account from it.
  */
-const blankLine = () => ({
+const blankLine = (mode = "boq") => ({
   _id: Date.now() + Math.floor(Math.random() * 1000),
+  mode, // "boq" — build from BOQ items; "manual" — pick/create a cost code
   costCodeId: "",
+  boqItemIds: [],
+  accountId: "",
   description: "",
   amount: "",
 });
@@ -47,11 +50,13 @@ const blankLine = () => ({
 export default function BudgetForm({
   projectId,
   costCodes = [],
+  boqItems = [],
   budget,
   onCancel,
   canManageCostCodes = false,
   expenseAccounts = [],
 }) {
+  const hasBoq = boqItems.length > 0;
   /**
    * A code added from inside the picker has to reach every OTHER line's picker
    * too, so the list is state here rather than the prop. revalidatePath
@@ -64,14 +69,18 @@ export default function BudgetForm({
 
   const [lines, setLines] = useState(() => {
     if (budget?.lines?.length) {
+      // Existing lines already carry a cost code — edit them as manual codes.
       return budget.lines.map((l, i) => ({
         _id: Date.now() + i,
+        mode: "manual",
         costCodeId: l.costCodeId || "",
+        boqItemIds: [],
+        accountId: "",
         description: l.description || "",
         amount: l.amount ?? "",
       }));
     }
-    return [blankLine()];
+    return [blankLine(hasBoq ? "boq" : "manual")];
   });
   const [revisionNotes, setRevisionNotes] = useState(budget?.revisionNotes || "");
 
@@ -94,11 +103,37 @@ export default function BudgetForm({
     }
   }, [state]);
 
-  const addLine = () => setLines([...lines, blankLine()]);
+  const addLine = () => setLines([...lines, blankLine(hasBoq ? "boq" : "manual")]);
+
+  // Toggle a BOQ item on a line, and keep the line's description in step.
+  const toggleItem = (index, itemId) => {
+    setLines((prev) => {
+      const updated = [...prev];
+      const line = { ...updated[index] };
+      const set = new Set(line.boqItemIds);
+      if (set.has(itemId)) set.delete(itemId);
+      else set.add(itemId);
+      line.boqItemIds = [...set];
+      const picked = boqItems.filter((it) => line.boqItemIds.includes(it.id));
+      // Only auto-fill description while it tracks the selection.
+      const auto = picked.map((it) => (it.itemCode ? `${it.itemCode} ` : "") + it.description).join("; ");
+      if (!line._descTouched) line.description = auto;
+      updated[index] = line;
+      return updated;
+    });
+  };
 
   const removeLine = (id) => {
     if (lines.length <= 1) return;
     setLines(lines.filter((l) => l._id !== id));
+  };
+
+  const editDescription = (index, value) => {
+    setLines((prev) => {
+      const u = [...prev];
+      u[index] = { ...u[index], description: value, _descTouched: true };
+      return u;
+    });
   };
 
   const updateLine = (index, field, value) => {
@@ -129,12 +164,23 @@ export default function BudgetForm({
       "lines",
       JSON.stringify(
         lines
-          .filter((l) => l.costCodeId && l.amount)
-          .map((l) => ({
-            costCodeId: l.costCodeId,
-            description: l.description,
-            amount: parseFloat(l.amount) || 0,
-          })),
+          .filter((l) =>
+            l.amount && (l.mode === "manual" ? l.costCodeId : l.boqItemIds.length && l.accountId),
+          )
+          .map((l) =>
+            l.mode === "manual"
+              ? {
+                  costCodeId: l.costCodeId,
+                  description: l.description,
+                  amount: parseFloat(l.amount) || 0,
+                }
+              : {
+                  boqItemIds: l.boqItemIds,
+                  accountId: l.accountId,
+                  description: l.description,
+                  amount: parseFloat(l.amount) || 0,
+                },
+          ),
       ),
     );
     formAction(formData);
@@ -158,61 +204,33 @@ export default function BudgetForm({
         <div className="space-y-3 mb-4">
           <Label>Budget Lines</Label>
           {lines.map((line, index) => (
-            <div
-              key={line._id}
-              className="rounded-lg border p-3 sm:p-0 sm:border-0 sm:rounded-none space-y-2 sm:space-y-0 sm:grid sm:grid-cols-12 sm:gap-2 sm:items-start"
-            >
-              <div className="sm:col-span-4">
-                <Label className="text-xs text-muted-foreground sm:hidden mb-1 block">Cost code</Label>
-                <CostCodeCombobox
-                  value={line.costCodeId}
-                  onValueChange={(id) => updateLine(index, "costCodeId", id)}
-                  costCodes={codes}
-                  canCreate={canManageCostCodes}
-                  accounts={expenseAccounts}
-                  projectId={projectId}
-                  onCreated={(code) =>
-                    setCodes((prev) =>
-                      prev.some((c) => c._id === code._id) ? prev : [...prev, code],
-                    )
-                  }
-                  taken={lines
-                    .filter((l) => l._id !== line._id)
-                    .map((l) => l.costCodeId)}
-                />
-              </div>
-              <div className="sm:col-span-4">
-                <Label className="text-xs text-muted-foreground sm:hidden mb-1 block">Description</Label>
-                <Input
-                  placeholder="Description..."
-                  value={line.description}
-                  onChange={(e) =>
-                    updateLine(index, "description", e.target.value)
-                  }
-                  className="h-9 text-sm"
-                />
-              </div>
-              <div className="flex items-end gap-2 sm:contents">
-                <div className="flex-1 sm:col-span-3">
-                  <Label className="text-xs text-muted-foreground sm:hidden mb-1 block">Amount</Label>
-                  <Input
-                    type="number"
-                    placeholder="Amount"
-                    min="0"
-                    step="1"
-                    value={line.amount}
-                    onChange={(e) =>
-                      updateLine(index, "amount", e.target.value)
-                    }
-                    className="h-9 text-sm text-right"
-                  />
-                </div>
-                <div className="sm:col-span-1">
+            <div key={line._id} className="rounded-lg border p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground">Line {index + 1}</span>
+                <div className="flex items-center gap-2">
+                  {hasBoq && (
+                    <div className="inline-flex rounded-md border overflow-hidden text-xs">
+                      <button
+                        type="button"
+                        onClick={() => updateLine(index, "mode", "boq")}
+                        className={`px-2 py-1 ${line.mode === "boq" ? "bg-primary text-primary-foreground" : "bg-background"}`}
+                      >
+                        From BOQ
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateLine(index, "mode", "manual")}
+                        className={`px-2 py-1 ${line.mode === "manual" ? "bg-primary text-primary-foreground" : "bg-background"}`}
+                      >
+                        Manual code
+                      </button>
+                    </div>
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-9 w-9"
+                    className="h-8 w-8"
                     onClick={() => removeLine(line._id)}
                     disabled={lines.length <= 1}
                   >
@@ -220,6 +238,106 @@ export default function BudgetForm({
                   </Button>
                 </div>
               </div>
+
+              {line.mode === "manual" ? (
+                <div className="grid sm:grid-cols-12 gap-2 items-start">
+                  <div className="sm:col-span-5">
+                    <CostCodeCombobox
+                      value={line.costCodeId}
+                      onValueChange={(id) => updateLine(index, "costCodeId", id)}
+                      costCodes={codes}
+                      canCreate={canManageCostCodes}
+                      accounts={expenseAccounts}
+                      projectId={projectId}
+                      onCreated={(code) =>
+                        setCodes((prev) =>
+                          prev.some((c) => c._id === code._id) ? prev : [...prev, code],
+                        )
+                      }
+                      taken={lines.filter((l) => l._id !== line._id).map((l) => l.costCodeId)}
+                    />
+                  </div>
+                  <div className="sm:col-span-4">
+                    <Input
+                      placeholder="Description..."
+                      value={line.description}
+                      onChange={(e) => editDescription(index, e.target.value)}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  <div className="sm:col-span-3">
+                    <Input
+                      type="number"
+                      placeholder="Amount"
+                      min="0"
+                      step="1"
+                      value={line.amount}
+                      onChange={(e) => updateLine(index, "amount", e.target.value)}
+                      className="h-9 text-sm text-right"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block">Account these items charge</Label>
+                      <select
+                        value={line.accountId}
+                        onChange={(e) => updateLine(index, "accountId", e.target.value)}
+                        className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                      >
+                        <option value="">Select account…</option>
+                        {expenseAccounts.map((a) => (
+                          <option key={a._id || a.id} value={a._id || a.id}>
+                            {a.code} — {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block">Budgeted amount (KES)</Label>
+                      <Input
+                        type="number"
+                        placeholder="Amount"
+                        min="0"
+                        step="1"
+                        value={line.amount}
+                        onChange={(e) => updateLine(index, "amount", e.target.value)}
+                        className="h-9 text-sm text-right"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-1 block">
+                      BOQ items — {line.boqItemIds.length} selected (pick one or more to budget together)
+                    </Label>
+                    <div className="max-h-40 overflow-y-auto rounded-md border divide-y">
+                      {boqItems.map((it) => (
+                        <label
+                          key={it.id}
+                          className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-muted/50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={line.boqItemIds.includes(it.id)}
+                            onChange={() => toggleItem(index, it.id)}
+                          />
+                          <span className="font-mono text-xs text-muted-foreground w-14 shrink-0">{it.itemCode || "—"}</span>
+                          <span className="flex-1 truncate">{it.description}</span>
+                          <span className="text-xs text-muted-foreground tabular-nums">{formatCurrency(it.amount)}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <Input
+                    placeholder="Description (auto-filled from items — editable)"
+                    value={line.description}
+                    onChange={(e) => editDescription(index, e.target.value)}
+                    className="h-9 text-sm"
+                  />
+                </div>
+              )}
             </div>
           ))}
 
@@ -256,7 +374,12 @@ export default function BudgetForm({
         <div className="flex justify-end">
           <Button
             type="submit"
-            disabled={isPending || lines.every((l) => !l.costCodeId)}
+            disabled={
+              isPending ||
+              !lines.some((l) =>
+                l.amount && (l.mode === "manual" ? l.costCodeId : l.boqItemIds.length && l.accountId),
+              )
+            }
             className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold"
           >
             {isPending ? (
@@ -301,6 +424,7 @@ export function BudgetCard({
   budget,
   projectId,
   costCodes,
+  boqItems = [],
   canCreate,
   canApprove,
   canManageCostCodes = false,
@@ -313,6 +437,7 @@ export function BudgetCard({
       <BudgetForm
         projectId={projectId}
         costCodes={costCodes}
+        boqItems={boqItems}
         canManageCostCodes={canManageCostCodes}
         expenseAccounts={expenseAccounts}
         budget={budget}
