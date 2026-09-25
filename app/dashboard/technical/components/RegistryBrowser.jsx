@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search } from "lucide-react";
+import { Search, Download } from "lucide-react";
 import {
   SHEET_BY_CODE,
   sheetName,
@@ -128,19 +128,34 @@ export default function RegistryBrowser({ reports = [], projectId }) {
                 const st = STATUS_CONFIG[r.status] || STATUS_CONFIG.draft;
                 const sheet = SHEET_BY_CODE[r.type];
                 return (
-                  <a
+                  <div
                     key={r.id}
                     className="tech-card"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      open(r);
+                    role="link"
+                    tabIndex={0}
+                    onClick={() => open(r)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        open(r);
+                      }
                     }}
-                    href={`/dashboard/technical/${r.id}`}
                   >
                     <span
                       className="tech-card-fold"
                       style={{ borderColor: `transparent ${st.color} transparent transparent` }}
                     />
+                    <a
+                      className="tech-card-pdf"
+                      href={`/api/technical/${r.id}/pdf`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Download PDF"
+                      aria-label={`Download ${displaySerial(r.reportNumber)} as PDF`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Download size={14} />
+                    </a>
                     <div className="tech-card-body">
                       <span className="tech-serial">{displaySerial(r.reportNumber)}</span>
                       <p className="tech-card-title">{r.title}</p>
@@ -154,7 +169,7 @@ export default function RegistryBrowser({ reports = [], projectId }) {
                     <div className="tech-card-band" style={{ background: st.color }}>
                       <span>{st.label}</span>
                     </div>
-                  </a>
+                  </div>
                 );
               })}
             </div>
