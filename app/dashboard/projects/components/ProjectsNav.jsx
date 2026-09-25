@@ -12,6 +12,7 @@ import {
   Ruler,
   Clock,
   Flag,
+  ClipboardList,
 } from "lucide-react";
 import {
   SECTIONS,
@@ -69,6 +70,7 @@ import {
  */
 const ICONS = {
   boq: Ruler,
+  methodology: ClipboardList,
   milestones: Flag,
   programme: CalendarDays,
   instructions: FileEdit,
