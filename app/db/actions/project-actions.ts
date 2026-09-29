@@ -846,6 +846,35 @@ export async function getBudgetableBoqItems(projectId: string) {
   return withAuthorizedTenant([], (tx) => repo.listBudgetableBoqItems(tx, projectId));
 }
 
+/**
+ * Set (or clear) the account a project's budget lines default to — 0119.
+ *
+ * A budget is built from BOQ items and most projects charge one account for
+ * every item, so this remembers it once instead of asking on every line. Gated
+ * to the roles that build the budget; passing an empty id clears it.
+ */
+export async function setProjectDefaultCostAccount(
+  projectId: string,
+  accountId: string,
+) {
+  if (!projectId) return { error: "No project." };
+  try {
+    await withAuthorizedTenant(
+      PROJECT_MANAGE_ROLES as unknown as string[],
+      (tx) =>
+        repo.setProjectDefaultCostAccount(
+          tx,
+          projectId,
+          accountId ? accountId : null,
+        ),
+    );
+    revalidatePath(`/dashboard/projects/${projectId}/budget`);
+    return { success: true };
+  } catch (error) {
+    return { error: userMessage(error) };
+  }
+}
+
 export async function createProjectBudget(prevState: unknown, formData: FormData) {
   const parsed = parseBudgetForm(formData);
   if (!parsed.ok) return { errors: parsed.errors };

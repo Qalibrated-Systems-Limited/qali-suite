@@ -82,6 +82,7 @@ export default async function BudgetPage({ params }) {
           boqItems={boqItems}
           canManageCostCodes={canManageCostCodes}
           expenseAccounts={expenseAccounts}
+          defaultAccountId={project.defaultCostAccountId || ""}
         />
       )}
 

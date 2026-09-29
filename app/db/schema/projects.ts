@@ -124,6 +124,21 @@ export const projects = pgTable(
     budgetAmount: money("budget_amount").notNull().default("0"),
     budgetCurrency: text("budget_currency").notNull().default("KES"),
 
+    /**
+     * The default expense account a budget line charges — 0119.
+     *
+     * A budget is built from BOQ items and a cost code is created for each
+     * (0118); every one of those codes needs an account. Most projects charge
+     * the same account for every item, so picking it on every line is the
+     * loudest bit of friction in building a budget. This remembers it per
+     * project: new BOQ budget lines pre-select it, and any line may override.
+     * `set null` — if the account is retired the project simply has no default.
+     */
+    defaultCostAccountId: uuid("default_cost_account_id").references(
+      () => accounts.id,
+      { onDelete: "set null" },
+    ),
+
     tags: text("tags").array().notNull().default(sql`'{}'`),
 
     createdById: text("created_by_id").references(() => users.id, {

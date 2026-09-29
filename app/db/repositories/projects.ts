@@ -252,6 +252,18 @@ export async function getProjectById(tx: Tx, projectId: string) {
   return row ?? null;
 }
 
+/** Remember (or clear) the account this project's budget lines default to — 0119. */
+export async function setProjectDefaultCostAccount(
+  tx: Tx,
+  projectId: string,
+  accountId: string | null,
+) {
+  await tx
+    .update(projects)
+    .set({ defaultCostAccountId: accountId })
+    .where(eq(projects.id, projectId));
+}
+
 /** The picker every other module renders: planning and active only. */
 /**
  * Every project, for the workspace switcher — not just the live ones.

@@ -13,6 +13,8 @@ import {
   Clock,
   Flag,
   ClipboardList,
+  Coins,
+  ArrowLeft,
 } from "lucide-react";
 import {
   SECTIONS,
@@ -84,17 +86,11 @@ const ICONS = {
  * "Overview", not "Dashboard".
  *
  * Every module in this app hangs off /dashboard, so a tab called Dashboard
- * inside one of them names the thing it is already inside. What the page
- * actually is is the project REGISTER plus its totals — the overview of the
- * portfolio, not a dashboard of anything.
+ * inside one of them names the thing it is already inside. With no project
+ * chosen it is the project REGISTER plus its totals — the portfolio overview;
+ * once a project is open it is THAT project's page, and "‹ All projects" is
+ * the way back to the register.
  */
-const DASHBOARD = {
-  label: "Overview",
-  href: "/dashboard/projects",
-  icon: LayoutDashboard,
-  exact: true,
-};
-
 export default function ProjectsNav({ projects = [] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -162,20 +158,65 @@ export default function ProjectsNav({ projects = [] }) {
    * This is the same rule as the type gate one level up: a section shows when
    * it has something to show.
    */
+  /**
+   * ONE WORKSPACE PER PROJECT.
+   *
+   * With nothing chosen, the only tab is the portfolio Overview — the register.
+   * Open a project and the tabs become THAT project's: its own Overview page
+   * (`/dashboard/projects/<id>`, the rich page with financials, team and the
+   * setup checklist), its Budget, and the type's sections. Budget was reachable
+   * only as a button on the overview before, which is why people lost it; it is
+   * a step in the process, so it earns a tab.
+   */
+  const inProject = Boolean(project);
+  const projectHome = inProject
+    ? `/dashboard/projects/${project.id}`
+    : "/dashboard/projects";
+
   const items = [
-    DASHBOARD,
-    ...(project ? SECTIONS.filter((s) => sections[s.key]) : []).map((s) => ({
-      label: s.label,
-      href: project ? `${s.href}?project=${project.id}` : s.href,
-      // The active check compares paths, so it must not see the query string.
-      match: s.href,
-      icon: ICONS[s.key],
-    })),
+    {
+      label: "Overview",
+      href: projectHome,
+      match: projectHome,
+      icon: LayoutDashboard,
+      exact: true,
+    },
+    ...(inProject
+      ? [
+          {
+            label: "Budget",
+            href: `${projectHome}/budget`,
+            match: `${projectHome}/budget`,
+            icon: Coins,
+          },
+        ]
+      : []),
+    ...(inProject
+      ? SECTIONS.filter((s) => sections[s.key]).map((s) => ({
+          label: s.label,
+          href: `${s.href}?project=${project.id}`,
+          // The active check compares paths, so it must not see the query string.
+          match: s.href,
+          icon: ICONS[s.key],
+        }))
+      : []),
   ];
 
   return (
     <nav className="sticky top-14 z-10 border-b border-border bg-card">
       <div className="flex items-center gap-1 overflow-x-auto px-4 sm:px-6 py-0">
+        {inProject && (
+          <>
+            <Link
+              href="/dashboard/projects"
+              className="flex items-center gap-1.5 whitespace-nowrap px-2 py-3 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              All projects
+            </Link>
+            <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
+          </>
+        )}
         {items.map((item) => {
           const path = item.match ?? item.href;
           const active = item.exact

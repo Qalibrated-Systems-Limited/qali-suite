@@ -12,6 +12,7 @@ import {
   createProjectBudget,
   updateProjectBudget,
   approveProjectBudget,
+  setProjectDefaultCostAccount,
 } from "@/app/db/actions/project-actions";
 import { toast } from "sonner";
 import CostCodeCombobox from "./CostCodeCombobox";
@@ -37,12 +38,14 @@ function formatCurrency(amount) {
  * one of them finance owns the mapping to the ledger. Here the mapping lives
  * on the cost code, and the database derives the account from it.
  */
-const blankLine = (mode = "boq") => ({
+const blankLine = (mode = "boq", defaultAccountId = "") => ({
   _id: Date.now() + Math.floor(Math.random() * 1000),
   mode, // "boq" — build from BOQ items; "manual" — pick/create a cost code
   costCodeId: "",
   boqItemIds: [],
-  accountId: "",
+  // A new BOQ line starts on the project's default account, so most lines need
+  // no account chosen at all — 0119.
+  accountId: mode === "boq" ? defaultAccountId || "" : "",
   description: "",
   amount: "",
 });
@@ -55,8 +58,16 @@ export default function BudgetForm({
   onCancel,
   canManageCostCodes = false,
   expenseAccounts = [],
+  defaultAccountId = "",
 }) {
   const hasBoq = boqItems.length > 0;
+  /**
+   * The account new BOQ lines start on — 0119. Set once, remembered on the
+   * project, so a manager who charges everything to the same account never
+   * picks it again. Editing an existing budget version does not touch it.
+   */
+  const [defaultAccount, setDefaultAccount] = useState(defaultAccountId || "");
+  const [savingDefault, startSavingDefault] = useTransition();
   /**
    * A code added from inside the picker has to reach every OTHER line's picker
    * too, so the list is state here rather than the prop. revalidatePath
@@ -80,7 +91,7 @@ export default function BudgetForm({
         amount: l.amount ?? "",
       }));
     }
-    return [blankLine(hasBoq ? "boq" : "manual")];
+    return [blankLine(hasBoq ? "boq" : "manual", defaultAccount)];
   });
   const [revisionNotes, setRevisionNotes] = useState(budget?.revisionNotes || "");
 
@@ -94,7 +105,7 @@ export default function BudgetForm({
         onCancel?.();
       } else {
         // Reset form — default to the mode the project can actually use.
-        setLines([blankLine(hasBoq ? "boq" : "manual")]);
+        setLines([blankLine(hasBoq ? "boq" : "manual", defaultAccount)]);
         setRevisionNotes("");
       }
     }
@@ -103,7 +114,30 @@ export default function BudgetForm({
     }
   }, [state]);
 
-  const addLine = () => setLines([...lines, blankLine(hasBoq ? "boq" : "manual")]);
+  const addLine = () =>
+    setLines([...lines, blankLine(hasBoq ? "boq" : "manual", defaultAccount)]);
+
+  /**
+   * Change the project's default account. It seeds new lines, and it also
+   * fills in any existing BOQ line that either has no account yet or still
+   * carries the old default — a line the user set to something else on purpose
+   * is left alone. Persisted to the project so it survives reload.
+   */
+  const changeDefaultAccount = (value) => {
+    const prevDefault = defaultAccount;
+    setDefaultAccount(value);
+    setLines((prev) =>
+      prev.map((l) =>
+        l.mode === "boq" && (!l.accountId || l.accountId === prevDefault)
+          ? { ...l, accountId: value }
+          : l,
+      ),
+    );
+    startSavingDefault(async () => {
+      const res = await setProjectDefaultCostAccount(projectId, value);
+      if (res?.error) toast.error(res.error);
+    });
+  };
 
   // Toggle a BOQ item on a line, and keep the line's description in step.
   const toggleItem = (index, itemId) => {
@@ -200,6 +234,34 @@ export default function BudgetForm({
       </div>
 
       <form action={handleSubmit}>
+        {/* Default account — 0119. Only meaningful when building from a BOQ;
+            an edit works on existing coded lines, so it is hidden there. */}
+        {hasBoq && !isEdit && (
+          <div className="mb-4 rounded-lg border bg-muted/30 p-3">
+            <Label className="text-xs font-medium">
+              Default account for budget lines
+            </Label>
+            <p className="mb-2 text-xs text-muted-foreground">
+              New lines from the BOQ start on this account, so you only pick one
+              here instead of on every line. Any line can still be changed.
+            </p>
+            <select
+              value={defaultAccount}
+              onChange={(e) => changeDefaultAccount(e.target.value)}
+              disabled={savingDefault}
+              className="h-9 w-full rounded-md border bg-background px-2 text-sm sm:max-w-md"
+            >
+              <option value="">No default — pick an account on each line</option>
+              {expenseAccounts.map((a) => (
+                <option key={a._id || a.id} value={a._id || a.id}>
+                  {(a.accountCode || a.code) ? `${a.accountCode || a.code} — ` : ""}
+                  {a.accountName || a.name || "Unnamed account"}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Budget Lines */}
         <div className="space-y-3 mb-4">
           <Label>Budget Lines</Label>
