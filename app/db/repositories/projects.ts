@@ -3756,6 +3756,8 @@ export async function getProjectSetupState(tx: Tx, projectId: string) {
                                                                     AS has_boq,
       EXISTS (SELECT 1 FROM project_boqs q
                WHERE q.project_id = p.id AND q.status = 'awarded')   AS has_awarded_boq,
+      EXISTS (SELECT 1 FROM project_methodologies m WHERE m.project_id = p.id)
+                                                                    AS has_methodology,
       EXISTS (SELECT 1 FROM project_tasks t WHERE t.project_id = p.id)
                                                                     AS has_tasks
       FROM projects p
@@ -3773,6 +3775,7 @@ export async function getProjectSetupState(tx: Tx, projectId: string) {
     hasApprovedBudget: b("has_approved_budget"),
     hasBoq: b("has_boq"),
     hasAwardedBoq: b("has_awarded_boq"),
+    hasMethodology: b("has_methodology"),
     hasTasks: b("has_tasks"),
   };
 }

@@ -93,8 +93,8 @@ export default function BudgetForm({
       if (isEdit) {
         onCancel?.();
       } else {
-        // Reset form
-        setLines([blankLine()]);
+        // Reset form — default to the mode the project can actually use.
+        setLines([blankLine(hasBoq ? "boq" : "manual")]);
         setRevisionNotes("");
       }
     }
@@ -290,7 +290,8 @@ export default function BudgetForm({
                         <option value="">Select account…</option>
                         {expenseAccounts.map((a) => (
                           <option key={a._id || a.id} value={a._id || a.id}>
-                            {a.code} — {a.name}
+                            {(a.accountCode || a.code) ? `${a.accountCode || a.code} — ` : ""}
+                            {a.accountName || a.name || "Unnamed account"}
                           </option>
                         ))}
                       </select>
