@@ -308,6 +308,36 @@ export const projectCostCodes = pgTable(
   ],
 );
 
+/**
+ * Which BOQ items a cost code covers — 0118.
+ *
+ * Cost codes come from the bill: a code is created against one BOQ item (its
+ * Item No. and description) or a GROUP of items chosen to be budgeted together.
+ * A code with rows here is BOQ-derived; a manual code (the fallback) has none.
+ * The account a code charges is still finance's, picked when the code is made.
+ */
+export const projectCostCodeBoqItems = pgTable(
+  "project_cost_code_boq_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "restrict" }),
+    costCodeId: uuid("cost_code_id")
+      .notNull()
+      .references(() => projectCostCodes.id, { onDelete: "cascade" }),
+    boqItemId: uuid("boq_item_id")
+      .notNull()
+      .references(() => projectBoqItems.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("project_cost_code_boq_items_uq").on(t.costCodeId, t.boqItemId),
+    index("project_cost_code_boq_items_item_idx").on(t.companyId, t.boqItemId),
+    index("project_cost_code_boq_items_code_idx").on(t.costCodeId),
+  ],
+);
+
 export const projectBudgetLines = pgTable(
   "project_budget_lines",
   {
