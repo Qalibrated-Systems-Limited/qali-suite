@@ -6,11 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, ShieldCheck, Users, KeyRound, AlertTriangle } from "lucide-react";
 import { canSeeSettingsNav, roleAllowed } from "@/lib/permissions";
 import { ADMIN_ROLES } from "@/lib/utils/role-gates";
-import { getCustomRoles } from "@/app/db/actions/role-actions";
+import {
+  getCustomRoles,
+  getRolePermissionMatrix,
+} from "@/app/db/actions/role-actions";
 import { ROLES as CANONICAL_ROLES } from "@/lib/permission-catalog";
 import CustomRolesManager from "./CustomRolesManager";
+import RolePermissionsEditor from "./RolePermissionsEditor";
 import {
-  permissionsByModule,
   roleSummary,
   NON_CANONICAL_ROLES,
   PERMISSION_GROUPS,
@@ -28,10 +31,12 @@ export default async function RolesPermissionsPage() {
   if (!canSeeSettingsNav(session.user.role)) redirect("/dashboard");
 
   const roles = roleSummary();
-  const modules = permissionsByModule();
   const totalPermissions = PERMISSION_GROUPS.length + NAV_PERMISSIONS.length;
   const canManage = roleAllowed(session.user.role, ADMIN_ROLES);
-  const customRoles = await getCustomRoles();
+  const [customRoles, matrix] = await Promise.all([
+    getCustomRoles(),
+    getRolePermissionMatrix(),
+  ]);
 
   return (
     <div className="max-w-5xl space-y-6 sm:p-2 lg:p-4">
@@ -119,56 +124,27 @@ export default async function RolesPermissionsPage() {
         canManage={canManage}
       />
 
-      {/* Permissions by module */}
-      <section className="space-y-4">
+      {/* Permissions — interactive: assign to each role */}
+      <section className="space-y-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           <KeyRound className="h-4 w-4" /> Permissions
         </h2>
-        {modules.map((group) => (
-          <div key={group.module} className="space-y-2">
-            <h3 className="text-sm font-semibold">{group.module}</h3>
-            <Card className="divide-y">
-              {group.permissions.map((p) => (
-                <div key={p.key} className="p-3 sm:p-4">
-                  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-                    <div className="min-w-0 sm:w-64 sm:shrink-0">
-                      <p className="text-sm font-medium">{p.label}</p>
-                      {p.description && (
-                        <p className="text-xs text-muted-foreground">
-                          {p.description}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {p.roles.length === 0 ? (
-                        <span className="text-xs italic text-muted-foreground">
-                          No role
-                        </span>
-                      ) : (
-                        p.roles.map((r) => (
-                          <Badge
-                            key={r}
-                            variant="outline"
-                            className="text-[11px] font-normal"
-                          >
-                            {r}
-                          </Badge>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </Card>
-          </div>
-        ))}
+        <p className="text-sm text-muted-foreground">
+          Pick a role, then tick the permissions it holds. A role stays on its
+          base defaults until you save it; saving makes the ticked set
+          authoritative. {canManage ? "" : "You can view but not change these."}
+        </p>
+        <RolePermissionsEditor
+          modules={matrix.modules}
+          roles={matrix.roles}
+          canManage={canManage}
+        />
       </section>
 
       <p className="pt-2 text-xs text-muted-foreground">
-        SuperAdmin is granted every permission automatically and is shown on each
-        one. To change who holds a permission, edit the gate in{" "}
-        <code className="rounded bg-muted px-1 py-0.5">lib/utils/role-gates.js</code>{" "}
-        or <code className="rounded bg-muted px-1 py-0.5">lib/permissions.js</code>.
+        SuperAdmin always holds every permission. Nav and module-access
+        permissions take effect immediately; in-code write gates back-stop by the
+        role&apos;s base.
       </p>
     </div>
   );

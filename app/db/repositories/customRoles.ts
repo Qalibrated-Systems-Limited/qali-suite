@@ -11,6 +11,7 @@ export type CustomRoleRow = {
   baseRole: string;
   description: string;
   isSystem: boolean;
+  isActive: boolean;
 };
 
 /**
@@ -29,6 +30,7 @@ export async function listCustomRoles(
       baseRole: customRoles.baseRole,
       description: customRoles.description,
       isSystem: customRoles.isSystem,
+      isActive: customRoles.isActive,
     })
     .from(customRoles)
     .where(companyId ? eq(customRoles.companyId, companyId) : undefined)

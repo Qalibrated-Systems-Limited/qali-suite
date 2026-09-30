@@ -5,7 +5,10 @@ import { revalidatePath } from "next/cache";
 import { withAuthorizedTenant } from "../tenant";
 import { userMessage } from "../errors";
 import { ADMIN_ROLES } from "@/lib/utils/role-gates";
+import { userRoles } from "@/lib/utils";
+import { permissionsByModule } from "@/lib/permission-catalog";
 import * as repo from "../repositories/customRoles";
+import * as permRepo from "../repositories/rolePermissions";
 
 const ADMIN = ADMIN_ROLES as unknown as string[];
 
@@ -73,6 +76,86 @@ export async function updateCustomRoleAction(prevState, formData) {
     });
     revalidatePath("/dashboard/settings/roles");
     return { success: true, message: "Role updated." };
+  } catch (error) {
+    return { error: userMessage(error) };
+  }
+}
+
+/**
+ * Everything the permission editor needs: the grouped permission catalogue, and
+ * every role (canonical + custom) with the permission keys it effectively holds.
+ */
+export async function getRolePermissionMatrix() {
+  return withAuthorizedTenant([], async (tx, { companyId }) => {
+    const custom = await repo.listCustomRoles(tx, companyId);
+    const roleNames = [
+      ...userRoles.map((name) => ({ name, isCustom: false, isActive: true, baseRole: name })),
+      ...custom.map((c) => ({
+        name: c.name,
+        isCustom: true,
+        isActive: c.isActive,
+        baseRole: c.baseRole,
+        id: c.id,
+      })),
+    ];
+    const roles = [];
+    for (const r of roleNames) {
+      const keys = await permRepo.effectiveKeys(tx, r.name);
+      const explicit = await permRepo.hasExplicit(tx, r.name);
+      roles.push({ ...r, keys: [...keys], explicit });
+    }
+    return { modules: permissionsByModule(), roles };
+  });
+}
+
+/**
+ * The current user's effective permission keys — the resolver enforcement reads.
+ * Uses the user's ASSIGNED role (custom name and all), so a custom role's own
+ * permission set is honoured, not just its base's.
+ */
+export async function getMyPermissionKeys() {
+  return withAuthorizedTenant([], async (tx, { user, companyId }) => {
+    const assigned =
+      (await permRepo.assignedRole(tx, String(user.id), companyId)) ?? user.role;
+    return [...(await permRepo.effectiveKeys(tx, assigned))];
+  });
+}
+
+/** Replace a role's permission set (admin only). */
+export async function setRolePermissionsAction(roleName: string, keys: string[]) {
+  if (!roleName) return { error: "No role." };
+  try {
+    await withAuthorizedTenant(ADMIN, (tx, { companyId }) =>
+      permRepo.setRoleKeys(tx, companyId, roleName, Array.isArray(keys) ? keys : []),
+    );
+    revalidatePath("/dashboard/settings/roles");
+    return { success: true, message: `Permissions for "${roleName}" saved.` };
+  } catch (error) {
+    return { error: userMessage(error) };
+  }
+}
+
+/** Clear a role's overrides so it returns to its base's code defaults. */
+export async function resetRolePermissionsAction(roleName: string) {
+  if (!roleName) return { error: "No role." };
+  try {
+    await withAuthorizedTenant(ADMIN, (tx) => permRepo.resetRoleKeys(tx, roleName));
+    revalidatePath("/dashboard/settings/roles");
+    return { success: true, message: `"${roleName}" reset to defaults.` };
+  } catch (error) {
+    return { error: userMessage(error) };
+  }
+}
+
+/** Deactivate or reactivate a custom role (admin only). */
+export async function setCustomRoleActiveAction(id: string, active: boolean) {
+  if (!id) return { error: "No role." };
+  try {
+    await withAuthorizedTenant(ADMIN, (tx) =>
+      permRepo.setCustomRoleActive(tx, id, active),
+    );
+    revalidatePath("/dashboard/settings/roles");
+    return { success: true };
   } catch (error) {
     return { error: userMessage(error) };
   }

@@ -51,6 +51,8 @@ export const customRoles = pgTable(
     description: text("description").notNull().default(""),
     /** Seeded by 0120; still editable, just marks provenance. */
     isSystem: boolean("is_system").notNull().default(false),
+    /** A role can be switched off without deleting it — 0121. */
+    isActive: boolean("is_active").notNull().default(true),
     createdById: text("created_by_id").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -82,5 +84,36 @@ export const customRoles = pgTable(
       'Storekeeper', 'HR Manager', 'Employee', 'Viewer'
     )`,
     ),
+  ],
+);
+
+/**
+ * A permission granted to a role — 0121.
+ *
+ * Presence of a row means the role holds that permission key. A role with NO
+ * rows falls back to the code defaults for its base role; the first edit
+ * materialises the whole set, after which these rows are authoritative. Applies
+ * to canonical role names and custom role names alike.
+ */
+export const rolePermissions = pgTable(
+  "role_permissions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    roleName: text("role_name").notNull(),
+    permissionKey: text("permission_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("role_permissions_uq").on(
+      t.companyId,
+      sql`lower(${t.roleName})`,
+      t.permissionKey,
+    ),
+    index("role_permissions_role_idx").on(t.companyId, sql`lower(${t.roleName})`),
   ],
 );
