@@ -13,8 +13,15 @@ export type CustomRoleRow = {
   isSystem: boolean;
 };
 
-/** Every custom role for the tenant, alphabetical. RLS scopes to the company. */
-export async function listCustomRoles(tx: Tx): Promise<CustomRoleRow[]> {
+/**
+ * Every custom role for the tenant, alphabetical. RLS scopes to the company;
+ * an explicit company filter is passed too so a privileged/SuperAdmin
+ * connection that bypasses RLS still sees only this company's roles.
+ */
+export async function listCustomRoles(
+  tx: Tx,
+  companyId?: string,
+): Promise<CustomRoleRow[]> {
   const rows = await tx
     .select({
       id: customRoles.id,
@@ -24,6 +31,7 @@ export async function listCustomRoles(tx: Tx): Promise<CustomRoleRow[]> {
       isSystem: customRoles.isSystem,
     })
     .from(customRoles)
+    .where(companyId ? eq(customRoles.companyId, companyId) : undefined)
     .orderBy(asc(customRoles.name));
   return rows.map((r) => ({ ...r, description: r.description ?? "" }));
 }

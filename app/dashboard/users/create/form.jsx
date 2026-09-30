@@ -57,7 +57,15 @@ const getAvailableRoles = (isSuperAdmin, customRoles = []) => {
     value: r.name,
     label: `${r.name} — acts as ${r.baseRole}`,
   }));
-  return [...base, ...custom];
+  // De-duplicate by value (case-insensitively) so an option — and its React
+  // key — is never repeated.
+  const seen = new Set();
+  return [...base, ...custom].filter((r) => {
+    const k = r.value.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 };
 
 export function CreateUserForm({ isSuperAdmin = false, customRoles = [] }) {

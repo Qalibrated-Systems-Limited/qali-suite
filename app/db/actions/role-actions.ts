@@ -11,7 +11,9 @@ const ADMIN = ADMIN_ROLES as unknown as string[];
 
 /** Read the tenant's custom roles. Open to anyone who can see settings. */
 export async function getCustomRoles() {
-  return withAuthorizedTenant([], (tx) => repo.listCustomRoles(tx));
+  return withAuthorizedTenant([], (tx, { companyId }) =>
+    repo.listCustomRoles(tx, companyId),
+  );
 }
 
 const roleSchema = z.object({
